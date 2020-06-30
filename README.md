@@ -253,7 +253,7 @@ After the openGauss installation environment is prepared by executing the pre-in
 4. After the installation is successful, manually delete the trust between users root on the host, that is, delete the mutual trust file on each openGauss database node.
 
    ```
-   rm –rf ~/.ssh
+   rm -rf ~/.ssh
    ```
 
 ### Uninstalling the openGauss
@@ -342,7 +342,7 @@ To compile openGauss, you need two components: openGauss-server and binarylibs.
 
 - binarylibs: third party open source software that openGauss depends on. You can obtain it by compiling the openGauss-third_party code or downloading from the open source community on which we have compiled a copy and uploaded it . The first method will be introduced in the following chapter.
 
-Before you compile openGauss，please check the OS and software dependency requirements.
+Before you compile openGauss, please check the OS and software dependency requirements.
 
 You can compile openGauss by build.sh, a one-click shell tool, which we will introduce later, or compile by command. Also, an installation package is produced by build.sh.
 
@@ -462,12 +462,27 @@ Compilation log: **make_compile.log**
    export BINARYLIBS=________    # Path of the binarylibs file
    export GAUSSHOME=$CODE_BASE/dest/
    export GCC_PATH=$BINARYLIBS/buildtools/***/gcc8.2/
-   export CC=$GCC_PATH/gcc/bin/gccexport CXX=$GCC_PATH/gcc/bin/g++
+   export CC=$GCC_PATH/gcc/bin/gcc
+   export CXX=$GCC_PATH/gcc/bin/g++
    export LD_LIBRARY_PATH=$GAUSSHOME/lib:$GCC_PATH/gcc/lib64:$GCC_PATH/isl/lib:$GCC_PATH/mpc/lib/:$GCC_PATH/mpfr/lib/:$GCC_PATH/gmp/lib/:$LD_LIBRARY_PATH
    export PATH=$GAUSSHOME/bin:$GCC_PATH/gcc/bin:$PATH
 
    ```
 
+   For example, on CENTOS X86-64 platform, binarylibs directory is placed as the sibling directory of openGauss-server directory.
+   The following command can be executed under openGauss-server directory.
+
+   ```
+   export CODE_BASE=`pwd`
+   export BINARYLIBS=`pwd`/../binarylibs
+   export GAUSSHOME=$CODE_BASE/dest/
+   export GCC_PATH=$BINARYLIBS/buildtools/centos7.6_x86_64/gcc8.2/
+   export CC=$GCC_PATH/gcc/bin/gcc
+   export CXX=$GCC_PATH/gcc/bin/g++
+   export LD_LIBRARY_PATH=$GAUSSHOME/lib:$GCC_PATH/gcc/lib64:$GCC_PATH/isl/lib:$GCC_PATH/mpc/lib/:$GCC_PATH/mpfr/lib/:$GCC_PATH/gmp/lib/:$LD_LIBRARY_PATH
+   export PATH=$GAUSSHOME/bin:$GCC_PATH/gcc/bin:$PATH
+
+   ```
 3. Select a version and configure it.
 
    **debug** version:
