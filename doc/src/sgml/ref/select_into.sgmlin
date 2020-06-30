@@ -1,0 +1,30 @@
+<refentry id="SQL-SELECT_INTO">
+<refmeta>
+<refentrytitle>SELECT INTO</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SELECT INTO</refname>
+<refpurpose>define a new table from the results of a query</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+SELECT [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
+    { * | {expression [ [ AS ] output_name ]} [, ...] }
+    INTO [ UNLOGGED ] [ TABLE ] new_table
+    [ FROM from_item [, ...] ]
+    [ WHERE condition ]
+    [ GROUP BY expression [, ...] ]
+    [ HAVING condition [, ...] ]
+    [ WINDOW {window_name AS ( window_definition )} [, ...] ]
+    [ { UNION | INTERSECT | EXCEPT | MINUS } [ ALL | DISTINCT ] select ]
+    [ ORDER BY {expression [ [ ASC | DESC | USING operator ] | nlssort_expression_clause ] [ NULLS { FIRST | LAST } ]} [, ...] ]
+    [ LIMIT { count | ALL } ]
+    [ OFFSET start [ ROW | ROWS ] ]
+    [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
+    [ {FOR { UPDATE | SHARE } [ OF table_name [, ...] ] [ NOWAIT ]} [...] ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

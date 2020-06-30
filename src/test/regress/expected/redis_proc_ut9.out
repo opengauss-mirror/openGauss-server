@@ -1,0 +1,50 @@
+/*
+ *   UT2:  1)IUD came
+ *         2)redis_proc get the ACCESS EXCLUSIVE LOCK and it waits for IUD to finish
+ *         3)Drop DOES NOT wait and cancels redis_proc directly while redis_proc waits and acquires lock until IUD finishes
+ *           - cancel happens at pg_sleep time 
+ *           - IUD continues
+ *           - drop table finishes after IUD finishes
+ */
+START TRANSACTION;
+        select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+        select pg_enable_redis_proc_cancelable();
+ pg_enable_redis_proc_cancelable 
+---------------------------------
+ t
+(1 row)
+
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	LOCK TABLE tx IN SHARE MODE;
+ERROR:  canceling data redistribution task
+	select pg_sleep(10);
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+        select current_timestamp;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+COMMIT;
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select count(*) from tx;
+ERROR:  relation "tx" does not exist
+LINE 1: select count(*) from tx;
+                             ^

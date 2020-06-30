@@ -1,0 +1,91 @@
+#test: node_active
+#test: psql
+test: retry
+test: hw_replication_slots
+test: insert
+test: copy2 temp
+test: truncate 
+test: temp_table
+#FIXME  Be sure this file is always the last test case, for node group1 has been modified.
+#test: process_switch
+
+test: b_compatibility
+test: hw_compatibility
+#test: hw_compatibility_source
+test: hw_groupingsets hw_row_grouping_set
+test: char_truncation_common char_truncation_cast
+
+#this case is dispatched from schedule10(gin_test)
+test: gin_test1 gin_test2 gin_test3
+
+#the fallowing part is dispatched from schedule15
+
+# FIXME: move me back to the parallel test when the refcnt issue is fixed
+# Below two teste are unstable, temporarily ignoring. This is same to distribute_dattistic, relallvisible, Dongwang will solve the problem.
+
+test: hw_expression_alias
+
+
+#==========================================================================================================================================
+
+
+# ----------
+# src/test/regress/parallel_schedule.33
+#
+# By convention, we put no more than twenty tests in any one parallel group;
+# this limits the number of connections needed to run the tests.
+# ----------
+
+
+test: udf_crem 
+
+test: create_c_function
+
+#---1. Drop-Column test
+test: cstore_drop_column cstore_drop_column_replicated
+
+#---2. delete delta test
+#  -2.1 delete delta test for row table (hash/replication)
+test: delete_delta
+test: delete_delta_row_partition
+
+#  -2.2 delete delta test CU (hash/replication)
+test: delete_delta_cstore
+test: delete_delta_col_partition
+
+#---3.3 test duplicate delete/update
+#  -3.1 test duplicate delete/update (hash/replication for col/row table)
+test: delete_delta_dupdelete
+test: delete_delta_col_dupdelete
+
+#  -3.2 test duplicate delete/update for partitioned (hash/replication for col/row table)
+test: delete_delta_partition_dupdelete
+test: delete_delta_col_partition_dupdelete
+
+#---4. Unsupported statement test
+#test: online_x_utility
+
+#---5. Row table append mode test
+#test: redis_append_mode
+#test: redis_append_mode_replicated
+#test: redis_append_mode_row_partition
+#test: redis_append_mode_row_partition_replicated
+#test: test_alter_table_set_refresh
+
+#---6. Column table append mode test
+#test: redis_append_mode_col
+#test: redis_append_mode_col_partition
+#test: redis_append_mode_col_partition_replicated
+
+#---7. other
+#test: create_redis_c_function
+#test: online_expansion_misc
+
+#---8. predicate push down to range scan in redis
+#test: pre_redis_pushdown
+#test: redis_pushdown_row
+#test: redis_pushdown_col
+#test: redis_pushdown_row_partition
+#test: redis_pushdown_col_partition
+#test: post_redis_pushdown
+

@@ -1,0 +1,194 @@
+-- clean up work
+\! rm -rf @abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/* >/dev/null 2>&1
+\! rm -rf @abs_srcdir@/results/parallel_export -r >/dev/null 2>&1
+\! mkdir @abs_srcdir@/results/parallel_export >/dev/null 2>&1
+-- setup GDS
+\! @abs_bindir@/gds -h > /dev/null 2>&1
+\! @abs_bindir@/gds -d @abs_srcdir@/results/parallel_export -p 0.0.0.0:8900 -r -D -H 0.0.0.0/0 -l @abs_bindir@/gds.log -s ./tmp_check/status -S 10MB
+
+-- sension env
+set datestyle to iso;
+SET IntervalStyle to postgres;
+set time zone PRC;
+-- test export feature for replication table
+CREATE TABLE hw_export_normal_srctbl
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024) ,
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE DEFAULT '1971-1-1',
+C_TSVECTOR TSVECTOR
+)
+ 
+partition by RANGE(C_TS_WITHOUT)
+(
+partition part0 VALUES LESS THAN('1971-2-1'),
+partition part1 VALUES LESS THAN('1971-3-1'),
+partition part2 VALUES LESS THAN('1971-4-1'),
+partition part3 VALUES LESS THAN('1971-5-1'),
+partition part4 VALUES LESS THAN('1971-6-1'),
+partition part5 VALUES LESS THAN('1971-7-1'),
+partition part6 VALUES LESS THAN('1971-8-1'),
+partition part7 VALUES LESS THAN('1971-9-1'),
+partition part8 VALUES LESS THAN('1971-10-1'),
+partition part9 VALUES LESS THAN('1971-11-1'),
+partition part10 VALUES LESS THAN('1971-12-1'),
+partition part11 VALUES LESS THAN('1972-1-1')
+);
+COPY hw_export_normal_srctbl FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hw_export_data.data';
+INSERT INTO hw_export_normal_srctbl SELECT * FROM hw_export_normal_srctbl;
+INSERT INTO hw_export_normal_srctbl SELECT * FROM hw_export_normal_srctbl;
+INSERT INTO hw_export_normal_srctbl SELECT * FROM hw_export_normal_srctbl;
+
+DROP TABLE IF EXISTS hw_export_normal_tbl;
+CREATE FOREIGN TABLE hw_export_normal_tbl 
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TSVECTOR TSVECTOR 
+)
+SERVER Gsmpp_server
+Options(Location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/1234/',
+Format 'Text')
+Write Only;
+create schema test_det_command;
+show current_schema;
+\det
+set current_schema = test_det_command;
+\det
+reset current_schema;
+drop schema test_det_command;
+INSERT INTO hw_export_normal_tbl SELECT * FROM hw_export_normal_srctbl;
+DROP FOREIGN TABLE hw_export_normal_tbl;
+
+CREATE FOREIGN TABLE hw_export_normal_tbl 
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TSVECTOR TSVECTOR 
+)
+SERVER Gsmpp_server
+Options(Location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/',
+Format 'Text')
+Write Only;
+INSERT INTO hw_export_normal_tbl SELECT * FROM hw_export_normal_srctbl;
+
+-- test records number
+\! find @abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/ -name hw_export_normal_tbl* | xargs ls | xargs wc -l | awk '{print $1}' > @abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/records_num.nodes
+\! cat @abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/records_num.nodes | awk 'BEGIN {max = 0} { if ($1 > max) max=$1; } END {print "total records ", max}'
+\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/records_num.nodes
+
+DROP FOREIGN TABLE hw_export_normal_tbl;
+
+---
+--Export to Remote GDS
+---
+CREATE FOREIGN TABLE hw_export_normal_tbl 
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TSVECTOR TSVECTOR 
+)
+SERVER Gsmpp_server
+Options(Location 'gsfs://127.0.0.1:8900/',
+Format 'Text')
+Write Only;
+INSERT INTO hw_export_normal_tbl SELECT * FROM hw_export_normal_srctbl;
+
+\! find @abs_srcdir@/results/parallel_export -name hw_export_normal_tbl* | xargs wc -l | awk '{print $1}'
+\! rm @abs_srcdir@/results/parallel_export/*
+DROP FOREIGN TABLE hw_export_normal_tbl;
+
+---
+--Export to Remote GDS and spacify EOL
+---
+CREATE FOREIGN TABLE hw_export_normal_tbl 
+(
+C_CHAR_3 CHAR(16),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_TSVECTOR TSVECTOR 
+)
+SERVER Gsmpp_server
+Options(Location 'gsfs://127.0.0.1:8900/',
+Format 'csv', eol '0x0D0A')
+Write Only;
+INSERT INTO hw_export_normal_tbl SELECT * FROM hw_export_normal_srctbl;
+\! find @abs_srcdir@/results/parallel_export -name hw_export_normal_tbl* | xargs wc -l | awk '{print $1}'
+\! rm @abs_srcdir@/results/parallel_export/*
+DROP FOREIGN TABLE hw_export_normal_tbl;
+
+---
+--Export to Remote GDS in FIXED format
+---
+CREATE FOREIGN TABLE hw_export_normal_tbl 
+(
+C_CHAR_3 CHAR(16) position(0, 16),
+C_VARCHAR_3 VARCHAR(1024) position(16, 1024),
+C_INT INTEGER position(1040, 10),
+C_NUMERIC numeric(10,5) position(1050, 15),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE position(1065, 20),
+C_TSVECTOR TSVECTOR position(1085, 80)
+)
+SERVER Gsmpp_server
+Options(Location 'gsfs://127.0.0.1:8900/',
+Format 'fixed')
+Write Only;
+INSERT INTO hw_export_normal_tbl SELECT * FROM hw_export_normal_srctbl;
+\! find @abs_srcdir@/results/parallel_export -name hw_export_normal_tbl* | xargs wc -l | awk '{print $1}'
+\! rm @abs_srcdir@/results/parallel_export/*
+DROP FOREIGN TABLE hw_export_normal_tbl;
+DROP TABLE hw_export_normal_srctbl;
+
+---
+-- COPY TO get error
+---
+create table hw_copy_src
+(
+c1 int,
+c2 varchar
+);
+insert into hw_copy_src values(1, 'aaaaaaa'), (2, 'bbbbbbbb');
+copy hw_copy_src to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/hw_copy_src.out' formatter(c1(0,4), c2(4,3)) fixed;
+
+---
+-- COPY TO SELECT
+---
+copy (select c1 from hw_copy_src) to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/hw_copy_src.out' formatter(c1(0,10), c2(10,20)) fixed;
+copy (select c1 from hw_copy_src) to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/hw_copy_src.out' formatter(c1(0,10)) fixed;
+
+---
+-- COPY TO without escaping
+---
+insert into hw_copy_src values(3, 'bb
+bb');
+copy (select * from hw_copy_src order by c1) to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/hw_copy_src.out' without escaping;
+\! cat @abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/hw_copy_src.out
+drop table hw_copy_src;
+
+---
+-- COPY TO. Length of HEADER longer than length specified by formatter
+---
+create table hw_exp_header(abcdef int, b111111 varchar(3));
+insert into hw_exp_header values(1, 'aaa'),(2, 'bbb');
+copy hw_exp_header to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/hw_exp_header.txt' formatter(abcdef(0, 3), b111111(4, 5)) header fixed;
+\! cat @abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/hw_exp_header.txt
+drop table hw_exp_header;
+
+-- clean up work
+\! rm -rf @abs_srcdir@/tmp_check/datanode1/pg_copydir/parallel_export/* >/dev/null 2>&1
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
+\! sleep 5
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1

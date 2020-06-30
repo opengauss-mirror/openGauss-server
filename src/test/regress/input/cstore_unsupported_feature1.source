@@ -1,0 +1,33 @@
+-- problem: list all unsupported feature in cstore table
+-- feature 6: alter cstore-table set schema to pg_catalog
+CREATE TABLE cstore_unsupport_tbl06 ( a int, b int , PARTIAL CLUSTER KEY(a)) with ( ORIENTATION = COLUMN )  ;
+ALTER TABLE cstore_unsupport_tbl06 SET SCHEMA pg_catalog;
+-- feature 7: rename
+ALTER TABLE cstore_unsupport_tbl06 RENAME TO cstore_unsupport_tbl07;
+ALTER TABLE cstore_unsupport_tbl07 RENAME TO cstore_unsupport_tbl06;
+ALTER TABLE cstore_unsupport_tbl06 RENAME a to c;
+\d+ cstore_unsupport_tbl06
+ALTER TABLE cstore_unsupport_tbl06 RENAME CONSTRAINT cstore_unsupport_tbl06_cluster TO cstore_unsupport_tbl07_cluster01;
+\d+ cstore_unsupport_tbl06
+-- feature 8: reset
+ALTER TABLE cstore_unsupport_tbl06 RESET ( ORIENTATION, MAX_BATCHROW );
+-- feature 9: LIKE INCLUDING DISTRIBUTION REPLICATION
+CREATE TABLE cstore_unsupport_tbl07 ( a int , b int , c int ) WITH ( ORIENTATION = 'ROW' )  ;
+CREATE TABLE cstore_unsupport_tbl08 ( LIKE cstore_unsupport_tbl07 ) WITH ( ORIENTATION = COLUMN );
+CREATE TABLE cstore_unsupport_tbl09 ( a int , b int , c int ) WITH ( ORIENTATION = 'COLUMN' )  ;
+-- feature 10: COMPRESSLEVEL option
+CREATE TABLE row_unsupport_tbl10 (a int, b int, c int ) WITH ( ORIENTATION = row, COMPRESSLEVEL = 0 )  ;
+CREATE TABLE row_unsupport_tbl10 (a int, b int, c int ) WITH ( ORIENTATION = row )  ;
+ALTER TABLE row_unsupport_tbl10 SET ( COMPRESSLEVEL = 1 );
+ALTER TABLE row_unsupport_tbl10 RESET (COMPRESSLEVEL);
+\d+ row_unsupport_tbl10
+DROP TABLE row_unsupport_tbl10;
+CREATE TABLE col_unsupport_tbl11 (a int, b int, c int ) WITH ( ORIENTATION = column, COMPRESSLEVEL = 1 )  ;
+\d+ col_unsupport_tbl11
+ALTER TABLE col_unsupport_tbl11 SET (COMPRESSLEVEL = 2);
+\d+ col_unsupport_tbl11
+ALTER TABLE col_unsupport_tbl11 RESET (COMPRESSLEVEL);
+\d+ col_unsupport_tbl11
+ALTER TABLE col_unsupport_tbl11 set ( compresslevel = -1 );
+ALTER TABLE col_unsupport_tbl11 set ( compresslevel = 4 );
+DROP TABLE col_unsupport_tbl11;

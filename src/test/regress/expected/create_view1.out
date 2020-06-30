@@ -1,0 +1,76 @@
+--
+-- CREATE_VIEW1
+-- Virtual class definitions
+--	(this also tests the query rewrite system)
+--
+-- Enforce use of COMMIT instead of 2PC for temporary objects
+SET enforce_two_phase_commit TO off;
+CREATE VIEW street AS
+   SELECT r.name, r.thepath, c.cname AS cname
+   FROM ONLY road r, real_city c
+   WHERE c.outline ## r.thepath;
+ERROR:  operator does not exist: path ## path
+LINE 4:    WHERE c.outline ## r.thepath;
+                           ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+CREATE VIEW iexit AS
+   SELECT ih.name, ih.thepath,
+	interpt_pp(ih.thepath, r.thepath) AS exit
+   FROM ihighway ih, ramp r
+   WHERE ih.thepath ## r.thepath;
+ERROR:  function interpt_pp(path, path) does not exist
+LINE 3:  interpt_pp(ih.thepath, r.thepath) AS exit
+         ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: exit
+CREATE VIEW toyemp AS
+   SELECT name, age, location, 12*salary AS annualsal
+   FROM emp;
+-- Test comments
+COMMENT ON VIEW noview IS 'no view';
+ERROR:  relation "noview" does not exist
+COMMENT ON VIEW toyemp IS 'is a view';
+COMMENT ON VIEW toyemp IS NULL;
+--
+-- CREATE OR REPLACE VIEW
+--
+CREATE TABLE viewtest_tbl (a int, b int);
+COPY viewtest_tbl FROM stdin;
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT * FROM viewtest_tbl;
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT * FROM viewtest_tbl WHERE a > 10;
+SELECT * FROM viewtest ORDER BY a;
+ a  | b  
+----+----
+ 15 | 20
+ 20 | 25
+(2 rows)
+
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a, b FROM viewtest_tbl WHERE a > 5 ORDER BY b DESC;
+SELECT * FROM viewtest ORDER BY a;
+ a  | b  
+----+----
+ 10 | 15
+ 15 | 20
+ 20 | 25
+(3 rows)
+
+-- should fail
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a FROM viewtest_tbl WHERE a <> 20;
+ERROR:  cannot drop columns from view
+-- should fail
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT 1, * FROM viewtest_tbl;
+ERROR:  cannot change name of view column "a" to "?column?"
+-- should fail
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a, b::numeric FROM viewtest_tbl;
+ERROR:  cannot change data type of view column "b" from integer to numeric
+-- should work
+CREATE OR REPLACE VIEW viewtest AS
+	SELECT a, b, 0 AS c FROM viewtest_tbl;
+DROP VIEW viewtest;
+DROP TABLE viewtest_tbl;

@@ -1,0 +1,28 @@
+START TRANSACTION;
+	select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	insert into tx (select 100x,10x,x from generate_series(1,10000) as x);
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	insert into cmpts values(1,current_timestamp);
+COMMIT;
+select count(*) from tx;
+ count 
+-------
+     0
+(1 row)
+

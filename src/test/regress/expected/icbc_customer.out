@@ -1,0 +1,516 @@
+set explain_perf_mode=pretty;
+/*
+ * 工行场景1测试
+ */
+explain (costs false) 
+with recursive cte as
+(
+    select area_code
+    from gcms.gcm_mag_area_h
+    where area_code='100000'
+    union all
+    select h.area_code
+    from cte
+    join gcms.gcm_mag_area_h h
+    on h.belong_area_code=cte.area_code
+)
+select area_code, count(*) from cte group by 1 order by 1 limit 20;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Limit
+   CTE cte
+     ->  Recursive Union
+           ->  Index Only Scan using gcm_mag_area_h_pkey on gcm_mag_area_h
+                 Index Cond: (area_code = '100000'::text)
+           ->  Hash Join
+                 Hash Cond: ((h.belong_area_code)::text = (cte.area_code)::text)
+                 ->  Seq Scan on gcm_mag_area_h h
+                 ->  Hash
+                       ->  WorkTable Scan on cte
+   ->  GroupAggregate
+         Group By Key: cte.area_code
+         ->  Sort
+               Sort Key: cte.area_code
+               ->  CTE Scan on cte
+(15 rows)
+
+with recursive cte as
+(
+    select area_code
+    from gcms.gcm_mag_area_h
+    where area_code='100000'
+    union all
+    select h.area_code
+    from cte
+    join gcms.gcm_mag_area_h h
+    on h.belong_area_code=cte.area_code
+)
+select area_code, count(*) from cte group by 1 order by 1 limit 20;
+ area_code | count 
+-----------+-------
+ 100000    |     1
+ 110000    |     1
+ 120000    |     1
+ 120107    |     1
+ 130000    |     1
+ 130121    |     1
+ 130122    |     1
+ 130123    |     1
+ 130124    |     1
+ 130128    |     1
+ 130129    |     1
+ 130130    |     1
+ 130131    |     1
+ 130132    |     1
+ 130133    |     1
+ 130181    |     1
+ 130182    |     1
+ 130183    |     1
+ 130184    |     1
+ 130185    |     1
+(20 rows)
+
+explain (costs false) 
+with recursive cte as
+(
+    select area_code
+    from gcms.gcm_mag_area_h
+    where area_code='100000'
+    union all
+    select h.area_code
+    from cte
+    join gcms.gcm_mag_area_h h
+    on h.belong_area_code=cte.area_code
+)
+select area_code, count(*) from cte group by 1 order by 1 limit 20;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Limit
+   CTE cte
+     ->  Recursive Union
+           ->  Index Only Scan using gcm_mag_area_h_pkey on gcm_mag_area_h
+                 Index Cond: (area_code = '100000'::text)
+           ->  Hash Join
+                 Hash Cond: ((h.belong_area_code)::text = (cte.area_code)::text)
+                 ->  Seq Scan on gcm_mag_area_h h
+                 ->  Hash
+                       ->  WorkTable Scan on cte
+   ->  GroupAggregate
+         Group By Key: cte.area_code
+         ->  Sort
+               Sort Key: cte.area_code
+               ->  CTE Scan on cte
+(15 rows)
+
+with recursive cte as
+(
+    select area_code
+    from gcms.gcm_mag_area_h
+    where area_code='100000'
+    union all
+    select h.area_code
+    from cte
+    join gcms.gcm_mag_area_h h
+    on h.belong_area_code=cte.area_code
+)
+select area_code, count(*) from cte group by 1 order by 1 limit 20;
+ area_code | count 
+-----------+-------
+ 100000    |     1
+ 110000    |     1
+ 120000    |     1
+ 120107    |     1
+ 130000    |     1
+ 130121    |     1
+ 130122    |     1
+ 130123    |     1
+ 130124    |     1
+ 130128    |     1
+ 130129    |     1
+ 130130    |     1
+ 130131    |     1
+ 130132    |     1
+ 130133    |     1
+ 130181    |     1
+ 130182    |     1
+ 130183    |     1
+ 130184    |     1
+ 130185    |     1
+(20 rows)
+
+/* 场景2 */
+explain (costs false) 
+with recursive cte as
+(
+    select area_code, area_code as chain, 1 as level /*chain为路径,例如>101>201>203;level为层级，从1开始*/
+    from gcms.gcm_mag_area_h
+    where area_code='100000'
+    union all
+    select h.area_code,cast(cte.chain||'>'||h.area_code as varchar2(30)),cte.level+1
+    from cte
+    join gcms.gcm_mag_area_h h
+    on h.belong_area_code=cte.area_code and cte.level <3 and h.area_code not in (select regexp_split_to_table(cte.chain,'>') )/*如果是循环的结构，可以用chain来退出循环；此处cte.level<6表示到第6层停止*/
+)
+select * from cte order by 1 limit 20;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Limit
+   CTE cte
+     ->  Recursive Union
+           ->  Index Only Scan using gcm_mag_area_h_pkey on gcm_mag_area_h
+                 Index Cond: (area_code = '100000'::text)
+           ->  Hash Join
+                 Hash Cond: ((h.belong_area_code)::text = (cte.area_code)::text)
+                 Join Filter: (NOT (SubPlan 1))
+                 ->  Seq Scan on gcm_mag_area_h h
+                 ->  Hash
+                       ->  WorkTable Scan on cte
+                             Filter: (level < 3)
+                 SubPlan 1
+                   ->  Result
+   ->  Sort
+         Sort Key: cte.area_code
+         ->  CTE Scan on cte
+(17 rows)
+
+with recursive cte as
+(
+    select area_code, area_code as chain, 1 as level /*chain为路径,例如>101>201>203;level为层级，从1开始*/
+    from gcms.gcm_mag_area_h
+    where area_code='100000'
+    union all
+    select h.area_code,cast(cte.chain||'>'||h.area_code as varchar2(30)),cte.level+1
+    from cte
+    join gcms.gcm_mag_area_h h
+    on h.belong_area_code=cte.area_code and cte.level <3 and h.area_code not in (select regexp_split_to_table(cte.chain,'>') )/*如果是循环的结构，可以用chain来退出循环；此处cte.level<6表示到第6层停止*/
+)
+select * from cte order by 1 limit 20;
+ area_code |        chain         | level 
+-----------+----------------------+-------
+ 100000    | 100000               |     1
+ 110000    | 100000>110000        |     2
+ 120000    | 100000>120000        |     2
+ 120107    | 100000>120000>120107 |     3
+ 130000    | 100000>130000        |     2
+ 130121    | 100000>130000>130121 |     3
+ 130122    | 100000>130000>130122 |     3
+ 130123    | 100000>130000>130123 |     3
+ 130124    | 100000>130000>130124 |     3
+ 130128    | 100000>130000>130128 |     3
+ 130129    | 100000>130000>130129 |     3
+ 130130    | 100000>130000>130130 |     3
+ 130131    | 100000>130000>130131 |     3
+ 130132    | 100000>130000>130132 |     3
+ 130133    | 100000>130000>130133 |     3
+ 130181    | 100000>130000>130181 |     3
+ 130182    | 100000>130000>130182 |     3
+ 130183    | 100000>130000>130183 |     3
+ 130184    | 100000>130000>130184 |     3
+ 130185    | 100000>130000>130185 |     3
+(20 rows)
+
+explain (costs false) 
+with recursive cte as
+(
+    select area_code, area_code as chain, 1 as level /*chain为路径,例如>101>201>203;level为层级，从1开始*/
+    from gcms.gcm_mag_area_h
+    where area_code='100000'
+    union all
+    select h.area_code,cast(cte.chain||'>'||h.area_code as varchar2(30)),cte.level+1
+    from cte
+    join gcms.gcm_mag_area_h h
+    on h.belong_area_code=cte.area_code and cte.level <3 and h.area_code not in (select regexp_split_to_table(cte.chain,'>') )/*如果是循环的结构，可以用chain来退出循环；此处cte.level<6表示到第6层停止*/
+)
+select * from cte order by 1 limit 20;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Limit
+   CTE cte
+     ->  Recursive Union
+           ->  Index Only Scan using gcm_mag_area_h_pkey on gcm_mag_area_h
+                 Index Cond: (area_code = '100000'::text)
+           ->  Hash Join
+                 Hash Cond: ((h.belong_area_code)::text = (cte.area_code)::text)
+                 Join Filter: (NOT (SubPlan 1))
+                 ->  Seq Scan on gcm_mag_area_h h
+                 ->  Hash
+                       ->  WorkTable Scan on cte
+                             Filter: (level < 3)
+                 SubPlan 1
+                   ->  Result
+   ->  Sort
+         Sort Key: cte.area_code
+         ->  CTE Scan on cte
+(17 rows)
+
+with recursive cte as
+(
+    select area_code, area_code as chain, 1 as level /*chain为路径,例如>101>201>203;level为层级，从1开始*/
+    from gcms.gcm_mag_area_h
+    where area_code='100000'
+    union all
+    select h.area_code,cast(cte.chain||'>'||h.area_code as varchar2(30)),cte.level+1
+    from cte
+    join gcms.gcm_mag_area_h h
+    on h.belong_area_code=cte.area_code and cte.level <3 and h.area_code not in (select regexp_split_to_table(cte.chain,'>') )/*如果是循环的结构，可以用chain来退出循环；此处cte.level<6表示到第6层停止*/
+)
+select * from cte order by 1 limit 20;
+ area_code |        chain         | level 
+-----------+----------------------+-------
+ 100000    | 100000               |     1
+ 110000    | 100000>110000        |     2
+ 120000    | 100000>120000        |     2
+ 120107    | 100000>120000>120107 |     3
+ 130000    | 100000>130000        |     2
+ 130121    | 100000>130000>130121 |     3
+ 130122    | 100000>130000>130122 |     3
+ 130123    | 100000>130000>130123 |     3
+ 130124    | 100000>130000>130124 |     3
+ 130128    | 100000>130000>130128 |     3
+ 130129    | 100000>130000>130129 |     3
+ 130130    | 100000>130000>130130 |     3
+ 130131    | 100000>130000>130131 |     3
+ 130132    | 100000>130000>130132 |     3
+ 130133    | 100000>130000>130133 |     3
+ 130181    | 100000>130000>130181 |     3
+ 130182    | 100000>130000>130182 |     3
+ 130183    | 100000>130000>130183 |     3
+ 130184    | 100000>130000>130184 |     3
+ 130185    | 100000>130000>130185 |     3
+(20 rows)
+
+/* 场景3 */
+explain (costs false) 
+with recursive cte as
+(
+    select 1 as id,district_code,district_name,district_code as district_code_root,belong_district from gcms.gcc_mag_district_h
+    union all
+    select cte.id+1,h.district_code,h.district_name,cte.district_code_root,h.belong_district from cte join gcms.gcc_mag_district_h h on h.district_code=cte.belong_district
+)
+select id,district_code,district_name,district_code_root from cte order by 1,2,3 limit 20;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Limit
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on gcc_mag_district_h
+           ->  Hash Join
+                 Hash Cond: ((cte.belong_district)::text = (h.district_code)::text)
+                 ->  WorkTable Scan on cte
+                 ->  Hash
+                       ->  Seq Scan on gcc_mag_district_h h
+   ->  Sort
+         Sort Key: cte.id, cte.district_code, cte.district_name
+         ->  CTE Scan on cte
+(12 rows)
+
+with recursive cte as
+(
+    select 1 as id,district_code,district_name,district_code as district_code_root,belong_district from gcms.gcc_mag_district_h
+    union all
+    select cte.id+1,h.district_code,h.district_name,cte.district_code_root,h.belong_district from cte join gcms.gcc_mag_district_h h on h.district_code=cte.belong_district
+)
+select id,district_code,district_name,district_code_root from cte order by 1,2,3 limit 20;
+ id | district_code |    district_name    | district_code_root 
+----+---------------+---------------------+--------------------
+  1 | 100000        | 数据库测试虚拟936行 | 100000
+  1 | 110000        | 数据库测试虚拟246行 | 110000
+  1 | 120000        | 数据库测试虚拟879行 | 120000
+  1 | 120107        | 数据库测试虚拟514行 | 120107
+  1 | 130000        | 数据库测试虚拟696行 | 130000
+  1 | 130121        | 数据库测试虚拟131行 | 130121
+  1 | 130122        | 数据库测试虚拟882行 | 130122
+  1 | 130123        | 数据库测试虚拟957行 | 130123
+  1 | 130124        | 数据库测试虚拟206行 | 130124
+  1 | 130128        | 数据库测试虚拟733行 | 130128
+  1 | 130129        | 数据库测试虚拟766行 | 130129
+  1 | 130130        | 数据库测试虚拟669行 | 130130
+  1 | 130131        | 数据库测试虚拟456行 | 130131
+  1 | 130132        | 数据库测试虚拟964行 | 130132
+  1 | 130133        | 数据库测试虚拟641行 | 130133
+  1 | 130181        | 数据库测试虚拟214行 | 130181
+  1 | 130182        | 数据库测试虚拟105行 | 130182
+  1 | 130183        | 数据库测试虚拟125行 | 130183
+  1 | 130184        | 数据库测试虚拟813行 | 130184
+  1 | 130185        | 数据库测试虚拟187行 | 130185
+(20 rows)
+
+explain (costs false) 
+with recursive cte as
+(
+    select 1 as id,district_code,district_name,district_code as district_code_root,belong_district from gcms.gcc_mag_district_h
+    union all
+    select cte.id+1,h.district_code,h.district_name,cte.district_code_root,h.belong_district from cte join gcms.gcc_mag_district_h h on h.district_code=cte.belong_district
+)
+select id,district_code,district_name,district_code_root from cte order by 1,2,3 limit 20;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Limit
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on gcc_mag_district_h
+           ->  Hash Join
+                 Hash Cond: ((cte.belong_district)::text = (h.district_code)::text)
+                 ->  WorkTable Scan on cte
+                 ->  Hash
+                       ->  Seq Scan on gcc_mag_district_h h
+   ->  Sort
+         Sort Key: cte.id, cte.district_code, cte.district_name
+         ->  CTE Scan on cte
+(12 rows)
+
+with recursive cte as
+(
+    select 1 as id,district_code,district_name,district_code as district_code_root,belong_district from gcms.gcc_mag_district_h
+    union all
+    select cte.id+1,h.district_code,h.district_name,cte.district_code_root,h.belong_district from cte join gcms.gcc_mag_district_h h on h.district_code=cte.belong_district
+)
+select id,district_code,district_name,district_code_root from cte order by 1,2,3 limit 20;
+ id | district_code |    district_name    | district_code_root 
+----+---------------+---------------------+--------------------
+  1 | 100000        | 数据库测试虚拟936行 | 100000
+  1 | 110000        | 数据库测试虚拟246行 | 110000
+  1 | 120000        | 数据库测试虚拟879行 | 120000
+  1 | 120107        | 数据库测试虚拟514行 | 120107
+  1 | 130000        | 数据库测试虚拟696行 | 130000
+  1 | 130121        | 数据库测试虚拟131行 | 130121
+  1 | 130122        | 数据库测试虚拟882行 | 130122
+  1 | 130123        | 数据库测试虚拟957行 | 130123
+  1 | 130124        | 数据库测试虚拟206行 | 130124
+  1 | 130128        | 数据库测试虚拟733行 | 130128
+  1 | 130129        | 数据库测试虚拟766行 | 130129
+  1 | 130130        | 数据库测试虚拟669行 | 130130
+  1 | 130131        | 数据库测试虚拟456行 | 130131
+  1 | 130132        | 数据库测试虚拟964行 | 130132
+  1 | 130133        | 数据库测试虚拟641行 | 130133
+  1 | 130181        | 数据库测试虚拟214行 | 130181
+  1 | 130182        | 数据库测试虚拟105行 | 130182
+  1 | 130183        | 数据库测试虚拟125行 | 130183
+  1 | 130184        | 数据库测试虚拟813行 | 130184
+  1 | 130185        | 数据库测试虚拟187行 | 130185
+(20 rows)
+
+/* 场景4 */
+explain (costs false) 
+select dm,(
+	with recursive cte as
+	(
+		select distinct f.dm, f.sj_dm, f.name from test_rec_1 f where f.sj_dm=t1.sj_dm
+		union all
+		select distinct f.dm, f.sj_dm, f.name from test_rec_1 f join cte on
+		f.dm=cte.sj_dm
+	)
+select distinct dm from cte where sj_dm=7) dm_2,
+sj_dm, name from test_rec t1 order by 1,2,3 limit 20;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Sort
+               Sort Key: t1.dm, ((SubPlan 2)), t1.sj_dm
+               ->  CStore Scan on test_rec t1
+                     SubPlan 2
+                       ->  HashAggregate
+                             Group By Key: cte.dm
+                             CTE cte
+                               ->  Recursive Union
+                                     ->  HashAggregate
+                                           Group By Key: f.dm, f.sj_dm, f.name
+                                           ->  Row Adapter
+                                                 ->  CStore Scan on test_rec_1 f
+                                                       Filter: (sj_dm = t1.sj_dm)
+                                     ->  HashAggregate
+                                           Group By Key: f.dm, f.sj_dm, f.name
+                                           ->  Hash Join
+                                                 Hash Cond: (f.dm = cte.sj_dm)
+                                                 ->  Row Adapter
+                                                       ->  CStore Scan on test_rec_1 f
+                                                 ->  Hash
+                                                       ->  WorkTable Scan on cte
+                             ->  CTE Scan on cte
+                                   Filter: (sj_dm = 7)
+(25 rows)
+
+select dm,(
+	with recursive cte as
+	(
+		select distinct f.dm, f.sj_dm, f.name from test_rec_1 f where f.sj_dm=t1.sj_dm
+		union all
+		select distinct f.dm, f.sj_dm, f.name from test_rec_1 f join cte on
+		f.dm=cte.sj_dm
+	)
+select distinct dm from cte where sj_dm=7) dm_2,
+sj_dm, name from test_rec t1 order by 1,2,3 limit 20;
+ dm | dm_2 | sj_dm |     name     
+----+------+-------+--------------
+  1 |    6 |     2 | gauss poc
+  2 |    6 |     3 | soft gauss
+  3 |    6 |     4 | 2012 soft
+  4 |    6 |     5 | huawei 2012
+  5 |    6 |     6 | China huawei
+  6 |    6 |     7 | world China
+(6 rows)
+
+explain (costs false) 
+select dm,(
+	with recursive cte as
+	(
+		select distinct f.dm, f.sj_dm, f.name from test_rec_1 f where f.sj_dm=t1.sj_dm
+		union all
+		select distinct f.dm, f.sj_dm, f.name from test_rec_1 f join cte on
+		f.dm=cte.sj_dm
+	)
+select distinct dm from cte where sj_dm=7) dm_2,
+sj_dm, name from test_rec t1 order by 1,2,3 limit 20;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Sort
+               Sort Key: t1.dm, ((SubPlan 2)), t1.sj_dm
+               ->  CStore Scan on test_rec t1
+                     SubPlan 2
+                       ->  HashAggregate
+                             Group By Key: cte.dm
+                             CTE cte
+                               ->  Recursive Union
+                                     ->  HashAggregate
+                                           Group By Key: f.dm, f.sj_dm, f.name
+                                           ->  Row Adapter
+                                                 ->  CStore Scan on test_rec_1 f
+                                                       Filter: (sj_dm = t1.sj_dm)
+                                     ->  HashAggregate
+                                           Group By Key: f.dm, f.sj_dm, f.name
+                                           ->  Hash Join
+                                                 Hash Cond: (f.dm = cte.sj_dm)
+                                                 ->  Row Adapter
+                                                       ->  CStore Scan on test_rec_1 f
+                                                 ->  Hash
+                                                       ->  WorkTable Scan on cte
+                             ->  CTE Scan on cte
+                                   Filter: (sj_dm = 7)
+(25 rows)
+
+select dm,(
+	with recursive cte as
+	(
+		select distinct f.dm, f.sj_dm, f.name from test_rec_1 f where f.sj_dm=t1.sj_dm
+		union all
+		select distinct f.dm, f.sj_dm, f.name from test_rec_1 f join cte on
+		f.dm=cte.sj_dm
+	)
+select distinct dm from cte where sj_dm=7) dm_2,
+sj_dm, name from test_rec t1 order by 1,2,3 limit 20;
+ dm | dm_2 | sj_dm |     name     
+----+------+-------+--------------
+  1 |    6 |     2 | gauss poc
+  2 |    6 |     3 | soft gauss
+  3 |    6 |     4 | 2012 soft
+  4 |    6 |     5 | huawei 2012
+  5 |    6 |     6 | China huawei
+  6 |    6 |     7 | world China
+(6 rows)
+
+/* 场景5 */
+/* 场景6 */
+reset explain_perf_mode;

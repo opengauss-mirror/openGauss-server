@@ -1,0 +1,2395 @@
+create schema plan_hint;
+set current_schema = plan_hint;
+create table src(a int);
+insert into src values(1);
+create table hint_t1(a int, b int, c int);
+insert into hint_t1 select generate_series(1, 2000), generate_series(1, 1000), generate_series(1, 500) from src;
+create table hint_t2(a int, b int, c int);
+insert into hint_t2 select generate_series(1, 1000), generate_series(1, 500), generate_series(1, 100) from src;
+create table hint_t3(a int, b int, c int);
+insert into hint_t3 select generate_series(1, 100), generate_series(1, 50), generate_series(1, 25) from src;
+create table hint_t4(a int, b int, c int);
+insert into hint_t4 select generate_series(1, 10), generate_series(1, 5), generate_series(1, 2) from src;
+create table hint_t5(a int, b int, c int);
+insert into hint_t5 select generate_series(1, 5), generate_series(1, 5), generate_series(1, 2) from src;
+analyze hint_t1;
+analyze hint_t2;
+analyze hint_t3;
+analyze hint_t4;
+analyze hint_t5;
+--leading hint error
+--table num < 2
+explain(costs off) select /*+ leading() */  * from hint_t1 join hint_t2 on (1 = 1);
+WARNING:  LINE 1: syntax error at ')'
+           QUERY PLAN            
+---------------------------------
+ Nested Loop
+   ->  Seq Scan on hint_t1
+   ->  Materialize
+         ->  Seq Scan on hint_t2
+(4 rows)
+
+explain(costs off) select /*+ leading(hint_t1) */  * from hint_t1 join hint_t2 on (1 = 1);
+WARNING:  LINE 1: syntax error at ')'
+           QUERY PLAN            
+---------------------------------
+ Nested Loop
+   ->  Seq Scan on hint_t1
+   ->  Materialize
+         ->  Seq Scan on hint_t2
+(4 rows)
+
+--more than one leading, they will all discard
+explain(costs off) select /*+ leading(hint_t1 hint_t2) leading(hint_t2 hint_t3) */  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--inner outer, syntax error
+explain (costs off)select /*+ leading((hint_t1 hint_t2) hint_t3)*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t1
+         ->  Materialize
+               ->  Seq Scan on hint_t2
+   ->  Materialize
+         ->  Seq Scan on hint_t3
+(7 rows)
+
+--outer inner couple
+explain(costs off) select /*+ leading((hint_t1 hint_t2 hint_t3))*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t1
+         ->  Materialize
+               ->  Seq Scan on hint_t2
+   ->  Materialize
+         ->  Seq Scan on hint_t3
+(7 rows)
+
+explain(costs off) select /*+ leading((hint_t1))*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  LINE 1: syntax error at ')'
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+explain(costs off) select /*+ leading(((hint_t1) (hint_t2)))*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  LINE 1: syntax error at ')'
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--join hint error
+--table num < 2
+explain(costs off) select /*+ nestloop()*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  LINE 1: syntax error at ')'
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+explain(costs off) select /*+ nestloop(hint_t1)*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  Error hint: NestLoop(hint_t1) requires at least two relations.
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--rows hint error
+--table num < 2
+explain(costs off) select /*+ rows()*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  LINE 1: syntax error at ')'
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+explain(costs off) select /*+ rows(hint_t1)*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  LINE 1: syntax error at ')'
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--support type '#'  '+'  '-'  '*'
+explain(costs off) select /*+ rows(hint_t1 hint_t2 10)*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  LINE 1: syntax error at '10'
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+explain(costs off) select /*+ rows(hint_t1 hint_t2 @10)*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  LINE 1: syntax error at '@'
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--last one need num
+explain(costs off) select /*+ rows(hint_t1 hint_t2 #1jk)*/  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on (1 = 1);
+WARNING:  LINE 1: syntax error at 'jk'
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--duplicate rows hint
+explain (costs off)select /*+ rows(hint_t1 hint_t2 +100) rows(hint_t1 hint_t2 +100)*/ * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  Duplicated or conflict hint: Rows(hint_t1 hint_t2 + 100), will be discarded.
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+explain (costs off)select /*+ rows(hint_t1 hint_t2 +100) rows(hint_t1 hint_t2 #100)*/ * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  Duplicated or conflict hint: Rows(hint_t1 hint_t2 # 100), will be discarded.
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+explain (costs off)select /*+ rows(hint_t1 hint_t2 +100) rows(hint_t1 hint_t2 +100) rows(hint_t1 hint_t2 #100)*/
+* from hint_t1 join hint_t2
+on (1 = 1) join hint_t3
+on(1 = 1);
+WARNING:  Duplicated or conflict hint: Rows(hint_t1 hint_t2 + 100) Rows(hint_t1 hint_t2 # 100), will be discarded.
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+explain (costs off)select /*+ rows(hint_t1 hint_t2 +100) rows(hint_t1 +10) rows(hint_t1 hint_t2 +100) rows(hint_t1 *10)
+rows(hint_t1 hint_t2 #100) rows(hint_t2 #100) rows(hint_t1 #10) rows(hint_t2 #100)*/
+* from hint_t1 join hint_t2
+on (1 = 1) join hint_t3
+on(1 = 1);
+WARNING:  Duplicated or conflict hint: Rows(hint_t1 hint_t2 + 100) Rows(hint_t1 * 10) Rows(hint_t1 hint_t2 # 100) Rows(hint_t1 # 10) Rows(hint_t2 # 100), will be discarded.
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--stream hint error
+--table num >= 1
+explain(costs off) select * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+explain(costs off) select * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--table name not exists
+explain (costs off) select /*+ nestloop(t10 t20) leading(t100 t200) rows(t1000 t2000 #100) */
+* from hint_t1 as t1 join hint_t2 as t2 on (1 = 1) join hint_t3 as t3 on(1 = 1);
+WARNING:  Error hint: NestLoop(t10 t20), relation name "t10" is not found.
+WARNING:  Error hint: Rows(t1000 t2000 # 100), relation name "t1000" is not found.
+WARNING:  Error hint: Leading(t100 t200), relation name "t100" is not found.
+                QUERY PLAN                
+------------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2 t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3 t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1 t1
+(7 rows)
+
+--hint can not include duplicate rel name
+explain (costs off) select /*+ nestloop(hint_t1 hint_t1) leading(hint_t2 hint_t2) rows(hint_t2 hint_t2 #10) */
+* from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  Error hint: NestLoop(hint_t1 hint_t1), relation name "hint_t1" is duplicated.
+WARNING:  Error hint: Rows(hint_t2 hint_t2 # 10), relation name "hint_t2" is duplicated.
+WARNING:  Error hint: Leading(hint_t2 hint_t2), relation name "hint_t2" is duplicated.
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t2
+         ->  Materialize
+               ->  Seq Scan on hint_t3
+   ->  Materialize
+         ->  Seq Scan on hint_t1
+(7 rows)
+
+--drop duplicate hint
+explain (costs off)select /*+ nestloop(hint_t1 hint_t2) nestloop(hint_t1 hint_t2)
+    rows(hint_t1 hint_t2 #100) rows(hint_t1 hint_t2 +100) */
+  * from hint_t1 join hint_t2 on (1 = 1) join hint_t3 on(1 = 1);
+WARNING:  Duplicated or conflict hint: NestLoop(hint_t1 hint_t2), will be discarded.
+WARNING:  Duplicated or conflict hint: Rows(hint_t1 hint_t2 + 100), will be discarded.
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   ->  Nested Loop
+         ->  Seq Scan on hint_t1
+         ->  Materialize
+               ->  Seq Scan on hint_t2
+   ->  Materialize
+         ->  Seq Scan on hint_t3
+(7 rows)
+
+--join hint
+explain (costs off)
+select
+/*+ nestloop(t1 t2)*/
+ *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Nested Loop
+         Join Filter: (t1.a = t2.b)
+         ->  Seq Scan on hint_t1 t1
+         ->  Materialize
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+--can not generate t1 join t3 path, because t1, t3 havr not join qual.
+--(join_search_one_level)
+explain (costs off)
+select /*+ nestloop(t1 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+WARNING:  unused hint: NestLoop(t1 t3)
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ nestloop(t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Nested Loop
+               Join Filter: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Materialize
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select
+/*+ mergejoin(t1 t2)*/
+ *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Merge Join
+         Merge Cond: (t1.a = t2.b)
+         ->  Sort
+               Sort Key: t1.a
+               ->  Seq Scan on hint_t1 t1
+         ->  Sort
+               Sort Key: t2.b
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select /*+ mergejoin(t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Merge Join
+               Merge Cond: (t2.a = t3.b)
+               ->  Sort
+                     Sort Key: t2.a
+                     ->  Seq Scan on hint_t2 t2
+               ->  Sort
+                     Sort Key: t3.b
+                     ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select
+/*+ hashjoin(t1 t2)*/
+ *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Hash Join
+         Hash Cond: (t1.a = t2.b)
+         ->  Seq Scan on hint_t1 t1
+         ->  Hash
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ hashjoin(t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ no hashjoin(t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Hash Join
+         Hash Cond: (t1.a = t2.b)
+         ->  Seq Scan on hint_t1 t1
+         ->  Hash
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ no hashjoin(t2 t3) no mergejoin(t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Hash Join
+         Hash Cond: (t1.a = t2.b)
+         ->  Seq Scan on hint_t1 t1
+         ->  Hash
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ nestloop(t1 t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Nested Loop
+   Join Filter: (t2.a = t3.b)
+   ->  Hash Join
+         Hash Cond: (t1.a = t2.b)
+         ->  Seq Scan on hint_t1 t1
+         ->  Hash
+               ->  Seq Scan on hint_t2 t2
+   ->  Materialize
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ mergejoin(t1 t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Merge Join
+   Merge Cond: (t2.a = t3.b)
+   ->  Sort
+         Sort Key: t2.a
+         ->  Hash Join
+               Hash Cond: (t1.a = t2.b)
+               ->  Seq Scan on hint_t1 t1
+               ->  Hash
+                     ->  Seq Scan on hint_t2 t2
+   ->  Sort
+         Sort Key: t3.b
+         ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select /*+ hashjoin(t1 t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ hashjoin(T1 "T2" t3)*/
+  *
+from hint_t1 as T1
+join hint_t2 as "T2"
+on(t1.a = "T2".b)
+join hint_t3 as t3
+on ("T2".a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = "T2".b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: ("T2".a = t3.b)
+               ->  Seq Scan on hint_t2 "T2"
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ hashjoin(t1 t2) mergejoin (t1 t2 t3) nestloop(t1 t2 t3 t4)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b)
+join hint_t4 as t4
+on (t4.c = t3.c);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Nested Loop
+   Join Filter: (t3.c = t4.c)
+   ->  Merge Join
+         Merge Cond: (t2.a = t3.b)
+         ->  Sort
+               Sort Key: t2.a
+               ->  Hash Join
+                     Hash Cond: (t1.a = t2.b)
+                     ->  Seq Scan on hint_t1 t1
+                     ->  Hash
+                           ->  Seq Scan on hint_t2 t2
+         ->  Sort
+               Sort Key: t3.b
+               ->  Seq Scan on hint_t3 t3
+   ->  Materialize
+         ->  Seq Scan on hint_t4 t4
+(16 rows)
+
+--leading hint
+explain (costs off)
+select /*+ leading(t1 t2)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Hash Join
+         Hash Cond: (t1.a = t2.b)
+         ->  Seq Scan on hint_t1 t1
+         ->  Hash
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+--can not generate t1 join t3 path, because t1, t3 have not join qual
+--(join_search_one_level)
+explain (costs off) select /*+ leading(t1 t3)*/
+  *
+from hint_t1 t1
+join hint_t2 t2
+on(t1.a = t2.b)
+join hint_t3 t3
+on (t2.a = t3.b);
+WARNING:  unused hint: Leading(t1 t3)
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ leading(t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off) select
+/*+ leading(t2 t3 t4)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b)
+join hint_t4 as t4
+on (t4.c = t3.c);
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Hash Join
+                           Hash Cond: (t3.c = t4.c)
+                           ->  Seq Scan on hint_t3 t3
+                           ->  Hash
+                                 ->  Seq Scan on hint_t4 t4
+(13 rows)
+
+explain (costs off)
+select /*+ leading((((t1 t2) t3) t4)) */
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b)
+join hint_t4 as t4
+on (t4.c = t3.c);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t3.c = t4.c)
+   ->  Hash Join
+         Hash Cond: (t2.a = t3.b)
+         ->  Hash Join
+               Hash Cond: (t1.a = t2.b)
+               ->  Seq Scan on hint_t1 t1
+               ->  Hash
+                     ->  Seq Scan on hint_t2 t2
+         ->  Hash
+               ->  Seq Scan on hint_t3 t3
+   ->  Hash
+         ->  Seq Scan on hint_t4 t4
+(13 rows)
+
+explain (costs off)
+select /*+ leading(((t1 t2) (t3 t4))) */
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b)
+join hint_t4 as t4
+on (t4.c = t3.c);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Hash Join
+         Hash Cond: (t1.a = t2.b)
+         ->  Seq Scan on hint_t1 t1
+         ->  Hash
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t3.c = t4.c)
+               ->  Seq Scan on hint_t3 t3
+               ->  Hash
+                     ->  Seq Scan on hint_t4 t4
+(13 rows)
+
+--row hint
+set explain_perf_mode = pretty;
+explain select
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Hash Join  (cost=24.62..64.12 rows=100 width=36)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=12)
+   ->  Hash  (cost=23.38..23.38 rows=100 width=24)
+         ->  Hash Join  (cost=3.25..23.38 rows=100 width=24)
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=12)
+               ->  Hash  (cost=2.00..2.00 rows=100 width=12)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=12)
+(9 rows)
+
+explain
+select  /*+ rows(t2 t3 #230)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Hash Join  (cost=26.25..67.05 rows=100 width=36)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=12)
+   ->  Hash  (cost=23.38..23.38 rows=230 width=24)
+         ->  Hash Join  (cost=3.25..23.38 rows=230 width=24)
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=12)
+               ->  Hash  (cost=2.00..2.00 rows=100 width=12)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=12)
+(9 rows)
+
+explain select  /*+ rows(t2 t3 +100)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Hash Join  (cost=25.88..66.38 rows=100 width=36)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=12)
+   ->  Hash  (cost=23.38..23.38 rows=200 width=24)
+         ->  Hash Join  (cost=3.25..23.38 rows=200 width=24)
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=12)
+               ->  Hash  (cost=2.00..2.00 rows=100 width=12)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=12)
+(9 rows)
+
+explain select  /*+ rows(t2 t3 +10.5)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Hash Join  (cost=24.75..64.35 rows=100 width=36)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=12)
+   ->  Hash  (cost=23.38..23.38 rows=110 width=24)
+         ->  Hash Join  (cost=3.25..23.38 rows=110 width=24)
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=12)
+               ->  Hash  (cost=2.00..2.00 rows=100 width=12)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=12)
+(9 rows)
+
+explain select  /*+ rows(t2 t3 -10)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Hash Join  (cost=24.50..63.90 rows=100 width=36)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=12)
+   ->  Hash  (cost=23.38..23.38 rows=90 width=24)
+         ->  Hash Join  (cost=3.25..23.38 rows=90 width=24)
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=12)
+               ->  Hash  (cost=2.00..2.00 rows=100 width=12)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=12)
+(9 rows)
+
+explain select  /*+ rows(t1 t2 *10) rows(t2 t3 *10)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Hash Join  (cost=35.88..86.88 rows=10000 width=36)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=12)
+   ->  Hash  (cost=23.38..23.38 rows=1000 width=24)
+         ->  Hash Join  (cost=3.25..23.38 rows=1000 width=24)
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=12)
+               ->  Hash  (cost=2.00..2.00 rows=100 width=12)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=12)
+(9 rows)
+
+explain select  /*+ rows(t1 t2 t3 *10)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Hash Join  (cost=24.62..64.12 rows=1000 width=36)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=12)
+   ->  Hash  (cost=23.38..23.38 rows=100 width=24)
+         ->  Hash Join  (cost=3.25..23.38 rows=100 width=24)
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=12)
+               ->  Hash  (cost=2.00..2.00 rows=100 width=12)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=12)
+(9 rows)
+
+explain select  /*+ rows(t1 t2 t3 *0.5)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Hash Join  (cost=24.62..64.12 rows=50 width=36)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=12)
+   ->  Hash  (cost=23.38..23.38 rows=100 width=24)
+         ->  Hash Join  (cost=3.25..23.38 rows=100 width=24)
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=12)
+               ->  Hash  (cost=2.00..2.00 rows=100 width=12)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=12)
+(9 rows)
+
+reset explain_perf_mode;
+--stream hint
+explain (costs off)
+select
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b);
+             QUERY PLAN             
+------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Seq Scan on hint_t2 t2
+(5 rows)
+
+explain (costs off)
+select
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select
+ * from hint_t1 as t1
+join (select sum(a) as a, b from hint_t2 as t2 group by b) as AA
+on(t1.b = AA.a);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t1.b = (sum(t2.a)))
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  HashAggregate
+               Group By Key: t2.b
+               ->  Seq Scan on hint_t2 t2
+(7 rows)
+
+explain (costs off)
+select /*+ hashjoin(t1 t2) mergejoin (t1 t2 t3) nestloop(t1 t2 t3 t4) */
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b)
+join hint_t4 as t4
+on (t4.c = t3.c);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Nested Loop
+   Join Filter: (t3.c = t4.c)
+   ->  Merge Join
+         Merge Cond: (t2.a = t3.b)
+         ->  Sort
+               Sort Key: t2.a
+               ->  Hash Join
+                     Hash Cond: (t1.a = t2.b)
+                     ->  Seq Scan on hint_t1 t1
+                     ->  Hash
+                           ->  Seq Scan on hint_t2 t2
+         ->  Sort
+               Sort Key: t3.b
+               ->  Seq Scan on hint_t3 t3
+   ->  Materialize
+         ->  Seq Scan on hint_t4 t4
+(16 rows)
+
+--leading join hint
+explain (costs off)
+select /*+ leading(t1 t2) no hashjoin(t1 t2)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Merge Join
+         Merge Cond: (t1.a = t2.b)
+         ->  Sort
+               Sort Key: t1.a
+               ->  Seq Scan on hint_t1 t1
+         ->  Sort
+               Sort Key: t2.b
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select /*+ leading(t1 t2) mergejoin(t1 t2)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Merge Join
+         Merge Cond: (t1.a = t2.b)
+         ->  Sort
+               Sort Key: t1.a
+               ->  Seq Scan on hint_t1 t1
+         ->  Sort
+               Sort Key: t2.b
+               ->  Seq Scan on hint_t2 t2
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select /*+ leading((t2 t1)) mergejoin(t1 t2)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Merge Join
+         Merge Cond: (t2.b = t1.a)
+         ->  Sort
+               Sort Key: t2.b
+               ->  Seq Scan on hint_t2 t2
+         ->  Sort
+               Sort Key: t1.a
+               ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select /*+ leading((t2 t1)) nestloop(t1 t2)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Nested Loop
+         Join Filter: (t1.a = t2.b)
+         ->  Seq Scan on hint_t2 t2
+         ->  Materialize
+               ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ leading((t2 t1)) hashjoin(t1 t2)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.a = t3.b)
+   ->  Hash Join
+         Hash Cond: (t2.b = t1.a)
+         ->  Seq Scan on hint_t2 t2
+         ->  Hash
+               ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select /*+ leading(t2 t3) no hashjoin(t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Merge Join
+               Merge Cond: (t2.a = t3.b)
+               ->  Sort
+                     Sort Key: t2.a
+                     ->  Seq Scan on hint_t2 t2
+               ->  Sort
+                     Sort Key: t3.b
+                     ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select /*+ leading(t2 t3) mergejoin(t2 t3)*/
+  *
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Merge Join
+               Merge Cond: (t2.a = t3.b)
+               ->  Sort
+                     Sort Key: t2.a
+                     ->  Seq Scan on hint_t2 t2
+               ->  Sort
+                     Sort Key: t3.b
+                     ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain(costs off) select /*+ nestloop(t1 t2) mergejoin(t1 t2) leading((t2 t1)) leading((t1 t2))*/ *
+from hint_t1 as t1 join hint_t2 as t2
+on (t1.a = t2.a)
+join hint_t3 as t3
+on (t2.b = t3.b);
+WARNING:  Duplicated or conflict hint: MergeJoin(t1 t2) Leading((t1 t2)), will be discarded.
+                QUERY PLAN                
+------------------------------------------
+ Hash Join
+   Hash Cond: (t2.b = t3.b)
+   ->  Nested Loop
+         Join Filter: (t1.a = t2.a)
+         ->  Seq Scan on hint_t2 t2
+         ->  Materialize
+               ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+--subquery include hint
+--subquery pull up
+explain (costs off)
+select 1 from hint_t1 as t1 join (select /*+ mergejoin(t2 t3) */ t2.a from hint_t2 as t2 join hint_t3 as t3 on (t2.a = t3.a)) as AA on(t1.a = AA.a);
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.a)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Merge Join
+               Merge Cond: (t2.a = t3.a)
+               ->  Sort
+                     Sort Key: t2.a
+                     ->  Seq Scan on hint_t2 t2
+               ->  Sort
+                     Sort Key: t3.a
+                     ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select /*+ leading(t1 aa) hashjoin(t1 aa)*/  1 from hint_t1 as t1 join (select /*+ leading((t3 t2)) mergejoin(t2 t3) */
+t2.a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a)) as AA on(t1.a = AA.a);
+WARNING:  Error hint: HashJoin(t1 aa), relation name "aa" is not found.
+WARNING:  Error hint: Leading(t1 aa), relation name "aa" is not found.
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.a)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Merge Join
+               Merge Cond: (t3.a = t2.a)
+               ->  Sort
+                     Sort Key: t3.a
+                     ->  Seq Scan on hint_t3 t3
+               ->  Sort
+                     Sort Key: t2.a
+                     ->  Seq Scan on hint_t2 t2
+(12 rows)
+
+--subquey can not pull up
+explain (costs off)
+select /*+ nestloop(t1 aa)*/  1 from hint_t1 as t1 join
+(select /*+ leading((t3 t2)) mergejoin(t2 t3) */  sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a)) as AA on(t1.a = AA.a);
+                   QUERY PLAN                   
+------------------------------------------------
+ Nested Loop
+   Join Filter: (t1.a = (sum(t2.a)))
+   ->  Aggregate
+         ->  Merge Join
+               Merge Cond: (t3.a = t2.a)
+               ->  Sort
+                     Sort Key: t3.a
+                     ->  Seq Scan on hint_t3 t3
+               ->  Sort
+                     Sort Key: t2.a
+                     ->  Seq Scan on hint_t2 t2
+   ->  Seq Scan on hint_t1 t1
+(12 rows)
+
+explain (costs off)
+select /*+ mergejoin(t1 aa)*/ 1 from hint_t1 as t1 join
+(select  sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a)) as AA on(t1.a = AA.a);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Merge Join
+   Merge Cond: (t1.a = (sum(t2.a)))
+   ->  Sort
+         Sort Key: t1.a
+         ->  Seq Scan on hint_t1 t1
+   ->  Sort
+         Sort Key: (sum(t2.a))
+         ->  Aggregate
+               ->  Hash Join
+                     Hash Cond: (t2.a = t3.a)
+                     ->  Seq Scan on hint_t2 t2
+                     ->  Hash
+                           ->  Seq Scan on hint_t3 t3
+(13 rows)
+
+explain (costs off)
+select /*+ mergejoin(t1 aa)*/ 1 from hint_t1 as t1 join
+(select /*+ mergejoin(t2 t3)*/ sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a)) as AA on(t1.a = AA.a);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Merge Join
+   Merge Cond: (t1.a = (sum(t2.a)))
+   ->  Sort
+         Sort Key: t1.a
+         ->  Seq Scan on hint_t1 t1
+   ->  Sort
+         Sort Key: (sum(t2.a))
+         ->  Aggregate
+               ->  Merge Join
+                     Merge Cond: (t2.a = t3.a)
+                     ->  Sort
+                           Sort Key: t2.a
+                           ->  Seq Scan on hint_t2 t2
+                     ->  Sort
+                           Sort Key: t3.a
+                           ->  Seq Scan on hint_t3 t3
+(16 rows)
+
+--sublink
+explain (costs off)
+select 1 from hint_t1 as t1 where t1.a =
+(select /*+ mergejoin(t2 t3)*/ sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a));
+                    QUERY PLAN                    
+--------------------------------------------------
+ Seq Scan on hint_t1 t1
+   Filter: (a = $0)
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Merge Join
+                 Merge Cond: (t2.a = t3.a)
+                 ->  Sort
+                       Sort Key: t2.a
+                       ->  Seq Scan on hint_t2 t2
+                 ->  Sort
+                       Sort Key: t3.a
+                       ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+explain (costs off)
+select 1 from hint_t1 as t1 where t1.a =
+(select /*+ leading((t3 t2)) mergejoin(t2 t3)*/ sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a) where t1.b = t2.b);
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Hash Join
+   Hash Cond: ((t1.a = (sum(t2.a))) AND (t1.b = t2.b))
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  HashAggregate
+               Group By Key: t2.b
+               ->  Merge Join
+                     Merge Cond: (t3.a = t2.a)
+                     ->  Sort
+                           Sort Key: t3.a
+                           ->  Seq Scan on hint_t3 t3
+                     ->  Sort
+                           Sort Key: t2.a
+                           ->  Seq Scan on hint_t2 t2
+(14 rows)
+
+explain (costs off)
+select 1 from hint_t1 as t1 where t1.a =
+(select /*+ nestloop(t2 t3)*/ sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a) where t1.b = t2.b);
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Hash Join
+   Hash Cond: ((t1.a = (sum(t2.a))) AND (t1.b = t2.b))
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  HashAggregate
+               Group By Key: t2.b
+               ->  Nested Loop
+                     Join Filter: (t2.a = t3.a)
+                     ->  Seq Scan on hint_t2 t2
+                     ->  Materialize
+                           ->  Seq Scan on hint_t3 t3
+(11 rows)
+
+explain (costs off)
+select 1 from hint_t1 as t1 where t1.a in
+(select /*+ nestloop(t2 t3)*/ t2.a as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a));
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Semi Join
+   Hash Cond: (t1.a = t2.a)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Nested Loop
+               Join Filter: (t2.a = t3.a)
+               ->  Seq Scan on hint_t2 t2
+               ->  Materialize
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select 1 from hint_t1 as t1 where t1.a in
+(select /*+ hahsjoin(t2 t3)*/ t2.a as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a));
+WARNING:  LINE 1: syntax error at 'hahsjoin'
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Semi Join
+   Hash Cond: (t1.a = t2.a)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.a)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+explain (costs off)
+select 1 from hint_t1 as t1 where t1.a not in
+(select /*+ nestloop(t2 t3)*/ t2.a as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a));
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: ((t1.a = t2.a) OR (t1.a IS NULL) OR (t2.a IS NULL))
+   ->  Seq Scan on hint_t1 t1
+   ->  Materialize
+         ->  Nested Loop
+               Join Filter: (t2.a = t3.a)
+               ->  Seq Scan on hint_t2 t2
+               ->  Materialize
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+--view keep hint
+create view hint_view_1 as
+select /*+ leading(t2 t3) mergejoin(t2 t3)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain (costs off)select * from hint_view_1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Merge Join
+               Merge Cond: (t2.a = t3.b)
+               ->  Sort
+                     Sort Key: t2.a
+                     ->  Seq Scan on hint_t2 t2
+               ->  Sort
+                     Sort Key: t3.b
+                     ->  Seq Scan on hint_t3 t3
+(12 rows)
+
+create view hint_view_2 as
+select /*+ leading((t3 t2)) mergejoin(t2 t3)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain (costs off)select * from hint_view_2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Merge Join
+               Merge Cond: (t3.b = t2.a)
+               ->  Sort
+                     Sort Key: t3.b
+                     ->  Seq Scan on hint_t3 t3
+               ->  Sort
+                     Sort Key: t2.a
+                     ->  Seq Scan on hint_t2 t2
+(12 rows)
+
+set explain_perf_mode = pretty;
+create view hint_view_3 as
+select /*+ nestloop(t2 t3) rows(t2 t3 #200)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain  select * from hint_view_3;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Hash Join  (cost=1520.75..1561.25 rows=100 width=4)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=4)
+   ->  Hash  (cost=1518.25..1518.25 rows=200 width=4)
+         ->  Nested Loop  (cost=0.00..1518.25 rows=200 width=4)
+               Join Filter: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=8)
+               ->  Materialize  (cost=0.00..2.50 rows=100 width=4)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=4)
+(9 rows)
+
+create view hint_view_4 as
+select /*+ nestloop(t2 t3) rows(t2 t3 #200)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain select * from hint_view_4;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Hash Join  (cost=1520.75..1561.25 rows=100 width=4)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=4)
+   ->  Hash  (cost=1518.25..1518.25 rows=200 width=4)
+         ->  Nested Loop  (cost=0.00..1518.25 rows=200 width=4)
+               Join Filter: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=8)
+               ->  Materialize  (cost=0.00..2.50 rows=100 width=4)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=4)
+(9 rows)
+
+create view hint_view_5 as
+select /*+ nestloop(t2 t3) rows(t2 t3 #200)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain select * from hint_view_5;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Hash Join  (cost=1520.75..1561.25 rows=100 width=4)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=4)
+   ->  Hash  (cost=1518.25..1518.25 rows=200 width=4)
+         ->  Nested Loop  (cost=0.00..1518.25 rows=200 width=4)
+               Join Filter: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=8)
+               ->  Materialize  (cost=0.00..2.50 rows=100 width=4)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=4)
+(9 rows)
+
+create view hint_view_6 as
+select /*+ leading(t2 t3) nestloop(t2 t3) rows(t2 t3 #200)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain select * from hint_view_6;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Hash Join  (cost=1520.75..1561.25 rows=100 width=4)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=4)
+   ->  Hash  (cost=1518.25..1518.25 rows=200 width=4)
+         ->  Nested Loop  (cost=0.00..1518.25 rows=200 width=4)
+               Join Filter: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=8)
+               ->  Materialize  (cost=0.00..2.50 rows=100 width=4)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=4)
+(9 rows)
+
+create view hint_view_7 as
+select /*+ leading(t2 t3) nestloop(t2 t3) rows(t2 t3 #200)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain select * from hint_view_7;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Hash Join  (cost=1520.75..1561.25 rows=100 width=4)
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=4)
+   ->  Hash  (cost=1518.25..1518.25 rows=200 width=4)
+         ->  Nested Loop  (cost=0.00..1518.25 rows=200 width=4)
+               Join Filter: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=8)
+               ->  Materialize  (cost=0.00..2.50 rows=100 width=4)
+                     ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=4)
+(9 rows)
+
+explain
+select 1 from hint_t1 as t1 where t1.a in
+(select /*+ nestloop(t2 t3) rows(t2 t3 #500)*/ sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
+on (t2.a = t3.a));
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Hash Join  (cost=1519.53..1555.54 rows=1 width=0)
+   Hash Cond: (t1.a = (sum(t2.a)))
+   ->  Seq Scan on hint_t1 t1  (cost=0.00..31.00 rows=2000 width=4)
+   ->  Hash  (cost=1519.52..1519.52 rows=1 width=8)
+         ->  Aggregate  (cost=1519.50..1519.51 rows=1 width=12)
+               ->  Nested Loop  (cost=0.00..1518.25 rows=500 width=4)
+                     Join Filter: (t2.a = t3.a)
+                     ->  Seq Scan on hint_t2 t2  (cost=0.00..16.00 rows=1000 width=4)
+                     ->  Materialize  (cost=0.00..2.50 rows=100 width=4)
+                           ->  Seq Scan on hint_t3 t3  (cost=0.00..2.00 rows=100 width=4)
+(10 rows)
+
+reset explain_perf_mode;
+create view hint_view_8 as
+select /*+ nestloop(t2 t3)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain (costs off)select * from hint_view_8;
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Nested Loop
+               Join Filter: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Materialize
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+create view hint_view_9 as
+select /*+ nestloop(t2 t3) */
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain (costs off)select * from hint_view_9;
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.b)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Nested Loop
+               Join Filter: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Materialize
+                     ->  Seq Scan on hint_t3 t3
+(9 rows)
+
+create view hint_view_10 as
+select /*+ leading(((t1 t2) t3)) nestloop(t2 t3) rows(t2 t3 #200)*/
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+explain (costst off)select * from hint_view_10;
+ERROR:  unrecognized EXPLAIN option "costst"
+\d+ hint_view_10
+            View "plan_hint.hint_view_10"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+View definition:
+ SELECT/*+ NestLoop(t2 t3) Leading(((t1 t2) t3)) Rows(t2 t3 # 200)*/ t1.a
+   FROM hint_t1 t1
+   JOIN hint_t2 t2 ON t1.a = t2.b
+   JOIN hint_t3 t3 ON t2.a = t3.b;
+
+create index hintt1_index on hint_t1(a);
+create index hintt2_index on hint_t1(a);
+explain (costs off) select * from  hint_t1 where a = 10 and b = 10;
+                QUERY PLAN                
+------------------------------------------
+ Index Scan using hintt2_index on hint_t1
+   Index Cond: (a = 10)
+   Filter: (b = 10)
+(3 rows)
+
+explain (costs off) select /*+ tablescan(hint_t1)*/ * from  hint_t1 where a = 10 and b = 10;
+            QUERY PLAN             
+-----------------------------------
+ Seq Scan on hint_t1
+   Filter: ((a = 10) AND (b = 10))
+(2 rows)
+
+explain (costs off) select /*+ indexscan(hint_t1)*/ * from  hint_t1 where a = 10 and b = 10;
+                QUERY PLAN                
+------------------------------------------
+ Index Scan using hintt2_index on hint_t1
+   Index Cond: (a = 10)
+   Filter: (b = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexscan(hint_t1 hintt1_index)*/ * from  hint_t1 where a = 10 and b = 10;
+                QUERY PLAN                
+------------------------------------------
+ Index Scan using hintt1_index on hint_t1
+   Index Cond: (a = 10)
+   Filter: (b = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexscan(hint_t1 hintt2_index)*/ * from  hint_t1 where a = 10 and b = 10;
+                QUERY PLAN                
+------------------------------------------
+ Index Scan using hintt2_index on hint_t1
+   Index Cond: (a = 10)
+   Filter: (b = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_t1 hintt1_index)*/ * from  hint_t1 where a = 10 and b = 10;
+WARNING:  unused hint: IndexOnlyScan(hint_t1 hintt1_index)
+                QUERY PLAN                
+------------------------------------------
+ Index Scan using hintt2_index on hint_t1
+   Index Cond: (a = 10)
+   Filter: (b = 10)
+(3 rows)
+
+explain (costs off) select a from  hint_t1 where a = 10;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Index Only Scan using hintt2_index on hint_t1
+   Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_t1)*/ a from  hint_t1 where a = 10;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Index Only Scan using hintt2_index on hint_t1
+   Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_t1 hintt1_index)*/ a from  hint_t1 where a = 10;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Index Only Scan using hintt1_index on hint_t1
+   Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_t1 hintt2_index)*/ a from  hint_t1 where a = 10;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Index Only Scan using hintt2_index on hint_t1
+   Index Cond: (a = 10)
+(3 rows)
+
+create view hint_view1 as select /*+ tablescan(hint_t1)*/ * from  hint_t1 where a = 10 and b = 10;
+create view hint_view2 as select /*+ indexscan(hint_t1)*/ * from  hint_t1 where a = 10 and b = 10;
+create view hint_view3 as select /*+ indexscan(hint_t1 hintt1_index)*/ * from  hint_t1 where a = 10 and b = 10;
+create view hint_view4 as select /*+ indexonlyscan(hint_t1 hintt1_index)*/ a from  hint_t1 where a = 10;
+select /*+ tablescan(hint_t1 hint_t2 hint_t3)*/ * from  hint_t1 where a = 10 and b = 10;
+ a  | b  | c  
+----+----+----
+ 10 | 10 | 10
+(1 row)
+
+explain (costs off) select * from hint_view1;
+            QUERY PLAN             
+-----------------------------------
+ Seq Scan on hint_t1
+   Filter: ((a = 10) AND (b = 10))
+(2 rows)
+
+explain (costs off) select * from hint_view2;
+                QUERY PLAN                
+------------------------------------------
+ Index Scan using hintt2_index on hint_t1
+   Index Cond: (a = 10)
+   Filter: (b = 10)
+(3 rows)
+
+explain (costs off) select * from hint_view3;
+                QUERY PLAN                
+------------------------------------------
+ Index Scan using hintt1_index on hint_t1
+   Index Cond: (a = 10)
+   Filter: (b = 10)
+(3 rows)
+
+explain (costs off) select * from hint_view4;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Index Only Scan using hintt1_index on hint_t1
+   Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off)select /*+ tablescan(t1) tablescan(t1) indexscan(t1) indexscan(t1) indexscan(t1 hintt1_index) indexscan(t1 hintt1_index)*/
+* from hint_t1 as t1;
+WARNING:  Duplicated or conflict hint: TableScan(t1) IndexScan(t1) IndexScan(t1) IndexScan(t1 hintt1_index) IndexScan(t1 hintt1_index), will be discarded.
+       QUERY PLAN       
+------------------------
+ Seq Scan on hint_t1 t1
+(1 row)
+
+create table hint_vec(a int, b int, c int) with(orientation = column) ;
+create index hint_vec_index on hint_vec(a);
+create index hint_vec_index2 on hint_vec(b);
+explain (costs off) select a from hint_vec where a = 10;
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ tablescan(hint_vec)*/ a from hint_vec where a = 10;
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexScan(hint_vec hint_vec_index)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+-- test conflict
+explain (costs off) select /*+ tablescan(hint_vec) indexonlyscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexOnlyScan(hint_vec hint_vec_index), will be discarded.
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ tablescan(hint_vec) no indexonlyscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexOnlyScan(hint_vec hint_vec_index2)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexscan(hint_vec) no indexscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexScan(hint_vec) No IndexScan(hint_vec hint_vec_index2)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexscan(hint_vec hint_vec_index2) indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec hint_vec_index2) IndexScan(hint_vec)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexscan(hint_vec hint_vec_index) indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec hint_vec_index) IndexScan(hint_vec)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no tablescan no indexonlyscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  LINE 1: syntax error at 'no'
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) no indexonlyscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexOnlyScan(hint_vec hint_vec_index2)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+-- same keyword
+-- yes yes
+explain (costs off) select /*+ indexonlyscan(hint_vec) indexonlyscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexOnlyScan(hint_vec), will be discarded.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec) indexonlyscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexOnlyScan(hint_vec), will be discarded.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec hint_vec_index) indexonlyscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexOnlyScan(hint_vec hint_vec_index2)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+-- yes no
+explain (costs off) select /*+ indexonlyscan(hint_vec) no indexonlyscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexOnlyScan(hint_vec hint_vec_index)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec hint_vec_index) no indexonlyscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexOnlyScan(hint_vec hint_vec_index), will be discarded.
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec) no indexonlyscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: No IndexOnlyScan(hint_vec), will be discarded.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec hint_vec_index) no indexonlyscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexOnlyScan(hint_vec hint_vec_index2)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+-- no yes
+explain (costs off) select /*+ no indexonlyscan(hint_vec) indexonlyscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexOnlyScan(hint_vec hint_vec_index), will be discarded.
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) indexonlyscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexOnlyScan(hint_vec)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec) indexonlyscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexOnlyScan(hint_vec), will be discarded.
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) indexonlyscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexOnlyScan(hint_vec hint_vec_index2)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+-- no no
+explain (costs off) select /*+ no indexonlyscan(hint_vec) no indexonlyscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: No IndexOnlyScan(hint_vec hint_vec_index), will be discarded.
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) no indexonlyscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: No IndexOnlyScan(hint_vec hint_vec_index), will be discarded.
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec) no indexonlyscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: No IndexOnlyScan(hint_vec), will be discarded.
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) no indexonlyscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexOnlyScan(hint_vec hint_vec_index2)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+-- different keyword
+-- yes yes
+explain (costs off) select /*+ indexonlyscan(hint_vec) indexscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexScan(hint_vec hint_vec_index), will be discarded.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec) indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexScan(hint_vec), will be discarded.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec hint_vec_index) indexscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  Duplicated or conflict hint: IndexScan(hint_vec hint_vec_index2), will be discarded.
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+-- yes no
+explain (costs off) select /*+ indexonlyscan(hint_vec) no indexscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec hint_vec_index)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec hint_vec_index) no indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec) no indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(hint_vec hint_vec_index) no indexscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec hint_vec_index2)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Only Scan using hint_vec_index on hint_vec
+         Index Cond: (a = 10)
+(3 rows)
+
+-- no yes
+explain (costs off) select /*+ no indexonlyscan(hint_vec) indexscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexScan(hint_vec hint_vec_index)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexScan(hint_vec)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec) indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexScan(hint_vec)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) indexscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: IndexScan(hint_vec hint_vec_index2)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+-- no no
+explain (costs off) select /*+ no indexonlyscan(hint_vec) no indexscan(hint_vec hint_vec_index)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec hint_vec_index)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) no indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec) no indexscan(hint_vec)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select /*+ no indexonlyscan(hint_vec hint_vec_index) no indexscan(hint_vec hint_vec_index2)*/ a from hint_vec where a = 10;
+WARNING:  unused hint: No IndexScan(hint_vec hint_vec_index2)
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  CStore Scan on hint_vec
+         Filter: (a = 10)
+(3 rows)
+
+explain (costs off) select hint_t1.a from hint_t1
+join  (select /*+ hashjoin(t2 aa)*/ a from hint_t2 as t2
+      where t2.a in (select /*+ blockname(aa)*/ a from hint_t3 group by a))as bb
+  on (hint_t1.a = bb.a);
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Nested Loop
+   ->  Hash Join
+         Hash Cond: (t2.a = hint_t3.a)
+         ->  Seq Scan on hint_t2 t2
+         ->  Hash
+               ->  HashAggregate
+                     Group By Key: hint_t3.a
+                     ->  Seq Scan on hint_t3
+   ->  Index Only Scan using hintt2_index on hint_t1
+         Index Cond: (a = t2.a)
+(10 rows)
+
+explain (costs off) select /*+ nestloop(t1 aa)*/ * from hint_t1 as t1 where t1.a in (select /*+ blockname(aa)*/ a from hint_t2 as t2 group by a);
+                    QUERY PLAN                     
+---------------------------------------------------
+ Nested Loop
+   ->  HashAggregate
+         Group By Key: t2.a
+         ->  Seq Scan on hint_t2 t2
+   ->  Index Scan using hintt2_index on hint_t1 t1
+         Index Cond: (a = t2.a)
+(6 rows)
+
+explain (costs off) select a from hint_t1 where a in (select /*+ blockname(t1) blockname(t2)*/ a from hint_t2);
+WARNING:  Duplicated or conflict hint: BlockName(t2), will be discarded.
+WARNING:  Hint BlockName(t1) will become invalid due to sub-query pulling up.
+              QUERY PLAN              
+--------------------------------------
+ Hash Semi Join
+   Hash Cond: (hint_t1.a = hint_t2.a)
+   ->  Seq Scan on hint_t1
+   ->  Hash
+         ->  Seq Scan on hint_t2
+(5 rows)
+
+explain (costs off) select a from hint_t1 where a in (select /*+ blockname(tt) blockname(tt) blockname(t1)*/ a from hint_t2);
+WARNING:  Duplicated or conflict hint: BlockName(tt) BlockName(t1), will be discarded.
+WARNING:  Hint BlockName(tt) will become invalid due to sub-query pulling up.
+              QUERY PLAN              
+--------------------------------------
+ Hash Semi Join
+   Hash Cond: (hint_t1.a = hint_t2.a)
+   ->  Seq Scan on hint_t1
+   ->  Hash
+         ->  Seq Scan on hint_t2
+(5 rows)
+
+\d+ hint_view1
+             View "plan_hint.hint_view1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+ b      | integer |           | plain   | 
+ c      | integer |           | plain   | 
+View definition:
+ SELECT/*+ TableScan(hint_t1)*/  *
+   FROM hint_t1
+  WHERE hint_t1.a = 10 AND hint_t1.b = 10;
+
+\d+ hint_view3
+             View "plan_hint.hint_view3"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ a      | integer |           | plain   | 
+ b      | integer |           | plain   | 
+ c      | integer |           | plain   | 
+View definition:
+ SELECT/*+ IndexScan(hint_t1 hintt1_index)*/  *
+   FROM hint_t1
+  WHERE hint_t1.a = 10 AND hint_t1.b = 10;
+
+explain (costs off, verbose on)
+select /*+ leading(("T1" t2)) nestloop("T1" t2) mergejoin("T1" T2)*/ t2.a from hint_t1 as "T1" join hint_t2 as t2 on ("T1".a = t2.a);
+WARNING:  Duplicated or conflict hint: MergeJoin("T1" t2), will be discarded.
+                  QUERY PLAN                  
+----------------------------------------------
+ Nested Loop
+   Output: t2.a
+   Join Filter: ("T1".a = t2.a)
+   ->  Seq Scan on plan_hint.hint_t1 "T1"
+         Output: "T1".a, "T1".b, "T1".c
+   ->  Materialize
+         Output: t2.a
+         ->  Seq Scan on plan_hint.hint_t2 t2
+               Output: t2.a
+(9 rows)
+
+-- duplicate name of blockname and table name
+explain (costs off, verbose on)
+select /*+ mergejoin(t1 t2)*/ t1.a from hint_t1 as t1 where t1.a in (select /*+blockname(t2)*/ b from hint_t2 as t2);
+WARNING:  Hint BlockName(t2) will become invalid due to sub-query pulling up.
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Merge Join
+   Output: t1.a
+   Merge Cond: (t1.a = t2.b)
+   ->  Index Only Scan using hintt2_index on plan_hint.hint_t1 t1
+         Output: t1.a
+   ->  Sort
+         Output: t2.b
+         Sort Key: t2.b
+         ->  HashAggregate
+               Output: t2.b
+               Group By Key: t2.b
+               ->  Seq Scan on plan_hint.hint_t2 t2
+                     Output: t2.b
+(13 rows)
+
+-- bms double free issue
+explain (costs off) select /*+ leading((t1 (t2 t4) t3)) */
+  t1.a
+from hint_t1 as t1
+join hint_t2 as t2
+on(t1.a = t2.b)
+join hint_t3 as t3
+on (t2.a = t3.b);
+WARNING:  Error hint: Leading((t1 (t2 t4) t3)), relation name "t4" is not found.
+WARNING:  unused hint: Leading(t2 t4) Leading((t1 (t2 t4))) Leading((t1 (t2 t4) t3))
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Merge Join
+   Merge Cond: (t1.a = t2.b)
+   ->  Index Only Scan using hintt2_index on hint_t1 t1
+   ->  Sort
+         Sort Key: t2.b
+         ->  Hash Join
+               Hash Cond: (t2.a = t3.b)
+               ->  Seq Scan on hint_t2 t2
+               ->  Hash
+                     ->  Seq Scan on hint_t3 t3
+(10 rows)
+
+drop view hint_view_1;
+drop view hint_view_2;
+drop view hint_view_3;
+drop view hint_view_4;
+drop view hint_view_5;
+drop view hint_view_6;
+drop view hint_view_7;
+drop view hint_view_8;
+drop view hint_view_9;
+drop view hint_view_10;
+drop view hint_view1;
+drop view hint_view2;
+drop view hint_view3;
+drop view hint_view4;
+drop table hint_t1;
+drop table hint_t2;
+drop table hint_t3;
+drop table hint_t4;
+drop table hint_t5;
+drop table hint_vec;
+drop schema plan_hint cascade;
+NOTICE:  drop cascades to table src

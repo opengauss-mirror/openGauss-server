@@ -1,0 +1,179 @@
+/*
+ * This file is used to test the function of ExecVecMergeJoin(): part 4: anti join
+ */
+set enable_hashjoin=off;
+set enable_nestloop=off;
+----
+--- case 4: MergeJoin Full Join
+----
+--explain (verbose on, costs off) select * from vector_mergejoin_table_01 A full join vector_mergejoin_table_02 B on A.col_int = B.col_int order by 1,2,3,4,5,6,7,8,9, 10 limit 100;
+--select * from vector_mergejoin_table_01 A full join vector_mergejoin_table_02 B on A.col_int = B.col_int order by 1,2,3,4,5,6,7,8,9, 10 limit 100;
+--select * from vector_mergejoin_table_01 A full join vector_mergejoin_table_02 B using(col_int) order by 1,2,3,4,5,6,7,8,9, 10 limit 100;
+--select * from vector_mergejoin_table_02 A full join vector_mergejoin_table_01 B on A.col_int = B.col_int order by 1,2,3,4,5,6,7,8,9, 10 limit 100;
+--select count(*) from vector_mergejoin_table_01 A full join vector_mergejoin_table_02 B on A.col_int = B.col_int;
+----
+--- case 5: MergeJoin Anti Join
+----
+SET ENABLE_SEQSCAN=ON;
+explain (verbose on, costs off) select A.ID, A.zip from vector_mergejoin_engine.vector_mergejoin_table_03 A, vector_mergejoin_engine.vector_mergejoin_table_04 B where (A.ID, A.zip) NOT IN (SELECT ID, zip FROM vector_mergejoin_engine.vector_mergejoin_table_04) order by 1, 2;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a.id, a.zip
+   ->  Vector Nest Loop
+         Output: a.id, a.zip
+         ->  Vector Merge Anti Join
+               Output: a.id, a.zip
+               Merge Cond: ((a.id = vector_mergejoin_table_04.id) AND (a.zip = vector_mergejoin_table_04.zip))
+               ->  Vector Sort
+                     Output: a.id, a.zip
+                     Sort Key: a.id, a.zip
+                     ->  CStore Scan on vector_mergejoin_engine.vector_mergejoin_table_03 a
+                           Output: a.id, a.zip
+               ->  Vector Sort
+                     Output: vector_mergejoin_table_04.id, vector_mergejoin_table_04.zip
+                     Sort Key: vector_mergejoin_table_04.id, vector_mergejoin_table_04.zip
+                     ->  CStore Scan on vector_mergejoin_engine.vector_mergejoin_table_04
+                           Output: vector_mergejoin_table_04.id, vector_mergejoin_table_04.zip
+         ->  Vector Materialize
+               Output: ('Dummy')
+               ->  CStore Scan on vector_mergejoin_engine.vector_mergejoin_table_04 b
+                     Output: 'Dummy'
+(21 rows)
+
+select A.ID, A.zip from vector_mergejoin_engine.vector_mergejoin_table_03 A, vector_mergejoin_engine.vector_mergejoin_table_04 B where (A.ID, A.zip) NOT IN (SELECT ID, zip FROM vector_mergejoin_engine.vector_mergejoin_table_04) order by 1, 2;
+ id |    zip    
+----+-----------
+  3 | 545511111
+  3 | 545511111
+  3 | 545511111
+  3 | 545511111
+  3 | 545511111
+  3 | 545511111
+  3 | 545511111
+  3 | 545511111
+  3 | 545511111
+  4 | 522411111
+  4 | 522411111
+  4 | 522411111
+  4 | 522411111
+  4 | 522411111
+  4 | 522411111
+  4 | 522411111
+  4 | 522411111
+  4 | 522411111
+  5 | 329711111
+  5 | 329711111
+  5 | 329711111
+  5 | 329711111
+  5 | 329711111
+  5 | 329711111
+  5 | 329711111
+  5 | 329711111
+  5 | 329711111
+  6 | 784411111
+  6 | 784411111
+  6 | 784411111
+  6 | 784411111
+  6 | 784411111
+  6 | 784411111
+  6 | 784411111
+  6 | 784411111
+  6 | 784411111
+  7 | 950211111
+  7 | 950211111
+  7 | 950211111
+  7 | 950211111
+  7 | 950211111
+  7 | 950211111
+  7 | 950211111
+  7 | 950211111
+  7 | 950211111
+  8 | 979511111
+  8 | 979511111
+  8 | 979511111
+  8 | 979511111
+  8 | 979511111
+  8 | 979511111
+  8 | 979511111
+  8 | 979511111
+  8 | 979511111
+ 10 | 760511111
+ 10 | 760511111
+ 10 | 760511111
+ 10 | 760511111
+ 10 | 760511111
+ 10 | 760511111
+ 10 | 760511111
+ 10 | 760511111
+ 10 | 760511111
+(63 rows)
+
+select A.ID, A.zip from vector_mergejoin_engine.vector_mergejoin_table_04 A, vector_mergejoin_engine.vector_mergejoin_table_03 B where (A.ID, A.zip) NOT IN (SELECT ID, zip FROM vector_mergejoin_engine.vector_mergejoin_table_03) order by 1, 2;
+ id |    zip    
+----+-----------
+  1 | 218111111
+  1 | 218111111
+  1 | 218111111
+  1 | 218111111
+  1 | 218111111
+  1 | 218111111
+  1 | 218111111
+  1 | 218111111
+  1 | 218111111
+  2 | 563811111
+  2 | 563811111
+  2 | 563811111
+  2 | 563811111
+  2 | 563811111
+  2 | 563811111
+  2 | 563811111
+  2 | 563811111
+  2 | 563811111
+  6 | 056511111
+  6 | 056511111
+  6 | 056511111
+  6 | 056511111
+  6 | 056511111
+  6 | 056511111
+  6 | 056511111
+  6 | 056511111
+  6 | 056511111
+  6 | 614611111
+  6 | 614611111
+  6 | 614611111
+  6 | 614611111
+  6 | 614611111
+  6 | 614611111
+  6 | 614611111
+  6 | 614611111
+  6 | 614611111
+  6 | 731811111
+  6 | 731811111
+  6 | 731811111
+  6 | 731811111
+  6 | 731811111
+  6 | 731811111
+  6 | 731811111
+  6 | 731811111
+  6 | 731811111
+  9 | 174311111
+  9 | 174311111
+  9 | 174311111
+  9 | 174311111
+  9 | 174311111
+  9 | 174311111
+  9 | 174311111
+  9 | 174311111
+  9 | 174311111
+  9 | 732911111
+  9 | 732911111
+  9 | 732911111
+  9 | 732911111
+  9 | 732911111
+  9 | 732911111
+  9 | 732911111
+  9 | 732911111
+  9 | 732911111
+(63 rows)
+

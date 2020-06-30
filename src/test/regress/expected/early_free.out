@@ -1,0 +1,292 @@
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+-- turn on early free policy.
+set enable_early_free=on;
+-- tpch Q5, HashJoin
+set enable_nestloop=off;
+set enable_mergejoin=off;
+set enable_hashjoin=on;
+explain (costs off) select
+	n_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+	customer,
+	orders,
+	lineitem,
+	supplier,
+	nation,
+	region
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and l_suppkey = s_suppkey
+	and c_nationkey = s_nationkey
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'ASIA'
+	and o_orderdate >= '1994-01-01'::date
+	and o_orderdate < '1994-01-01'::date + interval '1 year'
+group by
+	n_name
+order by
+	revenue desc;
+                                                                                               QUERY PLAN                                                                                                
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))) DESC
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: nation.n_name
+               ->  Vector Sonic Hash Join
+                     Hash Cond: ((lineitem.l_suppkey = supplier.s_suppkey) AND (customer.c_nationkey = supplier.s_nationkey))
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+                           ->  CStore Scan on lineitem
+                           ->  Vector Sonic Hash Join
+                                 Hash Cond: (customer.c_custkey = orders.o_custkey)
+                                 ->  Vector Sonic Hash Join
+                                       Hash Cond: (customer.c_nationkey = nation.n_nationkey)
+                                       ->  CStore Scan on customer
+                                       ->  Vector Sonic Hash Join
+                                             Hash Cond: (nation.n_regionkey = region.r_regionkey)
+                                             ->  CStore Scan on nation
+                                             ->  CStore Scan on region
+                                                   Filter: (r_name = 'ASIA'::bpchar)
+                                 ->  CStore Scan on orders
+                                       Filter: ((o_orderdate >= 'Sat Jan 01 00:00:00 1994'::timestamp(0) without time zone) AND (o_orderdate < 'Sun Jan 01 00:00:00 1995'::timestamp without time zone))
+                     ->  CStore Scan on supplier
+(23 rows)
+
+select
+	n_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+	customer,
+	orders,
+	lineitem,
+	supplier,
+	nation,
+	region
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and l_suppkey = s_suppkey
+	and c_nationkey = s_nationkey
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'ASIA'
+	and o_orderdate >= '1994-01-01'::date
+	and o_orderdate < '1994-01-01'::date + interval '1 year'
+group by
+	n_name
+order by
+	revenue desc;
+          n_name           |   revenue    
+---------------------------+--------------
+ VIETNAM                   | 1000926.6999
+ CHINA                     |  740210.7570
+ JAPAN                     |  660651.2425
+ INDONESIA                 |  566379.5276
+ INDIA                     |  422874.6844
+(5 rows)
+
+-- tpch Q5, MergeJoin
+set enable_nestloop=off;
+set enable_mergejoin=on;
+set enable_hashjoin=off;
+explain (costs off) select
+	n_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+	customer,
+	orders,
+	lineitem,
+	supplier,
+	nation,
+	region
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and l_suppkey = s_suppkey
+	and c_nationkey = s_nationkey
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'ASIA'
+	and o_orderdate >= '1994-01-01'::date
+	and o_orderdate < '1994-01-01'::date + interval '1 year'
+group by
+	n_name
+order by
+	revenue desc;
+                                                                                                        QUERY PLAN                                                                                                         
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))) DESC
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: nation.n_name
+               ->  Vector Merge Join
+                     Merge Cond: ((lineitem.l_suppkey = supplier.s_suppkey) AND (customer.c_nationkey = supplier.s_nationkey))
+                     ->  Vector Sort
+                           Sort Key: lineitem.l_suppkey, customer.c_nationkey
+                           ->  Vector Merge Join
+                                 Merge Cond: (orders.o_orderkey = lineitem.l_orderkey)
+                                 ->  Vector Sort
+                                       Sort Key: orders.o_orderkey
+                                       ->  Vector Merge Join
+                                             Merge Cond: (customer.c_custkey = orders.o_custkey)
+                                             ->  Vector Sort
+                                                   Sort Key: customer.c_custkey
+                                                   ->  Vector Merge Join
+                                                         Merge Cond: (nation.n_nationkey = customer.c_nationkey)
+                                                         ->  Vector Sort
+                                                               Sort Key: nation.n_nationkey
+                                                               ->  Vector Merge Join
+                                                                     Merge Cond: (region.r_regionkey = nation.n_regionkey)
+                                                                     ->  Vector Sort
+                                                                           Sort Key: region.r_regionkey
+                                                                           ->  CStore Scan on region
+                                                                                 Filter: (r_name = 'ASIA'::bpchar)
+                                                                     ->  Vector Sort
+                                                                           Sort Key: nation.n_regionkey
+                                                                           ->  CStore Scan on nation
+                                                         ->  Vector Sort
+                                                               Sort Key: customer.c_nationkey
+                                                               ->  CStore Scan on customer
+                                             ->  Vector Sort
+                                                   Sort Key: orders.o_custkey
+                                                   ->  CStore Scan on orders
+                                                         Filter: ((o_orderdate >= 'Sat Jan 01 00:00:00 1994'::timestamp(0) without time zone) AND (o_orderdate < 'Sun Jan 01 00:00:00 1995'::timestamp without time zone))
+                                 ->  Vector Sort
+                                       Sort Key: lineitem.l_orderkey
+                                       ->  CStore Scan on lineitem
+                     ->  Vector Sort
+                           Sort Key: supplier.s_suppkey, supplier.s_nationkey
+                           ->  CStore Scan on supplier
+(43 rows)
+
+select
+	n_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+	customer,
+	orders,
+	lineitem,
+	supplier,
+	nation,
+	region
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and l_suppkey = s_suppkey
+	and c_nationkey = s_nationkey
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'ASIA'
+	and o_orderdate >= '1994-01-01'::date
+	and o_orderdate < '1994-01-01'::date + interval '1 year'
+group by
+	n_name
+order by
+	revenue desc;
+          n_name           |   revenue    
+---------------------------+--------------
+ VIETNAM                   | 1000926.6999
+ CHINA                     |  740210.7570
+ JAPAN                     |  660651.2425
+ INDONESIA                 |  566379.5276
+ INDIA                     |  422874.6844
+(5 rows)
+
+-- tpch Q5, NestLoop
+set enable_nestloop=on;
+set enable_mergejoin=off;
+set enable_hashjoin=off;
+explain (costs off) select
+	n_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+	customer,
+	orders,
+	lineitem,
+	supplier,
+	nation,
+	region
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and l_suppkey = s_suppkey
+	and c_nationkey = s_nationkey
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'ASIA'
+	and o_orderdate >= '1994-01-01'::date
+	and o_orderdate < '1994-01-01'::date + interval '1 year'
+group by
+	n_name
+order by
+	revenue desc;
+                                                                                                  QUERY PLAN                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))) DESC
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: nation.n_name
+               ->  Vector Nest Loop
+                     Join Filter: ((lineitem.l_suppkey = supplier.s_suppkey) AND (customer.c_nationkey = supplier.s_nationkey))
+                     ->  Vector Nest Loop
+                           Join Filter: (orders.o_orderkey = lineitem.l_orderkey)
+                           ->  CStore Scan on lineitem
+                           ->  Vector Materialize
+                                 ->  Vector Nest Loop
+                                       Join Filter: (customer.c_custkey = orders.o_custkey)
+                                       ->  CStore Scan on orders
+                                             Filter: ((o_orderdate >= 'Sat Jan 01 00:00:00 1994'::timestamp(0) without time zone) AND (o_orderdate < 'Sun Jan 01 00:00:00 1995'::timestamp without time zone))
+                                       ->  Vector Materialize
+                                             ->  Vector Nest Loop
+                                                   Join Filter: (nation.n_nationkey = customer.c_nationkey)
+                                                   ->  CStore Scan on customer
+                                                   ->  Vector Materialize
+                                                         ->  Vector Nest Loop
+                                                               Join Filter: (nation.n_regionkey = region.r_regionkey)
+                                                               ->  CStore Scan on region
+                                                                     Filter: (r_name = 'ASIA'::bpchar)
+                                                               ->  CStore Scan on nation
+                     ->  Vector Materialize
+                           ->  CStore Scan on supplier
+(27 rows)
+
+select
+	n_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+	customer,
+	orders,
+	lineitem,
+	supplier,
+	nation,
+	region
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and l_suppkey = s_suppkey
+	and c_nationkey = s_nationkey
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'ASIA'
+	and o_orderdate >= '1994-01-01'::date
+	and o_orderdate < '1994-01-01'::date + interval '1 year'
+group by
+	n_name
+order by
+	revenue desc;
+          n_name           |   revenue    
+---------------------------+--------------
+ VIETNAM                   | 1000926.6999
+ CHINA                     |  740210.7570
+ JAPAN                     |  660651.2425
+ INDONESIA                 |  566379.5276
+ INDIA                     |  422874.6844
+(5 rows)
+

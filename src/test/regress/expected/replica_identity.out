@@ -1,0 +1,128 @@
+CREATE TABLE test_replica_identity (
+       id serial primary key,
+       keya text not null,
+       keyb text not null,
+       nonkey text
+);
+NOTICE:  CREATE TABLE will create implicit sequence "test_replica_identity_id_seq" for serial column "test_replica_identity.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_replica_identity_pkey" for table "test_replica_identity"
+CREATE TABLE test_replica_identity_othertable (id serial primary key);
+NOTICE:  CREATE TABLE will create implicit sequence "test_replica_identity_othertable_id_seq" for serial column "test_replica_identity_othertable.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_replica_identity_othertable_pkey" for table "test_replica_identity_othertable"
+CREATE INDEX test_replica_identity_keyab ON test_replica_identity (keya, keyb);
+CREATE INDEX test_replica_identity_hash ON test_replica_identity USING hash (nonkey);
+-- default is 'd'/DEFAULT for user created tables
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass;
+ relreplident 
+--------------
+ d
+(1 row)
+
+-- but 'none' for system tables
+SELECT relreplident FROM pg_class WHERE oid = 'pg_class'::regclass;
+ relreplident 
+--------------
+ n
+(1 row)
+
+SELECT relreplident FROM pg_class WHERE oid = 'pg_constraint'::regclass;
+ relreplident 
+--------------
+ n
+(1 row)
+
+----
+-- Make sure we detect inelegible indexes
+----
+-- fail, not unique
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_keyab;
+ERROR:  cannot use non-unique index "test_replica_identity_keyab" as replica identity
+-- fail, not a candidate key, nullable column
+-- fail, hash indexes cannot do uniqueness
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_hash;
+ERROR:  cannot use non-unique index "test_replica_identity_hash" as replica identity
+-- fail, not our index
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_othertable_pkey;
+ERROR:  "test_replica_identity_othertable_pkey" is not an index for table "test_replica_identity"
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass;
+ relreplident 
+--------------
+ d
+(1 row)
+
+----
+-- Make sure index cases succeeed
+----
+-- succeed, primary key
+ALTER TABLE test_replica_identity REPLICA IDENTITY USING INDEX test_replica_identity_pkey;
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass;
+ relreplident 
+--------------
+ i
+(1 row)
+
+\d test_replica_identity
+                         Table "public.test_replica_identity"
+ Column |  Type   |                             Modifiers                              
+--------+---------+--------------------------------------------------------------------
+ id     | integer | not null default nextval('test_replica_identity_id_seq'::regclass)
+ keya   | text    | not null
+ keyb   | text    | not null
+ nonkey | text    | 
+Indexes:
+    "test_replica_identity_pkey" PRIMARY KEY, btree (id) TABLESPACE pg_default REPLICA IDENTITY
+    "test_replica_identity_hash" hash (nonkey) TABLESPACE pg_default
+    "test_replica_identity_keyab" btree (keya, keyb) TABLESPACE pg_default
+
+SELECT count(*) FROM pg_index WHERE indrelid = 'test_replica_identity'::regclass AND indisreplident;
+ count 
+-------
+     1
+(1 row)
+
+----
+-- Make sure non index cases work
+----
+ALTER TABLE test_replica_identity REPLICA IDENTITY DEFAULT;
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass;
+ relreplident 
+--------------
+ d
+(1 row)
+
+SELECT count(*) FROM pg_index WHERE indrelid = 'test_replica_identity'::regclass AND indisreplident;
+ count 
+-------
+     0
+(1 row)
+
+ALTER TABLE test_replica_identity REPLICA IDENTITY FULL;
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass;
+ relreplident 
+--------------
+ f
+(1 row)
+
+\d test_replica_identity
+                         Table "public.test_replica_identity"
+ Column |  Type   |                             Modifiers                              
+--------+---------+--------------------------------------------------------------------
+ id     | integer | not null default nextval('test_replica_identity_id_seq'::regclass)
+ keya   | text    | not null
+ keyb   | text    | not null
+ nonkey | text    | 
+Indexes:
+    "test_replica_identity_pkey" PRIMARY KEY, btree (id) TABLESPACE pg_default
+    "test_replica_identity_hash" hash (nonkey) TABLESPACE pg_default
+    "test_replica_identity_keyab" btree (keya, keyb) TABLESPACE pg_default
+Replica Identity: FULL
+
+ALTER TABLE test_replica_identity REPLICA IDENTITY NOTHING;
+SELECT relreplident FROM pg_class WHERE oid = 'test_replica_identity'::regclass;
+ relreplident 
+--------------
+ n
+(1 row)
+
+DROP TABLE test_replica_identity;
+DROP TABLE test_replica_identity_othertable;

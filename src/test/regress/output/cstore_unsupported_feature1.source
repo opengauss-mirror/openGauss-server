@@ -1,0 +1,102 @@
+-- problem: list all unsupported feature in cstore table
+-- feature 6: alter cstore-table set schema to pg_catalog
+CREATE TABLE cstore_unsupport_tbl06 ( a int, b int , PARTIAL CLUSTER KEY(a)) with ( ORIENTATION = COLUMN )  ;
+ALTER TABLE cstore_unsupport_tbl06 SET SCHEMA pg_catalog;
+ERROR:  cannot move objects into system schema
+-- feature 7: rename
+ALTER TABLE cstore_unsupport_tbl06 RENAME TO cstore_unsupport_tbl07;
+ALTER TABLE cstore_unsupport_tbl07 RENAME TO cstore_unsupport_tbl06;
+ALTER TABLE cstore_unsupport_tbl06 RENAME a to c;
+\d+ cstore_unsupport_tbl06
+                Table "public.cstore_unsupport_tbl06"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ c      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Partial Cluster :
+    "cstore_unsupport_tbl06_cluster" PARTIAL CLUSTER KEY (c)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+ALTER TABLE cstore_unsupport_tbl06 RENAME CONSTRAINT cstore_unsupport_tbl06_cluster TO cstore_unsupport_tbl07_cluster01;
+\d+ cstore_unsupport_tbl06
+                Table "public.cstore_unsupport_tbl06"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ c      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Partial Cluster :
+    "cstore_unsupport_tbl07_cluster01" PARTIAL CLUSTER KEY (c)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- feature 8: reset
+ALTER TABLE cstore_unsupport_tbl06 RESET ( ORIENTATION, MAX_BATCHROW );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+-- feature 9: LIKE INCLUDING DISTRIBUTION REPLICATION
+CREATE TABLE cstore_unsupport_tbl07 ( a int , b int , c int ) WITH ( ORIENTATION = 'ROW' )  ;
+CREATE TABLE cstore_unsupport_tbl08 ( LIKE cstore_unsupport_tbl07 ) WITH ( ORIENTATION = COLUMN );
+CREATE TABLE cstore_unsupport_tbl09 ( a int , b int , c int ) WITH ( ORIENTATION = 'COLUMN' )  ;
+-- feature 10: COMPRESSLEVEL option
+CREATE TABLE row_unsupport_tbl10 (a int, b int, c int ) WITH ( ORIENTATION = row, COMPRESSLEVEL = 0 )  ;
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "compresslevel" for row relation
+CREATE TABLE row_unsupport_tbl10 (a int, b int, c int ) WITH ( ORIENTATION = row )  ;
+ALTER TABLE row_unsupport_tbl10 SET ( COMPRESSLEVEL = 1 );
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "compresslevel" for row relation
+ALTER TABLE row_unsupport_tbl10 RESET (COMPRESSLEVEL);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "compresslevel" for row relation
+\d+ row_unsupport_tbl10
+                 Table "public.row_unsupport_tbl10"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+DROP TABLE row_unsupport_tbl10;
+CREATE TABLE col_unsupport_tbl11 (a int, b int, c int ) WITH ( ORIENTATION = column, COMPRESSLEVEL = 1 )  ;
+\d+ col_unsupport_tbl11
+                 Table "public.col_unsupport_tbl11"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compresslevel=1, compression=low
+
+ALTER TABLE col_unsupport_tbl11 SET (COMPRESSLEVEL = 2);
+\d+ col_unsupport_tbl11
+                 Table "public.col_unsupport_tbl11"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low, compresslevel=2
+
+ALTER TABLE col_unsupport_tbl11 RESET (COMPRESSLEVEL);
+\d+ col_unsupport_tbl11
+                 Table "public.col_unsupport_tbl11"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+ALTER TABLE col_unsupport_tbl11 set ( compresslevel = -1 );
+ERROR:  value -1 out of bounds for option "compresslevel"
+DETAIL:  Valid values are between "0" and "3".
+ALTER TABLE col_unsupport_tbl11 set ( compresslevel = 4 );
+ERROR:  value 4 out of bounds for option "compresslevel"
+DETAIL:  Valid values are between "0" and "3".
+DROP TABLE col_unsupport_tbl11;

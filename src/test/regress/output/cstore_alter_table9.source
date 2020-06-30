@@ -1,0 +1,117 @@
+--
+-- ALTER_TABLE
+-- Add column for empty table, type test
+--
+set time zone 'PRC';
+-- Test on correctness of bitmap
+drop table if exists mergepartitionbitmap1;
+NOTICE:  table "mergepartitionbitmap1" does not exist, skipping
+CREATE TABLE mergepartitionbitmap1
+(
+ L_ORDERKEY BIGINT NOT NULL
+, L_PARTKEY BIGINT NOT NULL
+, L_SUPPKEY BIGINT NOT NULL
+, L_LINENUMBER BIGINT NOT NULL
+, L_QUANTITY DECIMAL(15,2) NOT NULL
+, L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+, L_DISCOUNT DECIMAL(15,2) NOT NULL
+, L_TAX DECIMAL(15,2) NOT NULL
+, L_RETURNFLAG CHAR(1) NOT NULL
+, L_LINESTATUS CHAR(1) NOT NULL
+, L_SHIPDATE DATE NOT NULL
+, L_COMMITDATE DATE NOT NULL
+, L_RECEIPTDATE DATE NOT NULL
+, L_SHIPINSTRUCT CHAR(25) NOT NULL
+, L_SHIPMODE CHAR(10) NOT NULL
+, L_COMMENT VARCHAR(44) NOT NULL
+--, primary key (L_ORDERKEY, L_LINENUMBER)
+)
+partition by range(L_ORDERKEY)
+(partition p1 values less than(3000),
+partition p2 values less than(6000),
+partition p3 values less than(15000))
+;
+create index mergepartitionbitmap1_ind on mergepartitionbitmap1 (L_ORDERKEY) local;
+copy mergepartitionbitmap1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' delimiter '|';
+copy mergepartitionbitmap1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' delimiter '|';
+select relname from pg_partition where parentid = (select oid from pg_class where relname = 'mergepartitionbitmap1_ind') order by 1;
+      relname      
+-------------------
+ p1_l_orderkey_idx
+ p2_l_orderkey_idx
+ p3_l_orderkey_idx
+(3 rows)
+
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'mergepartitionbitmap1') order by 2;
+        relname        | boundaries 
+-----------------------+------------
+ p3                    | {15000}
+ p1                    | {3000}
+ p2                    | {6000}
+ mergepartitionbitmap1 | 
+(4 rows)
+
+select count(*) from mergepartitionbitmap1;
+ count 
+-------
+ 20000
+(1 row)
+
+delete from mergepartitionbitmap1 where L_LINENUMBER=2;
+select count(*) from mergepartitionbitmap1;
+ count 
+-------
+ 15660
+(1 row)
+
+alter table mergepartitionbitmap1 merge partitions p1, p2 into partition px;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'mergepartitionbitmap1') order by 2;
+        relname        | boundaries 
+-----------------------+------------
+ p3                    | {15000}
+ px                    | {6000}
+ mergepartitionbitmap1 | 
+(3 rows)
+
+select relname from pg_partition where parentid = (select oid from pg_class where relname = 'mergepartitionbitmap1_ind') order by 1;
+      relname      
+-------------------
+ p2_l_orderkey_idx
+ p3_l_orderkey_idx
+(2 rows)
+
+select count(*) from mergepartitionbitmap1;
+ count 
+-------
+ 15660
+(1 row)
+
+delete from mergepartitionbitmap1 where L_LINENUMBER=3;
+delete from mergepartitionbitmap1 where L_LINENUMBER=4;
+select count(*) from mergepartitionbitmap1;
+ count 
+-------
+  9238
+(1 row)
+
+alter table mergepartitionbitmap1 merge partitions px, p3 into partition p3;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'mergepartitionbitmap1') order by 2;
+        relname        | boundaries 
+-----------------------+------------
+ p3                    | {15000}
+ mergepartitionbitmap1 | 
+(2 rows)
+
+select relname from pg_partition where parentid = (select oid from pg_class where relname = 'mergepartitionbitmap1_ind') order by 1;
+      relname      
+-------------------
+ p3_l_orderkey_idx
+(1 row)
+
+select count(*) from mergepartitionbitmap1;
+ count 
+-------
+  9238
+(1 row)
+
+drop table mergepartitionbitmap1;

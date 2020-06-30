@@ -1,0 +1,64 @@
+-------------------------
+-- test gsql query retry
+-------------------------
+
+-- invalid retry times
+\set RETRY 0
+\set RETRY 11
+\set RETRY 1.2
+\set RETRY 5 5
+\set RETRY aa
+\set RETRY 11aa
+\set RETRY 2222222222222222222222222222
+
+-- retry on and off
+\set RETRY
+\set RETRY
+\set RETRY 5
+\set RETRY
+
+-- retry in transaction block
+START TRANSACTION;
+\set RETRY
+END;
+
+-- add errcode 42601 to retry syntax error, just for test
+\! echo "42601" > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+create table;
+\g
+\set RETRY
+\! sed -i '$d' @abs_bindir@/retry_errcodes.conf 
+
+-- wrong errcode in config file
+\! echo "426011" > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+create table;
+\set RETRY
+\! sed -i '$d' @abs_bindir@/retry_errcodes.conf
+
+-- no errcode in config file
+\! > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+
+-- retry with parallel execute
+\! echo "42601" > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+\parallel
+create table;
+\parallel
+\set RETRY
+\! sed -i '$d' @abs_bindir@/retry_errcodes.conf 
+
+-- test function pgxc_pool_connection_status
+select * from pgxc_pool_connection_status();
+create user jack with password 'ttest@123';
+set role jack password 'ttest@123';
+select * from pgxc_pool_connection_status();
+reset role;
+drop user jack;
+
+-- retry the query at the end of file without a semicolon
+\! echo "42601" > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+create table

@@ -1,0 +1,397 @@
+set explain_perf_mode=pretty;
+explain (costs false) 
+WITH RECURSIVE   x(id) AS
+(
+	VALUES (1)
+	UNION ALL
+	SELECT id+1 FROM x WHERE id < 5
+), y(id) AS
+(
+	VALUES (1)
+	UNION ALL
+	SELECT id+1 FROM x WHERE id < 10
+)
+SELECT y.*, x.* FROM y LEFT JOIN x USING (id) ORDER BY 1;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Sort Key: y.id
+   CTE x
+     ->  Recursive Union
+           ->  Values Scan on "*VALUES*"
+           ->  WorkTable Scan on x
+                 Filter: (id < 5)
+   CTE y
+     ->  Result
+           ->  Append
+                 ->  Values Scan on "*VALUES*"
+                 ->  CTE Scan on x
+                       Filter: (id < 10)
+   ->  Hash Right Join
+         Hash Cond: (x.id = y.id)
+         ->  CTE Scan on x
+         ->  Hash
+               ->  CTE Scan on y
+(18 rows)
+
+WITH RECURSIVE   x(id) AS
+(
+	VALUES (1)
+	UNION ALL
+	SELECT id+1 FROM x WHERE id < 5
+), y(id) AS
+(
+	VALUES (1)
+	UNION ALL
+	SELECT id+1 FROM x WHERE id < 10
+)
+SELECT y.*, x.* FROM y LEFT JOIN x USING (id) ORDER BY 1;
+ id | id 
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |   
+(6 rows)
+
+explain (costs false) 
+WITH recursive t_result AS (
+SELECT *
+FROM test_rec
+WHERE dm = '3'
+UNION ALL
+SELECT t2.*
+FROM t_result t1
+JOIN test_rec t2 ON t2.dm = t1.sj_dm
+)
+SELECT * FROM t_result order by 1;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Sort
+   Sort Key: t_result.dm
+   CTE t_result
+     ->  Recursive Union
+           ->  Row Adapter
+                 ->  CStore Scan on test_rec
+                       Filter: (dm = 3)
+           ->  Hash Join
+                 Hash Cond: (t2.dm = t1.sj_dm)
+                 ->  Row Adapter
+                       ->  CStore Scan on test_rec t2
+                 ->  Hash
+                       ->  WorkTable Scan on t_result t1
+   ->  CTE Scan on t_result
+(14 rows)
+
+WITH recursive t_result AS (
+SELECT *
+FROM test_rec
+WHERE dm = '3'
+UNION ALL
+SELECT t2.*
+FROM t_result t1
+JOIN test_rec t2 ON t2.dm = t1.sj_dm
+)
+SELECT * FROM t_result order by 1;
+ dm | sj_dm |     name     
+----+-------+--------------
+  3 |     4 | 2012 soft
+  4 |     5 | huawei 2012
+  5 |     6 | China huawei
+  6 |     7 | world China
+(4 rows)
+
+/*
+ * verify if recursive cte appears multi times
+ */
+explain (costs false) 
+with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq where id > 5
+union all
+select id, name from rq where id < 5 order by 1;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Sort
+   Sort Key: rq.id
+   CTE rq
+     ->  Recursive Union
+           ->  Seq Scan on chinamap
+                 Filter: (id = 11)
+           ->  Hash Join
+                 Hash Cond: (origin.pid = rq.id)
+                 ->  Seq Scan on chinamap origin
+                 ->  Hash
+                       ->  WorkTable Scan on rq
+   ->  Result
+         ->  Append
+               ->  CTE Scan on rq
+                     Filter: (id > 5)
+               ->  CTE Scan on rq
+                     Filter: (id < 5)
+(17 rows)
+
+explain (costs false) 
+with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select t1.* from rq t1, rq t2 where t1.id = t2.id order by 1;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Merge Join
+   Merge Cond: (t1.id = t2.id)
+   CTE rq
+     ->  Recursive Union
+           ->  Seq Scan on chinamap
+                 Filter: (id = 11)
+           ->  Hash Join
+                 Hash Cond: (origin.pid = rq.id)
+                 ->  Seq Scan on chinamap origin
+                 ->  Hash
+                       ->  WorkTable Scan on rq
+   ->  Sort
+         Sort Key: t1.id
+         ->  CTE Scan on rq t1
+   ->  Sort
+         Sort Key: t2.id
+         ->  CTE Scan on rq t2
+(17 rows)
+
+with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq where id > 5
+union all
+select id, name from rq where id < 5 order by 1;
+ id  |           name           
+-----+--------------------------
+  11 | 湖北省
+ 110 | 湖北省 > 武汉市
+ 111 | 湖北省 > 武汉市 > 武昌区
+ 112 | 湖北省 > 武汉市 > 下城区
+ 113 | 湖北省 > 武汉市 > 江岸区
+ 114 | 湖北省 > 武汉市 > 江汉区
+ 115 | 湖北省 > 武汉市 > 汉阳区
+ 116 | 湖北省 > 武汉市 > 洪山区
+ 117 | 湖北省 > 武汉市 > 青山区
+ 120 | 湖北省 > 孝感市
+ 130 | 湖北省 > 宜昌市
+ 140 | 湖北省 > 随州市
+ 150 | 湖北省 > 仙桃市
+ 160 | 湖北省 > 荆门市
+ 170 | 湖北省 > 枝江市
+ 180 | 湖北省 > 神农架市
+(16 rows)
+
+with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select t1.* from rq t1, rq t2 where t1.id = t2.id order by 1;
+ id  |           name           
+-----+--------------------------
+  11 | 湖北省
+ 110 | 湖北省 > 武汉市
+ 111 | 湖北省 > 武汉市 > 武昌区
+ 112 | 湖北省 > 武汉市 > 下城区
+ 113 | 湖北省 > 武汉市 > 江岸区
+ 114 | 湖北省 > 武汉市 > 江汉区
+ 115 | 湖北省 > 武汉市 > 汉阳区
+ 116 | 湖北省 > 武汉市 > 洪山区
+ 117 | 湖北省 > 武汉市 > 青山区
+ 120 | 湖北省 > 孝感市
+ 130 | 湖北省 > 宜昌市
+ 140 | 湖北省 > 随州市
+ 150 | 湖北省 > 仙桃市
+ 160 | 湖北省 > 荆门市
+ 170 | 湖北省 > 枝江市
+ 180 | 湖北省 > 神农架市
+(16 rows)
+
+reset explain_perf_mode;
+/*
+ * verify if stream is on inner branch will not cause incorrect controller creation
+ */
+create table test_int(id int,name text,pid int, pname text,time timestamp);
+create table test_int_rep(id int,name text,pid int, pname text,time timestamp) ;
+create table test_number(id number,name text,pid number, pname text,time timestamp);
+create table test_number_hash_par(id number,name text,pid number, pname text,time timestamp)
+partition by range(time)
+(
+partition p0 values less than('2018-01-01 00:00:00'),
+partition p1 values less than('2018-02-01 00:00:00'),
+partition p2 values less than('2018-03-01 00:00:00'),
+partition p3 values less than('2018-04-01 00:00:00'),
+partition p4 values less than('2018-05-01 00:00:00'),
+partition p5 values less than('2018-06-01 00:00:00'),
+partition p6 values less than('2018-07-01 00:00:00'),
+partition p7 values less than('2018-08-01 00:00:00'),
+partition p8 values less than('2018-09-01 00:00:00'),
+partition p9 values less than('2018-10-01 00:00:00'),
+partition p10 values less than('2018-11-01 00:00:00'),
+partition p11 values less than('2018-12-01 00:00:00'),
+partition p12 values less than(maxvalue)
+);
+create table test_number_rep(id number,name text,pid number, pname text,time timestamp) ;
+create table test_number_rep_par(id number,name text,pid number, pname text,time timestamp) 
+partition by range(time)
+(
+partition p0 values less than('2018-01-01 00:00:00'),
+partition p1 values less than('2018-02-01 00:00:00'),
+partition p2 values less than('2018-03-01 00:00:00'),
+partition p3 values less than('2018-04-01 00:00:00'),
+partition p4 values less than('2018-05-01 00:00:00'),
+partition p5 values less than('2018-06-01 00:00:00'),
+partition p6 values less than('2018-07-01 00:00:00'),
+partition p7 values less than('2018-08-01 00:00:00'),
+partition p8 values less than('2018-09-01 00:00:00'),
+partition p9 values less than('2018-10-01 00:00:00'),
+partition p10 values less than('2018-11-01 00:00:00'),
+partition p11 values less than('2018-12-01 00:00:00'),
+partition p12 values less than(maxvalue)
+);
+set explain_perf_mode=pretty;
+explain
+with recursive tmp1 as (
+select case when id < 1000 then id  else id+1 end  as id,
+       case when pid >1000 then pid+1 else pid end as pid,
+       count(8)    as count
+from test_number
+group by 1,2
+union
+select case when id < 1000 then id  else id+1 end  as id,
+       case when pid >1000 then pid+1 else pid end as pid ,count(8)
+from test_number_rep
+where id < 100
+group by 1,2
+union
+select 1,'',1
+from test_number
+where id between 1 and 3
+except
+select 1,id,pid
+from test_number
+where id between 2 and 4
+union all
+select case when t1.id < 1000 then t1.id  else t1.id+1 end  as id,
+       case when t1.pid >1000 then t1.pid+1 else t1.pid end as pid,substr(t1.pid,-2)::int from tmp1 t1 inner join test_int_rep t2 on floor(t2.pid)::int = (case t1.id when t1.id between 1 and 10 then t1.id end))
+select t1.count,t2.name,max(distinct t2.time),count(*),t1.pid
+ from tmp1 t1
+inner join test_number_rep_par t2
+on t1.id = (case when t2.pid  is null then 1 end)
+inner join test_number_hash_par t3
+on (case when t1.pid is null then 3.60525512 end) =  t3.pid
+group by 1,2,5
+order by 1,2,3,4,5;
+                                                                                                                                                           QUERY PLAN                                                                                                                                                            
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=236307.07..237445.41 rows=455334 width=120)
+   Sort Key: t1.count, t2.name, (max(DISTINCT t2."time")), (count(*)), t1.pid
+   CTE tmp1
+     ->  Recursive Union  (cost=67.46..5386.51 rows=75242 width=71)
+           ->  Result  (cost=67.46..88.41 rows=202 width=71)
+                 ->  HashSetOp Except  (cost=67.46..88.41 rows=202 width=71)
+                       ->  Append  (cost=67.46..86.88 rows=204 width=71)
+                             ->  Result  (cost=67.46..69.48 rows=202 width=71)
+                                   ->  HashAggregate  (cost=67.46..69.48 rows=202 width=71)
+                                         Group By Key: (CASE WHEN (public.test_number.id < 1000::numeric) THEN public.test_number.id ELSE (public.test_number.id + 1::numeric) END), (CASE WHEN (public.test_number.pid > 1000::numeric) THEN (public.test_number.pid + 1::numeric) ELSE public.test_number.pid END), (count(8))
+                                         ->  Append  (cost=23.53..65.95 rows=202 width=71)
+                                               ->  HashAggregate  (cost=23.53..25.53 rows=100 width=72)
+                                                     Group By Key: CASE WHEN (public.test_number.id < 1000::numeric) THEN public.test_number.id ELSE (public.test_number.id + 1::numeric) END, CASE WHEN (public.test_number.pid > 1000::numeric) THEN (public.test_number.pid + 1::numeric) ELSE public.test_number.pid END
+                                                     ->  Seq Scan on test_number  (cost=0.00..19.84 rows=492 width=64)
+                                               ->  HashAggregate  (cost=19.02..21.02 rows=100 width=72)
+                                                     Group By Key: CASE WHEN (test_number_rep.id < 1000::numeric) THEN test_number_rep.id ELSE (test_number_rep.id + 1::numeric) END, CASE WHEN (test_number_rep.pid > 1000::numeric) THEN (test_number_rep.pid + 1::numeric) ELSE test_number_rep.pid END
+                                                     ->  Seq Scan on test_number_rep  (cost=0.00..17.79 rows=164 width=64)
+                                                           Filter: (id < 100::numeric)
+                                               ->  Subquery Scan on "*SELECT* 3"  (cost=0.00..17.40 rows=2 width=0)
+                                                     ->  Seq Scan on test_number  (cost=0.00..17.38 rows=2 width=0)
+                                                           Filter: ((id >= 1::numeric) AND (id <= 3::numeric))
+                             ->  Subquery Scan on "*SELECT* 4"  (cost=0.00..17.40 rows=2 width=64)
+                                   ->  Seq Scan on test_number  (cost=0.00..17.38 rows=2 width=64)
+                                         Filter: ((id >= 2::numeric) AND (id <= 4::numeric))
+           ->  Subquery Scan on "*SELECT* 5"  (cost=26.72..454.57 rows=7504 width=64)
+                 ->  Hash Join  (cost=26.72..379.53 rows=7504 width=64)
+                       Hash Cond: (CASE t1.id WHEN ((t1.id >= 1::numeric) AND (t1.id <= 10::numeric)) THEN t1.id ELSE NULL::numeric END = ((floor((t2.pid)::double precision))::integer)::numeric)
+                       ->  WorkTable Scan on tmp1 t1  (cost=0.00..40.40 rows=2020 width=64)
+                       ->  Hash  (cost=17.43..17.43 rows=743 width=4)
+                             ->  Seq Scan on test_int_rep t2  (cost=0.00..17.43 rows=743 width=4)
+   ->  GroupAggregate  (cost=114489.14..125872.49 rows=455334 width=120)
+         Group By Key: t1.count, t2.name, t1.pid
+         ->  Sort  (cost=114489.14..115627.47 rows=455334 width=104)
+               Sort Key: t1.count, t2.name, t1.pid
+               ->  Hash Join  (cost=42.14..9441.06 rows=455334 width=104)
+                     Hash Cond: (CASE WHEN (t1.pid IS NULL) THEN 3.60525512 ELSE NULL::numeric END = t3.pid)
+                     ->  Hash Join  (cost=21.07..3941.17 rows=185095 width=104)
+                           Hash Cond: (t1.id = (CASE WHEN (t2.pid IS NULL) THEN 1 ELSE NULL::integer END)::numeric)
+                           ->  CTE Scan on tmp1 t1  (cost=0.00..1504.84 rows=75242 width=96)
+                           ->  Hash  (cost=14.92..14.92 rows=492 width=72)
+                                 ->  Partition Iterator  (cost=0.00..14.92 rows=492 width=72)
+                                       Iterations: 13
+                                       ->  Partitioned Seq Scan on test_number_rep_par t2  (cost=0.00..14.92 rows=492 width=72)
+                                             Selected Partitions:  1..13
+                     ->  Hash  (cost=14.92..14.92 rows=492 width=32)
+                           ->  Partition Iterator  (cost=0.00..14.92 rows=492 width=32)
+                                 Iterations: 13
+                                 ->  Partitioned Seq Scan on test_number_hash_par t3  (cost=0.00..14.92 rows=492 width=32)
+                                       Selected Partitions:  1..13
+(49 rows)
+
+with recursive tmp1 as (
+select case when id < 1000 then id  else id+1 end  as id,
+       case when pid >1000 then pid+1 else pid end as pid,
+       count(8)    as count
+from test_number
+group by 1,2
+union
+select case when id < 1000 then id  else id+1 end  as id,
+       case when pid >1000 then pid+1 else pid end as pid ,count(8)
+from test_number_rep
+where id < 100
+group by 1,2
+union
+select 1,'',1
+from test_number
+where id between 1 and 3
+except
+select 1,id,pid
+from test_number
+where id between 2 and 4
+union all
+select case when t1.id < 1000 then t1.id  else t1.id+1 end  as id,
+       case when t1.pid >1000 then t1.pid+1 else t1.pid end as pid,substr(t1.pid,-2)::int from tmp1 t1 inner join test_int_rep t2 on floor(t2.pid)::int = (case t1.id when t1.id between 1 and 10 then t1.id end))
+select t1.count,t2.name,max(distinct t2.time),count(*),t1.pid
+ from tmp1 t1
+inner join test_number_rep_par t2
+on t1.id = (case when t2.pid  is null then 1 end)
+inner join test_number_hash_par t3
+on (case when t1.pid is null then 3.60525512 end) =  t3.pid
+group by 1,2,5
+order by 1,2,3,4,5;
+ count | name | max | count | pid 
+-------+------+-----+-------+-----
+(0 rows)
+
+drop table test_int;
+drop table test_int_rep;
+drop table test_number;
+drop table test_number_rep;
+drop table test_number_hash_par;
+drop table test_number_rep_par;

@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_DIRECTORY">
+<refmeta>
+<refentrytitle>DROP DIRECTORY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP DIRECTORY</refname>
+<refpurpose>remove a directory</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP DIRECTORY [ IF EXISTS ] directory_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

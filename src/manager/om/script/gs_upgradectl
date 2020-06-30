@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_upgradectl is a utility to upgrade a Gauss200 application.
+# 
+# gs_upgradectl is a upgrade framework,which control the upgrade process.
+# it contains binary upgrade, in-place upgrade and on-line binary upgrade.
+#
+# binary upgrade: which includes stopping old cluster,
+# replacing binary and starting
+# new cluster,only used for no database objects changed between old cluster
+# and new cluster.
+#
+# on-line binary upgrade: rolling upgrade, upgrade standby instances
+# firstly, switch over,
+# and then upgrade the master instances. only used for no database objects
+# changed
+# between old cluster and new cluster now.
+#
+# in-place upgrade: which includes binary upgrade and update database
+# mete-data(system tables,
+# system views, functions, and so on) ,used for some database objects had
+# been changed
+# between old cluster and new cluster.
+#############################################################################
+
+import os
+import sys
+import pwd
+import grp
+import socket
+
+from gspylib.common.Common import DefaultValue
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.threads.SshTool import SshTool
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParameterParsecheck import Parameter
+import impl.upgrade.UpgradeConst as Const
+from impl.upgrade.OLAP.UpgradeImplOLAP import UpgradeImplOLAP
+
+
+class Upgrade(ParallelBaseOM):
+    """
+    The class about upgrade
+    """
+
+    def __init__(self):
+        ParallelBaseOM.__init__(self)
+        self.oldClusterInfo = ""
+        self.oldVersion = ""
+        # the directory that when do binary upgrade the information store 
+        self.upgradeBackupPath = ""
+        self.userProfile = ""
+        self.tmpDir = ""
+        self.newClusterAppPath = ""
+        self.oldClusterAppPath = ""
+        self.clusterNodes = []
+        ##static parameter
+        self.binTarName = "binary_%s.tar" % DefaultValue.GetHostIpOrName()
+        self.rollback = False
+        self.is_inplace_upgrade = True
+        self.guc_paras = {}
+        self.newClusterVersion = None
+        self.newClusterNumber = None
+        self.oldclusterVersion = None
+        self.oldClusterNumber = None
+        self.forceRollback = False
+
+    def usage(self):
+        """
+gs_upgradectl is a utility to upgrade a cluster.
+
+Usage:
+  gs_upgradectl -? | --help
+  gs_upgradectl -V | --version
+  gs_upgradectl -t chose-strategy [-l LOGFILE]
+  gs_upgradectl -t commit-upgrade -X XMLFILE [-l LOGFILE]
+
+  gs_upgradectl -t auto-upgrade -X XMLFILE [-l LOGFILE]
+  gs_upgradectl -t auto-rollback -X XMLFILE [-l LOGFILE] [--force]
+
+General options:
+  -?, --help                      Show help information for this utility,
+                                  and exit the command line mode.
+  -V, --version                   Show version information.
+  -t                              Subcommand for upgrade. It can be
+                                  chose-strategy, auto-upgrade, auto-rollback,
+                                  commit-upgrade.
+  -X                              Path of the XML configuration file of the
+                                  later version cluster.
+  --force                         Force to rollback when cluster status is
+                                  not normal
+        """
+
+        print(self.usage.__doc__)
+
+    def parseCommandLine(self):
+        """
+        Parse command line and save to global variable
+        """
+        # Resolves incoming parameters
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("upgradectl")
+        if "helpFlag" in ParaDict.keys():
+            self.usage()
+            sys.exit(0)
+
+        # get action information
+        if "action" in ParaDict.keys():
+            self.action = ParaDict.get("action")
+        if "confFile" in ParaDict.keys():
+            self.xmlFile = ParaDict.get("confFile")
+        # get logFile information
+        if "logFile" in ParaDict.keys():
+            self.logFile = ParaDict.get("logFile")
+
+    def checkUser(self):
+        """
+        function: check user
+        """
+        # check user
+        # it will do more check about user after get the cluster config info
+        # get user information
+        self.user = pwd.getpwuid(os.getuid()).pw_name
+        # get group information
+        self.group = grp.getgrgid(pwd.getpwnam(self.user).pw_gid).gr_name
+        # if the user or group is null, exit
+        if (self.user == "" or self.group == ""):
+            raise Exception(ErrorCode.GAUSS_503["GAUSS_50308"])
+        # if the user or group is 'root', exit
+        if (self.user == "root" or self.group == "root"):
+            raise Exception(ErrorCode.GAUSS_501["GAUSS_50105"])
+
+        # we must make sure the env 'GAUSSHOME', 'GS_CLUSTER_NAME',
+        # 'GAUSS_ENV' exists
+        if (DefaultValue.getEnvironmentParameterValue("GAUSSHOME",
+                                                      self.user) == ""):
+            raise Exception(ErrorCode.GAUSS_518["GAUSS_51800"] % "$GAUSSHOME")
+        if (DefaultValue.getEnvironmentParameterValue("GS_CLUSTER_NAME",
+                                                      self.user) == ""):
+            raise Exception(
+                ErrorCode.GAUSS_518["GAUSS_51800"] % "$GS_CLUSTER_NAME")
+        if (DefaultValue.getEnvironmentParameterValue("GAUSS_ENV",
+                                                      self.user) == ""):
+            raise Exception(ErrorCode.GAUSS_518["GAUSS_51800"] % "$GAUSS_ENV")
+
+        # depending on the environment variable GPHOME, access to the python 
+        GPHOME = DefaultValue.getEnv(DefaultValue.TOOL_PATH_ENV)
+        if (GPHOME == None or GPHOME == ""):
+            raise Exception(ErrorCode.GAUSS_518["GAUSS_51800"] % "$GPHOME")
+
+    def checkParameter(self):
+        """
+        function: Check parameter from command line
+        """
+        if (self.action == ""):
+            raise Exception(ErrorCode.GAUSS_500["GAUSS_50001"] % "t" + ".")
+        # when we do auto-upgrade, auto-rollback or commit-upgrade,
+        # we must incoming '-X' and make sure  the xml file exists.
+        if (self.action != Const.ACTION_CHOSE_STRATEGY):
+            if (self.xmlFile == ""):
+                raise Exception(ErrorCode.GAUSS_500["GAUSS_50001"] % 'X' + ".")
+            if (not os.path.exists(self.xmlFile)):
+                raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"] %
+                                self.xmlFile)
+
+        # check mpprc file path
+        # get mpprcFile by MPPDB_ENV_SEPARATE_PATH. Even if the return value
+        # is "" or None, no need to pay attention
+        self.mpprcFile = DefaultValue.getEnv(DefaultValue.MPPRC_FILE_ENV)
+
+        # make sure which env file we use
+        # If self.mpprcFile is not "" and None, return self.mpprcFile; else
+        # return '~/.bashrc'
+        self.userProfile = DefaultValue.getMpprcFile()
+        self.checkUser()
+
+        # check log file
+        if (self.logFile == ""):
+            self.logFile = DefaultValue.getOMLogPath(
+                DefaultValue.UPGRADE_LOG_FILE, self.user, "", "")
+        if (not os.path.isabs(self.logFile)):
+            raise Exception(ErrorCode.GAUSS_502["GAUSS_50213"] % "log")
+
+        self.initLogger(self.action)
+
+    def initGlobalInfos(self):
+        """
+        function: init global infos
+        """
+        self.logger.debug("Init global infos")
+
+        # init cluster info
+        if (self.xmlFile):
+            self.initClusterInfo()
+        else:
+            self.initClusterInfoFromStaticFile(self.user)
+        self.logger.debug("Successfully init global infos")
+
+
+if __name__ == '__main__':
+    """
+    main function
+    """
+    if os.getuid() == 0:
+        GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50105"])
+
+    try:
+        REPEAT = False
+        upgrade = Upgrade()
+        upgrade.parseCommandLine()
+        upgrade.checkParameter()
+
+        # set action flag file
+        DefaultValue.setActionFlagFile("gs_upgradectl", upgrade.logger)
+
+        upgrade.initGlobalInfos()
+
+        # Check if -h value:nodename in clusterNodes and obtain clusterNodes
+        for dbNode in upgrade.clusterInfo.dbNodes:
+            upgrade.clusterNodes.append(dbNode.name)
+        if len(upgrade.clusterNodes) == 0:
+            raise Exception(ErrorCode.GAUSS_512["GAUSS_51201"])
+
+        impl = UpgradeImplOLAP(upgrade)
+        impl.run()
+    except Exception as e:
+        if REPEAT:
+            upgrade.sshTool = SshTool(upgrade.clusterNodes, upgrade.localLog,
+                                      DefaultValue.TIMEOUT_PSSH_COMMON)
+        GaussLog.exitWithError(str(e))
+    finally:
+        DefaultValue.setActionFlagFile("gs_upgradectl", None, False)

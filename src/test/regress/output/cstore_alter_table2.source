@@ -1,0 +1,551 @@
+CREATE SCHEMA cstore_alter_table2;
+SET SEARCH_PATH TO cstore_alter_table2;
+SET INTERVALsTYLE = POSTGRES;
+-- testcase: the whole cu is deleted.
+CREATE TABLE alter_addcols_58(a int, b int) WITH ( ORIENTATION = COLUMN);
+drop table if exists base_alter_table;
+NOTICE:  table "base_alter_table" does not exist, skipping
+create table base_alter_table(a int, b int);
+INSERT INTO base_alter_table VALUES(1, 1);
+INSERT INTO base_alter_table VALUES(1, 2);
+INSERT INTO base_alter_table VALUES(1, 3);
+INSERT INTO base_alter_table VALUES(1, 4);
+INSERT INTO base_alter_table VALUES(1, 5);
+INSERT INTO base_alter_table VALUES(1, 6);
+INSERT INTO base_alter_table VALUES(1, 7);
+INSERT INTO base_alter_table VALUES(1, 8);
+INSERT INTO base_alter_table VALUES(1, 9);
+TRUNCATE TABLE alter_addcols_58;
+INSERT INTO alter_addcols_58 select * from base_alter_table;
+DELETE FROM alter_addcols_58 WHERE b%2 = 0;
+ALTER TABLE alter_addcols_58 ADD COLUMN c int default 3;
+SELECT * FROM alter_addcols_58 order by a,b,c;
+ a | b | c 
+---+---+---
+ 1 | 1 | 3
+ 1 | 3 | 3
+ 1 | 5 | 3
+ 1 | 7 | 3
+ 1 | 9 | 3
+(5 rows)
+
+DROP TABLE alter_addcols_58;
+-- testcase 1: the whole cu is deleted
+CREATE TABLE alter_addcols_60(a int, b int) WITH ( ORIENTATION = COLUMN);
+-- testcase 1.1: the rows within cu is 1
+INSERT INTO alter_addcols_60 VALUES(1, 1);
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_60;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_60;
+ a | b 
+---+---
+(0 rows)
+
+-- testcase 1.2: the rows within cu is 7
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 select * from base_alter_table;
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_60;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_60;
+ a | b 
+---+---
+(0 rows)
+
+-- testcase 1.3: the rows within cu is 8
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 select * from base_alter_table;
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE varchar(100);
+SELECT COUNT(*) FROM alter_addcols_60;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_60;
+ a | b 
+---+---
+(0 rows)
+
+-- testcase 1.4: the rows within cu is 9
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 select * from base_alter_table;
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_60;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_60;
+ a | b 
+---+---
+(0 rows)
+
+-- testcase 1.5: the rows within cu is 17
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 select * from base_alter_table;
+INSERT INTO base_alter_table VALUES(1, 10);
+INSERT INTO base_alter_table VALUES(1, 11);
+INSERT INTO base_alter_table VALUES(1, 12);
+INSERT INTO base_alter_table VALUES(1, 13);
+INSERT INTO base_alter_table VALUES(1, 14);
+INSERT INTO base_alter_table VALUES(1, 15);
+INSERT INTO base_alter_table VALUES(1, 16);
+INSERT INTO base_alter_table VALUES(1, 17);
+INSERT INTO alter_addcols_60 select * from base_alter_table;
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE varchar(100);
+SELECT COUNT(*) FROM alter_addcols_60;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_60;
+ a | b 
+---+---
+(0 rows)
+
+-- testcase 1.5: the rows within cu is 17*3
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_60 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_60 SELECT * FROM base_alter_table;
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_60;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_60;
+ a | b 
+---+---
+(0 rows)
+
+-- testcase 1.5: the rows within cu is 17*3
+TRUNCATE TABLE alter_addcols_60;
+INSERT INTO alter_addcols_60 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_60 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_60 SELECT * FROM base_alter_table;
+VACUUM FULL alter_addcols_60;
+DELETE FROM alter_addcols_60;
+ALTER TABLE alter_addcols_60 ALTER COLUMN b SET DATA TYPE varchar(100);
+SELECT COUNT(*) FROM alter_addcols_60;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_60;
+ a | b 
+---+---
+(0 rows)
+
+-- test DELETE
+CREATE TABLE alter_addcols_62(a int, b int) WITH ( ORIENTATION = COLUMN);
+TRUNCATE TABLE alter_addcols_62;
+INSERT INTO alter_addcols_62 SELECT * FROM base_alter_table;
+VACUUM FULL alter_addcols_62;
+DELETE FROM alter_addcols_62 WHERE b%3 = 0;
+ALTER TABLE alter_addcols_62 ALTER COLUMN b SET DATA TYPE char;
+ERROR:  value too long for type character(1)
+SELECT COUNT(*) FROM alter_addcols_62;
+ count 
+-------
+    12
+(1 row)
+
+SELECT * FROM alter_addcols_62 order by 1, 2;
+ a | b  
+---+----
+ 1 |  1
+ 1 |  2
+ 1 |  4
+ 1 |  5
+ 1 |  7
+ 1 |  8
+ 1 | 10
+ 1 | 11
+ 1 | 13
+ 1 | 14
+ 1 | 16
+ 1 | 17
+(12 rows)
+
+-- test cudesc table with toast tuples.
+CREATE TABLE alter_addcols_63(a int, b int) WITH ( ORIENTATION = COLUMN);
+truncate table base_alter_table;
+INSERT INTO base_alter_table VALUES(1,generate_series(1,10));
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+INSERT INTO alter_addcols_63 VALUES(1, 6), (1, 7), (1, 8);
+INSERT INTO alter_addcols_63 SELECT * FROM base_alter_table;
+VACUUM FULL alter_addcols_63;
+DELETE FROM alter_addcols_63 WHERE b > 6;
+DELETE FROM alter_addcols_63 WHERE b = 2;
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_63;
+ count 
+-------
+    71
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+(5 rows)
+
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_63;
+ count 
+-------
+    71
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+(5 rows)
+
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_63;
+ count 
+-------
+    71
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+(5 rows)
+
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE int;
+SELECT COUNT(*) FROM alter_addcols_63;
+ count 
+-------
+    71
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+(5 rows)
+
+ALTER TABLE alter_addcols_63 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_63;
+ count 
+-------
+    71
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_63 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+(5 rows)
+
+-- test the FULL NULL cu
+CREATE TABLE alter_addcols_64(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_64 VALUES(1), (1), (1), (1), (1);
+VACUUM FULL alter_addcols_64;
+ALTER TABLE alter_addcols_64 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_64;
+ count 
+-------
+     5
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_64;
+ a | b 
+---+---
+ 1 | 
+(1 row)
+
+-- test DELETED && NULL tuple within one cu
+CREATE TABLE alter_addcols_70(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_70 VALUES(1), (1), (1), (1), (1);
+delete from base_alter_table where b>9;
+INSERT INTO alter_addcols_70 select * from base_alter_table;
+VACUUM FULL alter_addcols_70;
+DELETE FROM alter_addcols_70 WHERE b%2 = 0;
+ALTER TABLE alter_addcols_70 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_70;
+ count 
+-------
+    10
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_70 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 3
+ 1 | 5
+ 1 | 7
+ 1 | 9
+ 1 | 
+(6 rows)
+
+-- test only NULL value within one cu
+CREATE TABLE alter_addcols_71(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_71 VALUES(1), (1), (1), (1), (1);
+INSERT INTO alter_addcols_71 select * from base_alter_table;
+VACUUM FULL alter_addcols_71;
+ALTER TABLE alter_addcols_71 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_71;
+ count 
+-------
+    14
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_71 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+ 1 | 7
+ 1 | 8
+ 1 | 9
+ 1 | 
+(10 rows)
+
+-- test USING expression 
+-- 1.1 USING expression about only the column to be changed.
+CREATE TABLE alter_addcols_72(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_72 select * from base_alter_table; 
+VACUUM FULL alter_addcols_72;
+ALTER TABLE alter_addcols_72 ALTER COLUMN b SET DATA TYPE char USING b - 1;
+SELECT COUNT(*) FROM alter_addcols_72;
+ count 
+-------
+     9
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_72 ORDER BY b;
+ a | b 
+---+---
+ 1 | 0
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+ 1 | 7
+ 1 | 8
+(9 rows)
+
+-- 1.2 USING expression can return NULL value.
+CREATE TABLE alter_addcols_73(a int, b int) WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_73 select * from base_alter_table; 
+VACUUM FULL alter_addcols_73;
+ALTER TABLE alter_addcols_73 ALTER COLUMN b SET DATA TYPE char USING NULLIF(b, 2);
+SELECT COUNT(*) FROM alter_addcols_73;
+ count 
+-------
+     9
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_73 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+ 1 | 7
+ 1 | 8
+ 1 | 9
+ 1 | 
+(9 rows)
+
+-- 1.3 USING expression including the column to be changed and the other column.
+CREATE TABLE alter_addcols_74(a int, b int) WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_74 select * from base_alter_table; 
+VACUUM FULL alter_addcols_74;
+ALTER TABLE alter_addcols_74 ALTER COLUMN b SET DATA TYPE char USING b + a;
+ERROR:  cannot refer to other columns in transform expression for column store table
+SELECT COUNT(*) FROM alter_addcols_74;
+ count 
+-------
+     9
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_74 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+ 1 | 7
+ 1 | 8
+ 1 | 9
+(9 rows)
+
+-- 1.4 USING expression retrun null value, but it violate the NOT NULL constraint.
+CREATE TABLE alter_addcols_75(a int, b int not null) WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_75 select * from base_alter_table; 
+VACUUM FULL alter_addcols_75;
+ALTER TABLE alter_addcols_75 ALTER COLUMN b SET DATA TYPE char USING NULLIF(b, 2);
+ERROR:  column "b" contains null values
+DETAIL:  existing data violate the NOT NULL constraint.
+SELECT COUNT(*) FROM alter_addcols_75;
+ count 
+-------
+     9
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_75 ORDER BY b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+ 1 | 7
+ 1 | 8
+ 1 | 9
+(9 rows)
+
+-- 1.5 USING expression return null value, but it violate the NOT NULL constraint for the same value cu.
+CREATE TABLE alter_addcols_76(a int, b int not null) WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_76 VALUES(1, 2), (1, 2), (1, 2), (1, 2), (1, 2), (1, 2); 
+VACUUM FULL alter_addcols_76;
+ALTER TABLE alter_addcols_76 ALTER COLUMN b SET DATA TYPE char USING NULLIF(b, 2);
+ERROR:  column "b" contains null values
+DETAIL:  existing data violate the NOT NULL constraint.
+SELECT COUNT(*) FROM alter_addcols_76;
+ count 
+-------
+     6
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_76 ORDER BY b;
+ a | b 
+---+---
+ 1 | 2
+(1 row)
+
+-- 1.6 USING expression return the string whose length is greater than 32.
+CREATE TABLE alter_addcols_77(a int, b int not null) WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_77 select * from base_alter_table; 
+VACUUM FULL alter_addcols_77;
+ALTER TABLE alter_addcols_77 ALTER COLUMN b SET DATA TYPE varchar(40) USING b::char || 'ldiloveyouhelloworldiloveyouhelloworl';
+SELECT COUNT(*) FROM alter_addcols_77;
+ count 
+-------
+     9
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_77 ORDER BY b;
+ a |                   b                    
+---+----------------------------------------
+ 1 | 1ldiloveyouhelloworldiloveyouhelloworl
+ 1 | 2ldiloveyouhelloworldiloveyouhelloworl
+ 1 | 3ldiloveyouhelloworldiloveyouhelloworl
+ 1 | 4ldiloveyouhelloworldiloveyouhelloworl
+ 1 | 5ldiloveyouhelloworldiloveyouhelloworl
+ 1 | 6ldiloveyouhelloworldiloveyouhelloworl
+ 1 | 7ldiloveyouhelloworldiloveyouhelloworl
+ 1 | 8ldiloveyouhelloworldiloveyouhelloworl
+ 1 | 9ldiloveyouhelloworldiloveyouhelloworl
+(9 rows)
+
+CREATE TABLE alter_addcols_78(a int, b int not null) WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_78 select * from base_alter_table; 
+VACUUM FULL alter_addcols_78;
+ALTER TABLE alter_addcols_78 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl';
+SELECT COUNT(*) FROM alter_addcols_78;
+ count 
+-------
+     9
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_78 ORDER BY b;
+ a |                   b                   
+---+---------------------------------------
+ 1 | ldiloveyouhelloworldiloveyouhelloworl
+(1 row)
+
+drop schema cstore_alter_table2 cascade;
+NOTICE:  drop cascades to 14 other objects
+DETAIL:  drop cascades to table base_alter_table
+drop cascades to table alter_addcols_60
+drop cascades to table alter_addcols_62
+drop cascades to table alter_addcols_63
+drop cascades to table alter_addcols_64
+drop cascades to table alter_addcols_70
+drop cascades to table alter_addcols_71
+drop cascades to table alter_addcols_72
+drop cascades to table alter_addcols_73
+drop cascades to table alter_addcols_74
+drop cascades to table alter_addcols_75
+drop cascades to table alter_addcols_76
+drop cascades to table alter_addcols_77
+drop cascades to table alter_addcols_78

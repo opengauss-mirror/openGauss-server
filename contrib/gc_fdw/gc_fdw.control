@@ -1,0 +1,5 @@
+# gc_fdw extension
+comment = 'foreign-data wrapper for remote mppdb servers'
+default_version = '1.0'
+module_pathname = '$libdir/postgres_fdw'
+relocatable = true

@@ -1,0 +1,19 @@
+<refentry id="SQL-ALTER_SCHEMA">
+<refmeta>
+<refentrytitle>ALTER SCHEMA</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER SCHEMA</refname>
+<refpurpose>change the definition of a schema</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER SCHEMA schema_name
+    RENAME TO new_name;
+ALTER SCHEMA schema_name
+    OWNER TO new_owner;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

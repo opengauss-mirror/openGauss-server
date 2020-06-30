@@ -1,0 +1,17 @@
+<refentry id="SQL-SET_ROLE">
+<refmeta>
+<refentrytitle>SET ROLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SET ROLE</refname>
+<refpurpose>set the current user identifier of the current session</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+SET [ SESSION | LOCAL ] ROLE role_name PASSWORD 'password';
+RESET ROLE;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

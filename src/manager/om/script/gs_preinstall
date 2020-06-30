@@ -1,0 +1,457 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_preinstall is a utility to create an installation
+# environment for a cluster.
+#############################################################################
+
+import os
+import pwd
+import sys
+import grp
+import subprocess
+from gspylib.common.CheckPythonVersion import checkPythonVersion
+checkPythonVersion()
+from subprocess import Popen, PIPE
+
+from gspylib.common.DbClusterInfo import dbClusterInfo, \
+    readOneClusterConfigItem, initParserXMLFile
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.Common import DefaultValue
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.common.ParameterParsecheck import Parameter
+from impl.preinstall.OLAP.PreinstallImplOLAP import PreinstallImplOLAP
+from gspylib.threads.SshTool import SshTool
+
+#############################################################################
+# Global variables
+#############################################################################
+userNameFirtChar = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+
+
+class Preinstall(ParallelBaseOM):
+    def __init__(self):
+        ParallelBaseOM.__init__(self)
+        self.password = ""
+        self.envParams = []
+        self.rootUser = ""
+        self.rootPasswd = ""
+        self.createUserSshTrust = True
+        self.clusterToolPath = ""
+        self.needFixOwnerPaths = []
+        self.preMode = False
+        self.skipOSSet = False
+        self.skipHostnameSet = False
+        self.passwordsec = ""
+        self.corePath = ""
+        self.is_new_root_path = False
+
+    def usage(self):
+        """
+gs_preinstall is a utility to create an installation environment for a cluster.
+
+Usage:
+    gs_preinstall -? | --help
+    gs_preinstall -V | --version
+    gs_preinstall -U USER -G GROUP -X XMLFILE
+      [-L]  [--skip-os-set] [--env-var="ENVVAR" [...]]
+      [--sep-env-file=MPPRCFILE] [--skip-hostname-set] [-l LOGFILE]
+      [--non-interactive] [-M MOUNTDIR]
+
+General options:
+    -U                                 Cluster user.
+    -G                                 Group of the cluster user.
+    -X                                 Path of the XML configuration file.
+    -L                                 Only perform preinstallation on local
+                                       nodes.
+        --skip-os-set                  Whether to skip OS parameter setting.
+                                       (The default value is set.)
+        --env-var="ENVVAR"             OS user environment variables.
+        --sep-env-file=MPPRCFILE       Path of the MPP environment file.
+        --skip-hostname-set            Whether to skip hostname setting.
+                                       (The default value is set.)
+    -l                                 Path of log file.
+    -?, --help                         Show help information for this
+                                       utility, and exit the command line mode.
+    -V, --version                      Show version information.
+        --non-interactive              Pre-execution of non-secure mode.
+                                     If it is not specified, you can choose
+                                     whether create the SSH trust for root
+                                     user or cluster user.
+                                     If it is specified, you must ensure the
+                                     SSH trust for root user and cluster
+                                     user have been created.
+        """
+        print(self.usage.__doc__)
+
+    # get parameter from command
+    def parseCommandLine(self):
+        """
+        function: Parse command line and save to global variable
+        input: NA
+        output: NA
+        """
+        # init the ParaObj
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("preinstall")
+        # parameter -h or -?
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(0)
+
+        # Resolves command line arguments
+        # parameter -U
+        if (ParaDict.__contains__("user")):
+            self.user = ParaDict.get("user")
+            DefaultValue.checkPathVaild(self.user)
+        # parameter -G
+        if (ParaDict.__contains__("group")):
+            self.group = ParaDict.get("group")
+        # parameter -X
+        if (ParaDict.__contains__("confFile")):
+            self.xmlFile = ParaDict.get("confFile")
+        # parameter -L
+        if (ParaDict.__contains__("localMode")):
+            self.localMode = ParaDict.get("localMode")
+        # parameter -l
+        if (ParaDict.__contains__("logFile")):
+            self.logFile = ParaDict.get("logFile")
+        # parameter --env-var
+        if (ParaDict.__contains__("envparams")):
+            self.envParams = ParaDict.get("envparams")
+        # parameter --sep-env-file
+        if (ParaDict.__contains__("mpprcFile")):
+            self.mpprcFile = ParaDict.get("mpprcFile")
+            DefaultValue.checkPathVaild(self.mpprcFile)
+        # parameter --skip-hostname-set
+        if (ParaDict.__contains__("skipHostnameSet")):
+            self.skipHostnameSet = ParaDict.get("skipHostnameSet")
+        # parameter --skip-os-set
+        if (ParaDict.__contains__("skipOSSet")):
+            self.skipOSSet = ParaDict.get("skipOSSet")
+        # parameter --non-interactive
+        if (ParaDict.__contains__("preMode")):
+            self.preMode = ParaDict.get("preMode")
+
+    def checkUserParameter(self, check_clusterInfo):
+        """
+        """
+        if (self.user == ""):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_500["GAUSS_50001"] % 'U' + ".")
+        elif (":" in self.user):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"] % 'U')
+
+        # check group info
+        self.checkGroupParameter()
+
+        # check if user exists
+        cmd = "cat /etc/passwd|grep -v nologin|grep -v halt|" \
+              "grep -v shutdown|awk -F: '{ print $1 }'|" \
+              " grep '^%s$' 2>/dev/null" % self.user
+        status = subprocess.getstatusoutput(cmd)[0]
+        if status == 0:
+            if pwd.getpwnam(self.user).pw_uid == 0:
+                # user exists and uid is 0, exit.
+                GaussLog.exitWithError(ErrorCode.GAUSS_503["GAUSS_50302"])
+
+        # check the local user and the localmode,
+        # if user not exist exit with error
+        if (self.localMode):
+            try:
+                DefaultValue.getUserId(self.user)
+            except Exception as e:
+                GaussLog.exitWithError(str(e))
+
+    def checkGroupParameter(self):
+        """
+        """
+        if (self.group == ""):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                   % 'G' + ".")
+        if (self.user == "root" or self.group == "root"):
+            GaussLog.exitWithError(ErrorCode.GAUSS_503["GAUSS_50301"]
+                                   + "User:Group[%s:%s]."
+                                   % (self.user, self.group))
+
+    def checkUserAndGroup(self):
+        """
+        """
+        if (self.localMode):
+            usergroup = grp.getgrgid(pwd.getpwnam(self.user).pw_gid).gr_name
+            if (self.group != usergroup):
+                GaussLog.exitWithError(ErrorCode.GAUSS_503["GAUSS_50305"]
+                                       + "User:Group[%s:%s]"
+                                       % (self.user, self.group))
+
+    def checkConfigFile(self):
+        """
+        """
+        if (self.xmlFile == ""):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_500["GAUSS_50001"] % 'X' + ".")
+        if (not os.path.exists(self.xmlFile)):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_502["GAUSS_50201"] % self.xmlFile)
+        if (not os.path.isabs(self.xmlFile)):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_502["GAUSS_50213"] % "configuration file")
+
+    def checkEnvValueParameter(self):
+        """
+        """
+        for param in self.envParams:
+            # check environmental variables vaild
+            if (param.find("\'") >= 0 or param.find(";") >= 0):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"]
+                                       % "-env-var" + " There are illegal"
+                                                      " characters in the"
+                                                      " parameter.")
+
+    def checkLogFile(self):
+        """
+        """
+        if (self.logFile == ""):
+            self.logFile = self.getPreOMLogPath(
+                DefaultValue.PREINSTALL_LOG_FILE, self.xmlFile)
+        if (not os.path.isabs(self.logFile)):
+            GaussLog.exitWithError(ErrorCode.GAUSS_502["GAUSS_50213"]
+                                   % self.logFile)
+
+    def checkMpprcFile(self):
+        """
+        """
+        if (self.mpprcFile == ""):
+            return
+
+        if (not os.path.isabs(self.mpprcFile)):
+            GaussLog.exitWithError(ErrorCode.GAUSS_512["GAUSS_51206"]
+                                   % self.mpprcFile)
+
+        # check mpprc file path
+        mpprcFilePath = os.path.normpath(self.mpprcFile)
+        if (mpprcFilePath == "/home/%s" % self.user):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"] % \
+                                   '-sep-env-file' + " The file [%s] can not"
+                                                     " be a reserved home "
+                                                     "directory."
+                                   % self.mpprcFile)
+        if (os.path.isdir(self.mpprcFile)):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"] % \
+                                   '-sep-env-file' + " The file [%s] can not "
+                                                     "be a directory."
+                                   % self.mpprcFile)
+
+        try:
+            # check the user if exist
+            DefaultValue.getUserId(self.user)
+        except Exception as e:
+            mpprcFileTopPath = os.path.dirname(self.mpprcFile)
+            # the mpprc file can not be specified in the /home/user directory
+            userpath = "/home/%s/" % self.user
+            if (mpprcFilePath.startswith(userpath)):
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_500["GAUSS_50004"] % '-sep-env-file' + \
+                    " Environment variable separation file can not be "
+                    "created under %s." % mpprcFileTopPath)
+
+        DefaultValue.checkMpprcFileChange(self.mpprcFile, "", self.mpprcFile)
+        (checkstatus, checkoutput) = DefaultValue.checkEnvFile(self.mpprcFile)
+        if (not checkstatus):
+            if (self.mpprcFile != ""):
+                envfile = self.mpprcFile + " and /etc/profile"
+            else:
+                envfile = "/etc/profile and ~/.bashrc"
+            GaussLog.exitWithError(ErrorCode.GAUSS_518["GAUSS_51808"] % \
+                                   checkoutput + "Please check %s." % envfile)
+
+    def checkParameter(self):
+        """
+        function: Check parameter from command line
+        input: NA
+        output: NA
+        """
+        # remove HOST_IP info with /etc/profile and environ
+        cmd = "sed -i '/^export[ ]*HOST_IP=/d' /etc/profile"
+        (status, output) = subprocess.getstatusoutput(cmd)
+        if status != 0:
+            self.logger.logExit(ErrorCode.GAUSS_502["GAUSS_50205"]
+                                % "/etc/profile" + "The cmd is %s" % cmd)
+        if "HOST_IP" in os.environ.keys():
+            os.environ.pop("HOST_IP")
+
+        # check config file
+        self.checkConfigFile()
+        check_clusterInfo = dbClusterInfo()
+        check_clusterInfo.initFromXml(self.xmlFile)
+        # check user info
+        self.checkUserParameter(check_clusterInfo)
+        # check user group match
+        self.checkUserAndGroup()
+        # check env-val
+        self.checkEnvValueParameter()
+        # check mpprc file
+        self.checkMpprcFile()
+
+        # check log file
+        self.checkLogFile()
+
+    # init global variables
+    def initGlobals(self):
+        """
+        function: init global parameters
+        input: NA
+        output: NA
+        """
+        # init the log file
+        self.initLogger("gs_preinstall")
+
+        # get the clusterToolPath
+        self.clusterToolPath = self.getPreClusterToolPath(self.xmlFile)
+        os.environ[DefaultValue.TOOL_PATH_ENV] = self.clusterToolPath
+
+        self.logger.log("Parsing the configuration file.", "addStep")
+        try:
+            # parse the configuration file
+            self.initClusterInfo()
+            self.sshTool = SshTool(self.clusterInfo.getClusterNodeNames(),
+                                   self.logFile,
+                                   DefaultValue.TIMEOUT_PSSH_PREINSTALL)
+
+        except Exception as e:
+            self.logger.logExit(str(e))
+
+        # check the local hostname
+        if DefaultValue.GetHostIpOrName() not in \
+                self.clusterInfo.getClusterNodeNames():
+            self.logger.logExit(ErrorCode.GAUSS_516["GAUSS_51619"]
+                                % DefaultValue.GetHostIpOrName())
+        self.logger.log("Successfully parsed the configuration file.",
+                        "constant")
+
+    def getPreOMLogPath(self, logName, xml):
+        """
+        function: get the OM log path
+        input: logName, xml
+        output: fullLogPath
+        """
+        try:
+            fullLogPath = ""
+            # get the log path
+            configedLogPath = self.getOneClusterConfigItem("gaussdbLogPath",
+                                                           xml)
+            DefaultValue.checkPathVaild(configedLogPath)
+            # check gaussdbLogPath is not null
+            if configedLogPath == "":
+                fullLogPath = "%s/%s/om/%s" % (
+                DefaultValue.GAUSSDB_DIR, self.user, logName)
+            else:
+                fullLogPath = "%s/%s/om/%s" % (
+                os.path.normpath(configedLogPath), self.user, logName)
+
+            return fullLogPath
+        except Exception as e:
+            GaussLog.exitWithError(str(e))
+
+    def getOneClusterConfigItem(self, item_name, xml):
+        """
+        function: get the item_name's value in xml file
+        input: item_name, xml
+        output: item_name's value in the xml
+        """
+        try:
+            # set the environment variable
+            os.putenv("CLUSTERCONFIGFILE", xml)
+            # get the item_name's value in the xml
+            (retStatus, retValue) = readOneClusterConfigItem(
+                initParserXMLFile(xml), item_name, "cluster")
+            if (retStatus == 0):
+                return os.path.normpath(retValue)
+            elif (retStatus == 2):
+                return ""
+            else:
+                raise Exception(ErrorCode.GAUSS_502["GAUSS_50204"]
+                                % "the cluster configuration item file"
+                                + " Error: \n%s." % retValue)
+        except Exception as e:
+            GaussLog.exitWithError(str(e))
+
+    def getPreClusterToolPath(self, xml):
+        """
+        function: get the cluster tool path
+        input: xml
+        output: configedPath
+        """
+        try:
+            # get the cluster tool path in the xml file
+            configedPath = self.getOneClusterConfigItem("gaussdbToolPath", xml)
+            DefaultValue.checkPathVaild(configedPath)
+            # check the gaussdbToolPath is not null
+            if configedPath == "":
+                configedPath = DefaultValue.CLUSTER_TOOL_PATH
+            return configedPath
+        except Exception as e:
+            self.context.logger.logExit(str(e))
+
+    def change_lib_path(self):
+        """
+        if gs_preinstall current path is /root/gauss_om/username,
+         so change its lib path
+        :return:
+        """
+        gsom_path = os.path.realpath(
+                    os.path.join(os.path.realpath(__file__), "../../../"))
+        package_path = os.path.dirname(os.path.realpath(__file__))
+        lib_path = os.path.join(package_path, "lib")
+        sys.path.insert(0, lib_path)
+        if gsom_path == DefaultValue.ROOT_SCRIPTS_PATH:
+            self.is_new_root_path = True
+
+
+def clearHistTimeFormat():
+    cmd = "sed -i '/HISTTIMEFORMAT=/d' /etc/profile"
+    (status, output) = subprocess.getstatusoutput(cmd)
+    if status != 0:
+        GaussLog.exitWithError("Clear HISTTIMEFORMAT from /etc/profile "
+                               "failed.\nError: %s\nThe cmd is: %s\n" %
+                               (output,cmd))
+
+if __name__ == '__main__':
+    """
+    main function
+    """
+    # check if user is root
+    if os.getuid() != 0:
+        GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50104"])
+    clearHistTimeFormat()
+    try:
+        # Objectize class
+        preinstall = Preinstall()
+        # parse cmd lines
+        preinstall.parseCommandLine()
+        # check parameters
+        preinstall.checkParameter()
+        # init global variables
+        preinstall.initGlobals()
+        preinstall.change_lib_path()
+        impl = PreinstallImplOLAP(preinstall)
+        # Perform the whole extand process
+        impl.run()
+    except Exception as e:
+        GaussLog.exitWithError(str(e))

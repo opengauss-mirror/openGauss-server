@@ -1,0 +1,102 @@
+
+------------------------------------------------------------------------
+/* test funciton pg_tupleid_get_blocknum and pg_tupleid_get_offset*/
+
+CREATE OR REPLACE FUNCTION pg_tupleid_get_blocknum(tid) RETURNS int8 AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_tupleid_get_blocknum' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_offset(tid) RETURNS int AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_tupleid_get_offset' LANGUAGE C STABLE not fenced;
+
+create table a(x int);
+
+insert into a select generate_series(1, 50);
+select ctid, pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid), x from a order by x;
+
+drop table a;
+
+drop function pg_tupleid_get_blocknum;
+drop function pg_tupleid_get_offset;
+------------------------------------------------------------------------
+
+DROP TABLE IF EXISTS tbl;
+DROP TABLE IF EXISTS data_redis_tmp_54321;
+
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text, name)
+RETURNS tid
+AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@','pg_get_redis_rel_end_ctid'
+LANGUAGE C STABLE not fenced;
+
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text, name)
+RETURNS tid
+AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@','pg_get_redis_rel_start_ctid'
+LANGUAGE C STABLE not fenced;
+
+CREATE TABLE tbl(i int, j int);
+CREATE TABLE data_redis_tmp_54321(LIKE tbl INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING CONSTRAINTS, nodeid int, tupleid tid);
+INSERT INTO tbl VALUES (generate_series(1, 200), 5);
+
+-- phase 1
+ALTER TABLE tbl SET(append_mode=on, rel_cn_oid=16389);
+\d+ tbl
+INSERT INTO data_redis_tmp_54321
+	SELECT *, xc_node_id, ctid
+	FROM ONLY tbl
+	WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('tbl', NULL) AND pg_get_redis_rel_end_ctid('tbl', NULL);
+
+SELECT count(*) FROM data_redis_tmp_54321;
+
+SELECT 'Check result return code: ' || count(*)
+FROM
+(
+   SELECT i, j, ctid FROM  tbl
+   MINUS ALL
+   SELECT i, j, tupleid FROM data_redis_tmp_54321
+);
+
+-- phase 2
+CREATE SCHEMA data_redis;
+DELETE FROM tbl;
+DELETE FROM data_redis_tmp_54321;
+
+INSERT INTO tbl VALUES (generate_series(201, 500), 5);
+ALTER TABLE tbl SET(append_mode=on, rel_cn_oid=16389);
+
+INSERT INTO data_redis_tmp_54321
+	SELECT *, xc_node_id, ctid FROM ONLY tbl
+	WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('tbl', NULL)
+			AND pg_get_redis_rel_end_ctid('tbl', NULL);
+
+SELECT count(*) FROM data_redis_tmp_54321;
+SELECT count(*) FROM tbl;
+
+SELECT 'Check result return code: ' || count(*)
+FROM
+(
+   SELECT i, j, ctid FROM tbl
+   MINUS all
+   SELECT i, j, tupleid FROM data_redis_tmp_54321
+);
+
+SELECT i, j, tupleid FROM data_redis_tmp_54321 ORDER BY i;
+
+ALTER TABLE tbl SET(append_mode=off);
+
+drop schema if exists test cascade;
+create schema test;
+create table test.t1 (c1 int, c2 int);
+
+insert into test.t1 values(1,1);
+insert into test.t1 values(2,1);
+alter table test.t1 set (append_mode=on,rel_cn_oid=12345);
+select count(*) from test.t1;
+select count(*) from test.t1
+	where ctid between pg_get_redis_rel_start_ctid('test.t1', NULL)
+	and pg_get_redis_rel_end_ctid('test.t1',NULL);
+
+drop table test.t1;
+drop schema test;
+DROP SCHEMA data_redis CASCADE;
+
+DROP TABLE IF EXISTS tbl;
+DROP TABLE IF EXISTS data_redis_tmp_54321;
+DROP FUNCTION IF EXISTS pg_get_redis_rel_end_ctid(text, name);
+DROP FUNCTION IF EXISTS pg_get_redis_rel_start_ctid(text, name);
+

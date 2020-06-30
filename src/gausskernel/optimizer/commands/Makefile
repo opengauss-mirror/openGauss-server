@@ -1,0 +1,29 @@
+#---------------------------------------------------------------------------------------
+#     
+# IDENTIFICATION
+#        src/gausskernel/optimizer/commands/Makefile
+#
+# ---------------------------------------------------------------------------------------
+
+subdir = src/gausskernel/optimizer/commands
+top_builddir = ../../../..
+include $(top_builddir)/src/Makefile.global
+
+ifneq "$(MAKECMDGOALS)" "clean"
+  ifneq "$(MAKECMDGOALS)" "distclean"
+    ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"
+      -include $(DEPEND)
+    endif
+  endif
+endif
+OBJS = aggregatecmds.o alter.o analyze.o async.o cluster.o comment.o  \
+	collationcmds.o constraint.o conversioncmds.o copy.o createas.o \
+	dbcommands.o define.o discard.o dropcmds.o explain.o extension.o \
+	foreigncmds.o functioncmds.o \
+	indexcmds.o lockcmds.o operatorcmds.o opclasscmds.o \
+	portalcmds.o prepare.o proclang.o \
+	schemacmds.o seclabel.o sec_rls_cmds.o sequence.o tablecmds.o tablespace.o trigger.o \
+	tsearchcmds.o typecmds.o user.o vacuum.o vacuumlazy.o \
+	variable.o verify.o view.o gds_stream.o obs_stream.o formatter.o datasourcecmds.o directory.o
+
+include $(top_srcdir)/src/gausskernel/common.mk

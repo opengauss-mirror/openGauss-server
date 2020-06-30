@@ -1,0 +1,3 @@
+<func> ReceiveXlogStream
+<func> get_replconn_number
+<func> ParseReplConnInfo

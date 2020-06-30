@@ -1,0 +1,105 @@
+/*
+ * This file is used to test the function of ExecVecAppend
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_append_engine_part1;
+set current_schema=vector_append_engine_part1;
+create table vector_append_engine_part1.VECTOR_APPEND_TABLE_01
+(
+   col_int	int
+  ,col_int2	int
+  ,col_num	numeric(10,4)
+  ,col_char	char
+  ,col_varchar	varchar(20)
+  ,col_date	date
+  ,col_interval	interval
+) with(orientation=column)  ;
+COPY VECTOR_APPEND_TABLE_01(col_int, col_int2, col_num, col_char, col_varchar, col_date, col_interval) FROM stdin;
+create table vector_append_engine_part1.VECTOR_APPEND_TABLE_02
+(
+   col_int	int
+  ,col_int2	int
+  ,col_num	numeric(10,4)
+  ,col_char	char
+  ,col_varchar	varchar(20)
+  ,col_date	date
+  ,col_interval	interval
+) with(orientation=column)  ;
+COPY VECTOR_APPEND_TABLE_02(col_int, col_int2, col_num, col_char, col_varchar, col_date, col_interval) FROM stdin;
+analyze vector_append_table_01;
+analyze vector_append_table_02;
+----
+--- test 1: Basic Test
+----  
+explain (verbose on, costs off) 
+(select col_interval from vector_append_table_01 where col_int > 11) union (select col_interval from vector_append_table_02 where col_int > 12) order by col_interval;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: vector_append_table_01.col_interval
+   ->  Vector Sort
+         Output: vector_append_table_01.col_interval
+         Sort Key: vector_append_table_01.col_interval
+         ->  Vector Sonic Hash Aggregate
+               Output: vector_append_table_01.col_interval
+               Group By Key: vector_append_table_01.col_interval
+               ->  Vector Append
+                     ->  CStore Scan on vector_append_engine_part1.vector_append_table_01
+                           Output: vector_append_table_01.col_interval
+                           Filter: (vector_append_table_01.col_int > 11)
+                     ->  CStore Scan on vector_append_engine_part1.vector_append_table_02
+                           Output: vector_append_table_02.col_interval
+                           Filter: (vector_append_table_02.col_int > 12)
+(15 rows)
+
+(select col_interval from vector_append_table_01 where col_int > 11) union (select col_interval from vector_append_table_02 where col_int > 12) order by col_interval;
+           col_interval            
+-----------------------------------
+ @ 2 days 13 hours 24 mins 56 secs
+ @ 4 days 13 hours 25 mins 25 secs
+ @ 8 days 13 hours 28 mins 56 secs
+(3 rows)
+
+(select col_int, col_int2, col_num from vector_append_table_01 where col_int > 11) union (select col_int, col_int2, col_num from vector_append_table_02 where col_int > 12) order by 1, 2, 3;
+ col_int | col_int2 | col_num 
+---------+----------+---------
+      12 |       12 |  1.2500
+      12 |       12 |  2.2500
+      12 |       22 |  2.2500
+      13 |       14 |  1.2500
+      13 |       23 |  1.2500
+      15 |       15 |  2.2500
+      15 |       25 |  2.2500
+      16 |       16 |  2.3600
+      16 |       26 |  2.3600
+      17 |       27 |  2.2700
+      18 |       27 |  2.2500
+      18 |       28 |  2.2500
+(12 rows)
+
+(select col_int, col_int2, col_num from vector_append_table_01 where col_date > '2005-02-14') union (select col_int, col_int2, col_num from vector_append_table_02 where col_num < 2.25) order by 1, 2, 3;
+ col_int | col_int2 | col_num 
+---------+----------+---------
+      11 |       13 |  1.2500
+      12 |       12 |  2.2500
+      12 |       15 |  1.2500
+      12 |       22 |  2.2500
+      13 |       14 |  1.2500
+      13 |       23 |  1.2500
+      15 |       25 |  2.2500
+      16 |       16 |  2.3600
+      16 |       26 |  2.3600
+      17 |       27 |  2.2700
+      18 |       27 |  2.2500
+      18 |       28 |  2.2500
+(12 rows)
+
+----
+--- Clean Resource and Tables
+----
+drop schema vector_append_engine_part1 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table vector_append_table_01
+drop cascades to table vector_append_table_02

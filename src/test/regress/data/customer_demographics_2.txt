@@ -1,0 +1,3 @@
+1,M,M,Primary             ,500,Good      ,0,0,0
+1,F,S,Primary             ,1500,Good      ,0,0,0
+1,a,U,Advanced Degree     ,3500,Low Risk  ,0,0,0

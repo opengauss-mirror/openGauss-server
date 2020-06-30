@@ -1,0 +1,95 @@
+test: resolve_unknown
+test: query_rewrite 
+test: create_schema view_dump
+test: hw_function_p_2 hw_function_p_3 hw_function_p_4
+test: hw_function_p_1
+test: auto_analyze_test
+test: tablespace_limit
+test: create_c_function
+test: reindex_internal
+test: query_self_tuning_pre
+#test: query_self_tuning
+#test: query_self_tuning_1_2
+#test: query_self_tuning_1_3
+#test: query_self_tuning_clean
+test: cstore_replication_table_delete
+
+test: hw_cursor_part1 hw_cursor_part2 hw_cursor_part3 hw_cursor_part4 hw_cursor_part5 hw_cursor_part6 hw_cursor_part7 hw_cursor_part8
+test: vec_append_part1 vec_append_part2 vec_append_part3
+test: vec_cursor_part1 vec_cursor_part2
+test: vec_delete_part1 vec_delete_part2
+
+test: alter_schema_db_rename_seq
+
+#test: cbm_DN
+
+test: a_outerjoin_conversion
+
+# test on plan_table
+test: plan_table04
+
+test: setrefs
+test: agg
+
+# test sql by pass
+test: bypass_simplequery_support
+test: bypass_preparedexecute_support
+
+test: string_digit_to_numeric
+# Another group of parallel tests
+# ----------
+test: collate tablesample tablesample_1 tablesample_2
+
+# ----------
+# Another group of parallel tests
+# ----------
+test: hw_order
+
+# ----------
+# Database security
+# ----------
+test: hw_pwd_reuse
+test: hw_auditadmin
+
+test: performance_enhance
+test: explain_fqs
+test: explain_pbe
+# temp__3 create_table copy vec_prepare_001 vec_prepare_002 vec_prepare_003 int4 int8 are duplicated
+test: temp__3
+test: create_table 
+test: copy
+test: int4 int8
+# ----------
+# Another group of parallel tests
+# NB: temp.sql does a reconnect which transiently uses 2 connections,
+# so keep this parallel group to at most 19 tests
+# ----------
+test: plpgsql
+test: plancache limit rangefuncs prepare
+test: returning largeobject
+test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
+test: goto
+test: equivalence_class
+#test: tsdb_job
+test: tsdb_delta2_compress
+test: tsdb_xor_compress
+test: tsdb_aggregate
+
+test: readline
+#test: hw_export_normal_tbl hw_export_invalid_options
+test: hw_change_passwd hw_to_timestamp hw_view_privilege
+
+test: hw_identifier
+test: hw_hashint1 hw_smalldatetime_hash hw_rawtype_hash
+test: hw_nvarchar2_hash cmpr_smallint cmpr_prefix_150left cmpr_uint32_oid
+test: oidjoins opr_sanity opr_sanity_1 opr_sanity_2 regex
+
+test: pmk
+# Cluster setting related test is independant
+# ----------
+# Test of changed data type compatible with Oracle
+
+test: hw_datatype hw_datatype_2 hw_datatype_3
+test: test_regex llt_atc
+test: llt_coverage_atc
+

@@ -1,0 +1,20 @@
+<refentry id="SQL-DELETE">
+<refmeta>
+<refentrytitle>DELETE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DELETE</refname>
+<refpurpose>delete rows of a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+DELETE FROM [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+    [ USING using_list ]
+    [ WHERE condition | WHERE CURRENT OF cursor_name ]
+    [ RETURNING { * | { output_expr [ [ AS ] output_name ] } [, ...] } ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

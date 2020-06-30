@@ -1,0 +1,17 @@
+<refentry id="SQL-CREATE_RESOURCE_POOL">
+<refmeta>
+<refentrytitle>CREATE RESOURCE POOL</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE RESOURCE POOL</refname>
+<refpurpose>define a new resource pool</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE RESOURCE POOL pool_name
+    [WITH ({MEM_PERCENT=pct | CONTROL_GROUP="group_name" | ACTIVE_STATEMENTS=stmt | MAX_DOP = dop | MEMORY_LIMIT='memory_size' | io_limits=io_limits | io_priority='priority' | nodegroup='nodegroup_name' | is_foreign = boolean }[, ... ])];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

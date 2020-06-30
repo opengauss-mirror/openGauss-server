@@ -1,0 +1,135 @@
+
+create table t3(c1 int, c2 int)
+PARTITION BY RANGE (c2)
+(
+        partition p0 values less than (10),
+        partition p1 values less than (20),
+        partition p2 values less than (30),
+        partition p3 values less than (maxvalue)
+)
+ENABLE ROW MOVEMENT;
+;
+
+create table source_table(c1 int, c2 int);
+insert into source_table values(generate_series(1,10000),generate_series(1,30));
+
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_start_ctid' LANGUAGE C STABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_end_ctid' LANGUAGE C STABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_blocknum(tid) RETURNS bigint AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_tupleid_get_blocknum' LANGUAGE C STABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_offset(tid) RETURNS int AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_tupleid_get_offset' LANGUAGE C STABLE NOT FENCED;
+
+create schema data_redis;
+CREATE TABLE data_redis.data_redis_tmp_16399 (LIKE t3 INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING PARTITION, nodeid int,partitionoid int,tupleblocknum bigint,tupleoffset int);
+
+create unlogged table data_redis.pg_delete_delta_16399
+(
+        xcnodeid int,
+        dnrelid int,
+        block_number bigint,
+        block_offset int
+);
+
+create view ctid_view as
+select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t3 partition (p0)
+where ctid between pg_get_redis_rel_start_ctid('t3','p0') and pg_get_redis_rel_end_ctid('t3','p0')
+UNION ALL
+select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t3 partition (p1)
+where ctid between pg_get_redis_rel_start_ctid('t3','p1') and pg_get_redis_rel_end_ctid('t3','p1')
+UNION ALL
+select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t3 partition (p2)
+where ctid between pg_get_redis_rel_start_ctid('t3','p2') and pg_get_redis_rel_end_ctid('t3','p2')
+UNION ALL
+select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t3 partition (p3)
+where ctid between pg_get_redis_rel_start_ctid('t3','p3') and pg_get_redis_rel_end_ctid('t3','p3')
+;
+
+insert into t3 select * from source_table;
+
+ALTER TABLE t3 SET(append_mode=on, rel_cn_oid=16399);
+
+insert into data_redis.data_redis_tmp_16399 select * from ctid_view;
+
+delete from t3 where c2<10;
+
+select count(*) from data_redis.data_redis_tmp_16399;
+select count(*) from data_redis.pg_delete_delta_16399;
+
+alter table t3 truncate partition p0;
+
+select count(*) from data_redis.data_redis_tmp_16399;
+select count(*) from data_redis.data_redis_tmp_16399 partition (p0);
+select count(*) from data_redis.pg_delete_delta_16399;
+
+delete from t3;
+delete from data_redis.pg_delete_delta_16399;
+delete from data_redis.data_redis_tmp_16399;
+
+insert into t3 select * from source_table;
+
+ALTER TABLE t3 SET(append_mode=on, rel_cn_oid=16399);
+
+insert into data_redis.data_redis_tmp_16399 select * from ctid_view;
+
+delete from t3 where c2>10;
+
+select count(*) from data_redis.data_redis_tmp_16399;
+select count(*) from data_redis.pg_delete_delta_16399;
+
+alter table t3 truncate partition for (10);
+
+select count(*) from t3 partition (p1);
+select count(*) from data_redis.data_redis_tmp_16399;
+select count(*) from data_redis.data_redis_tmp_16399 partition (p1);
+select count(*) from data_redis.pg_delete_delta_16399;
+
+
+-- test error path --- 
+
+create table t4(c1 int, c2 int)
+PARTITION BY RANGE (c2)
+(
+        partition p0 values less than (10),
+        partition p1 values less than (20),
+        partition p2 values less than (30),
+        partition p3 values less than (maxvalue)
+)
+ENABLE ROW MOVEMENT;
+;
+
+ALTER TABLE t4 SET(append_mode=on, rel_cn_oid=12345);
+
+-- error with no new temp table is found
+alter table t4 truncate partition p0;
+
+CREATE TABLE data_redis.data_redis_tmp_12345 (LIKE t4 INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING PARTITION INCLUDING CONSTRAINTS, nodeid int,partitionoid int,tupleblocknum bigint,tupleoffset int);
+
+-- error with no delete_delta table is found
+alter table t4 truncate partition p0;
+
+create unlogged table data_redis.pg_delete_delta_12345
+(
+        xcnodeid int,
+        dnrelid int,
+        block_number bigint,
+        block_offset int
+);
+
+-- truncate is succeed
+alter table t4 truncate partition p0;
+
+-- clean up -- 
+drop view ctid_view;
+drop function pg_get_redis_rel_start_ctid(text, name);
+drop function pg_get_redis_rel_end_ctid(text, name);
+drop function pg_tupleid_get_offset;
+drop function pg_tupleid_get_blocknum;
+
+
+drop table t3;
+drop table t4;
+drop table source_table;
+drop table data_redis.pg_delete_delta_16399;
+drop table data_redis.pg_delete_delta_12345;
+drop table data_redis.data_redis_tmp_16399;
+drop table data_redis.data_redis_tmp_12345;
+drop schema data_redis;

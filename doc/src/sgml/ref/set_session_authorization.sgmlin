@@ -1,0 +1,18 @@
+<refentry id="SQL-SET_SESSION_AUTHORIZATION">
+<refmeta>
+<refentrytitle>SET SESSION AUTHORIZATION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SET SESSION AUTHORIZATION</refname>
+<refpurpose>set the current user identifier and session identifier of the current session</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+SET [ SESSION | LOCAL ] SESSION AUTHORIZATION role_name PASSWORD 'password';
+{SET [ SESSION | LOCAL ] SESSION AUTHORIZATION DEFAULT
+   | RESET SESSION AUTHORIZATION};
+</synopsis>
+</refsynopsisdiv>
+</refentry>

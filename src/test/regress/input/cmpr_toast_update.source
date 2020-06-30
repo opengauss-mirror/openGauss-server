@@ -1,0 +1,39 @@
+--
+-- Test: Update a compressed tuple, and new tuple is a toast one.
+--
+CREATE TABLE cmpr_toast_update(
+	RS_ID int,
+	R0_ID varchar(5000) NOT NULL,
+	R1_ID varchar(5000) NOT NULL,
+	R2_ID varchar(5000) NOT NULL,
+	R3_ID varchar(5000) NOT NULL,
+	R4_ID varchar(5000) NOT NULL,
+	R5_ID varchar(5000) NOT NULL,
+	R6_ID varchar(5000) NOT NULL
+) COMPRESS;
+COPY cmpr_toast_update FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+CREATE TABLE cmpr_toast_update_raw(
+	RS_ID int,
+	R0_ID varchar(5000) NOT NULL,
+	R1_ID varchar(5000) NOT NULL,
+	R2_ID varchar(5000) NOT NULL,
+	R3_ID varchar(5000) NOT NULL,
+	R4_ID varchar(5000) NOT NULL,
+	R5_ID varchar(5000) NOT NULL,
+	R6_ID varchar(5000) NOT NULL
+);
+COPY cmpr_toast_update_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+
+UPDATE cmpr_toast_update SET R5_ID=repeat('a', 2570) WHERE R3_ID='203000000000030345';
+UPDATE cmpr_toast_update_raw SET R5_ID=repeat('a', 2570) WHERE R3_ID='203000000000030345';
+SELECT (SELECT COUNT(*) FROM cmpr_toast_update) - (SELECT COUNT(*) FROM cmpr_toast_update_raw);
+(SELECT * FROM cmpr_toast_update) MINUS ALL (SELECT * FROM cmpr_toast_update_raw);
+(SELECT * FROM cmpr_toast_update_raw) MINUS ALL (SELECT * FROM cmpr_toast_update);
+
+UPDATE cmpr_toast_update SET R1_ID=repeat('c', 2770) WHERE R1_ID='20013';
+UPDATE cmpr_toast_update_raw SET R1_ID=repeat('c', 2770) WHERE R1_ID='20013';
+(SELECT * FROM cmpr_toast_update) MINUS ALL (SELECT * FROM cmpr_toast_update_raw);
+(SELECT * FROM cmpr_toast_update_raw) MINUS ALL (SELECT * FROM cmpr_toast_update);
+
+DROP TABLE cmpr_toast_update;
+DROP TABLE cmpr_toast_update_raw;

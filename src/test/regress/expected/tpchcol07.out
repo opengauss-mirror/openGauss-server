@@ -1,0 +1,114 @@
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off) select
+	supp_nation,
+	cust_nation,
+	l_year,
+	sum(volume) as revenue
+from
+	(
+		select
+			n1.n_name as supp_nation,
+			n2.n_name as cust_nation,
+			extract(year from l_shipdate) as l_year,
+			l_extendedprice * (1 - l_discount) as volume
+		from
+			supplier,
+			lineitem,
+			orders,
+			customer,
+			nation n1,
+			nation n2
+		where
+			s_suppkey = l_suppkey
+			and o_orderkey = l_orderkey
+			and c_custkey = o_custkey
+			and s_nationkey = n1.n_nationkey
+			and c_nationkey = n2.n_nationkey
+			and (
+				(n1.n_name = 'FRANCE ' and n2.n_name = 'GERMANY')
+				or (n1.n_name = 'GERMANY' and n2.n_name = 'FRANCE')
+			)
+			and l_shipdate >= date '1995-01-01'
+            and l_shipdate <= date '1996-12-31'
+	) as shipping
+group by
+	supp_nation,
+	cust_nation,
+	l_year
+order by 
+	revenue;
+                                                                                                QUERY PLAN                                                                                                
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: n1.n_name, n2.n_name, date_part('year'::text, lineitem.l_shipdate)
+               ->  Vector Sonic Hash Join
+                     Hash Cond: ((lineitem.l_suppkey = supplier.s_suppkey) AND (n1.n_nationkey = supplier.s_nationkey))
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+                           ->  CStore Scan on lineitem
+                                 Filter: ((l_shipdate >= 'Sun Jan 01 00:00:00 1995'::timestamp(0) without time zone) AND (l_shipdate <= 'Tue Dec 31 00:00:00 1996'::timestamp(0) without time zone))
+                           ->  Vector Sonic Hash Join
+                                 Hash Cond: (orders.o_custkey = customer.c_custkey)
+                                 ->  CStore Scan on orders
+                                 ->  Vector Sonic Hash Join
+                                       Hash Cond: (customer.c_nationkey = n2.n_nationkey)
+                                       ->  CStore Scan on customer
+                                       ->  Vector Nest Loop
+                                             Join Filter: (((n1.n_name = 'FRANCE '::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar)))
+                                             ->  CStore Scan on nation n1
+                                             ->  Vector Materialize
+                                                   ->  CStore Scan on nation n2
+                     ->  CStore Scan on supplier
+(23 rows)
+
+select
+	supp_nation,
+	cust_nation,
+	l_year,
+	sum(volume) as revenue
+from
+	(
+		select
+			n1.n_name as supp_nation,
+			n2.n_name as cust_nation,
+			extract(year from l_shipdate) as l_year,
+			l_extendedprice * (1 - l_discount) as volume
+		from
+			supplier,
+			lineitem,
+			orders,
+			customer,
+			nation n1,
+			nation n2
+		where
+			s_suppkey = l_suppkey
+			and o_orderkey = l_orderkey
+			and c_custkey = o_custkey
+			and s_nationkey = n1.n_nationkey
+			and c_nationkey = n2.n_nationkey
+			and (
+				(n1.n_name = 'FRANCE ' and n2.n_name = 'GERMANY')
+				or (n1.n_name = 'GERMANY' and n2.n_name = 'FRANCE')
+			)
+			and l_shipdate >= date '1995-01-01'
+            and l_shipdate <= date '1996-12-31'
+	) as shipping
+group by
+	supp_nation,
+	cust_nation,
+	l_year
+order by 
+	revenue;
+        supp_nation        |        cust_nation        | l_year |   revenue   
+---------------------------+---------------------------+--------+-------------
+ FRANCE                    | GERMANY                   |   1995 | 268068.5774
+ FRANCE                    | GERMANY                   |   1996 | 303862.2980
+ GERMANY                   | FRANCE                    |   1996 | 379095.8854
+ GERMANY                   | FRANCE                    |   1995 | 621159.4882
+(4 rows)
+

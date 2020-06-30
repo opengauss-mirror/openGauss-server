@@ -1,0 +1,209 @@
+create user "user1" with sysadmin password 'Test@Mpp';
+set role "user1" password 'Test@Mpp';
+create table t1 (a int ,b int);
+select * from DBA_TABLES where table_name = 't1';
+ owner | table_name | tablespace_name | status | temporary | dropped | num_rows 
+-------+------------+-----------------+--------+-----------+---------+----------
+ user1 | t1         | pg_default      | valid  | n         | no      |        0
+(1 row)
+
+select * from DBA_TAB_COLUMNS where table_name = 't1';
+ owner | table_name | column_name | data_type | column_id | data_length | comments | avg_col_len | nullable | data_precision | data_scale | char_length 
+-------+------------+-------------+-----------+-----------+-------------+----------+-------------+----------+----------------+------------+-------------
+ user1 | t1         | a           | int4      |         1 |           4 |          |             | y        |                |          0 |           0
+ user1 | t1         | b           | int4      |         2 |           4 |          |             | y        |                |          0 |           0
+(2 rows)
+
+insert into t1 values (2,5);
+analyze t1;
+select * from DBA_TABLES where table_name = 't1';
+ owner | table_name | tablespace_name | status | temporary | dropped | num_rows 
+-------+------------+-----------------+--------+-----------+---------+----------
+ user1 | t1         | pg_default      | valid  | n         | no      |        1
+(1 row)
+
+select * from DBA_TAB_COLUMNS where table_name = 't1';
+ owner | table_name | column_name | data_type | column_id | data_length | comments | avg_col_len | nullable | data_precision | data_scale | char_length 
+-------+------------+-------------+-----------+-----------+-------------+----------+-------------+----------+----------------+------------+-------------
+ user1 | t1         | a           | int4      |         1 |           4 |          |           4 | y        |                |          0 |           0
+ user1 | t1         | b           | int4      |         2 |           4 |          |           4 | y        |                |          0 |           0
+(2 rows)
+
+create table t2 (a int ,b int NOT NULL, c number,d number(2),e number(3,2));
+select * from DBA_TAB_COLUMNS where table_name = 't2';
+ owner | table_name | column_name | data_type | column_id | data_length | comments | avg_col_len | nullable | data_precision | data_scale | char_length 
+-------+------------+-------------+-----------+-----------+-------------+----------+-------------+----------+----------------+------------+-------------
+ user1 | t2         | a           | int4      |         1 |           4 |          |             | y        |                |          0 |           0
+ user1 | t2         | b           | int4      |         2 |           4 |          |             | n        |                |          0 |           0
+ user1 | t2         | c           | numeric   |         3 |          -1 |          |             | y        |                |            |           0
+ user1 | t2         | d           | numeric   |         4 |          -1 |          |             | y        |              2 |          0 |           0
+ user1 | t2         | e           | numeric   |         5 |          -1 |          |             | y        |              3 |          2 |           0
+(5 rows)
+
+CREATE INDEX t1_index ON t1 (a);
+select * from DBA_INDEXES where index_name = 't1_index';
+ owner | index_name | table_name | uniqueness | generated | partitioned 
+-------+------------+------------+------------+-----------+-------------
+ user1 | t1_index   | t1         | NONUNIQUE  | n         | No 
+(1 row)
+
+select * from DBA_IND_COLUMNS where index_name = 't1_index';
+ index_owner | index_name | table_owner | table_name | column_name | column_position 
+-------------+------------+-------------+------------+-------------+-----------------
+ user1       | t1_index   | user1       | t1         | a           |               1
+(1 row)
+
+select * from DBA_IND_EXPRESSIONS where index_name = 't1_index';
+ index_owner | index_name | table_owner | table_name | column_expression | column_position 
+-------------+------------+-------------+------------+-------------------+-----------------
+(0 rows)
+
+create table t3 (a int primary key, b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t3_pkey" for table "t3"
+select * from DBA_INDEXES where table_name = 't3';
+ owner | index_name | table_name | uniqueness | generated | partitioned 
+-------+------------+------------+------------+-----------+-------------
+ user1 | t3_pkey    | t3         | UNIQUE     | y         | No 
+(1 row)
+
+select * from DBA_CONSTRAINTS where table_name = 't3';
+ constraint_name | constraint_type | table_name | index_owner | index_name 
+-----------------+-----------------+------------+-------------+------------
+ t3_pkey         | p               | t3         | user1       | t3_pkey
+(1 row)
+
+select * from DBA_CONS_COLUMNS where table_name = 't3';
+ table_name | column_name | constraint_name | position 
+------------+-------------+-----------------+----------
+ t3         | a           | t3_pkey         |        1
+ t3         | b           | t3_pkey         |        2
+(2 rows)
+
+create table t4 (a varchar(32), b varchar(32));
+create index t4_index_expression on t4 ((a||' '||b));
+select * from DBA_IND_COLUMNS where index_name = 't4_index_expression';
+ index_owner |     index_name      | table_owner | table_name | column_name | column_position 
+-------------+---------------------+-------------+------------+-------------+-----------------
+ user1       | t4_index_expression | user1       | t4         | expr        |               1
+(1 row)
+
+select * from DBA_IND_EXPRESSIONS where index_name = 't4_index_expression';
+ index_owner |     index_name      | table_owner | table_name |          column_expression          | column_position 
+-------------+---------------------+-------------+------------+-------------------------------------+-----------------
+ user1       | t4_index_expression | user1       | t4         | ((a::text || ' '::text) || b::text) |               1
+(1 row)
+
+alter table t1 add constraint pk1 primary key (a);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "pk1" for table "t1"
+select * from DBA_CONS_COLUMNS where table_name = 't1';
+ table_name | column_name | constraint_name | position 
+------------+-------------+-----------------+----------
+ t1         | a           | pk1             |        1
+ t1         | b           | pk1             |        2
+(2 rows)
+
+create table t5 (a char ,b VARCHAR2(20), c NCHAR,d NVARCHAR2(20), e int);
+select * from DBA_TAB_COLUMNS where table_name = 't5';
+ owner | table_name | column_name | data_type | column_id | data_length | comments | avg_col_len | nullable | data_precision | data_scale | char_length 
+-------+------------+-------------+-----------+-----------+-------------+----------+-------------+----------+----------------+------------+-------------
+ user1 | t5         | a           | bpchar    |         1 |          -1 |          |             | y        |                |          0 |           1
+ user1 | t5         | b           | varchar   |         2 |          20 |          |             | y        |                |          0 |          20
+ user1 | t5         | c           | bpchar    |         3 |          -1 |          |             | y        |                |          0 |           1
+ user1 | t5         | d           | nvarchar2 |         4 |          -1 |          |             | y        |                |          0 |          20
+ user1 | t5         | e           | int4      |         5 |           4 |          |             | y        |                |          0 |           0
+(5 rows)
+
+insert into t5 values ('1','3333333','2','4eddd',1);
+analyze t5;
+select * from DBA_TAB_COLUMNS where table_name = 't5';
+ owner | table_name | column_name | data_type | column_id | data_length | comments | avg_col_len | nullable | data_precision | data_scale | char_length 
+-------+------------+-------------+-----------+-----------+-------------+----------+-------------+----------+----------------+------------+-------------
+ user1 | t5         | a           | bpchar    |         1 |          -1 |          |           2 | y        |                |          0 |           1
+ user1 | t5         | b           | varchar   |         2 |          20 |          |           8 | y        |                |          0 |          20
+ user1 | t5         | c           | bpchar    |         3 |          -1 |          |           2 | y        |                |          0 |           1
+ user1 | t5         | d           | nvarchar2 |         4 |          -1 |          |           6 | y        |                |          0 |          20
+ user1 | t5         | e           | int4      |         5 |           4 |          |           4 | y        |                |          0 |           0
+(5 rows)
+
+create table t6 (a int , b int);
+create index t6_index on t6 (trunc(a),trunc(b));
+select * from DBA_IND_EXPRESSIONS where table_name = 't6';
+ index_owner | index_name | table_owner | table_name |     column_expression      | column_position 
+-------------+------------+-------------+------------+----------------------------+-----------------
+ user1       | t6_index   | user1       | t6         | trunc(a::double precision) |               1
+ user1       | t6_index   | user1       | t6         | trunc(b::double precision) |               2
+(2 rows)
+
+select * from DBA_IND_COLUMNS where table_name = 't6';
+ index_owner | index_name | table_owner | table_name | column_name | column_position 
+-------------+------------+-------------+------------+-------------+-----------------
+ user1       | t6_index   | user1       | t6         | trunc       |               1
+ user1       | t6_index   | user1       | t6         | trunc1      |               2
+(2 rows)
+
+comment on table t6 is 'test table';
+comment on column t6.a is 'column a';
+select * from DBA_TAB_COMMENTS where table_name = 't6';
+ owner | table_name |  comments  
+-------+------------+------------
+ user1 | t6         | test table
+(1 row)
+
+select * from DBA_TAB_COMMENTS where table_name = 't5';
+ owner | table_name | comments 
+-------+------------+----------
+ user1 | t5         | 
+(1 row)
+
+create user "user2" with sysadmin password 'Test@Mpp';
+set role "user2" password 'Test@Mpp';
+select * from USER_TABLES where table_name = 't1';
+ owner | table_name | tablespace_name | status | temporary | dropped | num_rows 
+-------+------------+-----------------+--------+-----------+---------+----------
+(0 rows)
+
+select * from USER_TAB_COLUMNS where table_name = 't1';
+ owner | table_name | column_name | data_type | column_id | data_length | comments | avg_col_len | nullable | data_precision | data_scale | char_length 
+-------+------------+-------------+-----------+-----------+-------------+----------+-------------+----------+----------------+------------+-------------
+(0 rows)
+
+select * from USER_INDEXES where index_name = 't1_index';
+ owner | index_name | table_name | uniqueness | generated | partitioned 
+-------+------------+------------+------------+-----------+-------------
+(0 rows)
+
+select * from USER_IND_COLUMNS where index_name = 't1_index';
+ index_owner | index_name | table_owner | table_name | column_name | column_position 
+-------------+------------+-------------+------------+-------------+-----------------
+(0 rows)
+
+select * from USER_CONSTRAINTS where table_name = 't3';
+ constraint_name | constraint_type | table_name | index_owner | index_name 
+-----------------+-----------------+------------+-------------+------------
+(0 rows)
+
+select * from USER_CONS_COLUMNS where table_name = 't3';
+ table_name | column_name | constraint_name | position 
+------------+-------------+-----------------+----------
+(0 rows)
+
+select * from USER_IND_EXPRESSIONS where index_name = 't4_index_expression';
+ index_owner | index_name | table_owner | table_name | column_expression | column_position 
+-------------+------------+-------------+------------+-------------------+-----------------
+(0 rows)
+
+select * from USER_TAB_COMMENTS where table_name = 't6';
+ owner | table_name | comments 
+-------+------------+----------
+(0 rows)
+
+set role "user1" password 'Test@Mpp';
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+drop table t5;
+drop table t6;
+reset role;
+drop user "user1";
+drop user "user2";

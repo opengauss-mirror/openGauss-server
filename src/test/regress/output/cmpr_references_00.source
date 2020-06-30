@@ -1,0 +1,75 @@
+--
+-- TEST CASE: references
+--
+SET DATESTYLE TO ISO;
+CREATE TABLE cmpr_references_00(
+        c_int_1 INTEGER NOT NULL,
+        c_int_2 INTEGER NOT NULL,
+        c_int_3 INTEGER NOT NULL,
+        c_int_4 INTEGER NOT NULL,
+        c_int_5 INTEGER NOT NULL,
+        c_int_6 INTEGER NOT NULL,
+        c_int_7 INTEGER NOT NULL,
+        c_int_8 INTEGER NOT NULL,
+        c_int_9 INTEGER NOT NULL,
+        c_int_10 INTEGER NOT NULL,
+        c_VARCHAR_11 VARCHAR(120) NOT NULL,
+        c_VARCHAR_12 VARCHAR(120) NOT NULL
+)WITH (FILLFACTOR=90);
+CREATE TABLE cmpr_references_f01(
+        c_int_1 INTEGER UNIQUE,
+        c_VARCHAR_2 VARCHAR(120) PRIMARY KEY
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "cmpr_references_f01_pkey" for table "cmpr_references_f01"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "cmpr_references_f01_c_int_1_key" for table "cmpr_references_f01"
+CREATE TABLE cmpr_references_01(
+        c_int_1 INTEGER,
+        c_int_2 INTEGER,
+        c_int_3 INTEGER,
+        c_int_4 INTEGER,
+        c_int_5 INTEGER,
+        c_int_6 INTEGER,
+        c_int_7 INTEGER,
+        c_int_8 INTEGER,
+        c_int_9 INTEGER,
+        c_int_10 INTEGER,
+        c_VARCHAR_11 VARCHAR(120),
+        c_VARCHAR_12 VARCHAR(120))WITH (FILLFACTOR=90) COMPRESS;
+INSERT INTO cmpr_references_00 VALUES (generate_series(1,10000,10),generate_series(1,10000,10),generate_series(2,10000,10),generate_series(2,10000,10),generate_series(2,10000,10),generate_series(2,10000,10),generate_series(1,10000,10),generate_series(2,10000,10),generate_series(1,10000,10),generate_series(2,10000,10),'aaa'||MOD(generate_series(6,10000,10),200),'aaa'||MOD(generate_series(6,10000,10),200));
+INSERT INTO cmpr_references_f01 VALUES (generate_series(1,10000,10),'aaa'||generate_series(6,10000,10));
+COPY cmpr_references_00 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_references_00.data';
+COPY cmpr_references_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_references_00.data';
+(SELECT * FROM cmpr_references_00) MINUS ALL (SELECT * FROM cmpr_references_01);
+ c_int_1 | c_int_2 | c_int_3 | c_int_4 | c_int_5 | c_int_6 | c_int_7 | c_int_8 | c_int_9 | c_int_10 | c_varchar_11 | c_varchar_12 
+---------+---------+---------+---------+---------+---------+---------+---------+---------+----------+--------------+--------------
+(0 rows)
+
+(SELECT * FROM cmpr_references_01) MINUS ALL (SELECT * FROM cmpr_references_00);
+ c_int_1 | c_int_2 | c_int_3 | c_int_4 | c_int_5 | c_int_6 | c_int_7 | c_int_8 | c_int_9 | c_int_10 | c_varchar_11 | c_varchar_12 
+---------+---------+---------+---------+---------+---------+---------+---------+---------+----------+--------------+--------------
+(0 rows)
+
+UPDATE cmpr_references_01 SET C_INT_1=0, c_VARCHAR_11='aaa' WHERE c_VARCHAR_11='aaa'||6;
+SELECT COUNT(*) FROM cmpr_references_01 WHERE c_VARCHAR_11='aaa';
+ count 
+-------
+    50
+(1 row)
+
+INSERT INTO cmpr_references_f01 VALUES(0,'aaa');
+UPDATE cmpr_references_01 SET C_INT_1=0, c_VARCHAR_11='aaa' WHERE c_VARCHAR_11='aaa'||6;
+SELECT * FROM cmpr_references_01 WHERE c_VARCHAR_11='aaa'||6;
+ c_int_1 | c_int_2 | c_int_3 | c_int_4 | c_int_5 | c_int_6 | c_int_7 | c_int_8 | c_int_9 | c_int_10 | c_varchar_11 | c_varchar_12 
+---------+---------+---------+---------+---------+---------+---------+---------+---------+----------+--------------+--------------
+(0 rows)
+
+SELECT COUNT(*) FROM cmpr_references_01 WHERE c_VARCHAR_11='aaa';
+ count 
+-------
+    50
+(1 row)
+
+DROP TABLE cmpr_references_00;
+DROP TABLE cmpr_references_01 CASCADE;
+DROP TABLE cmpr_references_f01;
+\! rm -fr @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_references_00.data

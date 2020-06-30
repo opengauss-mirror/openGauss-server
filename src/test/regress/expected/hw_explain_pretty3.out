@@ -1,0 +1,665 @@
+----
+--- CREATE TABLE
+----
+-- Auto-analyze
+\c
+set codegen_cost_threshold=0;
+set explain_perf_mode = summary;
+show autoanalyze;
+ autoanalyze 
+-------------
+ off
+(1 row)
+
+-- Testset 1 normal cases
+set autoanalyze = on;
+create table aa_t1 (id int, num int);
+-- one table
+-- aa_t1 no
+insert into aa_t1 values (1,1),(2,2);
+select relname, reltuples, relpages from pg_class where relname='aa_t1';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+(1 row)
+
+-- insert into select
+create table aa_t2 (id int, num int);
+-- aa_t1 yes, aa_t2 no
+explain analyze insert into aa_t2 select * from aa_t1;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? Insert on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(3 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+-- aa_t1 no, aa_t2 no
+explain analyze insert into aa_t2 select * from aa_t1;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? Insert on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(3 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+-- create table as
+-- aa_t2 yes, aa_t3 no
+explain analyze create table aa_t3 as select * from aa_t2;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? Insert on aa_t3  (cost=.* rows=2149 width=8) (actual time=.* rows=4 loops=1)
+--?   ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=4 loops=1)
+--? Total runtime: .* ms
+(3 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' or relname='aa_t3' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+ aa_t3   |         0 |        0
+(3 rows)
+
+-- one table with groupby
+set autoanalyze = off;
+-- aa_t3 no
+explain analyze select num, count(*) from aa_t3 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t3  (cost=.* rows=2149 width=4) (actual time=.* rows=4 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t3';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t3   |         0 |        0
+(1 row)
+
+set autoanalyze = on;
+-- aa_t3 yes
+explain analyze select num, count(*) from aa_t3 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t3  (cost=.* rows=2149 width=4) (actual time=.* rows=4 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t3';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t3   |         0 |        0
+(1 row)
+
+-- aa_t3 no
+explain analyze select num, count(*) from aa_t3 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t3  (cost=.* rows=2149 width=4) (actual time=.* rows=4 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+-- multiple tables
+drop table aa_t2;
+create table aa_t2 (id int, num int);
+-- aa_t1 no, aa_t2 no
+insert into aa_t2 select * from aa_t1;
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+set autoanalyze = off;
+-- aa_t1 no, aa_t2 no
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+set autoanalyze = on;
+-- aa_t1 no, aa_t2 yes
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+-- aa_t1 no, aa_t2 no
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+-- Testset 2 special cases (not work)
+set autoanalyze = on;
+drop table aa_t1;
+drop table aa_t2;
+create table aa_t1 (id int, num int);
+insert into aa_t1 values (1,1),(2,2);
+create table aa_t2 (id int, num int);
+insert into aa_t2 values (1,1),(2,2);
+-- not stream plan
+-- aa_t1 no, aa_t2 no
+explain analyze select aa_t1.num from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=4) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+explain analyze select num, count(*) from aa_t1 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+-- user has no privilege
+create user test_aa_user identified by "Test@Mpp";
+grant select on aa_t1 to test_aa_user;
+grant select on aa_t2 to test_aa_user;
+SET SESSION AUTHORIZATION test_aa_user PASSWORD 'Test@Mpp';
+SELECT session_user, current_user;
+ session_user | current_user 
+--------------+--------------
+ test_aa_user | test_aa_user
+(1 row)
+
+-- aa_t1 no, aa_t2 no
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=31.49..31.49 rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+create table aa_t2 (id int, num int);
+insert into aa_t2 values (1,1),(2,2);
+-- aa_t1 no, aa_t2 yes
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname, reltuples;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+ aa_t2   |         0 |        0
+(3 rows)
+
+drop table aa_t2;
+\c
+drop user test_aa_user cascade;
+set explain_perf_mode = summary;
+set autoanalyze = on;
+-- table created in transaction
+drop table aa_t3;
+start transaction;
+-- aa_t3 no, aa_t2 yes
+explain analyze create table aa_t3 as select * from aa_t2;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? Insert on aa_t3  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(3 rows)
+
+-- aa_t3 no
+explain analyze select num, count(*) from aa_t3 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t3  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+-- aa_t1 yes, aa_t2 no
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: 1.476 ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' or relname='aa_t3' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+ aa_t3   |         0 |        0
+(3 rows)
+
+abort;
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' or relname='aa_t3' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+-- table created in function
+drop table aa_t2;
+create table aa_t2 (id int, num int);
+insert into aa_t2 values (1,1),(2,2);
+CREATE OR REPLACE FUNCTION test_aa()
+RETURNS bool
+AS $$
+DECLARE
+	BEGIN
+		execute('create table aa_t3 as select * from aa_t2;');
+		execute('select num, count(*) from aa_t3 group by num;');
+		return true;
+	END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+-- aa_t3 no, aa_t2 yes
+select test_aa();
+ test_aa 
+---------
+ t
+(1 row)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t2' or relname='aa_t3' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t2   |         0 |        0
+ aa_t3   |         0 |        0
+(2 rows)
+
+-- no
+explain analyze select num, count(*) from aa_t2 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+-- aa_t3 yes
+explain analyze select num, count(*) from aa_t3 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t3  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t2' or relname='aa_t3' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t2   |         0 |        0
+ aa_t3   |         0 |        0
+(2 rows)
+
+-- cannot get lock on table
+drop table aa_t1;
+drop table aa_t2;
+create table aa_t1 (id int, num int);
+insert into aa_t1 values (1,1),(2,2);
+create table aa_t2 (id int, num int);
+insert into aa_t2 values (1,1),(2,2);
+start transaction;
+lock table aa_t2 in access exclusive mode;
+-- aa_t2 no
+explain analyze select num, count(*) from aa_t2 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t2';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t2   |         0 |        0
+(1 row)
+
+-- aa_t1 yes, aa_t2 no
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+abort;
+-- aa_t1 no, aa_t2 yes
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+-- can not analyze (multiple)
+drop table aa_t1;
+drop table aa_t2;
+start transaction;
+create table aa_t1 (id int, num int);
+insert into aa_t1 values (1,1),(2,2);
+create table aa_t2 (id int, num int);
+insert into aa_t2 values (1,1),(2,2);
+-- aa_t1 no, aa_t2 no
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+end;
+-- temp table
+create temp table tmp_aa (id int, num int);
+insert into tmp_aa values (1,1),(2,2);
+-- tmp_aa no
+explain analyze select num, count(*) from tmp_aa group by num;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on tmp_aa  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+select relname, reltuples, relpages from pg_class where relname='tmp_aa';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ tmp_aa  |         0 |        0
+(1 row)
+
+-- subquery not pullup
+-- aa_t1 no, aa_t2 no
+explain verbose select * from aa_t2 where id in (select aa_t2.id - 1 from aa_t1);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+--? Seq Scan on public.aa_t2  (cost=.* rows=1074 width=8)
+   Output: aa_t2.id, aa_t2.num
+   Filter: (SubPlan 1)
+   SubPlan 1
+--?     ->  Seq Scan on public.aa_t1  (cost=.* rows=2149 width=0)
+           Output: (aa_t2.id - 1)
+(6 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+-- Testset 3 explain test
+drop table aa_t1;
+drop table aa_t2;
+create table aa_t1 (id int, num int);
+insert into aa_t1 values (1,1),(2,2);
+create table aa_t2 (id int, num int);
+insert into aa_t2 values (1,1),(2,2);
+-- aa_t3 yes but not show
+drop table aa_t3;
+create table aa_t3 (id int, num int);
+insert into aa_t3 values (1,1),(2,2);
+explain select num, count(*) from aa_t3 group by num;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t3  (cost=.* rows=2149 width=4)
+(3 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t3';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t3   |         0 |        0
+(1 row)
+
+drop table aa_t3;
+create table aa_t3 (id int, num int);
+insert into aa_t3 values (1,1),(2,2);
+-- aa_t3 yes but not show
+set explain_perf_mode = normal;
+explain analyze select num, count(*) from aa_t3 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t3  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t3';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t3   |         0 |        0
+(1 row)
+
+set explain_perf_mode = summary;
+-- error
+explain analyze cursor cursor_1 for select num, count(*) from aa_t1 group by num;
+ERROR:  EXPLAIN ANALYZE is not supported when declaring a cursor.
+DETAIL:  Query is not actually executed when declaring a cursor.
+-- aa_t1 yes
+explain analyze select num, count(*) from aa_t1 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1';
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+(1 row)
+
+-- error
+explain analyze cursor cursor_1 for select num, count(*) from aa_t1 group by num;
+ERROR:  EXPLAIN ANALYZE is not supported when declaring a cursor.
+DETAIL:  Query is not actually executed when declaring a cursor.
+-- aa_t1 no
+explain analyze select num, count(*) from aa_t1 group by num;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+--? HashAggregate  (cost=.* rows=200 width=12) (actual time=.* rows=2 loops=1)
+   Group By Key: num
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=4) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(4 rows)
+
+-- error
+explain analyze cursor cursor_1 for select num, count(*) from aa_t1 group by num;
+ERROR:  EXPLAIN ANALYZE is not supported when declaring a cursor.
+DETAIL:  Query is not actually executed when declaring a cursor.
+set explain_perf_mode=normal;
+-- aa_t2 yes
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+select relname, reltuples, relpages from pg_class where relname='aa_t1' or relname='aa_t2' order by relname;
+ relname | reltuples | relpages 
+---------+-----------+----------
+ aa_t1   |         0 |        0
+ aa_t2   |         0 |        0
+(2 rows)
+
+set explain_perf_mode=summary;
+-- error
+explain analyze cursor cursor_1 for select num, count(*) from aa_t1 group by num;
+ERROR:  EXPLAIN ANALYZE is not supported when declaring a cursor.
+DETAIL:  Query is not actually executed when declaring a cursor.
+-- no
+explain analyze select * from aa_t1, aa_t2 where aa_t1.id = aa_t2.id;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=23091 width=16) (actual time=.* rows=2 loops=1)
+   Hash Cond: (aa_t1.id = aa_t2.id)
+--?   ->  Seq Scan on aa_t1  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--?   ->  Hash  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+          Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?         ->  Seq Scan on aa_t2  (cost=.* rows=2149 width=8) (actual time=.* rows=2 loops=1)
+--? Total runtime: .* ms
+(7 rows)
+
+-- clean
+drop table if exists aa_t1;
+drop table if exists aa_t2;
+--?drop table if exists aa_t3;.*

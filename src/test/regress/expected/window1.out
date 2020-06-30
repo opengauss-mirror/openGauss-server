@@ -1,0 +1,1736 @@
+--
+-- WINDOW FUNCTIONS
+--
+CREATE TABLE EMPSALARY (DEPNAME VARCHAR, EMPNO BIGINT, SALARY INT, ENROLL_DATE DATE) ;
+CREATE TABLE CLONE_TENK1   AS SELECT * FROM TENK1;
+INSERT INTO EMPSALARY VALUES
+('develop', 10, 5200, '2007-08-01'),
+('sales', 1, 5000, '2006-10-01'),
+('personnel', 5, 3500, '2007-12-10'),
+('sales', 4, 4800, '2007-08-08'),
+('personnel', 2, 3900, '2006-12-23'),
+('develop', 7, 4200, '2008-01-01'),
+('develop', 9, 4500, '2008-01-01'),
+('sales', 3, 4800, '2007-08-01'),
+('develop', 8, 6000, '2006-10-01'),
+('develop', 11, 5200, '2007-08-15');
+SELECT DEPNAME, EMPNO, SALARY, SUM(SALARY) OVER (PARTITION BY DEPNAME) FROM EMPSALARY ORDER BY 1, 2, 3, 4;
+  depname  | empno | salary |  sum  
+-----------+-------+--------+-------
+ develop   |     7 |   4200 | 25100
+ develop   |     8 |   6000 | 25100
+ develop   |     9 |   4500 | 25100
+ develop   |    10 |   5200 | 25100
+ develop   |    11 |   5200 | 25100
+ personnel |     2 |   3900 |  7400
+ personnel |     5 |   3500 |  7400
+ sales     |     1 |   5000 | 14600
+ sales     |     3 |   4800 | 14600
+ sales     |     4 |   4800 | 14600
+(10 rows)
+
+SELECT DEPNAME, EMPNO, SALARY, RANK() OVER (PARTITION BY DEPNAME ORDER BY SALARY) FROM EMPSALARY ORDER BY 1, 2, 3, 4;
+  depname  | empno | salary | rank 
+-----------+-------+--------+------
+ develop   |     7 |   4200 |    1
+ develop   |     8 |   6000 |    5
+ develop   |     9 |   4500 |    2
+ develop   |    10 |   5200 |    3
+ develop   |    11 |   5200 |    3
+ personnel |     2 |   3900 |    2
+ personnel |     5 |   3500 |    1
+ sales     |     1 |   5000 |    3
+ sales     |     3 |   4800 |    1
+ sales     |     4 |   4800 |    1
+(10 rows)
+
+-- WITH GROUP BY
+SELECT FOUR, TEN, SUM(SUM(FOUR)) OVER (PARTITION BY FOUR), AVG(TEN) FROM CLONE_TENK1
+GROUP BY FOUR, TEN ORDER BY FOUR, TEN;
+ four | ten | sum  |          avg           
+------+-----+------+------------------------
+    0 |   0 |    0 | 0.00000000000000000000
+    0 |   2 |    0 |     2.0000000000000000
+    0 |   4 |    0 |     4.0000000000000000
+    0 |   6 |    0 |     6.0000000000000000
+    0 |   8 |    0 |     8.0000000000000000
+    1 |   1 | 2500 | 1.00000000000000000000
+    1 |   3 | 2500 |     3.0000000000000000
+    1 |   5 | 2500 |     5.0000000000000000
+    1 |   7 | 2500 |     7.0000000000000000
+    1 |   9 | 2500 |     9.0000000000000000
+    2 |   0 | 5000 | 0.00000000000000000000
+    2 |   2 | 5000 |     2.0000000000000000
+    2 |   4 | 5000 |     4.0000000000000000
+    2 |   6 | 5000 |     6.0000000000000000
+    2 |   8 | 5000 |     8.0000000000000000
+    3 |   1 | 7500 | 1.00000000000000000000
+    3 |   3 | 7500 |     3.0000000000000000
+    3 |   5 | 7500 |     5.0000000000000000
+    3 |   7 | 7500 |     7.0000000000000000
+    3 |   9 | 7500 |     9.0000000000000000
+(20 rows)
+
+SELECT DEPNAME, EMPNO, SALARY, SUM(SALARY) OVER W FROM EMPSALARY WINDOW W AS (PARTITION BY DEPNAME) ORDER BY EMPNO,SALARY;
+  depname  | empno | salary |  sum  
+-----------+-------+--------+-------
+ sales     |     1 |   5000 | 14600
+ personnel |     2 |   3900 |  7400
+ sales     |     3 |   4800 | 14600
+ sales     |     4 |   4800 | 14600
+ personnel |     5 |   3500 |  7400
+ develop   |     7 |   4200 | 25100
+ develop   |     8 |   6000 | 25100
+ develop   |     9 |   4500 | 25100
+ develop   |    10 |   5200 | 25100
+ develop   |    11 |   5200 | 25100
+(10 rows)
+
+SELECT DEPNAME, EMPNO, SALARY, RANK() OVER W FROM EMPSALARY WINDOW W AS (PARTITION BY DEPNAME ORDER BY SALARY) ORDER BY RANK() OVER W,EMPNO;
+  depname  | empno | salary | rank 
+-----------+-------+--------+------
+ sales     |     3 |   4800 |    1
+ sales     |     4 |   4800 |    1
+ personnel |     5 |   3500 |    1
+ develop   |     7 |   4200 |    1
+ personnel |     2 |   3900 |    2
+ develop   |     9 |   4500 |    2
+ sales     |     1 |   5000 |    3
+ develop   |    10 |   5200 |    3
+ develop   |    11 |   5200 |    3
+ develop   |     8 |   6000 |    5
+(10 rows)
+
+-- EMPTY WINDOW SPECIFICATION
+SELECT COUNT(*) OVER () FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1;
+ count 
+-------
+    10
+    10
+    10
+    10
+    10
+    10
+    10
+    10
+    10
+    10
+(10 rows)
+
+SELECT COUNT(*) OVER W FROM CLONE_TENK1 WHERE UNIQUE2 < 10 WINDOW W AS () ORDER BY 1;
+ count 
+-------
+    10
+    10
+    10
+    10
+    10
+    10
+    10
+    10
+    10
+    10
+(10 rows)
+
+-- NO WINDOW OPERATION
+SELECT FOUR FROM CLONE_TENK1 WHERE FALSE WINDOW W AS (PARTITION BY TEN);
+ four 
+------
+(0 rows)
+
+-- CUMULATIVE AGGREGATE
+SELECT SUM(FOUR) OVER (PARTITION BY TEN ORDER BY UNIQUE2) AS SUM_1, TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ sum_1 | ten | four 
+-------+-----+------
+     0 |   0 |    0
+     0 |   0 |    0
+     0 |   4 |    0
+     1 |   7 |    1
+     1 |   9 |    1
+     2 |   0 |    2
+     3 |   1 |    3
+     3 |   3 |    3
+     4 |   1 |    1
+     5 |   1 |    1
+(10 rows)
+
+SELECT ROW_NUMBER() OVER (ORDER BY UNIQUE2) FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1;
+ row_number 
+------------
+          1
+          2
+          3
+          4
+          5
+          6
+          7
+          8
+          9
+         10
+(10 rows)
+
+SELECT RANK() OVER (PARTITION BY FOUR ORDER BY TEN) AS RANK_1, TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ rank_1 | ten | four 
+--------+-----+------
+      1 |   0 |    0
+      1 |   0 |    0
+      1 |   0 |    2
+      1 |   1 |    1
+      1 |   1 |    1
+      1 |   1 |    3
+      2 |   3 |    3
+      3 |   4 |    0
+      3 |   7 |    1
+      4 |   9 |    1
+(10 rows)
+
+SELECT DENSE_RANK() OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ dense_rank | ten | four 
+------------+-----+------
+          1 |   0 |    0
+          1 |   0 |    0
+          1 |   0 |    2
+          1 |   1 |    1
+          1 |   1 |    1
+          1 |   1 |    3
+          2 |   3 |    3
+          2 |   4 |    0
+          2 |   7 |    1
+          3 |   9 |    1
+(10 rows)
+
+SELECT PERCENT_RANK() OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+   percent_rank   | ten | four 
+------------------+-----+------
+                0 |   0 |    0
+                0 |   0 |    0
+                0 |   0 |    2
+                0 |   1 |    1
+                0 |   1 |    1
+                0 |   1 |    3
+ .666666666666667 |   7 |    1
+                1 |   3 |    3
+                1 |   4 |    0
+                1 |   9 |    1
+(10 rows)
+
+SELECT CUME_DIST() OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+    cume_dist     | ten | four 
+------------------+-----+------
+               .5 |   1 |    1
+               .5 |   1 |    1
+               .5 |   1 |    3
+ .666666666666667 |   0 |    0
+ .666666666666667 |   0 |    0
+              .75 |   7 |    1
+                1 |   0 |    2
+                1 |   3 |    3
+                1 |   4 |    0
+                1 |   9 |    1
+(10 rows)
+
+SELECT NTILE(3) OVER (ORDER BY TEN, FOUR), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ ntile | ten | four 
+-------+-----+------
+     1 |   0 |    0
+     1 |   0 |    0
+     1 |   0 |    2
+     1 |   1 |    1
+     2 |   1 |    1
+     2 |   1 |    3
+     2 |   3 |    3
+     3 |   4 |    0
+     3 |   7 |    1
+     3 |   9 |    1
+(10 rows)
+
+SELECT NTILE(NULL) OVER (ORDER BY TEN, FOUR), TEN, FOUR FROM CLONE_TENK1 LIMIT 2;
+ ntile | ten | four 
+-------+-----+------
+       |   0 |    0
+       |   0 |    0
+(2 rows)
+
+SELECT LAG(TEN) OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ lag | ten | four 
+-----+-----+------
+   0 |   0 |    0
+   0 |   4 |    0
+   1 |   1 |    1
+   1 |   3 |    3
+   1 |   7 |    1
+   7 |   9 |    1
+     |   0 |    0
+     |   0 |    2
+     |   1 |    1
+     |   1 |    3
+(10 rows)
+
+SELECT LAG(TEN, FOUR) OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ lag | ten | four 
+-----+-----+------
+   0 |   0 |    0
+   0 |   0 |    0
+   1 |   1 |    1
+   1 |   7 |    1
+   4 |   4 |    0
+   7 |   9 |    1
+     |   0 |    2
+     |   1 |    1
+     |   1 |    3
+     |   3 |    3
+(10 rows)
+
+SELECT LAG(TEN, FOUR, 0) OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ lag | ten | four 
+-----+-----+------
+   0 |   0 |    0
+   0 |   0 |    0
+   0 |   0 |    2
+   0 |   1 |    1
+   0 |   1 |    3
+   0 |   3 |    3
+   1 |   1 |    1
+   1 |   7 |    1
+   4 |   4 |    0
+   7 |   9 |    1
+(10 rows)
+
+SELECT LEAD(TEN) OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ lead | ten | four 
+------+-----+------
+    0 |   0 |    0
+    1 |   1 |    1
+    3 |   1 |    3
+    4 |   0 |    0
+    7 |   1 |    1
+    9 |   7 |    1
+      |   0 |    2
+      |   3 |    3
+      |   4 |    0
+      |   9 |    1
+(10 rows)
+
+SELECT LEAD(TEN * 2, 1) OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ lead | ten | four 
+------+-----+------
+    0 |   0 |    0
+    2 |   1 |    1
+    6 |   1 |    3
+    8 |   0 |    0
+   14 |   1 |    1
+   18 |   7 |    1
+      |   0 |    2
+      |   3 |    3
+      |   4 |    0
+      |   9 |    1
+(10 rows)
+
+SELECT LEAD(TEN * 2, 1, -1) OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ lead | ten | four 
+------+-----+------
+   -1 |   0 |    2
+   -1 |   3 |    3
+   -1 |   4 |    0
+   -1 |   9 |    1
+    0 |   0 |    0
+    2 |   1 |    1
+    6 |   1 |    3
+    8 |   0 |    0
+   14 |   1 |    1
+   18 |   7 |    1
+(10 rows)
+
+SELECT FIRST_VALUE(TEN) OVER (PARTITION BY FOUR ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ first_value | ten | four 
+-------------+-----+------
+           0 |   0 |    0
+           0 |   0 |    0
+           0 |   0 |    2
+           0 |   4 |    0
+           1 |   1 |    1
+           1 |   1 |    1
+           1 |   1 |    3
+           1 |   3 |    3
+           1 |   7 |    1
+           1 |   9 |    1
+(10 rows)
+
+-- LAST_VALUE RETURNS THE LAST ROW OF THE FRAME, WHICH IS CURRENT ROW IN ORDER BY WINDOW.
+SELECT LAST_VALUE(FOUR) OVER (ORDER BY TEN, FOUR), TEN, FOUR FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1, 2, 3;
+ last_value | ten | four 
+------------+-----+------
+          0 |   0 |    0
+          0 |   0 |    0
+          0 |   4 |    0
+          1 |   1 |    1
+          1 |   1 |    1
+          1 |   7 |    1
+          1 |   9 |    1
+          2 |   0 |    2
+          3 |   1 |    3
+          3 |   3 |    3
+(10 rows)
+
+SELECT LAST_VALUE(TEN) OVER (PARTITION BY FOUR), TEN, FOUR FROM
+(SELECT * FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY FOUR, TEN)S
+ORDER BY FOUR, TEN;
+ last_value | ten | four 
+------------+-----+------
+          4 |   0 |    0
+          4 |   0 |    0
+          4 |   4 |    0
+          9 |   1 |    1
+          9 |   1 |    1
+          9 |   7 |    1
+          9 |   9 |    1
+          0 |   0 |    2
+          3 |   1 |    3
+          3 |   3 |    3
+(10 rows)
+
+SELECT NTH_VALUE(TEN, FOUR + 1) OVER (PARTITION BY FOUR), TEN, FOUR
+FROM (SELECT * FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY FOUR, TEN)S
+ORDER BY FOUR, TEN;
+ nth_value | ten | four 
+-----------+-----+------
+         0 |   0 |    0
+         0 |   0 |    0
+         0 |   4 |    0
+         1 |   1 |    1
+         1 |   1 |    1
+         1 |   7 |    1
+         1 |   9 |    1
+           |   0 |    2
+           |   1 |    3
+           |   3 |    3
+(10 rows)
+
+SELECT TEN, TWO, SUM(HUNDRED) AS GSUM, SUM(SUM(HUNDRED)) OVER (PARTITION BY TWO ORDER BY TEN) AS WSUM 
+FROM CLONE_TENK1 GROUP BY TEN, TWO
+ORDER BY TEN, TWO;
+ ten | two | gsum  |  wsum  
+-----+-----+-------+--------
+   0 |   0 | 45000 |  45000
+   1 |   1 | 46000 |  46000
+   2 |   0 | 47000 |  92000
+   3 |   1 | 48000 |  94000
+   4 |   0 | 49000 | 141000
+   5 |   1 | 50000 | 144000
+   6 |   0 | 51000 | 192000
+   7 |   1 | 52000 | 196000
+   8 |   0 | 53000 | 245000
+   9 |   1 | 54000 | 250000
+(10 rows)
+
+SELECT COUNT(*) OVER (PARTITION BY FOUR), FOUR FROM (SELECT * FROM CLONE_TENK1 WHERE TWO = 1)S WHERE UNIQUE2 < 10 ORDER BY 1, 2;
+ count | four 
+-------+------
+     2 |    3
+     2 |    3
+     4 |    1
+     4 |    1
+     4 |    1
+     4 |    1
+(6 rows)
+
+SELECT (COUNT(*) OVER (PARTITION BY FOUR ORDER BY TEN) + 
+  SUM(HUNDRED) OVER (PARTITION BY FOUR ORDER BY TEN))::VARCHAR AS CNTSUM 
+  FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1;
+ cntsum 
+--------
+ 136
+ 22
+ 22
+ 24
+ 24
+ 51
+ 82
+ 87
+ 92
+ 92
+(10 rows)
+
+-- OPEXPR WITH DIFFERENT WINDOWS EVALUATION.
+SELECT * FROM(
+  SELECT COUNT(*) OVER (PARTITION BY FOUR ORDER BY TEN) +
+    SUM(HUNDRED) OVER (PARTITION BY TWO ORDER BY TEN) AS TOTAL,
+    COUNT(*) OVER (PARTITION BY FOUR ORDER BY TEN) AS FOURCOUNT,
+    SUM(HUNDRED) OVER (PARTITION BY TWO ORDER BY TEN) AS TWOSUM
+    FROM CLONE_TENK1
+)SUB
+WHERE TOTAL <> FOURCOUNT + TWOSUM;
+ total | fourcount | twosum 
+-------+-----------+--------
+(0 rows)
+
+SELECT AVG(FOUR) OVER (PARTITION BY FOUR ORDER BY THOUSAND / 100) FROM CLONE_TENK1 WHERE UNIQUE2 < 10 ORDER BY 1;
+          avg           
+------------------------
+ 0.00000000000000000000
+ 0.00000000000000000000
+ 0.00000000000000000000
+ 1.00000000000000000000
+ 1.00000000000000000000
+ 1.00000000000000000000
+ 1.00000000000000000000
+     2.0000000000000000
+     3.0000000000000000
+     3.0000000000000000
+(10 rows)
+
+SELECT TEN, TWO, SUM(HUNDRED) AS GSUM, SUM(SUM(HUNDRED)) OVER WIN AS WSUM 
+FROM CLONE_TENK1 GROUP BY TEN, TWO WINDOW WIN AS (PARTITION BY TWO ORDER BY TEN) ORDER BY 1, 2, 3, 4;
+ ten | two | gsum  |  wsum  
+-----+-----+-------+--------
+   0 |   0 | 45000 |  45000
+   1 |   1 | 46000 |  46000
+   2 |   0 | 47000 |  92000
+   3 |   1 | 48000 |  94000
+   4 |   0 | 49000 | 141000
+   5 |   1 | 50000 | 144000
+   6 |   0 | 51000 | 192000
+   7 |   1 | 52000 | 196000
+   8 |   0 | 53000 | 245000
+   9 |   1 | 54000 | 250000
+(10 rows)
+
+-- MORE THAN ONE WINDOW WITH GROUP BY
+SELECT SUM(SALARY),
+	ROW_NUMBER() OVER (ORDER BY DEPNAME),
+	SUM(SUM(SALARY)) OVER (ORDER BY DEPNAME DESC)
+FROM EMPSALARY GROUP BY DEPNAME;
+  sum  | row_number |  sum  
+-------+------------+-------
+ 14600 |          3 | 14600
+  7400 |          2 | 22000
+ 25100 |          1 | 47100
+(3 rows)
+
+-- IDENTICAL WINDOWS WITH DIFFERENT NAMES
+SELECT SUM(SALARY) OVER W1, COUNT(*) OVER W2
+FROM EMPSALARY WINDOW W1 AS (ORDER BY SALARY), W2 AS (ORDER BY SALARY) ORDER BY 1, 2;
+  sum  | count 
+-------+-------
+  3500 |     1
+  7400 |     2
+ 11600 |     3
+ 16100 |     4
+ 25700 |     6
+ 25700 |     6
+ 30700 |     7
+ 41100 |     9
+ 41100 |     9
+ 47100 |    10
+(10 rows)
+
+-- SUBPLAN
+SELECT LEAD(TEN, (SELECT TWO FROM CLONE_TENK1 WHERE S.UNIQUE2 = UNIQUE2)) OVER (PARTITION BY FOUR ORDER BY TEN)
+FROM CLONE_TENK1 S WHERE UNIQUE2 < 10 ORDER BY 1;
+ lead 
+------
+    0
+    0
+    0
+    1
+    3
+    4
+    7
+    9
+     
+     
+(10 rows)
+
+-- EMPTY TABLE
+SELECT COUNT(*) OVER (PARTITION BY FOUR) FROM (SELECT * FROM CLONE_TENK1 WHERE FALSE)S;
+ count 
+-------
+(0 rows)
+
+-- MIXTURE OF AGG/WFUNC IN THE SAME WINDOW
+SELECT SUM(SALARY) OVER W, RANK() OVER W FROM EMPSALARY WINDOW W AS (PARTITION BY DEPNAME ORDER BY SALARY DESC) ORDER BY 1, 2;
+  sum  | rank 
+-------+------
+  3900 |    1
+  5000 |    1
+  6000 |    1
+  7400 |    2
+ 14600 |    2
+ 14600 |    2
+ 16400 |    2
+ 16400 |    2
+ 20900 |    4
+ 25100 |    5
+(10 rows)
+
+-- STRICT AGGS
+SELECT EMPNO, DEPNAME, SALARY, BONUS, DEPADJ, MIN(BONUS) OVER (ORDER BY EMPNO), MAX(DEPADJ) OVER () FROM(
+	SELECT *,
+		CASE WHEN ENROLL_DATE < '2008-01-01' THEN 2008 - EXTRACT(YEAR FROM ENROLL_DATE) END * 500 AS BONUS,
+		CASE WHEN
+			AVG(SALARY) OVER (PARTITION BY DEPNAME) < SALARY
+		THEN 200 END AS DEPADJ FROM EMPSALARY
+)S ORDER BY EMPNO;
+ empno |  depname  | salary | bonus | depadj | min  | max 
+-------+-----------+--------+-------+--------+------+-----
+     1 | sales     |   5000 |  1000 |    200 | 1000 | 200
+     2 | personnel |   3900 |  1000 |    200 | 1000 | 200
+     3 | sales     |   4800 |   500 |        |  500 | 200
+     4 | sales     |   4800 |   500 |        |  500 | 200
+     5 | personnel |   3500 |   500 |        |  500 | 200
+     7 | develop   |   4200 |       |        |  500 | 200
+     8 | develop   |   6000 |  1000 |    200 |  500 | 200
+     9 | develop   |   4500 |       |        |  500 | 200
+    10 | develop   |   5200 |   500 |    200 |  500 | 200
+    11 | develop   |   5200 |   500 |    200 |  500 | 200
+(10 rows)
+
+-- WINDOW FUNCTION OVER UNGROUPED AGG OVER EMPTY ROW SET (BUG BEFORE 9.1)
+SELECT SUM(COUNT(F1)) OVER () FROM INT4_TBL WHERE F1=42;
+ sum 
+-----
+   0
+(1 row)
+
+-- WINDOW FUNCTION WITH ORDER BY AN EXPRESSION INVOLVING AGGREGATES (9.1 BUG)
+SELECT TEN, SUM(UNIQUE1) + SUM(UNIQUE2) AS RES, RANK() OVER (ORDER BY SUM(UNIQUE1) + SUM(UNIQUE2)) AS RANK
+FROM CLONE_TENK1
+GROUP BY TEN ORDER BY TEN;
+ ten |   res    | rank 
+-----+----------+------
+   0 |  9976146 |    4
+   1 | 10114187 |    9
+   2 | 10059554 |    8
+   3 |  9878541 |    1
+   4 |  9881005 |    2
+   5 |  9981670 |    5
+   6 |  9947099 |    3
+   7 | 10120309 |   10
+   8 |  9991305 |    6
+   9 | 10040184 |    7
+(10 rows)
+
+-- WINDOW AND AGGREGATE WITH GROUP BY EXPRESSION (9.2 BUG)
+EXPLAIN (COSTS OFF, NODES OFF)
+SELECT FIRST_VALUE(MAX(X)) OVER (), Y
+FROM (SELECT UNIQUE1 AS X, TEN+FOUR AS Y FROM CLONE_TENK1) SS
+GROUP BY Y;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ WindowAgg
+   ->  HashAggregate
+         Group By Key: (clone_tenk1.ten + clone_tenk1.four)
+         ->  Seq Scan on clone_tenk1
+(4 rows)
+
+-- TEST NON-DEFAULT FRAME SPECIFICATIONS
+SELECT FOUR, TEN, SUM(TEN) OVER (PARTITION BY FOUR ORDER BY TEN), LAST_VALUE(TEN) OVER (PARTITION BY FOUR ORDER BY TEN)
+FROM (SELECT DISTINCT TEN, FOUR FROM CLONE_TENK1) SS ORDER BY 1, 2, 3, 4;
+ four | ten | sum | last_value 
+------+-----+-----+------------
+    0 |   0 |   0 |          0
+    0 |   2 |   2 |          2
+    0 |   4 |   6 |          4
+    0 |   6 |  12 |          6
+    0 |   8 |  20 |          8
+    1 |   1 |   1 |          1
+    1 |   3 |   4 |          3
+    1 |   5 |   9 |          5
+    1 |   7 |  16 |          7
+    1 |   9 |  25 |          9
+    2 |   0 |   0 |          0
+    2 |   2 |   2 |          2
+    2 |   4 |   6 |          4
+    2 |   6 |  12 |          6
+    2 |   8 |  20 |          8
+    3 |   1 |   1 |          1
+    3 |   3 |   4 |          3
+    3 |   5 |   9 |          5
+    3 |   7 |  16 |          7
+    3 |   9 |  25 |          9
+(20 rows)
+
+SELECT FOUR, TEN, SUM(TEN) OVER (PARTITION BY FOUR ORDER BY TEN RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), LAST_VALUE(TEN) OVER (PARTITION BY FOUR ORDER BY TEN RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+FROM (SELECT DISTINCT TEN, FOUR FROM CLONE_TENK1) SS ORDER BY 1, 2, 3, 4;
+ four | ten | sum | last_value 
+------+-----+-----+------------
+    0 |   0 |   0 |          0
+    0 |   2 |   2 |          2
+    0 |   4 |   6 |          4
+    0 |   6 |  12 |          6
+    0 |   8 |  20 |          8
+    1 |   1 |   1 |          1
+    1 |   3 |   4 |          3
+    1 |   5 |   9 |          5
+    1 |   7 |  16 |          7
+    1 |   9 |  25 |          9
+    2 |   0 |   0 |          0
+    2 |   2 |   2 |          2
+    2 |   4 |   6 |          4
+    2 |   6 |  12 |          6
+    2 |   8 |  20 |          8
+    3 |   1 |   1 |          1
+    3 |   3 |   4 |          3
+    3 |   5 |   9 |          5
+    3 |   7 |  16 |          7
+    3 |   9 |  25 |          9
+(20 rows)
+
+SELECT FOUR, TEN, SUM(TEN) OVER (PARTITION BY FOUR ORDER BY TEN RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), LAST_VALUE(TEN) OVER (PARTITION BY FOUR ORDER BY TEN RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+FROM (SELECT DISTINCT TEN, FOUR FROM CLONE_TENK1) SS ORDER BY 1, 2, 3, 4;
+ four | ten | sum | last_value 
+------+-----+-----+------------
+    0 |   0 |  20 |          8
+    0 |   2 |  20 |          8
+    0 |   4 |  20 |          8
+    0 |   6 |  20 |          8
+    0 |   8 |  20 |          8
+    1 |   1 |  25 |          9
+    1 |   3 |  25 |          9
+    1 |   5 |  25 |          9
+    1 |   7 |  25 |          9
+    1 |   9 |  25 |          9
+    2 |   0 |  20 |          8
+    2 |   2 |  20 |          8
+    2 |   4 |  20 |          8
+    2 |   6 |  20 |          8
+    2 |   8 |  20 |          8
+    3 |   1 |  25 |          9
+    3 |   3 |  25 |          9
+    3 |   5 |  25 |          9
+    3 |   7 |  25 |          9
+    3 |   9 |  25 |          9
+(20 rows)
+
+SELECT FOUR, TEN/4 AS TWO,SUM(TEN/4) OVER (PARTITION BY FOUR ORDER BY TEN/4 RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),LAST_VALUE(TEN/4) OVER (PARTITION BY FOUR ORDER BY TEN/4 RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+FROM (SELECT DISTINCT TEN, FOUR FROM CLONE_TENK1) SS ORDER BY 1, 2, 3, 4;
+ four | two  | sum  | last_value 
+------+------+------+------------
+    0 |    0 |    0 |          0
+    0 |   .5 |   .5 |         .5
+    0 |    1 |  1.5 |          1
+    0 |  1.5 |    3 |        1.5
+    0 |    2 |    5 |          2
+    1 |  .25 |  .25 |        .25
+    1 |  .75 |    1 |        .75
+    1 | 1.25 | 2.25 |       1.25
+    1 | 1.75 |    4 |       1.75
+    1 | 2.25 | 6.25 |       2.25
+    2 |    0 |    0 |          0
+    2 |   .5 |   .5 |         .5
+    2 |    1 |  1.5 |          1
+    2 |  1.5 |    3 |        1.5
+    2 |    2 |    5 |          2
+    3 |  .25 |  .25 |        .25
+    3 |  .75 |    1 |        .75
+    3 | 1.25 | 2.25 |       1.25
+    3 | 1.75 |    4 |       1.75
+    3 | 2.25 | 6.25 |       2.25
+(20 rows)
+
+SELECT FOUR, TEN/4 AS TWO, SUM(TEN/4) OVER (PARTITION BY FOUR ORDER BY TEN/4 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), LAST_VALUE(TEN/4) OVER (PARTITION BY FOUR ORDER BY TEN/4 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+FROM (SELECT DISTINCT TEN, FOUR FROM CLONE_TENK1) SS ORDER BY 1, 2, 3, 4;
+ four | two  | sum  | last_value 
+------+------+------+------------
+    0 |    0 |    0 |          0
+    0 |   .5 |   .5 |         .5
+    0 |    1 |  1.5 |          1
+    0 |  1.5 |    3 |        1.5
+    0 |    2 |    5 |          2
+    1 |  .25 |  .25 |        .25
+    1 |  .75 |    1 |        .75
+    1 | 1.25 | 2.25 |       1.25
+    1 | 1.75 |    4 |       1.75
+    1 | 2.25 | 6.25 |       2.25
+    2 |    0 |    0 |          0
+    2 |   .5 |   .5 |         .5
+    2 |    1 |  1.5 |          1
+    2 |  1.5 |    3 |        1.5
+    2 |    2 |    5 |          2
+    3 |  .25 |  .25 |        .25
+    3 |  .75 |    1 |        .75
+    3 | 1.25 | 2.25 |       1.25
+    3 | 1.75 |    4 |       1.75
+    3 | 2.25 | 6.25 |       2.25
+(20 rows)
+
+SELECT SUM(UNIQUE1) OVER (ORDER BY FOUR, UNIQUE1 RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING),
+	UNIQUE1, FOUR
+FROM CLONE_TENK1 WHERE UNIQUE1 < 10;
+ sum | unique1 | four 
+-----+---------+------
+  45 |       0 |    0
+  45 |       4 |    0
+  41 |       8 |    0
+  33 |       1 |    1
+  32 |       5 |    1
+  27 |       9 |    1
+  18 |       2 |    2
+  16 |       6 |    2
+  10 |       3 |    3
+   7 |       7 |    3
+(10 rows)
+
+SELECT SUM(UNIQUE1) OVER (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING), UNIQUE1, FOUR
+FROM (SELECT UNIQUE1, FOUR FROM CLONE_TENK1 WHERE UNIQUE1 < 10 ORDER BY 1, 2) STENK1 ORDER BY 1, 2, 3;
+ sum | unique1 | four 
+-----+---------+------
+   9 |       9 |    1
+  17 |       8 |    0
+  24 |       7 |    3
+  30 |       6 |    2
+  35 |       5 |    1
+  39 |       4 |    0
+  42 |       3 |    3
+  44 |       2 |    2
+  45 |       0 |    0
+  45 |       1 |    1
+(10 rows)
+
+SELECT SUM(UNIQUE1) OVER (ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING), UNIQUE1, FOUR
+FROM (SELECT UNIQUE1, FOUR FROM CLONE_TENK1 WHERE UNIQUE1 < 10 ORDER BY 1, 2) STENK1 ORDER BY 1, 2, 3;
+ sum | unique1 | four 
+-----+---------+------
+   3 |       0 |    0
+   6 |       1 |    1
+  10 |       2 |    2
+  15 |       3 |    3
+  20 |       4 |    0
+  24 |       9 |    1
+  25 |       5 |    1
+  30 |       6 |    2
+  30 |       8 |    0
+  35 |       7 |    3
+(10 rows)
+
+SELECT SUM(UNIQUE1) OVER (ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING), UNIQUE1, FOUR
+FROM (SELECT UNIQUE1, FOUR FROM CLONE_TENK1 WHERE UNIQUE1 < 10 ORDER BY 1, 2) STENK1 ORDER BY 1, 2, 3;
+ sum | unique1 | four 
+-----+---------+------
+   0 |       1 |    1
+   1 |       2 |    2
+   3 |       3 |    3
+   5 |       4 |    0
+   7 |       5 |    1
+   9 |       6 |    2
+  11 |       7 |    3
+  13 |       8 |    0
+  15 |       9 |    1
+     |       0 |    0
+(10 rows)
+
+SELECT SUM(UNIQUE1) OVER (ROWS BETWEEN 1 FOLLOWING AND 3 FOLLOWING), UNIQUE1, FOUR
+FROM (SELECT UNIQUE1, FOUR FROM CLONE_TENK1 WHERE UNIQUE1 < 10 ORDER BY 1, 2) STENK1 ORDER BY 1, 2, 3;
+ sum | unique1 | four 
+-----+---------+------
+   6 |       0 |    0
+   9 |       1 |    1
+   9 |       8 |    0
+  12 |       2 |    2
+  15 |       3 |    3
+  17 |       7 |    3
+  18 |       4 |    0
+  21 |       5 |    1
+  24 |       6 |    2
+     |       9 |    1
+(10 rows)
+
+SELECT SUM(UNIQUE1) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND 1 FOLLOWING), UNIQUE1, FOUR
+FROM (SELECT UNIQUE1, FOUR FROM CLONE_TENK1 WHERE UNIQUE1 < 10 ORDER BY 1, 2) STENK1 ORDER BY 1, 2, 3;
+ sum | unique1 | four 
+-----+---------+------
+   1 |       0 |    0
+   3 |       1 |    1
+   6 |       2 |    2
+  10 |       3 |    3
+  15 |       4 |    0
+  21 |       5 |    1
+  28 |       6 |    2
+  36 |       7 |    3
+  45 |       8 |    0
+  45 |       9 |    1
+(10 rows)
+
+SELECT SUM(UNIQUE1) OVER (W RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING), UNIQUE1, FOUR
+FROM CLONE_TENK1 WHERE UNIQUE1 < 10 WINDOW W AS (ORDER BY FOUR, UNIQUE1);
+ sum | unique1 | four 
+-----+---------+------
+  45 |       0 |    0
+  45 |       4 |    0
+  41 |       8 |    0
+  33 |       1 |    1
+  32 |       5 |    1
+  27 |       9 |    1
+  18 |       2 |    2
+  16 |       6 |    2
+  10 |       3 |    3
+   7 |       7 |    3
+(10 rows)
+
+-- FAIL: NOT IMPLEMENTED YET
+SELECT SUM(UNIQUE1) OVER (ORDER BY FOUR, TEN, UNIQUE1 RANGE BETWEEN 2::INT8 PRECEDING AND 1::INT2 PRECEDING), UNIQUE1, FOUR
+FROM CLONE_TENK1 WHERE UNIQUE1 < 10;
+ERROR:  RANGE PRECEDING is only supported with UNBOUNDED
+LINE 1: ...CT SUM(UNIQUE1) OVER (ORDER BY FOUR, TEN, UNIQUE1 RANGE BETW...
+                                                             ^
+SELECT FIRST_VALUE(UNIQUE1) OVER W, NTH_VALUE(UNIQUE1, 2) OVER W AS NTH_2, LAST_VALUE(UNIQUE1) OVER W, UNIQUE1, FOUR
+FROM CLONE_TENK1 WHERE UNIQUE1 < 10
+WINDOW W AS (ORDER BY FOUR, TEN, UNIQUE1 RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING);
+ first_value | nth_2 | last_value | unique1 | four 
+-------------+-------+------------+---------+------
+           0 |     4 |          7 |       0 |    0
+           4 |     8 |          7 |       4 |    0
+           8 |     1 |          7 |       8 |    0
+           1 |     5 |          7 |       1 |    1
+           5 |     9 |          7 |       5 |    1
+           9 |     2 |          7 |       9 |    1
+           2 |     6 |          7 |       2 |    2
+           6 |     3 |          7 |       6 |    2
+           3 |     7 |          7 |       3 |    3
+           7 |       |          7 |       7 |    3
+(10 rows)
+
+SELECT SUM(UNIQUE1) OVER (ORDER BY UNIQUE1 ROWS (SELECT UNIQUE1 FROM CLONE_TENK1 ORDER BY UNIQUE1 LIMIT 1) + 1 PRECEDING), UNIQUE1
+FROM (SELECT UNIQUE1, FOUR FROM CLONE_TENK1 WHERE UNIQUE1 < 10 ORDER BY 1, 2) STENK1;
+ sum | unique1 
+-----+---------
+   0 |       0
+   1 |       1
+   3 |       2
+   5 |       3
+   7 |       4
+   9 |       5
+  11 |       6
+  13 |       7
+  15 |       8
+  17 |       9
+(10 rows)
+
+CREATE VIEW V_WINDOW AS SELECT I, SUM(I) OVER (ORDER BY I ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS SUM_ROWS FROM GENERATE_SERIES(1, 10) I;
+SELECT * FROM V_WINDOW;
+ i  | sum_rows 
+----+----------
+  1 |        3
+  2 |        6
+  3 |        9
+  4 |       12
+  5 |       15
+  6 |       18
+  7 |       21
+  8 |       24
+  9 |       27
+ 10 |       19
+(10 rows)
+
+SELECT PG_GET_VIEWDEF('V_WINDOW');
+                                                         pg_get_viewdef                                                          
+---------------------------------------------------------------------------------------------------------------------------------
+ SELECT i.i, sum(i.i) OVER (ORDER BY i.i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS sum_rows FROM generate_series(1, 10) i(i);
+(1 row)
+
+-- WITH UNION
+SELECT COUNT(*) OVER (PARTITION BY FOUR) FROM (SELECT * FROM CLONE_TENK1 UNION ALL SELECT * FROM TENK2)S LIMIT 0;
+ count 
+-------
+(0 rows)
+
+-- ORDERING BY A NON-INTEGER CONSTANT IS ALLOWED
+SELECT RANK() OVER (ORDER BY LENGTH('ABC'));
+ rank 
+------
+    1
+(1 row)
+
+-- CAN'T ORDER BY ANOTHER WINDOW FUNCTION
+SELECT RANK() OVER (ORDER BY RANK() OVER (ORDER BY RANDOM()));
+ERROR:  window functions not allowed in window definition
+LINE 1: SELECT RANK() OVER (ORDER BY RANK() OVER (ORDER BY RANDOM())...
+                                     ^
+-- SOME OTHER ERRORS
+SELECT * FROM EMPSALARY WHERE ROW_NUMBER() OVER (ORDER BY SALARY) < 10;
+ERROR:  window functions not allowed in WHERE clause
+LINE 1: SELECT * FROM EMPSALARY WHERE ROW_NUMBER() OVER (ORDER BY SA...
+                                      ^
+SELECT * FROM EMPSALARY INNER JOIN CLONE_TENK1 ON ROW_NUMBER() OVER (ORDER BY SALARY) < 10;
+ERROR:  window functions not allowed in JOIN conditions
+LINE 1: SELECT * FROM EMPSALARY INNER JOIN CLONE_TENK1 ON ROW_NUMBER...
+                                                          ^
+SELECT RANK() OVER (ORDER BY 1), COUNT(*) FROM EMPSALARY GROUP BY 1;
+ERROR:  window functions not allowed in GROUP BY clause
+LINE 1: SELECT RANK() OVER (ORDER BY 1), COUNT(*) FROM EMPSALARY GRO...
+               ^
+SELECT * FROM RANK() OVER (ORDER BY RANDOM());
+ERROR:  syntax error at or near "ORDER"
+LINE 1: SELECT * FROM RANK() OVER (ORDER BY RANDOM());
+                                   ^
+DELETE FROM EMPSALARY WHERE (RANK() OVER (ORDER BY RANDOM())) > 10;
+ERROR:  window functions not allowed in WHERE clause
+LINE 1: DELETE FROM EMPSALARY WHERE (RANK() OVER (ORDER BY RANDOM())...
+                                     ^
+DELETE FROM EMPSALARY RETURNING RANK() OVER (ORDER BY RANDOM());
+ERROR:  cannot use window function in RETURNING
+LINE 1: DELETE FROM EMPSALARY RETURNING RANK() OVER (ORDER BY RANDOM...
+                                        ^
+SELECT COUNT(*) OVER W FROM CLONE_TENK1 WINDOW W AS (ORDER BY UNIQUE1), W AS (ORDER BY UNIQUE1);
+ERROR:  window "w" is already defined
+LINE 1: ... CLONE_TENK1 WINDOW W AS (ORDER BY UNIQUE1), W AS (ORDER BY ...
+                                                             ^
+SELECT RANK() OVER (PARTITION BY FOUR, ORDER BY TEN) FROM CLONE_TENK1;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: SELECT RANK() OVER (PARTITION BY FOUR, ORDER BY TEN) FROM CL...
+                                               ^
+SELECT COUNT() OVER () FROM CLONE_TENK1;
+ERROR:  count(*) must be used to call a parameterless aggregate function
+LINE 1: SELECT COUNT() OVER () FROM CLONE_TENK1;
+               ^
+CONTEXT:  referenced column: count
+SELECT GENERATE_SERIES(1, 100) OVER () FROM EMPSALARY;
+ERROR:  OVER specified, but generate_series is not a window function nor an aggregate function
+LINE 1: SELECT GENERATE_SERIES(1, 100) OVER () FROM EMPSALARY;
+               ^
+CONTEXT:  referenced column: generate_series
+SELECT NTILE(0) OVER (ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1;
+ERROR:  argument of ntile must be greater than zero
+SELECT NTH_VALUE(FOUR, 0) OVER (ORDER BY TEN), TEN, FOUR FROM CLONE_TENK1;
+ERROR:  argument of nth_value must be greater than zero
+EXPLAIN (COSTS OFF, VERBOSE ON)
+select empno, row_number() over(partition by substr(depname,1,3)  order by salary) from empsalary order by empno;
+                                                                             QUERY PLAN                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: empno, (row_number() OVER (PARTITION BY (substr((depname)::text, 1, 3)) ORDER BY salary USING = NULLS LAST)), salary, (substr((depname)::text, 1, 3))
+   Sort Key: empsalary.empno
+   ->  WindowAgg
+         Output: empno, row_number() OVER (PARTITION BY (substr((depname)::text, 1, 3)) ORDER BY salary USING = NULLS LAST), salary, (substr((depname)::text, 1, 3))
+         ->  Sort
+               Output: salary, (substr((depname)::text, 1, 3)), empno
+               Sort Key: (substr((empsalary.depname)::text, 1, 3)), empsalary.salary
+               ->  Seq Scan on public.empsalary
+                     Output: salary, substr((depname)::text, 1, 3), empno
+(10 rows)
+
+-- CLEANUP
+DROP TABLE EMPSALARY;
+DROP TABLE CLONE_TENK1;
+DROP VIEW V_WINDOW;
+CREATE TABLE EMPSALARY (DEPNAME VARCHAR, EMPNO BIGINT, SALARY INT, ENROLL_DATE DATE) ;
+INSERT INTO EMPSALARY VALUES
+('develop', 10, 5200, '2007-08-01'),
+('sales', 1, 5000, '2006-10-01'),
+('personnel', 5, 3500, '2007-12-10'),
+('sales', 4, 4800, '2007-08-08'),
+('personnel', 2, 3900, '2006-12-23'),
+('develop', 7, 4200, '2008-01-01'),
+('develop', 9, 4500, '2008-01-01'),
+('sales', 3, 4800, '2007-08-01'),
+('develop', 8, 6000, '2006-10-01'),
+('develop', 11, 5200, '2007-08-15');
+EXPLAIN (COSTS OFF, VERBOSE ON)
+select empno, row_number() over(partition by substr(depname,1,3)  order by salary, empno) from empsalary order by empno;
+                                                                                          QUERY PLAN                                                                                           
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: empno, (row_number() OVER (PARTITION BY (substr((depname)::text, 1, 3)) ORDER BY salary USING = NULLS LAST, empno USING = NULLS LAST)), salary, (substr((depname)::text, 1, 3))
+   Sort Key: empsalary.empno
+   ->  WindowAgg
+         Output: empno, row_number() OVER (PARTITION BY (substr((depname)::text, 1, 3)) ORDER BY salary USING = NULLS LAST, empno USING = NULLS LAST), salary, (substr((depname)::text, 1, 3))
+         ->  Sort
+               Output: empno, salary, (substr((depname)::text, 1, 3))
+               Sort Key: (substr((empsalary.depname)::text, 1, 3)), empsalary.salary, empsalary.empno
+               ->  Seq Scan on public.empsalary
+                     Output: empno, salary, substr((depname)::text, 1, 3)
+(10 rows)
+
+select empno, row_number() over(partition by substr(depname,1,3)  order by salary, empno) from empsalary order by empno;
+ empno | row_number 
+-------+------------
+     1 |          3
+     2 |          2
+     3 |          1
+     4 |          2
+     5 |          1
+     7 |          1
+     8 |          5
+     9 |          2
+    10 |          3
+    11 |          4
+(10 rows)
+
+DROP TABLE EMPSALARY;
+CREATE TABLE REPLICATION_WINDOW_T1(A INT, B INT, C INT, D INT)  ;
+INSERT INTO REPLICATION_WINDOW_T1 VALUES (GENERATE_SERIES(1, 2), GENERATE_SERIES(1, 3), GENERATE_SERIES(1, 5), GENERATE_SERIES(1, 7));
+EXPLAIN (COSTS OFF, VERBOSE ON)
+SELECT 
+RANK() OVER (PARTITION BY A ORDER BY B, C, D), 
+A, B, C, D,
+SUM(A) OVER (PARTITION BY A ORDER BY B, C, D), 
+SUM(B) OVER (PARTITION BY B ORDER BY A, C, D),
+SUM(C) OVER (PARTITION BY C ORDER BY A, B, D),
+SUM(D) OVER (PARTITION BY D ORDER BY A, B, C)
+FROM REPLICATION_WINDOW_T1 ORDER BY 1, 2, 3, 4, 5;
+                                                                                                                                                                                                                                                                                 QUERY PLAN                                                                                                                                                                                                                                                                                 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (rank() OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), a, b, c, d, (sum(a) OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(b) OVER (PARTITION BY b ORDER BY a USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(c) OVER (PARTITION BY c ORDER BY a USING = NULLS LAST, b USING = NULLS LAST, d USING = NULLS LAST)), (sum(d) OVER (PARTITION BY d ORDER BY a USING = NULLS LAST, b USING = NULLS LAST, c USING = NULLS LAST))
+   Sort Key: (rank() OVER (PARTITION BY replication_window_t1.a ORDER BY replication_window_t1.b USING = NULLS LAST, replication_window_t1.c USING = NULLS LAST, replication_window_t1.d USING = NULLS LAST)), replication_window_t1.a, replication_window_t1.b, replication_window_t1.c, replication_window_t1.d
+   ->  WindowAgg
+         Output: (rank() OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), a, b, c, d, (sum(a) OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(b) OVER (PARTITION BY b ORDER BY a USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(c) OVER (PARTITION BY c ORDER BY a USING = NULLS LAST, b USING = NULLS LAST, d USING = NULLS LAST)), sum(d) OVER (PARTITION BY d ORDER BY a USING = NULLS LAST, b USING = NULLS LAST, c USING = NULLS LAST)
+         ->  Sort
+               Output: a, b, c, d, (rank() OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(a) OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(b) OVER (PARTITION BY b ORDER BY a USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(c) OVER (PARTITION BY c ORDER BY a USING = NULLS LAST, b USING = NULLS LAST, d USING = NULLS LAST))
+               Sort Key: replication_window_t1.d, replication_window_t1.a, replication_window_t1.b, replication_window_t1.c
+               ->  WindowAgg
+                     Output: a, b, c, d, (rank() OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(a) OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(b) OVER (PARTITION BY b ORDER BY a USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), sum(c) OVER (PARTITION BY c ORDER BY a USING = NULLS LAST, b USING = NULLS LAST, d USING = NULLS LAST)
+                     ->  Sort
+                           Output: a, b, c, d, (rank() OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(a) OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(b) OVER (PARTITION BY b ORDER BY a USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST))
+                           Sort Key: replication_window_t1.c, replication_window_t1.a, replication_window_t1.b, replication_window_t1.d
+                           ->  WindowAgg
+                                 Output: a, b, c, d, (rank() OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(a) OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), sum(b) OVER (PARTITION BY b ORDER BY a USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)
+                                 ->  Sort
+                                       Output: a, b, c, d, (rank() OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)), (sum(a) OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST))
+                                       Sort Key: replication_window_t1.b, replication_window_t1.a, replication_window_t1.c, replication_window_t1.d
+                                       ->  WindowAgg
+                                             Output: a, b, c, d, rank() OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST), sum(a) OVER (PARTITION BY a ORDER BY b USING = NULLS LAST, c USING = NULLS LAST, d USING = NULLS LAST)
+                                             ->  Sort
+                                                   Output: a, b, c, d
+                                                   Sort Key: replication_window_t1.a, replication_window_t1.b, replication_window_t1.c, replication_window_t1.d
+                                                   ->  Seq Scan on public.replication_window_t1
+                                                         Output: a, b, c, d
+(25 rows)
+
+SELECT 
+RANK() OVER (PARTITION BY A ORDER BY B, C, D), 
+A, B, C, D,
+SUM(A) OVER (PARTITION BY A ORDER BY B, C, D), 
+SUM(B) OVER (PARTITION BY B ORDER BY A, C, D),
+SUM(C) OVER (PARTITION BY C ORDER BY A, B, D),
+SUM(D) OVER (PARTITION BY D ORDER BY A, B, C)
+FROM REPLICATION_WINDOW_T1 ORDER BY 1, 2, 3, 4, 5;
+ rank | a | b | c | d | sum | sum | sum | sum 
+------+---+---+---+---+-----+-----+-----+-----
+    1 | 1 | 1 | 1 | 1 |   1 |   1 |   1 |   1
+    1 | 2 | 1 | 1 | 1 |   2 |  36 |  22 |  16
+    2 | 1 | 1 | 1 | 2 |   2 |   2 |   2 |   2
+    2 | 2 | 1 | 1 | 2 |   4 |  37 |  23 |  32
+    3 | 1 | 1 | 1 | 3 |   3 |   3 |   3 |   3
+    3 | 2 | 1 | 1 | 3 |   6 |  38 |  24 |  48
+    4 | 1 | 1 | 1 | 4 |   4 |   4 |   4 |   4
+    4 | 2 | 1 | 1 | 4 |   8 |  39 |  25 |  64
+    5 | 1 | 1 | 1 | 5 |   5 |   5 |   5 |   5
+    5 | 2 | 1 | 1 | 5 |  10 |  40 |  26 |  80
+    6 | 1 | 1 | 1 | 6 |   6 |   6 |   6 |   6
+    6 | 2 | 1 | 1 | 6 |  12 |  41 |  27 |  96
+    7 | 1 | 1 | 1 | 7 |   7 |   7 |   7 |   7
+    7 | 2 | 1 | 1 | 7 |  14 |  42 |  28 | 112
+    8 | 1 | 1 | 2 | 1 |   8 |   8 |   2 |   2
+    8 | 2 | 1 | 2 | 1 |  16 |  43 |  44 |  17
+    9 | 1 | 1 | 2 | 2 |   9 |   9 |   4 |   4
+    9 | 2 | 1 | 2 | 2 |  18 |  44 |  46 |  34
+   10 | 1 | 1 | 2 | 3 |  10 |  10 |   6 |   6
+   10 | 2 | 1 | 2 | 3 |  20 |  45 |  48 |  51
+   11 | 1 | 1 | 2 | 4 |  11 |  11 |   8 |   8
+   11 | 2 | 1 | 2 | 4 |  22 |  46 |  50 |  68
+   12 | 1 | 1 | 2 | 5 |  12 |  12 |  10 |  10
+   12 | 2 | 1 | 2 | 5 |  24 |  47 |  52 |  85
+   13 | 1 | 1 | 2 | 6 |  13 |  13 |  12 |  12
+   13 | 2 | 1 | 2 | 6 |  26 |  48 |  54 | 102
+   14 | 1 | 1 | 2 | 7 |  14 |  14 |  14 |  14
+   14 | 2 | 1 | 2 | 7 |  28 |  49 |  56 | 119
+   15 | 1 | 1 | 3 | 1 |  15 |  15 |   3 |   3
+   15 | 2 | 1 | 3 | 1 |  30 |  50 |  66 |  18
+   16 | 1 | 1 | 3 | 2 |  16 |  16 |   6 |   6
+   16 | 2 | 1 | 3 | 2 |  32 |  51 |  69 |  36
+   17 | 1 | 1 | 3 | 3 |  17 |  17 |   9 |   9
+   17 | 2 | 1 | 3 | 3 |  34 |  52 |  72 |  54
+   18 | 1 | 1 | 3 | 4 |  18 |  18 |  12 |  12
+   18 | 2 | 1 | 3 | 4 |  36 |  53 |  75 |  72
+   19 | 1 | 1 | 3 | 5 |  19 |  19 |  15 |  15
+   19 | 2 | 1 | 3 | 5 |  38 |  54 |  78 |  90
+   20 | 1 | 1 | 3 | 6 |  20 |  20 |  18 |  18
+   20 | 2 | 1 | 3 | 6 |  40 |  55 |  81 | 108
+   21 | 1 | 1 | 3 | 7 |  21 |  21 |  21 |  21
+   21 | 2 | 1 | 3 | 7 |  42 |  56 |  84 | 126
+   22 | 1 | 1 | 4 | 1 |  22 |  22 |   4 |   4
+   22 | 2 | 1 | 4 | 1 |  44 |  57 |  88 |  19
+   23 | 1 | 1 | 4 | 2 |  23 |  23 |   8 |   8
+   23 | 2 | 1 | 4 | 2 |  46 |  58 |  92 |  38
+   24 | 1 | 1 | 4 | 3 |  24 |  24 |  12 |  12
+   24 | 2 | 1 | 4 | 3 |  48 |  59 |  96 |  57
+   25 | 1 | 1 | 4 | 4 |  25 |  25 |  16 |  16
+   25 | 2 | 1 | 4 | 4 |  50 |  60 | 100 |  76
+   26 | 1 | 1 | 4 | 5 |  26 |  26 |  20 |  20
+   26 | 2 | 1 | 4 | 5 |  52 |  61 | 104 |  95
+   27 | 1 | 1 | 4 | 6 |  27 |  27 |  24 |  24
+   27 | 2 | 1 | 4 | 6 |  54 |  62 | 108 | 114
+   28 | 1 | 1 | 4 | 7 |  28 |  28 |  28 |  28
+   28 | 2 | 1 | 4 | 7 |  56 |  63 | 112 | 133
+   29 | 1 | 1 | 5 | 1 |  29 |  29 |   5 |   5
+   29 | 2 | 1 | 5 | 1 |  58 |  64 | 110 |  20
+   30 | 1 | 1 | 5 | 2 |  30 |  30 |  10 |  10
+   30 | 2 | 1 | 5 | 2 |  60 |  65 | 115 |  40
+   31 | 1 | 1 | 5 | 3 |  31 |  31 |  15 |  15
+   31 | 2 | 1 | 5 | 3 |  62 |  66 | 120 |  60
+   32 | 1 | 1 | 5 | 4 |  32 |  32 |  20 |  20
+   32 | 2 | 1 | 5 | 4 |  64 |  67 | 125 |  80
+   33 | 1 | 1 | 5 | 5 |  33 |  33 |  25 |  25
+   33 | 2 | 1 | 5 | 5 |  66 |  68 | 130 | 100
+   34 | 1 | 1 | 5 | 6 |  34 |  34 |  30 |  30
+   34 | 2 | 1 | 5 | 6 |  68 |  69 | 135 | 120
+   35 | 1 | 1 | 5 | 7 |  35 |  35 |  35 |  35
+   35 | 2 | 1 | 5 | 7 |  70 |  70 | 140 | 140
+   36 | 1 | 2 | 1 | 1 |  36 |   2 |   8 |   6
+   36 | 2 | 2 | 1 | 1 |  72 |  72 |  29 |  21
+   37 | 1 | 2 | 1 | 2 |  37 |   4 |   9 |  12
+   37 | 2 | 2 | 1 | 2 |  74 |  74 |  30 |  42
+   38 | 1 | 2 | 1 | 3 |  38 |   6 |  10 |  18
+   38 | 2 | 2 | 1 | 3 |  76 |  76 |  31 |  63
+   39 | 1 | 2 | 1 | 4 |  39 |   8 |  11 |  24
+   39 | 2 | 2 | 1 | 4 |  78 |  78 |  32 |  84
+   40 | 1 | 2 | 1 | 5 |  40 |  10 |  12 |  30
+   40 | 2 | 2 | 1 | 5 |  80 |  80 |  33 | 105
+   41 | 1 | 2 | 1 | 6 |  41 |  12 |  13 |  36
+   41 | 2 | 2 | 1 | 6 |  82 |  82 |  34 | 126
+   42 | 1 | 2 | 1 | 7 |  42 |  14 |  14 |  42
+   42 | 2 | 2 | 1 | 7 |  84 |  84 |  35 | 147
+   43 | 1 | 2 | 2 | 1 |  43 |  16 |  16 |   7
+   43 | 2 | 2 | 2 | 1 |  86 |  86 |  58 |  22
+   44 | 1 | 2 | 2 | 2 |  44 |  18 |  18 |  14
+   44 | 2 | 2 | 2 | 2 |  88 |  88 |  60 |  44
+   45 | 1 | 2 | 2 | 3 |  45 |  20 |  20 |  21
+   45 | 2 | 2 | 2 | 3 |  90 |  90 |  62 |  66
+   46 | 1 | 2 | 2 | 4 |  46 |  22 |  22 |  28
+   46 | 2 | 2 | 2 | 4 |  92 |  92 |  64 |  88
+   47 | 1 | 2 | 2 | 5 |  47 |  24 |  24 |  35
+   47 | 2 | 2 | 2 | 5 |  94 |  94 |  66 | 110
+   48 | 1 | 2 | 2 | 6 |  48 |  26 |  26 |  42
+   48 | 2 | 2 | 2 | 6 |  96 |  96 |  68 | 132
+   49 | 1 | 2 | 2 | 7 |  49 |  28 |  28 |  49
+   49 | 2 | 2 | 2 | 7 |  98 |  98 |  70 | 154
+   50 | 1 | 2 | 3 | 1 |  50 |  30 |  24 |   8
+   50 | 2 | 2 | 3 | 1 | 100 | 100 |  87 |  23
+   51 | 1 | 2 | 3 | 2 |  51 |  32 |  27 |  16
+   51 | 2 | 2 | 3 | 2 | 102 | 102 |  90 |  46
+   52 | 1 | 2 | 3 | 3 |  52 |  34 |  30 |  24
+   52 | 2 | 2 | 3 | 3 | 104 | 104 |  93 |  69
+   53 | 1 | 2 | 3 | 4 |  53 |  36 |  33 |  32
+   53 | 2 | 2 | 3 | 4 | 106 | 106 |  96 |  92
+   54 | 1 | 2 | 3 | 5 |  54 |  38 |  36 |  40
+   54 | 2 | 2 | 3 | 5 | 108 | 108 |  99 | 115
+   55 | 1 | 2 | 3 | 6 |  55 |  40 |  39 |  48
+   55 | 2 | 2 | 3 | 6 | 110 | 110 | 102 | 138
+   56 | 1 | 2 | 3 | 7 |  56 |  42 |  42 |  56
+   56 | 2 | 2 | 3 | 7 | 112 | 112 | 105 | 161
+   57 | 1 | 2 | 4 | 1 |  57 |  44 |  32 |   9
+   57 | 2 | 2 | 4 | 1 | 114 | 114 | 116 |  24
+   58 | 1 | 2 | 4 | 2 |  58 |  46 |  36 |  18
+   58 | 2 | 2 | 4 | 2 | 116 | 116 | 120 |  48
+   59 | 1 | 2 | 4 | 3 |  59 |  48 |  40 |  27
+   59 | 2 | 2 | 4 | 3 | 118 | 118 | 124 |  72
+   60 | 1 | 2 | 4 | 4 |  60 |  50 |  44 |  36
+   60 | 2 | 2 | 4 | 4 | 120 | 120 | 128 |  96
+   61 | 1 | 2 | 4 | 5 |  61 |  52 |  48 |  45
+   61 | 2 | 2 | 4 | 5 | 122 | 122 | 132 | 120
+   62 | 1 | 2 | 4 | 6 |  62 |  54 |  52 |  54
+   62 | 2 | 2 | 4 | 6 | 124 | 124 | 136 | 144
+   63 | 1 | 2 | 4 | 7 |  63 |  56 |  56 |  63
+   63 | 2 | 2 | 4 | 7 | 126 | 126 | 140 | 168
+   64 | 1 | 2 | 5 | 1 |  64 |  58 |  40 |  10
+   64 | 2 | 2 | 5 | 1 | 128 | 128 | 145 |  25
+   65 | 1 | 2 | 5 | 2 |  65 |  60 |  45 |  20
+   65 | 2 | 2 | 5 | 2 | 130 | 130 | 150 |  50
+   66 | 1 | 2 | 5 | 3 |  66 |  62 |  50 |  30
+   66 | 2 | 2 | 5 | 3 | 132 | 132 | 155 |  75
+   67 | 1 | 2 | 5 | 4 |  67 |  64 |  55 |  40
+   67 | 2 | 2 | 5 | 4 | 134 | 134 | 160 | 100
+   68 | 1 | 2 | 5 | 5 |  68 |  66 |  60 |  50
+   68 | 2 | 2 | 5 | 5 | 136 | 136 | 165 | 125
+   69 | 1 | 2 | 5 | 6 |  69 |  68 |  65 |  60
+   69 | 2 | 2 | 5 | 6 | 138 | 138 | 170 | 150
+   70 | 1 | 2 | 5 | 7 |  70 |  70 |  70 |  70
+   70 | 2 | 2 | 5 | 7 | 140 | 140 | 175 | 175
+   71 | 1 | 3 | 1 | 1 |  71 |   3 |  15 |  11
+   71 | 2 | 3 | 1 | 1 | 142 | 108 |  36 |  26
+   72 | 1 | 3 | 1 | 2 |  72 |   6 |  16 |  22
+   72 | 2 | 3 | 1 | 2 | 144 | 111 |  37 |  52
+   73 | 1 | 3 | 1 | 3 |  73 |   9 |  17 |  33
+   73 | 2 | 3 | 1 | 3 | 146 | 114 |  38 |  78
+   74 | 1 | 3 | 1 | 4 |  74 |  12 |  18 |  44
+   74 | 2 | 3 | 1 | 4 | 148 | 117 |  39 | 104
+   75 | 1 | 3 | 1 | 5 |  75 |  15 |  19 |  55
+   75 | 2 | 3 | 1 | 5 | 150 | 120 |  40 | 130
+   76 | 1 | 3 | 1 | 6 |  76 |  18 |  20 |  66
+   76 | 2 | 3 | 1 | 6 | 152 | 123 |  41 | 156
+   77 | 1 | 3 | 1 | 7 |  77 |  21 |  21 |  77
+   77 | 2 | 3 | 1 | 7 | 154 | 126 |  42 | 182
+   78 | 1 | 3 | 2 | 1 |  78 |  24 |  30 |  12
+   78 | 2 | 3 | 2 | 1 | 156 | 129 |  72 |  27
+   79 | 1 | 3 | 2 | 2 |  79 |  27 |  32 |  24
+   79 | 2 | 3 | 2 | 2 | 158 | 132 |  74 |  54
+   80 | 1 | 3 | 2 | 3 |  80 |  30 |  34 |  36
+   80 | 2 | 3 | 2 | 3 | 160 | 135 |  76 |  81
+   81 | 1 | 3 | 2 | 4 |  81 |  33 |  36 |  48
+   81 | 2 | 3 | 2 | 4 | 162 | 138 |  78 | 108
+   82 | 1 | 3 | 2 | 5 |  82 |  36 |  38 |  60
+   82 | 2 | 3 | 2 | 5 | 164 | 141 |  80 | 135
+   83 | 1 | 3 | 2 | 6 |  83 |  39 |  40 |  72
+   83 | 2 | 3 | 2 | 6 | 166 | 144 |  82 | 162
+   84 | 1 | 3 | 2 | 7 |  84 |  42 |  42 |  84
+   84 | 2 | 3 | 2 | 7 | 168 | 147 |  84 | 189
+   85 | 1 | 3 | 3 | 1 |  85 |  45 |  45 |  13
+   85 | 2 | 3 | 3 | 1 | 170 | 150 | 108 |  28
+   86 | 1 | 3 | 3 | 2 |  86 |  48 |  48 |  26
+   86 | 2 | 3 | 3 | 2 | 172 | 153 | 111 |  56
+   87 | 1 | 3 | 3 | 3 |  87 |  51 |  51 |  39
+   87 | 2 | 3 | 3 | 3 | 174 | 156 | 114 |  84
+   88 | 1 | 3 | 3 | 4 |  88 |  54 |  54 |  52
+   88 | 2 | 3 | 3 | 4 | 176 | 159 | 117 | 112
+   89 | 1 | 3 | 3 | 5 |  89 |  57 |  57 |  65
+   89 | 2 | 3 | 3 | 5 | 178 | 162 | 120 | 140
+   90 | 1 | 3 | 3 | 6 |  90 |  60 |  60 |  78
+   90 | 2 | 3 | 3 | 6 | 180 | 165 | 123 | 168
+   91 | 1 | 3 | 3 | 7 |  91 |  63 |  63 |  91
+   91 | 2 | 3 | 3 | 7 | 182 | 168 | 126 | 196
+   92 | 1 | 3 | 4 | 1 |  92 |  66 |  60 |  14
+   92 | 2 | 3 | 4 | 1 | 184 | 171 | 144 |  29
+   93 | 1 | 3 | 4 | 2 |  93 |  69 |  64 |  28
+   93 | 2 | 3 | 4 | 2 | 186 | 174 | 148 |  58
+   94 | 1 | 3 | 4 | 3 |  94 |  72 |  68 |  42
+   94 | 2 | 3 | 4 | 3 | 188 | 177 | 152 |  87
+   95 | 1 | 3 | 4 | 4 |  95 |  75 |  72 |  56
+   95 | 2 | 3 | 4 | 4 | 190 | 180 | 156 | 116
+   96 | 1 | 3 | 4 | 5 |  96 |  78 |  76 |  70
+   96 | 2 | 3 | 4 | 5 | 192 | 183 | 160 | 145
+   97 | 1 | 3 | 4 | 6 |  97 |  81 |  80 |  84
+   97 | 2 | 3 | 4 | 6 | 194 | 186 | 164 | 174
+   98 | 1 | 3 | 4 | 7 |  98 |  84 |  84 |  98
+   98 | 2 | 3 | 4 | 7 | 196 | 189 | 168 | 203
+   99 | 1 | 3 | 5 | 1 |  99 |  87 |  75 |  15
+   99 | 2 | 3 | 5 | 1 | 198 | 192 | 180 |  30
+  100 | 1 | 3 | 5 | 2 | 100 |  90 |  80 |  30
+  100 | 2 | 3 | 5 | 2 | 200 | 195 | 185 |  60
+  101 | 1 | 3 | 5 | 3 | 101 |  93 |  85 |  45
+  101 | 2 | 3 | 5 | 3 | 202 | 198 | 190 |  90
+  102 | 1 | 3 | 5 | 4 | 102 |  96 |  90 |  60
+  102 | 2 | 3 | 5 | 4 | 204 | 201 | 195 | 120
+  103 | 1 | 3 | 5 | 5 | 103 |  99 |  95 |  75
+  103 | 2 | 3 | 5 | 5 | 206 | 204 | 200 | 150
+  104 | 1 | 3 | 5 | 6 | 104 | 102 | 100 |  90
+  104 | 2 | 3 | 5 | 6 | 208 | 207 | 205 | 180
+  105 | 1 | 3 | 5 | 7 | 105 | 105 | 105 | 105
+  105 | 2 | 3 | 5 | 7 | 210 | 210 | 210 | 210
+(210 rows)
+
+DROP TABLE REPLICATION_WINDOW_T1;
+CREATE TABLE REPLICATION_WINDOW_T1(ID INT ,NAME VARCHAR(20),ZIP VARCHAR(20))  ;
+CREATE TABLE REPLICATION_WINDOW_T2(ID INT,STREET VARCHAR(20),ZIP VARCHAR(20),C_D_ID INT,C_ID INT)  ;
+CREATE TABLE REPLICATION_WINDOW_T3(C_ID INT,STREET VARCHAR(20),ZIP VARCHAR(20) ,C_D_ID INT,ID INT)  ;
+CREATE TABLE REPLICATION_WINDOW_T4 (ID INTEGER,STREET VARCHAR(20),ZIP CHAR(9),C_D_ID INTEGER,C_W_ID INTEGER) ;
+EXPLAIN (COSTS OFF, VERBOSE ON)
+SELECT MAX(DT1.ID) OVER W 
+FROM
+(
+	SELECT REPLICATION_WINDOW_T1.ID, REPLICATION_WINDOW_T1.NAME, REPLICATION_WINDOW_T1.ZIP
+	FROM REPLICATION_WINDOW_T1
+	WHERE (REPLICATION_WINDOW_T1.ID IN ( SELECT A.ID FROM REPLICATION_WINDOW_T4 A WHERE NOT (EXISTS ( SELECT B.C_ID, B.STREET, B.ZIP, B.C_D_ID, B.ID FROM REPLICATION_WINDOW_T2 B WHERE B.C_ID = A.ID)))) ORDER BY REPLICATION_WINDOW_T1.ID, REPLICATION_WINDOW_T1.NAME, REPLICATION_WINDOW_T1.ZIP LIMIT 7
+) DT1 LEFT JOIN 
+(
+	SELECT A.ID, A.STREET, A.ZIP, A.C_D_ID, A.C_ID 
+	FROM REPLICATION_WINDOW_T3 A 
+	RIGHT JOIN REPLICATION_WINDOW_T4 B ON A.ID = B.ID::NUMERIC AND A.C_D_ID = B.C_D_ID  
+	WHERE A.ID IS NOT NULL
+)EXPLICIT_JOIN_02 ON DT1.ID=EXPLICIT_JOIN_02.ID 
+WHERE DT1.ID>=1 
+WINDOW W AS (PARTITION BY DT1.ZIP ORDER BY DT1.ID DESC)
+ORDER BY 1;
+                                                                QUERY PLAN                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (max(dt1.id) OVER (PARTITION BY dt1.zip ORDER BY dt1.id USING = NULLS LAST)), dt1.id, dt1.zip
+   Sort Key: (max(dt1.id) OVER (PARTITION BY dt1.zip ORDER BY dt1.id USING = NULLS LAST))
+   ->  WindowAgg
+         Output: max(dt1.id) OVER (PARTITION BY dt1.zip ORDER BY dt1.id USING = NULLS LAST), dt1.id, dt1.zip
+         ->  Sort
+               Output: dt1.id, dt1.zip
+               Sort Key: dt1.zip, dt1.id DESC
+               ->  Nested Loop Left Join
+                     Output: dt1.id, dt1.zip
+                     Join Filter: (dt1.id = a.id)
+                     ->  Subquery Scan on dt1
+                           Output: dt1.id, dt1.name, dt1.zip
+                           Filter: (dt1.id >= 1)
+                           ->  Limit
+                                 Output: replication_window_t1.id, replication_window_t1.name, replication_window_t1.zip
+                                 ->  Sort
+                                       Output: replication_window_t1.id, replication_window_t1.name, replication_window_t1.zip
+                                       Sort Key: replication_window_t1.id, replication_window_t1.name, replication_window_t1.zip
+                                       ->  Hash Semi Join
+                                             Output: replication_window_t1.id, replication_window_t1.name, replication_window_t1.zip
+                                             Hash Cond: (replication_window_t1.id = a.id)
+                                             ->  Seq Scan on public.replication_window_t1
+                                                   Output: replication_window_t1.id, replication_window_t1.name, replication_window_t1.zip
+                                             ->  Hash
+                                                   Output: a.id
+                                                   ->  Hash Anti Join
+                                                         Output: a.id
+                                                         Hash Cond: (a.id = b.c_id)
+                                                         ->  Seq Scan on public.replication_window_t4 a
+                                                               Output: a.id, a.street, a.zip, a.c_d_id, a.c_w_id
+                                                         ->  Hash
+                                                               Output: b.c_id
+                                                               ->  Seq Scan on public.replication_window_t2 b
+                                                                     Output: b.c_id
+                     ->  Materialize
+                           Output: a.id
+                           ->  Hash Join
+                                 Output: a.id
+                                 Hash Cond: (((b.id)::numeric = (a.id)::numeric) AND (b.c_d_id = a.c_d_id))
+                                 ->  Seq Scan on public.replication_window_t4 b
+                                       Output: b.id, b.street, b.zip, b.c_d_id, b.c_w_id
+                                 ->  Hash
+                                       Output: a.id, a.c_d_id
+                                       ->  Seq Scan on public.replication_window_t3 a
+                                             Output: a.id, a.c_d_id
+                                             Filter: (a.id IS NOT NULL)
+(47 rows)
+
+SELECT MAX(DT1.ID) OVER W 
+FROM
+(
+	SELECT REPLICATION_WINDOW_T1.ID, REPLICATION_WINDOW_T1.NAME, REPLICATION_WINDOW_T1.ZIP
+	FROM REPLICATION_WINDOW_T1
+	WHERE (REPLICATION_WINDOW_T1.ID IN ( SELECT A.ID FROM REPLICATION_WINDOW_T4 A WHERE NOT (EXISTS ( SELECT B.C_ID, B.STREET, B.ZIP, B.C_D_ID, B.ID FROM REPLICATION_WINDOW_T2 B WHERE B.C_ID = A.ID)))) ORDER BY REPLICATION_WINDOW_T1.ID, REPLICATION_WINDOW_T1.NAME, REPLICATION_WINDOW_T1.ZIP LIMIT 7
+) DT1 LEFT JOIN 
+(
+	SELECT A.ID, A.STREET, A.ZIP, A.C_D_ID, A.C_ID 
+	FROM REPLICATION_WINDOW_T3 A 
+	RIGHT JOIN REPLICATION_WINDOW_T4 B ON A.ID = B.ID::NUMERIC AND A.C_D_ID = B.C_D_ID  
+	WHERE A.ID IS NOT NULL
+)EXPLICIT_JOIN_02 ON DT1.ID=EXPLICIT_JOIN_02.ID 
+WHERE DT1.ID>=1 
+WINDOW W AS (PARTITION BY DT1.ZIP ORDER BY DT1.ID DESC)
+ORDER BY 1;
+ max 
+-----
+(0 rows)
+
+DROP TABLE REPLICATION_WINDOW_T1;
+DROP TABLE REPLICATION_WINDOW_T2;
+DROP TABLE REPLICATION_WINDOW_T3;
+DROP TABLE REPLICATION_WINDOW_T4;
+create table window_test(a int, b int, c int, d int) ;
+insert into window_test values(1, 11, generate_series(1, 30) % 5,  generate_series(1, 30) % 6);
+insert into window_test select * from window_test;
+insert into window_test select * from window_test;
+insert into window_test select * from window_test;
+insert into window_test select * from window_test;
+analyze window_test;
+explain (verbose on, costs off) select c, d, ROW_NUMBER() OVER(PARTITION BY c, d) AS QUA_ROW_NUM_1 from window_test;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ WindowAgg
+   Output: c, d, row_number() OVER (PARTITION BY c, d)
+   ->  Sort
+         Output: c, d
+         Sort Key: window_test.c, window_test.d
+         ->  Seq Scan on public.window_test
+               Output: c, d
+(7 rows)
+
+explain (verbose on, costs off)select * from (select c, d, ROW_NUMBER() OVER(PARTITION BY c, d) AS QUA_ROW_NUM_1 from window_test) AA 
+where QUA_ROW_NUM_1 = 1 order by 1, 2;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Subquery Scan on aa
+   Output: aa.c, aa.d, aa.qua_row_num_1
+   Filter: (aa.qua_row_num_1 = 1)
+   ->  WindowAgg
+         Output: window_test.c, window_test.d, row_number() OVER (PARTITION BY window_test.c, window_test.d)
+         ->  Sort
+               Output: window_test.c, window_test.d
+               Sort Key: window_test.c, window_test.d
+               ->  Seq Scan on public.window_test
+                     Output: window_test.c, window_test.d
+(10 rows)
+
+select * from (select c, d, ROW_NUMBER() OVER(PARTITION BY c, d) AS QUA_ROW_NUM_1 from window_test) AA where QUA_ROW_NUM_1 = 1 order by 1, 2;
+ c | d | qua_row_num_1 
+---+---+---------------
+ 0 | 0 |             1
+ 0 | 1 |             1
+ 0 | 2 |             1
+ 0 | 3 |             1
+ 0 | 4 |             1
+ 0 | 5 |             1
+ 1 | 0 |             1
+ 1 | 1 |             1
+ 1 | 2 |             1
+ 1 | 3 |             1
+ 1 | 4 |             1
+ 1 | 5 |             1
+ 2 | 0 |             1
+ 2 | 1 |             1
+ 2 | 2 |             1
+ 2 | 3 |             1
+ 2 | 4 |             1
+ 2 | 5 |             1
+ 3 | 0 |             1
+ 3 | 1 |             1
+ 3 | 2 |             1
+ 3 | 3 |             1
+ 3 | 4 |             1
+ 3 | 5 |             1
+ 4 | 0 |             1
+ 4 | 1 |             1
+ 4 | 2 |             1
+ 4 | 3 |             1
+ 4 | 4 |             1
+ 4 | 5 |             1
+(30 rows)
+
+explain (verbose on, costs off) select c, ((lead(c) over w - d))/5 as result from window_test window w as(partition by c, d order by c);
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ WindowAgg
+   Output: c, ((lead(c) OVER (PARTITION BY c, d) - d) / 5), d
+   ->  Sort
+         Output: c, d
+         Sort Key: window_test.c, window_test.d
+         ->  Seq Scan on public.window_test
+               Output: c, d
+(7 rows)
+
+drop table window_test;
+create table WINFUNC_TAB_HASH
+ ( c_id  integer ,
+  c_d_id  integer ,
+  c_w_id  integer  ,
+  c_first varchar(16),
+  c_middle    char(2)  ,
+  c_last  varchar(16)  ,
+  c_street_1  varchar(20),
+  c_street_2  varchar(20) ,
+  c_city  varchar(20)  ,
+  c_state char(2)  ,
+  c_zip   char(9)  ,
+  c_phone char(16)  ,
+  c_since timestamp without time zone,
+  c_credit    char(2),
+  c_credit_lim  numeric(12,2),
+  c_discount  numeric(4,4) ,
+  c_balance  numeric(12,2)   ,
+  c_ytd_payment numeric(12,2) ,
+  c_payment_cnt  integer  ,
+  c_delivery_cnt integer ,
+  c_data  varchar(500),
+  e      regproc)
+  ;
+explain (verbose on, costs off)
+SELECT * FROM  (SELECT  e, C_ID AS ID1, LEAD(C_ID<10) OVER W AS ID2,  C_SINCE AS DATE1, 
+ LEAD(substr(C_SINCE,1,10) ) OVER W AS DATE2  FROM WINFUNC_TAB_HASH
+ WINDOW W AS (PARTITION BY e ORDER BY e, C_ID , C_D_ID , C_SINCE ,C_FIRST ,
+ C_MIDDLE ,C_LAST,C_CITY,C_STREET_1,C_STREET_2)) 
+AS TEMP WHERE e is not null and id1 is not null ORDER BY 1,2,3,4,5;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: temp.e, temp.id1, temp.id2, temp.date1, temp.date2
+   Sort Key: temp.e, temp.id1, temp.id2, temp.date1, temp.date2
+   ->  Subquery Scan on temp
+         Output: temp.e, temp.id1, temp.id2, temp.date1, temp.date2
+         Filter: ((temp.e IS NOT NULL) AND (temp.id1 IS NOT NULL))
+         ->  WindowAgg
+               Output: winfunc_tab_hash.e, winfunc_tab_hash.c_id, lead((winfunc_tab_hash.c_id < 10)) OVER (PARTITION BY winfunc_tab_hash.e ORDER BY winfunc_tab_hash.c_id USING = NULLS LAST, winfunc_tab_hash.c_d_id USING = NULLS LAST, winfunc_tab_hash.c_since USING = NULLS LAST, winfunc_tab_hash.c_first USING = NULLS LAST, winfunc_tab_hash.c_middle USING = NULLS LAST, winfunc_tab_hash.c_last USING = NULLS LAST, winfunc_tab_hash.c_city USING = NULLS LAST, winfunc_tab_hash.c_street_1 USING = NULLS LAST, winfunc_tab_hash.c_street_2 USING = NULLS LAST), winfunc_tab_hash.c_since, lead(substr((winfunc_tab_hash.c_since)::text, 1, 10)) OVER (PARTITION BY winfunc_tab_hash.e ORDER BY winfunc_tab_hash.c_id USING = NULLS LAST, winfunc_tab_hash.c_d_id USING = NULLS LAST, winfunc_tab_hash.c_since USING = NULLS LAST, winfunc_tab_hash.c_first USING = NULLS LAST, winfunc_tab_hash.c_middle USING = NULLS LAST, winfunc_tab_hash.c_last USING = NULLS LAST, winfunc_tab_hash.c_city USING = NULLS LAST, winfunc_tab_hash.c_street_1 USING = NULLS LAST, winfunc_tab_hash.c_street_2 USING = NULLS LAST), winfunc_tab_hash.c_d_id, winfunc_tab_hash.c_first, winfunc_tab_hash.c_middle, winfunc_tab_hash.c_last, winfunc_tab_hash.c_city, winfunc_tab_hash.c_street_1, winfunc_tab_hash.c_street_2
+               ->  Sort
+                     Output: winfunc_tab_hash.e, winfunc_tab_hash.c_id, winfunc_tab_hash.c_since, winfunc_tab_hash.c_d_id, winfunc_tab_hash.c_first, winfunc_tab_hash.c_middle, winfunc_tab_hash.c_last, winfunc_tab_hash.c_city, winfunc_tab_hash.c_street_1, winfunc_tab_hash.c_street_2
+                     Sort Key: winfunc_tab_hash.e, winfunc_tab_hash.c_id, winfunc_tab_hash.c_d_id, winfunc_tab_hash.c_since, winfunc_tab_hash.c_first, winfunc_tab_hash.c_middle, winfunc_tab_hash.c_last, winfunc_tab_hash.c_city, winfunc_tab_hash.c_street_1, winfunc_tab_hash.c_street_2
+                     ->  Seq Scan on public.winfunc_tab_hash
+                           Output: winfunc_tab_hash.e, winfunc_tab_hash.c_id, winfunc_tab_hash.c_since, winfunc_tab_hash.c_d_id, winfunc_tab_hash.c_first, winfunc_tab_hash.c_middle, winfunc_tab_hash.c_last, winfunc_tab_hash.c_city, winfunc_tab_hash.c_street_1, winfunc_tab_hash.c_street_2
+(13 rows)
+
+drop table WINFUNC_TAB_HASH;
+--test cost of stream 
+create table stream_cost_table(a int, b int, c regproc);
+insert into stream_cost_table select generate_series(1, 1000), generate_series(1, 1000) % 50, 'sin';
+analyze stream_cost_table;
+--window function for redistribute and broadcast
+explain (verbose on, costs off, nodes off) select avg(a::numeric(7, 2)) over(partition by b) from stream_cost_table; 
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ WindowAgg
+   Output: avg((a)::numeric(7,2)) OVER (PARTITION BY b), b
+   ->  Sort
+         Output: b, a
+         Sort Key: stream_cost_table.b
+         ->  Seq Scan on public.stream_cost_table
+               Output: b, a
+(7 rows)
+
+explain (verbose on, costs off, nodes off) select avg(a::numeric(7, 2)) over(partition by c) from stream_cost_table;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ WindowAgg
+   Output: avg((a)::numeric(7,2)) OVER (PARTITION BY c), c
+   ->  Sort
+         Output: c, a
+         Sort Key: stream_cost_table.c
+         ->  Seq Scan on public.stream_cost_table
+               Output: c, a
+(7 rows)
+
+--group stream for redistribute and broadcast
+set enable_hashagg=off; 
+explain (verbose on, nodes off, costs off) select a from stream_cost_table union (select b from stream_cost_table t group by t.b);
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Unique
+   Output: stream_cost_table.a
+   ->  Sort
+         Output: stream_cost_table.a
+         Sort Key: stream_cost_table.a
+         ->  Append
+               ->  Seq Scan on public.stream_cost_table
+                     Output: stream_cost_table.a
+               ->  Group
+                     Output: t.b
+                     Group By Key: t.b
+                     ->  Sort
+                           Output: t.b
+                           Sort Key: t.b
+                           ->  Seq Scan on public.stream_cost_table t
+                                 Output: t.b
+(16 rows)
+
+explain (verbose on, nodes off, costs off) select a from stream_cost_table union (select c from stream_cost_table t group by t.c);
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Unique
+   Output: (("*SELECT* 1".a)::regproc)
+   ->  Sort
+         Output: (("*SELECT* 1".a)::regproc)
+         Sort Key: (("*SELECT* 1".a)::regproc)
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     Output: "*SELECT* 1".a
+                     ->  Seq Scan on public.stream_cost_table
+                           Output: stream_cost_table.a
+               ->  Group
+                     Output: t.c
+                     Group By Key: t.c
+                     ->  Sort
+                           Output: t.c
+                           Sort Key: t.c
+                           ->  Seq Scan on public.stream_cost_table t
+                                 Output: t.c
+(18 rows)
+
+--distinct stream for redistribute and broadcast
+explain (verbose on, nodes off, costs off) select a from stream_cost_table union (select distinct(b) from stream_cost_table);
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Unique
+   Output: public.stream_cost_table.a
+   ->  Sort
+         Output: public.stream_cost_table.a
+         Sort Key: public.stream_cost_table.a
+         ->  Append
+               ->  Seq Scan on public.stream_cost_table
+                     Output: public.stream_cost_table.a
+               ->  Unique
+                     Output: public.stream_cost_table.b
+                     ->  Sort
+                           Output: public.stream_cost_table.b
+                           Sort Key: public.stream_cost_table.b
+                           ->  Seq Scan on public.stream_cost_table
+                                 Output: public.stream_cost_table.b
+(15 rows)
+
+explain (verbose on, nodes off, costs off) select a from stream_cost_table union (select distinct(c) from stream_cost_table);
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Unique
+   Output: (("*SELECT* 1".a)::regproc)
+   ->  Sort
+         Output: (("*SELECT* 1".a)::regproc)
+         Sort Key: (("*SELECT* 1".a)::regproc)
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     Output: "*SELECT* 1".a
+                     ->  Seq Scan on public.stream_cost_table
+                           Output: public.stream_cost_table.a
+               ->  Unique
+                     Output: public.stream_cost_table.c
+                     ->  Sort
+                           Output: public.stream_cost_table.c
+                           Sort Key: public.stream_cost_table.c
+                           ->  Seq Scan on public.stream_cost_table
+                                 Output: public.stream_cost_table.c
+(17 rows)
+
+--agg stream for redistribute and broadcast
+set enable_hashagg=on; 
+explain (verbose on, nodes off, costs off) select sum(x) from (select 1, sum(a) x from stream_cost_table group by 1);
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   Output: sum((sum(stream_cost_table.a)))
+   ->  GroupAggregate
+         Output: (1), sum(stream_cost_table.a)
+         Group By Key: 1
+         ->  Seq Scan on public.stream_cost_table
+               Output: 1, stream_cost_table.a
+(7 rows)
+
+explain (verbose on, nodes off, costs off) select sum(b) from stream_cost_table union (select sum(b) from stream_cost_table);  
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Unique
+   Output: (sum(public.stream_cost_table.b))
+   ->  Sort
+         Output: (sum(public.stream_cost_table.b))
+         Sort Key: (sum(public.stream_cost_table.b))
+         ->  Append
+               ->  Aggregate
+                     Output: sum(public.stream_cost_table.b)
+                     ->  Seq Scan on public.stream_cost_table
+                           Output: public.stream_cost_table.a, public.stream_cost_table.b, public.stream_cost_table.c
+               ->  Aggregate
+                     Output: sum(public.stream_cost_table.b)
+                     ->  Seq Scan on public.stream_cost_table
+                           Output: public.stream_cost_table.a, public.stream_cost_table.b, public.stream_cost_table.c
+(14 rows)
+
+drop table stream_cost_table;
+--test expression and windowagg
+set enable_hashagg=off;
+create table t_window(a int primary key, b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_window_pkey" for table "t_window"
+explain (verbose on, nodes off, costs off) select a, sum(b)*b, rank() over (partition by a) from t_window group by 1;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ WindowAgg
+   Output: a, ((sum(b)) * b), rank() OVER (PARTITION BY a)
+   ->  GroupAggregate
+         Output: a, sum(b), b
+         Group By Key: t_window.a
+         ->  Index Scan using t_window_pkey on public.t_window
+               Output: a, b
+(7 rows)
+
+explain (verbose on, nodes off, costs off) select b, sum(a)*coalesce(a,0), rank() over (partition by b+1) from t_window group by 1, coalesce(a,0);
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ WindowAgg
+   Output: b, ((sum(a)) * (COALESCE(a, 0))), rank() OVER (PARTITION BY ((b + 1))), (COALESCE(a, 0)), ((b + 1))
+   ->  Sort
+         Output: b, (COALESCE(a, 0)), ((b + 1)), (sum(a))
+         Sort Key: ((t_window.b + 1))
+         ->  GroupAggregate
+               Output: b, (COALESCE(a, 0)), (b + 1), sum(a)
+               Group By Key: t_window.b, (COALESCE(t_window.a, 0))
+               ->  Sort
+                     Output: b, (COALESCE(a, 0)), a
+                     Sort Key: t_window.b, (COALESCE(t_window.a, 0))
+                     ->  Seq Scan on public.t_window
+                           Output: b, COALESCE(a, 0), a
+(13 rows)
+
+drop table t_window;

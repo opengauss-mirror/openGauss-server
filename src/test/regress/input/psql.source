@@ -1,0 +1,257 @@
+--for LLT
+--test gsql outer help
+\! @abs_bindir@/gsql --help | grep command
+--test gsql inner help
+\?
+--test syntax help
+\h nohelp
+--show a function's source code
+\sf pg_table_size
+--show user info
+create user gaussuser password 'ttest@123';
+\du gaussuser
+drop user gaussuser;
+--show seq info
+create table tbl_seq(col1 int,col2 int);
+create sequence seq_test start 1 increment 2 owned by tbl_seq.col1;
+\d seq_test
+
+\! echo -n 'JJ	123'	\.| @abs_bindir@/gsql -X -d postgres -p @portstring@ -c "create table gsql_c_copy(name varchar2(10),age integer);copy gsql_c_copy from STDIN;"
+\! @abs_bindir@/gsql -X -d postgres -p @portstring@ -c "drop table gsql_c_copy;"
+
+--select_audit_log test
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+select detail_info from pg_query_audit('1111-1-1','2222-2-2') where client_conninfo != 'gs_clean@::1';
+
+create table std_table(id int);
+\copy std_table from stdout;
+1
+2
+\.
+\copy std_table from stdout
+3
+4
+\.
+select * from std_table order by 1;
+drop table std_table;
+
+\! @abs_bindir@/gsql --no-gsqlrc -d postgres -p @portstring@ -a -c "select 1;"
+
+--test session timeout work with statement timeout.
+set session_timeout = 0;
+set statement_timeout = 1000;
+set session_timeout = 3;
+select pg_sleep(2);
+--reset session and statement timeout
+set session_timeout = 600; 
+set statement_timeout = 0;
+
+--test for '~/' in PSQLRC
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c ""
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from lock_cluster_ddl();"  >a.txt 2>&1
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from unlock_cluster_ddl();"  >a.txt 2>&1
+--add llt for psql
+\dFp+
+\i+ aes_llt.sql 0123456789abcdef
+
+--test gsql parallel execute
+drop table if exists gsql_parallel_test;
+create table gsql_parallel_test(id int);
+--1)don't support parallel in transaction
+start transaction;
+\parallel 
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+\parallel
+commit;
+--2)test parallel on xxx and parallel all statements
+\parallel on 2
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+\parallel
+select count(*) from gsql_parallel_test;
+\parallel on 2
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+\parallel
+select count(*) from gsql_parallel_test;
+\parallel
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+\parallel
+select count(*) from gsql_parallel_test;
+--3)test set guc can be passed to server in child process
+--NOTICE:parallel execute select and show may cause results returnning confusion
+--as ICBC most execute parallel is about insert,it's ok.
+set enable_nestloop=off;
+\parallel on 1
+show enable_nestloop;
+show enable_nestloop;
+show enable_nestloop;
+\parallel
+set enable_nestloop=on;
+--4)don't support parallel execute on \d e.g. which have no semicolon
+\parallel
+\d+ gsql_parallel_test
+\d+ gsql_parallel_test
+\parallel
+--5)test set invalid parallel num
+\set QUIET off
+\parallel on -0.3
+\parallel on -1
+\parallel on -1.5
+\parallel on 0
+\parallel on
+\parallel on 0.9
+\parallel on 2.3
+\parallel on 1025
+\parallel on aa
+\parallel on 'bb'
+\parallel off
+\set QUIET on
+drop table gsql_parallel_test;
+--6)test parallel execute after through \c to change database and connection messages
+create database test_parallel_db;
+\c test_parallel_db
+create schema test_parallel_schema;
+\parallel on
+create table test_parallel_schema.test_parallel_table(id int);
+\parallel off
+\parallel on
+table test_parallel_schema.test_parallel_table;
+\parallel off
+\c regression
+--7)test \d(+) and \d(+) partition table command
+create table test_d_command_tbl1(id int);
+create table test_d_command_tbl2(id int) with(orientation=column);
+create table test_d_command_tbl3(id int) with(orientation=row);
+create table test_d_command_tbl4(id int) with(compression=yes);
+create index test_d_command_tbl1_idx on test_d_command_tbl1(id);
+select relname,reloptions from pg_class where relname like 'test_d_command_tbl%' order by relname;
+\d+ test_d_command_tbl1
+\d+ test_d_command_tbl2
+\d+ test_d_command_tbl3
+\d+ test_d_command_tbl4
+\di test_d_command_tbl1_idx
+drop table test_d_command_tbl1,test_d_command_tbl2,test_d_command_tbl3,test_d_command_tbl4;
+
+create table test_d_command_part1 (id int,id2 int) partition by range (id2) (partition p1 values less than(2001),partition p2 values less than(2002),partition p3 values less than(2003));
+create table test_d_command_part2 (id int,id2 int) partition by range (id,id2) (partition p1 values less than(1,2001),partition p2 values less than(2,2002),partition p3 values less than(3,2003));
+\d test_d_command_part1
+\d test_d_command_part2
+\d+ test_d_command_part1
+\d+ test_d_command_part2
+drop table test_d_command_part1;
+drop table test_d_command_part2;
+--8)test gsql parser in debug version
+\! echo "--test parse normal                                                                                                    " >> @abs_bindir@/gsql_parser.sql
+\! echo "create table exp_alias.static_alias_cursor(c  varchar(20));                                                            " >> @abs_bindir@/gsql_parser.sql
+\! echo "--test parse procedure                                                                                                 " >> @abs_bindir@/gsql_parser.sql
+\! echo "create or replace  procedure exp_alias.static_alias_cursor                                                             " >> @abs_bindir@/gsql_parser.sql
+\! echo "as                                                                                                                     " >> @abs_bindir@/gsql_parser.sql
+\! echo "mychar   varchar(20);                                                                                                  " >> @abs_bindir@/gsql_parser.sql
+\! echo "begin                                                                                                                  " >> @abs_bindir@/gsql_parser.sql
+\! echo "open cursor_static;                                                                                                    " >> @abs_bindir@/gsql_parser.sql
+\! echo "loop                                                                                                                   " >> @abs_bindir@/gsql_parser.sql
+\! echo "fetch cursor_static into mychar;                                                                                       " >> @abs_bindir@/gsql_parser.sql
+\! echo "exit when cursor_static%notfound;                                                                                      " >> @abs_bindir@/gsql_parser.sql
+\! echo "insert into exp_alias.static_alias_cursor values(mychar);                                                              " >> @abs_bindir@/gsql_parser.sql
+\! echo "end loop;                                                                                                              " >> @abs_bindir@/gsql_parser.sql
+\! echo "close cursor_static;                                                                                                   " >> @abs_bindir@/gsql_parser.sql
+\! echo "end;                                                                                                                   " >> @abs_bindir@/gsql_parser.sql
+\! echo "/" >> @abs_bindir@/gsql_parser.sql
+\! echo "call exp_alias.static_alias_cursor();                                                                                  " >> @abs_bindir@/gsql_parser.sql
+\! echo "--test parse transaction                                                                                               " >> @abs_bindir@/gsql_parser.sql
+\! echo "start transaction;                                                                                                     " >> @abs_bindir@/gsql_parser.sql
+\! echo "select p_csp_01_topuprecharge('1397846',20151110000000,20151125235959,1,10);                                           " >> @abs_bindir@/gsql_parser.sql
+\! echo "fetch all in xxx; 		                                                                                        " >> @abs_bindir@/gsql_parser.sql
+\! echo "commit;                                                                                                                " >> @abs_bindir@/gsql_parser.sql
+\! echo "--test parse slash command                                                                                             " >> @abs_bindir@/gsql_parser.sql
+\! echo "\d                                                                                                                     " >> @abs_bindir@/gsql_parser.sql
+\! echo "--test parse comment                                                                                                   " >> @abs_bindir@/gsql_parser.sql
+\! echo "--create table comment(coment varchar(20));                                                                            " >> @abs_bindir@/gsql_parser.sql
+\! @abs_bindir@/gsql -p @portstring@ -f @abs_bindir@/gsql_parser.sql -g                                                         >> @abs_bindir@/gsql_parser.out
+--9)test verbosity and filename on parallel
+\! echo "\set VERBOSITY verbose                                                                                                 " >> @abs_bindir@/gsql_parallel.sql
+\! echo "\parallel on 2                                                                                                         " >> @abs_bindir@/gsql_parallel.sql
+\! echo "select ab;                                                                                                             " >> @abs_bindir@/gsql_parallel.sql
+\! echo "\parallel off                                                                                                          " >> @abs_bindir@/gsql_parallel.sql
+\! echo "\set VERBOSITY default                                                                                                 " >> @abs_bindir@/gsql_parallel.sql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_parallel.sql
+\! rm @abs_bindir@/gsql_parser.sql
+\! rm @abs_bindir@/gsql_parallel.sql
+
+set session_timeout = 3;
+\parallel on 3
+select pg_sleep(3);
+select pg_sleep(3);
+select pg_sleep(3);
+select pg_sleep(3);
+\parallel off
+select * from dual;
+show session_timeout;
+reset session_timeout;
+select left(version(),18);
+
+\! echo "select 1" 	>> @abs_bindir@/gsql_cat.sql
+\! echo "union all"	>> @abs_bindir@/gsql_cat.sql
+\! echo "select 2;"	>> @abs_bindir@/gsql_cat.sql
+\! echo "select 3;" >> @abs_bindir@/gsql_cat.sql
+\! echo "select 4"	>> @abs_bindir@/gsql_cat.sql
+\! cat @abs_bindir@/gsql_cat.sql | @abs_bindir@/gsql -d postgres -p @portstring@
+\! rm -f @abs_bindir@/gsql_cat.sql
+
+--add test for ut
+\! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
+\! echo '\e '	>> @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+
+\! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
+\! echo '\e @abs_bindir@/gsql_ut.sql'	>> @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+
+\! echo '\setenv PSQL_EDITOR "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
+\! echo '\e  @abs_bindir@/gsql_ut.sql 10'	>> @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+
+-- this is not added to V1R7C00 now.
+/*
+\! echo '\setenv PSQL_EDITOR_LINENUMBER_ARG "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
+\! echo '\e a.sql'	>> @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+*/
+
+\! echo '\setenv PAGER "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
+\! echo 'select * from generate_series(1, 300);'	>> @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+
+\! echo '\setenv SHELL "this is a bad env; and should make an error"'	> @abs_bindir@/gsql_ut.sql
+\! echo '\!'	>> @abs_bindir@/gsql_ut.sql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -f @abs_bindir@/gsql_ut.sql
+
+\cd @abs_bindir@
+
+\set FETCH_COUNT 10
+select * from generate_series(1, 20);
+\set FETCH_COUNT
+
+\o | echo | head -n 0 | grep -Ev '^$'
+select * from dual;
+\o
+\copyright
+
+\! rm -f @abs_bindir@/gsql_ut.sql
+-- end of test for ut.
+
+--10)test on_error_stop in parallel execute
+\set ON_ERROR_STOP 'on'
+start transaction;
+\parallel
+insert into gsql_parallel_test select generate_series(1,10);
+insert into gsql_parallel_test select generate_series(1,10);
+\parallel

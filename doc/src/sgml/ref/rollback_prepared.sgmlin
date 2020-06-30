@@ -1,0 +1,16 @@
+<refentry id="SQL-ROLLBACK_PREPARED">
+<refmeta>
+<refentrytitle>ROLLBACK PREPARED</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ROLLBACK PREPARED</refname>
+<refpurpose>cancel a transaction that was earlier prepared for two-phase commit</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ROLLBACK PREPARED transaction_id;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

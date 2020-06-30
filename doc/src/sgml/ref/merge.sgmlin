@@ -1,0 +1,31 @@
+<refentry id="SQL-MERGE">
+<refmeta>
+  <refentrytitle>MERGE</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+
+<refnamediv>
+  <refname>MERGE</refname>
+  <refpurpose>insert, update, or delete rows of a table based upon source data</refpurpose>
+</refnamediv>
+
+<refsynopsisdiv>
+<synopsis>
+MERGE INTO table_name [ [ AS ] alias ]
+USING { { table_name | view_name } | subquery } [ [ AS ] alias ]
+ON ( condition )
+[
+  WHEN MATCHED THEN
+  UPDATE SET { column_name = { expression | DEFAULT } |
+          ( column_name [, ...] ) = ( { expression | DEFAULT } [, ...] ) } [, ...]
+  [ WHERE condition ]
+]
+[
+  WHEN NOT MATCHED THEN
+  INSERT { DEFAULT VALUES |
+  [ ( column_name [, ...] ) ] VALUES ( { expression | DEFAULT } [, ...] ) [, ...] [ WHERE condition ] }
+];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

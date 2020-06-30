@@ -1,0 +1,1493 @@
+create schema distribute_function;
+set current_schema = distribute_function;
+create table function_table_01(f1 int, f2 float, f3 text);
+insert into function_table_01 values(1,2.0,'abcde'),(2,4.0,'abcde'),(3,5.0,'affde');
+insert into function_table_01 values(4,7.0,'aeede'),(5,1.0,'facde'),(6,3.0,'affde');
+analyze function_table_01;
+CREATE OR REPLACE FUNCTION test_function_immutable RETURNS BIGINT AS
+$body$ 
+BEGIN
+RETURN 3;
+END;
+$body$
+LANGUAGE 'plpgsql'
+IMMUTABLE
+CALLED ON NULL INPUT
+SECURITY INVOKER
+COST 100;
+explain (verbose, costs off, nodes off) select * from test_function_immutable();
+                QUERY PLAN                
+------------------------------------------
+ Function Scan on test_function_immutable
+   Output: test_function_immutable
+   Function Call: 3::bigint
+(3 rows)
+
+select * from test_function_immutable();
+ test_function_immutable 
+-------------------------
+                       3
+(1 row)
+
+CREATE VIEW functionview AS SELECT f1,f2,left(f3,test_function_immutable()::INT) f3 FROM function_table_01;
+--targetlist
+explain (verbose, costs off, nodes off) select f1,left(f3,test_function_immutable()::INT) from function_table_01 order by 1 limit 3;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit
+   Output: f1, ("left"(f3, 3))
+   ->  Sort
+         Output: f1, ("left"(f3, 3))
+         Sort Key: function_table_01.f1
+         ->  Seq Scan on distribute_function.function_table_01
+               Output: f1, "left"(f3, 3)
+(7 rows)
+
+select f1,left(f3,test_function_immutable()::INT) from function_table_01 order by 1 limit 3;
+ f1 | left 
+----+------
+  1 | abc
+  2 | abc
+  3 | aff
+(3 rows)
+
+--fromQual
+explain (verbose, costs off, nodes off) select * from function_table_01 where f1 = test_function_immutable();
+                    QUERY PLAN                     
+---------------------------------------------------
+ Seq Scan on distribute_function.function_table_01
+   Output: f1, f2, f3
+   Filter: (function_table_01.f1 = 3::bigint)
+(3 rows)
+
+select * from function_table_01 where f1 = test_function_immutable();
+ f1 | f2 |  f3   
+----+----+-------
+  3 |  5 | affde
+(1 row)
+
+--sortClause
+explain (verbose, costs off, nodes off) select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::INT) limit 3;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit
+   Output: f1, f3, ("left"(f3, 3))
+   ->  Sort
+         Output: f1, f3, ("left"(f3, 3))
+         Sort Key: ("left"(function_table_01.f3, 3))
+         ->  Seq Scan on distribute_function.function_table_01
+               Output: f1, f3, "left"(f3, 3)
+(7 rows)
+
+select f1,f3 from function_table_01 order by left(f3,test_function_immutable()::INT), f1 limit 3;
+ f1 |  f3   
+----+-------
+  1 | abcde
+  2 | abcde
+  4 | aeede
+(3 rows)
+
+--groupClause
+explain (verbose, costs off, nodes off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 order by 1;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Output: (avg(f2)), ("left"(f3, 3))
+   Sort Key: (avg(function_table_01.f2))
+   ->  HashAggregate
+         Output: avg(f2), ("left"(f3, 3))
+         Group By Key: "left"(function_table_01.f3, 3)
+         ->  Seq Scan on distribute_function.function_table_01
+               Output: "left"(f3, 3), f2
+(8 rows)
+
+select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 order by 1;
+ avg | left 
+-----+------
+   1 | fac
+   3 | abc
+   4 | aff
+   7 | aee
+(4 rows)
+
+--havingClause
+explain (verbose, costs off, nodes off) select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_function_immutable()  order by 1;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: (avg(f2)), f3
+   Sort Key: (avg(function_table_01.f2))
+   ->  HashAggregate
+         Output: avg(f2), f3
+         Group By Key: function_table_01.f3
+         Filter: (avg(function_table_01.f2) > 3::double precision)
+         ->  Seq Scan on distribute_function.function_table_01
+               Output: f3, f2
+(9 rows)
+
+select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_function_immutable() order by 1;
+ fa |  f3   
+----+-------
+  4 | affde
+  7 | aeede
+(2 rows)
+
+--limitClause && offsetClause
+explain (verbose, costs off, nodes off) select * from function_table_01 order by 1 limit test_function_immutable() offset test_function_immutable();
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit
+   Output: f1, f2, f3
+   ->  Sort
+         Output: f1, f2, f3
+         Sort Key: function_table_01.f1
+         ->  Seq Scan on distribute_function.function_table_01
+               Output: f1, f2, f3
+(7 rows)
+
+select * from function_table_01 order by 1  limit test_function_immutable() offset test_function_immutable();
+ f1 | f2 |  f3   
+----+----+-------
+  4 |  7 | aeede
+  5 |  1 | facde
+  6 |  3 | affde
+(3 rows)
+
+explain (verbose, costs off, nodes off) select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 having avg(f2)>test_function_immutable() order by 1 limit test_function_immutable() offset test_function_immutable()-2;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Limit
+   Output: (avg(f2)), ("left"(f3, 3))
+   ->  Sort
+         Output: (avg(f2)), ("left"(f3, 3))
+         Sort Key: (avg(function_table_01.f2))
+         ->  HashAggregate
+               Output: avg(f2), ("left"(f3, 3))
+               Group By Key: "left"(function_table_01.f3, 3)
+               Filter: (avg(function_table_01.f2) > 3::double precision)
+               ->  Seq Scan on distribute_function.function_table_01
+                     Output: "left"(f3, 3), f2
+(11 rows)
+
+select avg(f2),left(f3,test_function_immutable()::INT) from function_table_01 group by 2 having avg(f2)>test_function_immutable() order by 1 limit test_function_immutable() offset test_function_immutable()-2;
+ avg | left 
+-----+------
+   7 | aee
+(1 row)
+
+CREATE OR REPLACE FUNCTION test_function_volatile RETURNS BIGINT AS
+$body$ 
+DECLARE
+cnt BIGINT;
+cnt2 BIGINT;
+BEGIN
+SELECT count(*) INTO cnt FROM(select * from functionview limit 3);
+SELECT count(*) INTO cnt2 from function_table_01;
+RETURN (cnt+cnt2/2)/2;
+END;
+$body$
+LANGUAGE 'plpgsql'
+VOLATILE
+CALLED ON NULL INPUT
+SECURITY INVOKER
+COST 100;
+explain (verbose on, costs off, nodes off) select * from test_function_volatile();
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Function Scan on distribute_function.test_function_volatile
+   Output: test_function_volatile
+   Function Call: test_function_volatile()
+(3 rows)
+
+select * from test_function_volatile();
+ test_function_volatile 
+------------------------
+                      3
+(1 row)
+
+explain (verbose on, costs off, nodes off) select test_function_volatile();
+             QUERY PLAN             
+------------------------------------
+ Result
+   Output: test_function_volatile()
+(2 rows)
+
+select test_function_volatile();
+ test_function_volatile 
+------------------------
+                      3
+(1 row)
+
+--targetlist
+select f1,left(f3,test_function_volatile()::INT) from function_table_01 order by 1 limit 3;
+ f1 | left 
+----+------
+  1 | abc
+  2 | abc
+  3 | aff
+(3 rows)
+
+--fromQual
+select * from function_table_01 where f1 = test_function_volatile();
+ f1 | f2 |  f3   
+----+----+-------
+  3 |  5 | affde
+(1 row)
+
+--sortClause
+select f1,f3 from function_table_01 order by left(f3,test_function_volatile()::INT) limit 3;
+ f1 |  f3   
+----+-------
+  1 | abcde
+  2 | abcde
+  4 | aeede
+(3 rows)
+
+--groupClause
+select avg(f2),left(f3,test_function_volatile()::INT) from function_table_01 group by 2 order by 1;
+ avg | left 
+-----+------
+   1 | fac
+   3 | abc
+   4 | aff
+   7 | aee
+(4 rows)
+
+--havingClause
+select avg(f2) fa,f3 from function_table_01 group by f3 having avg(f2)>test_function_volatile() order by 1;
+ fa |  f3   
+----+-------
+  4 | affde
+  7 | aeede
+(2 rows)
+
+--limitClause && offsetClause
+select * from function_table_01 order by 1  limit test_function_volatile() offset test_function_volatile();
+ f1 | f2 |  f3   
+----+----+-------
+  4 |  7 | aeede
+  5 |  1 | facde
+  6 |  3 | affde
+(3 rows)
+
+select avg(f2),left(f3,test_function_volatile()::INT) from function_table_01 group by 2 having avg(f2)>test_function_volatile() order by 1 limit test_function_volatile() offset test_function_volatile()-2;
+ avg | left 
+-----+------
+   7 | aee
+(1 row)
+
+drop function test_function_volatile;
+drop view functionview;
+drop function test_function_immutable;
+drop table function_table_01;
+drop schema distribute_function;
+reset current_schema;
+create table distribute_function_t1(a int, b int) /*distribute by hash(a)*/;
+create table distribute_function_t2(a int, b int) /*distribute by replication*/;
+explain (verbose on, costs off, nodes off) select * from distribute_function_t1, generate_series(1, 1, 5);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: distribute_function_t1.a, distribute_function_t1.b, generate_series.generate_series
+   ->  Function Scan on pg_catalog.generate_series
+         Output: generate_series.generate_series
+         Function Call: generate_series(1, 1, 5)
+   ->  Materialize
+         Output: distribute_function_t1.a, distribute_function_t1.b
+         ->  Seq Scan on public.distribute_function_t1
+               Output: distribute_function_t1.a, distribute_function_t1.b
+(9 rows)
+
+explain (verbose on, costs off, nodes off) select * from distribute_function_t1, generate_series(1, 1, 5);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: distribute_function_t1.a, distribute_function_t1.b, generate_series.generate_series
+   ->  Function Scan on pg_catalog.generate_series
+         Output: generate_series.generate_series
+         Function Call: generate_series(1, 1, 5)
+   ->  Materialize
+         Output: distribute_function_t1.a, distribute_function_t1.b
+         ->  Seq Scan on public.distribute_function_t1
+               Output: distribute_function_t1.a, distribute_function_t1.b
+(9 rows)
+
+drop table distribute_function_t1;
+drop table distribute_function_t2;
+--object inside procedure be searched and new table/view/etc be created in. This is to adapt behaviar of Ora.
+create schema dist_func1;
+create schema dist_func2;
+create or replace function func_create_columnar_partition_table_176_xkey_xpart(part integer) returns boolean as $$ declare
+sql_temp text;
+begin
+sql_temp := 'create table create_columnar_table_176_xkey_'||part||'part ( c_smallint smallint not null,c_double_precision double precision,c_time_without_time_zone time without time zone null,c_time_with_time_zone time with time zone,c_integer integer default 23423,c_bigint bigint default 923423432,c_decimal decimal(19) default 923423423,c_real real,c_numeric numeric(18,12) null,c_varchar varchar(19),c_char char(57) null,c_timestamp_with_timezone timestamp with time zone,c_char2 char default ''0'',c_text text null,c_varchar2 varchar2(20),c_timestamp_without_timezone timestamp without time zone,c_date date,c_varchar22 varchar2(11621),c_numeric2 numeric null)  /*distribute by hash(c_decimal)*/;';
+    execute immediate sql_temp;
+     return true;
+end;
+$$ language plpgsql;
+create or replace function dist_func1.func_create_columnar_partition_table_176_xkey_xpart(part integer) returns boolean as $$ declare
+sql_temp text;
+begin
+sql_temp := 'create table create_columnar_table_176_xkey_'||part||'part ( c_smallint smallint not null,c_double_precision double precision,c_time_without_time_zone time without time zone null,c_time_with_time_zone time with time zone,c_integer integer default 23423,c_bigint bigint default 923423432,c_decimal decimal(19) default 923423423,c_real real,c_numeric numeric(18,12) null,c_varchar varchar(19),c_char char(57) null,c_timestamp_with_timezone timestamp with time zone,c_char2 char default ''0'',c_text text null,c_varchar2 varchar2(20),c_timestamp_without_timezone timestamp without time zone,c_date date,c_varchar22 varchar2(11621),c_numeric2 numeric null)  /*distribute by hash(c_decimal);*/';
+    execute immediate sql_temp;
+     return true;
+end;
+$$ language plpgsql;
+call dist_func1.func_create_columnar_partition_table_176_xkey_xpart(1);
+ func_create_columnar_partition_table_176_xkey_xpart 
+-----------------------------------------------------
+ t
+(1 row)
+
+set search_path to dist_func1;
+call public.func_create_columnar_partition_table_176_xkey_xpart(2);
+ func_create_columnar_partition_table_176_xkey_xpart 
+-----------------------------------------------------
+ t
+(1 row)
+
+call func_create_columnar_partition_table_176_xkey_xpart(3);
+ func_create_columnar_partition_table_176_xkey_xpart 
+-----------------------------------------------------
+ t
+(1 row)
+
+set search_path to dist_func3;
+call public.func_create_columnar_partition_table_176_xkey_xpart(4);
+ func_create_columnar_partition_table_176_xkey_xpart 
+-----------------------------------------------------
+ t
+(1 row)
+
+call dist_func1.func_create_columnar_partition_table_176_xkey_xpart(5);
+ func_create_columnar_partition_table_176_xkey_xpart 
+-----------------------------------------------------
+ t
+(1 row)
+
+create or replace function dist_func1.test1(part int) returns boolean as $$ declare
+sql_temp text;
+begin
+	sql_temp := 'set search_path to dist_func2;';
+	execute immediate sql_temp;
+	sql_temp := 'create table create_columnar_table_176_xkey_'||part||'part ( c_smallint smallint not null,c_double_precision double precision,c_time_without_time_zone time without time zone null,c_time_with_time_zone time with time zone,c_integer integer default 23423,c_bigint bigint default 923423432,c_decimal decimal(19) default 923423423,c_real real,c_numeric numeric(18,12) null,c_varchar varchar(19),c_char char(57) null,c_timestamp_with_timezone timestamp with time zone,c_char2 char default ''0'',c_text text null,c_varchar2 varchar2(20),c_timestamp_without_timezone timestamp without time zone,c_date date,c_varchar22 varchar2(11621),c_numeric2 numeric null)  /*distribute by hash(c_decimal)*/;';
+	execute immediate sql_temp;
+	return true;
+end;
+$$ language plpgsql;
+call dist_func1.test1(6);
+ test1 
+-------
+ t
+(1 row)
+
+select schemaname, tablename from pg_tables where tablename like 'create_columnar_table_176_xkey_%' order by tablename;
+ schemaname |              tablename               
+------------+--------------------------------------
+ dist_func1 | create_columnar_table_176_xkey_1part
+ public     | create_columnar_table_176_xkey_2part
+ dist_func1 | create_columnar_table_176_xkey_3part
+ public     | create_columnar_table_176_xkey_4part
+ dist_func1 | create_columnar_table_176_xkey_5part
+ dist_func1 | create_columnar_table_176_xkey_6part
+(6 rows)
+
+create or replace function dist_func1.multi_call1(a integer) returns int as $$
+declare
+b int;
+begin
+	select multi_call2(a) + 1 into b;
+	return b;
+end;
+$$ language plpgsql;
+create or replace function dist_func1.multi_call2(a integer) returns int as $$
+declare
+b int;
+begin
+	select dist_func2.multi_call3(a) + 1 into b;
+	return b;
+end;
+$$ language plpgsql;
+create or replace function dist_func2.multi_call3(a integer) returns int as $$
+declare
+b int;
+begin
+	select multi_call4() + 1 into b;
+	return b;
+end;
+$$ language plpgsql;
+create or replace function dist_func2.multi_call4() returns int as $$
+declare
+b int;
+begin
+	return 1;
+end;
+$$ language plpgsql;
+call dist_func1.multi_call1(1);
+ multi_call1 
+-------------
+           4
+(1 row)
+
+-- Test cross-schema
+-- search_path public, procedure sche1, row table distribute by hash
+create schema sche1;
+set search_path=sche1;
+create or replace function fun_001() returns void as $$
+declare
+begin
+	create table schema_tbl_001(a int) ;
+	insert into schema_tbl_001 values(1);
+end;
+$$ LANGUAGE plpgsql;
+set search_path=public;
+select sche1.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+select * from sche1.schema_tbl_001;
+ a 
+---
+ 1
+(1 row)
+
+select count(*) from pg_class where relname='schema_tbl_001';
+ count 
+-------
+     1
+(1 row)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function sche1.fun_001()
+drop cascades to table sche1.schema_tbl_001
+-- search_path sche1, procedure public, row unlogged table distribute by hash
+create schema sche1;
+set search_path=public;
+create or replace function fun_001() returns void as $$
+declare
+begin
+	create unlogged table schema_tbl_001(a int) ;
+	insert into schema_tbl_001 values(1);
+end;
+$$ LANGUAGE plpgsql;
+set search_path=sche1;
+select public.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+select * from schema_tbl_001;
+ERROR:  relation "schema_tbl_001" does not exist on datanode1
+LINE 1: select * from schema_tbl_001;
+                      ^
+select * from public.schema_tbl_001;
+ a 
+---
+ 1
+(1 row)
+
+drop function public.fun_001;
+drop schema sche1 cascade;
+drop table public.schema_tbl_001;
+reset search_path;
+-- search_path sche1, procedure sche2, row partition table
+create schema sche1;
+create schema sche2;
+set search_path=sche2;
+create or replace function fun_001() returns void as $$
+declare
+begin
+	create table schema_tbl_001(a int) partition by range(a) (partition p1 values less than(10), partition p2 values less than(20), partition p3 values less than(maxvalue));
+	insert into schema_tbl_001 values(1),(10),(20),(100);
+end;
+$$ LANGUAGE plpgsql;
+set search_path=sche1;
+select sche2.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+select * from sche2.schema_tbl_001 order by a;
+  a  
+-----
+   1
+  10
+  20
+ 100
+(4 rows)
+
+drop schema sche1 cascade;
+drop schema sche2 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function sche2.fun_001()
+drop cascades to table sche2.schema_tbl_001
+reset search_path;
+-- search_path sche1, procedure sche2, table sche3, row table distribute by replication
+create schema sche1;
+create schema sche2;
+create schema sche3;
+set search_path=sche2;
+create or replace function fun_001() returns void as $$
+declare
+begin
+	create table sche3.schema_tbl_001(a int) /*distribute by replication*/;
+	insert into sche3.schema_tbl_001 values(1);
+end;
+$$ LANGUAGE plpgsql;
+set search_path=sche1;
+select sche2.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+select * from sche2.schema_tbl_001;
+ERROR:  relation "sche2.schema_tbl_001" does not exist on datanode1
+LINE 1: select * from sche2.schema_tbl_001;
+                      ^
+select * from sche3.schema_tbl_001;
+ a 
+---
+ 1
+(1 row)
+
+drop schema sche1 cascade;
+drop schema sche2 cascade;
+NOTICE:  drop cascades to function sche2.fun_001()
+drop schema sche3 cascade;
+NOTICE:  drop cascades to table sche3.schema_tbl_001
+reset search_path;
+-- set search_path/current_schema inside procedure is invalid
+-- test set search_path
+create schema sche1;
+create schema sche2;
+set search_path=sche2;
+create or replace function fun_001() returns void as $$
+declare
+begin
+	set search_path=sche1;
+end;
+$$ LANGUAGE plpgsql;
+reset search_path;
+show search_path;
+  search_path   
+----------------
+ "$user",public
+(1 row)
+
+select sche2.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+show search_path;
+  search_path   
+----------------
+ "$user",public
+(1 row)
+
+-- test set current_schema
+set search_path=sche2;
+create or replace function fun_002() returns void as $$
+declare
+begin
+	set current_schema=sche1;
+end;
+$$ LANGUAGE plpgsql;
+reset current_schema;
+show current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+select sche2.fun_002();
+ fun_002 
+---------
+ 
+(1 row)
+
+show current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+-- test reset search_path
+set search_path=sche2;
+create or replace function fun_003() returns void as $$
+declare
+begin
+	reset search_path;
+end;
+$$ LANGUAGE plpgsql;
+show current_schema;
+ current_schema 
+----------------
+ sche2
+(1 row)
+
+select sche2.fun_003();
+ fun_003 
+---------
+ 
+(1 row)
+
+show search_path;
+ search_path 
+-------------
+ sche2
+(1 row)
+
+-- test set search_path mixed with other operations, column table distribute by hash
+set search_path=sche2;
+create or replace function fun_004() returns void as $$
+declare
+begin
+	set search_path=public;
+	create table schema_tbl_001(a int) with (orientation = column);
+	insert into schema_tbl_001 values(1);
+end;
+$$ LANGUAGE plpgsql;
+set search_path=sche1;
+select sche2.fun_004();
+ fun_004 
+---------
+ 
+(1 row)
+
+show search_path;
+ search_path 
+-------------
+ sche1
+(1 row)
+
+select * from public.schema_tbl_001;
+ERROR:  relation "public.schema_tbl_001" does not exist on datanode1
+LINE 1: select * from public.schema_tbl_001;
+                      ^
+select * from sche2.schema_tbl_001;
+ a 
+---
+ 1
+(1 row)
+
+drop schema sche1 cascade;
+drop schema sche2 cascade;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to function sche2.fun_001()
+drop cascades to function sche2.fun_002()
+drop cascades to function sche2.fun_003()
+drop cascades to function sche2.fun_004()
+drop cascades to table sche2.schema_tbl_001
+reset search_path;
+-- test multiple schemas with DDL, DML.
+create schema sche1;
+create schema sche2;
+create or replace function sche1.multi_call1(a integer) returns int as $$
+declare
+b int;
+begin
+	select multi_call2(a) + 1 into b;
+	insert into sche1_tbl values(1);
+	return b;
+end;
+$$ language plpgsql;
+create or replace function sche1.multi_call2(a integer) returns int as $$
+declare
+b int;
+begin
+	create table sche1_tbl(id int) with (orientation = column) /*distribute by replication*/;
+	select sche2.multi_call3(a) + 1 into b;
+	insert into sche2.sche2_tbl values(3);
+	return b;
+end;
+$$ language plpgsql;
+create or replace function sche2.multi_call3(a integer) returns int as $$
+declare
+b int;
+begin
+	select multi_call4() + 1 into b;
+	create table sche2_tbl(id int) /*distribute by hash(id)*/;
+	insert into sche2_tbl values(2);
+	return b;
+end;
+$$ language plpgsql;
+create or replace function sche2.multi_call4() returns int as $$
+declare
+b int;
+begin
+	return 1;
+end;
+$$ language plpgsql;
+select sche1.multi_call1(1);
+ multi_call1 
+-------------
+           4
+(1 row)
+
+select * from sche1.sche1_tbl order by id;
+ id 
+----
+  1
+(1 row)
+
+select * from sche2.sche2_tbl order by id;
+ id 
+----
+  2
+  3
+(2 rows)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to function sche1.multi_call1(integer)
+drop cascades to function sche1.multi_call2(integer)
+drop cascades to table sche1.sche1_tbl
+drop schema sche2 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to function sche2.multi_call3(integer)
+drop cascades to function sche2.multi_call4()
+drop cascades to table sche2.sche2_tbl
+-- test temp table in subtransaction
+create or replace function fun_002()
+returns int
+AS $$
+DECLARE
+x integer;
+BEGIN
+        create temp table fun_tmp(a int) /*distribute by hash(a)*/;
+        perform 1 / 0;
+        insert into fun_tmp values(2);
+        return 2;
+END; $$
+LANGUAGE plpgsql;
+create or replace function fun_003()
+returns int
+AS $$
+DECLARE
+x integer;
+BEGIN
+        create temp table fun_tmp(a int) /*distribute by hash(a)*/;
+        insert into fun_tmp values(3);
+        return 3;
+END; $$
+LANGUAGE plpgsql;
+create or replace function fun_001()
+returns void
+AS $$
+DECLARE
+x integer;
+BEGIN
+        BEGIN
+                select fun_002() into x;
+                insert into fun_tmp values(4);
+                exception when others then
+        END;
+        BEGIN
+                select fun_003() into x;
+                insert into fun_tmp values(5);
+        END;
+        insert into fun_tmp values(6);
+END; $$
+LANGUAGE plpgsql;
+call public.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+select * from fun_tmp order by 1;
+ a 
+---
+ 3
+ 5
+ 6
+(3 rows)
+
+drop function fun_001;
+drop function fun_002;
+drop function fun_003;
+drop table fun_tmp;
+-- test temp table with exception
+create schema sche1;
+set search_path = sche1;
+create or replace procedure proc_001
+as
+begin
+	create table tt1(a int) /*distribute by hash(a)*/;
+	begin
+		create temp table tablenamelevel (a int, b int) /*distribute by hash(a)*/;
+		select substring('abc', 1, -5);
+		exception when others then RAISE NOTICE 'others';
+	end;
+	begin
+		create temp table tablenamelevel2 (a int, b int) /*distribute by hash(a)*/;
+		begin
+			create temp table tablenamelevel3 (a int, b int) /*distribute by hash(a)*/;
+			select substring('abc', 1, -5);
+			exception when others then RAISE NOTICE 'others';
+			insert into tablenamelevel2 values(2,3);
+		end;
+		exception when others then RAISE NOTICE 'others';
+	end;
+	begin
+		create temp table tablenamelevel4 (a int, b int) /*distribute by hash(a)*/;
+		select substring('abc', 1, -5);
+		exception when others then RAISE NOTICE 'others'; 
+	end; 
+	insert into tt1 values(1);
+	exception when others then RAISE NOTICE 'others';
+end;
+/
+reset search_path;
+prepare test_cacheplan_pbe as select substring('abc', 1, -5);
+start transaction;
+savepoint sp1;
+create temp table temptable1(a int) /*distribute by hash(a)*/;
+rollback to savepoint sp1;
+create temp table temptable1(a int) /*distribute by hash(a)*/;
+select substring('abc', 1, -5);
+ERROR:  negative substring length not allowed
+CONTEXT:  referenced column: substring
+rollback to savepoint sp1;
+create temp table temptable1(a int) /*distribute by hash(a)*/;
+execute test_cacheplan_pbe;
+ERROR:  negative substring length not allowed
+CONTEXT:  referenced column: substring
+rollback to savepoint sp1;
+select sche1.proc_001();
+NOTICE:  others
+CONTEXT:  referenced column: proc_001
+NOTICE:  others
+CONTEXT:  referenced column: proc_001
+NOTICE:  others
+CONTEXT:  referenced column: proc_001
+ proc_001 
+----------
+ 
+(1 row)
+
+end;
+select * from sche1.tt1;
+ a 
+---
+ 1
+(1 row)
+
+select * from tablenamelevel1;
+ERROR:  relation "tablenamelevel1" does not exist on datanode1
+LINE 1: select * from tablenamelevel1;
+                      ^
+select * from tablenamelevel2;
+ a | b 
+---+---
+ 2 | 3
+(1 row)
+
+select * from tablenamelevel3;
+ERROR:  relation "tablenamelevel3" does not exist on datanode1
+LINE 1: select * from tablenamelevel3;
+                      ^
+select * from tablenamelevel4;
+ERROR:  relation "tablenamelevel4" does not exist on datanode1
+LINE 1: select * from tablenamelevel4;
+                      ^
+deallocate test_cacheplan_pbe;
+drop table tablenamelevel2;
+drop table sche1.tt1;
+drop schema sche1 cascade;
+NOTICE:  drop cascades to function sche1.proc_001()
+reset search_path;
+-- test the table with the same name with a pg_catalog table 
+create schema sche1;
+create table sche1.pg_class(id int);
+set search_path=sche1;
+insert into pg_class values(1);
+ERROR:  null value in column "relnamespace" violates not-null constraint
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+select * from sche1.pg_class;
+ id 
+----
+(0 rows)
+
+-- invalid to put pg_catalog behind sche1
+set search_path=sche1, pg_catalog;
+WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
+insert into pg_class values(1);
+ERROR:  null value in column "relnamespace" violates not-null constraint
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+select * from sche1.pg_class;
+ id 
+----
+(0 rows)
+
+insert into sche1.pg_class values(1);
+select * from sche1.pg_class;
+ id 
+----
+  1
+(1 row)
+
+delete from sche1.pg_class;
+set search_path=sche1;
+create or replace function fun_001() returns void as $$
+declare
+begin
+	insert into pg_class values(1);
+end;
+$$ LANGUAGE plpgsql;
+select sche1.fun_001();
+ERROR:  null value in column "relnamespace" violates not-null constraint
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+CONTEXT:  SQL statement "insert into pg_class values(1)"
+PL/pgSQL function fun_001() line 4 at SQL statement
+referenced column: fun_001
+select * from sche1.pg_class;
+ id 
+----
+(0 rows)
+
+set search_path=sche1, pg_catalog;
+WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
+select sche1.fun_001();
+ERROR:  null value in column "relnamespace" violates not-null constraint
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+CONTEXT:  SQL statement "insert into pg_class values(1)"
+PL/pgSQL function fun_001() line 4 at SQL statement
+referenced column: fun_001
+select * from sche1.pg_class;
+ id 
+----
+(0 rows)
+
+create or replace function sche1.fun_002() returns void as $$
+declare
+begin
+	insert into sche1.pg_class values(1);
+end;
+$$ LANGUAGE plpgsql;
+select sche1.fun_002();
+ fun_002 
+---------
+ 
+(1 row)
+
+select * from sche1.pg_class;
+ id 
+----
+  1
+(1 row)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table sche1.pg_class
+drop cascades to function fun_001()
+drop cascades to function fun_002()
+-- test the table with the same name with a temp table
+create schema sche1;
+create schema sche2;
+set search_path=sche1;
+create or replace function fun_002() returns void as $$
+declare
+begin
+	create table schema_tbl_001(a int) with(orientation=column) partition by range(a) (partition p1 values less than(10),partition p2 values less than(20), partition p3 values less than(maxvalue));
+	insert into schema_tbl_001 values(10),(20),(100);
+end;
+$$ LANGUAGE plpgsql;
+set search_path=public;
+create or replace function sche1.fun_001() returns void as $$
+declare
+begin
+	create temp table schema_tbl_001(a int) with(orientation=column) /*distribute by replication*/;
+	insert into schema_tbl_001 values(4);
+end;
+$$ LANGUAGE plpgsql;
+set search_path=sche2;
+select sche1.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+select sche1.fun_002();
+ fun_002 
+---------
+ 
+(1 row)
+
+-- always insert into temp table.
+select * from sche1.schema_tbl_001;
+ a 
+---
+(0 rows)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to function sche1.fun_002()
+drop cascades to function sche1.fun_001()
+drop cascades to table sche1.schema_tbl_001
+drop schema sche2 cascade;
+drop table schema_tbl_001;
+reset search_path;
+-- test create table ... as select
+create schema sche1;
+set search_path=sche1;
+create table sche1.schema_tbl_001(a int);
+insert into sche1.schema_tbl_001 values(1),(2);
+create or replace function fun_002() returns void as $$
+declare
+begin
+	create table t2 as select * from schema_tbl_001;
+	insert into t2 values(3);
+end;
+$$ LANGUAGE plpgsql;
+set search_path=public;
+select sche1.fun_002();
+ fun_002 
+---------
+ 
+(1 row)
+
+select * from sche1.t2 order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+(3 rows)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table sche1.schema_tbl_001
+drop cascades to function sche1.fun_002()
+drop cascades to table sche1.t2
+reset search_path;
+-- test insert into select
+create schema sche1;
+set search_path=sche1;
+create table sche1.schema_tbl_001(a int);
+insert into sche1.schema_tbl_001 values(1),(2);
+create or replace function fun_002() returns void as $$
+declare
+begin
+	create table t2(a int);
+	insert into t2 select a from schema_tbl_001;
+end;
+$$ LANGUAGE plpgsql;
+set search_path=public;
+select sche1.fun_002();
+ fun_002 
+---------
+ 
+(1 row)
+
+select * from sche1.t2 order by 1;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table sche1.schema_tbl_001
+drop cascades to function sche1.fun_002()
+drop cascades to table sche1.t2
+reset search_path;
+-- test creating schema inside procedure
+create schema sche1;
+create or replace function sche1.fun1() returns void as $$
+declare
+begin
+	create table t1(a int);
+	create schema sche2 create table t2(a int);
+	insert into t1 values(1);
+end;
+$$ LANGUAGE plpgsql;
+set search_path = public;
+select sche1.fun1();
+ fun1 
+------
+ 
+(1 row)
+
+select * from sche1.t1;
+ a 
+---
+ 1
+(1 row)
+
+select * from sche2.t2;
+ a 
+---
+(0 rows)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function sche1.fun1()
+drop cascades to table sche1.t1
+drop schema sche2 cascade;
+NOTICE:  drop cascades to table sche2.t2
+reset search_path;
+-- test with grammar
+create schema sche1;
+create schema sche2;
+create table sche1.t1(a int) /*distribute by replication*/;
+set search_path = sche2;
+create or replace function sche1.fun_001()
+returns setof sche1.t1
+AS $$
+DECLARE
+        row_data t1%rowtype;
+        row_name record;
+        query_str text;
+        BEGIN
+                query_str := 'WITH t AS (
+				INSERT INTO t1 VALUES (11),(12),(13) RETURNING *
+			)
+			SELECT * FROM t order by 1;';
+                FOR row_data IN EXECUTE(query_str) LOOP
+                      return next row_data;
+                END LOOP;
+                return;
+        END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select sche1.fun_001();
+ fun_001 
+---------
+ (11)
+ (12)
+ (13)
+(3 rows)
+
+select * from sche1.t1;
+ a  
+----
+ 11
+ 12
+ 13
+(3 rows)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table sche1.t1
+drop cascades to function sche1.fun_001()
+drop schema sche2 cascade;
+reset search_path;
+-- test cursor
+create schema sche1;
+set search_path = sche1;
+create table schema_tbl_001(a int) /*distribute by replication*/;
+insert into schema_tbl_001 values(1),(2);
+CREATE OR REPLACE PROCEDURE fun_001()
+AS
+DECLARE
+	b int;
+	CURSOR C1 IS
+	SELECT a FROM schema_tbl_001 order by 1;
+BEGIN
+	OPEN C1;
+	LOOP
+		FETCH C1 INTO b;
+		EXIT WHEN C1%NOTFOUND;
+	END LOOP;
+	CLOSE C1;
+END;
+/
+reset search_path;
+select sche1.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table sche1.schema_tbl_001
+drop cascades to function sche1.fun_001()
+reset search_path;
+-- test current_schemas()
+set search_path to pg_catalog,public;
+select current_schemas('f');
+   current_schemas   
+---------------------
+ {pg_catalog,public}
+(1 row)
+
+set search_path to public,pg_catalog;
+WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
+select current_schemas('f');
+ current_schemas 
+-----------------
+ {public}
+(1 row)
+
+-- test SUPPORT_BIND_SEARCHPATH
+SET behavior_compat_options = 'bind_procedure_searchpath';
+create schema sche1;
+create schema sche2;
+set search_path = public;
+create table public.bind_t1(a int) /*distribute by hash(a)*/;
+create or replace function sche2.fun_001() returns int as $$
+declare
+begin
+        insert into bind_t1 values(2);
+        return 2;
+end;
+$$ LANGUAGE plpgsql;
+create or replace function sche1.fun_001() returns int as $$
+declare
+x int;
+begin
+        insert into bind_t1 values(1);
+	select sche2.fun_001() into x;
+        return 1;
+end;
+$$ LANGUAGE plpgsql;
+-- insert into public.bind_t1;
+call sche2.fun_001();
+ fun_001 
+---------
+       2
+(1 row)
+
+select * from public.bind_t1;
+ a 
+---
+ 2
+(1 row)
+
+delete from public.bind_t1;
+-- insert into public.bind_t1;
+call sche1.fun_001();
+ fun_001 
+---------
+       1
+(1 row)
+
+select * from public.bind_t1;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+delete from public.bind_t1;
+-- cannot find bind_t1. insert fail.
+set search_path = sche2;
+call sche2.fun_001();
+ERROR:  relation "bind_t1" does not exist on datanode1
+LINE 1: insert into bind_t1 values(2)
+                    ^
+QUERY:  insert into bind_t1 values(2)
+CONTEXT:  PL/pgSQL function fun_001() line 4 at SQL statement
+-- insert into sche1.bind_t1;
+create table sche1.bind_t1(a int) /*distribute by hash(a)*/;
+set search_path = sche1;
+call sche2.fun_001();
+ fun_001 
+---------
+       2
+(1 row)
+
+select * from public.bind_t1;
+ a 
+---
+(0 rows)
+
+select * from sche1.bind_t1;
+ a 
+---
+ 2
+(1 row)
+
+delete from public.bind_t1;
+delete from sche1.bind_t1;
+-- insert into sche1.bind_t1;
+call sche1.fun_001();
+ fun_001 
+---------
+       1
+(1 row)
+
+select * from public.bind_t1;
+ a 
+---
+(0 rows)
+
+select * from sche1.bind_t1;
+ a 
+---
+ 1
+ 2
+(2 rows)
+
+delete from public.bind_t1;
+delete from sche1.bind_t1;
+-- cannot insert into sche2.bind_t1.
+create table sche2.bind_t1(a int) /*distribute by hash(a)*/;
+call sche2.fun_001();
+ fun_001 
+---------
+       2
+(1 row)
+
+select * from public.bind_t1;
+ a 
+---
+(0 rows)
+
+select * from sche1.bind_t1;
+ a 
+---
+ 2
+(1 row)
+
+select * from sche2.bind_t1;
+ a 
+---
+(0 rows)
+
+-- insert into sche2.bind_t1.
+set search_path = sche2;
+call sche2.fun_001();
+ fun_001 
+---------
+       2
+(1 row)
+
+select * from public.bind_t1;
+ a 
+---
+(0 rows)
+
+select * from sche1.bind_t1;
+ a 
+---
+ 2
+(1 row)
+
+select * from sche2.bind_t1;
+ a 
+---
+ 2
+(1 row)
+
+delete from public.bind_t1;
+delete from sche1.bind_t1;
+delete from sche2.bind_t1;
+-- insert into sche1.bind_t1 and sche2.bind_t1.
+call sche1.fun_001();
+ fun_001 
+---------
+       1
+(1 row)
+
+select * from public.bind_t1;
+ a 
+---
+(0 rows)
+
+select * from sche1.bind_t1;
+ a 
+---
+ 1
+(1 row)
+
+select * from sche2.bind_t1;
+ a 
+---
+ 2
+(1 row)
+
+reset search_path;
+drop table public.bind_t1;
+drop table sche1.bind_t1;
+drop table sche2.bind_t1;
+drop schema sche1 cascade;
+NOTICE:  drop cascades to function sche1.fun_001()
+drop schema sche2 cascade;
+NOTICE:  drop cascades to function sche2.fun_001()
+-- test DDL under SUPPORT_BIND_SEARCHPATH
+create schema sche1;
+create table public.sche_t1(a int, b int);
+insert into public.sche_t1 values(1, 11);
+create or replace procedure sche1.fun_001() as
+begin
+  insert into sche_t1 values(2, 12);
+  truncate table sche_t1;
+  insert into sche_t1 values(3, 13);
+end;
+/
+call sche1.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+select * from public.sche_t1;
+ a | b  
+---+----
+ 3 | 13
+(1 row)
+
+create or replace procedure sche1.fun_001() as
+begin
+  alter table sche_t1 add column c char(10);
+  insert into sche_t1 values(4, 14, 'hello');
+end;
+/
+call sche1.fun_001();
+ fun_001 
+---------
+ 
+(1 row)
+
+select * from public.sche_t1 order by 1,2,3;
+ a | b  |     c      
+---+----+------------
+ 3 | 13 | 
+ 4 | 14 | hello     
+(2 rows)
+
+drop table public.sche_t1;
+drop schema sche1 cascade;
+NOTICE:  drop cascades to function sche1.fun_001()
+reset behavior_compat_options;
+-- test multiple CREATE TABLE AS.
+-- avoid cacheplan CREATE TABLE AS statement as INSERT.
+create schema sche1;
+create table sche1.sche_t1(a int,b varchar);
+insert into sche1.sche_t1 values(1,1);
+create or replace procedure sche1.subpro() as
+begin
+    create table test as select * from sche_t1;
+    insert into test values(2,2);
+end;
+/
+create or replace procedure sche1.pro() as
+begin
+    subpro();
+    subpro();
+end;
+/
+call sche1.pro();
+ERROR:  relation "test" already exists
+CONTEXT:  SQL statement "create table test as select * from sche_t1"
+PL/pgSQL function sche1.subpro() line 3 at SQL statement
+SQL statement "CALL subpro()"
+PL/pgSQL function sche1.pro() line 4 at PERFORM
+drop schema sche1 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table sche1.sche_t1
+drop cascades to function sche1.subpro()
+drop cascades to function sche1.pro()
+-- clear option
+reset search_path;

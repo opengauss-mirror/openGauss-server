@@ -1,0 +1,90 @@
+--test separation of privilege
+create user sysuser with sysadmin password 'ttest@123';
+create user secuser with createrole password 'ttest@123';
+create user auduser with auditadmin password 'ttest@123';
+
+create user independent_user with independent sysadmin password 'ttest@123';
+create user independent_user with independent createrole password 'ttest@123';
+create user independent_user with independent auditadmin password 'ttest@123';
+create user independent_user with independent password 'ttest@123';
+alter user independent_user with sysadmin;
+alter user independent_user with createrole;
+alter user independent_user with auditadmin;
+alter user independent_user with noindependent;
+
+create user noindependent_user with noindependent password 'ttest@123';
+alter user independent_user with independent user noindependent_user;
+alter user noindependent_user with sysadmin independent;
+alter user noindependent_user with createrole independent;
+alter user noindependent_user with auditadmin independent;
+alter user noindependent_user with independent;
+create user create_role_in_independent_role in role independent_user password 'ttest@123';
+create user create_independent_role_to_role with independent role sysuser password 'ttest@123';
+create user create_independent_role_to_role with independent admin sysuser password 'ttest@123';
+alter user noindependent_user identified by 'ttest@789';
+grant independent_user to noindependent_user;
+\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'alter user noindependent_user with noindependent;'
+\! @abs_bindir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'create table independent_tbl(id1 int,id2 int);insert into independent_tbl values(100,100);insert into independent_tbl values(300,300);'
+\! @abs_bindir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'create view independent_user.myview as select * from independent_user.independent_tbl;'
+\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'create table noindependent_tbl(id1 int,id2 int);insert into noindependent_tbl values(100,100);insert into noindependent_tbl values(300,300);'
+\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'create view noindependent_user.myview as select * from noindependent_user.noindependent_tbl;'
+--independent
+insert into independent_user.independent_tbl values(100,100);
+delete from independent_user.independent_tbl where id1=100;
+update independent_user.independent_tbl set id2=500 where id1=300;
+select * from independent_user.independent_tbl;
+grant select on independent_user.independent_tbl to sysuser;
+revoke select on independent_user.independent_tbl from sysuser;
+copy independent_user.independent_tbl to STDOUT;
+alter table independent_user.independent_tbl owner to sysuser;
+truncate independent_user.independent_tbl;
+vacuum independent_user.independent_tbl;
+analyze independent_user.independent_tbl;
+select * from independent_user.myview;
+select has_table_privilege('independent_user.independent_tbl','select');
+select has_table_privilege('independent_user.independent_tbl','insert');
+select has_table_privilege('independent_user.independent_tbl','delete');
+select has_table_privilege('independent_user.independent_tbl','update');
+select has_table_privilege('independent_user.independent_tbl','truncate');
+select has_table_privilege('independent_user.independent_tbl','references');
+select has_table_privilege('independent_user.independent_tbl','trigger');
+--noindependent
+insert into noindependent_user.noindependent_tbl values(100,100);
+delete from noindependent_user.noindependent_tbl where id1=100;
+update noindependent_user.noindependent_tbl set id2=500 where id1=300;
+select * from noindependent_user.noindependent_tbl order by id1;
+grant select on noindependent_user.noindependent_tbl to sysuser;
+revoke select on noindependent_user.noindependent_tbl from sysuser;
+copy noindependent_user.noindependent_tbl to STDOUT;
+alter table noindependent_user.noindependent_tbl owner to sysuser;
+truncate noindependent_user.noindependent_tbl;
+select * from noindependent_user.myview;
+select has_table_privilege('noindependent_user.noindependent_tbl','select');
+select has_table_privilege('noindependent_user.noindependent_tbl','insert');
+select has_table_privilege('noindependent_user.noindependent_tbl','delete');
+select has_table_privilege('noindependent_user.noindependent_tbl','update');
+select has_table_privilege('noindependent_user.noindependent_tbl','truncate');
+select has_table_privilege('noindependent_user.noindependent_tbl','references');
+select has_table_privilege('noindependent_user.noindependent_tbl','trigger');
+--indirect access
+create table independent_user.like_independent_tbl(like independent_user.independent_tbl);
+create table independent_user.temp_create_tbl as select * from independent_user.independent_tbl;
+select * into independent_user.temp_create_tbl from independent_user.independent_tbl;
+create table public.temp_create_tbl as select * from independent_user.independent_tbl;
+select * into public.temp_create_tbl from independent_user.independent_tbl;
+create index indep_idx on independent_user.independent_tbl(id2);
+drop index independent_user.indep_idx;
+--test disable password for independent
+\! @abs_bindir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'alter user independent_user password disable;'
+\! @abs_bindir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'alter user noindependent_user password disable;'
+alter user independent_user password disable;
+alter user noindependent_user password disable;
+
+drop table independent_user.like_independent_tbl;
+drop table independent_user.independent_tbl cascade;
+drop table noindependent_user.noindependent_tbl cascade;
+drop user independent_user cascade;
+drop user noindependent_user cascade;
+drop user sysuser cascade;
+drop user secuser cascade;
+drop user auduser cascade;

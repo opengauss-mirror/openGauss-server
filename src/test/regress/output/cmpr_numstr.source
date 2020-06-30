@@ -1,0 +1,127 @@
+--
+-- case 1: number string type
+--
+CREATE TABLE cmpr_numstr_raw (
+	RS_ID int,
+	R0_ID varchar(30) NOT NULL,
+	R1_ID varchar(30) NOT NULL,
+	R2_ID varchar(30) NOT NULL,
+	R3_ID varchar(30) NOT NULL,
+	R4_ID varchar(30) NOT NULL,
+	R5_ID varchar(30) NOT NULL,
+	R6_ID varchar(30) NOT NULL
+);
+COPY cmpr_numstr_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+CREATE TABLE cmpr_numstr_auto (
+	RS_ID int,
+	R0_ID varchar(30) NOT NULL,
+	R1_ID varchar(30) NOT NULL,
+	R2_ID varchar(30) NOT NULL,
+	R3_ID varchar(30) NOT NULL,
+	R4_ID varchar(30) NOT NULL,
+	R5_ID varchar(30) NOT NULL,
+	R6_ID varchar(30) NOT NULL
+) COMPRESS;
+COPY cmpr_numstr_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+SELECT (SELECT COUNT(*) FROM cmpr_numstr_raw) - (SELECT COUNT(*) FROM cmpr_numstr_auto);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_numstr_raw) MINUS ALL (SELECT * FROM cmpr_numstr_auto);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id 
+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_numstr_auto) MINUS ALL (SELECT * FROM cmpr_numstr_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id 
+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+CREATE TABLE cmpr_numstr_dict (
+	RS_ID int,
+	R0_ID varchar(30) dictionary NOT NULL,
+	R1_ID varchar(30) dictionary NOT NULL,
+	R2_ID varchar(30) dictionary NOT NULL,
+	R3_ID varchar(30) dictionary NOT NULL,
+	R4_ID varchar(30) dictionary NOT NULL,
+	R5_ID varchar(30) dictionary NOT NULL,
+	R6_ID varchar(30) dictionary NOT NULL
+)  COMPRESS;
+COPY cmpr_numstr_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+SELECT (SELECT COUNT(*) FROM cmpr_numstr_raw) - (SELECT COUNT(*) FROM cmpr_numstr_dict);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_numstr_raw) MINUS ALL (SELECT * FROM cmpr_numstr_dict);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id 
+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_numstr_dict) MINUS ALL (SELECT * FROM cmpr_numstr_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id 
+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+CREATE TABLE cmpr_numstr_prefix (
+	RS_ID int,
+	R0_ID varchar(30) prefix NOT NULL,
+	R1_ID varchar(30) prefix NOT NULL,
+	R2_ID varchar(30) prefix NOT NULL,
+	R3_ID varchar(30) prefix NOT NULL,
+	R4_ID varchar(30) prefix NOT NULL,
+	R5_ID varchar(30) prefix NOT NULL,
+	R6_ID varchar(30) prefix NOT NULL
+)  COMPRESS;
+COPY cmpr_numstr_prefix FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+SELECT (SELECT COUNT(*) FROM cmpr_numstr_raw) - (SELECT COUNT(*) FROM cmpr_numstr_prefix);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_numstr_raw) MINUS ALL (SELECT * FROM cmpr_numstr_prefix);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id 
+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_numstr_prefix) MINUS ALL (SELECT * FROM cmpr_numstr_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id 
+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+CREATE TABLE cmpr_numstr (
+	RS_ID int,
+	R0_ID varchar(30) numstr NOT NULL,
+	R1_ID varchar(30) numstr NOT NULL,
+	R2_ID varchar(30) numstr NOT NULL,
+	R3_ID varchar(30) numstr NOT NULL,
+	R4_ID varchar(30) numstr NOT NULL,
+	R5_ID varchar(30) numstr NOT NULL,
+	R6_ID varchar(30) numstr NOT NULL
+)  COMPRESS;
+COPY cmpr_numstr FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr.data';
+SELECT (SELECT COUNT(*) FROM cmpr_numstr_raw) - (SELECT COUNT(*) FROM cmpr_numstr);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_numstr_raw) MINUS ALL (SELECT * FROM cmpr_numstr);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id 
+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_numstr) MINUS ALL (SELECT * FROM cmpr_numstr_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id 
+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_numstr_prefix;
+DROP TABLE cmpr_numstr_auto;
+DROP TABLE cmpr_numstr_dict;
+DROP TABLE cmpr_numstr;
+DROP TABLE cmpr_numstr_raw;

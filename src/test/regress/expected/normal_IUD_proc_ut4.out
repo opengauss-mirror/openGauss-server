@@ -1,0 +1,26 @@
+START TRANSACTION;
+	select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	insert into tx (select 100x,10x,x from generate_series(1,10000) as x);
+	insert into cmpts values(2,current_timestamp);
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+COMMIT;
+select count(*) from tx;
+ERROR:  relation "tx" does not exist
+LINE 1: select count(*) from tx;
+                             ^

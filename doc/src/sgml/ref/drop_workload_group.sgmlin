@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_WORKLOAD_GROUP">
+<refmeta>
+<refentrytitle>DROP WORKLOAD GROUP</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP WORKLOAD GROUP</refname>
+<refpurpose>remove a workload group</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP WORKLOAD GROUP  [ IF EXISTS ] wg_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

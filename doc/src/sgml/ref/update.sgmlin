@@ -1,0 +1,21 @@
+<refentry id="SQL-UPDATE">
+<refmeta>
+<refentrytitle>UPDATE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>UPDATE</refname>
+<refpurpose>update rows of a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+UPDATE [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+    SET {column_name = { expression | DEFAULT } |
+          ( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }
+          }[, ...]
+    [ FROM from_list] [ WHERE condition ]
+    [ RETURNING {* | {output_expression [ [ AS ] output_name ]} [, ...] }];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

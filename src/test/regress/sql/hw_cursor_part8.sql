@@ -1,0 +1,436 @@
+CREATE schema hw_cursor_part8;
+SET current_schema = hw_cursor_part8;
+
+CREATE TABLE TEST_TB(ID INTEGER);
+INSERT INTO TEST_TB VALUES(123);
+INSERT INTO TEST_TB VALUES(124);
+INSERT INTO TEST_TB VALUES(125);
+
+DECLARE
+    CURSOR CURS1 IS SELECT * FROM TEST_TB;
+ TEMP INTEGER:=0;
+BEGIN
+	FOR VARA IN CURS1 LOOP
+                raise notice '%',CURS1%ROWCOUNT;
+	END LOOP;
+END;
+/
+--2 TEST FOR  DISPLAY CURSOR IN (SELECT ,INSERT ,UPDATE ,DELETE);
+DECLARE
+    CURSOR CURS1 IS SELECT * FROM TEST_TB;
+ TEMP INTEGER:=0;
+BEGIN
+FOR VARA IN CURS1 LOOP
+	-- FOR SELECT
+	SELECT ID INTO TEMP FROM TEST_TB WHERE ID = 123;
+	IF NOT CURS1%ISOPEN THEN --CURS1%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST SELECT: CURS1%ISOPEN=FALSE';
+	END IF;
+	IF CURS1%FOUND THEN
+                raise notice '%','TEST SELECT: CURS1%FOUND=TRUE';
+	END IF;
+	IF CURS1%NOTFOUND THEN
+                raise notice '%','TEST SELECT: CURS1%NOTFOUND=TRUE';
+	END IF;
+        raise notice 'TEST SELECT: CURS1%%ROWCOUNT=%',CURS1%ROWCOUNT;
+	-- FOR INSERT
+	INSERT INTO TEST_TB VALUES (125);
+	IF NOT CURS1%ISOPEN THEN --CURS1%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST INSERT: CURS1%ISOPEN=FALSE';
+	END IF;
+	IF CURS1%FOUND THEN
+                raise notice '%','TEST INSERT: CURS1%FOUND=TRUE';
+	END IF;
+	IF CURS1%NOTFOUND THEN
+                raise notice '%','TEST INSERT: CURS1%NOTFOUND=TRUE';
+	END IF;
+        raise notice 'TEST INSERT: CURS1%%ROWCOUNT=%',CURS1%ROWCOUNT;
+	--UPDATE
+	UPDATE TEST_TB SET ID=ID+1 WHERE ID=124;
+	IF NOT CURS1%ISOPEN THEN --CURS1%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST UPDATE: CURS1%ISOPEN=FALSE';
+	END IF;
+	IF CURS1%FOUND THEN
+                raise notice '%','TEST UPDATE: CURS1%FOUND=TRUE';
+	END IF;
+	IF CURS1%NOTFOUND THEN
+                raise notice '%','TEST UPDATE: CURS1%NOTFOUND=TRUE';
+	END IF;
+        raise notice 'TEST UPDATE: CURS1%%ROWCOUNT=%',CURS1%ROWCOUNT;
+
+	--DELETE
+	DELETE FROM TEST_TB WHERE ID=125;
+	IF NOT CURS1%ISOPEN THEN --CURS1%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST DELETE: CURS1%ISOPEN=FALSE';
+	END IF;
+	IF CURS1%FOUND THEN
+                raise notice '%','TEST DELETE: CURS1%FOUND=TRUE';
+	END IF;
+	IF CURS1%NOTFOUND THEN
+                raise notice '%','TEST DELETE: CURS1%NOTFOUND=TRUE';
+	END IF;
+        raise notice 'TEST DELETE: CURS1%%ROWCOUNT=%',CURS1%ROWCOUNT;
+END LOOP;
+END;
+/
+DROP TABLE IF EXISTS TEST_TB;
+--3 TEST FOR IMPLICIT CURSOR IN (SELECT ,INSERT ,UPDATE ,DELETE)
+CREATE TABLE TEST_TB (ID INT);
+INSERT INTO TEST_TB VALUES (123);
+INSERT INTO TEST_TB VALUES (124);
+INSERT INTO TEST_TB VALUES (125);
+DECLARE
+	TEMP INTEGER = 0;
+BEGIN
+	-- FOR SELECT
+	SELECT ID INTO TEMP FROM TEST_TB WHERE ID = 123;
+	IF NOT SQL%ISOPEN THEN --SQL%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST SELECT: SQL%ISOPEN=FALSE';
+	END IF;
+	IF SQL%FOUND THEN
+                raise notice '%','TEST SELECT: SQL%FOUND=TRUE';
+	END IF;
+	IF NOT SQL%NOTFOUND THEN
+                raise notice '%','TEST SELECT: SQL%NOTFOUND=FALSE';
+	END IF;
+        raise notice 'TEST SELECT: SQL%%ROWCOUNT=%',SQL%ROWCOUNT;
+	-- FOR INSERT
+	INSERT INTO TEST_TB VALUES (125);
+	IF NOT SQL%ISOPEN THEN --SQL%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST INSERT: SQL%ISOPEN=FALSE';
+	END IF;
+	IF SQL%FOUND THEN
+                raise notice '%','TEST INSERT: SQL%FOUND=TRUE';
+	END IF;
+	IF NOT SQL%NOTFOUND THEN
+                raise notice '%','TEST INSERT: SQL%NOTFOUND=FALSE';
+	END IF;
+        raise notice 'TEST INSERT: SQL%%ROWCOUNT=%',SQL%ROWCOUNT;
+	--UPDATE
+	UPDATE TEST_TB SET ID=ID+1 WHERE ID<124;
+	IF NOT SQL%ISOPEN THEN --SQL%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST UPDATE: SQL%ISOPEN=FALSE';
+	END IF;
+	IF SQL%FOUND THEN
+                raise notice '%','TEST UPDATE: SQL%FOUND=TRUE';
+	END IF;
+	IF NOT SQL%NOTFOUND THEN
+                raise notice '%','TEST UPDATE: SQL%NOTFOUND=FALSE';
+	END IF;
+        raise notice 'TEST UPDATE: SQL%%ROWCOUNT=%',SQL%ROWCOUNT;
+
+	--DELETE
+	DELETE FROM TEST_TB WHERE ID<125;
+	IF NOT SQL%ISOPEN THEN --SQL%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST DELETE: SQL%ISOPEN=FALSE';
+	END IF;
+	IF SQL%FOUND THEN
+                raise notice '%','TEST DELETE: SQL%FOUND=TRUE';
+	END IF;
+	IF NOT SQL%NOTFOUND THEN
+                raise notice '%','TEST DELETE: SQL%NOTFOUND=FALSE';
+	END IF;
+        raise notice 'TEST DELETE: SQL%%ROWCOUNT=%',SQL%ROWCOUNT;
+END;
+/
+DROP TABLE IF EXISTS TEST_TB;
+--4 TEST FOR IMPLICIT CURSOR;
+CREATE TABLE TEST_TB (ID INT);
+INSERT INTO TEST_TB VALUES (123);
+INSERT INTO TEST_TB VALUES (124);
+INSERT INTO TEST_TB VALUES (125);
+
+DECLARE
+    CURSOR CURS1 IS SELECT * FROM TEST_TB;
+ TEMP INTEGER:=0;
+BEGIN
+	FOR	 VARA IN CURS1 LOOP
+		SELECT ID INTO TEMP FROM TEST_TB WHERE ID = 123;
+		IF NOT SQL%ISOPEN THEN --SQL%ISOPEN ALWAYS BE FALSE
+                        raise notice '%','TEST SELECT: SQL%ISOPEN=FALSE';
+		END IF;
+		IF SQL%FOUND THEN
+                        raise notice '%','TEST SELECT: SQL%FOUND=TRUE';
+		END IF;
+		IF NOT SQL%NOTFOUND THEN
+                        raise notice '%','TEST SELECT: SQL%NOTFOUND=FALSE';
+		END IF;
+                raise notice 'TEST SELECT: SQL%%ROWCOUNT=%',SQL%ROWCOUNT;
+	END LOOP;
+END;
+/
+
+DROP TABLE IF EXISTS TEST_TB;
+CREATE TABLE TEST_TB(ID INTEGER);
+INSERT INTO TEST_TB VALUES(123);
+INSERT INTO TEST_TB VALUES(124);
+INSERT INTO TEST_TB VALUES(125);
+
+DECLARE
+    CURSOR CURS1 IS SELECT * FROM TEST_TB;
+ TEMP INTEGER:=0;
+BEGIN
+	FOR VARA IN CURS1 LOOP
+                raise notice 'TEST SELECT: CURS1%%ROWCOUNT=%',CURS1%ROWCOUNT;
+	END LOOP;
+	IF NOT CURS1%ISOPEN THEN --CURS1%ISOPEN ALWAYS BE FALSE
+                raise notice '%','TEST SELECT: CURS1%ISOPEN=FALSE';
+	END IF;
+	IF CURS1%FOUND THEN
+                raise notice '%','TEST SELECT: CURS1%FOUND=TRUE';
+	END IF;
+	IF CURS1%NOTFOUND THEN
+                raise notice '%','TEST SELECT: CURS1%NOTFOUND=TRUE';
+	END IF;
+        raise notice 'TEST SELECT: CURS1%%ROWCOUNT=%', CURS1%ROWCOUNT;
+END;
+/
+DROP TABLE IF EXISTS TEST_TB;
+
+--TEST FOR CURSOR SYS_REFCURSOR IN PROCEDURE AND EMPTY TABLE;
+--IF THE RESULT IS 0 ,THAT'S OK,ELSE IS ERROR;
+DROP TABLE IF EXISTS TEST_TBL;
+CREATE TABLE TEST_TBL(ID INTEGER);
+
+CREATE OR REPLACE PROCEDURE T1(O OUT SYS_REFCURSOR)
+IS
+C1 SYS_REFCURSOR;
+BEGIN
+	OPEN C1 FOR SELECT ID FROM TEST_TBL ORDER BY ID;
+	O := C1;
+END;
+/
+
+DECLARE
+	C1 SYS_REFCURSOR;
+	TEMP INTEGER;
+BEGIN
+	T1(C1);
+	LOOP
+ 		FETCH C1 INTO TEMP;
+		EXIT WHEN C1%NOTFOUND;
+	END LOOP;
+        raise notice '%',C1%ROWCOUNT;
+END;
+/
+DROP TABLE IF EXISTS TEST_TBL;
+DROP PROCEDURE T1;
+--TEST FOR CURSOR REFCURSOR IN PROCEDURE AND EMPTY TABLE;
+--IF THE RESULT IS 0 ,THAT'S OK,ELSE IS ERROR;
+DROP TABLE IF EXISTS TEST_TBL;
+CREATE TABLE TEST_TBL(ID INTEGER);
+
+CREATE OR REPLACE PROCEDURE T2(O OUT REFCURSOR)
+IS
+C1 SYS_REFCURSOR;
+BEGIN
+	OPEN C1 FOR SELECT ID FROM TEST_TBL ORDER BY ID;
+	O := C1;
+END;
+/
+
+DECLARE
+   	C1 REFCURSOR;
+	TEMP INTEGER;
+BEGIN
+	T2(C1);
+	LOOP
+  	FETCH C1 INTO TEMP;
+	EXIT WHEN C1%NOTFOUND;
+	END LOOP;
+        raise notice '%',C1%ROWCOUNT;
+END;
+/
+DROP TABLE IF EXISTS TEST_TBL;
+DROP PROCEDURE T2;
+--TEST CURSOR IN Anonymous block
+DROP TABLE IF EXISTS TEST_TBL;
+CREATE TABLE TEST_TBL(ID INTEGER);
+DECLARE
+	C1 REFCURSOR;
+	TEMP INTEGER;
+BEGIN
+	OPEN C1 FOR SELECT ID FROM TEST_TBL ORDER BY ID;
+LOOP
+	FETCH C1 INTO TEMP;
+	EXIT WHEN C1%NOTFOUND;
+END LOOP;
+        raise notice '%',C1%ROWCOUNT;
+END;
+/
+DROP TABLE IF EXISTS TEST_TBL;
+
+DROP PROCEDURE TEST_TEMP;
+DROP PROCEDURE TEST_CRS_RPT_EMPTYSOR;
+DROP TABLE TBL_RCWSCFG;
+drop table TBL_TEMP_MODULE_312;
+
+CREATE TABLE TBL_RCWSCFG (
+    IWSNO INTEGER,
+    USCDBMID SMALLINT
+);
+INSERT INTO TBL_RCWSCFG VALUES (0, 184);
+
+CREATE TABLE TBL_TEMP_MODULE_312 (
+    I_MODULENO INTEGER
+);
+
+CREATE OR REPLACE PROCEDURE TEST_TEMP
+AS
+BEGIN
+ raise notice '%','TEST_TEMP';
+END;
+/
+CREATE OR REPLACE PROCEDURE TEST_CRS_RPT_EMPTYSOR(FLAG INTEGER)
+AS
+    TYPE T_PSTMT_CRS_RPT_EMPTY IS REF CURSOR;
+    CRS_RPT_EMPTY T_PSTMT_CRS_RPT_EMPTY;
+ PI_MODULENO INTEGER;
+ PSV_MODULETBLNAME VARCHAR2(128) := 'TBL_TEMP_MODULE_312';
+ PSV_SQL  VARCHAR2(128);
+ PI_NN INTEGER := NULL;
+BEGIN
+ OPEN CRS_RPT_EMPTY FOR SELECT DISTINCT USCDBMID FROM TBL_RCWSCFG;
+ LOOP
+  FETCH CRS_RPT_EMPTY INTO PI_MODULENO;
+  EXIT WHEN CRS_RPT_EMPTY%NOTFOUND;
+  IF (FLAG = 0) THEN 
+   -- INSERT INTO TBL_TEMP_MODULE_312, INSERT TRIGGER FUNCTION CALLED
+   PSV_SQL := 'BEGIN INSERT INTO '||PSV_MODULETBLNAME||' (I_MODULENO) VALUES('||PI_MODULENO||');END;';
+   EXECUTE IMMEDIATE PSV_SQL;
+  ELSE
+   TEST_TEMP();
+  END IF;
+ END LOOP;
+ -- check cursor attris status
+ raise notice 'CRS_RPT_EMPTY%%ROWCOUNT :%',NVL(TO_CHAR(CRS_RPT_EMPTY%ROWCOUNT),'NULL');
+ raise notice 'SQL%%ROWCOUNT :%',NVL(TO_CHAR(SQL%ROWCOUNT),'NULL');
+END;
+/
+CALL TEST_CRS_RPT_EMPTYSOR(0);
+CALL TEST_CRS_RPT_EMPTYSOR(1);
+DROP TABLE TBL_TEMP_MODULE_312;
+
+
+--test cursor define
+create or replace procedure pro_cursor_c0019() as
+declare
+   cursor cursor1 for create table t1(a int);
+BEGIN
+END;
+/
+
+create table t1(a int);
+--test with query
+create or replace procedure test_cursor() as
+declare
+	cursor cursor1 is 
+	with recursive StepCTE(a)
+	as (select a from t1) select * from StepCTE;
+BEGIN
+	null;
+END;
+/
+
+cursor pro_cursor_c0019_1 with hold for select * from t1;
+
+create or replace procedure pro_cursor_c0019() as
+declare
+	cursor cursor1 for fetch pro_cursor_c0019_1;
+BEGIN
+	open cursor1;
+        raise notice '%','test cursor';
+	close cursor1;
+END;
+/
+
+select * from pro_cursor_c0019();
+close  pro_cursor_c0019_1;
+select * from pro_cursor_c0019();
+
+create table test_cursor_table(c1 int,c2 varchar);
+insert into test_cursor_table values(1,'Jack'),(2,'Rose');
+
+create or replace procedure test_cursor() as
+declare
+		type ref_cur is ref cursor;
+		cur1 ref_cur;
+		a1 test_cursor_table%rowtype;
+		SQL_STR VARCHAR(100);
+begin
+		OPEN cur1 FOR with cte1 as (select * from test_cursor_table) select c1, c2 from cte1;
+		if cur1%isopen then
+		LOOP
+		FETCH cur1 INTO a1;
+		EXIT WHEN cur1%NOTFOUND;
+                raise notice '%---%',a1.c1,a1.c2;
+		END LOOP;
+		end if;
+		CLOSE cur1;
+end
+/
+call test_cursor();
+
+create or replace procedure test_cursor() as
+declare
+type ref_cur is ref cursor;
+		cur1 ref_cur;
+		a1 test_cursor_table%rowtype;
+		SQL_STR VARCHAR(100);
+		ID_T integer;
+begin
+		ID_T := 1;
+		SQL_STR := 'with cte1 as (select * from test_cursor_table) select c1, c2 from cte1 where c1 = :1';
+		OPEN cur1 FOR SQL_STR USING ID_T;
+		if cur1%isopen then
+		LOOP
+		FETCH cur1 INTO a1;
+		EXIT WHEN cur1%NOTFOUND;
+                raise notice '%---%',a1.c1,a1.c2;
+		END LOOP;
+		end if;
+		CLOSE cur1;
+end
+/
+call test_cursor();
+
+create type pro_type_04 as ( v_tablefield character varying, v_tablefield2 character varying, v_tablename character varying, v_cur refcursor);
+
+CREATE FUNCTION pro_base13_03(v_tablefield character varying, v_tablefield2 character varying,v_tablename character varying, OUT v_cur refcursor) RETURNS refcursor
+LANGUAGE plpgsql NOT SHIPPABLE
+AS $$ DECLARE
+begin
+open v_cur for
+'select '||v_tablefield||' as tablecode, '||v_tablefield2||' as tablename from '||v_tablename|| ' order by 1,2;';
+end $$;
+
+CREATE FUNCTION pro_base13_04(v_tablefield character varying, v_tablefield2 character varying, v_tablename character varying) RETURNS record
+LANGUAGE plpgsql NOT SHIPPABLE
+AS $$ DECLARE
+v_record pro_type_04;
+v_cur refcursor;
+begin
+v_cur := pro_base13_03(v_tablefield, v_tablefield2, v_tablename,v_cur);
+loop
+fetch v_cur into v_record;
+EXIT WHEN v_cur%notfound;
+return v_record;
+end loop;
+end $$;
+
+select pro_base13_04('c1','c2','test_cursor_table');
+
+CREATE or REPLACE FUNCTION pro_base12_01(OUT o_resultnum numeric, OUT o_result_cur refcursor,OUT o_result_cur_1 refcursor)
+RETURNS record
+LANGUAGE plpgsql
+AS $$ DECLARE
+	begin
+	select count(*), max(c1),min(c2) into o_resultnum,o_result_cur,o_result_cur_1
+	from test_cursor_table;
+	return;
+end$$;
+select pro_base12_01() from test_cursor_table;
+
+
+drop schema hw_cursor_part8 CASCADE;
+

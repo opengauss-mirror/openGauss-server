@@ -1,0 +1,7 @@
+multi_standby_single/inc_build_failover
+multi_standby_single/inc_build_failover_twice
+#multi_standby_single/inc_build_primary_checkpoint_keep
+multi_standby_single/inc_build_reconnect
+#multi_standby_single/inc_build_slave_checkpoint_keep
+multi_standby_single/params
+multi_standby_single/switchover

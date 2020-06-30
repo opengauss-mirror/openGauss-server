@@ -1,0 +1,27 @@
+<refentry id="SQL-ALTER_SESSION">
+<refmeta>
+<refentrytitle>ALTER SESSION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER SESSION</refname>
+<refpurpose>define and modify the current session influenced by condition or parameter</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER SESSION SET 
+    {{config_parameter { { TO  | =  }  { value | DEFAULT }
+      | FROM CURRENT }} | CURRENT_SCHEMA [ TO | = ] { schema | DEFAULT }
+      | TIME ZONE time_zone
+      | SCHEMA schema
+      | NAMES encoding_name
+      | ROLE role_name PASSWORD 'password'
+      | SESSION AUTHORIZATION { role_name PASSWORD 'password' | DEFAULT }
+      | XML OPTION { DOCUMENT | CONTENT }
+    } ;
+ALTER SESSION SET [ SESSION CHARACTERISTICS AS ] TRANSACTION
+    { ISOLATION LEVEL  {  READ COMMITTED  | READ UNCOMMITTED  }  |  { READ ONLY  | READ WRITE  }  } [, ...] ;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

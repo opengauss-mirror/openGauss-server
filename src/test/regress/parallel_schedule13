@@ -1,0 +1,51 @@
+# ----------
+# test for set operations
+# ----------
+#test: create_enumtype
+test: enum select_nest_views 
+test: vec_prepare_001 vec_prepare_002
+test: vec_prepare_003
+#show plan
+test: col_joinplan col_joinnew
+test: col_limit col_distinct col_prepare 
+test: col_function_1 col_function_2 col_count_distinct_1 col_count_distinct_2 col_count_distinct_3 col_count_distinct_4
+test: directory_test
+#test: nodegroup_name
+test: analyse_verify
+test: create_compositetype
+test: create_basetype
+#test: add_views
+test: tabletype
+#test with recursive
+test: recursive_ref_recursive
+test: recursive_prepare
+test: recursive_cte
+test: recursive_cte_col
+test: nohashjoin_recursive_cte
+test: nohashjoin_recursive_cte_col
+test: others
+test: icbc_customer
+test: recursive_unshippable
+test: recursive_finalize
+test: recursive_cte_1
+test: test_relpages
+
+test: temp__3
+# create_table copy vec_prepare int4 are duplicated
+test: create_table
+test: copy
+#test: vec_prepare_001 vec_prepare_002
+#test: vec_prepare_003 
+test: int4 vec_window_pre
+test: window1 gin_test_2
+test: vec_window_001 vec_window_002
+test: vec_window_end vec_numeric_sop_1 vec_numeric_sop_2 vec_numeric_sop_3 vec_numeric_sop_4 vec_numeric_sop_5
+
+#test: vec_prepare_001 vec_prepare_002
+#test: vec_prepare_003 
+test: vec_unique_pre vec_bitmap_prepare
+test: vec_unique vec_setop_001 vec_setop_002 vec_setop_003 vec_setop_004 vec_setop_005 hw_vec_int4 hw_vec_int8 hw_vec_float4 hw_vec_float8
+test: hw_vec_constrainst vec_numeric vec_numeric_1 vec_numeric_2 vec_bitmap_1 vec_bitmap_2 
+#test: wait_status
+test: disable_vector_engine
+test: hybrid_row_column

@@ -1,0 +1,92 @@
+
+DROP TABLE IF EXISTS tbl;
+DROP TABLE IF EXISTS data_redis_tmp_54321;
+
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text)
+RETURNS tid
+AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@','pg_get_redis_rel_end_ctid'
+LANGUAGE C STABLE not fenced;
+
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text)
+RETURNS tid
+AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@','pg_get_redis_rel_start_ctid'
+LANGUAGE C STABLE not fenced;
+CREATE SCHEMA data_redis;
+CREATE TABLE tbl(i int, j int);
+CREATE TABLE data_redis_tmp_54321(LIKE tbl INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING CONSTRAINTS, nodeid int, tupleid tid);
+INSERT INTO tbl VALUES (generate_series(1, 200), 5);
+
+-- phase 1
+ALTER TABLE tbl SET(append_mode=on, rel_cn_oid=16389);
+\d+ tbl
+INSERT INTO data_redis_tmp_54321
+        SELECT *, xc_node_id, ctid
+        FROM ONLY tbl
+        WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('tbl') AND pg_get_redis_rel_end_ctid('tbl');
+
+SELECT count(*) FROM data_redis_tmp_54321;
+
+SELECT 'Check result return code: ' || count(*)
+FROM
+(
+   SELECT i, j, ctid FROM  tbl
+   MINUS ALL
+   SELECT i, j, tupleid FROM data_redis_tmp_54321
+);
+
+-- phase 2
+DELETE FROM tbl;
+DELETE FROM data_redis_tmp_54321;
+
+INSERT INTO tbl VALUES (generate_series(201, 500), 5);
+
+ALTER TABLE tbl SET(append_mode=on, rel_cn_oid=16389);
+
+INSERT INTO data_redis_tmp_54321
+        SELECT *, xc_node_id, ctid FROM ONLY tbl
+        WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('tbl')
+                        AND pg_get_redis_rel_end_ctid('tbl');
+
+
+SELECT count(*) FROM data_redis_tmp_54321;
+SELECT count(*) FROM tbl;
+
+SELECT 'Check result return code: ' || count(*)
+FROM
+(
+   SELECT i, j, ctid FROM tbl
+   MINUS all
+   SELECT i, j, tupleid FROM data_redis_tmp_54321
+);
+
+SELECT count(*) FROM data_redis_tmp_54321;
+						
+ALTER TABLE tbl SET(append_mode=refresh, rel_cn_oid=16389);
+
+INSERT INTO data_redis_tmp_54321
+        SELECT *, xc_node_id, ctid FROM ONLY tbl
+        WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('tbl')
+                        AND pg_get_redis_rel_end_ctid('tbl');
+
+SELECT count(*) FROM data_redis_tmp_54321;
+SELECT count(*) FROM tbl;
+
+SELECT 'Check result return code: ' || count(*)
+FROM
+(
+   SELECT i, j, ctid FROM tbl
+   MINUS all
+   SELECT i, j, tupleid FROM data_redis_tmp_54321
+);
+
+SELECT count(*) FROM data_redis_tmp_54321;
+
+ALTER TABLE tbl SET(append_mode=off);
+-- drop hash table in shmem
+
+DROP TABLE IF EXISTS tbl;
+DROP TABLE IF EXISTS data_redis_tmp_54321;
+DROP SCHEMA data_redis CASCADE;
+DROP FUNCTION IF EXISTS pg_get_redis_rel_end_ctid;
+DROP FUNCTION IF EXISTS pg_get_redis_rel_start_ctid;
+

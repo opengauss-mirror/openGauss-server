@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_RESOURCE_POOL">
+<refmeta>
+<refentrytitle>DROP RESOURCE POOL</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP RESOURCE POOL</refname>
+<refpurpose>remove a resource pool</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP RESOURCE POOL [ IF EXISTS ] pool_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

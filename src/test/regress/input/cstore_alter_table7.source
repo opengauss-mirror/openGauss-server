@@ -1,0 +1,197 @@
+
+--
+-- ALTER_TABLE
+-- Add column for empty table, type test
+--
+
+set time zone 'PRC';
+drop table if exists cstore7_tmp;
+CREATE TABLE cstore7_tmp (initial int4) with(orientation = column);
+
+ALTER TABLE cstore7_tmp ADD COLUMN xmin integer; -- fails
+
+ALTER TABLE cstore7_tmp ADD COLUMN a int4 default 3;
+
+ALTER TABLE cstore7_tmp ADD COLUMN b tinyint default 1;
+
+ALTER TABLE cstore7_tmp ADD COLUMN c smallint default 2;
+
+ALTER TABLE cstore7_tmp ADD COLUMN d bigint;
+
+ALTER TABLE cstore7_tmp ADD COLUMN e decimal(5,2);
+
+ALTER TABLE cstore7_tmp ADD COLUMN f numeric(10,5);
+
+ALTER TABLE cstore7_tmp ADD COLUMN g float4;
+
+ALTER TABLE cstore7_tmp ADD COLUMN h float8;
+
+ALTER TABLE cstore7_tmp ADD COLUMN i char;
+
+ALTER TABLE cstore7_tmp ADD COLUMN j varchar(10);
+
+ALTER TABLE cstore7_tmp ADD COLUMN k char(5);
+
+ALTER TABLE cstore7_tmp ADD COLUMN l text;
+
+ALTER TABLE cstore7_tmp ADD COLUMN m nvarchar2;
+
+ALTER TABLE cstore7_tmp ADD COLUMN o timestamptz;
+
+ALTER TABLE cstore7_tmp ADD COLUMN p timestamp;
+
+ALTER TABLE cstore7_tmp ADD COLUMN q date;
+
+ALTER TABLE cstore7_tmp ADD COLUMN r timetz;
+
+ALTER TABLE cstore7_tmp ADD COLUMN s time;
+
+ALTER TABLE cstore7_tmp ADD COLUMN t tinterval;
+
+ALTER TABLE cstore7_tmp ADD COLUMN u interval;
+
+ALTER TABLE cstore7_tmp ADD COLUMN v smalldatetime;
+
+ALTER TABLE cstore7_tmp ADD COLUMN w oid;
+
+ALTER TABLE cstore7_tmp ADD COLUMN x bit(8);
+
+ALTER TABLE cstore7_tmp ADD COLUMN y varbit(8);
+
+--unsupport type
+
+ALTER TABLE cstore7_tmp ADD COLUMN n name;
+
+ALTER TABLE cstore7_tmp ADD COLUMN aa tid;
+
+ALTER TABLE cstore7_tmp ADD COLUMN bb xid;
+
+ALTER TABLE cstore7_tmp ADD COLUMN cc oidvector;
+
+ALTER TABLE cstore7_tmp ADD COLUMN dd smgr;
+
+ALTER TABLE cstore7_tmp ADD COLUMN ee point;
+
+ALTER TABLE cstore7_tmp ADD COLUMN ff lseg;
+
+ALTER TABLE cstore7_tmp ADD COLUMN gg path;
+
+ALTER TABLE cstore7_tmp ADD COLUMN hh box;
+
+ALTER TABLE cstore7_tmp ADD COLUMN ii polygon;
+
+ALTER TABLE cstore7_tmp ADD COLUMN ll float8[];
+
+ALTER TABLE cstore7_tmp ADD COLUMN mm float4[];
+
+ALTER TABLE cstore7_tmp ADD COLUMN nn int2[];
+
+INSERT INTO cstore7_tmp (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+
+SELECT * FROM cstore7_tmp;
+
+DROP TABLE cstore7_tmp;
+
+-- Add column for not-empty table
+
+CREATE TABLE cstore7_tmp (initial int4) with(orientation = column);
+
+insert into cstore7_tmp values(1);
+
+insert into cstore7_tmp values(2);
+
+ALTER TABLE cstore7_tmp ADD COLUMN a int4 default 3;
+
+ALTER TABLE cstore7_tmp ADD COLUMN b tinyint default 1;
+
+ALTER TABLE cstore7_tmp ADD COLUMN c smallint default 2;
+
+ALTER TABLE cstore7_tmp ADD COLUMN d bigint;
+
+ALTER TABLE cstore7_tmp ADD COLUMN e decimal(5,2);
+
+ALTER TABLE cstore7_tmp ADD COLUMN f numeric(10,5);
+
+ALTER TABLE cstore7_tmp ADD COLUMN g float4;
+
+ALTER TABLE cstore7_tmp ADD COLUMN h float8;
+
+ALTER TABLE cstore7_tmp ADD COLUMN i char;
+
+ALTER TABLE cstore7_tmp ADD COLUMN j varchar(10);
+
+ALTER TABLE cstore7_tmp ADD COLUMN k char(5);
+
+ALTER TABLE cstore7_tmp ADD COLUMN l text;
+
+ALTER TABLE cstore7_tmp ADD COLUMN m nvarchar2;
+
+ALTER TABLE cstore7_tmp ADD COLUMN o timestamptz;
+
+ALTER TABLE cstore7_tmp ADD COLUMN p timestamp;
+
+ALTER TABLE cstore7_tmp ADD COLUMN q date;
+
+ALTER TABLE cstore7_tmp ADD COLUMN r timetz;
+
+ALTER TABLE cstore7_tmp ADD COLUMN s time;
+
+ALTER TABLE cstore7_tmp ADD COLUMN t tinterval;
+
+ALTER TABLE cstore7_tmp ADD COLUMN u interval;
+
+ALTER TABLE cstore7_tmp ADD COLUMN v smalldatetime;
+
+ALTER TABLE cstore7_tmp ADD COLUMN w oid;
+
+ALTER TABLE cstore7_tmp ADD COLUMN x bit(8);
+
+ALTER TABLE cstore7_tmp ADD COLUMN y varbit(8);
+
+INSERT INTO cstore7_tmp (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+
+SELECT * FROM cstore7_tmp;
+
+DROP TABLE cstore7_tmp;
+-- bpchar --> bpchar(1) --> bpchar
+create table fail_alter ( a int, b bpchar ) with ( orientation = column ) ;
+insert into fail_alter values ( 1, '1'), (1, '20') , (1, '2'), (1, null);
+vacuum full fail_alter ;
+alter table fail_alter alter column b set data type bpchar(1) ;
+select * from fail_alter order by b;
+alter table fail_alter alter column b set data type bpchar;
+select * from fail_alter order by b;
+drop table if exists fail_alter;
+-- varchar --> text --> varchar
+create table fail_alter ( a int, b varchar ) with ( orientation = column ) ;
+insert into fail_alter values ( 1, '1'), (1, '20') , (1, '2'), (1, null);
+vacuum full fail_alter ;
+alter table fail_alter alter column b set data type text ;
+select * from fail_alter order by b;
+alter table fail_alter alter column b set data type varchar ;
+select * from fail_alter order by b;
+drop table if exists fail_alter;
+-- bpchar --> text --> bpchar
+create table fail_alter ( a int, b bpchar ) with ( orientation = column ) ;
+insert into fail_alter values ( 1, '1'), (1, '20') , (1, '2'), (1, null);
+vacuum full fail_alter ;
+alter table fail_alter alter column b set data type text ;
+select * from fail_alter order by b;
+alter table fail_alter alter column b set data type bpchar ;
+select * from fail_alter order by b;
+drop table if exists fail_alter;
+-- bpchar(10) --> text --> bpchar(10)
+create table fail_alter ( a int, b bpchar(10) ) with ( orientation = column ) ;
+insert into fail_alter values ( 1, '1'), (1, '20') , (1, '2'), (1, null);
+vacuum full fail_alter ;
+alter table fail_alter alter column b set data type text ;
+select * from fail_alter order by b;
+alter table fail_alter alter column b set data type bpchar(10) ;
+select * from fail_alter order by b;
+drop table if exists fail_alter;

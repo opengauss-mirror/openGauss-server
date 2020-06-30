@@ -1,0 +1,3145 @@
+diff -Naur code/compiler.hh new_code/compiler.hh
+--- code/compiler.hh	2020-06-11 15:18:24.423000000 +0700
++++ new_code/compiler.hh	2020-06-11 15:12:49.201000000 +0700
+@@ -15,9 +15,10 @@
+  */
+ #ifndef MASSTREE_COMPILER_HH
+ #define MASSTREE_COMPILER_HH 1
++
++#include "../masstree/config.h"
++#include "global.h"
+ #include <stdint.h>
+-#define __STDC_FORMAT_MACROS
+-#include <inttypes.h>
+ #include <arpa/inet.h>
+ #if HAVE_TYPE_TRAITS
+ #include <type_traits>
+@@ -25,8 +26,12 @@
+ 
+ #define arraysize(a) (sizeof(a) / sizeof((a)[0]))
+ 
++#ifndef likely
+ #define likely(x) __builtin_expect(!!(x), 1)
++#endif
++#ifndef unlikely
+ #define unlikely(x) __builtin_expect(!!(x), 0)
++#endif
+ 
+ #if HAVE_OFF_T_IS_LONG_LONG
+ #define PRIdOFF_T "lld"
+@@ -78,29 +83,49 @@
+  * Prevents reordering of loads and stores by the compiler. Not intended to
+  * synchronize the processor's caches. */
+ inline void fence() {
++#if defined(__x86_64__) || defined(__x86__)
+     asm volatile("" : : : "memory");
++#else
++    __sync_synchronize();
++#endif
+ }
+ 
+ /** @brief Acquire fence. */
+ inline void acquire_fence() {
++#if defined(__x86_64__) || defined(__x86__)
+     asm volatile("" : : : "memory");
++#else
++    __sync_synchronize();
++#endif
+ }
+ 
+ /** @brief Release fence. */
+ inline void release_fence() {
++#if defined(__x86_64__) || defined(__x86__)
+     asm volatile("" : : : "memory");
++#else
++    __sync_synchronize();
++#endif
+ }
+ 
+ /** @brief Compiler fence that relaxes the processor.
+ 
+     Use this in spinloops, for example. */
+ inline void relax_fence() {
++#if defined(__x86_64__) || defined(__x86__)
+     asm volatile("pause" : : : "memory"); // equivalent to "rep; nop"
++#else
++    asm volatile("" : : : "memory"); // equivalent to "rep; nop"
++#endif
+ }
+ 
+ /** @brief Full memory fence. */
+ inline void memory_fence() {
++#if defined(__x86_64__) || defined(__x86__)
+     asm volatile("mfence" : : : "memory");
++#else
++    __sync_synchronize();
++#endif
+ }
+ 
+ /** @brief Do-nothing function object. */
+@@ -149,13 +174,17 @@
+ template <typename B> struct sized_compiler_operations<1, B> {
+     typedef char type;
+     static inline type xchg(type* object, type new_value) {
++#if defined(__x86_64__) || defined(__x86__)
+         asm volatile("xchgb %0,%1"
+                      : "+q" (new_value), "+m" (*object));
+         B()();
+         return new_value;
++#else
++	return __sync_lock_test_and_set(object, new_value);
++#endif
+     }
+     static inline type val_cmpxchg(type* object, type expected, type desired) {
+-#if __x86__ && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
++#if (defined(__x86_64__) || defined(__x86__)) && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
+         asm volatile("lock; cmpxchgb %2,%1"
+                      : "+a" (expected), "+m" (*object)
+                      : "r" (desired) : "cc");
+@@ -178,7 +207,7 @@
+ #endif
+     }
+     static inline type fetch_and_add(type *object, type addend) {
+-#if __x86__ && (PREFER_X86 || !HAVE___SYNC_FETCH_AND_ADD)
++#if (defined(__x86_64__) || defined(__x86__)) && (PREFER_X86 || !HAVE___SYNC_FETCH_AND_ADD)
+         asm volatile("lock; xaddb %0,%1"
+                      : "+q" (addend), "+m" (*object) : : "cc");
+         B()();
+@@ -188,7 +217,7 @@
+ #endif
+     }
+     static inline void atomic_or(type* object, type addend) {
+-#if __x86__
++#if defined(__x86_64__) || defined(__x86__)
+         asm volatile("lock; orb %0,%1"
+                      : "=r" (addend), "+m" (*object) : : "cc");
+         B()();
+@@ -205,13 +234,17 @@
+     typedef int16_t type;
+ #endif
+     static inline type xchg(type* object, type new_value) {
++#if defined(__x86_64__) || defined(__x86__)
+         asm volatile("xchgw %0,%1"
+                      : "+r" (new_value), "+m" (*object));
+         B()();
+         return new_value;
++#else
++	return __sync_lock_test_and_set(object, new_value);
++#endif
+     }
+     static inline type val_cmpxchg(type* object, type expected, type desired) {
+-#if __x86__ && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
++#if (defined(__x86_64__) || defined(__x86__)) && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
+         asm volatile("lock; cmpxchgw %2,%1"
+                      : "+a" (expected), "+m" (*object)
+                      : "r" (desired) : "cc");
+@@ -234,7 +267,7 @@
+ #endif
+     }
+     static inline type fetch_and_add(type* object, type addend) {
+-#if __x86__ && (PREFER_X86 || !HAVE___SYNC_FETCH_AND_ADD)
++#if (defined(__x86_64__) || defined(__x86__)) && (PREFER_X86 || !HAVE___SYNC_FETCH_AND_ADD)
+         asm volatile("lock; xaddw %0,%1"
+                      : "+r" (addend), "+m" (*object) : : "cc");
+         B()();
+@@ -244,7 +277,7 @@
+ #endif
+     }
+     static inline void atomic_or(type* object, type addend) {
+-#if __x86__
++#if (defined(__x86_64__) || defined(__x86__))
+         asm volatile("lock; orw %0,%1"
+                      : "=r" (addend), "+m" (*object) : : "cc");
+         B()();
+@@ -261,13 +294,17 @@
+     typedef int32_t type;
+ #endif
+     static inline type xchg(type* object, type new_value) {
++#if (defined(__x86_64__) || defined(__x86__))
+         asm volatile("xchgl %0,%1"
+                      : "+r" (new_value), "+m" (*object));
+         B()();
+         return new_value;
++#else
++	return __sync_lock_test_and_set(object, new_value);
++#endif
+     }
+     static inline type val_cmpxchg(type* object, type expected, type desired) {
+-#if __x86__ && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
++#if (defined(__x86_64__) || defined(__x86__)) && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
+         asm volatile("lock; cmpxchgl %2,%1"
+                      : "+a" (expected), "+m" (*object)
+                      : "r" (desired) : "cc");
+@@ -290,7 +327,7 @@
+ #endif
+     }
+     static inline type fetch_and_add(type *object, type addend) {
+-#if __x86__ && (PREFER_X86 || !HAVE___SYNC_FETCH_AND_ADD)
++#if (defined(__x86_64__) || defined(__x86__)) && (PREFER_X86 || !HAVE___SYNC_FETCH_AND_ADD)
+         asm volatile("lock; xaddl %0,%1"
+                      : "+r" (addend), "+m" (*object) : : "cc");
+         B()();
+@@ -300,7 +337,7 @@
+ #endif
+     }
+     static inline void atomic_or(type* object, type addend) {
+-#if __x86__
++#if (defined(__x86_64__) || defined(__x86__))
+         asm volatile("lock; orl %0,%1"
+                      : "=r" (addend), "+m" (*object) : : "cc");
+         B()();
+@@ -318,14 +355,16 @@
+ #else
+     typedef int64_t type;
+ #endif
+-#if __x86_64__
+     static inline type xchg(type* object, type new_value) {
++#if (defined(__x86_64__) || defined(__x86__))
+         asm volatile("xchgq %0,%1"
+                      : "+r" (new_value), "+m" (*object));
+         B()();
+         return new_value;
+-    }
++#else
++	return __sync_lock_test_and_set(object, new_value);
+ #endif
++    }
+     static inline type val_cmpxchg(type* object, type expected, type desired) {
+ #if __x86_64__ && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP_8)
+         asm volatile("lock; cmpxchgq %2,%1"
+@@ -574,8 +613,12 @@
+ #ifdef NOPREFETCH
+     (void) ptr;
+ #else
++#if (defined(__x86_64__) || defined(__x86__))
+     typedef struct { char x[CACHE_LINE_SIZE]; } cacheline_t;
+     asm volatile("prefetcht0 %0" : : "m" (*(const cacheline_t *)ptr));
++#else
++    __builtin_prefetch(ptr);
++#endif
+ #endif
+ }
+ #endif
+@@ -584,8 +627,12 @@
+ #ifdef NOPREFETCH
+     (void) ptr;
+ #else
++#if (defined(__x86_64__) || defined(__x86__))
+     typedef struct { char x[CACHE_LINE_SIZE]; } cacheline_t;
+     asm volatile("prefetchnta %0" : : "m" (*(const cacheline_t *)ptr));
++#else
++    __builtin_prefetch(ptr,0,0);
++#endif
+ #endif
+ }
+ 
+@@ -618,9 +665,11 @@
+     asm("bswapl %0; bswapl %1; xchgl %0,%1"
+         : "+r" (v.s.a), "+r" (v.s.b));
+     return v.u;
+-#else /* __i386__ */
++#elif __x86_64__
+     asm("bswapq %0" : "+r" (val));
+     return val;
++#else
++    return __builtin_bswap64(val);
+ #endif
+ }
+ 
+@@ -966,20 +1015,6 @@
+     return read_in_net_order<T>(reinterpret_cast<const char*>(s));
+ }
+ 
+-
+-inline uint64_t read_pmc(uint32_t ecx) {
+-    uint32_t a, d;
+-    __asm __volatile("rdpmc" : "=a"(a), "=d"(d) : "c"(ecx));
+-    return ((uint64_t)a) | (((uint64_t)d) << 32);
+-}
+-
+-inline uint64_t read_tsc(void)
+-{
+-    uint32_t low, high;
+-    asm volatile("rdtsc" : "=a" (low), "=d" (high));
+-    return ((uint64_t)low) | (((uint64_t)high) << 32);
+-}
+-
+ template <typename T>
+ inline int compare(T a, T b) {
+     if (a == b)
+@@ -990,30 +1025,13 @@
+ 
+ 
+ /** Type traits **/
++
+ namespace mass {
+ 
+ template <typename T> struct type_synonym {
+     typedef T type;
+ };
+ 
+-
+-#if HAVE_CXX_TEMPLATE_ALIAS && HAVE_TYPE_TRAITS
+-template <typename T, T V>
+-using integral_constant = std::integral_constant<T, V>;
+-typedef std::true_type true_type;
+-typedef std::false_type false_type;
+-#else
+-template <typename T, T V>
+-struct integral_constant {
+-    typedef integral_constant<T, V> type;
+-    typedef T value_type;
+-    static constexpr T value = V;
+-};
+-template <typename T, T V> constexpr T integral_constant<T, V>::value;
+-typedef integral_constant<bool, true> true_type;
+-typedef integral_constant<bool, false> false_type;
+-#endif
+-
+ #if HAVE_CXX_TEMPLATE_ALIAS && HAVE_TYPE_TRAITS
+ template <bool B, typename T, typename F>
+ using conditional = std::conditional<B, T, F>;
+@@ -1139,6 +1157,7 @@
+   a reference. If fast_argument<T>::is_reference is true, then
+   fast_argument<T>::enable_rvalue_reference is a typedef to void; otherwise
+   it is not defined. */
++
+ template <typename T, bool use_reference = (!is_reference<T>::value
+                                             && (!is_trivially_copyable<T>::value
+                                                 || sizeof(T) > sizeof(void *)))>
+@@ -1158,36 +1177,6 @@
+ 
+ }
+ 
+-
+-template <typename T>
+-struct has_fast_int_multiply : public mass::false_type {
+-    // enum { check_t_integral = mass::integer_traits<T>::is_signed };
+-};
+-
+-#if defined(__i386__) || defined(__x86_64__)
+-inline void int_multiply(unsigned a, unsigned b, unsigned &xlow, unsigned &xhigh)
+-{
+-    __asm__("mul %2" : "=a" (xlow), "=d" (xhigh) : "r" (a), "a" (b) : "cc");
+-}
+-template <> struct has_fast_int_multiply<unsigned> : public mass::true_type {};
+-
+-# if SIZEOF_LONG == 4 || (defined(__x86_64__) && SIZEOF_LONG == 8)
+-inline void int_multiply(unsigned long a, unsigned long b, unsigned long &xlow, unsigned long &xhigh)
+-{
+-    __asm__("mul %2" : "=a" (xlow), "=d" (xhigh) : "r" (a), "a" (b) : "cc");
+-}
+-template <> struct has_fast_int_multiply<unsigned long> : public mass::true_type {};
+-# endif
+-
+-# if defined(__x86_64__) && SIZEOF_LONG_LONG == 8
+-inline void int_multiply(unsigned long long a, unsigned long long b, unsigned long long &xlow, unsigned long long &xhigh)
+-{
+-    __asm__("mul %2" : "=a" (xlow), "=d" (xhigh) : "r" (a), "a" (b) : "cc");
+-}
+-template <> struct has_fast_int_multiply<unsigned long long> : public mass::true_type {};
+-# endif
+-#endif
+-
+ struct uninitialized_type {};
+ 
+ #endif
+diff -Naur code/kpermuter.hh new_code/kpermuter.hh
+--- code/kpermuter.hh	2020-06-11 15:18:24.428000000 +0700
++++ new_code/kpermuter.hh	2020-06-11 15:12:49.202000000 +0700
+@@ -56,9 +56,9 @@
+            full_value = (uint64_t) 0xEDCBA98765432100ULL };
+ };
+ 
+-template <int width> class kpermuter {
++template <int W> class kpermuter {
+   public:
+-    typedef sized_kpermuter_info<(width > 3) + (width > 7) + (width > 15)> info;
++    typedef sized_kpermuter_info<(W > 3) + (W > 7) + (W > 15)> info;
+     typedef typename info::storage_type storage_type;
+     typedef typename info::value_type value_type;
+     enum { max_width = (int) (sizeof(storage_type) * 2 - 1) };
+@@ -76,7 +76,7 @@
+ 
+         Elements will be allocated in order 0, 1, ..., @a width - 1. */
+     static inline value_type make_empty() {
+-        value_type p = (value_type) info::initial_value >> ((max_width - width) << 2);
++        value_type p = (value_type) info::initial_value >> ((max_width - W) << 2);
+         return p & ~(value_type) 15;
+     }
+     /** @brief Return a permuter with size @a n.
+@@ -85,7 +85,7 @@
+         (*this)[i] == i. Elements n through @a width - 1 are free, and will be
+         allocated in that order. */
+     static inline value_type make_sorted(int n) {
+-        value_type mask = (n == width ? (value_type) 0 : (value_type) 16 << (n << 2)) - 1;
++        value_type mask = (n == W ? (value_type) 0 : (value_type) 16 << (n << 2)) - 1;
+         return (make_empty() << (n << 2))
+             | ((value_type) info::full_value & mask)
+             | n;
+@@ -95,13 +95,17 @@
+     int size() const {
+         return x_ & 15;
+     }
++    static int width() {
++        return W;
++    }
+     /** @brief Return the permuter's element @a i.
+         @pre 0 <= i < width */
+     int operator[](int i) const {
+         return (x_ >> ((i << 2) + 4)) & 15;
+     }
++    // Get next free entry in permutation
+     int back() const {
+-        return (*this)[width - 1];
++        return (*this)[W - 1];
+     }
+     value_type value() const {
+         return x_;
+@@ -147,7 +151,6 @@
+         @pre size() <= @a si
+         @return The newly allocated element. */
+     void insert_selected(int di, int si) {
+-        (void) width;
+         int value = (*this)[si];
+         value_type mask = ((value_type) 256 << (si << 2)) - 1;
+         // increment size, leave lower slots unchanged
+@@ -177,10 +180,9 @@
+         <li>q[q.size()] == p[i]</li>
+         </ul> */
+     void remove(int i) {
+-        (void) width;
+-        if (int(x_ & 15) == i + 1)
++        if (int(x_ & 15) == i + 1) {
+             --x_;
+-        else {
++        } else {
+             int rot_amount = ((x_ & 15) - i - 1) << 2;
+             value_type rot_mask =
+                 (((value_type) 16 << rot_amount) - 1) << ((i + 1) << 2);
+@@ -212,13 +214,13 @@
+     void remove_to_back(int i) {
+         value_type mask = ~(((value_type) 16 << (i << 2)) - 1);
+         // clear unused slots
+-        value_type x = x_ & (((value_type) 16 << (width << 2)) - 1);
++        value_type x = x_ & (((value_type) 16 << (W << 2)) - 1);
+         // decrement size, leave lower slots unchanged
+         x_ = ((x - 1) & ~mask)
+             // shift higher entries down
+             | ((x >> 4) & mask)
+             // shift removed element up
+-            | ((x & mask) << ((width - i - 1) << 2));
++            | ((x & mask) << ((W - i - 1) << 2));
+     }
+     /** @brief Rotate the permuter's elements between @a i and size().
+         @pre 0 <= @a i <= @a j <= size()
+@@ -236,12 +238,12 @@
+         <li>Given k with i <= k < q.size(), q[k] == p[i + (k - i + j - i) mod (size() - i)]</li>
+         </ul> */
+     void rotate(int i, int j) {
+-        value_type mask = (i == width ? (value_type) 0 : (value_type) 16 << (i << 2)) - 1;
++        value_type mask = (i == W ? (value_type) 0 : (value_type) 16 << (i << 2)) - 1;
+         // clear unused slots
+-        value_type x = x_ & (((value_type) 16 << (width << 2)) - 1);
++        value_type x = x_ & (((value_type) 16 << (W << 2)) - 1);
+         x_ = (x & mask)
+             | ((x >> ((j - i) << 2)) & ~mask)
+-            | ((x & ~mask) << ((width - j) << 2));
++            | ((x & ~mask) << ((W - j) << 2));
+     }
+     /** @brief Exchange the elements at positions @a i and @a j. */
+     void exchange(int i, int j) {
+@@ -251,8 +253,8 @@
+     /** @brief Exchange positions of values @a x and @a y. */
+     void exchange_values(int x, int y) {
+         value_type diff = 0, p = x_;
+-        for (int i = 0; i < width; ++i, diff <<= 4, p <<= 4) {
+-            int v = (p >> (width << 2)) & 15;
++        for (int i = 0; i < W; ++i, diff <<= 4, p <<= 4) {
++            int v = (p >> (W << 2)) & 15;
+             diff ^= -((v == x) | (v == y)) & (x ^ y);
+         }
+         x_ ^= diff;
+@@ -260,13 +262,14 @@
+ 
+     lcdf::String unparse() const;
+ 
+-    bool operator==(const kpermuter<width>& x) const {
++    bool operator==(const kpermuter<W>& x) const {
+         return x_ == x.x_;
+     }
+-    bool operator!=(const kpermuter<width>& x) const {
++    bool operator!=(const kpermuter<W>& x) const {
+         return !(*this == x);
+     }
+ 
++    // The number of ikeys the leaf currently holds. Each ikey points to a value or to a lower layer
+     static inline int size(value_type p) {
+         return p & 15;
+     }
+@@ -274,8 +277,8 @@
+     value_type x_;
+ };
+ 
+-template <int width>
+-lcdf::String kpermuter<width>::unparse() const
++template <int W>
++lcdf::String kpermuter<W>::unparse() const
+ {
+     char buf[max_width + 3], *s = buf;
+     value_type p(x_);
+@@ -283,18 +286,21 @@
+     int n = p & 15;
+     p >>= 4;
+     for (int i = 0; true; ++i) {
+-        if (i == n)
++        if (i == n) {
+             *s++ = ':';
+-        if (i == width)
++        }
++        if (i == W) {
+             break;
+-        if ((p & 15) < 10)
++        }
++        if ((p & 15) < 10) {
+             *s++ = '0' + (p & 15);
+-        else
++        } else {
+             *s++ = 'a' + (p & 15) - 10;
++        }
+         seen |= 1 << (p & 15);
+         p >>= 4;
+     }
+-    if (seen != (1 << width) - 1) {
++    if (seen != (1 << W) - 1) {
+         *s++ = '?';
+         *s++ = '!';
+     }
+diff -Naur code/ksearch.hh new_code/ksearch.hh
+--- code/ksearch.hh	2020-06-11 15:18:24.431000000 +0700
++++ new_code/ksearch.hh	2020-06-11 15:12:49.202000000 +0700
+@@ -60,6 +60,7 @@
+     return key_upper_bound_by(ka, n, key_comparator<KA, T>());
+ }
+ 
++// Binary search
+ template <typename KA, typename T, typename F>
+ key_indexed_position key_lower_bound_by(const KA& ka, const T& n, F comparator)
+ {
+@@ -85,7 +86,16 @@
+     return key_lower_bound_by(ka, n, key_comparator<KA, T>());
+ }
+ 
++/* For internode internal search:
++   Return the index of the child (leaf) that might contain the provided ikey (ka)
++   This is done be linear searching for the ikey that the provided ikey is the tightest upper boundary of (provided ikey is larger than the ikey in boundary array)
++   e.g. internode - boundary ikeys array: ikey0_ = {40, 50, 100, 110} children in indexes 0, 1, 2, 3, 4
++        For ka.ikey0_ == 100, 3 is returned because node in child_[3] might contain the ikey
++        For ka.ikey0_ == 150, 4 is returned
++        For ka.ikey0_ == 10, 0 is returned
++        For ka.ikey0_ == 50, 2 is returned */
+ 
++// Linear search
+ template <typename KA, typename T, typename F>
+ int key_find_upper_bound_by(const KA& ka, const T& n, F comparator)
+ {
+@@ -102,6 +112,19 @@
+     return l;
+ }
+ 
++/* In use in leafs for permutation search
++   Find the ikey in node which equal or that the provided ikey is the tightest lower boundary of (provided ikey is smaller than the ikey in node). If match, also compare the keylen
++   Return value: key_indexed_position which contains i and p variables
++   i - Index inside the permutation. if key was found, index of the key
++        If key was not found, index of the ikey which is tightest lower bounded by the provided key (ka)
++        If no such exists, return perm.size() (invalid\not used location - currently outsize of the permutation)
++   p - Position in child arrays ( == permutation[i]). if key was not found, p = -1
++   e.g. Leaf - ikeys, perm { 0, 3, 1, 2 } ikey0_ = {40, 100, 110, 50}
++        For ka.ikey0_ == 100, 110 is returned (ikey0_[2] == 110) --> i = 2, p = 110
++        For ka.ikey0_ == 120, -1 is returned --> i = 4, p = -1
++        For ka.ikey0_ == 85,  -1 is returned --> i = 1, p = -1 */
++
++// Linear search
+ template <typename KA, typename T, typename F>
+ key_indexed_position key_find_lower_bound_by(const KA& ka, const T& n, F comparator)
+ {
+diff -Naur code/kvthread.cpp new_code/kvthread.cpp
+--- code/kvthread.cpp	2020-06-11 15:18:24.470000000 +0700
++++ new_code/kvthread.cpp	2020-06-11 15:12:49.202000000 +0700
+@@ -13,6 +13,8 @@
+  * notice is a summary of the Masstree LICENSE file; the license in that file
+  * is legally binding.
+  */
++
++#include "masstree_index.h"
+ #include "kvthread.hh"
+ #include <string.h>
+ #include <stdio.h>
+@@ -24,61 +26,98 @@
+ #include <dirent.h>
+ #endif
+ 
++#include "mm_api.h"
++#include "mm_gc_manager.h"
++
++// This is the thread info which serves the current masstree operation. It is set before the operation starts.
++__thread threadinfo * mtSessionThreadInfo = NULL;
++
++volatile mrcu_epoch_type globalepoch;
++volatile mrcu_epoch_type active_epoch;
++
+ threadinfo *threadinfo::allthreads;
+ #if ENABLE_ASSERTIONS
+ int threadinfo::no_pool_value;
+ #endif
+ 
+-inline threadinfo::threadinfo(int purpose, int index) {
+-    gc_epoch_ = perform_gc_epoch_ = 0;
+-    logger_ = nullptr;
+-    next_ = nullptr;
++inline threadinfo::threadinfo(int purpose, int index, int rcu_max_free_count) {
++    memset(this, 0, sizeof(*this));
+     purpose_ = purpose;
+     index_ = index;
++    rcu_free_count = rcu_max_free_count;
+ 
+-    for (size_t i = 0; i != sizeof(pool_) / sizeof(pool_[0]); ++i) {
+-        pool_[i] = nullptr;
++    if (use_pool()) {
++      void *limbo_space = allocate(MAX_MEMTAG_MASSTREE_LIMBO_GROUP_ALLOCATION_SIZE, memtag_limbo);
++      mark(tc_limbo_slots, mt_limbo_group::capacity);
++      limbo_head_ = limbo_tail_ = new(limbo_space) mt_limbo_group;
+     }
+ 
+-    void *limbo_space = allocate(sizeof(limbo_group), memtag_limbo);
+-    mark(tc_limbo_slots, limbo_group::capacity);
+-    limbo_head_ = limbo_tail_ = new(limbo_space) limbo_group;
+     ts_ = 2;
+-
+-    for (size_t i = 0; i != sizeof(counters_) / sizeof(counters_[0]); ++i) {
+-        counters_[i] = 0;
+-    }
+ }
+ 
+-threadinfo *threadinfo::make(int purpose, int index) {
+-    static int threads_initialized;
+-
+-    threadinfo* ti = new(malloc(8192)) threadinfo(purpose, index);
+-    ti->next_ = allthreads;
+-    allthreads = ti;
+-
+-    if (!threads_initialized) {
+-#if ENABLE_ASSERTIONS
+-        const char* s = getenv("_");
+-        no_pool_value = s && strstr(s, "valgrind") != 0;
+-#endif
+-        threads_initialized = 1;
+-    }
++threadinfo *threadinfo::make(void * obj_mem, int purpose, int index, int rcu_max_free_count) {
++    threadinfo* ti = new(obj_mem) threadinfo(purpose, index, rcu_max_free_count);
+ 
+     return ti;
+ }
+ 
+ void threadinfo::refill_rcu() {
+     if (!limbo_tail_->next_) {
+-        void *limbo_space = allocate(sizeof(limbo_group), memtag_limbo);
+-        mark(tc_limbo_slots, limbo_group::capacity);
+-        limbo_tail_->next_ = new(limbo_space) limbo_group;
++        void *limbo_space = allocate(sizeof(mt_limbo_group), memtag_limbo);
++        mark(tc_limbo_slots, mt_limbo_group::capacity);
++        limbo_tail_->next_ = new(limbo_space) mt_limbo_group;
+     }
+     limbo_tail_ = limbo_tail_->next_;
+     assert(limbo_tail_->head_ == 0 && limbo_tail_->tail_ == 0);
+ }
+ 
+-inline unsigned limbo_group::clean_until(threadinfo& ti, mrcu_epoch_type epoch_bound,
++void* threadinfo::allocate(size_t sz, memtag tag, size_t * actual_size) {
++  int size = sz;
++  void * p = NULL;
++  if (likely(!use_pool())) {
++    p = cur_working_index->AllocateMem(size, tag);
++  } else {
++    p = malloc(sz + memdebug_size);
++  }
++
++  p = memdebug::make(p, sz, tag);
++  if (p) {
++    if (actual_size)
++      *actual_size = size;
++    mark(threadcounter(tc_alloc + (tag > memtag_value)), sz);
++  }
++  return p;
++}
++
++void threadinfo::deallocate(void* p, size_t sz, memtag tag) {
++  // in C++ allocators, 'p' must be nonnull
++  assert(0);
++  assert(p);
++  p = memdebug::check_free(p, sz, tag);
++  if (likely(!use_pool())) {
++    cur_working_index->DeallocateMem(p, sz, tag);
++  } else {
++    free(p);
++  }
++  mark(threadcounter(tc_alloc + (tag > memtag_value)), -sz);
++}
++
++void threadinfo::ng_record_rcu(void* p, int sz, memtag tag) {
++  assert(p);
++  memdebug::check_rcu(p, sz, tag);
++  cur_working_index->RecordMemRcu(p, sz, tag);
++  mark(threadcounter(tc_alloc + (tag > memtag_value)), -sz);
++}
++
++void threadinfo::set_gc_session(MOT::GcManager* gc_session) {
++  gc_session_ = gc_session;
++}
++
++MOT::GcManager* threadinfo::get_gc_session() {
++  return gc_session_;
++}
++
++inline unsigned mt_limbo_group::clean_until(threadinfo& ti, mrcu_epoch_type epoch_bound,
+                                          unsigned count) {
+     epoch_type epoch = 0;
+     while (head_ != tail_) {
+@@ -104,18 +143,22 @@
+ }
+ 
+ void threadinfo::hard_rcu_quiesce() {
+-    limbo_group* empty_head = nullptr;
+-    limbo_group* empty_tail = nullptr;
++    mt_limbo_group* empty_head = nullptr;
++    mt_limbo_group* empty_tail = nullptr;
+     unsigned count = rcu_free_count;
++    unsigned loc_count = 0;
+ 
+     mrcu_epoch_type epoch_bound = active_epoch - 1;
++    //mrcu_epoch_type epoch_bound = 1;
+     if (limbo_head_->head_ == limbo_head_->tail_
+         || mrcu_signed_epoch_type(epoch_bound - limbo_head_->first_epoch()) < 0)
+         goto done;
+ 
+     // clean [limbo_head_, limbo_tail_]
+     while (count) {
+-        count = limbo_head_->clean_until(*this, epoch_bound, count);
++        loc_count = limbo_head_->clean_until(*this, epoch_bound, count);
++        total_limbo_inuse_elements -= (count - loc_count);
++        count = loc_count;
+         if (limbo_head_->head_ != limbo_head_->tail_)
+             break;
+         if (!empty_head)
+@@ -142,9 +185,9 @@
+ 
+ void threadinfo::report_rcu(void *ptr) const
+ {
+-    for (limbo_group *lg = limbo_head_; lg; lg = lg->next_) {
++    for (mt_limbo_group *lg = limbo_head_; lg; lg = lg->next_) {
+         int status = 0;
+-        limbo_group::epoch_type e = 0;
++        mt_limbo_group::epoch_type e = 0;
+         for (unsigned i = 0; i < lg->capacity; ++i) {
+             if (i == lg->head_)
+                 status = 1;
+@@ -204,6 +247,9 @@
+ 
+     if (!use_pool()) {
+         pool_[nl - 1] = malloc(nl * CACHE_LINE_SIZE);
++#ifdef MM_STAT_MASSTREE
++        MOT::MemoryStatisticsProvider::_provider->addMasstreeBytesUsed(nl * CACHE_LINE_SIZE);
++#endif
+         if (pool_[nl - 1])
+             *reinterpret_cast<void**>(pool_[nl - 1]) = 0;
+         return;
+@@ -245,10 +291,13 @@
+         pool_size = 2 << 20;
+         if ((r = posix_memalign(&pool, CACHE_LINE_SIZE, pool_size)) != 0) {
+             fprintf(stderr, "posix_memalign: %s\n", strerror(r));
+-            abort();
++            MOT::MOTAbort();
+         }
+     }
+ 
++#ifdef MM_STAT_MASSTREE
++    MOT::MemoryStatisticsProvider::_provider->addMasstreeBytesUsed(pool_size);
++#endif
+     initialize_pool(pool, pool_size, nl * CACHE_LINE_SIZE);
+     pool_[nl - 1] = pool;
+ }
+diff -Naur code/kvthread.hh new_code/kvthread.hh
+--- code/kvthread.hh	2020-06-11 15:18:24.473000000 +0700
++++ new_code/kvthread.hh	2020-06-11 15:12:49.202000000 +0700
+@@ -24,9 +24,17 @@
+ #include <pthread.h>
+ #include <sys/mman.h>
+ #include <stdlib.h>
++#include "memory_statistics.h"
+ 
+ class threadinfo;
+ class loginfo;
++namespace MOT
++{
++    class MasstreePrimaryIndex;
++    class GcManager;
++};
++
++extern __thread threadinfo * mtSessionThreadInfo;
+ 
+ typedef uint64_t mrcu_epoch_type;
+ typedef int64_t mrcu_signed_epoch_type;
+@@ -34,11 +42,23 @@
+ extern volatile mrcu_epoch_type globalepoch;  // global epoch, updated regularly
+ extern volatile mrcu_epoch_type active_epoch;
+ 
+-struct limbo_group {
++// Memtags max allocation size
++#define MAX_MEMTAG_MASSTREE_LEAF_ALLOCATION_SIZE        iceil(sizeof(leaf<P>) +  128, 64)
++#define MAX_MEMTAG_MASSTREE_INTERNODE_ALLOCATION_SIZE   sizeof(internode<P>)
++#define MAX_MEMTAG_MASSTREE_LIMBO_GROUP_ALLOCATION_SIZE sizeof(mt_limbo_group)
++
++// Upper bound for the ksuffixes structure max size.
++#define MAX_MEMTAG_MASSTREE_KSUFFIXES_ALLOCATION_SIZE(width) iceil_log2(leaf<P>::external_ksuf_type::safe_size(width, MAX_KEY_SIZE * width)); 
++
++inline uint64_t ng_getGlobalEpoch() {
++  return globalepoch;
++}
++
++typedef struct mt_limbo_group {
+     typedef mrcu_epoch_type epoch_type;
+     typedef mrcu_signed_epoch_type signed_epoch_type;
+ 
+-    struct limbo_element {
++    struct mt_limbo_element {
+         void* ptr_;
+         union {
+             memtag tag;
+@@ -46,13 +66,13 @@
+         } u_;
+     };
+ 
+-    enum { capacity = (4076 - sizeof(epoch_type) - sizeof(limbo_group*)) / sizeof(limbo_element) };
++    enum { capacity = (4076 - sizeof(epoch_type) - sizeof(mt_limbo_group*)) / sizeof(mt_limbo_element) };
+     unsigned head_;
+     unsigned tail_;
+     epoch_type epoch_;
+-    limbo_group* next_;
+-    limbo_element e_[capacity];
+-    limbo_group()
++    mt_limbo_group* next_;
++    mt_limbo_element e_[capacity];
++    mt_limbo_group()
+         : head_(0), tail_(0), next_() {
+     }
+     epoch_type first_epoch() const {
+@@ -72,7 +92,7 @@
+         ++tail_;
+     }
+     inline unsigned clean_until(threadinfo& ti, mrcu_epoch_type epoch_bound, unsigned count);
+-};
++} mt_limbo_group;
+ 
+ template <int N> struct has_threadcounter {
+     static bool test(threadcounter ci) {
+@@ -88,10 +108,11 @@
+ struct mrcu_callback {
+     virtual ~mrcu_callback() {
+     }
++    virtual size_t operator()(bool drop_index) = 0;
+     virtual void operator()(threadinfo& ti) = 0;
+ };
+ 
+-class threadinfo {
++class alignas(64) threadinfo {
+   public:
+     enum {
+         TI_MAIN, TI_PROCESS, TI_LOG, TI_CHECKPOINT
+@@ -103,7 +124,7 @@
+         return next_;
+     }
+ 
+-    static threadinfo* make(int purpose, int index);
++    static threadinfo* make(void * obj_mem, int purpose, int index, int rcu_max_free_count = 0);
+     // XXX destructor
+ 
+     // thread information
+@@ -202,35 +223,34 @@
+     }
+ 
+     // memory allocation
+-    void* allocate(size_t sz, memtag tag) {
+-        void* p = malloc(sz + memdebug_size);
+-        p = memdebug::make(p, sz, tag);
+-        if (p)
+-            mark(threadcounter(tc_alloc + (tag > memtag_value)), sz);
+-        return p;
+-    }
+-    void deallocate(void* p, size_t sz, memtag tag) {
+-        // in C++ allocators, 'p' must be nonnull
+-        assert(p);
+-        p = memdebug::check_free(p, sz, tag);
+-        free(p);
+-        mark(threadcounter(tc_alloc + (tag > memtag_value)), -sz);
+-    }
++    void* allocate(size_t sz, memtag tag, size_t * actual_size = NULL);
++
++    // memory deallocation
++    void deallocate(void* p, size_t sz, memtag tag);
++
+     void deallocate_rcu(void* p, size_t sz, memtag tag) {
+         assert(p);
+         memdebug::check_rcu(p, sz, tag);
+-        record_rcu(p, tag);
++        record_rcu(p, sz, tag);
+         mark(threadcounter(tc_alloc + (tag > memtag_value)), -sz);
+     }
+ 
+     void* pool_allocate(size_t sz, memtag tag) {
++        void* p = NULL;
+         int nl = (sz + memdebug_size + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE;
+-        assert(nl <= pool_max_nlines);
+-        if (unlikely(!pool_[nl - 1]))
+-            refill_pool(nl);
+-        void* p = pool_[nl - 1];
+-        if (p) {
+-            pool_[nl - 1] = *reinterpret_cast<void **>(p);
++        if (use_pool()) {
++            assert(nl <= pool_max_nlines);
++            if (unlikely(!pool_[nl - 1]))
++                refill_pool(nl);
++            p = pool_[nl - 1];
++            if (p) {
++                pool_[nl - 1] = *reinterpret_cast<void **> (p);
++                p = memdebug::make(p, sz, memtag(tag + nl));
++                mark(threadcounter(tc_alloc + (tag > memtag_value)),
++                    nl * CACHE_LINE_SIZE);
++            }
++        } else {
++            p = allocate(sz, tag);
+             p = memdebug::make(p, sz, memtag(tag + nl));
+             mark(threadcounter(tc_alloc + (tag > memtag_value)),
+                  nl * CACHE_LINE_SIZE);
+@@ -253,16 +273,18 @@
+         int nl = (sz + memdebug_size + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE;
+         assert(p && nl <= pool_max_nlines);
+         memdebug::check_rcu(p, sz, memtag(tag + nl));
+-        record_rcu(p, memtag(tag + nl));
++        record_rcu(p, sz, use_pool() ? memtag(tag + nl) : tag);
+         mark(threadcounter(tc_alloc + (tag > memtag_value)),
+              -nl * CACHE_LINE_SIZE);
+     }
+ 
+     // RCU
+-    enum { rcu_free_count = 128 }; // max # of entries to free per rcu_quiesce() call
+     void rcu_start() {
+-        if (gc_epoch_ != globalepoch)
+-            gc_epoch_ = globalepoch;
++        if (gc_epoch_ != ng_getGlobalEpoch())
++            gc_epoch_ = ng_getGlobalEpoch();
++    }
++    void rcu_end() {
++        gc_epoch_ = 0;
+     }
+     void rcu_stop() {
+         if (perform_gc_epoch_ != active_epoch)
+@@ -275,8 +297,8 @@
+             hard_rcu_quiesce();
+     }
+     typedef ::mrcu_callback mrcu_callback;
+-    void rcu_register(mrcu_callback* cb) {
+-        record_rcu(cb, memtag(-1));
++    void rcu_register(mrcu_callback* cb, size_t size) {
++        record_rcu(cb, size, memtag_masstree_gc);
+     }
+ 
+     // thread management
+@@ -291,7 +313,29 @@
+     static void report_rcu_all(void* ptr);
+     static inline mrcu_epoch_type min_active_epoch();
+ 
++    void set_rcu_free_count(int rcu_count) { rcu_free_count = rcu_count; }
++    int get_rcu_free_count() { return rcu_free_count; }
++
++    void set_gc_session(MOT::GcManager* gc_session);
++    MOT::GcManager * get_gc_session();
++
++    inline uint32_t get_occupied_elements() { return total_limbo_inuse_elements; }
++
++    void set_working_index (MOT::MasstreePrimaryIndex * index) { cur_working_index = (MOT::MasstreePrimaryIndex *)index; }
++    MOT::MasstreePrimaryIndex * get_working_index () { return cur_working_index; }
++
++    // This function is now used to defer between Masstree internal pools (use_pool == true) vs NG pools\slab allocators (use_pool == false)
++    static bool use_pool() {
++#if ENABLE_ASSERTIONS
++        return !no_pool_value;
++#else
++//        return true;
++        return false;
++#endif
++    }
++
+   private:
++    MOT::MasstreePrimaryIndex * cur_working_index;
+     union {
+         struct {
+             mrcu_epoch_type gc_epoch_;
+@@ -310,14 +354,18 @@
+ 
+     enum { pool_max_nlines = 20 };
+     void* pool_[pool_max_nlines];
++    int rcu_free_count;
++    mt_limbo_group* limbo_head_;
++    mt_limbo_group* limbo_tail_;
++    MOT::GcManager* gc_session_;
++    uint32_t total_limbo_inuse_elements;
+ 
+-    limbo_group* limbo_head_;
+-    limbo_group* limbo_tail_;
+     mutable kvtimestamp_t ts_;
+ 
+     //enum { ncounters = (int) tc_max };
+     enum { ncounters = 0 };
+     uint64_t counters_[ncounters];
++    uint64_t insertions_ = 0;
+ 
+     void refill_pool(int nl);
+     void refill_rcu();
+@@ -336,36 +384,36 @@
+         }
+     }
+ 
+-    void record_rcu(void* ptr, memtag tag) {
++    void ng_record_rcu(void* ptr, int size, memtag tag);
++
++    void record_rcu(void* ptr, int size, memtag tag) {
++      if (use_pool()) {
+         if (limbo_tail_->tail_ + 2 > limbo_tail_->capacity)
+-            refill_rcu();
+-        uint64_t epoch = globalepoch;
++          refill_rcu();
++        uint64_t epoch = ng_getGlobalEpoch();
+         limbo_tail_->push_back(ptr, tag, epoch);
++        ++total_limbo_inuse_elements;
++      } else {
++        ng_record_rcu(ptr, size, tag);
++      }
+     }
+ 
+ #if ENABLE_ASSERTIONS
+     static int no_pool_value;
+ #endif
+-    static bool use_pool() {
+-#if ENABLE_ASSERTIONS
+-        return !no_pool_value;
+-#else
+-        return true;
+-#endif
+-    }
+ 
+-    inline threadinfo(int purpose, int index);
++    inline threadinfo(int purpose, int index, int rcu_max_free_count);
+     threadinfo(const threadinfo&) = delete;
+     ~threadinfo() {}
+     threadinfo& operator=(const threadinfo&) = delete;
+ 
+     void hard_rcu_quiesce();
+ 
+-    friend struct limbo_group;
++    friend struct mt_limbo_group;
+ };
+ 
+ inline mrcu_epoch_type threadinfo::min_active_epoch() {
+-    mrcu_epoch_type ae = globalepoch;
++    mrcu_epoch_type ae = ng_getGlobalEpoch();
+     for (threadinfo* ti = allthreads; ti; ti = ti->next()) {
+         prefetch((const void*) ti->next());
+         mrcu_epoch_type te = ti->gc_epoch_;
+diff -Naur code/masstree_get.hh new_code/masstree_get.hh
+--- code/masstree_get.hh	2020-06-11 15:18:24.437000000 +0700
++++ new_code/masstree_get.hh	2020-06-11 15:12:49.204000000 +0700
+@@ -17,6 +17,8 @@
+ #define MASSTREE_GET_HH
+ #include "masstree_tcursor.hh"
+ #include "masstree_key.hh"
++#include "masstree_remove.hh"
++
+ namespace Masstree {
+ 
+ template <typename P>
+@@ -86,32 +88,42 @@
+     fence();
+     kx_ = leaf<P>::bound_type::lower(ka_, *n_);
+     if (kx_.p >= 0) {
++        // Key slice (ikey) was found and it is stored in kx_.i
+         leafvalue<P> lv = n_->lv_[kx_.p];
+         lv.prefetch(n_->keylenx_[kx_.p]);
+         state_ = n_->ksuf_matches(kx_.p, ka_);
++         // lv.layer() should be the root of the lower layer but might not be the root anymore. This case handled later in "else if (unlikely(state_ < 0)) {"
+         if (state_ < 0 && !n_->has_changed(v) && lv.layer()->is_root()) {
++            // Going down to lower layer as the ikey in this layer matches. --> The full key prefix matches (not only this slice) while suffixes don't match
++            // (-state_) == the size of the ikey (in our case, 8 bytes)
+             ka_.shift_by(-state_);
++            // Change the current cursor root to point to the root of the lower layer and continue the search for the key from there
+             root = lv.layer();
+             goto retry;
+         }
+     } else
+         state_ = 0;
+ 
++    // n_ now points to the leaf where the key exists or should be added
+     n_->lock(v, ti.lock_fence(tc_leaf_lock));
+     if (n_->has_changed(v) || n_->permutation() != perm) {
+         ti.mark(threadcounter(tc_stable_leaf_insert + n_->simple_has_split(v)));
+         n_->unlock();
++        // If the node has split, look for the leaf that should hold the key (if exists) by traversing between the leaves in the same layer (using next pointer)
+         n_ = n_->advance_to_key(ka_, v, ti);
+         goto forward;
+     } else if (unlikely(state_ < 0)) {
++        // n_->lv_[kx_.p] is a node in lower layer and should be a root but it is not anymore. It means that it already has a parent in lower layer. So the value is replaced with the lower layer node's parent.
++        // The right thing to do was to replace value with the root of the lower layer. instead, it is done in iterations (level by level)
+         ka_.shift_by(-state_);
+         n_->lv_[kx_.p] = root = n_->lv_[kx_.p].layer()->maybe_parent();
+         n_->unlock();
+         goto retry;
+     } else if (unlikely(n_->deleted_layer())) {
++        // Layer was deleted. restart scan from table's root.
++        n_->unlock();
+         ka_.unshift_all();
+         root = const_cast<node_base<P>*>(root_);
+-        n_->unlock();
+         goto retry;
+     }
+     return state_;
+diff -Naur code/masstree.hh new_code/masstree.hh
+--- code/masstree.hh	2020-06-11 15:18:24.440000000 +0700
++++ new_code/masstree.hh	2020-06-11 15:12:49.204000000 +0700
+@@ -18,10 +18,19 @@
+ #include "compiler.hh"
+ #include "str.hh"
+ #include "ksearch.hh"
++#include "kvthread.hh"
++#include "utilities.h"
++
++namespace MOT {
++class Key;
++}
++
++using namespace MOT;
+ 
+ namespace Masstree {
+ using lcdf::Str;
+ using lcdf::String;
++typedef void (*destroy_value_cb_func)(void *);
+ 
+ class key_unparse_printable_string;
+ template <typename T> class value_print;
+@@ -31,7 +40,7 @@
+     static constexpr int internode_width = IW;
+     static constexpr bool concurrent = true;
+     static constexpr bool prefetch = true;
+-    static constexpr int bound_method = bound_method_binary;
++    static constexpr int bound_method = bound_method_fast;
+     static constexpr int debug_level = 0;
+     typedef uint64_t ikey_type;
+     typedef uint32_t nodeversion_value_type;
+@@ -54,6 +63,9 @@
+ template <typename P> class unlocked_tcursor;
+ template <typename P> class tcursor;
+ 
++template<bool CONST_ITERATOR, bool FORWARD, typename P>
++class MasstreeIterator;
++
+ template <typename P>
+ class basic_table {
+   public:
+@@ -64,6 +76,18 @@
+     typedef typename P::threadinfo_type threadinfo;
+     typedef unlocked_tcursor<P> unlocked_cursor_type;
+     typedef tcursor<P> cursor_type;
++    typedef MasstreeIterator<false, true, P> ForwardIterator;
++    typedef MasstreeIterator<false, false, P> ReverseIterator;
++
++    void find(MOT::Key const* const& key, void*& output, bool& result, const uint32_t& pid) const;
++
++    void iteratorScan(const char * keybuf, uint32_t keylen, const bool& matchKey, Iterator* const& it, const bool& forwardDirection,
++                      bool& result, const uint32_t& pid);
++
++    void *insert(MOT::Key const* const& key, void* const& entry, bool& result, const uint32_t& pid);
++    void *remove(uint8_t const *const &key, uint32_t length, bool &result, const uint32_t &pid);
++    bool init(const uint16_t keyLength, const std::string& name, destroy_value_cb_func destroyValue_CB = NULL);
++    int getMemtagMaxSize(enum memtag tag);
+ 
+     inline basic_table();
+ 
+@@ -84,6 +108,13 @@
+ 
+   private:
+     node_type* root_;
++    uint16_t keyLength_ = 0;
++    std::string name_;
++    destroy_value_cb_func destroyValue_CB_ = nullptr;
++
++    template<typename H, typename F>
++    int scan(H helper, void const *const &firstKey, unsigned int firstKeyLen,
++             bool matchFirstKey, F &scanner, threadinfo &ti) const;
+ 
+     template <typename H, typename F>
+     int scan(H helper, Str firstkey, bool matchfirst,
+@@ -91,6 +122,13 @@
+ 
+     friend class unlocked_tcursor<P>;
+     friend class tcursor<P>;
++
++    friend class MasstreeIterator<true, true, P>;
++    friend class MasstreeIterator<true, false, P>;
++    friend class MasstreeIterator<false, true, P>;
++    friend class MasstreeIterator<false, false, P>;
++
++    DECLARE_CLASS_LOGGER()
+ };
+ 
+ } // namespace Masstree
+diff -Naur code/masstree_insert.hh new_code/masstree_insert.hh
+--- code/masstree_insert.hh	2020-06-11 15:18:24.443000000 +0700
++++ new_code/masstree_insert.hh	2020-06-11 15:12:49.204000000 +0700
+@@ -17,6 +17,7 @@
+ #define MASSTREE_INSERT_HH
+ #include "masstree_get.hh"
+ #include "masstree_split.hh"
++
+ namespace Masstree {
+ 
+ template <typename P>
+@@ -35,6 +36,9 @@
+ 
+     // maybe we need a new layer
+     if (kx_.p >= 0)
++        /* Key with same prefix (of size ikey_size * layer height) was found but with different suffix. we need to create at least one new layer that will contain both keys
++           n_.lv[kx_.p] will be replaced with pointer to a new lower layer and n_.keylenx_[kx.p] will be replaced with 128 (defined by layer_keylenx constant) */
++
+         return make_new_layer(ti);
+ 
+     // mark insertion if we are changing modification state
+@@ -44,17 +48,23 @@
+         n_->modstate_ = leaf<P>::modstate_insert;
+     }
+ 
+-    // try inserting into this node
++    // try inserting into this leaf
+     if (n_->size() < n_->width) {
+         kx_.p = permuter_type(n_->permutation_).back();
+-        // don't inappropriately reuse position 0, which holds the ikey_bound
++        /* don't inappropriately reuse position 0, which holds the ikey_bound. If this is the case, make_split will handle it.
++           Before leaf's first split, ikey0_[0] (ikey_bound) might not contain the lower ikey value in the leaf as it doesn't have a parent yet. After the first split,
++            The new leaf ikey0_[0] will contain the lower ikey value in the right leaf and will be used as a boundary in the parent internode.
++           In case the key in slot 0 will be deleted, the ikey0_[0] ikey value will be kept (to avoid changing the parent's boundary) and entry 0 wont be used anymore.
++           This rule has 2 exceptions:
++             1. If leaf is the most left leaf in the btree which means ikey0_[0] is not used as a boundary. (!n_->prev_)
++             2. If a new key, with ikey == ikey0_[0], is added. In this case, we can re-use slot 0 as we won't change the tree's structure. (n_->ikey_bound() == ka_.ikey()) */
+         if (likely(kx_.p != 0) || !n_->prev_ || n_->ikey_bound() == ka_.ikey()) {
+             n_->assign(kx_.p, ka_, ti);
+             return false;
+         }
+     }
+ 
+-    // otherwise must split
++    // otherwise we might need to split
+     return make_split(ti);
+ }
+ 
+@@ -65,6 +75,7 @@
+     int kcmp = oka.compare(ka_);
+ 
+     // Create a twig of nodes until the suffixes diverge
++    // For each ikey_size bytes (currently 8) that matches in both key's suffixes, we will need to create a new layer
+     leaf_type* twig_head = n_;
+     leaf_type* twig_tail = n_;
+     while (kcmp == 0) {
+@@ -79,6 +90,7 @@
+         new_nodes_.emplace_back(nl, nl->full_unlocked_version_value());
+         oka.shift();
+         ka_.shift();
++        // Compare the ikey only. if ikey matches and one or more of the suffixes != 0, compare using suffix size
+         kcmp = oka.compare(ka_);
+     }
+ 
+diff -Naur code/masstree_iterator.hh new_code/masstree_iterator.hh
+--- code/masstree_iterator.hh	1970-01-01 07:00:00.000000000 +0700
++++ new_code/masstree_iterator.hh	2020-06-11 15:12:49.204000000 +0700
+@@ -0,0 +1,253 @@
++#ifndef MASSTREE_ITERATOR_HH
++#define MASSTREE_ITERATOR_HH
++
++#include "masstree.hh"
++#include "masstree_scan.hh"
++#include "key.h"
++
++namespace Masstree {
++    /**
++     * @class MasstreeIterator
++     * @brief Iterator implementation for Masstree index.
++     *
++     * @tparam CONST_ITERATOR defines if this is a constant iterator or not
++     * @tparam FORWARD defines the iterator's direction (forward or reverse)
++     * @tparam P default parameters\types for Masstree.
++     */
++    template<bool CONST_ITERATOR, bool FORWARD, typename P>
++    class alignas(64) MasstreeIterator final : public IteratorCRTP<MasstreeIterator<CONST_ITERATOR, FORWARD, P>> {
++    private:
++        friend class basic_table<P>;
++
++        friend class MasstreeIterator<true, true, P>;
++        friend class MasstreeIterator<true, false, P>;
++
++        typedef std::forward_iterator_tag iterator_category;
++        typedef std::ptrdiff_t difference_type;
++        typedef uint64_t size_type;
++        typedef typename basic_table<P>::node_type::leaf_type::leafvalue_type leafvalue_type;
++        typedef typename basic_table<P>::value_type value_type;
++        typedef typename std::conditional<CONST_ITERATOR, value_type const*, value_type*>::type pointer;
++        typedef typename std::conditional<CONST_ITERATOR, const value_type&, value_type&>::type reference;
++        typedef typename std::conditional<FORWARD, forward_scan_helper, reverse_scan_helper>::type helper_type;
++        typedef scanstackelt<P> mystack_type;
++        typedef basic_table<P> table_type;
++        typedef threadinfo threadinfo_type;
++        typedef typename basic_table<P>::node_type::key_type key_type;
++
++        /** @var Iterator's scan stack. */
++        mystack_type m_stack;
++
++        /** @var Leaf value which the iterator is currently pointing at. */
++        leafvalue_type m_entry;
++
++        /** @var Helper structure which implements functionality for tree's traversing (forward or reverse). */
++        helper_type m_helper;
++
++        /** @var Search key (in Masstree's key format). */
++        key_type  m_key;
++
++        /** @var Masstree instance (basic_table<P>) pointer. */
++        // IDAN: TODO: Not is use. Check performance after removing t
++        table_type* m_table;
++
++        /** @var Thread info pointer. */
++        threadinfo_type* m_ti;
++
++        /** @var Search key (in MOT's key format) pointer. */
++        MOT::MaxKey * m_searchKey = nullptr;
++
++        /** @var Current iterator scan state. */
++        uint32_t m_state;
++
++        /** @var True when scan ended (e.g. No more keys to return). */
++        bool m_done;
++
++        /** @var True if first key search (m_stack.find_initial(...)) was already called. */
++        bool m_foundInitial;
++
++        /** @var True if caller expect to receive the key itself in the iterator's returned range (if exists). */
++        bool m_matchKey;
++
++        // IDAN: TODO: Not is use. Check performance after removing t
++        bool m_forward = FORWARD;
++        // IDAN: TODO: Not is use. Check performance after removing t
++        bool m_constIt = CONST_ITERATOR;
++
++        /**
++         * @brief Initialize iterator's members.
++         * @param table A Masstree table pointer which the iterator should scan.
++         * @param key Search key.
++         * @param keyLength Search key's length.
++         * @param matchKey If search key exists, does the iterator returns its value or not.
++         * @param ti Thread info pointer.
++         */
++        void Init(table_type* const& table, char const* const& key, const uint32_t& keyLength, const bool& matchKey, threadinfo_type* const& ti){
++            m_searchKey    = new MaxKey(MAX_KEY_SIZE);
++            m_table        = table;
++            m_ti           = ti;
++            m_stack.root_  = table->root_;
++            m_entry        = leafvalue_type::make_empty();
++            m_state        = 0;
++            m_done         = false;
++            m_foundInitial = false;
++            m_matchKey     = matchKey;
++            if (key) {
++                //the deep copy of the key is done here
++                memcpy(m_searchKey->GetKeyBuf(), key, keyLength);
++            } else {
++                // If key is NULL, set to minimal\maximum key (according to helper's type)
++                if (FORWARD) {
++                  memset(m_searchKey->GetKeyBuf(), 0, keyLength);
++                } else {
++                  memset(m_searchKey->GetKeyBuf(), 0xFF, keyLength);
++                }
++            }
++            // Sharing buffer with _searchKey
++            m_key = key_type((const char*) m_searchKey->GetKeyBuf(), keyLength);
++        }
++
++        /**
++         * @brief Begin iterator scan and set it on the first value that satisfies the criteria.
++         * @return True is search key was found (regardless of m_matchKey value).
++         */
++        bool Begin(void) {
++            bool found = false;
++            while(true) {
++                m_state = m_stack.find_initial(m_helper, m_key, m_matchKey, found, m_entry, *m_ti);
++                if(m_state != mystack_type::scan_down)
++                    break;
++                m_key.shift();
++            }
++            m_foundInitial = true;
++            Next();
++
++            return found;
++        }
++
++        /**
++         * @brief Find the next key\value that satisfies the criteria.
++         * @detail If (m_state == mystack_type::scan_emit), stay on the current key\value.
++         * @return Current iterator scan state.
++         */
++        uint32_t Next(void) {
++            while(true) {
++                switch(m_state) {
++                        case mystack_type::scan_emit:
++                        m_searchKey->SetKeyLen(m_key.full_length());
++                        goto done;
++
++                    case mystack_type::scan_find_next:
++                    find_next:
++                        m_state = m_stack.find_next(m_helper, m_key, m_entry);
++                        break;
++
++                    case mystack_type::scan_up:
++                        do {
++                            //the scan is finished when the stack is empty
++                            if(m_stack.node_stack_.empty()) {
++                                m_done = true;
++                                goto done;
++                            }
++                            m_stack.n_ = static_cast<leaf<P>*>(m_stack.node_stack_.back());
++                            m_stack.node_stack_.pop_back();
++                            m_stack.root_ = m_stack.node_stack_.back();
++                            m_stack.node_stack_.pop_back();
++                            m_key.unshift();
++                        } while(unlikely(m_key.empty()));
++
++                        m_stack.v_ = m_helper.stable(m_stack.n_, m_key);
++                        m_stack.perm_ = m_stack.n_->permutation();
++                        m_stack.ki_ = m_helper.lower(m_key, &m_stack);
++                        goto find_next;
++
++                    case mystack_type::scan_down:
++                        m_helper.shift_clear(m_key);
++                        goto retry;
++
++                    case mystack_type::scan_retry:
++                    retry:
++                        m_state = m_stack.find_retry(m_helper, m_key, *m_ti);
++                        break;
++                }
++            }
++            done:
++            return m_state;
++        }
++
++    public:
++        /**
++          * @brief Default constructor.
++          */
++        MasstreeIterator(void) : m_table(nullptr), m_ti(nullptr), m_state(0), m_done(true) {}
++
++        /**
++         * @brief Default destructor.
++         */
++        ~MasstreeIterator(void) {
++            delete m_searchKey;
++            m_searchKey = nullptr;
++        }
++
++        /**
++         * @brief State that class is non-copy-able, non-assignable and non-movable
++         */
++        MasstreeIterator(const MasstreeIterator& rhs)            = delete;
++        MasstreeIterator(MasstreeIterator&& rhs)                 = delete;
++        MasstreeIterator& operator=(const MasstreeIterator& rhs) = delete;
++        MasstreeIterator& operator=(MasstreeIterator&& rhs)      = delete;
++
++        /** @brief Increment operator.
++         *  @detail Search for the next key\value after the current one and point at it.
++         *  @return Pointer to this
++         */
++        MasstreeIterator* operator++(void) {
++            if(m_foundInitial) {
++                m_stack.ki_ = m_helper.next(m_stack.ki_);
++                m_state = m_stack.find_next(m_helper, m_key, m_entry);
++                Next();
++            } else {
++                Begin();
++            }
++            return this;
++        }
++        /** @brief Dereference operator
++         *  @return The current value the iterator is currently points at.
++         */
++        void* operator*(void) {
++            return reinterpret_cast<void*>(m_entry.value());
++        }
++
++        /** @brief Getter for m_done.
++         *  @return Iterator validity state.
++         */
++        bool Exhausted(void) const {
++            return m_done;
++        }
++
++        /**
++         *  @brief Mark iterator as invalid.
++         */
++        void Invalidate(void) {
++            m_done = true;
++        }
++
++        /**
++         *  @brief Destroy instance
++         */
++        void Destroy(void) {
++            delete this;
++        }
++
++        /** @brief Getter for searchKey pointer
++         *  @return SearchKey (if valid) or null if not.
++         */
++        MOT::Key * GetSearchKey(void) {
++            if (!Exhausted())
++                return m_searchKey;
++            return nullptr;
++        }
++    };
++
++} // namespace Masstree
++#endif // MASSTREE_ITERATOR_HH
+diff -Naur code/masstree_key.hh new_code/masstree_key.hh
+--- code/masstree_key.hh	2020-06-11 15:18:24.446000000 +0700
++++ new_code/masstree_key.hh	2020-06-11 15:12:49.204000000 +0700
+@@ -158,15 +158,22 @@
+         return s;
+     }
+     int unparse_printable(char* data, int datalen) const {
+-        String s = unparse().printable();
++        String s = unparse_printable();
+         int cplen = std::min(s.length(), datalen);
+         memcpy(data, s.data(), cplen);
+         return cplen;
+     }
++    String unparse_printable() const {
++        return unparse().printable();
++    }
+     static String unparse_ikey(ikey_type ikey) {
+         key<ikey_type> k(ikey);
+         return k.unparse();
+     }
++    static String unparse_printable_ikey(ikey_type ikey) {
++        key<ikey_type> k(ikey);
++        return k.unparse_printable();
++    }
+ 
+     // used during scan
+     Str prefix_string() const {
+@@ -175,6 +182,9 @@
+     int prefix_length() const {
+         return s_ - first_;
+     }
++    int full_length() const {
++        return s_ - first_ + len_;
++    }
+     Str full_string() const {
+         return Str(first_, s_ + len_);
+     }
+@@ -203,6 +213,12 @@
+     void assign_store_length(int len) {
+         len_ = len;
+     }
++
++    /* We know that the len_ after the unshift is at least 9 because:
++         1. Before the unshift, len >=1
++         2. Unshift size is 8
++       As we didn't find the search key in the current layer, we are going to search for the unshift version of it in the upper layer. It means that the rest of the key can be ignored, because
++        the version key that will be found is our target key */
+     void unshift() {
+         masstree_precondition(is_shifted());
+         s_ -= ikey_size;
+diff -Naur code/masstree_remove.hh new_code/masstree_remove.hh
+--- code/masstree_remove.hh	2020-06-11 15:18:24.448000000 +0700
++++ new_code/masstree_remove.hh	2020-06-11 15:12:49.204000000 +0700
+@@ -1,6 +1,6 @@
+ /* Masstree
+  * Eddie Kohler, Yandong Mao, Robert Morris
+- * Copyright (c) 2012-2016 President and Fellows of Harvard College
++ * Copyright (c) 2012-2019 President and Fellows of Harvard College
+  * Copyright (c) 2012-2016 Massachusetts Institute of Technology
+  *
+  * Permission is hereby granted, free of charge, to any person obtaining a
+@@ -29,8 +29,9 @@
+     // find_locked might return early if another gc_layer attempt has
+     // succeeded at removing multiple tree layers. So check that the whole
+     // key has been consumed
+-    if (ka_.has_suffix())
++    if (ka_.has_suffix()) {
+         return false;
++    }
+ 
+     // find the slot for the child tree
+     // ka_ is a multiple of ikey_size bytes long. We are looking for the entry
+@@ -38,35 +39,45 @@
+     // So if has_value(), then we found an entry for the same ikey, but with
+     // length ikey_size; we need to adjust ki_.
+     kx_.i += has_value();
+-    if (kx_.i >= n_->size())
++    if (kx_.i >= n_->size()) {
+         return false;
++    }
+     permuter_type perm(n_->permutation_);
+     kx_.p = perm[kx_.i];
+-    if (n_->ikey0_[kx_.p] != ka_.ikey() || !n_->is_layer(kx_.p))
++    if (n_->ikey0_[kx_.p] != ka_.ikey() || !n_->is_layer(kx_.p)) {
+         return false;
++    }
+ 
+     // remove redundant internode layers
+-    node_type *layer;
+-    while (1) {
++    node_type* layer;
++    while (true) {
+         layer = n_->lv_[kx_.p].layer();
+         if (!layer->is_root()) {
+             n_->lv_[kx_.p] = layer->maybe_parent();
+             continue;
+         }
+ 
+-        if (layer->isleaf())
++        if (layer->isleaf()) {
+             break;
++        }
+ 
+         internode_type *in = static_cast<internode_type *>(layer);
+-        if (in->size() > 0)
++        if (in->size() > 0) {
+             return false;
++        }
+         in->lock(*layer, ti.lock_fence(tc_internode_lock));
+-        if (!in->is_root() || in->size() > 0)
++        if (!in->is_root() || in->size() > 0) {
+             goto unlock_layer;
++        }
+ 
+         node_type *child = in->child_[0];
++        if (!child->try_lock(ti.lock_fence(tc_internode_lock))) {
++            in->unlock();
++            continue;
++        }
+         child->make_layer_root();
+         n_->lv_[kx_.p] = child;
++        child->unlock();
+         in->mark_split();
+         in->set_parent(child);  // ensure concurrent reader finds true root
+         // NB: now in->parent() might weirdly be a LEAF!
+@@ -76,19 +87,22 @@
+ 
+     {
+         leaf_type* lf = static_cast<leaf_type*>(layer);
+-        if (lf->size() > 0)
++        if (lf->size() > 0) {
+             return false;
++        }
+         lf->lock(*lf, ti.lock_fence(tc_leaf_lock));
+-        if (!lf->is_root() || lf->size() > 0)
++        if (!lf->is_root() || lf->size() > 0) {
+             goto unlock_layer;
++        }
+ 
+         // child is an empty leaf: kill it
+         masstree_invariant(!lf->prev_ && !lf->next_.ptr);
+         masstree_invariant(!lf->deleted());
+         masstree_invariant(!lf->deleted_layer());
+         if (P::need_phantom_epoch
+-            && circular_int<typename P::phantom_epoch_type>::less(n_->phantom_epoch_[0], lf->phantom_epoch_[0]))
++            && circular_int<typename P::phantom_epoch_type>::less(n_->phantom_epoch_[0], lf->phantom_epoch_[0])) {
+             n_->phantom_epoch_[0] = lf->phantom_epoch_[0];
++        }
+         lf->mark_deleted_layer();   // NB DO NOT mark as deleted (see above)
+         lf->unlock();
+         lf->deallocate_rcu(ti);
+@@ -106,10 +120,11 @@
+     node_base<P>* root_;
+     int len_;
+     char s_[0];
+-    gc_layer_rcu_callback(node_base<P>* root, Str prefix)
++    gc_layer_rcu_callback(node_base<P>* root, Str prefix, size_t size = 0)
+         : root_(root), len_(prefix.length()) {
+         memcpy(s_, prefix.data(), len_);
+     }
++    size_t operator()(bool drop_index) { return 0; }
+     void operator()(threadinfo& ti);
+     size_t size() const {
+         return len_ + sizeof(*this);
+@@ -120,13 +135,15 @@
+ template <typename P>
+ void gc_layer_rcu_callback<P>::operator()(threadinfo& ti)
+ {
+-    while (!root_->is_root())
++    while (!root_->is_root()) {
+         root_ = root_->maybe_parent();
++    }
+     if (!root_->deleted()) {    // if not destroying tree...
+         tcursor<P> lp(root_, s_, len_);
+         bool do_remove = lp.gc_layer(ti);
+-        if (!do_remove || !lp.finish_remove(ti))
++        if (!do_remove || !lp.finish_remove(ti)) {
+             lp.n_->unlock();
++        }
+         ti.deallocate(this, size(), memtag_masstree_gc);
+     }
+ }
+@@ -152,10 +169,11 @@
+     permuter_type perm(n_->permutation_);
+     perm.remove(kx_.i);
+     n_->permutation_ = perm.value();
+-    if (perm.size())
++    if (perm.size()) {
+         return false;
+-    else
++    } else {
+         return remove_leaf(n_, root_, ka_.prefix_string(), ti);
++    }
+ }
+ 
+ template <typename P>
+@@ -163,8 +181,11 @@
+                              Str prefix, threadinfo& ti)
+ {
+     if (!leaf->prev_) {
+-        if (!leaf->next_.ptr && !prefix.empty())
+-            gc_layer_rcu_callback<P>::make(root, prefix, ti);
++        if (!leaf->next_.ptr && !prefix.empty()) {
++            // Leaf doesn't hold any keys, not in the highest layer and has no neighbors --> entire layer can be destroyed
++            gc_layer_rcu_callback_ng<P>::make(root, prefix, ti);
++        }
++        // Leaf has neighbor to the right (next) or leaf in the highest layer. do nothing
+         return false;
+     }
+ 
+@@ -178,11 +199,13 @@
+         leaf_type *prev = leaf->prev_;
+         typename P::phantom_epoch_type prev_ts = prev->phantom_epoch();
+         while (circular_int<typename P::phantom_epoch_type>::less(prev_ts, leaf->phantom_epoch())
+-               && !bool_cmpxchg(&prev->phantom_epoch_[0], prev_ts, leaf->phantom_epoch()))
++               && !bool_cmpxchg(&prev->phantom_epoch_[0], prev_ts, leaf->phantom_epoch())) {
+             prev_ts = prev->phantom_epoch();
++        }
+         fence();
+-        if (prev == leaf->prev_)
++        if (prev == leaf->prev_) {
+             break;
++        }
+     }
+ 
+     // Unlink leaf from doubly-linked leaf list
+@@ -194,7 +217,8 @@
+     node_type* n = leaf;
+     node_type* replacement = nullptr;
+ 
+-    while (1) {
++    // Leaf has neighbor to the left (leaf->prev_ != NULL) --> it has a parent
++    while (true) {
+         internode_type *p = n->locked_parent(ti);
+         p->mark_insert();
+         masstree_invariant(!p->deleted());
+@@ -208,6 +232,7 @@
+         if (replacement) {
+             replacement->set_parent(p);
+         } else if (kp > 0) {
++            // No leaf replacement for the removed leaf. Remove the leaf from parent's key boundary and child arrays
+             p->shift_down(kp - 1, kp, p->nkeys_ - kp);
+             --p->nkeys_;
+         }
+@@ -218,19 +243,20 @@
+         }
+ 
+         n->unlock();
++        n = p;
+ 
+-        if (p->nkeys_ > (p->child_[0] == nullptr)
+-            || p->is_root()) {
+-            p->unlock();
+-            return true;
++        if (p->nkeys_ || p->is_root()) {
++            break;
+         }
+ 
+         p->mark_deleted();
+         p->deallocate_rcu(ti);
+-        n = p;
+-        replacement = p->child_[p->nkeys_];
+-        p->child_[p->nkeys_] = nullptr;
++        replacement = p->child_[0];
++        p->child_[0] = nullptr;
+     }
++
++    n->unlock();
++    return true;
+ }
+ 
+ template <typename P>
+@@ -240,14 +266,16 @@
+     int kp = -1;
+     do {
+         internode_type* p = n->locked_parent(ti);
+-        if (kp >= 0)
++        if (kp >= 0) {
+             n->unlock();
+-        n = p;
+-        kp = internode_type::bound_type::upper(ikey, *n);
++        }
++        kp = internode_type::bound_type::upper(ikey, *p);
++        masstree_invariant(p->child_[kp] == n);
+         if (kp > 0) {
+-            // NB n->ikey0_[kp - 1] might not equal ikey
+-            n->ikey0_[kp - 1] = replacement_ikey;
++            // NB p->ikey0_[kp - 1] might not equal ikey
++            p->ikey0_[kp - 1] = replacement_ikey;
+         }
++        n = p;
+     } while (kp == 0 || (kp == 1 && !n->child_[0]));
+     n->unlock();
+ }
+@@ -259,8 +287,10 @@
+     typedef typename node_base<P>::internode_type internode_type;
+     node_base<P>* root_;
+     int count_;
+-    destroy_rcu_callback(node_base<P>* root)
+-        : root_(root), count_(0) {
++    destroy_value_cb_func destroyValueCB_ = nullptr;
++
++    destroy_rcu_callback(node_base<P>* root, destroy_value_cb_func func)
++        : root_(root), count_(0), destroyValueCB_(func) {
+     }
+     void operator()(threadinfo& ti);
+     static void make(node_base<P>* root, Str prefix, threadinfo& ti);
+@@ -287,8 +317,9 @@
+ template <typename P>
+ void destroy_rcu_callback<P>::operator()(threadinfo& ti) {
+     if (++count_ == 1) {
+-        while (!root_->is_root())
++        while (!root_->is_root()) {
+             root_ = root_->maybe_parent();
++        }
+         root_->lock();
+         root_->mark_deleted_tree(); // i.e., deleted but not splitting
+         root_->unlock();
+@@ -302,9 +333,9 @@
+ 
+     while (node_base<P>* n = workq) {
+         node_base<P>** linkp = link_ptr(n);
+-        if (linkp != tailp)
++        if (linkp != tailp) {
+             workq = *linkp;
+-        else {
++        } else {
+             workq = 0;
+             tailp = &workq;
+         }
+@@ -314,15 +345,21 @@
+             typename leaf_type::permuter_type perm = l->permutation();
+             for (int i = 0; i != l->size(); ++i) {
+                 int p = perm[i];
+-                if (l->is_layer(p))
++                if (l->is_layer(p)) {
+                     enqueue(l->lv_[p].layer(), tailp);
++                }
++                else {
++                    if (destroyValueCB_)
++                        destroyValueCB_(l->lv_[p].value());
++                }
+             }
+             l->deallocate(ti);
+         } else {
+             internode_type* in = static_cast<internode_type*>(n);
+-            for (int i = 0; i != in->size() + 1; ++i)
++            for (int i = 0; i != in->size() + 1; ++i) {
+                 if (in->child_[i])
+                     enqueue(in->child_[i], tailp);
++            }
+             in->deallocate(ti);
+         }
+     }
+@@ -333,7 +370,7 @@
+ void basic_table<P>::destroy(threadinfo& ti) {
+     if (root_) {
+         void* data = ti.allocate(sizeof(destroy_rcu_callback<P>), memtag_masstree_gc);
+-        destroy_rcu_callback<P>* cb = new(data) destroy_rcu_callback<P>(root_);
++        destroy_rcu_callback<P>* cb = new(data) destroy_rcu_callback<P>(root_, destroyValue_CB_);
+         ti.rcu_register(cb);
+         root_ = 0;
+     }
+diff -Naur code/masstree_scan.hh new_code/masstree_scan.hh
+--- code/masstree_scan.hh	2020-06-11 15:18:24.451000000 +0700
++++ new_code/masstree_scan.hh	2020-06-11 15:12:49.204000000 +0700
+@@ -61,13 +61,15 @@
+     }
+ 
+     template <typename H>
+-    int find_initial(H& helper, key_type& ka, bool emit_equal,
++    int find_initial(H& helper, key_type& ka, bool emit_equal, bool& found,
+                      leafvalue_type& entry, threadinfo& ti);
+     template <typename H>
+     int find_retry(H& helper, key_type& ka, threadinfo& ti);
+     template <typename H>
+     int find_next(H& helper, key_type& ka, leafvalue_type& entry);
+ 
++    // Return the location of the key in key's related arrays (ikey0_, lv_ and  keylenx_)
++    // The unsigned trick is to handle ki_ < 0;
+     int kp() const {
+         if (unsigned(ki_) < unsigned(perm_.size()))
+             return perm_[ki_];
+@@ -76,6 +78,7 @@
+     }
+ 
+     template <typename PX> friend class basic_table;
++    template<bool CONST_ITERATOR, bool FORWARD, typename PX> friend class MasstreeIterator;
+ };
+ 
+ struct forward_scan_helper {
+@@ -85,6 +88,7 @@
+     template <typename K> bool is_duplicate(const K &k,
+                                             typename K::ikey_type ikey,
+                                             int keylenx) const {
++        // k.ikey < ikey --> k.compare(ikey, keylenx) < 0
+         return k.compare(ikey, keylenx) >= 0;
+     }
+     template <typename K, typename N> int lower(const K &k, const N *n) const {
+@@ -129,17 +133,22 @@
+     template <typename K> bool is_duplicate(const K &k,
+                                             typename K::ikey_type ikey,
+                                             int keylenx) const {
++        // k.ikey < ikey --> k.compare(ikey, keylenx) < 0
+         return k.compare(ikey, keylenx) <= 0 && !upper_bound_;
+     }
+     template <typename K, typename N> int lower(const K &k, const N *n) const {
+         if (upper_bound_)
+             return n->size() - 1;
++        // If kx.p < 0, the provided ikey was not found. It means that kx.i is pointing to an index which it's ikey is larger than our ikey.
++        // It also means that the ikey in index (kx.i - 1) (if exists) is the largest ikey in this node that smaller than our key.
+         key_indexed_position kx = N::bound_type::lower_by(k, *n, *n);
+         return kx.i - (kx.p < 0);
+     }
+     template <typename K, typename N>
+     key_indexed_position lower_with_position(const K &k, const N *n) const {
+         key_indexed_position kx = N::bound_type::lower_by(k, *n, *n);
++        // If kx.p < 0, the provided ikey was not found. It means that kx.i is pointing to an index which it's ikey is larger than our ikey.
++        // It also means that the ikey in index (kx.i - 1) (if exists) is the largest ikey in this node that smaller than our key.
+         kx.i -= kx.p < 0;
+         return kx;
+     }
+@@ -151,6 +160,7 @@
+     }
+     template <typename N, typename K>
+     N *advance(const N *n, K &k) const {
++        // Change the ikey of our search key to be the lowest ikey in the leaf. If this is the most left leaf, it could be any of the values that are currently or used to be in this leaf.
+         k.assign_store_ikey(n->ikey_bound());
+         k.assign_store_length(0);
+         return n->prev_;
+@@ -178,7 +188,7 @@
+ 
+ 
+ template <typename P> template <typename H>
+-int scanstackelt<P>::find_initial(H& helper, key_type& ka, bool emit_equal,
++int scanstackelt<P>::find_initial(H& helper, key_type& ka, bool emit_equal, bool& found,
+                                   leafvalue_type& entry, threadinfo& ti)
+ {
+     key_indexed_position kx;
+@@ -186,27 +196,36 @@
+     char suffixbuf[MASSTREE_MAXKEYLEN];
+     Str suffix;
+ 
++ // Goes down to the leaf
+  retry_root:
+     n_ = root_->reach_leaf(ka, v_, ti);
+ 
+  retry_node:
+     if (v_.deleted())
+         goto retry_root;
++
++    // Finds the key inside the leaf
+     n_->prefetch();
+     perm_ = n_->permutation();
+ 
+     kx = helper.lower_with_position(ka, this);
++    // kx.i - index of the key inside the permutation. If the key was not found, index of the closest key (depends on the helper's implementation).
++    // kx.p - position of the given key in the child's array (perm[kx.i]). -1 if was not found
++
++    // If a valid position for the key is found is recorded
+     if (kx.p >= 0) {
+         keylenx = n_->keylenx_[kx.p];
+         fence();
+         entry = n_->lv_[kx.p];
+         entry.prefetch(keylenx);
+         if (n_->keylenx_has_ksuf(keylenx)) {
++            // There is only one key in the tree with our key's prefix
+             suffix = n_->ksuf(kx.p);
+             memcpy(suffixbuf, suffix.s, suffix.len);
+             suffix.s = suffixbuf;
+         }
+     }
++    // If the leaf changes we have to find the new correct leaf and retry
+     if (n_->has_changed(v_)) {
+         ti.mark(tc_leaf_retry);
+         n_ = n_->advance_to_key(ka, v_, ti);
+@@ -215,20 +234,38 @@
+ 
+     ki_ = kx.i;
+     if (kx.p >= 0) {
++        // Matching ikey was found (--> full prefix matches)
++        // We might have to keep going down since we found the subtree we are interested in
+         if (n_->keylenx_is_layer(keylenx)) {
++            // The ikey was found and it's value pointing to lower layer. keep the current node and the current layer root so we will be able to return back (used in some corner cases)
+             node_stack_.push_back(root_);
+             node_stack_.push_back(n_);
++
++            // Change our local search root to point to the lower layer
+             root_ = entry.layer();
+             return scan_down;
+         } else if (n_->keylenx_has_ksuf(keylenx)) {
++            // Key in the tree has suffix (--> this is the only key in the tree with this prefix)
+             int ksuf_compare = suffix.compare(ka.suffix());
++            // If ksuf_compare > 0 --> suffix > ka.suffix
++            found = (ksuf_compare == 0);
+             if (helper.initial_ksuf_match(ksuf_compare, emit_equal)) {
++                /* ikey matches and the suffix comparison matches the helper rules:
++                     forward - our key is smaller than the tree's key (--> the current key in tree is the closest upper bounder for our key)
++                     reverse - our key is larger than the tree's key (--> the current key in tree is the closest lower bounder for our key)
++                   In case the suffixes match, if emit_equal is true, both helpers return true and vice versa */
++
++                // Copy the key that was found in the tree to our key, as we are going to return it to the iterator
++                // IDAN: OPTIMIZATION: found is true, our key suffix fully matches the tree's key suffix. we can optimize the code by not copying the data.
+                 int keylen = ka.assign_store_suffix(suffix);
+                 ka.assign_store_length(keylen);
+                 return scan_emit;
+             }
+-        } else if (emit_equal)
++        } else if (emit_equal) {
++            // Tree's key has no suffix and does not point to a lower layer --> the tree's key fully matches our key
++            found = true;
+             return scan_emit;
++        }
+         // otherwise, this entry must be skipped
+         ki_ = helper.next(ki_);
+     }
+@@ -260,6 +297,9 @@
+  retry_entry:
+     kp = this->kp();
+     if (kp >= 0) {
++        // After the call to find_initial, ki (index in leaf) points to ikey in the leaf that best match our request (tightest upper or lower boundary, depends on the helper type)
++        // As kp is valid, we should investigate the current ikey in leaf.
++        // If the ikey points to a lower layer, we need to traverse down with it. otherwise, this is our target key.
+         ikey_type ikey = n_->ikey0_[kp];
+         int keylenx = n_->keylenx_[kp];
+         int keylen = keylenx;
+@@ -271,25 +311,35 @@
+ 
+         if (n_->has_changed(v_))
+             goto changed;
++            // Verify that the key that we found meets the criteria
+         else if (helper.is_duplicate(ka, ikey, keylenx)) {
++            /* The current tree's key doesn't meet the criteria:
++                 forward - search key is larger or equal to the tree's key
++                 reverse - search key is smaller or equal to the tree's key (if upper_bound_ == true, is_duplicate always return false as any key that we find is our target key)
++                   * - equal is not good because if an equal key exists, it should have been already reported
++               usually happens when node was changed in previous iteration. */
+             ki_ = helper.next(ki_);
+             goto retry_entry;
+         }
+ 
+         // We know we can emit the data collected above.
++        // Updating the search key with the ikey from the tree's key. we might return our updated key now or continue search with it in lower layer
+         ka.assign_store_ikey(ikey);
+         helper.mark_key_complete();
+         if (n_->keylenx_is_layer(keylenx)) {
++            // The tree's key is in lower layer. save the current layer root and current node (we might need to return back) and continue the search there
+             node_stack_.push_back(root_);
+             node_stack_.push_back(n_);
+             root_ = entry.layer();
+             return scan_down;
+         } else {
++            // Key was found. update our search key length with the tree's key (suffix was already copied)
+             ka.assign_store_length(keylen);
+             return scan_emit;
+         }
+     }
+ 
++    // kp is not valid -> ki is no valid. the target key is not in the current node
+     if (!n_->has_changed(v_)) {
+         n_ = helper.advance(n_, ka);
+         if (!n_) {
+@@ -308,7 +358,8 @@
+ 
+ template <typename P> template <typename H, typename F>
+ int basic_table<P>::scan(H helper,
+-                         Str firstkey, bool emit_firstkey,
++                         void const *const &firstKey,
++                         unsigned int firstKeyLen, bool emit_firstkey,
+                          F& scanner,
+                          threadinfo& ti) const
+ {
+@@ -319,9 +370,9 @@
+         ikey_type x[(MASSTREE_MAXKEYLEN + sizeof(ikey_type) - 1)/sizeof(ikey_type)];
+         char s[MASSTREE_MAXKEYLEN];
+     } keybuf;
+-    masstree_precondition(firstkey.len <= (int) sizeof(keybuf));
+-    memcpy(keybuf.s, firstkey.s, firstkey.len);
+-    key_type ka(keybuf.s, firstkey.len);
++    masstree_precondition(firstKeyLen <= (int) sizeof(keybuf));
++    memcpy(keybuf.s, firstKey, firstKeyLen);
++    key_type ka(keybuf.s, firstKeyLen);
+ 
+     typedef scanstackelt<P> mystack_type;
+     mystack_type stack;
+@@ -330,10 +381,13 @@
+ 
+     int scancount = 0;
+     int state;
++    bool foundGiven = false;
+ 
+     while (1) {
+-        state = stack.find_initial(helper, ka, emit_firstkey, entry, ti);
+-        scanner.visit_leaf(stack, ka, ti);
++        state = stack.find_initial(helper, ka, emit_firstkey, foundGiven, entry, ti);
++        //If we want to signal that we have visited this leave, we can do it here
++        //like for example range locks
++//            scanner.visit_leaf(stack, ka, ti);
+         if (state != mystack_type::scan_down)
+             break;
+         ka.shift();
+@@ -343,8 +397,8 @@
+         switch (state) {
+         case mystack_type::scan_emit:
+             ++scancount;
+-            if (!scanner.visit_value(ka, entry.value(), ti))
+-                goto done;
++//            if (!scanner.visit_value(ka, entry.value(), ti))
++//                goto done;
+             stack.ki_ = helper.next(stack.ki_);
+             state = stack.find_next(helper, ka, entry);
+             break;
+@@ -352,12 +406,16 @@
+         case mystack_type::scan_find_next:
+         find_next:
+             state = stack.find_next(helper, ka, entry);
+-            if (state != mystack_type::scan_up)
+-                scanner.visit_leaf(stack, ka, ti);
++            if (state != mystack_type::scan_up) {
++                //If we want to signal that we have visited this leave, we can do it here
++                //like for example range locks
++//                scanner.visit_leaf(stack, ka, ti);
++            }
+             break;
+ 
+         case mystack_type::scan_up:
+             do {
++                //the scan is finished when the stack is empty
+                 if (stack.node_stack_.empty())
+                     goto done;
+                 stack.n_ = static_cast<leaf<P>*>(stack.node_stack_.back());
+diff -Naur code/masstree_split.hh new_code/masstree_split.hh
+--- code/masstree_split.hh	2020-06-11 15:18:24.453000000 +0700
++++ new_code/masstree_split.hh	2020-06-11 15:12:49.205000000 +0700
+@@ -23,14 +23,15 @@
+ template <typename P>
+ inline typename P::ikey_type
+ leaf<P>::ikey_after_insert(const permuter_type& perm, int i,
+-                           const key_type& ka, int ka_i) const
++                           const tcursor<P>* cursor) const
+ {
+-    if (i < ka_i)
++    if (i < cursor->kx_.i) {
+         return this->ikey0_[perm[i]];
+-    else if (i == ka_i)
+-        return ka.ikey();
+-    else
++    } else if (i == cursor->kx_.i) {
++        return cursor->ka_.ikey();
++    } else {
+         return this->ikey0_[perm[i - 1]];
++    }
+ }
+ 
+ /** @brief Split this node into *@a nr and insert @a ka at position @a p.
+@@ -47,40 +48,46 @@
+     *@a nr, and 2 for the sequential-order optimization (@a ka went into *@a
+     nr and no other keys were moved). */
+ template <typename P>
+-int leaf<P>::split_into(leaf<P>* nr, int p, const key_type& ka,
++int leaf<P>::split_into(leaf<P>* nr, tcursor<P>* cursor,
+                         ikey_type& split_ikey, threadinfo& ti)
+ {
++    masstree_precondition(!this->concurrent || (this->locked() && nr->locked()));
++    masstree_precondition(this->size() >= this->width - 1);
++
+     // B+tree leaf insertion.
+     // Split *this, with items [0,T::width), into *this + nr, simultaneously
+     // inserting "ka:value" at position "p" (0 <= p <= T::width).
+ 
+-    // Let mid = floor(T::width / 2) + 1. After the split,
+-    // "*this" contains [0,mid) and "nr" contains [mid,T::width+1).
+-    // If p < mid, then x goes into *this, and the first element of nr
+-    //   will be former item (mid - 1).
+-    // If p >= mid, then x goes into nr.
+-    masstree_precondition(!this->concurrent || (this->locked() && nr->locked()));
+-    masstree_precondition(this->size() >= this->width - 1);
++    // `mid` determines the split point. Post-split, `*this` contains [0,mid)
++    // and `nr` contains [mid,T::width+1).
++    // If `p < mid`, then the new item goes into `*this`, and the first element
++    //   of `nr` will be former item (mid - 1).
++    // If `p >= mid`, then the new item goes into nr.
+ 
+-    int width = this->size();   // == this->width or this->width - 1
++    // pick initial insertion point
++    permuter_type perml(this->permutation_);
++    int width = perml.size();   // == this->width or this->width - 1
+     int mid = this->width / 2 + 1;
+-    if (p == 0 && !this->prev_)
++    int p = cursor->kx_.i;
++    if (p == 0 && !this->prev_) {
++        // reverse-sequential optimization
+         mid = 1;
+-    else if (p == width && !this->next_.ptr)
++    } else if (p == width && !this->next_.ptr) {
++        // sequential optimization
+         mid = width;
++    }
+ 
+-    // Never separate keys with the same ikey0.
+-    permuter_type perml(this->permutation_);
+-    ikey_type mid_ikey = ikey_after_insert(perml, mid, ka, p);
+-    if (mid_ikey == ikey_after_insert(perml, mid - 1, ka, p)) {
++    // adjust insertion point to keep keys with the same ikey0 together
++    ikey_type mid_ikey = ikey_after_insert(perml, mid, cursor);
++    if (mid_ikey == ikey_after_insert(perml, mid - 1, cursor)) {
+         int midl = mid - 2, midr = mid + 1;
+-        while (1) {
++        while (true) {
+             if (midr <= width
+-                && mid_ikey != ikey_after_insert(perml, midr, ka, p)) {
++                && mid_ikey != ikey_after_insert(perml, midr, cursor)) {
+                 mid = midr;
+                 break;
+             } else if (midl >= 0
+-                       && mid_ikey != ikey_after_insert(perml, midl, ka, p)) {
++                       && mid_ikey != ikey_after_insert(perml, midl, cursor)) {
+                 mid = midl + 1;
+                 break;
+             }
+@@ -89,28 +96,33 @@
+         masstree_invariant(mid > 0 && mid <= width);
+     }
+ 
++    // move items to `nr`
+     typename permuter_type::value_type pv = perml.value_from(mid - (p < mid));
+-    for (int x = mid; x <= width; ++x)
+-        if (x == p)
+-            nr->assign_initialize(x - mid, ka, ti);
+-        else {
++    for (int x = mid; x <= width; ++x) {
++        if (x == p) {
++            nr->assign_initialize(x - mid, cursor->ka_, ti);
++        } else {
+             nr->assign_initialize(x - mid, this, pv & 15, ti);
+             pv >>= 4;
+         }
++    }
+     permuter_type permr = permuter_type::make_sorted(width + 1 - mid);
+-    if (p >= mid)
++    if (p >= mid) {
+         permr.remove_to_back(p - mid);
++    }
+     nr->permutation_ = permr.value();
++    split_ikey = nr->ikey0_[0];
+ 
++    // link `nr` across leaves
+     btree_leaflink<leaf<P>, P::concurrent>::link_split(this, nr);
+ 
+-    split_ikey = nr->ikey0_[0];
+-    return p >= mid ? 1 + (mid == width) : 0;
++    // return split type
++    return p < mid ? 0 : 1 + (mid == width);
+ }
+ 
+ template <typename P>
+-int internode<P>::split_into(internode<P> *nr, int p, ikey_type ka,
+-                             node_base<P> *value, ikey_type& split_ikey,
++int internode<P>::split_into(internode<P>* nr, int p, ikey_type ka,
++                             node_base<P>* value, ikey_type& split_ikey,
+                              int split_type)
+ {
+     // B+tree internal node insertion.
+@@ -148,8 +160,9 @@
+         split_ikey = this->ikey0_[mid];
+     }
+ 
+-    for (int i = 0; i <= nr->nkeys_; ++i)
++    for (int i = 0; i <= nr->nkeys_; ++i) {
+         nr->child_[i]->set_parent(nr);
++    }
+ 
+     this->mark_split();
+     if (p < mid) {
+@@ -169,6 +182,8 @@
+     // full, or because we're trying to insert into position 0 (which holds
+     // the ikey_bound). But in the latter case, perhaps we can rearrange the
+     // permutation to do an insert instead.
++
++    //IDAN: LEARN: as we might fail in case the last available slot is 0, why not replace the condition to (n_->size() < n_->width -1) ?
+     if (n_->size() < n_->width) {
+         permuter_type perm(n_->permutation_);
+         perm.exchange(perm.size(), n_->width - 1);
+@@ -184,13 +199,14 @@
+     node_type* child = leaf_type::make(n_->ksuf_used_capacity(), n_->phantom_epoch(), ti);
+     child->assign_version(*n_);
+     ikey_type xikey[2];
++    // Add the new key and spread the keys between the 2 leafs. The new key might be inserted to either one of the leafs. Link to parent will be done later.
+     int split_type = n_->split_into(static_cast<leaf_type*>(child),
+-                                    kx_.i, ka_, xikey[0], ti);
++                                    this, xikey[0], ti);
+     unsigned sense = 0;
+     node_type* n = n_;
+     uint32_t height = 0;
+ 
+-    while (1) {
++    while (true) {
+         masstree_invariant(!n->concurrent || (n->locked() && child->locked() && (n->isleaf() || n->splitting())));
+         internode_type *next_child = 0;
+ 
+@@ -231,37 +247,42 @@
+             }
+         }
+ 
+-        if (n->isleaf()) {
+-            leaf_type *nl = static_cast<leaf_type *>(n);
+-            leaf_type *nr = static_cast<leaf_type *>(child);
++        // complete split by stripping shifted items from left node
++        // (this is delayed until both nodes are reachable because
++        // creating new internodes is expensive; might as well leave items
++        // in the left leaf reachable until that's done)
++        if (n == n_) {
++            leaf_type* nl = static_cast<leaf_type*>(n);
++            leaf_type* nr = static_cast<leaf_type*>(child);
++            // shrink `nl` to only the relevant items
+             permuter_type perml(nl->permutation_);
+             int width = perml.size();
+             perml.set_size(width - nr->size());
+             // removed item, if any, must be @ perml.size()
+-            if (width != nl->width)
++            if (width != nl->width) {
+                 perml.exchange(perml.size(), nl->width - 1);
++            }
+             nl->mark_split();
+             nl->permutation_ = perml.value();
++            // account for split
+             if (split_type == 0) {
+                 kx_.p = perml.back();
+                 nl->assign(kx_.p, ka_, ti);
++                new_nodes_.emplace_back(nr, nr->full_unlocked_version_value());
+             } else {
+                 kx_.i = kx_.p = kx_.i - perml.size();
+                 n_ = nr;
+-            }
+-            // versions/sizes shouldn't change after this
+-            if (nl != n_) {
+-                assert(nr == n_);
+-                // we don't add n_ until lp.finish() is called (this avoids next_version_value() annoyances)
+                 updated_v_ = nl->full_unlocked_version_value();
+-            } else
+-                new_nodes_.emplace_back(nr, nr->full_unlocked_version_value());
++            }
+         }
+ 
+-        if (n != n_)
++        // hand-over-hand locking
++        if (n != n_) {
+             n->unlock();
+-        if (child != n_)
++        }
++        if (child != n_) {
+             child->unlock();
++        }
+         if (next_child) {
+             n = p;
+             child = next_child;
+@@ -270,8 +291,9 @@
+         } else if (p) {
+             p->unlock();
+             break;
+-        } else
++        } else {
+             break;
++        }
+     }
+ 
+     return false;
+diff -Naur code/masstree_struct.hh new_code/masstree_struct.hh
+--- code/masstree_struct.hh	2020-06-11 15:18:24.456000000 +0700
++++ new_code/masstree_struct.hh	2020-06-11 15:12:49.205000000 +0700
+@@ -106,9 +106,12 @@
+     typedef typename key_bound<width, P::bound_method>::type bound_type;
+     typedef typename P::threadinfo_type threadinfo;
+ 
++    // Number of boundary keys the node currently contains
+     uint8_t nkeys_;
+     uint32_t height_;
++    // Boundary keys array
+     ikey_type ikey0_[width];
++    // Child nodes array (might be leafs or internodes)
+     node_base<P>* child_[width + 1];
+     node_base<P>* parent_;
+     kvtimestamp_t created_at_[P::debug_level > 0];
+@@ -118,7 +121,7 @@
+     }
+ 
+     static internode<P>* make(uint32_t height, threadinfo& ti) {
+-        void* ptr = ti.pool_allocate(sizeof(internode<P>),
++        void* ptr = ti.pool_allocate(MAX_MEMTAG_MASSTREE_INTERNODE_ALLOCATION_SIZE,
+                                      memtag_masstree_internode);
+         internode<P>* n = new(ptr) internode<P>(height);
+         assert(n);
+@@ -264,19 +267,38 @@
+     enum {
+         modstate_insert = 0, modstate_remove = 1, modstate_deleted_layer = 2
+     };
+-
++    /* Indicator for internal suffix (iksuf_) string bag
++       extrasize64_ == 0 --> no iksuf_.
++       extrasize64_ > 0 --> iksuf_ (of size extrasize64_ * 64) exists and is in use
++       extrasize64_ < 0 --> iksuf_ (of size (-extrasize64_ - 1) * 64) exists but not in use anymore (ksuf_ is used instead)
++    */
+     int8_t extrasize64_;
+     uint8_t modstate_;
++    /* Key slice (ikey) length array. locations consistent with keys in ikey0_ and lv_ arrays.
++        If key ends in this leaf and has no suffix:            length of the key slice is stored
++        If key ends in this leaf and has suffix:               ksuf_keylenx (64) is stored
++        If key doesn't end in this leaf (ends in lower layer): layer_keylenx (128) is stored */
+     uint8_t keylenx_[width];
++    /* Sorted permutation of the ikey's indexes (up to the permutation size). divided into 16 parts of 2 bytes each.
++         First part: the current size of the permutation (number of ikeys in use)
++         Following parts: sorted indexes of the ikeys in ikey0_ array.
++       The permutation always include all values (0-14) but only the first perm.size (which is located in the first part) entries are valid and sorted. */
+     typename permuter_type::storage_type permutation_;
++    // Key slices (ikey) array. each slice is uint64 and represent 8 bytes of the original key
+     ikey_type ikey0_[width];
++    // Values array. locations are consistent with keys in ikey0_ and keylenx_ arrays. holds key's value or a link to lower layer
+     leafvalue_type lv_[width];
++    // Suffixes of keys. Will be used if a key has further suffix but it's prefix is unique.
+     external_ksuf_type* ksuf_;
++    // Pointer to the next leaf in the same layer
+     union {
+         leaf<P>* ptr;
+         uintptr_t x;
+     } next_;
++    // Pointer to the previous leaf in the same layer
+     leaf<P>* prev_;
++
++    // Leaf's parent (might be null if leaf is the root of the btree (trie node)
+     node_base<P>* parent_;
+     phantom_epoch_type phantom_epoch_[P::need_phantom_epoch];
+     kvtimestamp_t created_at_[P::debug_level > 0];
+@@ -288,10 +310,12 @@
+           ksuf_(), parent_(), iksuf_{} {
+         masstree_precondition(sz % 64 == 0 && sz / 64 < 128);
+         extrasize64_ = (int(sz) >> 6) - ((int(sizeof(*this)) + 63) >> 6);
+-        if (extrasize64_ > 0)
+-            new((void *)&iksuf_[0]) internal_ksuf_type(width, sz - sizeof(*this));
+-        if (P::need_phantom_epoch)
++        if (extrasize64_ > 0) {
++            new((void*) &iksuf_[0]) internal_ksuf_type(width, sz - sizeof(*this));
++        }
++        if (P::need_phantom_epoch) {
+             phantom_epoch_[0] = phantom_epoch;
++        }
+     }
+ 
+     static leaf<P>* make(int ksufsize, phantom_epoch_type phantom_epoch, threadinfo& ti) {
+@@ -299,13 +323,15 @@
+         void* ptr = ti.pool_allocate(sz, memtag_masstree_leaf);
+         leaf<P>* n = new(ptr) leaf<P>(sz, phantom_epoch);
+         assert(n);
+-        if (P::debug_level > 0)
++        if (P::debug_level > 0) {
+             n->created_at_[0] = ti.operation_timestamp();
++        }
+         return n;
+     }
+     static leaf<P>* make_root(int ksufsize, leaf<P>* parent, threadinfo& ti) {
+         leaf<P>* n = make(ksufsize, parent ? parent->phantom_epoch() : phantom_epoch_type(), ti);
+         n->next_.ptr = n->prev_ = 0;
++        n->ikey0_[0] = 0; // to avoid undefined behavior
+         n->make_layer_root();
+         return n;
+     }
+@@ -334,10 +360,13 @@
+     typename nodeversion_type::value_type full_unlocked_version_value() const {
+         static_assert(int(nodeversion_type::traits_type::top_stable_bits) >= int(permuter_type::size_bits), "not enough bits to add size to version");
+         typename node_base<P>::nodeversion_type v(*this);
+-        if (v.locked())
+-            // subtlely, unlocked_version_value() is different than v.unlock(); v.version_value() because the latter will add a
+-            // split bit if we're doing a split. So we do the latter to get the fully correct version.
++        if (v.locked()) {
++            // subtly, unlocked_version_value() is different than v.unlock();
++            // v.version_value() because the latter will add a split bit if
++            // we're doing a split. So we do the latter to get the fully
++            // correct version.
+             v.unlock();
++        }
+         return (v.version_value() << permuter_type::size_bits) + size();
+     }
+ 
+@@ -404,9 +433,13 @@
+     int ksuf_matches(int p, const key_type& ka) const {
+         int keylenx = keylenx_[p];
+         if (keylenx < ksuf_keylenx)
++            // Key does not have extra suffix
+             return 1;
+         if (keylenx == layer_keylenx)
++            // Key does not end in this layer. we need to continue looking for it in lower layers.
+             return -(int) sizeof(ikey_type);
++
++        // Key is stored in this layer and has suffix. lets compare the suffixes.
+         Str s = ksuf(p, keylenx);
+         return s.len == ka.suffix().len
+             && string_slice<uintptr_t>::equals_sloppy(s.s, ka.suffix().s, s.len);
+@@ -490,9 +523,9 @@
+     inline void assign(int p, const key_type& ka, threadinfo& ti) {
+         lv_[p] = leafvalue_type::make_empty();
+         ikey0_[p] = ka.ikey();
+-        if (!ka.has_suffix())
++        if (!ka.has_suffix()) {
+             keylenx_[p] = ka.length();
+-        else {
++        } else {
+             keylenx_[p] = ksuf_keylenx;
+             assign_ksuf(p, ka.suffix(), false, ti);
+         }
+@@ -500,9 +533,9 @@
+     inline void assign_initialize(int p, const key_type& ka, threadinfo& ti) {
+         lv_[p] = leafvalue_type::make_empty();
+         ikey0_[p] = ka.ikey();
+-        if (!ka.has_suffix())
++        if (!ka.has_suffix()) {
+             keylenx_[p] = ka.length();
+-        else {
++        } else {
+             keylenx_[p] = ksuf_keylenx;
+             assign_ksuf(p, ka.suffix(), true, ti);
+         }
+@@ -511,8 +544,9 @@
+         lv_[p] = x->lv_[xp];
+         ikey0_[p] = x->ikey0_[xp];
+         keylenx_[p] = x->keylenx_[xp];
+-        if (x->has_ksuf(xp))
++        if (x->has_ksuf(xp)) {
+             assign_ksuf(p, x->ksuf(xp), true, ti);
++        }
+     }
+     inline void assign_initialize_for_layer(int p, const key_type& ka) {
+         assert(ka.has_suffix());
+@@ -522,8 +556,8 @@
+     void assign_ksuf(int p, Str s, bool initializing, threadinfo& ti);
+ 
+     inline ikey_type ikey_after_insert(const permuter_type& perm, int i,
+-                                       const key_type& ka, int ka_i) const;
+-    int split_into(leaf<P>* nr, int p, const key_type& ka, ikey_type& split_ikey,
++                                       const tcursor<P>* cursor) const;
++    int split_into(leaf<P>* nr, tcursor<P>* tcursor, ikey_type& split_ikey,
+                    threadinfo& ti);
+ 
+     template <typename PP> friend class tcursor;
+@@ -545,10 +579,11 @@
+ {
+     node_base<P>* p;
+     masstree_precondition(!this->concurrent || this->locked());
+-    while (1) {
++    while (true) {
+         p = this->parent();
+-        if (!this->parent_exists(p))
++        if (!this->parent_exists(p)) {
+             break;
++        }
+         nodeversion_type pv = p->lock(*p, ti.lock_fence(tc_internode_lock));
+         if (p == this->parent()) {
+             masstree_invariant(!p->isleaf());
+@@ -579,10 +614,12 @@
+ internode<P>::stable_last_key_compare(const key_type& k, nodeversion_type v,
+                                       threadinfo& ti) const
+ {
+-    while (1) {
+-        int cmp = compare_key(k, size() - 1);
+-        if (likely(!this->has_changed(v)))
++    while (true) {
++        int n = this->size();
++        int cmp = n ? compare_key(k, n - 1) : 1;
++        if (likely(!this->has_changed(v))) {
+             return cmp;
++        }
+         v = this->stable_annotated(ti.stable_fence());
+     }
+ }
+@@ -592,12 +629,30 @@
+ leaf<P>::stable_last_key_compare(const key_type& k, nodeversion_type v,
+                                  threadinfo& ti) const
+ {
+-    while (1) {
++    while (true) {
+         typename leaf<P>::permuter_type perm(permutation_);
+-        int p = perm[perm.size() - 1];
++        int n = perm.size();
++        // Eddie's comment
++        // If `n == 0`, then this node is empty: it was deleted without ever
++        // splitting, or it split and then was emptied.
++        // - It is always safe to return 1, because then the caller will
++        //   check more precisely whether `k` belongs in `this`.
++        // - It is safe to return anything if `this->deleted()`, because
++        //   viewing the deleted node will always cause a retry.
++        // - Thus it is safe to return a comparison with the key stored in slot
++        //   `perm[0]`. If the node ever had keys in it, then kpermuter ensures
++        //   that slot holds the most recently deleted key, which would belong
++        //   in this leaf. Otherwise, `perm[0]` is 0.
++
++        // Idan's comment
++        // In case the leaf has no keys, perm[-1] will return 0.
++        // This wont work for the most left leaf, as we cannot assume anything about it's ikey.
++        // So we will use the value that was last deleted as an upper boundary (perm[0])
++        int p = perm[n ? n - 1 : 0];
+         int cmp = compare_key(k, p);
+-        if (likely(!this->has_changed(v)))
++        if (likely(!this->has_changed(v))) {
+             return cmp;
++        }
+         v = this->stable_annotated(ti.stable_fence());
+     }
+ }
+@@ -621,22 +676,27 @@
+  retry:
+     sense = 0;
+     n[sense] = this;
+-    while (1) {
++    // Looking for a local root node up the tree and populate n[0] and v[0] with the founded node\node's version respectively
++    while (true) {
+         v[sense] = n[sense]->stable_annotated(ti.stable_fence());
+-        if (v[sense].is_root())
++        if (v[sense].is_root()) {
+             break;
++        }
+         ti.mark(tc_root_retry);
+         n[sense] = n[sense]->maybe_parent();
+     }
+ 
+-    // Loop over internal nodes.
++    // Traverse over internal nodes until reaching a leaf.
+     while (!v[sense].isleaf()) {
+         const internode<P> *in = static_cast<const internode<P>*>(n[sense]);
+         in->prefetch();
++        // Get the child's node location (inside in->child_) which best match the key in ka
++        // This is done by comparing each one of the boundaries (starting from the lower one) until key in ka is lower than the boundary (linear search)
+         int kp = internode<P>::bound_type::upper(ka, *in);
+         n[sense ^ 1] = in->child_[kp];
+-        if (!n[sense ^ 1])
++        if (!n[sense ^ 1]) {
+             goto retry;
++        }
+         v[sense ^ 1] = n[sense ^ 1]->stable_annotated(ti.stable_fence());
+ 
+         if (likely(!in->has_changed(v[sense]))) {
+@@ -644,14 +704,18 @@
+             continue;
+         }
+ 
++        // Node's version was changed. wait until it is stable again (aka not dirty)
+         typename node_base<P>::nodeversion_type oldv = v[sense];
+         v[sense] = in->stable_annotated(ti.stable_fence());
+-        if (oldv.has_split(v[sense])
++
++        // Handle the case the node has split (start again from the local root)
++        if (unlikely(oldv.has_split(v[sense]))
+             && in->stable_last_key_compare(ka, v[sense], ti) > 0) {
+             ti.mark(tc_root_retry);
+             goto retry;
+-        } else
++        } else {
+             ti.mark(tc_internode_retry);
++        }
+     }
+ 
+     version = v[sense];
+@@ -671,7 +735,7 @@
+     const leaf<P>* n = this;
+     nodeversion_type oldv = v;
+     v = n->stable_annotated(ti.stable_fence());
+-    if (v.has_split(oldv)
++    if (unlikely(v.has_split(oldv))
+         && n->stable_last_key_compare(ka, v, ti) > 0) {
+         leaf<P> *next;
+         ti.mark(tc_leaf_walk);
+@@ -702,8 +766,12 @@
+ void leaf<P>::assign_ksuf(int p, Str s, bool initializing, threadinfo& ti) {
+     if ((ksuf_ && ksuf_->assign(p, s))
+         || (extrasize64_ > 0 && iksuf_[0].assign(p, s)))
++    {
++#if !(defined(__x86_64__) || defined(__x86__))        
++	fence();
++#endif        
+         return;
+-
++    }
+     external_ksuf_type* oksuf = ksuf_;
+ 
+     permuter_type perm(permutation_);
+@@ -716,11 +784,18 @@
+             csz += ksuf(mp).len;
+     }
+ 
+-    size_t sz = iceil_log2(external_ksuf_type::safe_size(width, csz + s.len));
++    size_t sz;
++    if (likely(!ti.use_pool())) {
++    // We don't use the iceil_log2 because our slab allocator will allocate a buffer in iceil_log2 - 1 size for us.
++      sz = external_ksuf_type::safe_size(width, csz + s.len);
++    } else {
++      sz = iceil_log2(external_ksuf_type::safe_size(width, csz + s.len));
++    }
++
+     if (oksuf)
+         sz = std::max(sz, oksuf->capacity());
+ 
+-    void* ptr = ti.allocate(sz, memtag_masstree_ksuffixes);
++    void* ptr = ti.allocate(sz, memtag_masstree_ksuffixes, &sz);
+     external_ksuf_type* nksuf = new(ptr) external_ksuf_type(width, sz);
+     for (int i = 0; i < n; ++i) {
+         int mp = initializing ? i : perm[i];
+diff -Naur code/masstree_tcursor.hh new_code/masstree_tcursor.hh
+--- code/masstree_tcursor.hh	2020-06-11 15:18:24.459000000 +0700
++++ new_code/masstree_tcursor.hh	2020-06-11 15:12:49.205000000 +0700
+@@ -20,6 +20,7 @@
+ #include "masstree_struct.hh"
+ namespace Masstree {
+ template <typename P> struct gc_layer_rcu_callback;
++template <typename P> struct gc_layer_rcu_callback_ng;
+ 
+ template <typename P>
+ class unlocked_tcursor {
+@@ -124,7 +125,7 @@
+     inline bool has_value() const {
+         return kx_.p >= 0;
+     }
+-    inline value_type &value() const {
++    inline value_type& value() const {
+         return n_->lv_[kx_.p].value();
+     }
+ 
+@@ -136,7 +137,7 @@
+         return n_;
+     }
+ 
+-    inline leaf_type *original_node() const {
++    inline leaf_type* original_node() const {
+         return original_n_;
+     }
+ 
+@@ -161,13 +162,13 @@
+     inline nodeversion_value_type next_full_version_value(int state) const;
+ 
+   private:
+-    leaf_type *n_;
++    leaf_type* n_;
+     key_type ka_;
+     key_indexed_position kx_;
+     node_base<P>* root_;
+     int state_;
+ 
+-    leaf_type *original_n_;
++    leaf_type* original_n_;
+     nodeversion_value_type original_v_;
+     nodeversion_value_type updated_v_;
+     new_nodes_type new_nodes_;
+@@ -179,6 +180,7 @@
+ 
+     bool make_new_layer(threadinfo& ti);
+     bool make_split(threadinfo& ti);
++    friend class leaf<P>;
+     inline void finish_insert();
+     inline bool finish_remove(threadinfo& ti);
+ 
+@@ -194,6 +196,7 @@
+ 
+     bool gc_layer(threadinfo& ti);
+     friend struct gc_layer_rcu_callback<P>;
++    friend struct gc_layer_rcu_callback_ng<P>;
+ };
+ 
+ template <typename P>
+diff -Naur code/nodeversion.hh new_code/nodeversion.hh
+--- code/nodeversion.hh	2020-06-11 15:18:24.476000000 +0700
++++ new_code/nodeversion.hh	2020-06-11 15:12:49.205000000 +0700
+@@ -46,6 +46,8 @@
+         acquire_fence();
+         return x;
+     }
++
++    // Spin while node is in dirty state
+     template <typename SF>
+     nodeversion<P> stable_annotated(SF spin_function) const {
+         value_type x = v_;
+@@ -92,11 +94,12 @@
+     }
+     template <typename SF>
+     nodeversion<P> lock(nodeversion<P> expected, SF spin_function) {
+-        while (1) {
++        while (true) {
+             if (!(expected.v_ & P::lock_bit)
+                 && bool_cmpxchg(&v_, expected.v_,
+-                                expected.v_ | P::lock_bit))
++                                expected.v_ | P::lock_bit)) {
+                 break;
++            }
+             spin_function();
+             expected.v_ = v_;
+         }
+@@ -107,6 +110,24 @@
+         return expected;
+     }
+ 
++    bool try_lock() {
++        return try_lock(relax_fence_function());
++    }
++    template <typename SF>
++    bool try_lock(SF spin_function) {
++        value_type expected = v_;
++        if (!(expected & P::lock_bit)
++            && bool_cmpxchg(&v_, expected, expected | P::lock_bit)) {
++            masstree_invariant(!(expected & P::dirty_mask));
++            acquire_fence();
++            masstree_invariant((expected | P::lock_bit) == v_);
++            return true;
++        } else {
++            spin_function();
++            return false;
++        }
++    }
++
+     void unlock() {
+         unlock(*this);
+     }
+@@ -114,8 +135,10 @@
+         masstree_invariant((fence(), x.v_ == v_));
+         masstree_invariant(x.v_ & P::lock_bit);
+         if (x.v_ & P::splitting_bit)
++            // Increasing the vsplit version counter, clean all lower bits (inserting, splitting, lock ...) and zeroing the vinsert version counter
+             x.v_ = (x.v_ + P::vsplit_lowbit) & P::split_unlock_mask;
+         else
++            // Clean all lower bits (inserting, splitting, lock ...). If P::inserting_bit == 1, also increasing the vinsert version counter
+             x.v_ = (x.v_ + ((x.v_ & P::inserting_bit) << 2)) & P::unlock_mask;
+         release_fence();
+         v_ = x.v_;
+@@ -159,6 +182,7 @@
+         acquire_fence();
+     }
+     void mark_nonroot() {
++        masstree_invariant(locked());
+         v_ &= ~P::root_bit;
+         acquire_fence();
+     }
+@@ -247,6 +271,14 @@
+         return *this;
+     }
+ 
++    bool try_lock() {
++        return true;
++    }
++    template <typename SF>
++    bool try_lock(SF) {
++        return true;
++    }
++
+     void unlock() {
+     }
+     void unlock(singlethreaded_nodeversion<P>) {
+diff -Naur code/straccum.cpp new_code/straccum.cpp
+--- code/straccum.cpp	2020-06-11 15:18:24.481000000 +0700
++++ new_code/straccum.cpp	2020-06-11 15:12:49.206000000 +0700
+@@ -266,7 +266,7 @@
+ operator<<(StringAccum &sa, long i)
+ {
+     if (char *x = sa.reserve(24)) {
+-        int len = sprintf(x, "%ld", i);
++        int len = snprintf(x, 24, "%ld", i);
+         sa.adjust_length(len);
+     }
+     return sa;
+@@ -279,7 +279,7 @@
+ operator<<(StringAccum &sa, unsigned long u)
+ {
+     if (char *x = sa.reserve(24)) {
+-        int len = sprintf(x, "%lu", u);
++        int len = snprintf(x, 24, "%lu", u);
+         sa.adjust_length(len);
+     }
+     return sa;
+@@ -292,7 +292,7 @@
+ operator<<(StringAccum &sa, long long i)
+ {
+     if (char *x = sa.reserve(24)) {
+-        int len = sprintf(x, "%lld", i);
++        int len = snprintf(x, 24, "%lld", i);
+         sa.adjust_length(len);
+     }
+     return sa;
+@@ -305,7 +305,7 @@
+ operator<<(StringAccum &sa, unsigned long long u)
+ {
+     if (char *x = sa.reserve(24)) {
+-        int len = sprintf(x, "%llu", u);
++        int len = snprintf(x, 24, "%llu", u);
+         sa.adjust_length(len);
+     }
+     return sa;
+@@ -315,7 +315,7 @@
+ operator<<(StringAccum &sa, double d)
+ {
+     if (char *x = sa.reserve(256)) {
+-        int len = sprintf(x, "%.12g", d);
++        int len = snprintf(x, 256, "%.12g", d);
+         sa.adjust_length(len);
+     }
+     return sa;
+@@ -334,7 +334,7 @@
+ #if HAVE_VSNPRINTF
+         int len = ::vsnprintf(x, n + 1, format, val);
+ #else
+-        int len = vsprintf(x, format, val);
++        int len = ::vsnprintf(x, n + 1, format, val);
+         assert(len <= n);
+ #endif
+         adjust_length(len);
+diff -Naur code/straccum.hh new_code/straccum.hh
+--- code/straccum.hh	2020-06-11 15:18:24.484000000 +0700
++++ new_code/straccum.hh	2020-06-11 15:12:49.206000000 +0700
+@@ -19,11 +19,6 @@
+ #include <assert.h>
+ #include <stdarg.h>
+ #include "string.hh"
+-#if __GNUC__ > 4
+-# define LCDF_SNPRINTF_ATTR __attribute__((__format__(__printf__, 3, 4)))
+-#else
+-# define LCDF_SNPRINTF_ATTR /* nothing */
+-#endif
+ namespace lcdf {
+ 
+ /** @file <lcdf/straccum.hh>
+@@ -121,7 +116,7 @@
+     void append_break_lines(const String& text, int linelen, const String& leftmargin = String());
+ 
+     StringAccum& snprintf(int n, const char* format, ...) LCDF_SNPRINTF_ATTR;
+-    StringAccum& vsnprintf(int n, const char* format, va_list val);
++    StringAccum& vsnprintf(int n, const char* format, va_list val) LCDF_VSNPRINTF_ATTR;
+ 
+     String take_string();
+ 
+@@ -724,5 +719,4 @@
+ }
+ 
+ } // namespace lcdf
+-#undef LCDF_SNPRINTF_ATTR
+ #endif
+diff -Naur code/str.hh new_code/str.hh
+--- code/str.hh	2020-06-11 15:18:24.487000000 +0700
++++ new_code/str.hh	2020-06-11 15:12:49.206000000 +0700
+@@ -18,6 +18,7 @@
+ #include "string_base.hh"
+ #include <stdarg.h>
+ #include <stdio.h>
++
+ namespace lcdf {
+ 
+ struct Str : public String_base<Str> {
+@@ -129,8 +130,7 @@
+             x = (x * 10) + s[p] - '0';
+         return p == len && p != 0 ? x : -1;
+     }
+-
+-    static Str snprintf(char *buf, size_t size, const char *fmt, ...) {
++    static Str snprintf(char *buf, size_t size, const char *fmt, ...) LCDF_SNPRINTF_ATTR {
+         va_list val;
+         va_start(val, fmt);
+         int n = vsnprintf(buf, size, fmt, val);
+diff -Naur code/string_base.hh new_code/string_base.hh
+--- code/string_base.hh	2020-06-11 15:18:24.493000000 +0700
++++ new_code/string_base.hh	2020-06-11 15:12:49.207000000 +0700
+@@ -26,6 +26,14 @@
+ class StringAccum;
+ #define LCDF_CONSTANT_CSTR(cstr) ((cstr) && __builtin_constant_p(strlen((cstr))))
+ 
++#if __GNUC__ > 4
++# define LCDF_SNPRINTF_ATTR  __attribute__((__format__(__printf__, 3, 4)))
++# define LCDF_VSNPRINTF_ATTR __attribute__((__format__(__printf__, 3, 0)))
++#else
++# define LCDF_SNPRINTF_ATTR  /* nothing */
++# define LCDF_VSNPRINTF_ATTR /* nothing */
++#endif
++
+ class String_generic {
+   public:
+     static const char empty_data[1];
+diff -Naur code/string.cpp new_code/string.cpp
+--- code/string.cpp	2020-06-11 15:18:24.496000000 +0700
++++ new_code/string.cpp	2020-06-11 15:12:49.207000000 +0700
+@@ -584,7 +584,7 @@
+         _r.assign(int_data + 2 * x, 1, 0);
+     else {
+         char buf[128];
+-        sprintf(buf, "%d", x);
++        snprintf(buf, 128, "%d", x);
+         assign(buf, -1, false);
+     }
+ }
+@@ -596,7 +596,7 @@
+         _r.assign(int_data + 2 * x, 1, 0);
+     else {
+         char buf[128];
+-        sprintf(buf, "%u", x);
++        snprintf(buf, 128, "%u", x);
+         assign(buf, -1, false);
+     }
+ }
+@@ -608,7 +608,7 @@
+         _r.assign(int_data + 2 * x, 1, 0);
+     else {
+         char buf[128];
+-        sprintf(buf, "%ld", x);
++        snprintf(buf, 128, "%ld", x);
+         assign(buf, -1, false);
+     }
+ }
+@@ -620,7 +620,7 @@
+         _r.assign(int_data + 2 * x, 1, 0);
+     else {
+         char buf[128];
+-        sprintf(buf, "%lu", x);
++        snprintf(buf, 128, "%lu", x);
+         assign(buf, -1, false);
+     }
+ }
+@@ -632,7 +632,7 @@
+         _r.assign(int_data + 2 * x, 1, 0);
+     else {
+         char buf[128];
+-        sprintf(buf, "%lld", x);
++        snprintf(buf, 128, "%lld", x);
+         assign(buf, -1, false);
+     }
+ }
+@@ -644,7 +644,7 @@
+         _r.assign(int_data + 2 * x, 1, 0);
+     else {
+         char buf[128];
+-        sprintf(buf, "%llu", x);
++        snprintf(buf, 128, "%llu", x);
+         assign(buf, -1, false);
+     }
+ }
+@@ -652,7 +652,7 @@
+ String::String(double x)
+ {
+     char buf[128];
+-    int len = sprintf(buf, "%.12g", x);
++    int len = snprintf(buf, 128, "%.12g", x);
+     assign(buf, len, false);
+ }
+ 
+@@ -975,11 +975,11 @@
+             if (x[pos] >= 9 && x[pos] <= 13)
+                 sa << '\\' << ("tnvfr"[x[pos] - 9]);
+             else if (char *buf = sa.extend(4, 1))
+-                sprintf(buf, "\\%03o", x[pos]);
++                snprintf(buf, 5, "\\%03o", x[pos]);
+         } else if (x[pos] < 32 && type != 1)
+             sa << '^' << (unsigned char)(x[pos] + 64);
+         else if (char *buf = sa.extend(4, 1))
+-            sprintf(buf, "\\%03o", x[pos]);
++            snprintf(buf, 5, "\\%03o", x[pos]);
+     }
+     return sa.take_string();
+ }
+diff -Naur code/string_slice.hh new_code/string_slice.hh
+--- code/string_slice.hh	2020-06-11 15:18:24.501000000 +0700
++++ new_code/string_slice.hh	2020-06-11 15:12:49.208000000 +0700
+@@ -40,11 +40,13 @@
+ 
+     /** @brief Return a T containing data from a string's prefix. */
+     static T make(const char *s, int len) {
+-        if (len <= 0)
++        if (len <= 0) {
+             return 0;
++        }
+ #if HAVE_UNALIGNED_ACCESS
+-        if (len >= size)
++        if (len >= size) {
+             return *reinterpret_cast<const T *>(s);
++        }
+ #endif
+         union_type u(0);
+         memcpy(u.s, s, std::min(len, size));
+@@ -70,11 +72,13 @@
+         short strings. These accesses may observe data outside the range [@a
+         s, @a s + len). */
+     static T make_sloppy(const char *s, int len) {
+-        if (len <= 0)
++        if (len <= 0) {
+             return 0;
++        }
+ #if HAVE_UNALIGNED_ACCESS
+-        if (len >= size)
++        if (len >= size) {
+             return *reinterpret_cast<const T *>(s);
++        }
+ # if WORDS_BIGENDIAN
+         return *reinterpret_cast<const T *>(s) & (~T(0) << (8 * (size - len)));
+ # elif WORDS_BIGENDIAN_SET
+@@ -111,8 +115,9 @@
+     static int unparse_comparable(char *buf, int buflen, T value) {
+         union_type u(host_to_net_order(value));
+         int l = size;
+-        while (l > 0 && u.s[l - 1] == 0)
++        while (l > 0 && u.s[l - 1] == 0) {
+             --l;
++        }
+         l = std::min(l, buflen);
+         memcpy(buf, u.s, l);
+         return l;
+@@ -142,14 +147,15 @@
+ 
+         Always returns the same result as "memcmp(@a a, @a b, @a len) == 0",
+         but can be faster on some machines. */
+-    static bool equals_sloppy(const char *a, const char *b, int len) {
++    static bool equals_sloppy(const char* a, const char* b, int len) {
+ #if HAVE_UNALIGNED_ACCESS
+         if (len <= size) {
+             typename mass::make_unsigned<T>::type delta
+-                = *reinterpret_cast<const T *>(a)
+-                ^ *reinterpret_cast<const T *>(b);
+-            if (unlikely(len <= 0))
++                = *reinterpret_cast<const T*>(a)
++                  ^ *reinterpret_cast<const T*>(b);
++            if (unlikely(len <= 0)) {
+                 return true;
++            }
+ # if WORDS_BIGENDIAN
+             return (delta >> (8 * (size - len))) == 0;
+ # else

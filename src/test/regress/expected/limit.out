@@ -1,0 +1,207 @@
+--
+-- LIMIT
+-- Check the LIMIT/OFFSET feature of SELECT
+--
+SELECT ''::text AS two, unique1, unique2, stringu1
+		FROM onek WHERE unique1 > 50
+		ORDER BY unique1 LIMIT 2;
+ two | unique1 | unique2 | stringu1 
+-----+---------+---------+----------
+     |      51 |      76 | ZBAAAA
+     |      52 |     985 | ACAAAA
+(2 rows)
+
+SELECT ''::text AS five, unique1, unique2, stringu1
+		FROM onek WHERE unique1 > 60
+		ORDER BY unique1 LIMIT 5;
+ five | unique1 | unique2 | stringu1 
+------+---------+---------+----------
+      |      61 |     560 | JCAAAA
+      |      62 |     633 | KCAAAA
+      |      63 |     296 | LCAAAA
+      |      64 |     479 | MCAAAA
+      |      65 |      64 | NCAAAA
+(5 rows)
+
+SELECT ''::text AS two, unique1, unique2, stringu1
+		FROM onek WHERE unique1 > 60 AND unique1 < 63
+		ORDER BY unique1 LIMIT 5;
+ two | unique1 | unique2 | stringu1 
+-----+---------+---------+----------
+     |      61 |     560 | JCAAAA
+     |      62 |     633 | KCAAAA
+(2 rows)
+
+SELECT ''::text AS three, unique1, unique2, stringu1
+		FROM onek WHERE unique1 > 100
+		ORDER BY unique1 LIMIT 3 OFFSET 20;
+ three | unique1 | unique2 | stringu1 
+-------+---------+---------+----------
+       |     121 |     700 | REAAAA
+       |     122 |     519 | SEAAAA
+       |     123 |     777 | TEAAAA
+(3 rows)
+
+SELECT ''::text AS zero, unique1, unique2, stringu1
+		FROM onek WHERE unique1 < 50
+		ORDER BY unique1 DESC LIMIT 8 OFFSET 99;
+ zero | unique1 | unique2 | stringu1 
+------+---------+---------+----------
+(0 rows)
+
+SELECT ''::text AS eleven, unique1, unique2, stringu1
+		FROM onek WHERE unique1 < 50
+		ORDER BY unique1 DESC LIMIT 20 OFFSET 39;
+ eleven | unique1 | unique2 | stringu1 
+--------+---------+---------+----------
+        |      10 |     520 | KAAAAA
+        |       9 |      49 | JAAAAA
+        |       8 |     653 | IAAAAA
+        |       7 |     647 | HAAAAA
+        |       6 |     978 | GAAAAA
+        |       5 |     541 | FAAAAA
+        |       4 |     833 | EAAAAA
+        |       3 |     431 | DAAAAA
+        |       2 |     326 | CAAAAA
+        |       1 |     214 | BAAAAA
+        |       0 |     998 | AAAAAA
+(11 rows)
+
+SELECT ''::text AS ten, unique1, unique2, stringu1
+		FROM onek
+		ORDER BY unique1 OFFSET 990;
+ ten | unique1 | unique2 | stringu1 
+-----+---------+---------+----------
+     |     990 |     369 | CMAAAA
+     |     991 |     426 | DMAAAA
+     |     992 |     363 | EMAAAA
+     |     993 |     661 | FMAAAA
+     |     994 |     695 | GMAAAA
+     |     995 |     144 | HMAAAA
+     |     996 |     258 | IMAAAA
+     |     997 |      21 | JMAAAA
+     |     998 |     549 | KMAAAA
+     |     999 |     152 | LMAAAA
+(10 rows)
+
+SELECT ''::text AS five, unique1, unique2, stringu1
+		FROM onek
+		ORDER BY unique1 OFFSET 990 LIMIT 5;
+ five | unique1 | unique2 | stringu1 
+------+---------+---------+----------
+      |     990 |     369 | CMAAAA
+      |     991 |     426 | DMAAAA
+      |     992 |     363 | EMAAAA
+      |     993 |     661 | FMAAAA
+      |     994 |     695 | GMAAAA
+(5 rows)
+
+SELECT ''::text AS five, unique1, unique2, stringu1
+		FROM onek
+		ORDER BY unique1 LIMIT 5 OFFSET 900;
+ five | unique1 | unique2 | stringu1 
+------+---------+---------+----------
+      |     900 |     913 | QIAAAA
+      |     901 |     931 | RIAAAA
+      |     902 |     702 | SIAAAA
+      |     903 |     641 | TIAAAA
+      |     904 |     793 | UIAAAA
+(5 rows)
+
+-- Stress test for variable LIMIT in conjunction with bounded-heap sorting
+SELECT
+  (SELECT n
+     FROM (VALUES (1)) AS x,
+          (SELECT n FROM generate_series(1,10) AS n
+             ORDER BY n LIMIT 1 OFFSET s-1) AS y) AS z
+  FROM generate_series(1,10) AS s;
+ z  
+----
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+ 10
+(10 rows)
+
+CREATE SCHEMA test_limit_broadcast;
+SET CURRENT_SCHEMA = test_limit_broadcast;
+--
+-- test limit for Gather->BroadCast issues
+-- frankly speaking, this will not happen now, we keep subquery scan upon broadcast
+--
+--we have to test both row and column store
+create table trow( a int , b int);
+create table tcol( a int , b int) with (orientation=column);
+--add a broadcast upon limit, need to remove
+select * from ( select * from trow limit 1);
+ a | b 
+---+---
+(0 rows)
+
+select * from ( select * from tcol limit 1);
+ a | b 
+---+---
+(0 rows)
+
+--only one column is sorted, need to remove
+select * from ( select * from trow order by a limit 1);
+ a | b 
+---+---
+(0 rows)
+
+select * from ( select * from tcol order by a limit 1);
+ a | b 
+---+---
+(0 rows)
+
+--broadcast not added, so no need to remove
+select * from ( select * from trow order by a,b limit 1);
+ a | b 
+---+---
+(0 rows)
+
+select * from ( select * from tcol order by a,b limit 1);
+ a | b 
+---+---
+(0 rows)
+
+--more complicated cases: join against system table.
+--the broadcast node is hide in the plan
+select * from (select * from trow limit 1) t1, pg_class t2 where t1.a=t2.oid;
+ a | b | relname | relnamespace | reltype | reloftype | relowner | relam | relfilenode | reltablespace | relpages | reltuples | relallvisible | reltoastrelid | reltoastidxid | reldeltarelid | reldeltaidx | relcudescrelid | relcudescidx | relhasindex | relisshared | relpersistence | relkind | relnatts | relchecks | relhasoids | relhaspkey | relhasrules | relhastriggers | relhassubclass | relcmprs | relhasclusterkey | relrowmovement | parttype | relfrozenxid | relacl | reloptions | relreplident | relfrozenxid64 | relbucket | relbucketkey 
+---+---+---------+--------------+---------+-----------+----------+-------+-------------+---------------+----------+-----------+---------------+---------------+---------------+---------------+-------------+----------------+--------------+-------------+-------------+----------------+---------+----------+-----------+------------+------------+-------------+----------------+----------------+----------+------------------+----------------+----------+--------------+--------+------------+--------------+----------------+-----------+--------------
+(0 rows)
+
+select * from (select * from tcol limit 1) t1, pg_class t2 where t1.a=t2.oid;
+ a | b | relname | relnamespace | reltype | reloftype | relowner | relam | relfilenode | reltablespace | relpages | reltuples | relallvisible | reltoastrelid | reltoastidxid | reldeltarelid | reldeltaidx | relcudescrelid | relcudescidx | relhasindex | relisshared | relpersistence | relkind | relnatts | relchecks | relhasoids | relhaspkey | relhasrules | relhastriggers | relhassubclass | relcmprs | relhasclusterkey | relrowmovement | parttype | relfrozenxid | relacl | reloptions | relreplident | relfrozenxid64 | relbucket | relbucketkey 
+---+---+---------+--------------+---------+-----------+----------+-------+-------------+---------------+----------+-----------+---------------+---------------+---------------+---------------+-------------+----------------+--------------+-------------+-------------+----------------+---------+----------+-----------+------------+------------+-------------+----------------+----------------+----------+------------------+----------------+----------+--------------+--------+------------+--------------+----------------+-----------+--------------
+(0 rows)
+
+--union
+select * from (select * from trow limit 1) t1, pg_class t2 where t1.a=t2.oid union select * from (select * from trow limit 1) t1, pg_class t2 where t1.a=t2.oid;
+ERROR:  could not implement UNION
+DETAIL:  Some of the datatypes only support hashing, while others only support sorting.
+select * from (select * from tcol limit 1) t1, pg_class t2 where t1.a=t2.oid union select * from (select * from tcol limit 1) t1, pg_class t2 where t1.a=t2.oid;
+ERROR:  could not implement UNION
+DETAIL:  Some of the datatypes only support hashing, while others only support sorting.
+--subplan
+select reltype,relnamespace from pg_class where exists   ( select * from (select * from trow limit 1) t1, pg_class t2 where t1.a=t2.oid );
+ reltype | relnamespace 
+---------+--------------
+(0 rows)
+
+select reltype,relnamespace from pg_class where exists   ( select * from (select * from tcol limit 1) t1, pg_class t2 where t1.a=t2.oid );
+ reltype | relnamespace 
+---------+--------------
+(0 rows)
+
+DROP SCHEMA test_limit_broadcast CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table trow
+drop cascades to table tcol

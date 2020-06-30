@@ -1,0 +1,19 @@
+<refentry id="SQL-CREATE_PROCEDURE">
+<refmeta>
+<refentrytitle>CREATE PROCEDURE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE PROCEDURE</refname>
+<refpurpose>create a procedure</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ OR REPLACE ] PROCEDURE procedure_name
+    [ ( {[ argmode ] [ argname ] argtype [ { DEFAULT | := | = } expression ]}[,...]) ]
+   { IS | AS } plsql_body
+/
+</synopsis>
+</refsynopsisdiv>
+</refentry>

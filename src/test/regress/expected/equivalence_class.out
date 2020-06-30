@@ -1,0 +1,312 @@
+create database icbc template template0 encoding 'SQL_ASCII' dbcompatibility 'C';
+\c icbc
+create or replace function IsValidDate(str text) RETURN integer 
+AS
+BEGIN
+	RETURN 1;
+END;
+/
+ALTER FUNCTION IsValidDate(str text) IMMUTABLE;
+create or replace function IsNumber(str text) RETURN integer 
+AS
+BEGIN
+	RETURN 1;
+END;
+/
+ALTER FUNCTION IsNumber(str text) IMMUTABLE;
+--
+-- Name: TABLE1; Type: TABLE; Schema: ediods; Owner: -; Tablespace: 
+--
+CREATE TABLE TABLE1 (
+    fnce_grp_cd character varying(2) NOT NULL,
+    prod_code character varying(12) NOT NULL,
+    zoneno character varying(5) NOT NULL,
+    cnd_cd character varying(5) NOT NULL,
+    aply_strt_date character varying(10) NOT NULL,
+    cnd_srl_no character varying(5) NOT NULL,
+    cx_strctr_id character varying(10) NOT NULL,
+    row_no character varying(5) NOT NULL,
+    aply_end_date character varying(10),
+    cndg_tmplt_cd character varying(5),
+    cndg_cd character varying(9),
+    cnd_name character varying(50),
+    cnd_stat_cd character varying(1),
+    cd_rgnatrbt_cd character varying(1),
+    query_order_tpcd character varying(1),
+    cndv_dcsn_lvl_cd character varying(1),
+    mndt_neg_cnd_yn character varying(1),
+    cnd_tpcd character varying(1),
+    cndv_nulv_yn character varying(1),
+    cx_cnd_yn character varying(1),
+    row_aply_cmtd_cd character varying(1),
+    irt_aply_bsdt_cd character varying(1),
+    pirt_aply_tm_cd character varying(1),
+    hq_dev_pd_yn character varying(1),
+    chr_base_con_cd character varying(5),
+    chr_base_unit character varying(3),
+    add_fee_cnd_cd1 character varying(5),
+    dc_aply_yn1 character varying(1),
+    add_fee_cnd_cd2 character varying(5),
+    dc_aply_yn2 character varying(1),
+    list_cd_cnt character varying(3),
+    comp_cnd_cnt character varying(3),
+    cnd_val_ts character varying(26),
+    lst_user_no character varying(9),
+    lst_user_strucd character varying(10),
+    lst_chg_date character varying(10),
+    lst_chg_time character varying(8),
+    vari_type character varying(1),
+    cnd_vlu character varying(2100),
+    etl_first_dt date NOT NULL,
+    etl_tx_dt date NOT NULL,
+    record_del_dt date NOT NULL
+)
+WITH (orientation=row, compression=no);
+--
+-- Name: TABLE2; Type: TABLE; Schema: ediods; Owner: -; Tablespace: 
+--
+CREATE TABLE TABLE2 (
+    fnce_grp_cd character varying(2) NOT NULL,
+    cx_strctr_id character varying(10) NOT NULL,
+    row_no character varying(5) NOT NULL,
+    border_sign1 character varying(1),
+    min_val1 character varying(18),
+    max_val1 character varying(18),
+    lst_cd1 character varying(20),
+    border_sign2 character varying(1),
+    min_val2 character varying(18),
+    max_val2 character varying(18),
+    lst_cd2 character varying(20),
+    border_sign3 character varying(1),
+    min_val3 character varying(18),
+    max_val3 character varying(18),
+    lst_cd3 character varying(20),
+    border_sign4 character varying(1),
+    min_val4 character varying(18),
+    max_val4 character varying(18),
+    lst_cd4 character varying(20),
+    border_sign5 character varying(1),
+    min_val5 character varying(18),
+    max_val5 character varying(18),
+    lst_cd5 character varying(20),
+    border_sign6 character varying(1),
+    min_val6 character varying(18),
+    max_val6 character varying(18),
+    lst_cd6 character varying(20),
+    border_sign7 character varying(1),
+    min_val7 character varying(18),
+    max_val7 character varying(18),
+    lst_cd7 character varying(20),
+    lst_user_no character varying(9),
+    lst_user_strucd character varying(10),
+    lst_chg_date character varying(10),
+    lst_chg_time character varying(8),
+    etl_first_dt date NOT NULL,
+    etl_tx_dt date NOT NULL,
+    record_del_dt date NOT NULL
+)
+WITH (orientation=row, compression=no);
+--
+-- Name: TABLE3; Type: TABLE; Schema: public; Owner: -; Tablespace: 
+--
+CREATE UNLOGGED TABLE TABLE3 (
+    fnce_grp_cd character varying(2) NOT NULL,
+    prod_code character varying(12) NOT NULL,
+    zoneno character varying(5) NOT NULL,
+    cnd_cd character varying(5) NOT NULL,
+    aply_strt_date character varying(10) NOT NULL,
+    cnd_srl_no character varying(5) NOT NULL,
+    cx_strctr_id character varying(10) NOT NULL,
+    row_no character varying(5),
+    aply_end_date character varying(10),
+    cndg_tmplt_cd character varying(5),
+    cndg_cd character varying(9),
+    cnd_name character varying(50),
+    cnd_stat_cd character varying(1),
+    cd_rgnatrbt_cd character varying(1),
+    query_order_tpcd character varying(1),
+    cndv_dcsn_lvl_cd character varying(1),
+    mndt_neg_cnd_yn character varying(1),
+    cnd_tpcd character varying(1),
+    cndv_nulv_yn character varying(1),
+    cx_cnd_yn character varying(1),
+    row_aply_cmtd_cd character varying(1),
+    irt_aply_bsdt_cd character varying(1),
+    pirt_aply_tm_cd character varying(1),
+    hq_dev_pd_yn character varying(1),
+    chr_base_con_cd character varying(5),
+    chr_base_unit character varying(3),
+    add_fee_cnd_cd1 character varying(5),
+    dc_aply_yn1 character varying(1),
+    add_fee_cnd_cd2 character varying(5),
+    dc_aply_yn2 character varying(1),
+    list_cd_cnt character varying(3),
+    comp_cnd_cnt character varying(3),
+    cnd_val_ts character varying(26),
+    lst_user_no character varying(9),
+    lst_user_strucd character varying(10),
+    lst_chg_date character varying(10),
+    lst_chg_time character varying(8),
+    vari_type character varying(1),
+    cnd_vlu character varying(2100),
+    etl_first_dt date NOT NULL,
+    etl_tx_dt date NOT NULL,
+    record_del_dt date NOT NULL
+)
+WITH (orientation=row, compression=no);
+set enable_nestloop=off;
+set enable_mergejoin=off;
+set explain_perf_mode=pretty;
+set log_min_messages=debug3;
+EXPLAIN
+SELECT
+   T1.PROD_CODE
+  ,'AAA' 
+  ,COALESCE(TRIM(SUBSTR(T1.CND_VLU,1,20)),'')
+FROM TABLE1 T1                                           
+INNER JOIN
+(
+SELECT
+     A.FNCE_GRP_CD
+    ,A.ZONENO
+    ,A.CNDG_TMPLT_CD
+    ,A.CNDG_CD
+    ,A.CND_CD
+    ,A.APLY_STRT_DATE
+    ,A.APLY_END_DATE
+    ,MAX(A.CND_SRL_NO) AS CND_SRL_NO_1
+FROM  TABLE1 A
+GROUP BY 1,2,3,4,5,6,7
+) T2
+    ON T1.FNCE_GRP_CD = T2.FNCE_GRP_CD
+   AND T1.ZONENO = T2.ZONENO
+   AND T1.CNDG_TMPLT_CD = T2.CNDG_TMPLT_CD
+   AND T1.CNDG_CD = T2.CNDG_CD
+   AND T1.CND_CD = T2.CND_CD
+   AND T1.APLY_STRT_DATE = T2.APLY_STRT_DATE
+   AND T1.APLY_END_DATE = T2.APLY_END_DATE
+   AND T1.CND_SRL_NO = T2.CND_SRL_NO_1
+INNER JOIN  TABLE2 T3
+   ON T1.FNCE_GRP_CD = T3.FNCE_GRP_CD
+  AND T1.CX_STRCTR_ID = T3.CX_STRCTR_ID
+  AND T1.ROW_NO = T3.ROW_NO
+INNER JOIN
+  (
+  SELECT
+     T11.PROD_CODE
+    ,T31.MIN_VAL1
+  FROM TABLE3 T11
+  INNER JOIN
+  (
+  SELECT
+       A.FNCE_GRP_CD
+      ,A.ZONENO
+      ,A.CNDG_TMPLT_CD
+      ,A.CNDG_CD
+      ,A.CND_CD
+      ,A.APLY_STRT_DATE
+      ,A.APLY_END_DATE
+      ,MAX(A.CND_SRL_NO) AS CND_SRL_NO_1
+  FROM TABLE1 A
+  GROUP BY 1,2,3,4,5,6,7
+  ) T21
+      ON T11.FNCE_GRP_CD = T21.FNCE_GRP_CD
+     AND T11.ZONENO = T21.ZONENO
+     AND T11.CNDG_TMPLT_CD = T21.CNDG_TMPLT_CD
+     AND T11.CNDG_CD = T21.CNDG_CD
+     AND T11.CND_CD = T21.CND_CD
+     AND T11.APLY_STRT_DATE = T21.APLY_STRT_DATE
+     AND T11.APLY_END_DATE = T21.APLY_END_DATE
+     AND T11.CND_SRL_NO = T21.CND_SRL_NO_1
+  INNER JOIN  TABLE2 T31
+     ON T11.FNCE_GRP_CD = T31.FNCE_GRP_CD
+    AND T11.CX_STRCTR_ID = T31.CX_STRCTR_ID
+    AND T11.ROW_NO = T31.ROW_NO
+  WHERE T11.CND_CD = 'BBB'
+    AND T11.FNCE_GRP_CD = '01'
+    AND T11.ZONENO = '00000'
+    AND (CASE WHEN ISVALIDDATE(T11.APLY_STRT_DATE) = 1 THEN CAST(T11.APLY_STRT_DATE AS DATE)
+              ELSE CAST('19000101' AS DATE)
+         END) <= CAST('2018-02-23' AS DATE)
+    AND (CASE WHEN ISVALIDDATE(T11.APLY_END_DATE) = 1  THEN CAST(T11.APLY_END_DATE AS DATE)
+              ELSE CAST('25001231' AS DATE)
+         END) >= CAST('2018-02-23' AS DATE)
+    AND CAST(SUBSTR(T11.CND_VLU,11,8) AS DATE) <= CAST('2018-02-23' AS DATE)
+    AND CAST(SUBSTR(T11.CND_VLU,29,8) AS DATE) >= CAST('2018-02-23' AS DATE)
+  ) T4
+    ON T1.PROD_CODE = T4.PROD_CODE
+   AND T3.MIN_VAL1 = T4.MIN_VAL1
+WHERE T1.CND_CD = 'CCC'
+  AND T1.FNCE_GRP_CD = '01'
+  AND T1.ZONENO = '00000'
+  AND (CASE WHEN ISVALIDDATE(T1.APLY_STRT_DATE) = 1 THEN CAST(T1.APLY_STRT_DATE AS DATE)
+            ELSE CAST('19000101' AS DATE)
+       END) <= CAST('2018-02-23' AS DATE)
+  AND (CASE WHEN ISVALIDDATE(T1.APLY_END_DATE) = 1  THEN CAST(T1.APLY_END_DATE AS DATE)
+            ELSE CAST('25001231' AS DATE)
+       END) >= CAST('2018-02-23' AS DATE)
+  AND ISNUMBER(TRIM(SUBSTR(T1.CND_VLU,1,20))) = 1;
+                                                                                                                                                                                                                                                                                                                                                                                                                                               QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=1 width=532)
+   Hash Cond: (((t1.cndg_tmplt_cd)::text = (a.cndg_tmplt_cd)::text) AND ((t1.cndg_cd)::text = (a.cndg_cd)::text) AND ((t1.aply_strt_date)::text = (a.aply_strt_date)::text) AND ((t1.aply_end_date)::text = (a.aply_end_date)::text) AND ((t1.cnd_srl_no)::text = (max((a.cnd_srl_no)::text))) AND ((t1.cx_strctr_id)::text = (t3.cx_strctr_id)::text) AND ((t1.row_no)::text = (t3.row_no)::text) AND ((a.cndg_tmplt_cd)::text = (t11.cndg_tmplt_cd)::text) AND ((a.cndg_cd)::text = (t11.cndg_cd)::text) AND ((a.aply_strt_date)::text = (t11.aply_strt_date)::text) AND ((a.aply_end_date)::text = (t11.aply_end_date)::text) AND ((max((a.cnd_srl_no)::text)) = (t11.cnd_srl_no)::text) AND ((t31.cx_strctr_id)::text = (t11.cx_strctr_id)::text) AND ((t31.row_no)::text = (t11.row_no)::text) AND ((t1.prod_code)::text = (t11.prod_code)::text) AND ((t31.min_val1)::text = (t3.min_val1)::text))
+--?   ->  Nested Loop  (cost=.* rows=1 width=795)
+--?         ->  Nested Loop  (cost=.* rows=1 width=744)
+--?               ->  Seq Scan on table1 t1  (cost=.* rows=1 width=638)
+                     Filter: (((fnce_grp_cd)::text = '01'::text) AND ((zoneno)::text = '00000'::text) AND ((cnd_cd)::text = 'CCC'::text) AND (CASE WHEN (isvaliddate((aply_strt_date)::text) = 1) THEN (aply_strt_date)::date ELSE '01-01-1900'::date END <= '02-23-2018'::date) AND (CASE WHEN (isvaliddate((aply_end_date)::text) = 1) THEN (aply_end_date)::date ELSE '12-31-2500'::date END >= '02-23-2018'::date) AND (isnumber(btrim(substr((cnd_vlu)::text, 1, 20))) = 1))
+--?               ->  HashAggregate  (cost=.* rows=1 width=115)
+                     Group By Key: a.fnce_grp_cd, a.zoneno, a.cndg_tmplt_cd, a.cndg_cd, a.cnd_cd, a.aply_strt_date, a.aply_end_date
+--?                     ->  Seq Scan on table1 a  (cost=.* rows=1 width=83)
+                           Filter: (((fnce_grp_cd)::text = '01'::text) AND ((zoneno)::text = '00000'::text) AND ((cnd_cd)::text = 'BBB'::text))
+--?         ->  Seq Scan on table2 t31  (cost=.* rows=1 width=51)
+               Filter: ((fnce_grp_cd)::text = '01'::text)
+--?   ->  Hash  (cost=.* rows=1 width=279)
+--?         ->  Nested Loop  (cost=.* rows=1 width=279)
+--?               ->  Nested Loop  (cost=.* rows=1 width=157)
+--?                     ->  HashAggregate  (cost=.* rows=1 width=115)
+                           Group By Key: a.fnce_grp_cd, a.zoneno, a.cndg_tmplt_cd, a.cndg_cd, a.cnd_cd, a.aply_strt_date, a.aply_end_date
+--?                           ->  Seq Scan on table1 a  (cost=.* rows=1 width=83)
+                                 Filter: (((fnce_grp_cd)::text = '01'::text) AND ((zoneno)::text = '00000'::text) AND ((cnd_cd)::text = 'CCC'::text))
+--?                     ->  Seq Scan on table2 t3  (cost=.* rows=1 width=51)
+                           Filter: ((fnce_grp_cd)::text = '01'::text)
+--?               ->  Seq Scan on table3 t11  (cost=.* rows=1 width=122)
+                     Filter: (((fnce_grp_cd)::text = '01'::text) AND ((zoneno)::text = '00000'::text) AND ((cnd_cd)::text = 'BBB'::text) AND ((substr((cnd_vlu)::text, 11, 8))::date <= '02-23-2018'::date) AND ((substr((cnd_vlu)::text, 29, 8))::date >= '02-23-2018'::date) AND (CASE WHEN (isvaliddate((aply_strt_date)::text) = 1) THEN (aply_strt_date)::date ELSE '01-01-1900'::date END <= '02-23-2018'::date) AND (CASE WHEN (isvaliddate((aply_end_date)::text) = 1) THEN (aply_end_date)::date ELSE '12-31-2500'::date END >= '02-23-2018'::date))
+(23 rows)
+
+reset log_min_messages;
+---------------------
+---------------------
+create temp table tmp_1 
+(
+    trade_date        date,
+	sec_code          char(6),
+	para_n            int,
+	last_date_one	  timestamp without time zone
+    
+);
+insert into tmp_1 values(date'2017-07-21','601678',3,'2017-07-21 00:00:00');
+create table test1(
+trade_date timestamp without time zone not null,
+sec_code char(6) not null, 
+rf_range numeric(10,5) not null);
+insert into test1 values('2017-07-21', '601678', 0.00126);
+insert into test1 values('2017-07-22', '601678', 0.00126);
+insert into test1 values('2017-07-23', '601678', 0.00126);
+insert into test1 values('2017-07-24', '601678', 0.00126);
+analyze tmp_1;
+analyze test1;
+select a.trade_date,a.sec_code,a2.rf_range
+from tmp_1 a
+left join (select b.trade_date, b.sec_code, a.rf_range 
+from test1 a,tmp_1 b
+where b.trade_date = a.trade_date
+and b.sec_code = a.sec_code) a2	
+on a2.trade_date = a.trade_date
+and a2.sec_code = a.sec_code;
+ trade_date | sec_code | rf_range 
+------------+----------+----------
+ 07-21-2017 | 601678   |   .00126
+(1 row)
+
+\c regression
+drop database icbc;

@@ -1,0 +1,145 @@
+/*
+ * This file is used to test the function of ExecVecSetOp
+ */
+set current_schema=vector_setop_engine;
+----
+--- test 3: Basic Test: EXCEPT ALL 
+----
+select * from vector_setop_table_01 except all select * from vector_setop_table_02 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_varchar, col_time from vector_setop_table_01 except all select col_varchar, col_time from vector_setop_table_03 order by 1, 2;
+ col_varchar | col_time 
+-------------+----------
+ hash_t1     | 11:18:00
+ hash_t1     | 11:18:00
+(2 rows)
+
+select * from vector_setop_table_01 where col_inta = 1 except all select * from vector_setop_table_02 where col_intb = 1 order by 1, 2, 3, 4;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except all select col_intb, col_inta from vector_setop_table_03 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+(2 rows)
+
+-- hash + hash + same distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 except all select * from vector_setop_table_02 where col_inta = 1 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(1 row)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except all select col_intb, col_inta from vector_setop_table_03 where col_intb = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+(2 rows)
+
+select col_time, col_interval from vector_setop_table_01 where col_inta = 1 except all select col_time, col_interval from vector_setop_table_03 where col_intb = 1 order by 1, 2; 
+ col_time |           col_interval            
+----------+-----------------------------------
+ 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+ 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+(2 rows)
+
+-- hash + hash + different distributeKey + Append executes on all DNs
+select * from vector_setop_table_01 except all select * from vector_setop_table_03 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 except all select col_intb, col_inta from vector_setop_table_02 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+        2 |        3
+        2 |        3
+(4 rows)
+
+-- hash + hash + different distributeKey + Append executes on special DN
+select * from vector_setop_table_01 where col_inta = 1 except all select * from vector_setop_table_03 where col_intb = 1 order by 1, 2, 3, 4;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | F        | t           | t        | 11:28:00 | @ 2 days 13 hours 25 mins 56 secs
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 where col_inta = 1 except all select col_intb, col_inta from vector_setop_table_02 where col_inta = 1 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+(2 rows)
+
+-- hash + hash + type cast
+select * from vector_setop_table_01 except all select * from vector_setop_table_04 order by 1, 2, 3;
+ col_inta | col_intb | col_num | col_char | col_varchar | col_text | col_time |           col_interval            
+----------+----------+---------+----------+-------------+----------+----------+-----------------------------------
+        1 |        2 |     1.2 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+        2 |        3 |     2.3 | T        | hash_t1     | hash_t1  | 11:18:00 | @ 2 days 13 hours 24 mins 56 secs
+(2 rows)
+
+select col_inta, col_intb from vector_setop_table_01 except all select col_intb, col_inta from vector_setop_table_04 order by 1, 2;
+ col_inta | col_intb 
+----------+----------
+        1 |        2
+        1 |        2
+        2 |        3
+        2 |        3
+(4 rows)
+
+-- execute on cn + hash
+select 1 from pg_auth_members except all select col_intb from vector_setop_table_02 order by 1;
+ ?column? 
+----------
+(0 rows)
+
+-- targetlist dosenot contains distributeKey
+select col_inta from vector_setop_table_01 except all select col_intb from vector_setop_table_02 order by 1;
+ col_inta 
+----------
+        1
+        1
+(2 rows)
+
+select col_intb from vector_setop_table_01 except all select col_intb from vector_setop_table_02 order by 1;
+ col_intb 
+----------
+(0 rows)
+
+select col_interval from vector_setop_table_01 except all select col_interval from vector_setop_table_02 order by 1;
+ col_interval 
+--------------
+(0 rows)
+
+select * from setop_12 except all select * from setop_23 order by 1, 2, 3;
+ ta1 | tb1 | ta2 | tb2 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT 1 AS one except all SELECT 1.1::float8 order by 1;
+ one 
+-----
+   1
+(1 row)
+
+--Since column table does not support replication, the following tests should be fixed later
+-- hash + replication  + Append executes on special DN
+--select * from hash_t1 except all select * from replication_t1 order by 1, 2, 3;
+-- replication + replication
+--select * from replication_t1 except all select * from replication_t2 order by 1, 2, 3;

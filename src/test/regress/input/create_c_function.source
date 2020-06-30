@@ -1,0 +1,156 @@
+create schema vec_function_call;
+set current_schema=vec_function_call;
+
+create table test_vec_int4add(t1 int,t2 int,t3 int, t4 int) with (orientation = column);
+insert into  test_vec_int4add values(1,2,3,4);
+insert into  test_vec_int4add values(5,6,7,8);
+
+
+CREATE FUNCTION vec_int4add_0()
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C IMMUTABLE not fenced;  
+   
+CREATE FUNCTION vec_int4add_0_strict()
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C strict  IMMUTABLE not fenced; 
+
+select  * from test_vec_int4add  where vec_int4add_0() > 0 order by 1,2,3,4;
+select  * from test_vec_int4add  where vec_int4add_0_strict() > 0 order by 1,2,3,4;
+
+CREATE FUNCTION vec_int4add_1(int)
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C IMMUTABLE not fenced;  
+select  * from test_vec_int4add  where vec_int4add_1(t1) > 0 order by 1,2,3,4;
+
+
+CREATE FUNCTION vec_int4add_11(int4, int4,int4,int4,int4,int4,int4,int4,int4,int4,int4)
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C IMMUTABLE not fenced;  
+
+CREATE FUNCTION vec_int4add_11_strict(int4, int4,int4,int4,int4,int4,int4,int4,int4,int4,int4)
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C  strict IMMUTABLE not fenced;  
+   
+select  * from test_vec_int4add  where vec_int4add_11(t1,t2,t3,t4,t1,t2,t3,t4,t1,t2,t3) > 0 order by 1,2,3,4;
+select  * from test_vec_int4add  where vec_int4add_11_strict(t1,t2,t3,t4,t1,t2,t3,t4,t1,t2,t3) > 0 order by 1,2,3,4;
+CREATE FUNCTION vec_int4add_32
+(int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4)
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C IMMUTABLE not fenced; 
+CREATE FUNCTION vec_int4add_32_strict
+(int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4)
+RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C strict IMMUTABLE not fenced;
+
+select  * from test_vec_int4add  where vec_int4add_32
+(t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4) > 0 order by 1,2,3,4;
+
+select  * from test_vec_int4add  where vec_int4add_32
+(t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4) > 0 order by 1,2,3,4;
+CREATE FUNCTION vec_int4add_33
+(int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4
+,int4,int4,int4,int4,int4,int4,int4,int4
+,int4)
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C IMMUTABLE not fenced;  
+
+select  * from test_vec_int4add  where vec_int4add_33
+(t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4
+,t1,t2,t3,t4,t1,t2,t3,t4
+,t1) > 0 order by 1,2,3,4;
+
+CREATE FUNCTION test_int4add_0()
+   RETURNS int4
+   AS '@libdir@/regress@DLSUFFIX@', 'vec_int4add_0'
+   LANGUAGE C IMMUTABLE not fenced; 
+
+
+CREATE OR REPLACE FUNCTION func(text)
+RETURNS text AS '@libdir@/regress@DLSUFFIX@', 'funcA'
+LANGUAGE C STABLE not fenced;
+
+CREATE OR REPLACE FUNCTION func(int)
+RETURNS text AS '@libdir@/regress@DLSUFFIX@', 'funcB'
+LANGUAGE C STABLE not fenced;
+
+select func(1);
+select func('1');
+
+CREATE OR REPLACE FUNCTION funcC(int)
+RETURNS text AS '@libdir@/regress@DLSUFFIX@', 'funcC'
+LANGUAGE C STABLE not fenced;
+
+select funcC(1);
+
+--test for enable normal user create c function
+create user c_function_user1 password 'ttest@123';
+create user c_function_user2 password 'ttest@123';
+grant all on schema vec_function_call to c_function_user1;
+
+CREATE OR REPLACE FUNCTION c_function_user1.funcA(text,name)
+RETURNS tid
+AS '@libdir@/regress@DLSUFFIX@', 'funcA'
+LANGUAGE C STABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION c_function_user2.funcA(text,name)
+RETURNS tid
+AS '@libdir@/regress@DLSUFFIX@', 'funcA'
+LANGUAGE C STABLE NOT FENCED;
+
+set role c_function_user1 password 'ttest@123';
+CREATE OR REPLACE FUNCTION funcA(text,name)
+RETURNS tid
+AS '@libdir@/regress@DLSUFFIX@', 'funcA'
+LANGUAGE C STABLE NOT FENCED;
+grant usage on language c to c_function_user1;
+reset role;
+grant usage on language c to public;
+grant usage on language c to c_function_user1 with grant option;
+grant usage on language java to c_function_user1;
+grant usage on language internal to c_function_user1;
+grant usage on language c to c_function_user1;
+grant c_function_user2 to c_function_user1;
+
+set role c_function_user1 password 'ttest@123';
+CREATE OR REPLACE FUNCTION funcA(text,name)
+RETURNS tid
+AS '@libdir@/regress@DLSUFFIX@', 'funcA'
+LANGUAGE C STABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION c_function_user2.funcA(text,name)
+RETURNS tid
+AS '@libdir@/regress@DLSUFFIX@', 'funcA'
+LANGUAGE C STABLE NOT FENCED;
+reset role;
+
+select proname,proowner,rolname from pg_proc a inner join pg_authid b on a.proowner = b.oid where proname = 'funcA';
+select has_language_privilege('c','USAGE');
+select has_language_privilege('c_function_user1','c','USAGE');
+select has_language_privilege('c_function_user2','c','USAGE');
+
+drop user c_function_user1 cascade;
+drop user c_function_user2 cascade;
+
+drop schema vec_function_call cascade;

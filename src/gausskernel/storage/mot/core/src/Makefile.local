@@ -1,0 +1,232 @@
+#
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ---------------------------------------------------------------------------------------
+#
+# Makefile.local
+#     Makefile for the MOT storage engine core components
+#
+# IDENTIFICATION
+#        src/gausskernel/storage/mot/core/src/Makefile.local
+#
+# ---------------------------------------------------------------------------------------
+
+UNDERPG ?= yes
+SECURE ?= yes
+DEBUG ?= no
+MODE ?= PG
+REPLICA ?= no
+ISOLATION ?= no
+CC=g++
+CFLAGS ?= 
+
+subdir=src/gausskernel/storage/mot/core/src
+top_builddir ?= ../../../../../../
+MASSTREE_MEGRED_SOURCES_DIR=$(top_builddir)/third_party/dependency/masstree/code
+
+ifeq ($(UNDERPG),yes)
+include $(top_builddir)/src/Makefile.global
+include $(top_srcdir)/src/gausskernel/common.mk
+endif
+.SUFFIXES:
+.SUFFIXES: .o .cpp .h .hpp
+
+#Target directory definitions.Scan them recursively.
+SRC_TARGET_DIRS = \
+		concurrency_control \
+		infra \
+		memory \
+		storage \
+		system \
+		$(MASSTREE_MEGRED_SOURCES_DIR) \
+		utils
+
+SRC_DIRS = $(shell find $(SRC_TARGET_DIRS) -type d 2> /dev/null) # 2> /dev/null To remove error printout when calling clean
+SRC_DIRS += .
+INCLUDE = $(foreach dir, $(SRC_DIRS), -I$(dir))
+BIN_DIR = ../bin
+OBJ_DIR = ../obj
+
+
+NO_NUMA ?= no
+HUGE_PAGES_ON ?= no
+ALLOCATOR ?=jemalloc
+
+#Default build configuration, can be overriden by command line or environment
+BUILD ?= Release
+#BUILD ?= Debug
+ifeq ($(DEBUG),yes)
+       BUILD = Debug
+endif
+
+# Common flags definition
+PLATFORM_ARCH = $(shell uname -p)
+ifeq ($(PLATFORM_ARCH),aarch64)
+	#CFLAGS += -std=gnu++11 -march=armv8-a+crc -Wall -Wextra -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
+	CFLAGS += -std=gnu++11 -march=armv8-a+crc -w -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
+else
+	#CFLAGS += -std=gnu++11 -march=native -mcx16 -Wall -Wextra -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
+	CFLAGS += -std=gnu++11 -mcx16 -w -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC
+endif
+
+CFLAGS += $(INCLUDE)
+CFLAGS += -g
+#SG CFLAGS += -g3
+
+ifeq ($(NO_NUMA), yes)
+	CFLAGS += -DNO_NUMA=1
+endif
+ifeq ($(HUGE_PAGES_ON), yes)
+        CFLAGS += -DHUGE_PAGES_ON=1
+endif
+#Debug and release flag definition
+ifeq ($(UNDERPG), no)
+ifeq ($(BUILD),Release)
+    ifeq ($(PLATFORM_ARCH),aarch64)
+	CFLAGS += -O2 -DNDEBUG -D_FORTIFY_SOURCE=2
+    else
+	CFLAGS += -Werror -O2 -DNDEBUG -mcx16  -D_FORTIFY_SOURCE=2
+    endif
+else
+#	CFLAGS += -O0 -DDEBUG
+	CFLAGS += -DDEBUG
+endif
+endif
+
+ifeq ($(CC_VERSION), 8.2.0)
+	CFLAGS += -faligned-new
+endif
+# turn on some warnings
+CFLAGS += -Wwrite-strings -Wcast-align -Wreturn-type
+CFLAGS += -Wpointer-arith -Wlogical-op -Waddress -Wsizeof-pointer-memaccess -Winit-self
+
+# Enable this warning for gcc version 6.0 or higher
+#CFLAGS += -Wduplicated-cond
+
+# For Masstree index tests
+CFLAGS += -DMASSTREE
+
+CFLAGS += -D$(MODE)
+# disable exceptions
+CFLAGS += -fno-exceptions
+# disable RTTI usage
+CFLAGS += -fno-rtti
+# TODO: enable
+#CFLAGS += -Woverloaded-virtual
+CFLAGS += -Wnon-virtual-dtor
+ifeq ($(ISOLATION), yes)
+    CFLAGS += -DISOLATION_TEST
+endif
+
+ifeq ($(PLATFORM_ARCH),aarch64)
+	LDFLAGS = -Wall -L. -pthread -lrt -std=gnu++11 -latomic
+else
+	LDFLAGS = -Wall -L. -L../libs -pthread -lrt -std=gnu++11 -latomic
+endif
+
+ifeq ($(ALLOCATOR),jemalloc)
+	LDFLAGS += -L$(JEMALLOC_LIB_PATH) -ljemalloc -ldl
+else
+	TCMALLOC_PATH = /usr/lib64
+endif
+#LDFLAGS += -lnuma
+
+
+LDFLAGS += $(CFLAGS)
+ifeq ($(CC_VERSION), 8.2.0)
+	LDFLAGS += -latomic
+endif
+
+INCLUDE += -I$(JEMALLOC_INCLUDE_PATH)
+PYREPLICA :=
+ifeq ($(REPLICA),yes)
+	PYREPLICA := --replica
+endif
+
+CPPS := $(foreach dir, $(SRC_DIRS), $(wildcard $(dir)/*.cpp))
+OBJS := $(CPPS)
+OBJS := $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(OBJS))
+DEPS := $(OBJS:.o=.d)
+
+ifeq ($(UNDERPG), yes)
+	ifeq ($(SECURE), yes)	
+		CFLAGS += -DMOT_SECURE
+		LDFLAGS += -L$(LIBOBS_LIB_PATH) -lsecurec
+	endif
+endif
+
+.PHONY: FORCE all
+
+all: libmot_engine objfiles
+
+FORCE:
+
+$(OBJS): | buildrepo
+
+libmot_engine: $(BIN_DIR)/libmot_engine.a
+
+$(BIN_DIR)/libmot_engine.a: $(OBJS) $(REPLICADEP)
+	@$(AR) rcs $(BIN_DIR)/$@ $(OBJS)
+
+objfiles: objfiles.txt
+objfiles.txt: Makefile $(OBJS)
+	@echo "$(subdir)/$(BIN_DIR)/libmot_engine.a" > $@
+	@touch $@
+
+$(OBJ_DIR)/%.o: %.cpp
+	@$(CC) -c $(CFLAGS) $(CPPFLAGS) -MMD -MP -MF"$(patsubst %.o,%.d,$@)" -MT"$@" -o $@ $<
+
+.PHONY: clean
+
+clean:
+	@rm -rf $(BIN_DIR) $(OBJ_DIR) objfiles.txt
+
+buildrepo:
+	@$(call make-repo)
+
+.PHONY: show
+show:
+	@echo "CC_VERSION=${CC_VERSION}"
+	@echo "CC=${CC}"
+	@echo
+	@echo "DEBUG=${DEBUG}"
+	@echo
+	@echo "BUILD=${BUILD}"
+	@echo
+	@echo "SRC_DIRS=${SRC_DIRS}"
+	@echo
+	@echo "CPPFLAGS=${CPPFLAGS}"
+	@echo
+	@echo "CFLAGS=${CFLAGS}"
+	@echo
+	@echo "LDFLAGS=${LDFLAGS}"
+	@echo
+	@echo "CPPS=${CPPS}"
+	@echo
+	@echo "OBJS=${OBJS}"
+
+# Optionally include dependencies files
+ifneq ($(MAKECMDGOALS),clean)
+-include $(DEPS)
+endif
+
+
+
+define make-repo
+   mkdir -p $(OBJ_DIR); \
+   mkdir -p $(BIN_DIR); \
+   for dir in $(SRC_DIRS); \
+   do \
+	mkdir -p $(OBJ_DIR)/$$dir; \
+   done
+endef

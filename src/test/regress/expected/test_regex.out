@@ -1,0 +1,178 @@
+CREATE TABLE regex_1 (
+     id              int,
+     name            text,
+     person          text
+);
+create table regex_2 (
+     id              int,
+     name            text,
+     value           text,
+     primary key(id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "regex_2_pkey" for table "regex_2"
+insert into regex_1 values(1, 'a', 'aaa');
+insert into regex_2 values(1, 'b', 'bbb');
+explain (costs on, verbose on, nodes on, analyse on, cpu on, detail on, buffers on) select * from regex_1;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+--? Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=833 width=68\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+   Output: id, name, person
+   (Buffers: shared hit=1)
+--?   (CPU: ex c/r=[0-9]*, ex row=[0-9]*, ex cyc=[0-9]*, inc cyc=[0-9]*)
+--? Total runtime: [0-9]*\.[0-9]* ms
+(5 rows)
+
+explain (costs on, verbose on, nodes on, analyse on, cpu on, detail on, buffers on) select * from regex_2;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+--? Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+   Output: id, name, value
+   (Buffers: shared hit=1)
+--?   (CPU: ex c/r=[0-9]*, ex row=[0-9]*, ex cyc=[0-9]*, inc cyc=[0-9]*)
+--? Total runtime: [0-9]*\.[0-9]* ms
+(5 rows)
+
+explain (costs on, verbose on, nodes on) select * from (select name from regex_1 intersect select name from regex_2 order by name) limit 10;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+--? Limit  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: __unnamed_subquery__.name
+--?   ->  Subquery Scan on __unnamed_subquery__  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: __unnamed_subquery__.name
+--?         ->  Sort  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: "*SELECT* 1".name, (0)
+               Sort Key: "*SELECT* 1".name
+--?               ->  HashSetOp Intersect  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                     Output: "*SELECT* 1".name, (0)
+--?                     ->  Append  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+--?                           ->  Subquery Scan on "\*SELECT\* 1"  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                 Output: "*SELECT* 1".name, 0
+--?                                 ->  Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                       Output: regex_1.name
+--?                           ->  Subquery Scan on "\*SELECT\* 2"  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                 Output: "*SELECT* 2".name, 1
+--?                                 ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                                       Output: regex_2.name
+(18 rows)
+
+explain (costs on, verbose on, nodes on) select * from (select name from regex_1 union select name from regex_2 order by name) limit 10;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+--? Limit  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: regex_1.name
+--?   ->  Sort  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_1.name
+         Sort Key: regex_1.name
+--?         ->  HashAggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_1.name
+               Group By Key: regex_1.name
+--?               ->  Append  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+--?                     ->  Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                           Output: regex_1.name
+--?                     ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                           Output: regex_2.name
+(13 rows)
+
+explain (costs on, verbose on, nodes on) insert into regex_1 (select * from regex_2);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+--? Insert on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+--?   ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_2.id, regex_2.name, regex_2.value
+(3 rows)
+
+set enable_hashjoin=on;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+explain (costs on, verbose on, nodes on) select * from regex_1, regex_2 where regex_1.name=regex_2.name;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+--? Hash Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* distinct=\[[0-9]*, [0-9]*\] width=[0-9]*\)
+   Output: regex_1.id, regex_1.name, regex_1.person, regex_2.id, regex_2.name, regex_2.value
+   Hash Cond: (regex_1.name = regex_2.name)
+--?   ->  Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_1.id, regex_1.name, regex_1.person
+--?   ->  Hash  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_2.id, regex_2.name, regex_2.value
+--?         ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_2.id, regex_2.name, regex_2.value
+(9 rows)
+
+set enable_hashjoin=off;
+set enable_nestloop=off;
+set enable_mergejoin=on;
+explain (costs on, verbose on, nodes on) select * from regex_1, regex_2 where regex_1.name=regex_2.name;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+--? Merge Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: regex_1.id, regex_1.name, regex_1.person, regex_2.id, regex_2.name, regex_2.value
+   Merge Cond: (regex_1.name = regex_2.name)
+--?   ->  Sort  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_1.id, regex_1.name, regex_1.person
+         Sort Key: regex_1.name
+--?         ->  Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_1.id, regex_1.name, regex_1.person
+--?   ->  Sort  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_2.id, regex_2.name, regex_2.value
+         Sort Key: regex_2.name
+--?         ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+               Output: regex_2.id, regex_2.name, regex_2.value
+(13 rows)
+
+set enable_hashjoin=on;
+set enable_nestloop=on;
+set enable_mergejoin=on;
+explain (costs on, verbose on, nodes on) select * from regex_2, regex_1 where regex_1.id>regex_2.id;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+--? Nested Loop  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: regex_2.id, regex_2.name, regex_2.value, regex_1.id, regex_1.name, regex_1.person
+--?   ->  Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_1.id, regex_1.name, regex_1.person
+--?   ->  Index Scan using regex_2_pkey on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: regex_2.id, regex_2.name, regex_2.value
+         Index Cond: (regex_1.id > regex_2.id)
+(7 rows)
+
+explain (costs on, verbose on, nodes on) select avg(id) from regex_1;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+--? Aggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: avg(id)
+--?   ->  Seq Scan on public.regex_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: id, name, person
+(4 rows)
+
+explain (costs on, verbose on, nodes on) select sum(id)+2 from regex_2 where value is not NULL group by name having sum(id)>0;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+--? HashAggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: (sum(id) + 2), name
+   Group By Key: regex_2.name
+   Filter: (sum(regex_2.id) > 0)
+--?   ->  Seq Scan on public.regex_2  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: name, id
+         Filter: (regex_2.value IS NOT NULL)
+(7 rows)
+
+explain (costs on, verbose on, nodes on) with recursive t(n) as (
+values(1)
+union all
+select n+1 from t where n<100
+)
+select sum(n) from t;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+--? Aggregate  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+   Output: sum(t.n)
+   CTE t
+--?     ->  Recursive Union  (cost=0.00..2.96 rows=31 width=4)
+--?           ->  Values Scan on "\*VALUES\*"  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                 Output: "*VALUES*".column1
+--?           ->  WorkTable Scan on t  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+                 Output: (t.n + 1)
+                 Filter: (t.n < 100)
+--?   ->  CTE Scan on t  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\)
+         Output: t.n
+(11 rows)
+

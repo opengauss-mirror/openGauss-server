@@ -1,0 +1,413 @@
+--
+-- XC_LIMIT
+--
+-- This file tests the LIMIT and OFFSET clause push down 
+-- Since the LIMIT and OFFSET optimization can not be used when ORDER BY or
+-- other clauses are present in the Query, we rely on count(*) and EXPLAIN
+-- output to test correctness.
+-- Testcase 1: Replicated tables
+create table xc_limit_tab1 (val int, val2 int);
+insert into xc_limit_tab1 values (generate_series(1, 10), generate_series(1, 10));
+create table xc_limit_tab2 (val int, val2 int);
+insert into xc_limit_tab2 values (generate_series(1, 10), generate_series(1, 10));
+-- simple shippable limit
+select count(*) from (select * from xc_limit_tab1 limit 2) a;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 limit 2 + length('some')) q;
+ count 
+-------
+     6
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2 + length('some');
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 limit 2 offset 3) q;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2 offset 3;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 offset 3) q;
+ count 
+-------
+     7
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 3;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 limit all) q;
+ count 
+-------
+    10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit all;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 limit null) q;
+ count 
+-------
+    10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit null;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 offset 0) q;
+ count 
+-------
+    10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 0;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+-- unshippable LIMIT or OFFSET clauses
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit random() * 10;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit random() * 10;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+-- in the presence of GROUP BY, ORDER BY etc.
+select count(*) from (select count(*) from xc_limit_tab1 group by val2 % 4 limit 2) q;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select count(*) from xc_limit_tab1 group by val2 % 4 limit 2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   Output: (count(*)), ((val2 % 4))
+   ->  HashAggregate
+         Output: count(*), ((val2 % 4))
+         Group By Key: (xc_limit_tab1.val2 % 4)
+         ->  Seq Scan on public.xc_limit_tab1
+               Output: (val2 % 4)
+(7 rows)
+
+select val, val2 from xc_limit_tab1 order by val2 limit 2;
+ val | val2 
+-----+------
+   1 |    1
+   2 |    2
+(2 rows)
+
+explain (costs off, verbose on, nodes off) select val, val2 from xc_limit_tab1 order by val2 limit 2;
+                  QUERY PLAN                  
+----------------------------------------------
+ Limit
+   Output: val, val2
+   ->  Sort
+         Output: val, val2
+         Sort Key: xc_limit_tab1.val2
+         ->  Seq Scan on public.xc_limit_tab1
+               Output: val, val2
+(7 rows)
+
+-- On top of JOIN tree
+select count(*) from (select * from xc_limit_tab1 join xc_limit_tab2 using (val) limit 2) q;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 join xc_limit_tab2 using (val) limit 2;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Limit
+   Output: xc_limit_tab1.val, xc_limit_tab1.val2, xc_limit_tab2.val2
+   ->  Nested Loop
+         Output: xc_limit_tab1.val, xc_limit_tab1.val2, xc_limit_tab2.val2
+         Join Filter: (xc_limit_tab1.val = xc_limit_tab2.val)
+         ->  Seq Scan on public.xc_limit_tab1
+               Output: xc_limit_tab1.val, xc_limit_tab1.val2
+         ->  Materialize
+               Output: xc_limit_tab2.val2, xc_limit_tab2.val
+               ->  Seq Scan on public.xc_limit_tab2
+                     Output: xc_limit_tab2.val2, xc_limit_tab2.val
+(11 rows)
+
+drop table xc_limit_tab1;
+drop table xc_limit_tab2;
+-- Testcase 2: distributed tables
+create table xc_limit_tab1 (val int, val2 int);
+insert into xc_limit_tab1 values (generate_series(1, 10), generate_series(1, 10));
+create table xc_limit_tab2 (val int, val2 int);
+insert into xc_limit_tab2 values (generate_series(1, 10), generate_series(1, 10));
+-- simple shippable limit
+select count(*) from (select * from xc_limit_tab1 limit 2) a;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 limit 2 + length('some')) q;
+ count 
+-------
+     6
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2 + length('some');
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 limit 2 offset 3) q;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2 offset 3;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 offset 3) q;
+ count 
+-------
+     7
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 3;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 limit all) q;
+ count 
+-------
+    10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit all;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 limit null) q;
+ count 
+-------
+    10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit null;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+select count(*) from (select * from xc_limit_tab1 offset 0) q;
+ count 
+-------
+    10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 offset 0;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+-- unshippable LIMIT or OFFSET clauses
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit random() * 10;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit random() * 10;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+-- in the presence of GROUP BY, ORDER BY etc.
+select count(*) from (select count(*) from xc_limit_tab1 group by val2 % 4 limit 2) q;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select count(*) from xc_limit_tab1 group by val2 % 4 limit 2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   Output: (count(*)), ((val2 % 4))
+   ->  HashAggregate
+         Output: count(*), ((val2 % 4))
+         Group By Key: (xc_limit_tab1.val2 % 4)
+         ->  Seq Scan on public.xc_limit_tab1
+               Output: (val2 % 4)
+(7 rows)
+
+select val, val2 from xc_limit_tab1 order by val2 limit 2;
+ val | val2 
+-----+------
+   1 |    1
+   2 |    2
+(2 rows)
+
+explain (costs off, verbose on, nodes off) select val, val2 from xc_limit_tab1 order by val2 limit 2;
+                  QUERY PLAN                  
+----------------------------------------------
+ Limit
+   Output: val, val2
+   ->  Sort
+         Output: val, val2
+         Sort Key: xc_limit_tab1.val2
+         ->  Seq Scan on public.xc_limit_tab1
+               Output: val, val2
+(7 rows)
+
+-- On top of JOIN tree
+select count(*) from (select * from xc_limit_tab1 join xc_limit_tab2 using (val) limit 2) q;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 join xc_limit_tab2 using (val) limit 2;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Limit
+   Output: xc_limit_tab1.val, xc_limit_tab1.val2, xc_limit_tab2.val2
+   ->  Nested Loop
+         Output: xc_limit_tab1.val, xc_limit_tab1.val2, xc_limit_tab2.val2
+         Join Filter: (xc_limit_tab1.val = xc_limit_tab2.val)
+         ->  Seq Scan on public.xc_limit_tab1
+               Output: xc_limit_tab1.val, xc_limit_tab1.val2
+         ->  Materialize
+               Output: xc_limit_tab2.val2, xc_limit_tab2.val
+               ->  Seq Scan on public.xc_limit_tab2
+                     Output: xc_limit_tab2.val2, xc_limit_tab2.val
+(11 rows)
+
+drop table xc_limit_tab1;
+drop table xc_limit_tab2;
+-- Test the working of GUC
+create table xc_limit_tab1 (val int, val2 int);
+insert into xc_limit_tab1 values (generate_series(1, 10), generate_series(1, 10));
+select count(*) from (select * from xc_limit_tab1 limit 2) q;
+ count 
+-------
+     2
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from xc_limit_tab1 limit 2;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.xc_limit_tab1
+         Output: val, val2
+(4 rows)
+
+drop table xc_limit_tab1;
+-- Reset the GUC that we set here

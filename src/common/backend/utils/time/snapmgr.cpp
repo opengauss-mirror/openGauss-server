@@ -1,0 +1,1374 @@
+/* -------------------------------------------------------------------------
+ * snapmgr.c
+ *		PostgreSQL snapshot manager
+ *
+ * We keep track of snapshots in two ways: those "registered" by resowner.c,
+ * and the "active snapshot" stack.  All snapshots in either of them live in
+ * persistent memory.  When a snapshot is no longer in any of these lists
+ * (tracked by separate refcounts on each snapshot), its memory can be freed.
+ *
+ * The same is true for historic snapshots used during logical decoding,
+ * their lifetime is managed separately (as they life longer as one xact.c
+ * transaction).
+ *
+ * The FirstXactSnapshot, if any, is treated a bit specially: we increment its
+ * regd_count and count it in RegisteredSnapshots, but this reference is not
+ * tracked by a resource owner. We used to use the TopTransactionResourceOwner
+ * to track this snapshot reference, but that introduces logical circularity
+ * and thus makes it impossible to clean up in a sane fashion.	It's better to
+ * handle this reference as an internally-tracked registration, so that this
+ * module is entirely lower-level than ResourceOwners.
+ *
+ * Likewise, any snapshots that have been exported by pg_export_snapshot
+ * have regd_count = 1 and are counted in RegisteredSnapshots, but are not
+ * tracked by any resource owner.
+ *
+ * These arrangements let us reset MyPgXact->xmin when there are no snapshots
+ * referenced by this transaction.	(One possible improvement would be to be
+ * able to advance Xmin when the snapshot with the earliest Xmin is no longer
+ * referenced.	That's a bit harder though, it requires more locking, and
+ * anyway it should be rather uncommon to keep temporary snapshots referenced
+ * for too long.)
+ *
+ *
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1994, Regents of the University of California
+ *
+ * IDENTIFICATION
+ *	  src/backend/utils/time/snapmgr.c
+ *
+ * -------------------------------------------------------------------------
+ */
+#include "postgres.h"
+#include "knl/knl_variable.h"
+
+#include <sys/stat.h>
+
+#include "access/transam.h"
+#include "access/twophase.h"
+#include "access/xact.h"
+#include "catalog/pg_type.h"
+#include "funcapi.h"
+#include "miscadmin.h"
+#include "pgxc/execRemote.h"
+#include "storage/predicate.h"
+#include "storage/proc.h"
+#include "storage/procarray.h"
+#include "utils/builtins.h"
+#include "utils/memutils.h"
+#include "utils/snapmgr.h"
+#include "utils/syscache.h"
+#include "utils/tqual.h"
+#ifdef PGXC
+#include "pgxc/pgxc.h"
+#endif
+SnapshotData CatalogSnapshotData = {HeapTupleSatisfiesMVCC};
+
+extern THR_LOCAL bool need_reset_xmin;
+/*
+ * Elements of the active snapshot stack.
+ *
+ * Each element here accounts for exactly one active_count on SnapshotData.
+ *
+ * NB: the code assumes that elements in this list are in non-increasing
+ * order of as_level; also, the list must be NULL-terminated.
+ */
+typedef struct ActiveSnapshotElt {
+    Snapshot as_snap;
+    int as_level;
+    struct ActiveSnapshotElt* as_next;
+} ActiveSnapshotElt;
+
+static THR_LOCAL bool RegisterStreamSnapshot = false;
+
+/* Define pathname of exported-snapshot files */
+#define SNAPSHOT_EXPORT_DIR "pg_snapshots"
+#define XactExportFilePath(path, xid, num, suffix) \
+    {                                              \
+        int rc = snprintf_s(path,                  \
+            sizeof(path),                          \
+            sizeof(path) - 1,                      \
+            SNAPSHOT_EXPORT_DIR "/%08X%08X-%d%s",  \
+            (uint32)((xid) >> 32),                 \
+            (uint32)(xid),                         \
+            (num),                                 \
+            (suffix));                             \
+        securec_check_ss(rc, "", "");              \
+    }
+#define MAX_ULONG_LENGTH 22
+
+static Snapshot CopySnapshot(Snapshot snapshot);
+static void FreeSnapshot(Snapshot snapshot);
+static void SnapshotResetXmin(void);
+
+/*
+ * GetTransactionSnapshot
+ *		Get the appropriate snapshot for a new query in a transaction.
+ *
+ * Note that the return value may point at static storage that will be modified
+ * by future calls and by CommandCounterIncrement().  Callers should call
+ * RegisterSnapshot or PushActiveSnapshot on the returned snap if it is to be
+ * used very long.
+ */
+Snapshot GetTransactionSnapshot(bool force_local_snapshot)
+{
+    /*
+     * Return historic snapshot if doing logical decoding. We'll never
+     * need a non-historic transaction snapshot in this (sub-)transaction, so
+     * there's no need to be careful to set one up for later calls to
+     * GetTransactionSnapshot function.
+     */
+    if (HistoricSnapshotActive()) {
+        Assert(!u_sess->utils_cxt.FirstSnapshotSet);
+        return u_sess->utils_cxt.HistoricSnapshot;
+    }
+
+    /* First call in transaction? */
+    if (!u_sess->utils_cxt.FirstSnapshotSet) {
+        Assert(u_sess->utils_cxt.RegisteredSnapshots == 0);
+        Assert(u_sess->utils_cxt.FirstXactSnapshot == NULL);
+
+        /*
+         * In transaction-snapshot mode, the first snapshot must live until
+         * end of xact regardless of what the caller does with it, so we must
+         * make a copy of it rather than returning CurrentSnapshotData
+         * directly.  Furthermore, if we're running in serializable mode,
+         * predicate.c needs to wrap the snapshot fetch in its own processing.
+         */
+        Assert(!(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
+        if (IsolationUsesXactSnapshot()) {
+            /* First, create the snapshot in CurrentSnapshotData */
+            if (IsolationIsSerializable()) {
+                u_sess->utils_cxt.CurrentSnapshot =
+                    GetSerializableTransactionSnapshot(u_sess->utils_cxt.CurrentSnapshotData);
+            } else {
+                u_sess->utils_cxt.CurrentSnapshot =
+                    GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, false);
+            }
+            Assert(
+                !(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
+            /* Make a saved copy */
+            u_sess->utils_cxt.CurrentSnapshot = CopySnapshot(u_sess->utils_cxt.CurrentSnapshot);
+
+            u_sess->utils_cxt.FirstXactSnapshot = u_sess->utils_cxt.CurrentSnapshot;
+            /* Mark it as "registered" in FirstXactSnapshot */
+            u_sess->utils_cxt.FirstXactSnapshot->regd_count++;
+            u_sess->utils_cxt.RegisteredSnapshots++;
+        } else {
+            u_sess->utils_cxt.CurrentSnapshot =
+                GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, force_local_snapshot);
+        }
+
+        u_sess->utils_cxt.FirstSnapshotSet = true;
+        return u_sess->utils_cxt.CurrentSnapshot;
+    }
+
+    if (IsolationUsesXactSnapshot()) {
+#ifdef PGXC
+        /*
+         * Consider this test case taken from portals.sql
+         *
+         * CREATE TABLE cursor (a int, b int) distribute by replication;
+         * INSERT INTO cursor VALUES (10);
+         * BEGIN;
+         * SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+         * DECLARE c1 NO SCROLL CURSOR FOR SELECT * FROM cursor FOR UPDATE;
+         * INSERT INTO cursor VALUES (2);
+         * FETCH ALL FROM c1;
+         * would result in
+         * ERROR:  attempted to lock invisible tuple
+         * because FETCH would be sent as a select to the remote nodes
+         * with command id 0, whereas the command id would be 2
+         * in the current snapshot.
+         * (1 sent by Coordinator due to declare cursor &
+         *  2 because of the insert inside the transaction)
+         * The command id should therefore be updated in the
+         * current snapshot.
+         */
+        if (IsConnFromCoord())
+            SnapshotSetCommandId(GetCurrentCommandId(false));
+#endif
+        return u_sess->utils_cxt.CurrentSnapshot;
+    }
+    Assert(!(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
+    u_sess->utils_cxt.CurrentSnapshot =
+        GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, force_local_snapshot);
+
+    return u_sess->utils_cxt.CurrentSnapshot;
+}
+
+void StreamTxnContextSetSnapShot(void* snapshotPtr)
+{
+    u_sess->utils_cxt.FirstSnapshotSet = true;
+    Snapshot snapshot = (Snapshot)snapshotPtr;
+    u_sess->utils_cxt.CurrentSnapshot = u_sess->utils_cxt.CurrentSnapshotData;
+    u_sess->utils_cxt.CurrentSnapshot->xmin = snapshot->xmin;
+    u_sess->utils_cxt.CurrentSnapshot->xmax = snapshot->xmax;
+    u_sess->utils_cxt.CurrentSnapshot->timeline = snapshot->timeline;
+    u_sess->utils_cxt.CurrentSnapshot->snapshotcsn = snapshot->snapshotcsn;
+
+    u_sess->utils_cxt.CurrentSnapshot->curcid = snapshot->curcid;
+
+    /*
+     * This is a new snapshot, so set both refcounts are zero, and mark it as
+     * not copied in persistent memory.
+     */
+    u_sess->utils_cxt.CurrentSnapshot->active_count = 0;
+    u_sess->utils_cxt.CurrentSnapshot->regd_count = 0;
+    u_sess->utils_cxt.CurrentSnapshot->copied = false;
+}
+
+void StreamTxnContextSetMyPgXactXmin(TransactionId xmin)
+{
+    t_thrd.pgxact->xmin = xmin;
+}
+
+/*
+ * GetLatestSnapshot
+ *		Get a snapshot that is up-to-date as of the current instant,
+ *		even if we are executing in transaction-snapshot mode.
+ */
+Snapshot GetLatestSnapshot(void)
+{
+    /*
+     * So far there are no cases requiring support for GetLatestSnapshot()
+     * during logical decoding, but it wouldn't be hard to add if
+     * required.
+     */
+    Assert(!HistoricSnapshotActive());
+
+    /* If first call in transaction, go ahead and set the xact snapshot */
+    if (!u_sess->utils_cxt.FirstSnapshotSet)
+        return GetTransactionSnapshot();
+
+    Assert(!(u_sess->utils_cxt.SecondarySnapshot != NULL && u_sess->utils_cxt.SecondarySnapshot->user_data != NULL));
+
+    u_sess->utils_cxt.SecondarySnapshot =
+        GetSnapshotData(u_sess->utils_cxt.SecondarySnapshotData, false);
+
+    return u_sess->utils_cxt.SecondarySnapshot;
+}
+
+/*
+ * GetCatalogSnapshot
+ *      Get a snapshot that is sufficiently up-to-date for scan of the
+ *      system catalog with the specified OID.
+ */
+Snapshot GetCatalogSnapshot(Oid relid)
+{
+    /*
+     * Return historic snapshot if we're doing logical decoding, but
+     * return a non-historic, snapshot if we temporarily are doing up2date
+     * lookups.
+     */
+    if (HistoricSnapshotActive())
+        return u_sess->utils_cxt.HistoricSnapshot;
+
+    return GetNonHistoricCatalogSnapshot(relid);
+}
+
+/*
+ * GetNonHistoricCatalogSnapshot
+ *      Get a snapshot that is sufficiently up-to-date for scan of the system
+ *      catalog with the specified OID, even while historic snapshots are set
+ *      up.
+ */
+Snapshot GetNonHistoricCatalogSnapshot(Oid relid)
+{
+    /*
+     * If the caller is trying to scan a relation that has no syscache,
+     * no catcache invalidations will be sent when it is updated.  For a
+     * a few key relations, snapshot invalidations are sent instead.  If
+     * we're trying to scan a relation for which neither catcache nor
+     * snapshot invalidations are sent, we must refresh the snapshot every
+     * time.
+     */
+    if (!u_sess->utils_cxt.CatalogSnapshotStale && !RelationInvalidatesSnapshotsOnly(relid) &&
+        !RelationHasSysCache(relid))
+        u_sess->utils_cxt.CatalogSnapshotStale = true;
+
+    if (u_sess->utils_cxt.CatalogSnapshotStale) {
+        /* Get new snapshot. */
+        u_sess->utils_cxt.CatalogSnapshot = GetSnapshotData(&CatalogSnapshotData, false);
+
+        /*
+         * Mark new snapshost as valid.  We must do this last, in case an
+         * ERROR occurs inside GetSnapshotData().
+         */
+        u_sess->utils_cxt.CatalogSnapshotStale = false;
+    }
+
+    return u_sess->utils_cxt.CatalogSnapshot;
+}
+
+/*
+ * SnapshotSetCommandId
+ *		Propagate CommandCounterIncrement into the static snapshots, if set
+ */
+void SnapshotSetCommandId(CommandId curcid)
+{
+    if (!u_sess->utils_cxt.FirstSnapshotSet)
+        return;
+
+    if (u_sess->utils_cxt.CurrentSnapshot)
+        u_sess->utils_cxt.CurrentSnapshot->curcid = curcid;
+    if (u_sess->utils_cxt.SecondarySnapshot)
+        u_sess->utils_cxt.SecondarySnapshot->curcid = curcid;
+}
+
+/*
+ * SetTransactionSnapshot
+ *		Set the transaction's snapshot from an imported MVCC snapshot.
+ *
+ * Note that this is very closely tied to GetTransactionSnapshot --- it
+ * must take care of all the same considerations as the first-snapshot case
+ * in GetTransactionSnapshot.
+ */
+static void SetTransactionSnapshot(Snapshot sourcesnap, TransactionId sourcexid)
+{
+    /* Caller should have checked this already */
+    Assert(!u_sess->utils_cxt.FirstSnapshotSet);
+
+    Assert(u_sess->utils_cxt.RegisteredSnapshots == 0);
+    Assert(u_sess->utils_cxt.FirstXactSnapshot == NULL);
+    Assert(!(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
+    /*
+     * Even though we are not going to use the snapshot it computes, we must
+     * call GetSnapshotData, for two reasons: (1) to be sure that
+     * CurrentSnapshotData's XID arrays have been allocated, and (2) to update
+     * RecentXmin and RecentGlobalXmin.  (We could alternatively include those
+     * two variables in exported snapshot files, but it seems better to have
+     * snapshot importers compute reasonably up-to-date values for them.)
+     */
+    u_sess->utils_cxt.CurrentSnapshot = GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, false);
+
+    /*
+     * Now copy appropriate fields from the source snapshot.
+     */
+    u_sess->utils_cxt.CurrentSnapshot->xmin = sourcesnap->xmin;
+    u_sess->utils_cxt.CurrentSnapshot->xmax = sourcesnap->xmax;
+    u_sess->utils_cxt.CurrentSnapshot->snapshotcsn = sourcesnap->snapshotcsn;
+    u_sess->utils_cxt.CurrentSnapshot->timeline = sourcesnap->timeline;
+    u_sess->utils_cxt.CurrentSnapshot->takenDuringRecovery = sourcesnap->takenDuringRecovery;
+
+    /*
+	 * NB: curcid should NOT be copied, it's a local matter
+     * Now we have to fix what GetSnapshotData did with MyPgXact->xmin and
+     * TransactionXmin.  There is a race condition: to make sure we are not
+     * causing the global xmin to go backwards, we have to test that the
+     * source transaction is still running, and that has to be done
+     * atomically. So let procarray.c do it.
+     *
+     * Note: in serializable mode, predicate.c will do this a second time. It
+     * doesn't seem worth contorting the logic here to avoid two calls,
+     * especially since it's not clear that predicate.c *must* do this.
+     * In transaction-snapshot mode, the first snapshot must live until end of
+     * xact, so we must make a copy of it.	Furthermore, if we're running in
+     * serializable mode, predicate.c needs to do its own processing.
+     */
+    if (IsolationUsesXactSnapshot()) {
+        if (IsolationIsSerializable())
+            SetSerializableTransactionSnapshot(u_sess->utils_cxt.CurrentSnapshot, sourcexid);
+        /* Make a saved copy */
+        Assert(!(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
+        u_sess->utils_cxt.CurrentSnapshot = CopySnapshot(u_sess->utils_cxt.CurrentSnapshot);
+        u_sess->utils_cxt.FirstXactSnapshot = u_sess->utils_cxt.CurrentSnapshot;
+        /* Mark it as "registered" in FirstXactSnapshot */
+        u_sess->utils_cxt.FirstXactSnapshot->regd_count++;
+        u_sess->utils_cxt.RegisteredSnapshots++;
+    }
+
+    u_sess->utils_cxt.FirstSnapshotSet = true;
+}
+
+/*
+ * CopySnapshot
+ *		Copy the given snapshot.
+ *
+ * The copy is palloc'd in u_sess->top_transaction_mem_cxt and has initial refcounts set
+ * to 0.  The returned snapshot has the copied flag set.
+ */
+Snapshot CopySnapshot(Snapshot snapshot)
+{
+    Snapshot newsnap;
+    int rc = 0;
+
+    Assert(snapshot != InvalidSnapshot);
+
+    newsnap = (Snapshot)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, sizeof(SnapshotData));
+    rc = memcpy_s(newsnap, sizeof(SnapshotData), snapshot, sizeof(SnapshotData));
+    securec_check(rc, "", "");
+
+    newsnap->regd_count = 0;
+    newsnap->active_count = 0;
+    newsnap->copied = true;
+    newsnap->user_data = NULL;
+
+    if (GTM_LITE_MODE && snapshot->prepared_array) { /* prepared_array is only defined for gtm_lite */
+        int arraySize = sizeof(TransactionId) * snapshot->prepared_array_capacity;
+        newsnap->prepared_array =
+            (TransactionId *)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, arraySize);
+        rc = memcpy_s(newsnap->prepared_array, arraySize, snapshot->prepared_array, arraySize);
+        securec_check(rc, "", "");
+    }
+    return newsnap;
+}
+
+/*
+ * CopySnapshot
+ *		Copy the given snapshot.
+ *
+ * The copy is palloc'd in u_sess->top_transaction_mem_cxt and has initial refcounts set
+ * to 0.  The returned snapshot has the copied flag set.
+ */
+Snapshot CopySnapshotByCurrentMcxt(Snapshot snapshot)
+{
+    Snapshot newsnap;
+    errno_t rc;
+
+    Assert(snapshot != InvalidSnapshot);
+
+    newsnap = (Snapshot)palloc(sizeof(SnapshotData));
+    rc = memcpy_s(newsnap, sizeof(SnapshotData), snapshot, sizeof(SnapshotData));
+    securec_check(rc, "\0", "\0");
+
+    newsnap->regd_count = 0;
+    newsnap->active_count = 0;
+    newsnap->copied = true;
+    newsnap->user_data = NULL;
+
+    if (GTM_LITE_MODE && snapshot->prepared_array) { /* prepared_array is only defined for gtm_lite */
+        int arraySize = sizeof(TransactionId) * snapshot->prepared_array_capacity;
+        newsnap->prepared_array = (TransactionId *)palloc(arraySize);
+        rc = memcpy_s(newsnap->prepared_array, arraySize, snapshot->prepared_array, arraySize);
+        securec_check(rc, "", "");
+    }
+
+    return newsnap;
+}
+
+/*
+ * FreeSnapshot
+ *		Free the memory associated with a snapshot.
+ */
+static void FreeSnapshot(Snapshot snapshot)
+{
+    Assert(snapshot->regd_count == 0);
+    Assert(snapshot->active_count == 0);
+    Assert(snapshot->copied);
+    Assert(!(snapshot != NULL && snapshot->user_data != NULL));
+    if (GTM_LITE_MODE && snapshot->prepared_array) {
+        pfree_ext(snapshot->prepared_array);
+    }
+
+    pfree_ext(snapshot);
+}
+
+/*
+ * PushActiveSnapshot
+ *		Set the given snapshot as the current active snapshot
+ *
+ * If the passed snapshot is a statically-allocated one, or it is possibly
+ * subject to a future command counter update, create a new long-lived copy
+ * with active refcount=1.	Otherwise, only increment the refcount.
+ */
+void PushActiveSnapshot(Snapshot snap)
+{
+    ActiveSnapshotElt* newactive = NULL;
+
+    Assert(snap != InvalidSnapshot);
+
+    newactive = (ActiveSnapshotElt*)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, sizeof(ActiveSnapshotElt));
+
+    /*
+     * Checking SecondarySnapshot is probably useless here, but it seems
+     * better to be sure.
+     */
+    if (snap == u_sess->utils_cxt.CurrentSnapshot || snap == u_sess->utils_cxt.SecondarySnapshot || !snap->copied ||
+        snap == u_sess->pgxc_cxt.gc_fdw_snapshot)
+        newactive->as_snap = CopySnapshot(snap);
+    else
+        newactive->as_snap = snap;
+
+    newactive->as_next = u_sess->utils_cxt.ActiveSnapshot;
+    newactive->as_level = GetCurrentTransactionNestLevel();
+
+    newactive->as_snap->active_count++;
+
+    u_sess->utils_cxt.ActiveSnapshot = newactive;
+}
+
+/*
+ * PushCopiedSnapshot
+ *		As above, except forcibly copy the presented snapshot.
+ *
+ * This should be used when the ActiveSnapshot has to be modifiable, for
+ * example if the caller intends to call UpdateActiveSnapshotCommandId.
+ * The new snapshot will be released when popped from the stack.
+ */
+void PushCopiedSnapshot(Snapshot snapshot)
+{
+    PushActiveSnapshot(CopySnapshot(snapshot));
+}
+
+/*
+ * UpdateActiveSnapshotCommandId
+ *
+ * Update the current CID of the active snapshot.  This can only be applied
+ * to a snapshot that is not referenced elsewhere.
+ */
+void UpdateActiveSnapshotCommandId(void)
+{
+    Assert(u_sess->utils_cxt.ActiveSnapshot != NULL);
+    Assert(u_sess->utils_cxt.ActiveSnapshot->as_snap->active_count == 1);
+    Assert(u_sess->utils_cxt.ActiveSnapshot->as_snap->regd_count == 0);
+
+    u_sess->utils_cxt.ActiveSnapshot->as_snap->curcid = GetCurrentCommandId(false);
+}
+
+/*
+ * PopActiveSnapshot
+ *
+ * Remove the topmost snapshot from the active snapshot stack, decrementing the
+ * reference count, and free it if this was the last reference.
+ */
+void PopActiveSnapshot(void)
+{
+    ActiveSnapshotElt* newstack = NULL;
+
+    newstack = u_sess->utils_cxt.ActiveSnapshot->as_next;
+
+    Assert(u_sess->utils_cxt.ActiveSnapshot->as_snap->active_count > 0);
+
+    u_sess->utils_cxt.ActiveSnapshot->as_snap->active_count--;
+
+    if (u_sess->utils_cxt.ActiveSnapshot->as_snap->active_count == 0 &&
+        u_sess->utils_cxt.ActiveSnapshot->as_snap->regd_count == 0)
+        FreeSnapshot(u_sess->utils_cxt.ActiveSnapshot->as_snap);
+
+    pfree_ext(u_sess->utils_cxt.ActiveSnapshot);
+    u_sess->utils_cxt.ActiveSnapshot = newstack;
+
+    SnapshotResetXmin();
+}
+
+/*
+ * GetActiveSnapshot
+ *		Return the topmost snapshot in the Active stack.
+ */
+Snapshot GetActiveSnapshot(void)
+{
+#ifdef PGXC
+    /*
+     * Check if topmost snapshot is null or not,
+     * if it is, a new one will be taken from GTM.
+     */
+    if (!u_sess->utils_cxt.ActiveSnapshot && IS_PGXC_COORDINATOR && !IsConnFromCoord())
+        return NULL;
+#endif
+
+    if (u_sess->utils_cxt.ActiveSnapshot == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_TRANS_SNAPSHOT),
+                errcode(ERRCODE_INVALID_STATUS),
+                errmsg("snapshot is not active")));
+    }
+    return u_sess->utils_cxt.ActiveSnapshot->as_snap;
+}
+
+/*
+ * ActiveSnapshotSet
+ *		Return whether there is at least one snapshot in the Active stack
+ */
+bool ActiveSnapshotSet(void)
+{
+    return u_sess->utils_cxt.ActiveSnapshot != NULL;
+}
+
+/*
+ * RegisterSnapshot
+ *		Register a snapshot as being in use by the current resource owner
+ *
+ * If InvalidSnapshot is passed, it is not registered.
+ */
+Snapshot RegisterSnapshot(Snapshot snapshot)
+{
+    if (snapshot == InvalidSnapshot)
+        return InvalidSnapshot;
+
+    return RegisterSnapshotOnOwner(snapshot, t_thrd.utils_cxt.CurrentResourceOwner);
+}
+
+/*
+ * RegisterSnapshotOnOwner
+ *		As above, but use the specified resource owner
+ */
+Snapshot RegisterSnapshotOnOwner(Snapshot snapshot, ResourceOwner owner)
+{
+    Snapshot snap;
+
+    if (snapshot == InvalidSnapshot)
+        return InvalidSnapshot;
+
+    /* Static snapshot?  Create a persistent copy */
+    snap = snapshot->copied ? snapshot : CopySnapshot(snapshot);
+
+    /* and tell resowner.c about it */
+    ResourceOwnerEnlargeSnapshots(owner);
+    snap->regd_count++;
+    ResourceOwnerRememberSnapshot(owner, snap);
+
+    u_sess->utils_cxt.RegisteredSnapshots++;
+
+    return snap;
+}
+
+/*
+ * UnregisterSnapshot
+ *
+ * Decrement the reference count of a snapshot, remove the corresponding
+ * reference from CurrentResourceOwner, and free the snapshot if no more
+ * references remain.
+ */
+void UnregisterSnapshot(Snapshot snapshot)
+{
+    if (snapshot == NULL)
+        return;
+
+    UnregisterSnapshotFromOwner(snapshot, t_thrd.utils_cxt.CurrentResourceOwner);
+}
+
+/*
+ * UnregisterSnapshotFromOwner
+ *		As above, but use the specified resource owner
+ */
+void UnregisterSnapshotFromOwner(Snapshot snapshot, ResourceOwner owner)
+{
+    if (snapshot == NULL)
+        return;
+
+    Assert(snapshot->regd_count > 0);
+    Assert(u_sess->utils_cxt.RegisteredSnapshots > 0);
+
+    ResourceOwnerForgetSnapshot(owner, snapshot);
+    u_sess->utils_cxt.RegisteredSnapshots--;
+    if (--snapshot->regd_count == 0 && snapshot->active_count == 0) {
+        FreeSnapshot(snapshot);
+        SnapshotResetXmin();
+    }
+}
+
+void RegisterStreamSnapshots()
+{
+    RegisterStreamSnapshot = true;
+}
+
+void ForgetRegisterStreamSnapshots()
+{
+    RegisterStreamSnapshot = false;
+}
+
+void UnRegisterStreamSnapshots()
+{
+    ForgetRegisterStreamSnapshots();
+    SnapshotResetXmin();
+}
+
+/*
+ * SnapshotResetXmin
+ *
+ * If there are no more snapshots, we can reset our PGXACT->xmin to InvalidXid.
+ * Note we can do this without locking because we assume that storing an Xid
+ * is atomic.
+ */
+static void SnapshotResetXmin(void)
+{
+    if (u_sess->utils_cxt.RegisteredSnapshots == 0 && u_sess->utils_cxt.ActiveSnapshot == NULL) {
+        t_thrd.pgxact->xmin = InvalidTransactionId;
+        t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
+        need_reset_xmin = true;
+    }
+}
+
+/*
+ * AtSubCommit_Snapshot
+ */
+void AtSubCommit_Snapshot(int level)
+{
+    ActiveSnapshotElt* active = NULL;
+
+    /*
+     * Relabel the active snapshots set in this subtransaction as though they
+     * are owned by the parent subxact.
+     */
+    for (active = u_sess->utils_cxt.ActiveSnapshot; active != NULL; active = active->as_next) {
+        if (active->as_level < level)
+            break;
+        active->as_level = level - 1;
+    }
+}
+
+/*
+ * AtSubAbort_Snapshot
+ *		Clean up snapshots after a subtransaction abort
+ */
+void AtSubAbort_Snapshot(int level)
+{
+    /* Forget the active snapshots set by this subtransaction */
+    while (u_sess->utils_cxt.ActiveSnapshot && u_sess->utils_cxt.ActiveSnapshot->as_level >= level) {
+        ActiveSnapshotElt* next = NULL;
+
+        next = u_sess->utils_cxt.ActiveSnapshot->as_next;
+
+        /*
+         * Decrement the snapshot's active count.  If it's still registered or
+         * marked as active by an outer subtransaction, we can't free it yet.
+         */
+        Assert(u_sess->utils_cxt.ActiveSnapshot->as_snap->active_count >= 1);
+        u_sess->utils_cxt.ActiveSnapshot->as_snap->active_count -= 1;
+
+        if (u_sess->utils_cxt.ActiveSnapshot->as_snap->active_count == 0 &&
+            u_sess->utils_cxt.ActiveSnapshot->as_snap->regd_count == 0)
+            FreeSnapshot(u_sess->utils_cxt.ActiveSnapshot->as_snap);
+
+        /* and free the stack element */
+        pfree_ext(u_sess->utils_cxt.ActiveSnapshot);
+
+        u_sess->utils_cxt.ActiveSnapshot = next;
+    }
+
+    SnapshotResetXmin();
+}
+
+static void free_snapshot_prepared_array(void)
+{
+    if (!GTM_LITE_MODE) {
+        return;
+    }
+    int def_prep_array_num = get_snapshot_defualt_prepared_num();
+    if (u_sess->utils_cxt.CurrentSnapshotData->prepared_array_capacity > def_prep_array_num) {
+        pfree_ext(u_sess->utils_cxt.CurrentSnapshotData->prepared_array);
+        u_sess->utils_cxt.CurrentSnapshotData->prepared_array_capacity = 0;
+        u_sess->utils_cxt.CurrentSnapshotData->prepared_count = 0;
+    }
+
+    if (u_sess->utils_cxt.SecondarySnapshotData->prepared_array_capacity > def_prep_array_num) {
+        pfree_ext(u_sess->utils_cxt.SecondarySnapshotData->prepared_array);
+        u_sess->utils_cxt.SecondarySnapshotData->prepared_array_capacity = 0;
+        u_sess->utils_cxt.SecondarySnapshotData->prepared_count = 0;
+    }
+}
+/*
+ * AtEOXact_Snapshot
+ *		Snapshot manager's cleanup function for end of transaction
+ */
+void AtEOXact_Snapshot(bool isCommit)
+{
+    /*
+     * In transaction-snapshot mode we must release our privately-managed
+     * reference to the transaction snapshot.  We must decrement
+     * RegisteredSnapshots to keep the check below happy.  But we don't bother
+     * to do FreeSnapshot, for two reasons: the memory will go away with
+     * u_sess->top_transaction_mem_cxt anyway, and if someone has left the snapshot
+     * stacked as active, we don't want the code below to be chasing through a
+     * dangling pointer.
+     */
+    if (u_sess->utils_cxt.FirstXactSnapshot != NULL) {
+        Assert(u_sess->utils_cxt.FirstXactSnapshot->regd_count > 0);
+        Assert(u_sess->utils_cxt.RegisteredSnapshots > 0);
+        u_sess->utils_cxt.RegisteredSnapshots--;
+    }
+    u_sess->utils_cxt.FirstXactSnapshot = NULL;
+
+    /*
+     * If we exported any snapshots, clean them up.
+     */
+    if (u_sess->utils_cxt.exportedSnapshots != NIL) {
+        TransactionId myxid = GetTopTransactionId();
+        int i;
+        char buf[MAXPGPATH];
+
+        /*
+         * Get rid of the files.  Unlink failure is only a WARNING because (1)
+         * it's too late to abort the transaction, and (2) leaving a leaked
+         * file around has little real consequence anyway.
+         */
+        for (i = 1; i <= list_length(u_sess->utils_cxt.exportedSnapshots); i++) {
+            XactExportFilePath(buf, myxid, i, "");
+            if (unlink(buf))
+                ereport(WARNING, (errmsg("could not unlink file \"%s\": %m", buf)));
+        }
+
+        /*
+         * As with the FirstXactSnapshot, we needn't spend any effort on
+         * cleaning up the per-snapshot data structures, but we do need to
+         * adjust the RegisteredSnapshots count to prevent a warning below.
+         *
+         * Note: you might be thinking "why do we have the exportedSnapshots
+         * list at all?  All we need is a counter!".  You're right, but we do
+         * it this way in case we ever feel like improving xmin management.
+         */
+        Assert(u_sess->utils_cxt.RegisteredSnapshots >= list_length(u_sess->utils_cxt.exportedSnapshots));
+        u_sess->utils_cxt.RegisteredSnapshots -= list_length(u_sess->utils_cxt.exportedSnapshots);
+
+        u_sess->utils_cxt.exportedSnapshots = NIL;
+    }
+
+    /* On commit, complain about leftover snapshots */
+    if (isCommit) {
+        ActiveSnapshotElt* active = NULL;
+
+        if (u_sess->utils_cxt.RegisteredSnapshots != 0)
+            ereport(WARNING,
+                (errmsg(
+                    "%d registered snapshots seem to remain after cleanup", u_sess->utils_cxt.RegisteredSnapshots)));
+
+        /* complain about unpopped active snapshots */
+        for (active = u_sess->utils_cxt.ActiveSnapshot; active != NULL; active = active->as_next)
+            ereport(LOG, (errmsg("snapshot still active")));
+    }
+
+    /* free static snapshotData prepared array memory in GTM Lite if needed */
+    free_snapshot_prepared_array();
+
+    /*
+     * And reset our state.  We don't need to free the memory explicitly --
+     * it'll go away with u_sess->top_transaction_mem_cxt.
+     */
+    u_sess->utils_cxt.ActiveSnapshot = NULL;
+    u_sess->utils_cxt.RegisteredSnapshots = 0;
+
+    Assert(!(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
+    Assert(!(u_sess->utils_cxt.SecondarySnapshot != NULL && u_sess->utils_cxt.SecondarySnapshot->user_data != NULL));
+
+    u_sess->utils_cxt.CurrentSnapshot = NULL;
+    u_sess->utils_cxt.SecondarySnapshot = NULL;
+
+    u_sess->utils_cxt.FirstSnapshotSet = false;
+
+    SnapshotResetXmin();
+}
+
+/*
+ * ExportSnapshot
+ *		Export the snapshot to a file so that other backends can import it.
+ *		Returns the token (the file name) that can be used to import this
+ *		snapshot.
+ */
+char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
+{
+    TransactionId topXid;
+    TransactionId* children = NULL;
+    int nchildren;
+    int addTopXid;
+    StringInfoData buf;
+    FILE* f = NULL;
+    int i;
+    MemoryContext oldcxt;
+    char path[MAXPGPATH];
+    char pathtmp[MAXPGPATH];
+
+    /*
+     * It's tempting to call RequireTransactionChain here, since it's not very
+     * useful to export a snapshot that will disappear immediately afterwards.
+     * However, we haven't got enough information to do that, since we don't
+     * know if we're at top level or not.  For example, we could be inside a
+     * plpgsql function that is going to fire off other transactions via
+     * dblink.	Rather than disallow perfectly legitimate usages, don't make a
+     * check.
+     *
+     * Also note that we don't make any restriction on the transaction's
+     * isolation level; however, importers must check the level if they are
+     * serializable.
+     * This will assign a transaction ID if we do not yet have one.
+     */
+    topXid = GetTopTransactionId();
+
+    /*
+     * We cannot export a snapshot from a subtransaction because there's no
+     * easy way for importers to verify that the same subtransaction is still
+     * running.
+     */
+    if (IsSubTransaction())
+        ereport(
+            ERROR, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION), errmsg("cannot export a snapshot from a subtransaction")));
+
+    /*
+     * We do however allow previous committed subtransactions to exist.
+     * Importers of the snapshot must see them as still running, so get their
+     * XIDs to add them to the snapshot.
+     */
+    nchildren = xactGetCommittedChildren(&children);
+
+    /*
+     * Copy the snapshot into u_sess->top_transaction_mem_cxt, add it to the
+     * exportedSnapshots list, and mark it pseudo-registered.  We do this to
+     * ensure that the snapshot's xmin is honored for the rest of the
+     * transaction.  (Right now, because SnapshotResetXmin is so stupid, this
+     * is overkill; but later we might make that routine smarter.)
+     */
+    snapshot = CopySnapshot(snapshot);
+
+    oldcxt = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+    u_sess->utils_cxt.exportedSnapshots = lappend(u_sess->utils_cxt.exportedSnapshots, snapshot);
+    (void)MemoryContextSwitchTo(oldcxt);
+
+    snapshot->regd_count++;
+    u_sess->utils_cxt.RegisteredSnapshots++;
+
+    /*
+     * Fill buf with a text serialization of the snapshot, plus identification
+     * data about this transaction.  The format expected by ImportSnapshot is
+     * pretty rigid: each line must be fieldname:value.
+     */
+    initStringInfo(&buf);
+
+    appendStringInfo(&buf, "xid:" XID_FMT "\n", topXid);
+    appendStringInfo(&buf, "dbid:%u\n", u_sess->proc_cxt.MyDatabaseId);
+    appendStringInfo(&buf, "iso:%d\n", u_sess->utils_cxt.XactIsoLevel);
+    appendStringInfo(&buf, "ro:%d\n", u_sess->attr.attr_common.XactReadOnly);
+
+    appendStringInfo(&buf, "xmin:" XID_FMT "\n", snapshot->xmin);
+    appendStringInfo(&buf, "xmax:" XID_FMT "\n", snapshot->xmax);
+
+    appendStringInfo(&buf, "timeline:%u\n", snapshot->timeline);
+
+    /*
+     * We must include our own top transaction ID in the top-xid data, since
+     * by definition we will still be running when the importing transaction
+     * adopts the snapshot, but GetSnapshotData never includes our own XID in
+     * the snapshot.  (There must, therefore, be enough room to add it.)
+     *
+     * However, it could be that our topXid is after the xmax, in which case
+     * we shouldn't include it because xip[] members are expected to be before
+     * xmax.  (We need not make the same check for subxip[] members, see
+     * snapshot.h.)
+     */
+    addTopXid = TransactionIdPrecedes(topXid, snapshot->xmax) ? 1 : 0;
+    if (addTopXid)
+        appendStringInfo(&buf, "xip:" XID_FMT "\n", topXid);
+
+    appendStringInfo(&buf, "snapshotcsn:" XID_FMT "\n", snapshot->snapshotcsn);
+    if (snapshotCsn) {
+        *snapshotCsn = snapshot->snapshotcsn;
+    }
+
+    /*
+     * Similarly, we add our subcommitted child XIDs to the subxid data. Here,
+     * we have to cope with possible overflow.
+     */
+    if (nchildren > GetMaxSnapshotSubxidCount())
+        appendStringInfoString(&buf, "sof:1\n");
+    else {
+        appendStringInfoString(&buf, "sof:0\n");
+
+        for (i = 0; i < nchildren; i++)
+            appendStringInfo(&buf, "sxp:" XID_FMT "\n", children[i]);
+    }
+    appendStringInfo(&buf, "rec:%u\n", snapshot->takenDuringRecovery);
+
+    /*
+     * Now write the text representation into a file.  We first write to a
+     * ".tmp" filename, and rename to final filename if no error.  This
+     * ensures that no other backend can read an incomplete file
+     * (ImportSnapshot won't allow it because of its valid-characters check).
+     */
+    XactExportFilePath(pathtmp, topXid, list_length(u_sess->utils_cxt.exportedSnapshots), ".tmp");
+    if (!(f = AllocateFile(pathtmp, PG_BINARY_W)))
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", pathtmp)));
+
+    if (fwrite(buf.data, buf.len, 1, f) != 1)
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", pathtmp)));
+
+    /* no fsync() since file need not survive a system crash */
+    if (FreeFile(f))
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", pathtmp)));
+
+    /*
+     * Now that we have written everything into a .tmp file, rename the file
+     * to remove the .tmp suffix.
+     */
+    XactExportFilePath(path, topXid, list_length(u_sess->utils_cxt.exportedSnapshots), "");
+
+    if (rename(pathtmp, path) < 0)
+        ereport(
+            ERROR, (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %m", pathtmp, path)));
+
+    /*
+     * The basename of the file is what we return from pg_export_snapshot().
+     * It's already in path in a textual format and we know that the path
+     * starts with SNAPSHOT_EXPORT_DIR.  Skip over the prefix and the slash
+     * and pstrdup it so as not to return the address of a local variable.
+     */
+    return pstrdup(path + strlen(SNAPSHOT_EXPORT_DIR) + 1);
+}
+
+/*
+ * pg_export_snapshot
+ *		SQL-callable wrapper for ExportSnapshot.
+ */
+Datum pg_export_snapshot(PG_FUNCTION_ARGS)
+{
+    char* snapshotName = NULL;
+    
+    if (!superuser()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), 
+                (errmsg("Must be system admin to export snapshot."))));
+    }
+
+    snapshotName = ExportSnapshot(GetActiveSnapshot(), NULL);
+    PG_RETURN_TEXT_P(cstring_to_text(snapshotName));
+}
+
+/*
+ * pg_export_snapshot_and_csn
+ *		SQL-callable wrapper for ExportSnapshot.
+ *		Return snapshot name and csn.
+ */
+Datum pg_export_snapshot_and_csn(PG_FUNCTION_ARGS)
+{
+    char *snapshotName = NULL;
+
+    Datum           values[2];
+    bool            nulls[2] = {0};
+    TupleDesc       tupdesc = NULL;
+    HeapTuple       tuple = NULL;
+    Datum           result;
+    CommitSeqNo snapshotcsn = InvalidCommitSeqNo;
+    char strCSN[MAX_ULONG_LENGTH] = {0};
+    errno_t         errorno = EOK;
+
+    /*
+     * Construct a tuple descriptor for the result row.  This must match this
+     * function's pg_proc entry!
+     */
+    tupdesc = CreateTemplateTupleDesc(2, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber) 1, "snapshot_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) 2, "CSN", TEXTOID, -1, 0);
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    snapshotName = ExportSnapshot(GetActiveSnapshot(), &snapshotcsn);
+    errorno = snprintf_s(strCSN, MAX_ULONG_LENGTH, MAX_ULONG_LENGTH - 1, "%X", snapshotcsn);
+    securec_check_ss(errorno, "", "");
+    values[0] = CStringGetTextDatum(snapshotName);
+    values[1] = CStringGetTextDatum(strCSN);
+    nulls[0] = false;
+    nulls[1] = false;
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(tuple);
+    PG_RETURN_DATUM(result);
+}
+
+/*
+ * Parsing subroutines for ImportSnapshot: parse a line with the given
+ * prefix followed by a value, and advance *s to the next line.  The
+ * filename is provided for use in error messages.
+ */
+static int parseIntFromText(const char* prefix, char** s, const char* filename)
+{
+    char* ptr = *s;
+    int prefixlen = strlen(prefix);
+    int val;
+
+    if (strncmp(ptr, prefix, prefixlen) != 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    ptr += prefixlen;
+    if (sscanf_s(ptr, "%d", &val) != 1)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    ptr = strchr(ptr, '\n');
+    if (ptr == NULL)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    *s = ptr + 1;
+    return val;
+}
+
+static TransactionId parseXidFromText(const char* prefix, char** s, const char* filename)
+{
+    char* ptr = *s;
+    int prefixlen = strlen(prefix);
+    TransactionId val;
+
+    if (strncmp(ptr, prefix, prefixlen) != 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    ptr += prefixlen;
+    if (sscanf_s(ptr, XID_FMT, &val) != 1)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    ptr = strchr(ptr, '\n');
+    if (ptr == NULL)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    *s = ptr + 1;
+    return val;
+}
+
+static GTM_Timeline parseTimelineFromText(const char* prefix, char** s, const char* filename)
+{
+    char* ptr = *s;
+    int prefixlen = strlen(prefix);
+    GTM_Timeline val;
+
+    if (strncmp(ptr, prefix, prefixlen) != 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    ptr += prefixlen;
+    if (sscanf_s(ptr, "%u", &val) != 1)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    ptr = strchr(ptr, '\n');
+    if (ptr == NULL)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    *s = ptr + 1;
+    return val;
+}
+
+/*
+ * ImportSnapshot
+ *		Import a previously exported snapshot.	The argument should be a
+ *		filename in SNAPSHOT_EXPORT_DIR.  Load the snapshot from that file.
+ *		This is called by "SET TRANSACTION SNAPSHOT 'foo'".
+ */
+void ImportSnapshot(const char* idstr)
+{
+    char path[MAXPGPATH];
+    FILE* f = NULL;
+    struct stat stat_buf;
+    char* filebuf = NULL;
+    TransactionId src_xid;
+    Oid src_dbid;
+    int src_isolevel;
+    bool src_readonly = false;
+    SnapshotData snapshot;
+
+    /*
+     * Must be at top level of a fresh transaction.  Note in particular that
+     * we check we haven't acquired an XID --- if we have, it's conceivable
+     * that the snapshot would show it as not running, making for very screwy
+     * behavior.
+     */
+    if (u_sess->utils_cxt.FirstSnapshotSet || GetTopTransactionIdIfAny() != InvalidTransactionId || IsSubTransaction())
+        ereport(ERROR,
+            (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+                errmsg("SET TRANSACTION SNAPSHOT must be called before any query")));
+
+    /*
+     * If we are in read committed mode then the next query would execute with
+     * a new snapshot thus making this function call quite useless.
+     */
+    if (!IsolationUsesXactSnapshot())
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("a snapshot-importing transaction must have isolation level SERIALIZABLE or REPEATABLE READ")));
+
+    /*
+     * Verify the identifier: only 0-9, A-F and hyphens are allowed.  We do
+     * this mainly to prevent reading arbitrary files.
+     */
+    if (strspn(idstr, "0123456789ABCDEF-") != strlen(idstr))
+        ereport(
+            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid snapshot identifier: \"%s\"", idstr)));
+
+    /* OK, read the file */
+    int rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, SNAPSHOT_EXPORT_DIR "/%s", idstr);
+    securec_check_ss(rc, "", "");
+
+    f = AllocateFile(path, PG_BINARY_R);
+    if (f == NULL)
+        ereport(
+            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid snapshot identifier: \"%s\"", idstr)));
+
+    /* get the size of the file so that we know how much memory we need */
+    if (fstat(fileno(f), &stat_buf))
+        ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("could not stat file \"%s\": %m", path)));
+
+    /* and read the file into a palloc'd string */
+    filebuf = (char*)palloc(stat_buf.st_size + 1);
+    if (fread(filebuf, stat_buf.st_size, 1, f) != 1)
+        ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("could not read file \"%s\": %m", path)));
+
+    filebuf[stat_buf.st_size] = '\0';
+
+    (void)FreeFile(f);
+
+    /*
+     * Construct a snapshot struct by parsing the file content.
+     */
+    rc = memset_s(&snapshot, sizeof(SnapshotData), 0, sizeof(snapshot));
+    securec_check(rc, "", "");
+
+    src_xid = parseXidFromText("xid:", &filebuf, path);
+    /* we abuse parseXidFromText a bit here ... */
+    src_dbid = parseXidFromText("dbid:", &filebuf, path);
+    src_isolevel = parseIntFromText("iso:", &filebuf, path);
+    src_readonly = parseIntFromText("ro:", &filebuf, path);
+
+    snapshot.xmin = parseXidFromText("xmin:", &filebuf, path);
+    snapshot.xmax = parseXidFromText("xmax:", &filebuf, path);
+    /* should we use a new parsefunction for timeline */
+    snapshot.timeline = parseTimelineFromText("timeline:", &filebuf, path);
+    snapshot.snapshotcsn = parseXidFromText("snapshotcsn:", &filebuf, path);
+    parseIntFromText("sof:", &filebuf, path);
+    snapshot.takenDuringRecovery = parseIntFromText("rec:", &filebuf, path);
+
+    /*
+     * Do some additional sanity checking, just to protect ourselves.  We
+     * don't trouble to check the array elements, just the most critical
+     * fields.
+     */
+    if (!TransactionIdIsNormal(src_xid) || !OidIsValid(src_dbid) || !TransactionIdIsNormal(snapshot.xmin) ||
+        !TransactionIdIsNormal(snapshot.xmax))
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", path)));
+
+    /*
+     * If we're serializable, the source transaction must be too, otherwise
+     * predicate.c has problems (SxactGlobalXmin could go backwards).  Also, a
+     * non-read-only transaction can't adopt a snapshot from a read-only
+     * transaction, as predicate.c handles the cases very differently.
+     */
+    if (IsolationIsSerializable()) {
+        if (src_isolevel != XACT_SERIALIZABLE)
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("a serializable transaction cannot import a snapshot from a non-serializable transaction")));
+        if (src_readonly && !u_sess->attr.attr_common.XactReadOnly)
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("a non-read-only serializable transaction cannot import a snapshot from a read-only "
+                           "transaction")));
+    }
+
+    /*
+     * We cannot import a snapshot that was taken in a different database,
+     * because vacuum calculates OldestXmin on a per-database basis; so the
+     * source transaction's xmin doesn't protect us from data loss.  This
+     * restriction could be removed if the source transaction were to mark its
+     * xmin as being globally applicable.  But that would require some
+     * additional syntax, since that has to be known when the snapshot is
+     * initially taken.  (See pgsql-hackers discussion of 2011-10-21.)
+     */
+    if (src_dbid != u_sess->proc_cxt.MyDatabaseId)
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot import a snapshot from a different database")));
+
+    /* OK, install the snapshot */
+    SetTransactionSnapshot(&snapshot, src_xid);
+}
+
+/*
+ * XactHasExportedSnapshots
+ *		Test whether current transaction has exported any snapshots.
+ */
+bool XactHasExportedSnapshots(void)
+{
+    return (u_sess->utils_cxt.exportedSnapshots != NIL);
+}
+
+/*
+ * DeleteAllExportedSnapshotFiles
+ *		Clean up any files that have been left behind by a crashed backend
+ *		that had exported snapshots before it died.
+ *
+ * This should be called during database startup or crash recovery.
+ */
+void DeleteAllExportedSnapshotFiles(void)
+{
+    char buf[MAXPGPATH];
+    DIR* s_dir = NULL;
+    struct dirent* s_de = NULL;
+    int rc = 0;
+
+    if (!(s_dir = AllocateDir(SNAPSHOT_EXPORT_DIR))) {
+        /*
+         * We really should have that directory in a sane cluster setup. But
+         * then again if we don't, it's not fatal enough to make it FATAL.
+         * Since we're running in the postmaster, LOG is our best bet.
+         */
+        ereport(LOG, (errmsg("could not open directory \"%s\": %m", SNAPSHOT_EXPORT_DIR)));
+        return;
+    }
+
+    while ((s_de = ReadDir(s_dir, SNAPSHOT_EXPORT_DIR)) != NULL) {
+        if (strcmp(s_de->d_name, ".") == 0 || strcmp(s_de->d_name, "..") == 0)
+            continue;
+
+        rc = snprintf_s(buf, MAXPGPATH, MAXPGPATH - 1, SNAPSHOT_EXPORT_DIR "/%s", s_de->d_name);
+        securec_check_ss(rc, "", "");
+        /* Again, unlink failure is not worthy of FATAL */
+        if (unlink(buf))
+            ereport(LOG, (errmsg("could not unlink file \"%s\": %m", buf)));
+    }
+
+    FreeDir(s_dir);
+}
+
+void StreamTxnContextSaveSnapmgr(void* stc)
+{
+    STCSaveElem(((StreamTxnContext*)stc)->RecentGlobalXmin, u_sess->utils_cxt.RecentGlobalXmin);
+    STCSaveElem(((StreamTxnContext*)stc)->TransactionXmin, u_sess->utils_cxt.TransactionXmin);
+    STCSaveElem(((StreamTxnContext*)stc)->RecentXmin, u_sess->utils_cxt.RecentXmin);
+}
+
+void StreamTxnContextRestoreSnapmgr(const void* stc)
+{
+    STCRestoreElem(((StreamTxnContext*)stc)->RecentGlobalXmin, u_sess->utils_cxt.RecentGlobalXmin);
+    STCRestoreElem(((StreamTxnContext*)stc)->TransactionXmin, u_sess->utils_cxt.TransactionXmin);
+    STCRestoreElem(((StreamTxnContext*)stc)->RecentXmin, u_sess->utils_cxt.RecentXmin);
+}
+
+bool ThereAreNoPriorRegisteredSnapshots(void)
+{
+    if (u_sess->utils_cxt.RegisteredSnapshots <= 1)
+        return true;
+
+    return false;
+}
+
+Snapshot PgFdwCopySnapshot(Snapshot snapshot)
+{
+    return CopySnapshot(snapshot);
+}
+
+/*
+ * Setup a snapshot that replaces normal catalog snapshots that allows catalog
+ * access to behave just like it did at a certain point in the past.
+ *
+ * Needed for logical decoding.
+ */
+void SetupHistoricSnapshot(Snapshot historic_snapshot, HTAB* tuplecids)
+{
+    Assert(historic_snapshot != NULL);
+
+    /* setup the timetravel snapshot */
+    u_sess->utils_cxt.HistoricSnapshot = historic_snapshot;
+
+    /* setup (cmin, cmax) lookup hash */
+    u_sess->utils_cxt.tuplecid_data = tuplecids;
+}
+
+/*
+ * Make catalog snapshots behave normally again.
+ */
+void TeardownHistoricSnapshot(bool is_error)
+{
+    u_sess->utils_cxt.HistoricSnapshot = NULL;
+    u_sess->utils_cxt.tuplecid_data = NULL;
+}
+
+bool HistoricSnapshotActive(void)
+{
+    return u_sess->utils_cxt.HistoricSnapshot != NULL;
+}
+
+HTAB* HistoricSnapshotGetTupleCids(void)
+{
+    Assert(HistoricSnapshotActive());
+    return u_sess->utils_cxt.tuplecid_data;
+}

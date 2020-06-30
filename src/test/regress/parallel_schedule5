@@ -1,0 +1,44 @@
+#show plan
+test: plan_hint
+
+###split from parallel_schedule4###
+
+# ----------
+# Another group of parallel tests
+# ----------
+# plsql_packages tests
+
+test: hw_empty_str_to_null
+#test: hw_varray hw_cursor hw_schema
+test: hw_schema
+
+test: tpchrush
+test: tpch01 tpch02 tpch03 tpch04 libcomm_check_status tpch03_querymem
+test: tpch05 tpch06 tpch07 tpch08 
+test: tpch09 tpch10 tpch11 tpch12 
+test: tpch13 tpch14 tpch15 tpch16 
+test: tpch17 tpch18 tpch19 tpch20 tpch18_querymem
+test: tpch21 tpch22 tpch11_pretty_performance
+
+#test export
+test: temp__2
+
+#test: vec_prepare -- original test
+test: vec_prepare_001 vec_prepare_002
+test: vec_prepare_003
+
+#test sort optimize
+test: sort_optimize_row sort_optimize_column sort_optimize_001
+#test early free
+test: early_free
+#test for col tpch with vector engine disabled
+test: tpch_disablevec01 tpch_disablevec03 tpch_disablevec04
+test: tpch_disablevec05 tpch_disablevec06 tpch_disablevec07
+test: tpch_disablevec08 tpch_disablevec09 tpch_disablevec12
+test: tpch_disablevec13 tpch_disablevec14 tpch_disablevec16
+test: tpch_disablevec18 tpch_disablevec19 tpch_disablevec21
+
+# This test case is used to monitor CATALOG_VERSION_NO, GUC parameter information and gs_upgrade llt coverage.
+# If CATALOG_VERSION_NO is changed, please inform the OM tools team, the OM tools scripts need to be modified together.
+# If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
+#test: recovery_2pc_tools

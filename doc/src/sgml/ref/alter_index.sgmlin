@@ -1,0 +1,31 @@
+<refentry id="SQL-ALTER_INDEX">
+<refmeta>
+<refentrytitle>ALTER INDEX</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER INDEX</refname>
+<refpurpose>change the definition of an index</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER INDEX [ IF EXISTS ] index_name 
+    RENAME TO new_name;
+ALTER INDEX [ IF EXISTS ] index_name 
+    SET TABLESPACE tablespace_name;
+ALTER INDEX [ IF EXISTS ] index_name 
+    SET ( {storage_parameter = value} [, ... ] );
+ALTER INDEX [ IF EXISTS ] index_name 
+    RESET ( storage_parameter [, ... ] ) ;
+ALTER INDEX [ IF EXISTS ] index_name 
+    [ MODIFY PARTITION partition_name ] UNUSABLE;
+ALTER INDEX index_name 
+    REBUILD [ PARTITION partition_name ];
+ALTER INDEX [ IF EXISTS ] index_name 
+    RENAME PARTITION partition_name TO new_partition_name;
+ALTER INDEX [ IF EXISTS ] index_name 
+    MOVE PARTITION index_partition_name TABLESPACE new_tablespace;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

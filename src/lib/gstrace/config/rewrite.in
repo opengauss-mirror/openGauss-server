@@ -1,0 +1,13 @@
+<func> OffsetVarNodes
+<func> ChangeVarNodes
+<func> IncrementVarSublevelsUp
+<func> IncrementVarSublevelsUp_rtable
+<func> rangeTableEntry_used
+<func> attribute_used
+<func> getInsertSelectQuery
+<func> AddQual
+<func> AddInvertedQual
+<func> contain_aggs_of_level
+<func> checkExprHasAggs
+<func> checkExprHasWindowFuncs
+<func> checkExprHasSubLink

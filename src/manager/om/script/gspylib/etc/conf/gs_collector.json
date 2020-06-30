@@ -1,0 +1,9 @@
+{
+    "Collect": 
+    [
+		{"TypeName": "System", "Content":"RunTimeInfo, HardWareInfo","Interval":"0", "Count":"1"},
+		{"TypeName": "Log", "Content" : "DataNode,ClusterManager", "Interval":"0", "Count":"1"},
+		{"TypeName": "Database", "Content": "pg_locks,pg_stat_activity,pg_thread_wait_status","Interval":"0", "Count":"1"},
+		{"TypeName": "Config", "Content": "DataNode", "Interval":"0", "Count":"1"}
+    ]
+}

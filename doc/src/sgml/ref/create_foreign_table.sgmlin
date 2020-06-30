@@ -1,0 +1,52 @@
+<refentry id="SQL-CREATE_FOREIGN_TABLE">
+<refmeta>
+<refentrytitle>CREATE FOREIGN TABLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE FOREIGN TABLE</refname>
+<refpurpose>define a new foreign table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE FOREIGN TABLE [ IF NOT EXISTS  ] table_name 
+( { column_name type_name POSITION(offset,length) [column_constraint ]
+	| LIKE source_table | table_constraint } [, ...] ) 
+SEVER gsmpp_server 
+OPTIONS (  { option_name ' value '  }  [, ...] ) 
+[  { WRITE ONLY  |  READ ONLY  }] 
+[ WITH error_table_name | LOG INTO error_table_name] 
+[REMOTE LOG 'name'] 
+[PER NODE REJECT LIMIT 'value']
+[ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ];
+CREATE FOREIGN TABLE [ IF NOT EXISTS ] table_name 
+( { column_name type_name 
+    [ { [CONSTRAINT constraint_name] NULL | 
+    [CONSTRAINT constraint_name] NOT NULL | 
+	column_constraint [...]} ] | 
+	table_constraint} [, ...] ) 
+SERVER server_name 
+OPTIONS ( { option_name ' value ' } [, ...] ) 
+DISTRIBUTE BY {ROUNDROBIN | REPLICATION}
+[ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
+[ PARTITION BY ( column_name ) [AUTOMAPPED]] ;
+CREATE FOREIGN TABLE [ IF NOT EXISTS ] table_name
+( [ { column_name type_name | LIKE source_table } [, ...] ] )
+SERVER server_name
+OPTIONS ( { option_name ' value ' } [, ...] )
+[ READ ONLY ]
+[ DISTRIBUTE BY {ROUNDROBIN} ]
+[ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ];
+
+where column_constraint can be:
+[CONSTRAINT constraint_name]
+{PRIMARY KEY | UNIQUE}
+[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED]
+where table_constraint can be:
+[CONSTRAINT constraint_name]
+{PRIMARY KEY | UNIQUE} (column_name)
+[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED]
+</synopsis>
+</refsynopsisdiv>
+</refentry>

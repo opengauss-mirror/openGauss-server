@@ -1,0 +1,59 @@
+create database view_bug_sjs;
+\c view_bug_sjs
+create table view_bug_sjs(a int, b int);
+create view test_sjs_view1(col1,col2)
+AS SELECT * FROM ( SELECT CAST(a/10000 AS DECIMAL(18,2)) , CAST(CAST(b AS DECIMAL(18,4))/a*100 AS DECIMAL(18,2)) FROM view_bug_sjs);
+create view test_sjs_view2(col1,col2)
+AS SELECT * FROM(SELECT * FROM ( SELECT CAST(a/10000 AS DECIMAL(18,2)) , CAST(CAST(b AS DECIMAL(18,4))/a*100 AS DECIMAL(18,2)) FROM view_bug_sjs));
+create view test_sjs_view3(col1,col2)
+AS SELECT * FROM(SELECT CAST(a/10000 AS DECIMAL(18,2)) , b AS "numeric" FROM view_bug_sjs);
+create view test_sjs_view4(col1,col2,col3)
+AS SELECT * FROM(SELECT CAST(a/10000 AS DECIMAL(18,2)) , CAST(CAST(b AS DECIMAL(18,4))/a*100 AS DECIMAL(18,2)), b AS "numeric" FROM view_bug_sjs);
+create view test_sjs_view5(col1,col2)
+AS SELECT t1.* FROM
+(SELECT a AS "numeric", b AS "numeric" FROM view_bug_sjs) t1,
+(SELECT a AS "numeric", b AS "numeric" FROM view_bug_sjs) t2;
+create view test_sjs_view6(col1,col2, col3, col4)
+AS SELECT t1.*, t2.* FROM
+(SELECT a AS "numeric", b AS "numeric" FROM view_bug_sjs) t1,
+(SELECT a AS "numeric", b AS "numeric" FROM view_bug_sjs) t2;
+create view test_sjs_view7(col1,col2,col3,col4,col5,col6)
+AS SELECT t1.*, t1.b, t2.* FROM
+(SELECT a AS "numeric", b, b AS "numeric" FROM view_bug_sjs) t1,
+(SELECT a AS "numeric", b AS "numeric" FROM view_bug_sjs) t2;
+create view test_sjs_view8(col1,col2,col3,col4,col5,col6)
+AS SELECT t1.*, t1.b, t2.* FROM
+(SELECT a, b, b AS "numeric" FROM view_bug_sjs) t1 left join
+(SELECT a, b AS "numeric" FROM view_bug_sjs) t2 on t1.a = t2.a;
+create view test_sjs_view9(col1,col2,col3,col4,col5,col6)
+AS SELECT t1.*, t1.b, t2.* FROM
+(SELECT a, b, b AS "numeric" FROM view_bug_sjs) t1 inner join
+(SELECT a, b AS "numeric" FROM view_bug_sjs) t2 on t1.a = t2.a;
+create view test_sjs_view10(col1,col2,col3,col4,col5,col6)
+AS SELECT t1.*, t1.b, t2.* FROM
+(SELECT a, b, b AS "numeric" FROM view_bug_sjs) t1 right join
+(SELECT a, b AS "numeric" FROM view_bug_sjs) t2 on t1.a = t2.a;
+create view test_sjs_view11(col1,col2,col3,col4)
+AS SELECT t1.*, t2.* FROM
+(SELECT * FROM view_bug_sjs) t1 right join
+(SELECT * FROM view_bug_sjs) t2 on t1.a = t2.a;
+create view test_sjs_view11_1(col1,col2,col3,col4)
+AS SELECT * FROM
+(SELECT * FROM view_bug_sjs) t1 right join
+(SELECT * FROM view_bug_sjs) t2 on t1.a = t2.a;
+create view test_sjs_view12(col1,col2,col3,col4)
+AS SELECT t1.*, t2.* FROM
+(SELECT * FROM view_bug_sjs) t1 right join
+(SELECT * FROM view_bug_sjs) t2 on t1.a = t2.a;
+create view test_sjs_view13(col1,col2,col3,col4)
+AS SELECT * FROM (VALUES (generate_series(1, 2), generate_series(1, 2),generate_series(1, 2),generate_series(1, 2))) t1;
+create view test_sjs_view14(col1,col2,col3,col4)
+AS SELECT * FROM (SELECT * FROM pg_stat_get_activity(NULL::bigint)) t1;
+\! @abs_bindir@/gs_dump view_bug_sjs -p @portstring@ --include-depend-objs --exclude-self | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^ALTER|^DROP'| tr -s ‘'\n' > @abs_bindir@/view_dump.sql 2>&1
+\! cat @abs_bindir@/view_dump.sql
+DROP TABLE view_bug_sjs CASCADE;
+DROP VIEW test_sjs_view13;
+DROP VIEW test_sjs_view14;
+\i @abs_bindir@/view_dump.sql
+\c regression
+drop database view_bug_sjs;

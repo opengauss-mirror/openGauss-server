@@ -1,0 +1,129 @@
+/* -------------------------------------------------------------------------
+ *
+ * procarray.h
+ *	  POSTGRES process array definitions.
+ *
+ *
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ *
+ * src/include/storage/procarray.h
+ *
+ * -------------------------------------------------------------------------
+ */
+#ifndef PROCARRAY_H
+#define PROCARRAY_H
+
+#include "storage/standby.h"
+#include "utils/snapshot.h"
+#include "pgstat.h"
+
+extern Size ProcArrayShmemSize(void);
+extern void CreateSharedProcArray(void);
+extern void ProcArrayAdd(PGPROC* proc);
+extern void ProcArrayRemove(PGPROC* proc, TransactionId latestXid, bool isCommit);
+
+extern Size RingBufferShmemSize(void);
+extern void CreateSharedRingBuffer(void);
+
+extern void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommit = true);
+extern void ProcArrayClearTransaction(PGPROC* proc);
+extern bool TransactionIdIsInProgress(
+    TransactionId xid, bool* needSync = NULL, bool shortcutByRecentXmin = false, bool bCareNextxid = false);
+
+#ifdef PGXC /* PGXC_DATANODE */
+extern void SetGlobalSnapshotData(
+    TransactionId xmin, TransactionId xmax, uint64 scn, GTM_Timeline timeline, bool ss_need_sync_wait_all);
+extern void UnsetGlobalSnapshotData(void);
+extern void ReloadConnInfoOnBackends(void);
+#endif /* PGXC */
+extern char dump_memory_context_name[MEMORY_CONTEXT_NAME_LEN];
+extern void DumpMemoryCtxOnBackend(ThreadId tid, const char* mem_ctx);
+extern void ProcArrayInitRecovery(TransactionId initializedUptoXID);
+extern void ProcArrayApplyRecoveryInfo(RunningTransactions running);
+
+extern int GetMaxSnapshotXidCount(void);
+extern int GetMaxSnapshotSubxidCount(void);
+
+#ifndef ENABLE_MULTIPLE_NODES
+Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot, bool forHSFeedBack = false);
+#else
+extern Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot);
+#endif
+extern Snapshot GetLocalSnapshotData(Snapshot snapshot);
+extern void ReleaseSnapshotData(Snapshot snapshot);
+
+extern bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid);
+extern void set_proc_csn_and_check(const char* func, CommitSeqNo csn_min, SnapshotType snapshot_type);
+extern RunningTransactions GetRunningTransactionData(void);
+
+extern bool TransactionIdIsActive(TransactionId xid);
+extern TransactionId GetRecentGlobalXmin(void);
+extern TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin = false);
+extern void CheckCurrentTimeline(GTM_Timeline timeline);
+extern TransactionId GetOldestActiveTransactionId(void);
+extern void FixCurrentSnapshotByGxid(TransactionId gxid);
+extern void CheckSnapshotIsValidException(Snapshot snapshot, const char* location);
+extern TransactionId GetOldestSafeDecodingTransactionId(bool catalogOnly);
+extern void CheckSnapshotTooOldException(Snapshot snapshot, const char* location);
+
+extern VirtualTransactionId* GetVirtualXIDsDelayingChkpt(int* nvxids);
+extern bool HaveVirtualXIDsDelayingChkpt(VirtualTransactionId* vxids, int nvxids);
+
+extern PGPROC* BackendPidGetProc(ThreadId pid);
+extern int BackendXidGetPid(TransactionId xid);
+extern bool IsBackendPid(ThreadId pid);
+
+extern VirtualTransactionId* GetCurrentVirtualXIDs(
+    TransactionId limitXmin, bool excludeXmin0, bool allDbs, int excludeVacuum, int* nvxids);
+extern VirtualTransactionId* GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbOid);
+extern ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode);
+
+extern bool MinimumActiveBackends(int min);
+extern int CountDBBackends(Oid databaseid);
+extern void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPending);
+extern int CountUserBackends(Oid roleid);
+extern bool CountOtherDBBackends(Oid databaseId, int* nbackends, int* nprepared);
+
+extern void XidCacheRemoveRunningXids(TransactionId xid, int nxids, const TransactionId* xids, TransactionId latestXid);
+extern void SetPgXactXidInvalid(void);
+
+extern void ProcArraySetReplicationSlotXmin(TransactionId xmin, TransactionId catalog_xmin, bool already_locked);
+
+extern void ProcArrayGetReplicationSlotXmin(TransactionId* xmin, TransactionId* catalog_xmin);
+extern TransactionId GetGlobal2pcXmin();
+
+extern void CSNLogRecordAssignedTransactionId(TransactionId newXid);
+
+#ifdef PGXC
+typedef enum {
+    SNAPSHOT_UNDEFINED,   /* Coordinator has not sent snapshot or not yet connected */
+    SNAPSHOT_LOCAL,       /* Coordinator has instructed Datanode to build up snapshot from the local procarray */
+    SNAPSHOT_COORDINATOR, /* Coordinator has sent snapshot data */
+    SNAPSHOT_DIRECT,      /* Datanode obtained directly from GTM */
+    SNAPSHOT_DATANODE     /* obtained directly from other thread in the same datanode*/
+} SnapshotSource;
+
+#endif
+
+extern void PrintCurrentSnapshotInfo(int logelevel, TransactionId xid, Snapshot snapshot, const char* action);
+extern void ProcSubXidCacheClean();
+extern void InitProcSubXidCacheContext();
+extern void ProcArrayResetXmin(PGPROC* proc);
+extern uint64 GetCommitCsn();
+extern void setCommitCsn(uint64 commit_csn);
+#ifndef ENABLE_MULTIPLE_NODES
+extern CommitSeqNo getNextCSN();
+#endif
+extern void SyncLocalXidWait(TransactionId xid);
+
+extern void UpdateCSNLogAtTransactionEND(
+    PGPROC* proc, TransactionId xid, uint32 nsubxids, TransactionId* subXids, CommitSeqNo csn, bool isCommit);
+
+#endif /* PROCARRAY_H */
+
+#ifdef ENABLE_UT
+extern void ResetProcXidCache(PGPROC* proc, bool needlock);
+#endif /* USE_UT */
+

@@ -1,0 +1,56 @@
+<refentry id="SQL-CREATE_FUNCTION">
+<refmeta>
+<refentrytitle>CREATE FUNCTION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE FUNCTION</refname>
+<refpurpose>define a new function</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ OR REPLACE  ] FUNCTION function_name
+    ( [  { argname [ argmode  ] argtype [  { DEFAULT  | :=  | =  } expression  ]}  [, ...]  ] )
+    [ RETURNS rettype [ DETERMINISTIC  ]
+        | RETURNS TABLE (  { column_name column_type  }  [, ...] )]
+    LANGUAGE lang_name 
+    [  
+        {IMMUTABLE  | STABLE  | VOLATILE}
+        | {SHIPPABLE | NOT SHIPPABLE}
+        | [ NOT  ] LEAKPROOF 
+        | WINDOW
+        | {CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT} 
+        | {[ EXTERNAL  ] SECURITY INVOKER  | [ EXTERNAL  ] SECURITY DEFINER | AUTHID DEFINER  | AUTHID CURRENT_USER} 
+        | {FENCED | NOT FENCED}
+        | {PACKAGE}
+        | COST execution_cost  
+        | ROWS result_rows
+        | SET configuration_parameter { {TO | =} value | FROM CURRENT }
+    ] [...]
+    {
+        AS 'definition'
+        | AS 'obj_file', 'link_symbol'
+    }
+
+CREATE [ OR REPLACE  ] FUNCTION function_name
+    ( [  { argname [ argmode  ] argtype [  { DEFAULT | := | =  } expression  ] }  [, ...]  ] )
+    RETURN rettype [ DETERMINISTIC  ]
+    [ 
+        {IMMUTABLE  | STABLE  | VOLATILE } 
+        | {SHIPPABLE | NOT SHIPPABLE}
+        | {PACKAGE}
+        | [ NOT  ] LEAKPROOF  
+        | {CALLED ON NULL INPUT  | RETURNS NULL ON NULL INPUT  | STRICT } 
+        | {[ EXTERNAL  ] SECURITY INVOKER  | [ EXTERNAL  ] SECURITY DEFINER | | AUTHID DEFINER  | AUTHID CURRENT_USER}
+        | COST execution_cost
+        | ROWS result_rows
+        | SET configuration_parameter { {TO | =} value | FROM CURRENT } 
+     ][...]
+     { 
+        IS | AS  
+     } plsql_body
+/
+</synopsis>
+</refsynopsisdiv>
+</refentry>

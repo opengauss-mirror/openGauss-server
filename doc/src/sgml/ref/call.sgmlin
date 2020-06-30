@@ -1,0 +1,16 @@
+<refentry id="SQL-CALL">
+<refmeta>
+<refentrytitle>CALL</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CALL</refname>
+<refpurpose>call a defined function</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CALL [schema.] func_name ( param_expr );
+</synopsis>
+</refsynopsisdiv>
+</refentry>

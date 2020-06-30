@@ -1,0 +1,19 @@
+
+test: hw_dfx_thread_status
+
+test: stable_function_shippable
+# ----------
+# data partition
+# ----------
+test: physical_slot
+
+test: hw_smp
+
+# test MERGE INTO
+
+# test INSERT UPDATE
+test: insert_update_001 insert_update_002 insert_update_003 insert_update_008 insert_update_009 insert_update_010
+test: delete update namespace case select_having select_implicit
+test: hw_test_operate_user
+test: hw_createtbl_llt gsqlerr
+test: hw_sql_llt sqlLLT

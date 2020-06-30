@@ -1,0 +1,1005 @@
+create schema hw_cursor_part1;
+set current_schema = hw_cursor_part1;
+create table company(name varchar(100), loc varchar(100), no integer);
+insert into company values ('macrosoft',    'usa',          001);
+insert into company values ('oracle',       'usa',          002);
+insert into company values ('backberry',    'canada',       003);
+insert into company values ('sumsung',      'south korea',  004);
+insert into company values ('tencent',      'china',        005);
+insert into company values ('ibm',          'usa',          006);
+insert into company values ('nokia',        'finland',      007);
+insert into company values ('apple',        'usa',          008);
+insert into company values ('sony',         'japan',        009);
+insert into company values ('baidu',        'china',        010);
+insert into company values ('kingsoft',     'china',        011);
+--1 test explicit cursor without args
+create or replace procedure test_cursor_1 
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+    cursor c1_all is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+begin 
+    if not c1_all%isopen then
+        raise notice '%','c1_all%isopen=false: c1_all closed ';
+        open c1_all;
+        raise notice '%','c1_all opened ';
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        exit when c1_all%notfound;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        raise notice '%','c1_all%isopen=true: c1_all opened ';
+        close c1_all;
+        raise notice '%','c1_all closed ';
+    end if;
+end;
+/
+call test_cursor_1();
+NOTICE:  c1_all%isopen=false: c1_all closed 
+NOTICE:  c1_all opened 
+NOTICE:  apple : usa : 8
+NOTICE:  backberry : canada : 3
+NOTICE:  baidu : china : 10
+NOTICE:  ibm : usa : 6
+NOTICE:  kingsoft : china : 11
+NOTICE:  macrosoft : usa : 1
+NOTICE:  nokia : finland : 7
+NOTICE:  oracle : usa : 2
+NOTICE:  sony : japan : 9
+NOTICE:  sumsung : south korea : 4
+NOTICE:  tencent : china : 5
+NOTICE:  c1_all%isopen=true: c1_all opened 
+NOTICE:  c1_all closed 
+ test_cursor_1 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_1;
+--2 test explicit cursor with args
+create or replace procedure test_cursor_2 
+as 
+    company_name    varchar(100);
+    company_loc     varchar(100);
+    company_no      integer;
+
+    cursor c2_no_range(no_1 integer, no_2 integer) is --cursor with args 
+        select name, loc, no from company where no >=no_1 and no <= no_2 order by 1, 2, 3;
+begin 
+    if not c2_no_range%isopen then
+        raise notice '%','c2_no_range%isopen=false: c2_no_range closed';
+        open c2_no_range(5,10);
+        raise notice '%','c2_no_range opened';
+    end if;
+    loop
+        fetch c2_no_range into company_name, company_loc, company_no;
+        exit when c2_no_range%notfound;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c2_no_range%isopen then
+        raise notice '%','c2_no_range%isopen=true: c2_no_range opened';
+        close c2_no_range;
+        raise notice '%','c2_no_range closed';
+    end if;
+end;
+/
+call test_cursor_2();
+NOTICE:  c2_no_range%isopen=false: c2_no_range closed
+NOTICE:  c2_no_range opened
+NOTICE:  apple : usa : 8
+NOTICE:  baidu : china : 10
+NOTICE:  ibm : usa : 6
+NOTICE:  nokia : finland : 7
+NOTICE:  sony : japan : 9
+NOTICE:  tencent : china : 5
+NOTICE:  c2_no_range%isopen=true: c2_no_range opened
+NOTICE:  c2_no_range closed
+ test_cursor_2 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_2;
+--3 test explicit cursor attributes
+create or replace procedure test_cursor_3
+as
+    company_name    varchar(100);
+    company_loc     varchar(100);
+    company_no      integer;
+
+    cursor c1_all is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+begin 
+    if not c1_all%isopen then
+        raise notice '%','c1_all%isopen=false: c1_all closed';
+        open c1_all;
+        raise notice '%','c1_all opened';
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        if c1_all%notfound then
+            raise notice '%','c1_all%notfound=true: no rows selected';
+            exit;
+        end if;
+        if c1_all%found then
+            raise notice 'rows_%: %  %  %',c1_all%rowcount,company_name,company_loc,company_no;
+        end if;
+    end loop;
+    if c1_all%isopen then
+        raise notice '%','c1_all%isopen=true: c1_all opened';
+        close c1_all;
+        raise notice '%','c1_all closed';
+    end if;
+end;
+/
+call test_cursor_3();
+NOTICE:  c1_all%isopen=false: c1_all closed
+NOTICE:  c1_all opened
+NOTICE:  rows_1: apple  usa  8
+NOTICE:  rows_2: backberry  canada  3
+NOTICE:  rows_3: baidu  china  10
+NOTICE:  rows_4: ibm  usa  6
+NOTICE:  rows_5: kingsoft  china  11
+NOTICE:  rows_6: macrosoft  usa  1
+NOTICE:  rows_7: nokia  finland  7
+NOTICE:  rows_8: oracle  usa  2
+NOTICE:  rows_9: sony  japan  9
+NOTICE:  rows_10: sumsung  south korea  4
+NOTICE:  rows_11: tencent  china  5
+NOTICE:  c1_all%notfound=true: no rows selected
+NOTICE:  c1_all%isopen=true: c1_all opened
+NOTICE:  c1_all closed
+ test_cursor_3 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_3;
+--4 test implicit cursor attributes: (sql%)%found,%notfound,%isopen,%rowcount
+create or replace procedure test_cursor_4
+as
+begin 
+    delete from company where loc='china';
+    if sql%isopen then --sql%isopen always false, as closed after the execution of sql.
+        raise notice '%','sql%isopen=true: implicit opened!';
+    end if;
+    if not sql%isopen then 
+        raise notice '%','sql%isopen=false: implicit closed!';
+    end if;
+    if sql%found then
+        raise notice 'sql%%found=true: % rows',sql%rowcount;
+    end if;
+    if sql%notfound then
+        raise notice '%','sql%found=false: no rows found!';
+    end if;
+end;
+/
+call test_cursor_4();
+NOTICE:  sql%isopen=false: implicit closed!
+NOTICE:  sql%found=true: 3 rows
+ test_cursor_4 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_4;
+--5 test dynamic cursor: (weak type)without return
+create or replace procedure test_cursor_5()
+as
+    company_name    varchar(100);
+    company_loc     varchar(100);
+    company_no      integer;
+
+    type ref_cur_type is ref cursor; --declare cursor type
+        my_cur ref_cur_type; --declare cursor var
+    sqlstr varchar(100);
+begin 
+    sqlstr := 'select name,loc,no from company where loc=:1 order by 1, 2, 3';
+    open my_cur for 'select name,loc,no from company order by 1, 2, 3';
+    fetch my_cur into company_name,company_loc,company_no;
+    while my_cur%found loop
+    raise notice '% : % : %',company_name,company_loc,company_no;
+        fetch my_cur into company_name,company_loc,company_no;
+    end loop;
+    close my_cur;
+end;
+/
+call test_cursor_5();
+NOTICE:  apple : usa : 8
+NOTICE:  backberry : canada : 3
+NOTICE:  ibm : usa : 6
+NOTICE:  macrosoft : usa : 1
+NOTICE:  nokia : finland : 7
+NOTICE:  oracle : usa : 2
+NOTICE:  sony : japan : 9
+NOTICE:  sumsung : south korea : 4
+ test_cursor_5 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_5;
+----6 test more than one cursors access	
+create or replace procedure test_cursor_6
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+    cursor c1_all is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;		
+    cursor c2_no_range(no_1 integer, no_2 integer) is --cursor with args 
+        select name, loc, no from company where no >=no_1 and no <= no_2 order by 1, 2, 3;
+begin 
+    open c1_all; 
+    open c2_no_range(50,100); --result null 	
+    fetch c1_all into company_name, company_loc, company_no;
+    fetch c2_no_range into company_name, company_loc, company_no;
+    if c1_all%found then
+        raise notice '%','c1_all%found=true';
+    end if;
+    if c1_all%notfound then
+        raise notice '%','c1_all%notfound=true';
+    end if;
+    if c2_no_range%found then
+        raise notice '%','c2_no_range%found=true';
+    end if;
+    if c2_no_range%notfound then
+        raise notice '%','c2_no_range%notfound=true';
+    end if;
+    raise notice 'c1_all%%rowcount=%',c1_all%rowcount;
+    raise notice 'c2_no_range%%rowcount=%',c2_no_range%rowcount;
+end;
+/
+call test_cursor_6();
+NOTICE:  c1_all%found=true
+NOTICE:  c2_no_range%notfound=true
+NOTICE:  c1_all%rowcount=1
+NOTICE:  c2_no_range%rowcount=0
+ test_cursor_6 
+---------------
+ 
+(1 row)
+
+drop procedure test_cursor_6;
+create table tbl (id int);
+insert into tbl values  (1);
+insert into tbl values  (2);
+insert into tbl values  (3);
+insert into tbl values  (4);
+create or replace procedure sp_testsp
+as
+    temp1       integer;
+    temp2       integer;
+    sql_str     varchar2(200);
+begin
+    declare
+        type crs_recode_type is ref cursor;
+        c1 crs_recode_type;
+    begin
+        temp1   := 4;
+        temp2   := 0;
+        sql_str := 'select id from tbl where id < :a and id > :b order by 1';
+        open c1 for sql_str using in temp1, in temp2;
+        loop
+            fetch c1 into temp1;
+            raise notice '%',temp1;
+            raise notice '%',temp1;
+            exit when c1%notfound; 
+        end loop;
+        close c1;
+--test implicit cursor rowcount attribute
+        select id into temp1 from tbl where id=2 order by 1;
+        raise notice '%',sql%rowcount;
+        update tbl set id=100 where id<3;
+        raise notice '%',sql%rowcount;
+        insert into tbl select * from tbl;
+        raise notice '%',sql%rowcount;
+        delete from tbl;
+        raise notice '%',sql%rowcount;
+    end;  
+end;
+/
+call sp_testsp();
+NOTICE:  1
+NOTICE:  1
+NOTICE:  2
+NOTICE:  2
+NOTICE:  3
+NOTICE:  3
+NOTICE:  3
+NOTICE:  3
+NOTICE:  1
+NOTICE:  2
+NOTICE:  4
+NOTICE:  8
+ sp_testsp 
+-----------
+ 
+(1 row)
+
+create table a3(id int, name varchar2(100));
+insert into a3 values(1,'test');
+insert into a3 values(2,'test');
+create or replace function func_test(a in sys_refcursor,b in varchar2(100))
+return varchar2(100) as
+v_out varchar2(100);
+v_a varchar2(100);
+v_b varchar2(100);
+begin
+    raise notice 'dfdf+%',a%isopen;
+    if a%isopen then
+        v_out := '0';
+		raise notice '%',a%isopen;
+        if b = '1' then 
+            fetch a into v_a,v_b;
+            raise notice '%,%',v_a,v_b;
+        end if;
+    else
+        v_out := 'x'; --not open
+    end if;
+    return v_out;
+end;
+/
+--test cursor as an in parameter, its option can be changed in a function
+create or replace procedure proc_test(i_b in varchar2(100),o_retcode out varchar2(100))
+as
+v_c sys_refcursor;
+v_status varchar2(100);
+begin 
+    o_retcode := '0';
+	v_status := func_test(v_c,i_b);
+    open v_c for select id,name from a3 order by id;
+    v_status := func_test(v_c,i_b);
+	raise notice '%',v_c%isopen;
+    raise notice '%',v_status;
+    exception when others then
+		o_retcode := '-1';
+end;
+/
+call proc_test(1,'hello');
+NOTICE:  dfdf+f
+CONTEXT:  PL/pgSQL function proc_test(character varying) line 6 at assignment
+NOTICE:  dfdf+t
+CONTEXT:  PL/pgSQL function proc_test(character varying) line 8 at assignment
+NOTICE:  t
+CONTEXT:  PL/pgSQL function proc_test(character varying) line 8 at assignment
+NOTICE:  1,test
+CONTEXT:  PL/pgSQL function proc_test(character varying) line 8 at assignment
+NOTICE:  t
+NOTICE:  0
+ o_retcode 
+-----------
+ 0
+(1 row)
+
+create or replace function func_test(a in sys_refcursor,b in number)
+return number 
+as
+	v_out number;
+	v_a number;
+	v_b number;
+begin
+	if a%isopen then
+                raise notice '%','open is true';
+	end if;
+	
+    if a%isopen then
+        v_out := 0;
+                 raise notice '%','a is open';
+        if b = 1 then 
+            fetch a into v_a;
+                        raise notice '%','fetch is execute';
+        end if;
+    end if;
+    return v_out;
+end;
+/
+create or replace procedure proc_test(i_b in number)
+as
+v_c sys_refcursor;
+v_status int;
+begin 
+    open v_c for select id from a3;
+	if (v_c%found) then
+                raise notice '%','v_c found is true';
+	end if;
+	if (v_c%notfound) then
+                raise notice '%','v_c not found is true';
+	end if;
+	if (v_c%rowcount = 0) then
+                raise notice '%','v_c row count 0';
+	end if;
+    v_status := func_test(v_c,i_b);
+	
+	if (v_c%found) then
+                raise notice '%','v_c found is true';
+	end if;
+	if (v_c%notfound) then
+                raise notice '%','v_c not found is true';
+	end if;
+	if (v_c%rowcount = 1) then
+                raise notice '%','v_c row count 1';
+	end if;
+end;
+/
+call proc_test(1);
+NOTICE:  v_c row count 0
+NOTICE:  open is true
+CONTEXT:  PL/pgSQL function proc_test(numeric) line 15 at assignment
+NOTICE:  a is open
+CONTEXT:  PL/pgSQL function proc_test(numeric) line 15 at assignment
+NOTICE:  fetch is execute
+CONTEXT:  PL/pgSQL function proc_test(numeric) line 15 at assignment
+NOTICE:  v_c found is true
+NOTICE:  v_c row count 1
+ proc_test 
+-----------
+ 
+(1 row)
+
+create table sections(section_ID int);
+insert into sections values(1);
+insert into sections values(1);
+insert into sections values(1);
+insert into sections values(1);
+CREATE OR REPLACE function proc_sys_ref()
+return SYS_REFCURSOR
+IS 
+	C1 SYS_REFCURSOR;
+ BEGIN
+	OPEN C1 FOR SELECT section_ID FROM sections ORDER BY section_ID; 
+	return C1; 
+ END; 
+ /
+ DECLARE 
+	 C1 SYS_REFCURSOR; 
+	 TEMP NUMBER(4); 
+ BEGIN 
+	 c1 = proc_sys_ref();
+	 if c1%isopen then
+                 raise notice '%','ok';
+	end if;
+	
+	 LOOP  
+		 FETCH C1 INTO TEMP;   
+                 raise notice '%',C1%ROWCOUNT;
+		 EXIT WHEN C1%NOTFOUND; 
+	 END LOOP;  
+ END; 
+ /
+NOTICE:  ok
+NOTICE:  1
+NOTICE:  2
+NOTICE:  3
+NOTICE:  4
+NOTICE:  4
+ 
+ drop function proc_sys_ref();
+ 
+--test cursor as an out parameter, its option can be changed in a function
+CREATE OR REPLACE PROCEDURE proc_sys_ref(O out SYS_REFCURSOR)
+IS 
+	C1 SYS_REFCURSOR;
+ BEGIN
+	OPEN C1 FOR SELECT section_ID FROM sections ORDER BY section_ID; 
+	O := C1; 
+ END; 
+ /
+ DECLARE 
+	 C1 SYS_REFCURSOR; 
+	 TEMP NUMBER(4); 
+ BEGIN 
+	 proc_sys_ref(C1);
+	 if c1%isopen then
+                 raise notice '%','ok';
+	end if;
+	
+	 LOOP  
+		 FETCH C1 INTO TEMP;   
+                 raise notice '%',C1%ROWCOUNT;
+		 EXIT WHEN C1%NOTFOUND; 
+	 END LOOP;  
+ END; 
+ /
+NOTICE:  ok
+NOTICE:  1
+NOTICE:  2
+NOTICE:  3
+NOTICE:  4
+NOTICE:  4
+ 
+drop table TEST_TB;
+ERROR:  table "test_tb" does not exist
+CREATE TABLE TEST_TB(ID INTEGER);
+INSERT INTO TEST_TB VALUES(123);
+INSERT INTO TEST_TB VALUES(124);
+INSERT INTO TEST_TB VALUES(125);
+DECLARE
+    CURSOR CURS1 IS SELECT * FROM TEST_TB;
+ TEMP INTEGER:=0;
+BEGIN
+	if CURS1%isopen then
+                raise notice '%','curosr is open';
+	end if;
+	FOR VARA IN CURS1 LOOP
+                raise notice '%',CURS1%ROWCOUNT;
+	END LOOP;
+	if not CURS1%isopen then
+                raise notice '%','curosr is open';
+	end if;
+END;
+/
+NOTICE:  1
+NOTICE:  2
+NOTICE:  3
+NOTICE:  curosr is open
+--test multi cursor option
+create or replace procedure Test_cursor_3
+as
+    company_name    varchar(100);
+    company_loc     varchar(100);
+    company_no      integer;
+
+    cursor c1_all is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+
+	cursor c2_no_range(no_1 integer, no_2 integer) is --cursor with args 
+        select name, loc, no from company where no >=no_1 and no <= no_2 order by 1, 2, 3;
+
+begin
+	
+	open c1_all;
+	
+    if not c2_no_range%isopen then
+        raise notice '%','c2_no_range%isopen=false: c2_no_range closed';
+        raise notice '%','c2_no_range opened';
+    end if;	
+
+    if c1_all%isopen then
+        raise notice '%','c1_all%isopen=false: c1_all closed';
+        raise notice '%','c1_all opened';
+    end if;
+	
+	close c1_all;
+	
+	open c2_no_range(1,2);
+	
+    if c1_all%isopen then
+        raise notice '%','c1_all%isopen=true: c1_all closed';
+        raise notice '%','c1_all opened';
+    end if;
+	
+    if  c2_no_range%isopen then
+        raise notice '%','c2_no_range%isopen=true: c2_no_range opened';
+    end if;	
+
+	close c2_no_range;
+end;
+/
+call Test_cursor_3();
+NOTICE:  c2_no_range%isopen=false: c2_no_range closed
+NOTICE:  c2_no_range opened
+NOTICE:  c1_all%isopen=false: c1_all closed
+NOTICE:  c1_all opened
+NOTICE:  c2_no_range%isopen=true: c2_no_range opened
+ test_cursor_3 
+---------------
+ 
+(1 row)
+
+--test return cursor or record
+ drop table TEST_TB;
+CREATE TABLE TEST_TB(ID INTEGER);
+INSERT INTO TEST_TB VALUES(123);
+INSERT INTO TEST_TB VALUES(124);
+INSERT INTO TEST_TB VALUES(125);
+DECLARE
+    CURSOR CURS1 IS SELECT * FROM TEST_TB order by 1;
+ TEMP INTEGER:=0;
+BEGIN
+	if not CURS1%isopen then
+                raise notice '%','curosr is open';
+	end if;
+	FOR VARA IN CURS1 LOOP
+                raise notice '%',CURS1%ROWCOUNT;
+	END LOOP;
+	if not CURS1%isopen then
+                raise notice '%','curosr is open';
+	end if;
+END;
+/
+NOTICE:  curosr is open
+NOTICE:  1
+NOTICE:  2
+NOTICE:  3
+NOTICE:  curosr is open
+--test return set
+create or replace function func_test(a in sys_refcursor,b in number)
+return setof number
+as
+	v_out number;
+	v_a number;
+	v_b number;
+begin
+    if a%isopen then
+        v_out := 0;
+                 raise notice '%','a is open';
+        if b = 1 then 
+            fetch a into v_a;
+                        raise notice '%','fetch is execute';
+        end if;
+    end if;
+end;
+/
+create or replace procedure proc_test(i_b in varchar2(100),o_retcode out varchar2(100))
+as
+v_c sys_refcursor;
+v_status varchar2(100);
+begin 
+    o_retcode := '0';
+    open v_c for select id,name from a3 limit 10;
+    v_status := func_test(v_c,i_b);
+	raise notice '%',v_c%isopen;
+    raise notice '%',v_status;
+end;
+/
+select proc_test('1');
+NOTICE:  a is open
+CONTEXT:  referenced column: func_test
+SQL statement "SELECT func_test(v_c,i_b)"
+PL/pgSQL function proc_test(character varying) line 7 at assignment
+referenced column: proc_test
+NOTICE:  fetch is execute
+CONTEXT:  referenced column: func_test
+SQL statement "SELECT func_test(v_c,i_b)"
+PL/pgSQL function proc_test(character varying) line 7 at assignment
+referenced column: proc_test
+NOTICE:  t
+CONTEXT:  referenced column: proc_test
+NOTICE:  <NULL>
+CONTEXT:  referenced column: proc_test
+ proc_test 
+-----------
+ 0
+(1 row)
+
+--test dynamic anonimous
+create table staffs(first_name VARCHAR2, phone_number  VARCHAR2, salary        NUMBER(8,2), section_id int);
+insert into staffs values('first','12345',1234,30);
+DECLARE
+    name          VARCHAR2(20);
+    phone_number  VARCHAR2(20);
+    salary        NUMBER(8,2);
+    sqlstr        VARCHAR2(1024);
+    TYPE app_ref_cur_type IS REF CURSOR;  
+    my_cur app_ref_cur_type;  
+    
+BEGIN
+    sqlstr := 'select first_name,phone_number,salary from staffs
+         where section_id = :1';
+    OPEN my_cur FOR sqlstr USING '30'; 
+	if (my_cur%isopen) then
+                raise notice '%','cursor is open';
+	end if;
+	
+    FETCH my_cur INTO name, phone_number, salary; 
+    WHILE my_cur%FOUND LOOP
+          raise notice '% # % # %',name,phone_number,salary;
+          FETCH my_cur INTO name, phone_number, salary;
+    END LOOP;
+    CLOSE my_cur; 
+END;
+/		
+NOTICE:  cursor is open
+NOTICE:  first # 12345 # 1234.00
+CREATE OR REPLACE PROCEDURE proc_sys_ref(O in SYS_REFCURSOR, O2 out SYS_REFCURSOR)
+IS 
+	C1 SYS_REFCURSOR;
+ BEGIN
+	OPEN C1 FOR SELECT section_ID FROM sections ORDER BY section_ID; 
+	O := C1; 
+	O2 := C1;
+ END; 
+ /
+DECLARE
+    statement  VARCHAR2(200);
+    param2     SYS_REFCURSOR;
+	param1     SYS_REFCURSOR;
+BEGIN
+ 
+    statement := 'call proc_sys_ref(:col_2,:col_1)';
+    EXECUTE IMMEDIATE statement
+        USING IN  param2, out param1;
+	if (param2%isopen) then
+                raise notice '%','function call is ok';
+     else
+            raise notice '%','function call is wrong';
+		
+		
+	end if;
+
+	if (param1%isopen) then
+                raise notice '%','param1 function call is ok';
+     else
+            raise notice '%','aram1 function call is wrong';
+	end if;
+END;
+/
+NOTICE:  function call is ok
+NOTICE:  param1 function call is ok
+CREATE OR REPLACE PROCEDURE proc_sys_ref(O out SYS_REFCURSOR, b out SYS_REFCURSOR)
+IS 
+	C1 SYS_REFCURSOR;
+ BEGIN
+	OPEN C1 FOR SELECT section_ID FROM sections ORDER BY section_ID; 
+	O := C1;
+	b := C1;
+ END; 
+ /
+ DECLARE 
+	 C1 SYS_REFCURSOR; 
+	 C2 SYS_REFCURSOR; 
+	 TEMP NUMBER(4); 
+ BEGIN 
+	 proc_sys_ref(C1, c2);
+	 if c1%isopen then
+                 raise notice '%','ok';
+	end if;
+	
+	 if c2%FOUND then
+                 raise notice '%','ok';
+	end if;
+	
+	 LOOP  
+		 FETCH C1 INTO TEMP;   
+                 raise notice '%',C1%ROWCOUNT;
+		 EXIT WHEN C1%NOTFOUND; 
+	 END LOOP;  
+ END; 
+ /
+NOTICE:  ok
+NOTICE:  1
+NOTICE:  2
+NOTICE:  3
+NOTICE:  4
+NOTICE:  4
+ 
+ create table rc_test(a int);
+ 
+  CREATE OR REPLACE PROCEDURE proc_sys_ref2(O out SYS_REFCURSOR, b out SYS_REFCURSOR)
+IS 
+	C1 SYS_REFCURSOR;
+ BEGIN
+	OPEN C1 FOR SELECT a FROM rc_test;
+	O := C1;
+	b := C1;
+ END; 
+ /
+  CREATE OR REPLACE PROCEDURE proc_sys_ref1(O out SYS_REFCURSOR, b out SYS_REFCURSOR)
+IS 
+	C1 SYS_REFCURSOR;
+	TEMP number;
+	 C2 SYS_REFCURSOR; 
+	 C3 SYS_REFCURSOR; 
+ BEGIN
+	OPEN C1 FOR SELECT section_ID FROM sections ORDER BY section_ID;
+	fetch c1 into temp;
+	proc_sys_ref2(c2, c3);
+	 if c2%isopen then
+                 raise notice '%','ef1 ok';
+	end if;
+	O := C1;
+	b := C1;
+ END; 
+ /
+ 
+ DECLARE 
+	 C1 SYS_REFCURSOR; 
+	 C2 SYS_REFCURSOR; 
+	 TEMP NUMBER(4); 
+ BEGIN 
+	 proc_sys_ref1(C1, c2);
+	 if c1%isopen then
+                 raise notice '%','ok';
+	end if;
+	
+	 if c2%found then
+                 raise notice '%','ok';
+	end if;
+	
+	 LOOP  
+		 FETCH C1 INTO TEMP;   
+                 raise notice '%','ok';
+		 EXIT WHEN C1%NOTFOUND; 
+	 END LOOP;  
+ END; 
+ /
+NOTICE:  ef1 ok
+CONTEXT:  SQL statement "CALL proc_sys_ref1(c1,c2)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+NOTICE:  ok
+NOTICE:  ok
+NOTICE:  ok
+NOTICE:  ok
+NOTICE:  ok
+NOTICE:  ok
+ --test inout SYS_REFCURSOR
+CREATE OR REPLACE PROCEDURE proc_sys_ref1(O inout SYS_REFCURSOR)
+IS
+	TEMP number;
+ BEGIN
+	
+	if (O%isopen) then
+                raise notice '%','inparameter is open ok';
+	else
+                raise notice '%','inparameter is not open ok';
+	end if;
+	fetch O into temp;
+	if (O%found) then
+                raise notice '%','found is true';
+	end if;
+	close O;
+ END; 
+ /
+  DECLARE
+	C1 SYS_REFCURSOR;
+    type ref_cur_type is ref cursor; --declare cursor type
+        my_cur ref_cur_type; --declare cursor var
+ BEGIN
+	 OPEN my_cur FOR SELECT section_ID FROM sections ORDER BY section_ID;
+	 c1 = proc_sys_ref1(my_cur);
+	 if c1%isopen then
+                 raise notice '%','c1 ok';
+	end if;
+	
+	 if my_cur%isopen then
+                 raise notice '%',' my_cur ok';
+	end if;
+ END; 
+ /
+NOTICE:  inparameter is open ok
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+NOTICE:  found is true
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
+ 
+CREATE OR REPLACE PROCEDURE proc_sys_ref1(c1 out SYS_REFCURSOR)
+IS
+	TEMP number;
+	my_cur SYS_REFCURSOR;
+ BEGIN
+	OPEN my_cur FOR SELECT section_ID FROM sections ORDER BY section_ID;
+	if (my_cur%isopen) then
+                raise notice '%','cursor is open ok';
+	else
+                raise notice '%','cursor is not open ok';
+	end if;
+	fetch my_cur into temp;
+	if (my_cur%found) then
+                raise notice '%','found is true';
+	end if;
+	c1 = my_cur;
+	close c1;
+ END; 
+ /
+  DECLARE
+	C1 SYS_REFCURSOR;
+ BEGIN
+	 c1 = proc_sys_ref1(c1);
+	 if c1%isopen then
+                 raise notice '%','c1 ok';
+	else
+                 raise notice '%','c1 is closed';
+	end if;
+ END; 
+ /
+NOTICE:  cursor is open ok
+CONTEXT:  PL/pgSQL function inline_code_block line 3 at assignment
+NOTICE:  found is true
+CONTEXT:  PL/pgSQL function inline_code_block line 3 at assignment
+NOTICE:  c1 is closed
+create or replace function pro_base_003(refcursor, refcursor) returns setof refcursor as $$
+declare
+a int;
+b text;
+begin
+drop table if exists pro_base_001;
+create table pro_base_001(a int,b text );
+insert into pro_base_001 values(1,'a');
+insert into pro_base_001 values(2,'b');
+open $2 for select * from pro_base_001 order by 1;
+loop
+fetch next from $2 into a,b;
+EXIT WHEN $2%NOTFOUND;
+end loop;
+end;
+$$ language plpgsql;
+select * from  pro_base_003('a','b');
+NOTICE:  table "pro_base_001" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists pro_base_001"
+PL/pgSQL function pro_base_003(refcursor,refcursor) line 6 at SQL statement
+ pro_base_003 
+--------------
+(0 rows)
+
+create table tb1(c1 int,c2 int);
+insert into tb1 values(1,2);
+insert into tb1 values(2,3);
+create or replace procedure i_inout(refcur inout refcursor)
+AS
+DECLARE
+v_csr refcursor;
+a1 int;
+begin 
+open v_csr for refcur;
+LOOP
+fetch v_csr into a1;
+exit when v_csr%notfound;
+raise notice 'a1:%',a1;
+end loop;
+close v_csr;
+end;
+/
+call i_inout(' select c1 from tb1;');
+NOTICE:  a1:1
+NOTICE:  a1:2
+        refcur        
+----------------------
+  select c1 from tb1;
+(1 row)
+
+DECLARE
+c sys_refcursor;
+a1 int;
+BEGIN 
+c:=i_inout(' select c1 from tb1;');
+LOOP
+fetch c into a1;
+exit when c%notfound;
+raise notice '%',a1;
+end loop;
+close c;
+end;
+/
+NOTICE:  a1:1
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
+NOTICE:  a1:2
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at assignment
+ERROR:  cursor " select c1 from tb1;" does not exist in FETCH statement.
+CONTEXT:  PL/pgSQL function inline_code_block line 7 at FETCH
+START TRANSACTION;
+CURSOR sc  FOR select * from generate_series(3, 13) i where i <> all (values (1),(2),(4));
+MOVE FORWARD 10 IN sc;
+FETCH BACKWARD FROM sc;
+ i  
+----
+ 12
+(1 row)
+
+END;
+ -- clean up
+DROP SCHEMA hw_cursor_part1 CASCADE;
+NOTICE:  drop cascades to 18 other objects
+DETAIL:  drop cascades to table company
+drop cascades to table tbl
+drop cascades to function sp_testsp()
+drop cascades to table a3
+drop cascades to table sections
+drop cascades to function test_cursor_3()
+drop cascades to table test_tb
+drop cascades to function func_test(refcursor,numeric)
+drop cascades to function proc_test(character varying)
+drop cascades to table staffs
+drop cascades to function proc_sys_ref()
+drop cascades to table rc_test
+drop cascades to function proc_sys_ref2()
+drop cascades to function proc_sys_ref1()
+drop cascades to function pro_base_003(refcursor,refcursor)
+drop cascades to table pro_base_001
+drop cascades to table tb1
+drop cascades to function i_inout(refcursor)

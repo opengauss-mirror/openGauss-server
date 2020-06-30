@@ -1,0 +1,153 @@
+/*
+ * This file is used to create public table for vector engine tests
+ */
+----
+--- tables for ICBC
+----
+create schema dwSumData_act;
+CREATE TABLE dwSumData_act.C03_SEMI_CRDT_CARD_ACCT
+(
+Data_Dt date,
+Agt_Num VARCHAR(60) ,
+Agt_Modif_Num VARCHAR(60) ,
+Party_Id VARCHAR(30) ,
+Proc_Org_Num VARCHAR(30) ,
+Int_Org_Num VARCHAR(30) ,
+Curr_Cd CHAR(4) ,
+Open_Dt DATE ,
+Year_Dpsit_Accum DECIMAL(18,2) ,
+Party_Class_Cd CHAR(4) 
+)with (orientation = column);
+
+copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_casewhen_1.data' delimiter ',' NULL '';
+copy dwSumData_act.C03_SEMI_CRDT_CARD_ACCT from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_casewhen_2.data' delimiter ',' NULL '';
+ANALYZE dwSumData_act.C03_SEMI_CRDT_CARD_ACCT;
+
+--test explain_dna_file
+show explain_dna_file;
+set explain_dna_file = 'data';
+set explain_dna_file = '@abs_srcdir@/tmp_check/datanode1/pg_copydir';
+set explain_dna_file = '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv';
+reset explain_dna_file;
+/*
+ * Create Table to test the function of ExecVecSetOp for vec_setop_001~vec_setop_004
+ */
+drop schema vector_setop_engine cascade;
+----
+--- Create Table and Insert Data
+----
+create schema vector_setop_engine;
+set current_schema=vector_setop_engine;
+create table vector_setop_engine.VECTOR_SETOP_TABLE_01
+(
+   col_inta	int
+  ,col_intb	int
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation=column) ;
+
+COPY VECTOR_SETOP_TABLE_01(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+1	2	1.2	T	hash_t1	hash_t1	11:18:00	2 day 13:24:56
+2	3	2.3	T	hash_t1	hash_t1	11:18:00	2 day 13:24:56
+1	2	1.2	F	t	t	11:28:00	2 day 13:25:56
+2	3	2.3	F	t	t	11:28:00	2 day 13:25:56
+\.
+
+create table vector_setop_engine.VECTOR_SETOP_TABLE_02
+(
+   col_inta	int
+  ,col_intb	int
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation=column) ;
+
+COPY VECTOR_SETOP_TABLE_02(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+1	2	1.2	T	hash_t2	hash_t2	11:18:00	2 day 13:24:56
+2	3	2.3	T	hash_t2	hash_t2	11:18:00	2 day 13:24:56
+3	4	3.4	T	hash_t2	hash_t2	11:18:00	2 day 13:24:56
+1	2	1.2	F	t	t	11:28:00	2 day 13:25:56
+2	3	2.3	F	t	t	11:28:00	2 day 13:25:56
+3	4	3.4	F	t	t	11:28:00	2 day 13:25:56
+\.
+
+create table vector_setop_engine.VECTOR_SETOP_TABLE_03
+(
+   col_inta	int
+  ,col_intb	int
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation=column) ;
+
+COPY VECTOR_SETOP_TABLE_03(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+1	2	1.2	T	hash_t3	hash_t3	11:18:00	2 day 13:24:56
+2	3	2.3	T	hash_t3	hash_t3	11:18:00	2 day 13:24:56
+3	4	3.4	T	hash_t3	hash_t3	11:18:00	2 day 13:24:56
+4	5	4.5	T	hash_t3	hash_t3	11:18:00	2 day 13:24:56
+1	2	1.2	F	t	t	11:28:00	2 day 13:25:56
+2	3	2.3	F	t	t	11:28:00	2 day 13:25:56
+3	4	3.4	F	t	t	11:28:00	2 day 13:25:56
+4	5	4.5	F	t	t	11:28:00	2 day 13:25:56
+\.
+
+create table vector_setop_engine.VECTOR_SETOP_TABLE_04
+(
+   col_inta	smallint
+  ,col_intb	bigint
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation=column) ;
+
+COPY VECTOR_SETOP_TABLE_04(col_inta, col_intb, col_num, col_char, col_varchar, col_text, col_time, col_interval) FROM stdin;
+1	2	1.2	T	hash_t4	hash_t4	11:18:00	2 day 13:24:56
+2	3	2.3	T	hash_t4	hash_t4	11:18:00	2 day 13:24:56
+3	4	3.4	T	hash_t4	hash_t4	11:18:00	2 day 13:24:56
+4	5	4.5	T	hash_t4	hash_t4	11:18:00	2 day 13:24:56
+5	6	4.5	T	hash_t4	hash_t4	11:18:00	2 day 13:24:56
+1	2	1.2	F	t	t	11:28:00	2 day 13:25:56
+2	3	2.3	F	t	t	11:28:00	2 day 13:25:56
+3	4	3.4	F	t	t	11:28:00	2 day 13:25:56
+4	5	4.5	F	t	t	11:28:00	2 day 13:25:56
+5	6	4.5	F	t	t	11:28:00	2 day 13:25:56
+\.
+
+create table vector_setop_engine.VECTOR_SETOP_TABLE_05
+(
+   col_inta	int
+  ,col_intb	int
+  ,col_num	numeric
+  ,col_char	char
+  ,col_varchar	varchar
+  ,col_text	text
+  ,col_time	time
+  ,col_interval	interval
+) with (orientation=column) ;
+
+insert into vector_setop_engine.VECTOR_SETOP_TABLE_05 select * from vector_setop_engine.VECTOR_SETOP_TABLE_01;
+
+analyze vector_setop_table_01;
+analyze vector_setop_table_02;
+analyze vector_setop_table_03;
+analyze vector_setop_table_04;
+analyze vector_setop_table_05;
+
+create view setop_12 as select vector_setop_table_01.col_inta as ta1, vector_setop_table_01.col_intb as tb1, vector_setop_table_02.col_inta as ta2, vector_setop_table_01.col_intb as tb2 from vector_setop_table_01 inner join vector_setop_table_02 on vector_setop_table_01.col_inta = vector_setop_table_02.col_inta; 
+
+create view setop_23 as select vector_setop_table_02.col_inta as ta2, vector_setop_table_02.col_intb as tb2, vector_setop_table_03.col_inta as ta3, vector_setop_table_03.col_intb as tb3 from vector_setop_table_02 inner join vector_setop_table_03 on vector_setop_table_02.col_inta = vector_setop_table_03.col_inta; 
+
+create view setop_31 as select vector_setop_table_03.col_inta as ta3, vector_setop_table_03.col_intb as tb3, vector_setop_table_01.col_inta as ta1, vector_setop_table_01.col_intb as tb1 from vector_setop_table_03 inner join vector_setop_table_01 on vector_setop_table_03.col_inta = vector_setop_table_01.col_inta; 

@@ -1,0 +1,582 @@
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * ---------------------------------------------------------------------------------------
+ * 
+ * libcomm.h
+ * 
+ * 
+ * IDENTIFICATION
+ *        src/include/libcomm/libcomm.h
+ *
+ * ---------------------------------------------------------------------------------------
+ */
+
+#ifndef _GS_LIBCOMM_H_
+#define _GS_LIBCOMM_H_
+
+#include <stdio.h>
+#include <netinet/in.h>
+#ifndef WIN32
+#include <pthread.h>
+#else
+#include "pthread-win32.h"
+#endif
+#include <stdlib.h>
+
+#include "c.h"
+
+#define ECOMMSCTPARGSINVAL 1001
+#define ECOMMSCTPMEMALLOC 1002
+#define ECOMMSCTPCVINIT 1003
+#define ECOMMSCTPCVDESTROY 1004
+#define ECOMMSCTPLOCKINIT 1005
+#define ECOMMSCTPLOCKDESTROY 1006
+#define ECOMMSCTPNODEIDXSCTPFD 1007
+#define ECOMMSCTPNODEIDXTCPFD 1008
+#define ECOMMSCTPSETSTREAMIDX 1009
+#define ECOMMSCTPBUFFQSIZE 1010
+#define ECOMMSCTPQUTOASZIE 1011
+#define ECOMMSCTPSEMINIT 1012
+#define ECOMMSCTPSEMPOST 1013
+#define ECOMMSCTPSEMWAIT 1014
+#define ECOMMSCTPEPOLLINIT 1015
+#define ECOMMSCTPEPOLLHNDL 1016
+#define ECOMMSCTPSCTPADRINIT 1017
+#define ECOMMSCTPSCTPLISTEN 1018
+#define ECOMMSCTPCMAILBOXINIT 1019
+#define ECOMMSCTPNODEIDXSCTPPORT 1020
+#define ECOMMSCTPSTREAMIDX 1021
+#define ECOMMSCTPTCPFD 1022
+#define ECOMMSCTPEPOLLEVNT 1023
+#define ECOMMSCTPCTRLMSG 1024
+#define ECOMMSCTPCTRLMSGWR 1025
+#define ECOMMSCTPCTRLMSGRD 1026
+#define ECOMMSCTPSTREAMIDXINVAL 1027
+#define ECOMMSCTPINVALNODEID 1028
+#define ECOMMSCTPCTRLMSGSIZE 1029
+#define ECOMMSCTPCVSIGNAL 1030
+#define ECOMMSCTPEPOLLLST 1031
+#define ECOMMSCTPCTRLCONN 1032
+#define ECOMMSCTPSCTPSND 1033
+#define ECOMMSCTPEPOLLCLOSE 1034
+#define ECOMMSCTPEPOLLTIMEOUT 1035
+#define ECOMMSCTPHASHENTRYDEL 1036
+#define ECOMMSCTPTHREADSTOP 1037
+#define ECOMMSCTPMAILBOXCLOSE 1038
+#define ECOMMSCTPSTREAMSTATE 1039
+#define ECOMMSCTPSCTPFDINVAL 1040
+#define ECOMMSCTPNODATA 1041
+#define ECOMMSCTPTHREADSTART 1042
+#define ECOMMSCTPHASHENTRYADD 1043
+#define ECOMMSCTPBUILDSCTPASSOC 1044
+#define ECOMMSCTPWRONGSTREAMKEY 1045
+#define ECOMMSCTPRELEASEMEM 1046
+#define ECOMMSCTPTCPDISCONNECT 1047
+#define ECOMMSCTPSCTPDISCONNECT 1048
+#define ECOMMSCTPREMOETECLOSE 1049
+#define ECOMMSCTPAPPCLOSE 1050
+#define ECOMMSCTPLOCALCLOSEPOLL 1051
+#define ECOMMSCTPPEERCLOSEPOLL 1052
+#define ECOMMSCTPTCPCONNFAIL 1053
+#define ECOMMSCTPSCTPCONNFAIL 1054
+#define ECOMMSCTPSTREAMCONNFAIL 1055
+#define ECOMMSCTPREJECTSTREAM 1056
+#define ECOMMSCTPCONNTIMEOUT 1057
+#define ECOMMSCTPWAITQUOTAFAIL 1058
+#define ECOMMSCTPWAITPOLLERROR 1059
+#define ECOMMSCTPPEERCHANGED 1060
+#define ECOMMSCTPGSSAUTHFAIL 1061
+#define ECOMMSCTPSENDTIMEOUT 1062
+#define ECOMMSCTPNOTINTERNALIP 1063
+
+// Structure definitions.
+// Stream key is using to associate producers and consumers
+//
+#define HOST_ADDRSTRLEN INET6_ADDRSTRLEN
+#define HOST_LEN_OF_HTAB 64
+#define NAMEDATALEN 64
+#define MSG_TIME_LEN 30
+#define MAX_DN_NODE_NUM 8192
+#define MAX_CN_NODE_NUM 1024
+#define MAX_CN_DN_NODE_NUM (MAX_DN_NODE_NUM + MAX_CN_NODE_NUM)  // (MaxCoords+MaxDataNodes)
+#define MIN_CN_DN_NODE_NUM (1 + 1)                              // (1 CN + 1 DN)
+
+#define SEC_TO_MICRO_SEC 1000
+
+typedef int32 comm_connect_t;
+
+/* Socket option layer for SCTP */
+#ifndef SOL_SCTP
+#define SOL_SCTP 132
+#endif
+
+#ifndef IPPROTO_SCTP
+#define IPPROTO_SCTP 132
+#endif
+
+#define COMM_INIT_MESSAGE       2
+#define COMM_NO_DELAY           3
+#define COMM_EVENT_INFO         11
+#define COMM_GET_PEER_ADDRESS   108
+#define COMM_GET_LOCAL_ADDRESS  109
+#define COMM_UNORDERED          1
+#define MSG_NOTIFICATION        0x8000
+
+typedef enum {
+    LIBCOMM_NONE,
+    LIBCOMM_SEND_CTRL,
+    LIBCOMM_RECV_CTRL,
+    LIBCOMM_RECV_LOOP,
+    LIBCOMM_AUX
+} LibcommThreadTypeDef;
+
+/* send and recv message type */
+typedef enum {
+    SEND_SOME = 0,
+    SECURE_READ,
+    SECURE_WRITE,
+    READ_DATA,
+    READ_DATA_FROM_LOGIC
+} CommMsgOper;
+
+typedef enum {
+    POSTMASTER = 0,
+    GS_SEND_flow,
+    GS_RECV_FLOW,
+    GS_RECV_LOOP,
+} CommThreadUsed;
+
+typedef struct SctpStreamKey {
+    uint64 queryId;       /* Plan id of current query. */
+    uint32 planNodeId;    /* Plan node id of stream node. */
+    uint32 producerSmpId; /* Smp id for producer. */
+    uint32 consumerSmpId; /* Smp id for consumer. */
+} SctpStreamKey;
+
+// struct of libcomm logic addr
+// idx gives the node idx of backend
+// sid gives the logic conn idx with specific node
+// ver gives the version of this logic addr, once it is closed ver++
+// type is GSOCK_TYPE
+typedef struct {
+    uint16 idx;
+    uint16 sid;
+    uint16 ver;
+    uint16 type;
+} gsocket;
+
+struct StreamConnInfo;
+
+// statistic structure
+//
+typedef struct {
+    char remote_node[NAMEDATALEN];
+    char remote_host[HOST_ADDRSTRLEN];
+    int idx;
+    int stream_id;
+    const char* stream_state;
+    int tcp_sock;
+    uint64 query_id;
+    SctpStreamKey stream_key;
+    long quota_size;
+    unsigned long buff_usize;
+    long bytes;
+    long time;
+    long speed;
+    unsigned long local_thread_id;
+    unsigned long peer_thread_id;
+} CommRecvStreamStatus;
+
+typedef struct {
+    char remote_node[NAMEDATALEN];
+    char remote_host[HOST_ADDRSTRLEN];
+    int idx;
+    int stream_id;
+    const char* stream_state;
+    int tcp_sock;
+    int packet_count;
+    int quota_count;
+    uint64 query_id;
+    SctpStreamKey stream_key;
+    long bytes;
+    long time;
+    long speed;
+    long quota_size;
+    long wait_quota;
+    long send_overhead;
+    unsigned long local_thread_id;
+    unsigned long peer_thread_id;
+} CommSendStreamStatus;
+
+typedef struct {
+    long recv_speed;
+    long send_speed;
+    int recv_count_speed;
+    int send_count_speed;
+    long buffer;
+    long mem_libcomm;
+    long mem_libpq;
+    int postmaster;
+    int gs_sender_flow;
+    int gs_receiver_flow;
+    int gs_receiver_loop;
+    int stream_conn_num;
+} CommStat;
+
+
+typedef struct {
+    char remote_node[NAMEDATALEN];
+    char remote_host[HOST_ADDRSTRLEN];
+    int idx;
+    int stream_num;
+    uint32 min_delay;
+    uint32 dev_delay;
+    uint32 max_delay;
+} CommDelayInfo;
+
+// sctp address infomation
+//
+typedef struct libcommaddrinfo {
+    char* host;                       // host ip
+    char nodename[NAMEDATALEN];       // datanode name
+    int ctrl_port;                    // control tcp listening port
+    int sctp_port;                    // sctp listening port
+    int status;                       // status of the address info,
+                                      // -1:closed, 0:need send, 1:send finish
+    int nodeIdx;                      // datanode index, like PGXCNodeId
+    SctpStreamKey sctpKey;            // sctp stream key, use plan id,plan node id, producer smp id and consumer smp id
+    unsigned int qid;                 // query index
+    bool parallel_send_mode;          // this connection use parallel mode to send
+    int addr_list_size;               // how many node in addr info list, only the head node set it
+    libcommaddrinfo* addr_list_next;  // point to next addr info node, libcomm use it to build addr info list
+    gsocket gs_sock;                  // libcomm logic addr
+} sctpaddrinfo;
+
+/* cn and dn send and recv message log */
+typedef struct MessageIpcLog {
+    char type;              /* the incomplete message type parsed last time */
+    int msg_cursor;
+    int msg_len;            /* When the message parsed last time is incomplete, record the true length of the message */
+
+    int len_cursor;         /* When msglen is parsed to be less than 4 bytes, the received bytes count are recorded */
+    uint32 len_cache;
+
+    /*
+     * For consecutive parses to the same message,
+     * record the msgtype, length, and last parsed time and same message count.
+     */
+    char last_msg_type;     /* the type of the previous message */
+    int last_msg_len;       /* the message of the previous message */
+    int last_msg_count;     /* same message count */
+    char last_msg_time[MSG_TIME_LEN]; // the time of the previous message
+}MessageIpcLog;
+
+typedef struct MessageCommLog {
+    MessageIpcLog recv_ipc_log;
+    MessageIpcLog send_ipc_log;
+}MessageCommLog;
+
+typedef enum {
+    GSOCK_INVALID,
+    GSOCK_PRODUCER,
+    GSOCK_CONSUMER,
+    GSOCK_DAUL_CHANNEL,
+} GSOCK_TYPE;
+
+extern gsocket gs_invalid_gsock;
+#define GS_INVALID_GSOCK gs_invalid_gsock
+
+void mc_elog(int elevel, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+
+#define LIBCOMM_DEBUG_LOG(format, ...) \
+    do {                               \
+        ;                              \
+    } while (0)
+
+// the role of current node
+//
+typedef enum { ROLE_PRODUCER, ROLE_CONSUMER, ROLE_MAX_TYPE } SctpNodeRole;
+
+// the connection state of IP+PORT
+//
+typedef enum { CONNSTATEFAIL, CONNSTATECONNECTING, CONNSTATESUCCEED } ConnectionState;
+
+// the channel type
+//
+typedef enum { DATA_CHANNEL, CTRL_CHANNEL } ChannelType;
+
+typedef bool (*wakeup_hook_type)(SctpStreamKey key, StreamConnInfo connInfo);
+
+// Set basic initialization information for communication,
+// calling by each datanode for initializing the communication layer
+//
+extern int gs_set_basic_info(const char* local_host,  // local ip of the datanode, it can be used "localhost" for simple
+    const char* local_node_name,                      // local node name of the datanode, like PGXCNodeName
+    int node_num,      // total number of datanodes, maximum value is 1024, it could be set in postgresql.conf with
+                       // parameter name comm_max_datanode
+    char* sock_path);  // unix domain path
+
+// Connect to destination datanode, and get the sctp stream index for sending
+// called by Sender
+//
+// return: stream index
+//
+extern int gs_connect(libcommaddrinfo** sctp_addrinfo,  // destination address
+    int addr_num,                                       // connection number
+    int timeout                                         // timeout threshold, default is 10 min
+);
+
+// Regist call back function of receiver for waking up Consumer in executor,
+// if a sender connect successfully to receiver, wake up the consumer once
+//
+extern void gs_connect_regist_callback(wakeup_hook_type wakeup_callback);
+
+// Send message through sctp channel using a sctp stream
+// called by Sender
+//
+// return: transmitted data size
+//
+extern int gs_send(gsocket* gs_sock,  // destination address
+    char* message,                    // message to send
+    int m_len,                        // message length
+    int time_out,                     // timeout threshold, default is -1
+    bool block_mode                   // is wait quota
+);
+
+extern int gs_broadcast_send(struct libcommaddrinfo* sctp_addrinfo, char* message, int m_len, int time_out);
+
+// Receive message from an array of sctp channels,
+// however, we will get message data from just one channel,
+// and copy the data into buffer.
+//
+// return: received data size
+//
+extern int gs_recv(
+    gsocket* gs_sock,  // array of node index, which labeled the datanodes will send data to this datanode
+    void* buff,        // buffer to copy data message, allocated by caller
+    int buff_size      // size of buffer
+);
+
+// Simulate linux poll interface,
+// to notify the Consumer thread data have been received into the inner buffer, you can come to take it
+//
+// return: the number of mailbox which has data
+//
+extern int gs_wait_poll(gsocket* gs_sock_array,  // array of producers node index
+    int nproducer,                               // number of producers
+    int* producer,                               // producers number triggers poll
+    int timeout,                                 // time out in seconds, 0 for block mode
+    bool close_expected                          // is logic connection closed by remote is an expected result
+);
+
+/* Handle the same message and print message receiving and sending log */
+extern void gs_comm_ipc_print(MessageIpcLog *ipc_log, char *remotenode, gsocket *gs_sock, CommMsgOper msg_oper);
+
+/* Send and receive data between nodes, for performance problem location */
+extern MessageCommLog* gs_comm_ipc_performance(MessageCommLog *msgLog,
+    void *ptr,
+    int n,
+    char *remotenode,
+    gsocket *gs_sock,
+    CommMsgOper logType);
+
+// Receiver close sctp stream
+//
+extern int gs_r_close_stream(int sctp_idx,  // node index
+    int sctp_sid,                           // stream index
+    int version  // stream key(the plan id and plan node id), associated the pair of  Consumer and Producer
+);
+
+// Sender close sctp stream
+//
+extern int gs_s_close_stream(int sctp_idx,  // node index
+    int sctp_sid,                           // node index
+    int version  // stream key(the plan id and plan node id), associated the pair of  Consumer and Producer
+);
+
+extern void gs_close_gsocket(gsocket* gsock);
+
+extern void gs_poll_close();
+
+extern int gs_close_all_stream_by_debug_id(uint64 query_id);
+
+extern bool gs_stop_query(gsocket* gsock, uint32 remote_pid);
+
+// Shudown the communication layer
+//
+extern void gs_shutdown_comm();
+
+// Do internal cancel when cancelling is requested
+//
+extern void gs_r_cancel();
+
+// export communication layer status
+//
+extern void gs_log_comm_status();
+
+// check if the kernel version is reliable
+//
+extern int gs_check_SLESSP2_version();
+
+// check if the system do support SCTP protocol
+//
+extern int gs_check_sctp_support();
+
+// get the assigned stream number
+//
+extern int gs_get_stream_num();
+
+// get the error information
+//
+const char* gs_comm_strerror();
+
+// get communication layer stream status at receiver as a tuple for pg_comm_recv_stream
+//
+extern bool get_next_recv_stream_status(CommRecvStreamStatus* stream_status);
+
+// get communication layer stream status at sender as a tuple for pg_comm_send_stream
+//
+extern bool get_next_send_stream_status(CommSendStreamStatus* stream_status);
+
+// get communication layer stream status as a tuple for pg_comm_status
+//
+extern bool gs_get_comm_stat(CommStat* comm_stat);
+
+// get communication layer sctp delay infomation as a tuple for pg_comm_delay
+//
+extern bool get_next_comm_delay_info(CommDelayInfo* delay_info);
+
+extern void gs_set_debug_mode(bool mod);
+
+extern void gs_set_stat_mode(bool mod);
+
+extern void gs_set_timer_mode(bool mod);
+
+extern void gs_set_no_delay(bool mod);
+
+extern void gs_set_ackchk_time(int mod);
+
+extern void gs_set_libcomm_used_rate(int rate);
+
+extern void init_libcomm_cpu_rate();
+
+// get availabe memory of communication layer
+//
+extern long gs_get_comm_used_memory(void);
+
+extern long gs_get_comm_peak_memory(void);
+
+extern Size gs_get_comm_context_memory(void);
+
+extern int gs_release_comm_memory();
+
+// interface function for postmaster read msg by unix domain
+extern int gs_recv_msg_by_unix_domain(int fd, gsocket* gs_sock);
+
+// check mailbox version for connection reused by poolmgr
+extern bool gs_test_libcomm_conn(gsocket* gs_sock);
+
+// reset cmailbox for pooler reuse
+extern void gs_clean_cmailbox(gsocket gs_sock);
+
+// for capacity expansion
+extern void gs_change_capacity(int newval);
+
+extern int gs_get_cur_node();
+
+extern void commSenderFlowMain();
+extern void commReceiverFlowMain();
+extern void commAuxiliaryMain();
+extern void commPoolCleanerMain();
+extern void commReceiverMain(void* tid_callback);
+
+extern void gs_init_hash_table();
+/*
+ * LIBCOMM_CHECK is defined when make commcheck
+ */
+#ifdef LIBCOMM_CHECK
+#define LIBCOMM_FAULT_INJECTION_ENABLE
+#define LIBCOMM_SPEED_TEST_ENABLE
+#else
+#undef LIBCOMM_FAULT_INJECTION_ENABLE
+#undef LIBCOMM_SPEED_TEST_ENABLE
+#endif
+
+/*
+ * Libcomm Speed Test Framework
+ * Before start: 1, Must run a stream query to get DN connections.
+ *               2, add new guc params to $GAUSSHOME/bin/cluster_guc.conf
+ * Start: Use gs_guc reload to set test thread num.
+ * For example: gs_guc reload -Z datanode -N all -I all -c "comm_test_thread_num=1"
+ * Stop: Use gs_guc reload to set test thread num=0.
+ */
+#ifdef LIBCOMM_SPEED_TEST_ENABLE
+extern void gs_set_test_thread_num(int newval);
+extern void gs_set_test_msg_len(int newval);
+extern void gs_set_test_send_sleep(int newval);
+extern void gs_set_test_send_once(int newval);
+extern void gs_set_test_recv_sleep(int newval);
+extern void gs_set_test_recv_once(int newval);
+#endif
+
+/* Libcomm fault injection Framework
+ * Before start: 1, enable LIBCOMM_FAULT_INJECTION_ENABLE.
+ *               2, add new guc params to $GAUSSHOME/bin/cluster_guc.conf
+ * Start: Use gs_guc reload to set FI num.
+ * For instance: gs_guc reload -Z datanode -N all -I all -c "comm_fault_injection=6"
+ * Stop: Use gs_guc reload to set comm_fault_injection=0.
+ */
+#ifdef LIBCOMM_FAULT_INJECTION_ENABLE
+typedef enum {
+    LIBCOMM_FI_NONE,
+    LIBCOMM_FI_R_TCP_DISCONNECT,
+    LIBCOMM_FI_R_SCTP_DISCONNECT,
+    LIBCOMM_FI_S_TCP_DISCONNECT,
+    LIBCOMM_FI_S_SCTP_DISCONNECT,
+    LIBCOMM_FI_RELEASE_MEMORY,
+    LIBCOMM_FI_FAILOVER,  //
+    LIBCOMM_FI_NO_STREAMID,
+    LIBCOMM_FI_CONSUMER_REJECT,
+    LIBCOMM_FI_R_APP_CLOSE,    //
+    LIBCOMM_FI_S_APP_CLOSE,    //
+    LIBCOMM_FI_CANCEL_SIGNAL,  //
+    LIBCOMM_FI_CLOSE_BY_VIEW,  //
+    LIBCOMM_FI_GSS_TCP_FAILED,
+    LIBCOMM_FI_GSS_SCTP_FAILED,
+    LIBCOMM_FI_R_PACKAGE_SPLIT,
+    LIBCOMM_FI_MALLOC_FAILED,
+    LIBCOMM_FI_MC_TCP_READ_FAILED,
+    LIBCOMM_FI_MC_TCP_READ_BLOCK_FAILED,
+    LIBCOMM_FI_MC_TCP_READ_NONBLOCK_FAILED,
+    LIBCOMM_FI_MC_TCP_WRITE_FAILED,
+    LIBCOMM_FI_MC_TCP_WRITE_NONBLOCK_FAILED,
+    LIBCOMM_FI_MC_TCP_ACCEPT_FAILED,
+    LIBCOMM_FI_MC_TCP_LISTEN_FAILED,
+    LIBCOMM_FI_MC_TCP_CONNECT_FAILED,
+    LIBCOMM_FI_FD_SOCKETVERSION_FAILED,
+    LIBCOMM_FI_SOCKID_NODEIDX_FAILED,
+    LIBCOMM_FI_POLLER_ADD_FD_FAILED,
+    LIBCOMM_FI_NO_NODEIDX,
+    LIBCOMM_FI_CREATE_POLL_FAILED,
+    LIBCOMM_FI_DYNAMIC_CAPACITY_FAILED,
+    LIBCOMM_FI_MAX
+} LibcommFaultInjection;
+
+extern void gs_set_fault_injection(int newval);
+extern void set_comm_fault_injection(int type);
+extern bool is_comm_fault_injection(LibcommFaultInjection type);
+#endif
+
+#endif  //_GS_LIBCOMM_H_
+

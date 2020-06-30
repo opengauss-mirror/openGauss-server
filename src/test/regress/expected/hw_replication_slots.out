@@ -1,0 +1,45 @@
+--replication slots test 
+select * from pg_create_physical_replication_slot('dummystandby_slot',true);
+     slotname      | xlog_position 
+-------------------+---------------
+ dummystandby_slot | 
+(1 row)
+
+select * from pg_create_physical_replication_slot('standby_slot',false);
+   slotname   | xlog_position 
+--------------+---------------
+ standby_slot | 
+(1 row)
+
+select * from pg_create_physical_replication_slot('standby_slot',false);
+WARNING:  replication slot "standby_slot" already exists
+   slotname   | xlog_position 
+--------------+---------------
+ standby_slot | 
+(1 row)
+
+select * from pg_replication_slots order by 1;
+     slot_name     | plugin | slot_type | datoid | database | active | xmin | catalog_xmin | restart_lsn | dummy_standby 
+-------------------+--------+-----------+--------+----------+--------+------+--------------+-------------+---------------
+ dummystandby_slot |        | physical  |      0 |          | f      |      |              |             | t
+ standby_slot      |        | physical  |      0 |          | f      |      |              |             | f
+(2 rows)
+
+select * from pg_drop_replication_slot('dummystandby_slot');
+WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
+WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+select * from pg_drop_replication_slot('standby_slot');
+WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
+WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+select * from pg_drop_replication_slot('wrong_slot_name');
+ERROR:  replication slot "wrong_slot_name" does not exist

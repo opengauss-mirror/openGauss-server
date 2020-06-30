@@ -1,0 +1,52 @@
+---------------------------------------------------------------
+-------------------test pg directory-------------------
+---------------------------------------------------------------
+CREATE SCHEMA test_directory;
+CREATE USER JACK with sysadmin IDENTIFIED BY 'Ttest@123';
+CREATE USER ROSE with sysadmin IDENTIFIED BY 'Ttest@123';
+CREATE USER LEON IDENTIFIED BY 'Ttest@123';
+---create directory
+CREATE DIRECTORY REGRESSDIR AS '@libdir@';
+CREATE DIRECTORY NormalDir AS '/home/test_directory/work/';
+CREATE DIRECTORY DummyDir AS '/home/dummydir';
+CREATE OR REPLACE DIRECTORY DummyDir AS '/home/dummydirreplace';
+CREATE DIRECTORY ErrorQuote AS '/home''DIR';
+CREATE DIRECTORY RelativePath AS '../DIR/subdir';
+SELECT * FROM PG_DIRECTORY;
+SELECT pg_sleep(1);
+--grant and revoke
+GRANT READ, WRITE ON DIRECTORY DummyDir TO JACK;
+GRANT ALL ON DIRECTORY DummyDir TO LEON;
+SELECT * FROM PG_DIRECTORY;
+REVOKE READ ON DIRECTORY DummyDir FROM LEON;
+SELECT * FROM PG_DIRECTORY;
+REVOKE ALL ON DIRECTORY DummyDir FROM ROSE;
+--alter owner to
+ALTER DIRECTORY DummyDir OWNER TO LEON;
+ALTER DIRECTORY DummyDir OWNER TO JACK;
+--drop directory
+DROP DIRECTORY NormalDir;
+DROP DIRECTORY IF EXISTS NormalDir;
+SELECT * FROM PG_DIRECTORY;
+--drop user
+DROP USER ROSE;
+DROP USER JACK;
+DROP USER JACK Cascade;
+DROP USER LEON Cascade;
+SELECT * FROM PG_DIRECTORY;
+--audit
+select type, detail_info from pg_query_audit('2019-01-01 00:00:00','9999-12-31') where detail_info like '%DIRECTORY%' or type='ddl_directory';
+-- test permission
+SHOW enableSeparationOfDuty;
+SHOW enable_access_server_directory;
+CREATE DIRECTORY data_dir AS '@abs_srcdir@/data';
+DROP DIRECTORY data_dir;
+
+CREATE USER CARRIE sysadmin PASSWORD 'Ttest@123';
+SET SESSION AUTHORIZATION CARRIE PASSWORD 'Ttest@123';
+CREATE DIRECTORY data_dir AS '@abs_srcdir@/data';
+DROP DIRECTORY data_dir;
+RESET SESSION AUTHORIZATION;
+SET enable_access_server_directory = ON;
+DROP USER CARRIE;
+DROP SCHEMA test_directory;

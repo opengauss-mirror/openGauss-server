@@ -1,0 +1,18 @@
+drop foreign table test;
+drop foreign table test2;
+
+create foreign table test (x integer, y integer);
+create foreign table test2 (x integer, y integer);
+
+insert into test values (generate_series(1,10), generate_series(1,10));
+
+select * from test;
+
+copy (select * from test) to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv' DELIMITER ',';
+
+copy test2 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv' DELIMITER ',';
+
+select * from test2;
+
+drop foreign table test;
+drop foreign table test2;

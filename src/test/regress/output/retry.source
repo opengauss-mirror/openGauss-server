@@ -1,0 +1,122 @@
+-------------------------
+-- test gsql query retry
+-------------------------
+-- invalid retry times
+\set RETRY 0
+Invalid retry times "0".
+Hint: The valid retry times is 5-10.
+\set RETRY 11
+Invalid retry times "11".
+Hint: The valid retry times is 5-10.
+\set RETRY 1.2
+Invalid retry times "1.2".
+Hint: The valid retry times is 5-10.
+\set RETRY 5 5
+Invalid retry times, need only one parameter.
+\set RETRY aa
+Invalid retry times "aa".
+Hint: The valid retry times is 5-10.
+\set RETRY 11aa
+Invalid retry times "11aa".
+Hint: The valid retry times is 5-10.
+\set RETRY 2222222222222222222222222222
+Value exceeds integer range.
+Hint: The valid retry times is 5-10.
+-- retry on and off
+\set RETRY
+Retry is on with default retry times: 5.
+\set RETRY
+Retry is off.
+\set RETRY 5
+Retry is on with retry times: 5.
+\set RETRY
+Retry is off.
+-- retry in transaction block
+START TRANSACTION;
+\set RETRY
+Retry within transaction is not supported.
+END;
+-- add errcode 42601 to retry syntax error, just for test
+\! echo "42601" > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+Retry is on with default retry times: 5.
+create table;
+INFO: query retry 1 time(s).
+INFO: query retry 2 time(s).
+INFO: query retry 3 time(s).
+INFO: query retry 4 time(s).
+INFO: query retry 5 time(s).
+ERROR:  syntax error at or near ";"
+LINE 1: create table;
+                    ^
+\g
+INFO: query retry 1 time(s).
+INFO: query retry 2 time(s).
+INFO: query retry 3 time(s).
+INFO: query retry 4 time(s).
+INFO: query retry 5 time(s).
+ERROR:  syntax error at or near ";"
+LINE 1: create table;
+                    ^
+\set RETRY
+Retry is off.
+\! sed -i '$d' @abs_bindir@/retry_errcodes.conf 
+-- wrong errcode in config file
+\! echo "426011" > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+Wrong errcodes in config file.
+create table;
+ERROR:  syntax error at or near ";"
+LINE 1: create table;
+                    ^
+\set RETRY
+Wrong errcodes in config file.
+\! sed -i '$d' @abs_bindir@/retry_errcodes.conf
+-- no errcode in config file
+\! > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+No errcodes list in config file.
+-- retry with parallel execute
+\! echo "42601" > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+Retry is on with default retry times: 5.
+\parallel
+create table;
+\parallel
+INFO: query retry 1 time(s).
+INFO: query retry 2 time(s).
+INFO: query retry 3 time(s).
+INFO: query retry 4 time(s).
+INFO: query retry 5 time(s).
+ERROR:  syntax error at or near ";"
+LINE 1: create table;
+                    ^
+\set RETRY
+Retry is off.
+\! sed -i '$d' @abs_bindir@/retry_errcodes.conf 
+-- test function pgxc_pool_connection_status
+select * from pgxc_pool_connection_status();
+ pgxc_pool_connection_status 
+-----------------------------
+ t
+(1 row)
+
+create user jack with password 'ttest@123';
+set role jack password 'ttest@123';
+select * from pgxc_pool_connection_status();
+ERROR:  must be system admin to manage pooler
+reset role;
+drop user jack;
+-- retry the query at the end of file without a semicolon
+\! echo "42601" > @abs_bindir@/retry_errcodes.conf
+\set RETRY
+Retry is on with default retry times: 5.
+create table
+INFO: query retry 1 time(s).
+INFO: query retry 2 time(s).
+INFO: query retry 3 time(s).
+INFO: query retry 4 time(s).
+INFO: query retry 5 time(s).
+ERROR:  syntax error at end of input
+LINE 1: create table
+                    ^

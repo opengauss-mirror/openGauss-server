@@ -1,0 +1,17 @@
+<refentry id="SQL-ALTER_APP_WORKLOAD_GROUP_MAPPING">
+<refmeta>
+<refentrytitle>ALTER APP WORKLOAD GROUP MAPPING</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER APP WORKLOAD GROUP MAPPING</refname>
+<refpurpose>modify app group relate with group mapping</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER APP WORKLOAD GROUP MAPPING app_name
+    WITH ( WORKLOAD_GPNAME = wg_name );
+</synopsis>
+</refsynopsisdiv>
+</refentry>

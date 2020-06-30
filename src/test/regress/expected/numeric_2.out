@@ -1,0 +1,330 @@
+-- TO_NUMBER()
+--
+SELECT '' AS to_number_1,  to_number('-34,338,492', '99G999G999');
+ to_number_1 | to_number 
+-------------+-----------
+             | -34338492
+(1 row)
+
+SELECT '' AS to_number_2,  to_number('-34,338,492.654,878', '99G999G999D999G999');
+ to_number_2 |    to_number     
+-------------+------------------
+             | -34338492.654878
+(1 row)
+
+SELECT '' AS to_number_3,  to_number('<564646.654564>', '999999.999999PR');
+ to_number_3 |   to_number    
+-------------+----------------
+             | -564646.654564
+(1 row)
+
+SELECT '' AS to_number_4,  to_number('0.00001-', '9.999999S');
+ to_number_4 | to_number 
+-------------+-----------
+             |   -.00001
+(1 row)
+
+SELECT '' AS to_number_5,  to_number('5.01-', 'FM9.999999S');
+ to_number_5 | to_number 
+-------------+-----------
+             |     -5.01
+(1 row)
+
+SELECT '' AS to_number_5,  to_number('5.01-', 'FM9.999999MI');
+ to_number_5 | to_number 
+-------------+-----------
+             |     -5.01
+(1 row)
+
+SELECT '' AS to_number_7,  to_number('5 4 4 4 4 8 . 7 8', '9 9 9 9 9 9 . 9 9');
+ to_number_7 | to_number 
+-------------+-----------
+             | 544448.78
+(1 row)
+
+SELECT '' AS to_number_8,  to_number('.01', 'FM9.99');
+ to_number_8 | to_number 
+-------------+-----------
+             |       .01
+(1 row)
+
+SELECT '' AS to_number_9,  to_number('.0', '99999999.99999999');
+ to_number_9 | to_number 
+-------------+-----------
+             |       0.0
+(1 row)
+
+SELECT '' AS to_number_10, to_number('0', '99.99');
+ to_number_10 | to_number 
+--------------+-----------
+              |         0
+(1 row)
+
+SELECT '' AS to_number_11, to_number('.-01', 'S99.99');
+ to_number_11 | to_number 
+--------------+-----------
+              |      -.01
+(1 row)
+
+SELECT '' AS to_number_12, to_number('.01-', '99.99S');
+ to_number_12 | to_number 
+--------------+-----------
+              |      -.01
+(1 row)
+
+SELECT '' AS to_number_13, to_number(' . 0 1-', ' 9 9 . 9 9 S');
+ to_number_13 | to_number 
+--------------+-----------
+              |      -.01
+(1 row)
+
+--
+-- Input syntax
+--
+CREATE TABLE num_input_test (n1 numeric);
+-- good inputs
+INSERT INTO num_input_test(n1) VALUES (' 123');
+INSERT INTO num_input_test(n1) VALUES ('   3245874    ');
+INSERT INTO num_input_test(n1) VALUES ('  -93853');
+INSERT INTO num_input_test(n1) VALUES ('555.50');
+INSERT INTO num_input_test(n1) VALUES ('-555.50');
+INSERT INTO num_input_test(n1) VALUES ('NaN ');
+INSERT INTO num_input_test(n1) VALUES ('        nan');
+-- bad inputs
+INSERT INTO num_input_test(n1) VALUES ('     ');
+ERROR:  invalid input syntax for type numeric: "     "
+LINE 1: INSERT INTO num_input_test(n1) VALUES ('     ');
+                                               ^
+CONTEXT:  referenced column: n1
+INSERT INTO num_input_test(n1) VALUES ('   1234   %');
+ERROR:  invalid input syntax for type numeric: "   1234   %"
+LINE 1: INSERT INTO num_input_test(n1) VALUES ('   1234   %');
+                                               ^
+CONTEXT:  referenced column: n1
+INSERT INTO num_input_test(n1) VALUES ('xyz');
+ERROR:  invalid input syntax for type numeric: "xyz"
+LINE 1: INSERT INTO num_input_test(n1) VALUES ('xyz');
+                                               ^
+CONTEXT:  referenced column: n1
+INSERT INTO num_input_test(n1) VALUES ('- 1234');
+ERROR:  invalid input syntax for type numeric: "- 1234"
+LINE 1: INSERT INTO num_input_test(n1) VALUES ('- 1234');
+                                               ^
+CONTEXT:  referenced column: n1
+INSERT INTO num_input_test(n1) VALUES ('5 . 0');
+ERROR:  invalid input syntax for type numeric: "5 . 0"
+LINE 1: INSERT INTO num_input_test(n1) VALUES ('5 . 0');
+                                               ^
+CONTEXT:  referenced column: n1
+INSERT INTO num_input_test(n1) VALUES ('5. 0   ');
+ERROR:  invalid input syntax for type numeric: "5. 0   "
+LINE 1: INSERT INTO num_input_test(n1) VALUES ('5. 0   ');
+                                               ^
+CONTEXT:  referenced column: n1
+INSERT INTO num_input_test(n1) VALUES ('');
+INSERT INTO num_input_test(n1) VALUES (' N aN ');
+ERROR:  invalid input syntax for type numeric: " N aN "
+LINE 1: INSERT INTO num_input_test(n1) VALUES (' N aN ');
+                                               ^
+CONTEXT:  referenced column: n1
+SELECT * FROM num_input_test ORDER BY n1;
+   n1    
+---------
+  -93853
+ -555.50
+     123
+  555.50
+ 3245874
+     NaN
+     NaN
+        
+(8 rows)
+
+--
+-- Test some corner cases for multiplication
+--
+select 4790999999999999999999999999999999999999999999999999999999999999999999999999999999999999 * 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999;
+                                                                                     ?column?                                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 47909999999999999999999999999999999999999999999999999999999999999999999999999999999999985209000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+(1 row)
+
+select 4789999999999999999999999999999999999999999999999999999999999999999999999999999999999999 * 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999;
+                                                                                     ?column?                                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 47899999999999999999999999999999999999999999999999999999999999999999999999999999999999985210000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+(1 row)
+
+select 4770999999999999999999999999999999999999999999999999999999999999999999999999999999999999 * 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999;
+                                                                                     ?column?                                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 47709999999999999999999999999999999999999999999999999999999999999999999999999999999999985229000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+(1 row)
+
+select 4769999999999999999999999999999999999999999999999999999999999999999999999999999999999999 * 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999;
+                                                                                     ?column?                                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 47699999999999999999999999999999999999999999999999999999999999999999999999999999999999985230000000000000000000000000000000000000000000000000000000000000000000000000000000000001
+(1 row)
+
+--
+-- Test some corner cases for division
+--
+select 999999999999999999999::numeric/1000000000000000000000;
+        ?column?        
+------------------------
+ 1.00000000000000000000
+(1 row)
+
+select div(999999999999999999999::numeric,1000000000000000000000);
+ div 
+-----
+   0
+(1 row)
+
+select mod(999999999999999999999::numeric,1000000000000000000000);
+          mod          
+-----------------------
+ 999999999999999999999
+(1 row)
+
+select div(-9999999999999999999999::numeric,1000000000000000000000);
+ div 
+-----
+  -9
+(1 row)
+
+select mod(-9999999999999999999999::numeric,1000000000000000000000);
+          mod           
+------------------------
+ -999999999999999999999
+(1 row)
+
+select div(-9999999999999999999999::numeric,1000000000000000000000)*1000000000000000000000 + mod(-9999999999999999999999::numeric,1000000000000000000000);
+        ?column?         
+-------------------------
+ -9999999999999999999999
+(1 row)
+
+select mod (70.0,70) ;
+ mod 
+-----
+ 0.0
+(1 row)
+
+select div (70.0,70) ;
+ div 
+-----
+   1
+(1 row)
+
+select 70.0 / 70 ;
+        ?column?        
+------------------------
+ 1.00000000000000000000
+(1 row)
+
+select 12345678901234567890 % 123;
+ ?column? 
+----------
+       78
+(1 row)
+
+select 12345678901234567890 / 123;
+      ?column?      
+--------------------
+ 100371373180768845
+(1 row)
+
+select div(12345678901234567890, 123);
+        div         
+--------------------
+ 100371373180768844
+(1 row)
+
+select div(12345678901234567890, 123) * 123 + 12345678901234567890 % 123;
+       ?column?       
+----------------------
+ 12345678901234567890
+(1 row)
+
+--
+-- cast varchar(bpchar) to float4/float8 : first we should check pg_cast
+--
+select * from pg_cast where castfunc in (4196,4197,4198,4199);
+ castsource | casttarget | castfunc | castcontext | castmethod 
+------------+------------+----------+-------------+------------
+       1042 |        700 |     4196 | i           | f
+       1042 |        701 |     4197 | i           | f
+       1043 |        700 |     4198 | i           | f
+       1043 |        701 |     4199 | i           | f
+(4 rows)
+
+CREATE TABLE num_cast(a varchar(15), b bpchar(15));
+insert into num_cast values('12500','175800');
+select to_number((num_cast.a::float4)/(10^2)) from num_cast;
+ to_number 
+-----------
+       125
+(1 row)
+
+select to_number((num_cast.a::float8)/(10^2)) from num_cast;
+ to_number 
+-----------
+       125
+(1 row)
+
+select to_number((num_cast.b::float4)/(10^2)) from num_cast;
+ to_number 
+-----------
+      1758
+(1 row)
+
+select to_number((num_cast.b::float8)/(10^2)) from num_cast;
+ to_number 
+-----------
+      1758
+(1 row)
+
+drop table num_cast;
+--
+-- varchar + int (convert to numeric + numeric in C format)
+--
+create database icbc template template0 encoding 'SQL_ASCII' dbcompatibility 'C';
+\c icbc
+create table test(a int, b varchar(10), c varbit(10), d bool, e date, f interval);
+insert into test values(5, '13.8', '010101', true, '1980-01-01', interval '1' year);
+select a+b, b+10, d=true, e+f from test;
+ ?column? | ?column? | ?column? |         ?column?         
+----------+----------+----------+--------------------------
+     18.8 |     23.8 | t        | Thu Jan 01 00:00:00 1981
+(1 row)
+
+select * from test where c='01001';
+ a | b | c | d | e | f 
+---+---+---+---+---+---
+(0 rows)
+
+\c regression
+drop database icbc;
+--test stddev_samp
+  create table stddev_samp_104(
+  id               integer                 ,
+  COL_SMALLINT     smallint
+ )
+ WITH(ORIENTATION=COLUMN); 
+ insert into stddev_samp_104 values(1, 5);
+ insert into stddev_samp_104 values(1, 2); 
+ insert into stddev_samp_104 values(1, 3);
+ insert into stddev_samp_104 values(2, -5);
+ insert into stddev_samp_104 values(2, -2);
+ insert into stddev_samp_104 values(2, -3);
+ select ID, stddev_samp(COL_SMALLINT) as RESULT from stddev_samp_104 group by ID order by 1,2;
+ id |       result       
+----+--------------------
+  1 | 1.5275252316519467
+  2 | 1.5275252316519467
+(2 rows)
+
+ 
+ drop table stddev_samp_104;

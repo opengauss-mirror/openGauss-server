@@ -1,0 +1,91 @@
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+select * from LINEITEM_partition where L_ORDERKEY = 1::int8;
+ l_orderkey | l_partkey | l_suppkey | l_linenumber | l_quantity | l_extendedprice | l_discount | l_tax | l_returnflag | l_linestatus |        l_shipdate        |       l_commitdate       |      l_receiptdate       |      l_shipinstruct       | l_shipmode |             l_comment              
+------------+-----------+-----------+--------------+------------+-----------------+------------+-------+--------------+--------------+--------------------------+--------------------------+--------------------------+---------------------------+------------+------------------------------------
+          1 |   1551894 |     76910 |            1 |      17.00 |        33078.94 |        .04 |   .02 | N            | O            | Wed Mar 13 00:00:00 1996 | Mon Feb 12 00:00:00 1996 | Fri Mar 22 00:00:00 1996 | DELIVER IN PERSON         | TRUCK      | egular courts above the
+          1 |    673091 |     73092 |            2 |      36.00 |        38306.16 |        .09 |   .06 | N            | O            | Fri Apr 12 00:00:00 1996 | Wed Feb 28 00:00:00 1996 | Sat Apr 20 00:00:00 1996 | TAKE BACK RETURN          | MAIL       | ly final dependencies: slyly bold 
+          1 |    636998 |     36999 |            3 |       8.00 |        15479.68 |        .10 |   .02 | N            | O            | Mon Jan 29 00:00:00 1996 | Tue Mar 05 00:00:00 1996 | Wed Jan 31 00:00:00 1996 | TAKE BACK RETURN          | REG AIR    | riously. regular, express dep
+          1 |     21315 |     46316 |            4 |      28.00 |        34616.68 |        .09 |   .06 | N            | O            | Sun Apr 21 00:00:00 1996 | Sat Mar 30 00:00:00 1996 | Thu May 16 00:00:00 1996 | NONE                      | AIR        | lites. fluffily even de
+          1 |    240267 |     15274 |            5 |      24.00 |        28974.00 |        .10 |   .04 | N            | O            | Sat Mar 30 00:00:00 1996 | Thu Mar 14 00:00:00 1996 | Mon Apr 01 00:00:00 1996 | NONE                      | FOB        |  pending foxes. slyly re
+          1 |    156345 |      6348 |            6 |      32.00 |        44842.88 |        .07 |   .02 | N            | O            | Tue Jan 30 00:00:00 1996 | Wed Feb 07 00:00:00 1996 | Sat Feb 03 00:00:00 1996 | DELIVER IN PERSON         | MAIL       | arefully slyly ex
+(6 rows)
+
+select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY > 2000::int8 and L_ORDERKEY < 2017::int8;
+ l_orderkey 
+------------
+       2016
+       2016
+       2016
+(3 rows)
+
+select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY = 8001::int8;
+ l_orderkey 
+------------
+       8001
+       8001
+       8001
+       8001
+       8001
+       8001
+       8001
+(7 rows)
+
+explain (verbose on, costs off, nodes off) select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY > 8000::int8 ;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Row Adapter
+   Output: l_orderkey
+   ->  Vector Partition Iterator
+         Output: l_orderkey
+         Iterations: 1
+         ->  Partitioned CStore Scan on vector_engine.lineitem_partition
+               Output: l_orderkey
+               Filter: (lineitem_partition.l_orderkey > 8000::bigint)
+               Selected Partitions:  7
+(9 rows)
+
+reset enable_vector_engine;
+create table test_vec_sortinfo_row(b1 VARCHAR(1000), b2 INT,  b4 INT) 
+ partition by range(b2) 
+(
+PARTITION  p1 VALUES LESS THAN(1),
+PARTITION  p50001 VALUES LESS THAN(50001),
+PARTITION  p100001  VALUES LESS THAN(100001),
+PARTITION  p150001  VALUES LESS THAN(150001),
+partition p_max values less than(maxvalue)
+) enable row movement;
+create table test_vec_sortinfo(b1 VARCHAR(1000), b2 INT,  b4 INT) with(orientation=column) 
+ partition by range(b2) 
+(
+PARTITION  p1 VALUES LESS THAN(1),
+PARTITION  p50001 VALUES LESS THAN(50001),
+PARTITION  p100001  VALUES LESS THAN(100001),
+PARTITION  p150001  VALUES LESS THAN(150001),
+partition p_max values less than(maxvalue)
+) enable row movement;
+insert into test_vec_sortinfo_row values('a',1,2);
+insert into test_vec_sortinfo_row values('a',1,2);
+insert into test_vec_sortinfo_row values('a',1,2);
+insert into test_vec_sortinfo_row values('a',1,2);
+insert into test_vec_sortinfo_row values('a',1,2);
+insert into test_vec_sortinfo select * from test_vec_sortinfo_row;
+explain (verbose, costs off, nodes off) select distinct b2 from test_vec_sortinfo order by 1;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Row Adapter
+   Output: b2
+   ->  Vector Unique
+         Output: b2
+         ->  Vector Sort
+               Output: b2
+               Sort Key: test_vec_sortinfo.b2
+               ->  Vector Partition Iterator
+                     Output: b2
+                     Iterations: 5
+                     ->  Partitioned CStore Scan on vector_engine.test_vec_sortinfo
+                           Output: b2
+                           Selected Partitions:  1..5
+(13 rows)
+
+drop table test_vec_sortinfo;

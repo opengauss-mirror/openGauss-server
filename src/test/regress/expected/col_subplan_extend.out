@@ -1,0 +1,1412 @@
+/*
+ * This file is used to test pull down of subplan expressions
+ */
+create schema col_distribute_subplan_extend;
+set current_schema = col_distribute_subplan_extend;
+-- Set up some simple test tables
+CREATE TABLE INT4_TBL(f1 int4) with (orientation=column);
+INSERT INTO INT4_TBL(f1) VALUES ('   0  ');
+INSERT INTO INT4_TBL(f1) VALUES ('123456     ');
+INSERT INTO INT4_TBL(f1) VALUES ('    -123456');
+INSERT INTO INT4_TBL(f1) VALUES ('2147483647');
+INSERT INTO INT4_TBL(f1) VALUES ('-2147483647');
+INSERT INTO INT4_TBL(f1) VALUES (NULL);
+CREATE TABLE tenk1 (
+	unique1		int4,
+	unique2		int4,
+	ten			int4,
+	hundred		int4,
+	thousand	int4
+) WITH (orientation=column);
+insert into tenk1 select unique1, unique2, ten, hundred, thousand from public.tenk1;
+CREATE TABLE SUBSELECT_TBL (
+  f1 integer,
+  f2 integer,
+  f3 float
+) with (orientation=column) distribute by hash(f1, f2, f3);
+INSERT INTO SUBSELECT_TBL VALUES (1, 2, 3);
+INSERT INTO SUBSELECT_TBL VALUES (2, 3, 4);
+INSERT INTO SUBSELECT_TBL VALUES (3, 4, 5);
+INSERT INTO SUBSELECT_TBL VALUES (1, 1, 1);
+INSERT INTO SUBSELECT_TBL VALUES (2, 2, 2);
+INSERT INTO SUBSELECT_TBL VALUES (3, 3, 3);
+INSERT INTO SUBSELECT_TBL VALUES (6, 7, 8);
+INSERT INTO SUBSELECT_TBL VALUES (8, 9, NULL);
+SELECT '' AS eight, * FROM SUBSELECT_TBL ORDER BY f1, f2, f3;
+ eight | f1 | f2 | f3 
+-------+----+----+----
+       |  1 |  1 |  1
+       |  1 |  2 |  3
+       |  2 |  2 |  2
+       |  2 |  3 |  4
+       |  3 |  3 |  3
+       |  3 |  4 |  5
+       |  6 |  7 |  8
+       |  8 |  9 |   
+(8 rows)
+
+-- Uncorrelated subselects
+explain (costs off, nodes off)
+SELECT '' AS two, f1 AS "Constant Select" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT 1) ORDER BY 2;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: subselect_tbl.f1
+         ->  Vector Sort
+               Sort Key: subselect_tbl.f1
+               ->  Vector Nest Loop Semi Join
+                     Join Filter: (subselect_tbl.f1 = (1))
+                     ->  CStore Scan on subselect_tbl
+                     ->  Vector Materialize
+                           ->  Vector Adapter
+                                 ->  Result
+(11 rows)
+
+SELECT '' AS two, f1 AS "Constant Select" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT 1) ORDER BY 2;
+ two | Constant Select 
+-----+-----------------
+     |               1
+     |               1
+(2 rows)
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL) 
+  ORDER BY 2;
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: col_distribute_subplan_extend.subselect_tbl.f1
+         ->  Vector Sort
+               Sort Key: col_distribute_subplan_extend.subselect_tbl.f1
+               ->  Vector Sonic Hash Join
+                     Hash Cond: (col_distribute_subplan_extend.subselect_tbl.f1 = col_distribute_subplan_extend.subselect_tbl.f2)
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  CStore Scan on subselect_tbl
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: col_distribute_subplan_extend.subselect_tbl.f2
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 ->  CStore Scan on subselect_tbl
+(13 rows)
+
+SELECT '' AS six, f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL) 
+  ORDER BY 2;
+ six | Uncorrelated Field 
+-----+--------------------
+     |                  1
+     |                  1
+     |                  2
+     |                  2
+     |                  3
+     |                  3
+(6 rows)
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE
+    f2 IN (SELECT f1 FROM SUBSELECT_TBL)) 
+    ORDER BY 2;
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: col_distribute_subplan_extend.subselect_tbl.f1
+         ->  Vector Sort
+               Sort Key: col_distribute_subplan_extend.subselect_tbl.f1
+               ->  Vector Hash Semi Join
+                     Hash Cond: (col_distribute_subplan_extend.subselect_tbl.f1 = col_distribute_subplan_extend.subselect_tbl.f2)
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  CStore Scan on subselect_tbl
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (col_distribute_subplan_extend.subselect_tbl.f2 = col_distribute_subplan_extend.subselect_tbl.f1)
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 ->  CStore Scan on subselect_tbl
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: col_distribute_subplan_extend.subselect_tbl.f1
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       ->  CStore Scan on subselect_tbl
+(17 rows)
+
+SELECT '' AS six, f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE
+    f2 IN (SELECT f1 FROM SUBSELECT_TBL)) 
+    ORDER BY 2;
+ six | Uncorrelated Field 
+-----+--------------------
+     |                  1
+     |                  1
+     |                  2
+     |                  2
+     |                  3
+     |                  3
+(6 rows)
+
+explain (costs off, nodes off)
+SELECT '' AS three, f1, f2
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) NOT IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                         WHERE f3 IS NOT NULL) 
+                         ORDER BY f1, f2;
+                                                                                                                                                                                                                                                      QUERY PLAN                                                                                                                                                                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: col_distribute_subplan_extend.subselect_tbl.f1, col_distribute_subplan_extend.subselect_tbl.f2
+         ->  Vector Sort
+               Sort Key: col_distribute_subplan_extend.subselect_tbl.f1, col_distribute_subplan_extend.subselect_tbl.f2
+               ->  Vector Nest Loop Anti Join
+                     Join Filter: (((col_distribute_subplan_extend.subselect_tbl.f1 = col_distribute_subplan_extend.subselect_tbl.f2) OR (col_distribute_subplan_extend.subselect_tbl.f1 IS NULL) OR (col_distribute_subplan_extend.subselect_tbl.f2 IS NULL)) AND ((col_distribute_subplan_extend.subselect_tbl.f2 = (col_distribute_subplan_extend.subselect_tbl.f3)::integer) OR (col_distribute_subplan_extend.subselect_tbl.f2 IS NULL) OR ((col_distribute_subplan_extend.subselect_tbl.f3)::integer IS NULL)))
+                     ->  CStore Scan on subselect_tbl
+                     ->  Vector Materialize
+                           ->  Vector Streaming(type: BROADCAST)
+                                 ->  CStore Scan on subselect_tbl
+                                       Filter: (f3 IS NOT NULL)
+(12 rows)
+
+SELECT '' AS three, f1, f2
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) NOT IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                         WHERE f3 IS NOT NULL) 
+                         ORDER BY f1, f2;
+ three | f1 | f2 
+-------+----+----
+       |  1 |  2
+       |  6 |  7
+       |  8 |  9
+(3 rows)
+
+-- Correlated subselects
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Correlated Field", f2 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE f1 = upper.f1) 
+  ORDER BY f1, f2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: upper.f1, upper.f2
+         ->  Vector Sort
+               Sort Key: upper.f1, upper.f2
+               ->  CStore Scan on subselect_tbl upper
+                     Filter: (SubPlan 1)
+                     SubPlan 1
+                       ->  Row Adapter
+                             ->  Vector Result
+                                   Filter: (subselect_tbl.f1 = upper.f1)
+                                   ->  Vector Materialize
+                                         ->  Vector Streaming(type: BROADCAST)
+                                               ->  CStore Scan on subselect_tbl
+(14 rows)
+
+SELECT '' AS six, f1 AS "Correlated Field", f2 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE f1 = upper.f1) 
+  ORDER BY f1, f2;
+ six | Correlated Field | Second Field 
+-----+------------------+--------------
+     |                1 |            1
+     |                1 |            2
+     |                2 |            2
+     |                2 |            3
+     |                3 |            3
+     |                3 |            4
+(6 rows)
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN
+    (SELECT f2 FROM SUBSELECT_TBL WHERE CAST(upper.f2 AS float) = f3)
+    ORDER BY 2, 3;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: upper.f1, upper.f3
+         ->  Vector Sort
+               Sort Key: upper.f1, upper.f3
+               ->  CStore Scan on subselect_tbl upper
+                     Filter: (SubPlan 1)
+                     SubPlan 1
+                       ->  Row Adapter
+                             ->  Vector Result
+                                   Filter: ((upper.f2)::double precision = subselect_tbl.f3)
+                                   ->  Vector Materialize
+                                         ->  Vector Streaming(type: BROADCAST)
+                                               ->  CStore Scan on subselect_tbl
+(14 rows)
+
+SELECT '' AS six, f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN
+    (SELECT f2 FROM SUBSELECT_TBL WHERE CAST(upper.f2 AS float) = f3)
+    ORDER BY 2, 3;
+ six | Correlated Field | Second Field 
+-----+------------------+--------------
+     |                1 |            1
+     |                2 |            2
+     |                2 |            4
+     |                3 |            3
+     |                3 |            5
+(5 rows)
+
+explain (costs off, nodes off)
+SELECT '' AS six, f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f3 IN (SELECT upper.f1 + f2 FROM SUBSELECT_TBL
+               WHERE f2 = CAST(f3 AS integer)) 
+               ORDER BY 2, 3;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: upper.f1, upper.f3
+         ->  Vector Sort
+               Sort Key: upper.f1, upper.f3
+               ->  CStore Scan on subselect_tbl upper
+                     Filter: (SubPlan 1)
+                     SubPlan 1
+                       ->  Row Adapter
+                             ->  Vector Result
+                                   ->  Vector Materialize
+                                         ->  Vector Streaming(type: BROADCAST)
+                                               ->  CStore Scan on subselect_tbl
+                                                     Filter: (f2 = (f3)::integer)
+(14 rows)
+
+SELECT '' AS six, f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f3 IN (SELECT upper.f1 + f2 FROM SUBSELECT_TBL
+               WHERE f2 = CAST(f3 AS integer)) 
+               ORDER BY 2, 3;
+ six | Correlated Field | Second Field 
+-----+------------------+--------------
+     |                1 |            3
+     |                2 |            4
+     |                3 |            5
+     |                6 |            8
+(4 rows)
+
+explain (costs off, nodes off)
+SELECT '' AS five, f1 AS "Correlated Field"
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                     WHERE f3 IS NOT NULL) 
+                     ORDER BY 2;
+                                                                                                                     QUERY PLAN                                                                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: col_distribute_subplan_extend.subselect_tbl.f1
+         ->  Vector Sort
+               Sort Key: col_distribute_subplan_extend.subselect_tbl.f1
+               ->  Vector Hash Semi Join
+                     Hash Cond: ((col_distribute_subplan_extend.subselect_tbl.f1 = col_distribute_subplan_extend.subselect_tbl.f2) AND (col_distribute_subplan_extend.subselect_tbl.f2 = (col_distribute_subplan_extend.subselect_tbl.f3)::integer))
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  CStore Scan on subselect_tbl
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  CStore Scan on subselect_tbl
+                                 Filter: (f3 IS NOT NULL)
+(12 rows)
+
+SELECT '' AS five, f1 AS "Correlated Field"
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                     WHERE f3 IS NOT NULL) 
+                     ORDER BY 2;
+ five | Correlated Field 
+------+------------------
+      |                1
+      |                2
+      |                2
+      |                3
+      |                3
+(5 rows)
+
+--
+-- Use some existing tables in the regression test
+--
+explain (costs off, nodes off)
+SELECT '' AS eight, ss.f1 AS "Correlated Field", ss.f3 AS "Second Field"
+  FROM SUBSELECT_TBL ss
+  WHERE f1 NOT IN (SELECT f1+1 FROM INT4_TBL
+                   WHERE f1 != ss.f1 AND f1 < 2147483647) 
+                   ORDER BY 2, 3;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: ss.f1, ss.f3
+         ->  Vector Sort
+               Sort Key: ss.f1, ss.f3
+               ->  CStore Scan on subselect_tbl ss
+                     Filter: (NOT (SubPlan 1))
+                     SubPlan 1
+                       ->  Row Adapter
+                             ->  Vector Result
+                                   Filter: (int4_tbl.f1 <> ss.f1)
+                                   ->  Vector Materialize
+                                         ->  Vector Streaming(type: BROADCAST)
+                                               ->  CStore Scan on int4_tbl
+                                                     Filter: (f1 < 2147483647)
+(15 rows)
+
+SELECT '' AS eight, ss.f1 AS "Correlated Field", ss.f3 AS "Second Field"
+  FROM SUBSELECT_TBL ss
+  WHERE f1 NOT IN (SELECT f1+1 FROM INT4_TBL
+                   WHERE f1 != ss.f1 AND f1 < 2147483647) 
+                   ORDER BY 2, 3;
+ eight | Correlated Field | Second Field 
+-------+------------------+--------------
+       |                2 |            2
+       |                2 |            4
+       |                3 |            3
+       |                3 |            5
+       |                6 |            8
+       |                8 |             
+(6 rows)
+
+explain (costs off, nodes off)
+select f1, float8(count(*)) / (select count(*) from int4_tbl)
+from int4_tbl group by f1 order by f1;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: col_distribute_subplan_extend.int4_tbl.f1
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  Vector Streaming(type: BROADCAST)
+                             ->  Vector Aggregate
+                                   ->  CStore Scan on int4_tbl
+         ->  Vector Sort Aggregate
+               Group By Key: col_distribute_subplan_extend.int4_tbl.f1
+               ->  Vector Sort
+                     Sort Key: col_distribute_subplan_extend.int4_tbl.f1
+                     ->  CStore Scan on int4_tbl
+(14 rows)
+
+select f1, float8(count(*)) / (select count(*) from int4_tbl)
+from int4_tbl group by f1 order by f1;
+     f1      |     ?column?     
+-------------+------------------
+ -2147483647 | .166666666666667
+     -123456 | .166666666666667
+           0 | .166666666666667
+      123456 | .166666666666667
+  2147483647 | .166666666666667
+             | .166666666666667
+(6 rows)
+
+--
+-- Test cases to catch unpleasant interactions between IN-join processing
+-- and subquery pullup.
+--
+-- delelte this sentence, because the output is related with number of nodes
+--select count(*) from
+--  (select 1 from tenk1 a
+--   where unique1 IN (select hundred from tenk1 b)) ss;
+explain (costs off, nodes off)
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select hundred from tenk1 b)) ss;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Aggregate
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Hash Right Semi Join
+                                 Hash Cond: (b.hundred = a.unique1)
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       ->  CStore Scan on tenk1 b
+                                 ->  CStore Scan on tenk1 a
+(10 rows)
+
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select hundred from tenk1 b)) ss;
+ count 
+-------
+    10
+(1 row)
+
+explain (costs off, nodes off)
+select count(*) from
+  (select 1 from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Aggregate
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (a.unique1 = b.hundred)
+                           ->  CStore Scan on tenk1 a
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: b.hundred
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       ->  CStore Scan on tenk1 b
+(11 rows)
+
+select count(*) from
+  (select 1 from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss;
+ count 
+-------
+   100
+(1 row)
+
+explain (costs off, nodes off)
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               ->  Vector Aggregate
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Sonic Hash Join
+                                 Hash Cond: (a.unique1 = b.hundred)
+                                 ->  CStore Scan on tenk1 a
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: b.hundred
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             ->  CStore Scan on tenk1 b
+(12 rows)
+
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss;
+ count 
+-------
+    10
+(1 row)
+
+--
+-- Test cases to check for overenthusiastic optimization of
+-- "IN (SELECT DISTINCT ...)" and related cases.  Per example from
+-- Luca Pireddu and Michael Fuhr.
+--
+-- Enforce use of COMMIT instead of 2PC for temporary objects
+SET enforce_two_phase_commit TO off;
+-- CREATE TEMP TABLE subselect_foo (id integer);
+CREATE  TABLE subselect_foo (id integer) with (orientation = column);
+-- CREATE TEMP TABLE bar (id1 integer, id2 integer);
+CREATE  TABLE subselect_bar (id1 integer, id2 integer) with (orientation = column);
+INSERT INTO subselect_foo VALUES (1);
+INSERT INTO subselect_bar VALUES (1, 1);
+INSERT INTO subselect_bar VALUES (2, 2);
+INSERT INTO subselect_bar VALUES (3, 1);
+-- These cases require an extra level of distinct-ing above subquery s
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT id1, id2 FROM subselect_bar) AS s);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Join
+               Hash Cond: (subselect_foo.id = s.id2)
+               ->  CStore Scan on subselect_foo
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: s.id2
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Subquery Scan on s
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: subselect_bar.id1, subselect_bar.id2
+                                       ->  CStore Scan on subselect_bar
+(12 rows)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT id1, id2 FROM subselect_bar) AS s);
+ id 
+----
+  1
+(1 row)
+
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1,id2 FROM subselect_bar GROUP BY id1,id2) AS s);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Join
+               Hash Cond: (subselect_foo.id = s.id2)
+               ->  CStore Scan on subselect_foo
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: s.id2
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Subquery Scan on s
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: subselect_bar.id1, subselect_bar.id2
+                                       ->  CStore Scan on subselect_bar
+(12 rows)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1,id2 FROM subselect_bar GROUP BY id1,id2) AS s);
+ id 
+----
+  1
+(1 row)
+
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1, id2 FROM subselect_bar UNION
+                      SELECT id1, id2 FROM subselect_bar) AS s);
+                                                                      QUERY PLAN                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Join
+               Hash Cond: (subselect_foo.id = s.id2)
+               ->  CStore Scan on subselect_foo
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: s.id2
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  Vector Subquery Scan on s
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: col_distribute_subplan_extend.subselect_bar.id1, col_distribute_subplan_extend.subselect_bar.id2
+                                       ->  Vector Append
+                                             ->  CStore Scan on subselect_bar
+                                             ->  CStore Scan on subselect_bar
+(14 rows)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1, id2 FROM subselect_bar UNION
+                      SELECT id1, id2 FROM subselect_bar) AS s);
+ id 
+----
+  1
+(1 row)
+
+-- These cases do not
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT ON (id2) id1, id2 FROM subselect_bar) AS s);
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: (subselect_bar.id2 = subselect_foo.id)
+   ->  Unique
+         ->  Sort
+               Sort Key: subselect_bar.id2
+               ->  Data Node Scan on subselect_bar "_REMOTE_TABLE_QUERY_"
+   ->  Hash
+         ->  Data Node Scan on subselect_foo "_REMOTE_TABLE_QUERY_"
+(8 rows)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT ON (id2) id1, id2 FROM subselect_bar) AS s);
+ id 
+----
+  1
+(1 row)
+
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM subselect_bar GROUP BY id2) AS s);
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Join
+               Hash Cond: (subselect_foo.id = subselect_bar.id2)
+               ->  CStore Scan on subselect_foo
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: subselect_bar.id2
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  CStore Scan on subselect_bar
+(9 rows)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM subselect_bar GROUP BY id2) AS s);
+ id 
+----
+  1
+(1 row)
+
+explain (costs off, nodes off)
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM subselect_bar UNION
+                      SELECT id2 FROM subselect_bar) AS s);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Join
+               Hash Cond: (subselect_foo.id = col_distribute_subplan_extend.subselect_bar.id2)
+               ->  CStore Scan on subselect_foo
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: col_distribute_subplan_extend.subselect_bar.id2
+                     ->  Vector Append
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 ->  CStore Scan on subselect_bar
+                           ->  Vector Streaming(type: REDISTRIBUTE)
+                                 ->  CStore Scan on subselect_bar
+(12 rows)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM subselect_bar UNION
+                      SELECT id2 FROM subselect_bar) AS s);
+ id 
+----
+  1
+(1 row)
+
+--
+-- Test case to catch problems with multiply nested sub-SELECTs not getting
+-- recalculated properly.  Per bug report from Didier Moens.
+--
+CREATE TABLE orderstest (
+    approver_ref integer,
+    po_ref integer,
+    ordercanceled boolean
+) with (orientation = column);
+INSERT INTO orderstest VALUES (1, 1, false);
+INSERT INTO orderstest VALUES (66, 5, false);
+INSERT INTO orderstest VALUES (66, 6, false);
+INSERT INTO orderstest VALUES (66, 7, false);
+INSERT INTO orderstest VALUES (66, 1, true);
+INSERT INTO orderstest VALUES (66, 8, false);
+INSERT INTO orderstest VALUES (66, 1, false);
+INSERT INTO orderstest VALUES (77, 1, false);
+INSERT INTO orderstest VALUES (1, 1, false);
+INSERT INTO orderstest VALUES (66, 1, false);
+INSERT INTO orderstest VALUES (1, 1, false);
+CREATE VIEW orders_view AS
+SELECT *,
+(SELECT CASE
+   WHEN ord.approver_ref=1 THEN '---' ELSE 'Approved'
+ END) AS "Approved",
+(SELECT CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (SELECT CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (SELECT CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status",
+(CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status_OK"
+FROM orderstest ord;
+explain (costs off, nodes off)
+SELECT * FROM orders_view 
+ORDER BY approver_ref, po_ref, ordercanceled;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: ord.approver_ref, ord.po_ref, ord.ordercanceled
+         ->  Vector Sort
+               Sort Key: ord.approver_ref, ord.po_ref, ord.ordercanceled
+               ->  CStore Scan on orderstest ord
+                     SubPlan 1
+                       ->  Result
+                     SubPlan 4
+                       ->  Result
+                             InitPlan 3 (returns $4)
+                               ->  Result
+                                     InitPlan 2 (returns $2)
+                                       ->  Result
+(14 rows)
+
+SELECT * FROM orders_view 
+ORDER BY approver_ref, po_ref, ordercanceled;
+ approver_ref | po_ref | ordercanceled | Approved |  Status  | Status_OK 
+--------------+--------+---------------+----------+----------+-----------
+            1 |      1 | f             | ---      | ---      | ---
+            1 |      1 | f             | ---      | ---      | ---
+            1 |      1 | f             | ---      | ---      | ---
+           66 |      1 | f             | Approved | Approved | Approved
+           66 |      1 | f             | Approved | Approved | Approved
+           66 |      1 | t             | Approved | Canceled | Canceled
+           66 |      5 | f             | Approved | PO       | PO
+           66 |      6 | f             | Approved | PO       | PO
+           66 |      7 | f             | Approved | PO       | PO
+           66 |      8 | f             | Approved | PO       | PO
+           77 |      1 | f             | Approved | Approved | Approved
+(11 rows)
+
+DROP TABLE orderstest cascade;
+NOTICE:  drop cascades to view orders_view
+explain (costs off, nodes off)
+select f1, ss1 as relabel from
+    (select *, (select sum(f1) from int4_tbl b where f1 >= a.f1) as ss1
+     from int4_tbl a) ss 
+     ORDER BY f1, relabel;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: a.f1, ((SubPlan 1))
+         ->  Vector Sort
+               Sort Key: a.f1, ((SubPlan 1))
+               ->  CStore Scan on int4_tbl a
+                     SubPlan 1
+                       ->  Row Adapter
+                             ->  Vector Aggregate
+                                   ->  Vector Result
+                                         Filter: (b.f1 >= a.f1)
+                                         ->  Vector Materialize
+                                               ->  Vector Streaming(type: BROADCAST)
+                                                     ->  CStore Scan on int4_tbl b
+(14 rows)
+
+select f1, ss1 as relabel from
+    (select *, (select sum(f1) from int4_tbl b where f1 >= a.f1) as ss1
+     from int4_tbl a) ss 
+     ORDER BY f1, relabel;
+     f1      |  relabel   
+-------------+------------
+ -2147483647 |          0
+     -123456 | 2147483647
+           0 | 2147607103
+      123456 | 2147607103
+  2147483647 | 2147483647
+             |           
+(6 rows)
+
+--
+-- Test cases involving PARAM_EXEC parameters and min/max index optimizations.
+-- Per bug report from David Sanchez i Gregori.
+--
+explain (costs off, nodes off)
+select * from (
+  select max(unique1) from tenk1 as a
+  where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
+) ss;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Aggregate
+               ->  Vector Streaming(type: BROADCAST)
+                     ->  Vector Aggregate
+                           ->  Vector Sonic Hash Join
+                                 Hash Cond: (a.unique2 = b.thousand)
+                                 ->  Vector Streaming(type: REDISTRIBUTE)
+                                       ->  CStore Scan on tenk1 a
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: b.thousand
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             ->  CStore Scan on tenk1 b
+(13 rows)
+
+select * from (
+  select max(unique1) from tenk1 as a
+  where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
+) ss;
+ max  
+------
+ 9997
+(1 row)
+
+explain (costs off, nodes off)
+select * from (
+  select min(unique1) from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Aggregate
+               InitPlan 1 (returns $0)
+                 ->  Row Adapter
+                       ->  Vector Streaming(type: BROADCAST)
+                             ->  CStore Scan on tenk1 b
+                                   Filter: (unique2 = 10000)
+               ->  Vector Streaming(type: BROADCAST)
+                     ->  Vector Aggregate
+                           ->  Vector Result
+                                 One-Time Filter: (NOT $0)
+                                 ->  CStore Scan on tenk1 a
+(13 rows)
+
+select * from (
+  select min(unique1) from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss;
+ min 
+-----
+   0
+(1 row)
+
+--
+-- Test case for bug #4290: bogus calculation of subplan param sets
+--
+create  table ta (id int, val int) with (orientation=column);
+insert into ta values(1,1);
+insert into ta values(2,2);
+create  table tb (id int, aval int) with (orientation=column);
+insert into tb values(1,1);
+insert into tb values(2,1);
+insert into tb values(3,2);
+insert into tb values(4,2);
+create  table tc (id int, aid int) with (orientation=column);
+insert into tc values(1,1);
+insert into tc values(2,2);
+explain (costs off, nodes off)
+select
+  ( select min(tb.id) from tb
+    where tb.aval = (select ta.val from ta where ta.id = tc.aid) ) as min_tb_id
+from tc 
+ORDER BY min_tb_id;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         Merge Sort Key: ((SubPlan 2))
+         ->  Vector Sort
+               Sort Key: ((SubPlan 2))
+               ->  CStore Scan on tc
+                     SubPlan 2
+                       ->  Row Adapter
+                             ->  Vector Aggregate
+                                   InitPlan 1 (returns $1)
+                                     ->  Row Adapter
+                                           ->  Vector Result
+                                                 Filter: (ta.id = tc.aid)
+                                                 ->  Vector Materialize
+                                                       ->  Vector Streaming(type: BROADCAST)
+                                                             ->  CStore Scan on ta
+                                   ->  Vector Result
+                                         Filter: (tb.aval = $1)
+                                         ->  Vector Materialize
+                                               ->  Vector Streaming(type: BROADCAST)
+                                                     ->  CStore Scan on tb
+(21 rows)
+
+select
+  ( select min(tb.id) from tb
+    where tb.aval = (select ta.val from ta where ta.id = tc.aid) ) as min_tb_id
+from tc 
+ORDER BY min_tb_id;
+ min_tb_id 
+-----------
+         1
+         3
+(2 rows)
+
+--
+-- Test case for 8.3 "failed to locate grouping columns" bug
+--
+-- create temp table t1 (f1 numeric(14,0), f2 varchar(30));
+create  table subselect_t1 (f1 numeric(14,0), f2 varchar(30)) with (orientation=column);
+explain (costs off, nodes off)
+select * from
+  (select distinct f1, f2, (select f2 from subselect_t1 x where x.f1 = up.f1) as fs
+   from subselect_t1 up) ss
+group by f1,f2,fs;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: up.f1, up.f2, ((SubPlan 1))
+               ->  Vector Hash Aggregate
+                     Group By Key: up.f1, up.f2, (SubPlan 1)
+                     ->  CStore Scan on subselect_t1 up
+                           SubPlan 1
+                             ->  Row Adapter
+                                   ->  Vector Result
+                                         Filter: (x.f1 = up.f1)
+                                         ->  Vector Materialize
+                                               ->  Vector Streaming(type: BROADCAST)
+                                                     ->  CStore Scan on subselect_t1 x
+(14 rows)
+
+select * from
+  (select distinct f1, f2, (select f2 from subselect_t1 x where x.f1 = up.f1) as fs
+   from subselect_t1 up) ss
+group by f1,f2,fs;
+ f1 | f2 | fs 
+----+----+----
+(0 rows)
+
+--
+-- Check that whole-row Vars reading the result of a subselect don't include
+-- any junk columns therein
+--
+explain (costs off, nodes off)
+select q from (select max(f1) from int4_tbl group by f1 order by f1) q;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Subquery Scan on q
+   ->  Sort
+         Sort Key: int4_tbl.f1
+         ->  Data Node Scan on "__REMOTE_GROUP_QUERY__"
+(4 rows)
+
+select q from (select max(f1) from int4_tbl group by f1 order by f1) q;
+       q       
+---------------
+ (-2147483647)
+ (-123456)
+ (0)
+ (123456)
+ (2147483647)
+ ()
+(6 rows)
+
+explain (costs off, nodes off)
+with q as (select max(f1) from int4_tbl group by f1 order by f1)
+  select q from q;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ CTE Scan on q
+   CTE q
+     ->  Sort
+           Sort Key: int4_tbl.f1
+           ->  Data Node Scan on "__REMOTE_GROUP_QUERY__"
+(5 rows)
+
+with q as (select max(f1) from int4_tbl group by f1 order by f1)
+  select q from q;
+       q       
+---------------
+ (-2147483647)
+ (-123456)
+ (0)
+ (123456)
+ (2147483647)
+ ()
+(6 rows)
+
+--
+-- Test case for sublinks pushed down into subselects via join alias expansion
+--
+explain (costs off, nodes off)
+select
+  (select sq1) as qq1
+from
+  (select exists(select 1 from int4_tbl where f1 = f1) as sq1, 42 as dummy
+   from int4_tbl) sq0
+  join
+  int4_tbl i4 on dummy = i4.f1;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         InitPlan 2 (returns $1)
+           ->  Result
+                 InitPlan 1 (returns $0)
+                   ->  Row Adapter
+                         ->  Vector Streaming(type: BROADCAST)
+                               ->  CStore Scan on int4_tbl
+                                     Filter: (f1 IS NOT NULL)
+         ->  Vector Nest Loop
+               ->  Vector Streaming(type: BROADCAST)
+                     ->  CStore Scan on int4_tbl i4
+                           Filter: (42 = f1)
+               ->  CStore Scan on int4_tbl
+(14 rows)
+
+select
+  (select sq1) as qq1
+from
+  (select exists(select 1 from int4_tbl where f1 = f1) as sq1, 42 as dummy
+   from int4_tbl) sq0
+  join
+  int4_tbl i4 on dummy = i4.f1;
+ qq1 
+-----
+(0 rows)
+
+--
+-- Test case for cross-type partial matching in hashed subplan (bug #7597)
+--
+-- create temp table outer_7597 (f1 int4, f2 int4);
+create  table outer_7597 (f1 int4, f2 int4) with (orientation=column);
+insert into outer_7597 values (0, 0);
+insert into outer_7597 values (1, 0);
+insert into outer_7597 values (0, null);
+insert into outer_7597 values (1, null);
+-- create temp table inner_7597(c1 int8, c2 int8);
+create  table inner_7597(c1 int8, c2 int8) with (orientation=column);
+insert into inner_7597 values(0, null);
+explain (costs off, nodes off)
+select * from outer_7597 where (f1, f2) not in (select * from inner_7597);
+                                                                                                    QUERY PLAN                                                                                                    
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop Anti Join
+               Join Filter: (((outer_7597.f1 = inner_7597.c1) OR (outer_7597.f1 IS NULL) OR (inner_7597.c1 IS NULL)) AND ((outer_7597.f2 = inner_7597.c2) OR (outer_7597.f2 IS NULL) OR (inner_7597.c2 IS NULL)))
+               ->  CStore Scan on outer_7597
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: BROADCAST)
+                           ->  CStore Scan on inner_7597
+(8 rows)
+
+select * from outer_7597 where (f1, f2) not in (select * from inner_7597) order by 1 ,2;
+ f1 | f2 
+----+----
+  1 |  0
+  1 |   
+(2 rows)
+
+--
+-- Test case for planner bug with nested EXISTS handling
+--
+explain (costs off, nodes off)
+select a.thousand from tenk1 a, tenk1 b
+where a.thousand = b.thousand
+  and exists ( select 1 from tenk1 c where b.hundred = c.hundred
+                   and not exists ( select 1 from tenk1 d
+                                    where a.thousand = d.thousand ) );
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Streaming (type: GATHER)
+         ->  Vector Nest Loop Semi Join
+               Join Filter: (b.hundred = c.hundred)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (a.thousand = b.thousand)
+                           ->  Vector Streaming(type: BROADCAST)
+                                 ->  Vector Hash Anti Join
+                                       Hash Cond: (a.thousand = d.thousand)
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             ->  CStore Scan on tenk1 a
+                                       ->  Vector Streaming(type: REDISTRIBUTE)
+                                             ->  CStore Scan on tenk1 d
+                           ->  CStore Scan on tenk1 b
+               ->  Vector Materialize
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           ->  CStore Scan on tenk1 c
+(18 rows)
+
+select a.thousand from tenk1 a, tenk1 b
+where a.thousand = b.thousand
+  and exists ( select 1 from tenk1 c where b.hundred = c.hundred
+                   and not exists ( select 1 from tenk1 d
+                                    where a.thousand = d.thousand ) );
+ thousand 
+----------
+(0 rows)
+
+---add llt case
+CREATE TABLE t_subplan08
+(
+   col_num	numeric(5, 0)
+  ,col_int	int
+  ,col_timestamptz	timestamptz
+  ,col_varchar	varchar
+  ,col_char	char(2)
+  ,col_interval	interval
+  ,col_timetz	timetz
+  ,col_tinterval	tinterval
+) with(orientation=column);
+COPY t_subplan08(col_num, col_int, col_timestamptz, col_varchar, col_char, col_interval, col_timetz, col_tinterval) FROM stdin;
+CREATE TABLE t_subplan09
+(
+   col_num	numeric(5, 0)
+  ,col_int	int
+  ,col_timestamptz	timestamptz
+  ,col_varchar	varchar
+  ,col_char	char(2)
+  ,col_interval	interval
+  ,col_timetz	timetz
+  ,col_tinterval	tinterval
+) with(orientation=column);
+insert into t_subplan09 select * from t_subplan08;
+insert into t_subplan09 values (NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+CREATE TABLE t_subplan10
+(
+   col_num	numeric(5, 0)
+  ,col_int	int
+  ,col_timestamptz	timestamptz
+  ,col_varchar	varchar
+  ,col_char	char(2)
+  ,col_interval	interval
+  ,col_timetz	timetz
+  ,col_tinterval	tinterval
+) with(orientation=column);
+insert into t_subplan08 values (1,4,'2014-01-09 19:35:37','2014-11-09 19:35:37','j','8 day 13:34:56','1988-2-6 01:00:30+8', NULL);
+explain (costs off, nodes off, verbose on) 
+select count(*) from t_subplan08 group by col_interval  having(min(col_interval)  = any(select col_interval  from t_subplan09));
+WARNING:  Statistics in some tables or columns(col_distribute_subplan_extend.t_subplan09.col_num, col_distribute_subplan_extend.t_subplan08.col_num, col_distribute_subplan_extend.t_subplan08.col_interval) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), t_subplan08.col_interval
+   ->  Vector Streaming (type: GATHER)
+         Output: (count(*)), t_subplan08.col_interval
+         ->  Vector Hash Aggregate
+               Output: count(*), t_subplan08.col_interval
+               Group By Key: t_subplan08.col_interval
+               Filter: (hashed SubPlan 1)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: t_subplan08.col_interval
+                     Distribute Key: t_subplan08.col_interval
+                     ->  CStore Scan on col_distribute_subplan_extend.t_subplan08
+                           Output: t_subplan08.col_interval
+                           Distribute Key: t_subplan08.col_num
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: t_subplan09.col_interval
+                       ->  Vector Materialize
+                             Output: t_subplan09.col_interval
+                             ->  Vector Streaming(type: BROADCAST)
+                                   Output: t_subplan09.col_interval
+                                   ->  CStore Scan on col_distribute_subplan_extend.t_subplan09
+                                         Output: t_subplan09.col_interval
+                                         Distribute Key: t_subplan09.col_num
+(24 rows)
+
+select count(*) from t_subplan08 group by col_interval  having(min(col_interval)  = any(select col_interval  from t_subplan09));
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+(8 rows)
+
+explain (costs off, nodes off, verbose on) 
+select count(*) from t_subplan08 group by col_interval  having(min(col_interval)  = any(select col_interval  from t_subplan10));
+WARNING:  Statistics in some tables or columns(col_distribute_subplan_extend.t_subplan10.col_num, col_distribute_subplan_extend.t_subplan08.col_num, col_distribute_subplan_extend.t_subplan08.col_interval) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), t_subplan08.col_interval
+   ->  Vector Streaming (type: GATHER)
+         Output: (count(*)), t_subplan08.col_interval
+         ->  Vector Hash Aggregate
+               Output: count(*), t_subplan08.col_interval
+               Group By Key: t_subplan08.col_interval
+               Filter: (hashed SubPlan 1)
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: t_subplan08.col_interval
+                     Distribute Key: t_subplan08.col_interval
+                     ->  CStore Scan on col_distribute_subplan_extend.t_subplan08
+                           Output: t_subplan08.col_interval
+                           Distribute Key: t_subplan08.col_num
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: t_subplan10.col_interval
+                       ->  Vector Materialize
+                             Output: t_subplan10.col_interval
+                             ->  Vector Streaming(type: BROADCAST)
+                                   Output: t_subplan10.col_interval
+                                   ->  CStore Scan on col_distribute_subplan_extend.t_subplan10
+                                         Output: t_subplan10.col_interval
+                                         Distribute Key: t_subplan10.col_num
+(24 rows)
+
+select count(*) from t_subplan08 group by col_interval  having(min(col_interval)  = any(select col_interval  from t_subplan10));
+ count 
+-------
+(0 rows)
+
+explain (costs off, nodes off, verbose on)
+select count(*) from t_subplan08 group by col_timetz  having(min(col_timetz)  = any(select col_timetz  from t_subplan09)) order by 1;
+WARNING:  Statistics in some tables or columns(col_distribute_subplan_extend.t_subplan09.col_num, col_distribute_subplan_extend.t_subplan08.col_num, col_distribute_subplan_extend.t_subplan08.col_timetz) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), t_subplan08.col_timetz
+   ->  Vector Streaming (type: GATHER)
+         Output: (count(*)), t_subplan08.col_timetz
+         Merge Sort Key: (count(*))
+         ->  Vector Sort
+               Output: (count(*)), t_subplan08.col_timetz
+               Sort Key: (count(*))
+               ->  Vector Hash Aggregate
+                     Output: count(*), t_subplan08.col_timetz
+                     Group By Key: t_subplan08.col_timetz
+                     Filter: (hashed SubPlan 1)
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: t_subplan08.col_timetz
+                           Distribute Key: t_subplan08.col_timetz
+                           ->  CStore Scan on col_distribute_subplan_extend.t_subplan08
+                                 Output: t_subplan08.col_timetz
+                                 Distribute Key: t_subplan08.col_num
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan09.col_timetz
+                             ->  Vector Materialize
+                                   Output: t_subplan09.col_timetz
+                                   ->  Vector Streaming(type: BROADCAST)
+                                         Output: t_subplan09.col_timetz
+                                         ->  CStore Scan on col_distribute_subplan_extend.t_subplan09
+                                               Output: t_subplan09.col_timetz
+                                               Distribute Key: t_subplan09.col_num
+(28 rows)
+
+select count(*) from t_subplan08 group by col_timetz  having(min(col_timetz)  = any(select col_timetz  from t_subplan09)) order by 1;
+ count 
+-------
+     1
+     1
+     1
+     1
+     2
+     3
+(6 rows)
+
+explain (costs off, nodes off, verbose on)
+select count(*) from t_subplan08 group by col_char  having(min(col_char)  = any(select col_char  from t_subplan09)) order by 1;
+WARNING:  Statistics in some tables or columns(col_distribute_subplan_extend.t_subplan09.col_num, col_distribute_subplan_extend.t_subplan08.col_num, col_distribute_subplan_extend.t_subplan08.col_char) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), t_subplan08.col_char
+   ->  Vector Streaming (type: GATHER)
+         Output: (count(*)), t_subplan08.col_char
+         Merge Sort Key: (count(*))
+         ->  Vector Sort
+               Output: (count(*)), t_subplan08.col_char
+               Sort Key: (count(*))
+               ->  Vector Hash Aggregate
+                     Output: count(*), t_subplan08.col_char
+                     Group By Key: t_subplan08.col_char
+                     Filter: (hashed SubPlan 1)
+                     ->  Vector Streaming(type: REDISTRIBUTE)
+                           Output: t_subplan08.col_char
+                           Distribute Key: t_subplan08.col_char
+                           ->  CStore Scan on col_distribute_subplan_extend.t_subplan08
+                                 Output: t_subplan08.col_char
+                                 Distribute Key: t_subplan08.col_num
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan09.col_char
+                             ->  Vector Materialize
+                                   Output: t_subplan09.col_char
+                                   ->  Vector Streaming(type: BROADCAST)
+                                         Output: t_subplan09.col_char
+                                         ->  CStore Scan on col_distribute_subplan_extend.t_subplan09
+                                               Output: t_subplan09.col_char
+                                               Distribute Key: t_subplan09.col_num
+(28 rows)
+
+select count(*) from t_subplan08 group by col_char  having(min(col_char)  = any(select col_char  from t_subplan09)) order by 1;
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+     1
+     2
+(7 rows)
+
+--added for dts
+explain (costs off, nodes off, verbose on)
+select count(*) from t_subplan08 group by col_interval , col_int  having(min(col_interval)  > (select col_interval  from t_subplan09 where col_int = t_subplan08.col_int));
+WARNING:  Statistics in some tables or columns(col_distribute_subplan_extend.t_subplan09.col_num, col_distribute_subplan_extend.t_subplan08.col_num, col_distribute_subplan_extend.t_subplan08.col_interval, col_distribute_subplan_extend.t_subplan08.col_int) are not collected.
+HINT:  Do analyze for them in order to generate optimized plan.
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), t_subplan08.col_interval, t_subplan08.col_int
+   ->  Vector Streaming (type: GATHER)
+         Output: (count(*)), t_subplan08.col_interval, t_subplan08.col_int
+         ->  Vector Hash Aggregate
+               Output: count(*), t_subplan08.col_interval, t_subplan08.col_int
+               Group By Key: t_subplan08.col_interval, t_subplan08.col_int
+               Filter: (min(t_subplan08.col_interval) > (SubPlan 1))
+               ->  Vector Streaming(type: REDISTRIBUTE)
+                     Output: t_subplan08.col_interval, t_subplan08.col_int
+                     Distribute Key: t_subplan08.col_interval, t_subplan08.col_int
+                     ->  CStore Scan on col_distribute_subplan_extend.t_subplan08
+                           Output: t_subplan08.col_interval, t_subplan08.col_int
+                           Distribute Key: t_subplan08.col_num
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: t_subplan09.col_interval
+                       ->  Vector Result
+                             Output: t_subplan09.col_interval
+                             Filter: (t_subplan09.col_int = t_subplan08.col_int)
+                             ->  Vector Materialize
+                                   Output: t_subplan09.col_interval, t_subplan09.col_int
+                                   ->  Vector Streaming(type: BROADCAST)
+                                         Output: t_subplan09.col_interval, t_subplan09.col_int
+                                         ->  CStore Scan on col_distribute_subplan_extend.t_subplan09
+                                               Output: t_subplan09.col_interval, t_subplan09.col_int
+                                               Distribute Key: t_subplan09.col_num
+(27 rows)
+
+select count(*) from t_subplan08 group by col_interval , col_int  having(min(col_interval)  > (select col_interval  from t_subplan09 where col_int = t_subplan08.col_int));
+ count 
+-------
+(0 rows)
+
+select count(*) from t_subplan08 group by col_interval , col_int  having(min(col_interval)  = (select col_interval  from t_subplan09 where col_int = t_subplan08.col_int));
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+(8 rows)
+
+select count(*) from t_subplan08  where ctid  = (select ctid  from t_subplan09 where col_int = t_subplan08.col_int);
+ count 
+-------
+     9
+(1 row)
+
+drop schema col_distribute_subplan_extend cascade;
+NOTICE:  drop cascades to 14 other objects
+DETAIL:  drop cascades to table int4_tbl
+drop cascades to table tenk1
+drop cascades to table subselect_tbl
+drop cascades to table subselect_foo
+drop cascades to table subselect_bar
+drop cascades to table ta
+drop cascades to table tb
+drop cascades to table tc
+drop cascades to table subselect_t1
+drop cascades to table outer_7597
+drop cascades to table inner_7597
+drop cascades to table t_subplan08
+drop cascades to table t_subplan09
+drop cascades to table t_subplan10

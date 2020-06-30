@@ -1,0 +1,1982 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<inspection>
+    <cateogries>
+        <category name="os"/>
+        <category name="cluster"/>
+        <category name="database"/>
+        <category name="network"/>
+        <category name="device"/>
+        <category name="other"/>
+    </cateogries>
+
+     <checkitems>
+        <checkitem id="10010" name="CheckNTPD">
+            <title>
+                <zh>检查NTPD服务</zh>
+                <en>Check the time consistency status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>检查是否安装并开启ntpq服务，并与ntp时钟源同步。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查系统NTPD服务，如果服务开启且各节点时间误差在1分钟以内则检查项通过，否则检查项不通过。</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>custom</analysis>
+        </checkitem>
+
+        <checkitem id="10011" name="CheckCPU">
+            <title>
+                <zh>检查CPU占用率</zh>
+                <en>Check CPU Idle and I/O wait</en>
+            </title>
+            <threshold>
+                StandardCPUIdle=30;
+                StandardWIO=30
+            </threshold>
+            <suggestion>
+                <zh>如果idle不足 CPU负载过高，请扩容节点，如果iowait过高，则磁盘为瓶颈，扩容磁盘</zh>
+            </suggestion>
+            <standard>
+                <zh>检查主机CPU占用率，如果idle 大于30%,或者 iowait 小于 30%.则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10012" name="CheckTimeZone">
+            <title>
+                <zh>检查时区一致性</zh>
+                <en>Check the usage of time zone</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>用正确的时区文件覆盖时区文件 cp /usr/share/zoneinfo/Asia/XXX /etc/localtime 再通过hwclock命令写入BIOS</zh>
+            </suggestion>
+            <standard>
+                <zh>检查集群内各节点时区，如果时区一致则检查通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="10013" name="CheckEncoding">
+            <title>
+                <zh>检查编码格式</zh>
+                <en>Check the unicode status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>在异常节点修改/etc/profile文件，添加或修改LANG=XXX信息与其他节点相同。</zh>
+            </suggestion>
+            <standard>
+                <zh>通过locale | grep '^LANG='获取节点的系统编码，判断是否一致,如果编码一致则检查项通过，否则检查项不通过。</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="10014" name="CheckFirewall">
+            <title>
+                <zh>检查防火墙状态</zh>
+                <en>Check the firewall state</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>关闭防火墙服务。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查主机防火墙状态，如果防火墙关闭则检查项通过，否则检查项不通过。</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10015" name="CheckKernelVer">
+            <title>
+                <zh>检查内核版本</zh>
+                <en>Check the kernel version status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>确认异常节点的内核版本是否和其他节点存在差异，如果存在差异则可根据资料说明进行节点替换或温备操作(gs_replace)</zh>
+            </suggestion>
+            <standard>
+                <zh>检查各节点系统内核版本信息，如果版本信息一致则检查项通过，否则报warning。</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="10016" name="CheckMaxHandle">
+            <title>
+                <zh>检查句柄最大设置</zh>
+                <en>Check the Open Files</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>设置/etc/security/limits.d/90-nofile.conf文件中的soft nofile和hard nofile参数，然后重启会话。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查操作系统最大句柄值，如果该值大于等于1000000则检查项通过，否则检查项不通过。</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10017" name="CheckSysParams">
+            <title>
+                <zh>检查系统参数</zh>
+                <en>Check the system control parameters status</en>
+            </title>
+            <threshold>
+                version=V1R7C00
+            </threshold>
+            <suggestion>
+                <zh>编辑/etc/sysctl.conf写入正确的参数配置，通过sysctl -p生效。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查各节点操作系统参数，判断是否等于预期值。所有参数符合预期值则检查项通过，否则检查项不通过并打印不满足预期项</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10018" name="CheckOSVer">
+            <title>
+                <zh>检查操作系统版本</zh>
+                <en>Check the OS version status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>确认异常节点的操作系统版本是否和主节点在同一混搭列表内，如果不在同一列表内需要按照资料说明，进行节点替换或温备操作(gs_replace)</zh>
+            </suggestion>
+            <standard>
+                <zh>检查集群内各个节点的操作系统版本信息，如果满足版本兼容列表且全集群在同一混搭列表中则检查通过，否则检查不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>custom</analysis>
+        </checkitem>
+
+        <checkitem id="10019" name="CheckTHP">
+            <title>
+                <zh>检查THP服务</zh>
+                <en>Check the THP service status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>如果THP文件存在，echo never > THPFile 并将关闭指定写入自启动文件sed -i '/^.*transparent_hugepage.*enabled.*echo
+                    never.*$/d' initFile echo "echo never > THPFile" >> initFile
+                </zh>
+            </suggestion>
+            <standard>
+                <zh>检查系统THP服务，如果服务未开启则检查项通过，否则检查项不通过。</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10020" name="CheckSshdService">
+            <title>
+                <zh>检查sshd服务是否已启动</zh>
+                <en>Check sshd service status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>如果检查发现某项关键服务未启动，请先启动</zh>
+            </suggestion>
+            <standard>
+                <zh>检查系统是否存在sshd服务，若存在则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10021" name="CheckCrondService">
+            <title>
+                <zh>检查crontab服务是否已启动</zh>
+                <en>Check Crond service status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>如果检查发现某项关键服务未启动，请先启动</zh>
+            </suggestion>
+            <standard>
+                <zh>检查系统是否存在crontab服务，若存在则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10022" name="CheckCrontabLeft">
+            <title>
+                <zh>检查crontab是否有残留Gauss相关信息</zh>
+                <en>Check crontab</en>
+            </title>
+            <threshold>
+                crontabUser=omm
+            </threshold>
+            <suggestion>
+                <zh>如果存在，删除此定时任务</zh>
+            </suggestion>
+            <standard>
+                <zh>检查crontab是否残留Gauss相关信息，若无该信息则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10023" name="CheckDirLeft">
+            <title>
+                <zh>检查文件目录是否有残留(/srv/BigData/ ,/opt/huawei/Bigdata/ ,/var/log/Bigdata/, /home/omm)
+                </zh>
+                <en>Check directory</en>
+            </title>
+            <threshold>
+                directoryList=/opt/huawei/Bigdata/,/var/log/Bigdata/,/home/omm/
+            </threshold>
+            <suggestion>
+                <zh>删除存在的目录</zh>
+            </suggestion>
+            <standard>
+                <zh>
+                    检查扩容新节点上是否存在（/srv/BigData/ ,/opt/huawei/Bigdata/ ,/var/log/Bigdata/, /home/omm）目录，若不存在则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10024" name="CheckProcessLeft">
+            <title>
+                <zh>检查进程是否有残留(检查gauss进程，omm用户进程是否残留)</zh>
+                <en>Check process</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>检查残留的具体进程，确认后kill掉这些进程</zh>
+            </suggestion>
+            <standard>
+                <zh>检查扩容新节点上是否残留gaussdb和omm进程，若未残留则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10025" name="CheckStack">
+            <title>
+                <zh>检查栈深度</zh>
+                <en>Check stack depth</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>设置栈大小为3072</zh>
+            </suggestion>
+            <standard>
+                <zh>检查各个节点栈深度是否一致，若不一致报warning，若大于等于3072则检查项通过，否则不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="10026" name="CheckKeyProAdj">
+            <title>
+                <zh>关键进程oom_adj检查</zh>
+                <en>Check oom_adj value of key processes</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>修改关键进程omm_adj值为0</zh>
+            </suggestion>
+            <standard>
+                <zh>检查所有关键进程，如果所有关键进程omm_adj值为0，则通过，否则不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10026" name="CheckNoCheckSum">
+            <title>
+                <zh>检查nochecksum值是否为预期值且一致(默认为N,RedHat6.4/6.5且bond是为Y)</zh>
+                <en>Check the nochecksum</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>修改nochecksum值为一致的预期值</zh>
+            </suggestion>
+            <standard>
+                <zh>检查nochecksum值，若符合预期且一致则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>network</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="10027" name="CheckOmmUserExist">
+            <title>
+                <zh>检查omm用户是否已删除</zh>
+                <en>Check omm user</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>如果存在，删除用户（useradd -rf omm）</zh>
+            </suggestion>
+            <standard>
+                <zh>检查扩容新节点上是否存在omm用户，若不存在omm用户则检查项通过，否则检查项不通过s</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10028" name="CheckPortConflict">
+            <title>
+                <zh>检查DN，CN端口是否占用</zh>
+                <en>Check port conflict</en>
+            </title>
+            <threshold>
+                cooPort=0;
+                dataPortBase1=0;
+                dataPortBase2=0;
+                dataPortStandby1=0;
+                dataPortStandby2=0;
+                dataPortDummyStandby1=0;
+                dataPortDummyStandby2=0;
+                cmServerPortBase_mpp=0;
+                cmServerPortStandby_mpp=0;
+                gtmPortBase_mpp=0;
+                gtmPortStandby_mpp=0;
+                cooPortBase_mpp=0;
+                dataPortBase_mpp=0;
+                dataPortStandby_mpp=0;
+                dataPortDummyStandby_mpp=0
+            </threshold>
+            <suggestion>
+                <zh>如果发现端口占用，确认占用进程，释放端口</zh>
+            </suggestion>
+            <standard>
+                <zh>检查CN端口,DN端口是否已被占用，若未占用则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10029" name="CheckSysPortRange">
+            <title>
+                <zh>检查ip_local_port_range设置范围</zh>
+                <en>Check ip_local_port_range</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>修改参数范围为26000 65535</zh>
+            </suggestion>
+            <standard>
+                <zh>检查ip_local_port_range系统参数范围，若范围在26000 65535则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10030" name="CheckEtcHosts">
+            <title>
+                <zh>检查/etc/hosts中是否有重复地址以及localhost配置</zh>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>/etc/hosts没有配置localhost检查项不通过，存在带有#Gauss200注释的映射报abnormal，相同IP不同hostname报abnormal</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10031" name="CheckCpuCount">
+            <title>
+                <zh>检查CPU核数</zh>
+                <en>Check CPU count</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>检查CPU</zh>
+            </suggestion>
+            <standard>
+                <zh>CPU核心与可用CPU不符检查项不通过，相符但存在不可用信息Warning。 所有节点CPU信息不相同则检查项不通过。</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="10032" name="CheckSctpService">
+            <title>
+                <zh>检查sctp服务</zh>
+                <en>Check sctp service</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>安装及加载sctp服务</zh>
+            </suggestion>
+            <standard>
+                <zh>stcp服务开启且写在开机自启动文件中则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10033" name="CheckHyperThread">
+            <title>
+                <zh>检查超线程是否打开</zh>
+                <en>Check Hyper Threading</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>检查超线程</zh>
+            </suggestion>
+            <standard>
+                <zh>检查超线程，若打开则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10034" name="CheckMemInfo">
+            <title>
+                <zh>检查内存总大小</zh>
+                <en>Check total memory</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>需要保证节点上总内存大小一致</zh>
+            </suggestion>
+            <standard>
+                <zh>检查各节点总内存，若内存大小一致则检查项通过，否则报warning</zh>
+            </standard>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="10035" name="CheckSshdConfig">
+            <title>
+                <zh>检查sshd服务配置是否正确</zh>
+                <en>Check sshd config</en>
+            </title>
+            <threshold>
+                PasswordAuthentication=yes;
+                MaxStartups=1000;
+                UseDNS=no;
+                ClientAliveInterval=10800
+            </threshold>
+            <suggestion>
+                <zh>修改sshd配置</zh>
+            </suggestion>
+            <standard>
+                <zh>检查/etc/ssh/sshd_config文件，判断参数配置是否符合预期，若符合则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10036" name="CheckMaxProcMemory">
+            <title>
+                <zh>检查max_process_memory参数设置是否合理</zh>
+                <en>Check max_process_memory setting</en>
+            </title>
+            <threshold>
+                Threshold_NG=1048576
+            </threshold>
+            <suggestion>
+                <zh>使用gs_guc重设max_process_memory的值</zh>
+            </suggestion>
+            <standard>
+                <zh>检查cn和主备dn max_process_memory值，判断参数配置是否符合预期，若符合则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10037" name="CheckBootItems">
+            <title>
+                <zh>检查是否有人为添加启动项</zh>
+            </title>
+            <threshold>
+            </threshold>
+            <suggestion>
+                <zh>检查启动项</zh>
+            </suggestion>
+            <standard>
+                <zh>如果有人为添加特定启动项则检查不通过，否则检查通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="10038" name="CheckFilehandle">
+            <title>
+                <zh>文件句柄检测</zh>
+            </title>
+            <threshold>
+                Threshold_Warning=800000
+            </threshold>
+            <suggestion>
+                <zh>检查负载均衡信息</zh>
+            </suggestion>
+            <standard>
+                <zh>检查每个gaussdb进程打开的进程数是否超过80万，超过则检查不通过，是否有slave进程使用的句柄说超过master进程，有则检查不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="10039" name="CheckDropCache">
+            <title>
+                <zh>DropCache进程检测</zh>
+            </title>
+            <threshold>
+            </threshold>
+            <suggestion>
+                <zh>检查dropCache进程</zh>
+            </suggestion>
+            <standard>
+                <zh>检查各节点是否有dropcache进程在运行，若是则检查通过，否则检查不通过</zh>
+            </standard>
+            <category>os</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="10044" name="CheckProcMem">
+            <title>
+                <zh>检查内存使用是否超标</zh>
+                <en>Check whether memroy usage exceed threshold or not</en>
+            </title>
+            <threshold>
+                percent_total=0.8;
+                percent_max=0.9
+            </threshold>
+             <suggestion>
+                <zh>若整体内存使用率超标，检查占用内存高的进程，清理内存空间，若gaussdb进程内存使用超标，需要分析当前高负载业务</zh>
+                <en>If the overall memory usage exceeds the standard, check the processes with high memory usage and clean up the memory space. If the memory usage of gaussdb process exceeds the standard, it is necessary to analyze the current high-load business.</en>
+            </suggestion>
+            <standard>
+                <zh>检查节点整体内存使用率是否超过percent_total,若超过则告警，否则继续检查各个gaussdb进程是否超过max_process_memroy的percent_max</zh>
+                <en>check whether any node's memory usgae exceeded threshold,or any guassdb process's memory usage exceeded threshold</en>
+            </standard>
+            <influences>
+                <zh>内存资源不足</zh>
+                <en>No sufficent Meory</en>
+            </influences>
+            <category>os</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20010" name="CheckSwapMemory">
+            <title>
+                <zh>检查交换内存是否小于总内存</zh>
+                <en>Check the SwapMemory</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>减少交换内存的大小</zh>
+            </suggestion>
+            <standard>
+                <zh>检查交换内存和总内存大小，若检查结果为0则检查项通过，否则检查项报Warning 大于总内存时检查项不通过</zh>
+            </standard>
+            <category>device</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20011" name="CheckLogicalBlock">
+            <title>
+                <zh>检查磁盘逻辑块</zh>
+                <en>Check the LogicalBlock</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>修改磁盘逻辑块大小为512</zh>
+            </suggestion>
+            <standard>
+                <zh>检查磁盘逻辑块大小，若为512则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>device</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20012" name="CheckIOrequestqueue">
+            <title>
+                <zh>检查IO请求</zh>
+                <en>Check the IO request</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查IO值，如果该值为32768则检查项通过，否则报warning</zh>
+            </standard>
+            <category>device</category>
+            <permission>root</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20013" name="CheckMaxAsyIOrequests">
+            <title>
+                <zh>检查最大异步请求</zh>
+                <en>Check Max Asy IO requests</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查当前异步IO值，若其大于（dn+cn）*1048576和104857600则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>device</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20014" name="CheckIOConfigure">
+            <title>
+                <zh>检查IO配置</zh>
+                <en>Check IO Configure</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查IO配置，如果是deadline则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>device</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20015" name="CheckBlockdev">
+            <title>
+                <zh>检查磁盘预读块</zh>
+                <en>Check the pre-read block size status</en>
+            </title>
+            <threshold>
+                BlockSize=16384
+            </threshold>
+            <suggestion>
+                <zh>设置/sbin/blockdev --setra 16384 devname预读块大小为16384，并 echo "/sbin/blockdev --setra expecte devname" >>
+                    initFile写入自启动文件
+                </zh>
+            </suggestion>
+            <standard>
+                <zh>检查磁盘预读块大小，如果预读块大小为16384则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>device</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20016" name="CheckDiskFormat">
+            <title>
+                <zh>检查磁盘格式参数</zh>
+                <en>Check the disk configuration status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>设置/etc/fdisk文件，将xfs格式的磁盘配置为'rw,noatime,inode64,allocsize=16m'，并重新mount。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查磁盘格式信息，如果格式为ext3/ext4/xfs中的一种且xfs的配置为'rw,noatime,inode64,allocsize=16m'则检查项通过，否则报warning</zh>
+            </standard>
+            <category>device</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20017" name="CheckInodeUsage">
+            <title>
+                <zh>检查磁盘inodes使用率</zh>
+                <en>Check the usage of disk inodes</en>
+            </title>
+            <threshold>
+                Threshold_NG=80;
+                Threshold_Warning=60
+            </threshold>
+            <suggestion>
+                <zh>清理磁盘对应中的空间或更换更大的磁盘。</zh>
+            </suggestion>
+            <standard>
+                <zh>通过df -i检查磁盘指定目录（目录列表）inodes使用率，如果使用率超过warning阈值(默认值为60%)则报warning，超过NG阈值(默认值为80%)则报NG，inode总数少于5亿则报NG</zh>
+            </standard>
+            <category>device</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20018" name="CheckSpaceUsage">
+            <title>
+                <zh>检查磁盘使用率</zh>
+                <en>Check the usage of disk</en>
+            </title>
+            <threshold>
+                Threshold_NG=90;
+                Threshold_Warning=70;
+                DiskVailPGHOST=5;
+                DiskVailGPHOME=5;
+                DiskVailGAUSSHOME=5;
+                DiskVailGAUSSLOG=20;
+                DiskVailOS_TMP=5;
+                DiskVailDATA=20
+            </threshold>
+            <suggestion>
+                <zh>清理磁盘对应中的空间或更换更大的磁盘。</zh>
+            </suggestion>
+            <standard>
+                <zh>"如果使用率超过warning阈值(默认为70%) 报warning，超过NG阈值(默认为90%)则检查项不通过 。集群路径下检查GAUSSHOME/PGHOST/GPHOME/GAUSSLOG/tmp/data路径的剩余空间，不满足阈值则检查项不通过"</zh>
+            </standard>
+            <category>device</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20019" name="CheckDiskConfig">
+            <title>
+                <zh>检查磁盘空间大小一致性</zh>
+                <en>Check the disk configuration consistent</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查磁盘名大小挂载点一致，不满足报warning</zh>
+            </standard>
+            <category>device</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="20020" name="CheckXid">
+            <title>
+                <zh>检查CheckXid数值</zh>
+                <en>Check the value of CheckXid</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>暂无安全处理方案</zh>
+            </suggestion>
+            <standard>
+                <zh>如果xid的值大于10亿，抛出Warning。如果xid的值大于18亿，抛出Abnormal。</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+    
+        <checkitem id="20021" name="CheckSysTabSize">
+            <title>
+                <zh>检查每个实例的系统表容量</zh>
+                <en>Check the size of system table in every instances</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>清理硬盘至容量足够</zh>
+            </suggestion>
+            <standard>
+                <zh>如果容量不足，抛出Abnormal。</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="20022" name="CheckTableSkew">
+            <title>
+                <zh>检查表级别数据倾斜</zh>
+                <en></en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>知会客户手工修复</zh>
+            </suggestion>
+            <standard>
+                <zh>检查是否存在表级别数据倾斜，若存在则检查不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="20023" name="CheckUnAnalyzeTable">
+            <title>
+                <zh>检查未做analyze的表</zh>
+                <en></en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>对没有做analyze的表执行analyze。</zh>
+            </suggestion>
+            <standard>
+                <zh>若数据库中存在未做过analyze的表，则检查不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="20024" name="CheckDNSkew">
+            <title>
+                <zh>检查DN级别的数据分布倾斜</zh>
+                <en></en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>知会客户手工修复</zh>
+            </suggestion>
+            <standard>
+                <zh>若dn数据分布倾斜，则报NG，否则报OK</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>custom</analysis>
+        </checkitem>
+
+
+         <checkitem id="20025" name="CheckDiskFailure">
+            <title>
+                <zh>检查磁盘是否存在故障</zh>
+                <en></en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>通知客户手工修复</zh>
+            </suggestion>
+            <standard>
+                <zh>对集群中所有数据库所有表做全量查询，如果出现故障则报NG，全部查询成功报OK</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="20027" name="CheckSlowDisk">
+            <title>
+                <zh>检查慢盘</zh>
+                <en>Check the slow node</en>
+            </title>
+            <threshold>
+                max=200;
+                high=100
+            </threshold>
+            <suggestion>
+                <zh>更换磁盘</zh>
+                <en>Replace the disk.</en>
+            </suggestion>
+            <standard>
+                <zh>如果不存在磁盘的IO平均服务时间低于普遍水平则检查项通过，否则检查项不通过</zh>
+                <en>If the IO average service time of the disk does not exist below the general level, the check item passes, Otherwise, the item fails the check.</en>
+            </standard>
+            <influences>
+                <zh>数据库性能下降</zh>
+                <en>Database performance degradation.</en>
+            </influences>
+            <category>device</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30010" name="CheckClusterState">
+            <title>
+                <zh>检查集群状态</zh>
+                <en>Check the cluster status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>查询cm_agent进程并检查集群状态</zh>
+            </suggestion>
+            <standard>
+                <zh>检查fenced UDF状态,如果为down则报warning;检查集群状态，如果为Normal则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>local</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30012" name="CheckDBParams">
+            <title>
+                <zh>检查数据库集群参数</zh>
+                <en>Check database parameters</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>使用GUC工具配置CN、DN的参数。</zh>
+            </suggestion>
+            <standard>
+                <zh>
+                    "检查CN检查共享缓冲区大小和Sem参数主DN实例检查共享缓冲区大小和最大连接数共享缓冲区需要大于128kB且大于shmmax且大于shmall*PAGESIZE若存在CN，则Sem值需大于(DN最大连接数+150)/16向上取整以上项完全满足则检查项通过，否则检查项不通过"
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30013" name="CheckDebugSwitch">
+            <title>
+                <zh>检查日志级别</zh>
+                <en>Check debug switch</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>使用guc工具将log_min_messages设为指定值。</zh>
+            </suggestion>
+            <standard>
+                <zh>在各节点检查各实例的配置文件中log_min_messages参数的值，为空则认为是Warning，判断日志级别是 waring，不是则报warning
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30014" name="CheckUpVer">
+            <title>
+                <zh>检查升级版本是否一致</zh>
+                <en>Check the consistence of upgrade version</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>重新进行发包，保证各节点安装包版本一致。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查集群各个节点上升级包的版本，如果一致则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="30015" name="CheckDirPermissions">
+            <title>
+                <zh>检查目录权限</zh>
+                <en>Check the primitive of key folders</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>将对应的目录权限进行修改。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查节点目录（实例xlog路径、GAUSSHOME、GPHOME、PGHOST、GAUSSLOG）权限，如果目录有写入权限且不大于750则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <set_permission>root</set_permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30016" name="CheckEnvProfile">
+            <title>
+                <zh>检查环境变量</zh>
+                <en>Check environment profile</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>在用户环境变量文件或/etc/profile中添加统一的$GAUSSHOME，并通过export $GAUSSHOME:$PATH 的方式分别添加到$LD_LIBRARY_PATH、$PATH中
+                </zh>
+            </suggestion>
+            <standard>
+                <zh>检查节点环境变量（$GAUSSHOME、$LD_LIBRARY_PATH、$PATH），如果环境变量存在并配置正确则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="30017" name="CheckGaussVer">
+            <title>
+                <zh>检查gaussdb版本</zh>
+                <en>Check the gaussdb version</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>重新进行发包，保证各节点新gaussdb文件版本一致</zh>
+            </suggestion>
+            <standard>
+                <zh>"检查各个节点gaussdb版本是否一致，如果版本一致则检查项通过，否则检查项不通过
+                    通过source env，gsql -V | awk '{print $4""_""$6}'获取新的gaussdb版本信息，判断各节点是否一致
+                    判断两种方式获得的版本信息是否一致"
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="30018" name="CheckPortRange">
+            <title>
+                <zh>检查端口范围</zh>
+                <en>Check the port range</en>
+            </title>
+            <threshold>
+                ip_local_port_range=26000 65535
+            </threshold>
+            <suggestion>
+                <zh>通过gs_om -t changeip 更改集群使用的端口号到合法的范围内。</zh>
+            </suggestion>
+            <standard>
+                <zh>若ip_local_port_range的范围在阈值范围内（默认是26000 65535），并且实例端口不在ip_local_port_range范围内则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30019" name="CheckReadonlyMode">
+            <title>
+                <zh>检查只读模式</zh>
+                <en>Check the readonly mode</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>确认磁盘空间足够，未执行其他管理操作后，使用GUC工具关闭只读模式。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查集群中所有含CN节点上default_transaction_read_only值若为为off则检查通过，否则不通过</zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30020" name="CheckCatchup">
+            <title>
+                <zh>检查Catchup（gaussdb进程堆栈应搜索不到CatchupMain函数）</zh>
+                <en>Check catchup function</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>gaussdb进程堆栈搜索到CatchupMain函数，MPPDB重启后需要重新检查</zh>
+            </suggestion>
+            <standard>
+                <zh>检查gaussdb进程堆栈是否能搜索到CatchupMain函数，若搜索不到则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30021" name="CheckProcessStatus">
+            <title>
+                <zh>检查进程状态</zh>
+                <en>Check the Process Status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>如果存在属主不是omm的进程，则停止集群，kill掉所有残留进程，然后重启集群，再次检查进程的属主是否正确。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查其他用户的进程中是否存在gaussdb等MPPDB进程，若无则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30022" name="CheckSpecialFile">
+            <title>
+                <zh>特殊文件检查</zh>
+                <en>Check Special File</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>人工排除</zh>
+            </suggestion>
+            <standard>
+                <zh>
+                    检查tmp目录(PGHOST)、OM目录(GPHOME)、日志目录(GAUSSLOG)、data目录、程序目录(GAUSSHOME)下文件是否存在特殊字符以及非omm用户的文件，若不存在则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30023" name="CheckCollector">
+            <title>
+                <zh>检查集群的信息收集</zh>
+                <en>Check the information of the log collection</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>确认信息收集是否成功</zh>
+            </suggestion>
+            <standard>
+                <zh>在output目录下查看信息收集是否成功，若收集成功则检查项通过，否则检查项不通过</zh>
+                <en>If the collection is successful, the check item passes, otherwise the check item does not pass.</en>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="30024" name="CheckIntegrity">
+            <title>
+                <zh>检查gaussdb数据一致性</zh>
+                <en>Check the gaussdb sha256</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>从统一节点分发gaussdb文件</zh>
+            </suggestion>
+            <standard>
+                <zh>检查各个节点gaussdb的sha256值，若各节点一致则检查项通过，否则检查项不通过。
+                </zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="30026" name="CheckLargeFile">
+            <title>
+                <zh>检查数据目录大文件</zh>
+                <en>Check the datadir large file</en>
+            </title>
+            <threshold>
+                size=4G
+            </threshold>
+            <suggestion>
+                <zh>删除大文件</zh>
+            </suggestion>
+            <standard>
+                <zh>检查各个DN实例目录是否存在过大的文件，存在则检查项不通过，否则检查项通过。</zh>
+                <en>If there is a large file in the DN instance directory, the check item does not pass. Otherwise, the check item passes.</en>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="30027" name="CheckDilateSysTab">
+            <title>
+                <zh>系统表膨胀检查</zh>
+                <en>Check Dilate System Table</en>
+            </title>
+            <threshold>
+                Threshold_NG=100;
+                Threshold_Warning=50
+            </threshold>
+            <suggestion/>
+            <standard>
+                <zh>检查系统表是否膨胀，若膨胀则不通过，否则检查通过</zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="30028" name="CheckProStartTime">
+            <title>
+                <zh>关键进程启动时间检测</zh>
+                <en>check start time of key process</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查关键进程启动时间是否间隔超过一分钟，超过则检查不通过，否则检查通过</zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>custom</analysis>
+        </checkitem>
+         
+         <checkitem id="30029" name="CheckMpprcFile">
+            <title>
+                <zh>检测环境变量分离文件改动</zh>
+                <en>check if there is any change on mpprc file</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查是否存在对环境变量分离文件的改动，若存在则检查不通过，否则检查通过</zh>
+            </standard>
+            <category>cluster</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+         
+        <checkitem id="40010" name="CheckLockNum">
+            <title>
+                <zh>检查锁数量</zh>
+                <en>Check the lock count</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查数据库锁数量，查询成功则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40012" name="CheckArchiveParameter">
+            <title>
+                <zh>检查归档参数</zh>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查数据库归档参数，如果未打开或打开且在CN下则检查项通过，打开且不在CN目录下则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40015" name="CheckCurConnCount">
+            <title>
+                <zh>检查当前连接数</zh>
+                <en>Check the current connection count</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>断开不使用的连接</zh>
+            </suggestion>
+            <standard>
+                <zh>检查数据库连接数，如果连接数小于最大连接数的90%则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40016" name="CheckCursorNum">
+            <title>
+                <zh>检查当前游标数</zh>
+                <en>Check cursor num</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>清理不使用的游标</zh>
+            </suggestion>
+            <standard>
+                <zh>检查数据库的游标数，查询成功则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40017" name="CheckMaxDatanode">
+            <title>
+                <zh>检查comm_max_datanode参数值范围小于DN个数</zh>
+                <en>Check the parameter value of comm_max_datanode</en>
+            </title>
+            <threshold>
+                nodeCount=90;
+                dnCount=5
+            </threshold>
+            <suggestion>
+                <zh>使用guc工具将comm_max_datanode调整为更大的值(2的指数)</zh>
+            </suggestion>
+            <standard>
+                <zh>检查最大DN数，若最大DN数小于xml配置的节点数*DN数（默认值为90*5）报warning，否则检查项通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40018" name="CheckPgPreparedXacts">
+            <title>
+                <zh>检查残留两阶段事务</zh>
+                <en>Check the value of pg_prepared_xacts</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查pg_prepared_xacts参数，如果不存在二阶段事物则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40019" name="CheckPgxcgroup">
+            <title>
+                <zh>pgxc_group表中in_redistribution为Y的个数是否为0</zh>
+                <en>Check the value of pgxc_group</en>
+            </title>
+            <threshold>
+                version=V1R7C00
+            </threshold>
+            <suggestion/>
+            <standard>
+                <zh>检查pgxc_group表中in_redistribution为Y的个数，如果数量为0则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40020" name="CheckLockState">
+            <title>
+                <zh>集群是否被锁</zh>
+                <en>Check the cluster lock status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>确认集群未进行其他操作后，kill掉存在的锁集群进程。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查集群是否被锁，若集群未锁则检查通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40021" name="CheckIdleSession">
+            <title>
+                <zh>检查空闲会话</zh>
+                <en>Check idle session status</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>kill掉存在的空会话进程。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查空闲会话数，如果没有空闲会话则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40022" name="CheckDBConnection">
+            <title>
+                <zh>检查数据库连接</zh>
+                <en>Check the database connection</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>检查集群状态及实例状态。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查能否连接数据库，如果连接成功则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40023" name="CheckGUCValue">
+            <title>
+                <zh>GUC参数检查</zh>
+                <en>Check the GUC value</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>修改GUC参数</zh>
+            </suggestion>
+            <standard>
+                <zh>检查(max_connections + max_prepared_transactions) *
+                    max_locks_per_transaction的值，若该值大于等于1000000则检查项通过，否则检查项不通过。
+                </zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40025" name="CheckPMKData">
+            <title>
+                <zh>检查PMK异常数据</zh>
+                <en>Check pmk exception data</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>连接数据库修复异常数据</zh>
+            </suggestion>
+            <standard>
+                <zh>检查数据库PMK schema是否包含有异常数据，如果不存在异常数据则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40026" name="CheckSysTable">
+            <title>
+                <zh>检查系统表</zh>
+            </title>
+            <threshold>
+                database=postgres
+            </threshold>
+            <suggestion/>
+            <standard>
+                <zh>检查系统表，查询成功则检查项通过,否则检查项不通过。</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40027" name="CheckTableSpace">
+            <title>
+                <zh>检查表空间</zh>
+            </title>
+            <threshold>
+            </threshold>
+            <suggestion/>
+            <standard>
+                <zh>表空间路径和集群路径之间不能存在嵌套且表空间路径相互不能存在嵌套，则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40030" name="CheckSysadminUser">
+            <title>
+                <zh>检查sysadmin用户</zh>
+                <en>Check sysadmin user</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查除集群属主外是否存在sysadmin用户，若存在则不通过，否则检查通过</zh>
+                <en>Check whether there is a sysadmin user other than cluster user. If it exists, it does not pass. Otherwise, the check is passed.</en>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="40031" name="CheckGUCConsistent">
+            <title>
+                <zh>检查guc参数一致性</zh>
+                <en>Check guc parameter consistency</en>
+            </title>
+            <threshold>
+                version=V1R7C00
+            </threshold>
+            <suggestion/>
+            <standard>
+                <zh>检查各CN/DN实例的guc参数是否一致，若全部一致则检查通过，否则检查不通过</zh>
+                <en>Check whether the guc parameters of each CN/DN instance are consistent. If all parameters are the same, the check is passed. Otherwise, the check fails.</en>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>custom</analysis>
+        </checkitem>
+
+         <checkitem id="40032" name="CheckNextvalInDefault">
+            <title>
+                <zh>检查Default表达式中包含nextval（sequence）</zh>
+            </title>
+            <threshold>
+            </threshold>
+            <suggestion>
+                1、重建replicate table， 开始的时候就创建好所有列
+                2、退出session即可, 避免使用temp sequence
+         </suggestion>
+            <standard>
+                <zh>若Default表达式中包含nextval(sequence)则不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="40033" name="CheckDropColumn">
+            <title>
+                <zh>检查是否执行过alter table drop column</zh>
+            </title>
+            <threshold>
+            </threshold>
+            <suggestion>
+                1、创建新表 create table new(like old including all);
+                2、如原表有索引，需要禁用新表索引alter index idx_name UNUSABLE;
+                3、导入数据 insert into new select * from old;
+                4、恢复新表索引ALTER INDEX idx_name REBUILD;
+                5、删除老表 drop table old;
+                6、重命名新表 alter table new rename to old;
+         </suggestion>
+            <standard>
+                <zh>若执行过alter table drop column操作未消除影响则检查不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="40034" name="CheckTDDate">
+            <title>
+                <zh>检查是否存在TD模式数据库下的orc表，且包含date类型的列</zh>
+            </title>
+            <threshold>
+            </threshold>
+            <suggestion>删除表或改为其他类型</suggestion>
+            <standard>
+                <zh>若存在TD模式数据库下的orc表，且包含date类型的列则检查不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="40035" name="CheckHashIndex">
+            <title>
+                <zh>检查是否存在hash index</zh>
+            </title>
+            <threshold>
+            </threshold>
+            <suggestion>删除hash index</suggestion>
+            <standard>
+                <zh>若存在hash index则检查不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+         <checkitem id="40037" name="CheckReturnType">
+            <title>
+                <zh>检查用户自定义函数是否包含非法返回值</zh>
+                <en>Check if the user-defined function contains an illegal return value</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>用户自定义函数包含非法返回类型，检查不通过，否则检查通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+        <checkitem id="40038" name="CheckNodeGroupName">
+            <title>
+                <zh>检查是否存在非SQL_ASCII字符的node group名称</zh>
+                <en>Check if there is a node group name with non-SQL_ASCII characters</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>存在非SQL_ASCII字符的node group名称，检查不通过，否则检查通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>       
+        <checkitem id="40039" name="CheckCreateView">
+            <title>
+                <zh>检查视图中，子查询是否存在隐式的重命名字段</zh>
+                <en>Check if there is an implicit rename field in the subquery in the view</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>存在重命名字段，检查不通过，否则检查通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+        <checkitem id="40040" name="CheckPgxcRedistb">
+            <title>
+                <zh>检查数据库中是否存在重分布残留的临时表pgxc_redistb</zh>
+                <en>Check if there is a redistributed residual temporary table pgxc_redistb in the database</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>不存在则检查通过，否则检查不通过</zh>
+            </standard>
+            <category>database</category>
+            <permission>user</permission>
+            <scope>cn</scope>
+            <analysis>default</analysis>
+        </checkitem>
+        <checkitem id="50010" name="CheckPing">
+            <title>
+                <zh>检查网络通畅</zh>
+                <en>Check network ping</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>检查异常IP节点网络状况。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查集群内所有节点的互通性，如果各节点所有IP均可ping通则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>network</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="50011" name="CheckRXTX">
+            <title>
+                <zh>检查网卡RXTX值</zh>
+                <en>Check the network RXTX value</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>到异常节点执行ethtool eth* RX/TX 4096 将指定网卡RX/TX设置为4096。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查节点backIP对应的网卡的网卡速率，若不是万兆网卡报 warning，检查此节点backIp的RX/TX值，如果该值为4096则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>network</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="50012" name="CheckMTU">
+            <title>
+                <zh>检查网卡MTU值</zh>
+                <en>Check the network care MTU</en>
+            </title>
+            <threshold>
+                expectMTU1=8192;
+                expectMTU2=1500
+            </threshold>
+            <suggestion>
+                <zh>到异常节点执行ifconfig eth* mtu 8192 将指定网卡MTU值设置为8192。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查节点backIP对应的网卡MTU值（ bond后的物理网卡要确保一致），如果该值不是8192或1500 报warning 若集群MTU值一致则检查项通过，否则检查项不通过</zh>
+            </standard>     
+            <category>network</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="50013" name="CheckNetWorkDrop">
+            <title>
+                <zh>检查网络掉包率</zh>
+                <en>Check network care Drop</en>
+            </title>
+            <threshold/>
+            <suggestion/>
+            <standard>
+                <zh>检查各IP1分钟内网络掉包率，如果不超过1%则检查项通过，否则检查项不通过。</zh>
+            </standard>
+            <category>network</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="50014" name="CheckBond">
+            <title>
+                <zh>检查网卡绑定模式</zh>
+                <en>Check the network care bond mode</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>到异常节点将指定网卡bond模式设置为与其他节点相同。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查是否有配置BONDING_OPTS或BONDING_MODULE_OPTS，若没有配置则报NG。检查各节点bond模式是否一致，如果同时满足则检查项通过，否则检查项不通过 </zh>
+            </standard>
+            <category>network</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="50015" name="CheckMultiQueue">
+            <title>
+                <zh>检查网卡多队列</zh>
+                <en>Check the network care multi-queue</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>开启网卡多队列</zh>
+            </suggestion>
+            <standard>
+                <zh>检查cat /proc/interrupts，判断是否开启网卡多队列且绑定不同CPU，如果满足则检查项通过，否则检查项不通过</zh>
+            </standard>
+            <category>network</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="50016" name="CheckUsedPort">
+            <title>
+                <zh>检查随机端口使用数量</zh>
+                <en>Check port used number</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>增大net.ipv4.ip_local_port_range或降低并发</zh>
+            </suggestion>
+            <standard>
+                <zh>检查net.ipv4.ip_local_port_range，范围大于等于OS默认值通过;检查TCP协议随机端口数，小于总随机端口数的80%通过;检查SCTP协议随机端口数，小于总随机端口数的80%通过</zh>
+            </standard>
+            <category>network</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="50017" name="CheckNetSpeed">
+            <title>
+                <zh>网络带宽测试</zh>
+                <en>Check net speed</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>检查网络组网环境</zh>
+            </suggestion>
+            <standard>
+                <zh>使用speed_test跑满网络带宽，带宽大于600MB通过;网络满载时,检查网络ping值,小于1秒通过;网络满载时，检查网卡丢包率，小于1%通过</zh>
+            </standard>
+            <category>network</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="50018" name="CheckNICModel">
+            <title>
+                <zh>网卡型号检查</zh>
+                <en>Check NIC model</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>使用相同型号及驱动版本的网卡</zh>
+            </suggestion>
+            <standard>
+                <zh>检查各节点网卡的型号及驱动版本，各节点一致时通过</zh>
+            </standard>
+            <category>network</category>
+            <permission>root</permission>
+            <scope>all</scope>
+            <analysis>consistent</analysis>
+        </checkitem>
+
+        <checkitem id="50019" name="CheckRouting">
+            <title>
+                <zh>本地路由表检查</zh>
+                <en>Check routing table</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>设置节点上只有一个业务网段IP</zh>
+            </suggestion>
+            <standard>
+                <zh>检查单节点上业务网段的IP个数，超过一个则不通过</zh>
+            </standard>
+            <category>network</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="60010" name="CheckDataDiskUsage">
+            <title>
+                <zh>检查DN磁盘使用率</zh>
+                <en>Check the usage of DN disk</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>清理磁盘对应中的空间或更换更大的磁盘。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查磁盘DN目录空间和索引使用率，如果使用率低于90%则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>other</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="60011" name="CheckInstallDiskUsage">
+            <title>
+                <zh>检查系统安装磁盘空间使用率</zh>
+                <en>Check the usage of install disk</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>清理磁盘对应中的空间或更换更大的磁盘。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查磁盘系统安装目录空间和索引使用率，如果使用率低于90%则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>other</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="60010" name="CheckLogDiskUsage">
+            <title>
+                <zh>检查日志磁盘空间使用率</zh>
+                <en>Check the usage of log disk</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>清理磁盘对应中的空间或更换更大的磁盘。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查磁盘日志目录空间和索引使用率，如果使用率低于90%则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>other</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+
+        <checkitem id="60010" name="CheckTmpDiskUsage">
+            <title>
+                <zh>检查临时磁盘空间使用率</zh>
+                <en>Check the usage of tmp disk</en>
+            </title>
+            <threshold/>
+            <suggestion>
+                <zh>清理磁盘对应中的空间或更换更大的磁盘。</zh>
+            </suggestion>
+            <standard>
+                <zh>检查磁盘临时目录磁盘和索引使用率，如果使用率低于90%则检查项通过，否则检查项不通过
+                </zh>
+            </standard>
+            <category>other</category>
+            <permission>user</permission>
+            <scope>all</scope>
+            <analysis>default</analysis>
+        </checkitem>
+    </checkitems>
+</inspection>

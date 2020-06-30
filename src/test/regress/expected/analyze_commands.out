@@ -1,0 +1,80 @@
+create schema analyze_commands;
+set search_path to analyze_commands;
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(a int, b int, c int);
+insert into t1 values(generate_series(1,10),generate_series(1,2),generate_series(1,2));
+set default_statistics_target=100;
+analyze t1;
+analyze t1((b,c));
+INFO:  Please set default_statistics_target to a negative value to collect extended statistics.
+select * from pg_stats where tablename = 't1' order by attname;
+    schemaname    | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs |    histogram_bounds    | correlation | most_common_elems | most_common_elem_freqs | elem_count_histogram 
+------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------------+-------------+-------------------+------------------------+----------------------
+ analyze_commands | t1        | a       | f         |         0 |         4 |         -1 |            0 |                  |                   | {1,2,3,4,5,6,7,8,9,10} |           1 |                   |                        | 
+ analyze_commands | t1        | b       | f         |         0 |         4 |        -.2 |            0 | {1,2}            | {.5,.5}           |                        |     .636364 |                   |                        | 
+ analyze_commands | t1        | c       | f         |         0 |         4 |        -.2 |            0 | {1,2}            | {.5,.5}           |                        |     .636364 |                   |                        | 
+(3 rows)
+
+select * from pg_catalog.pg_ext_stats;
+ schemaname | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
+(0 rows)
+
+drop table if exists t1;
+create table t1(a int, b int, c int);
+insert into t1 values(generate_series(1,10),generate_series(1,2),generate_series(1,2));
+set default_statistics_target=100;
+analyze;
+select * from pg_stats where tablename = 't1' order by attname;
+    schemaname    | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs |    histogram_bounds    | correlation | most_common_elems | most_common_elem_freqs | elem_count_histogram 
+------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------------+-------------+-------------------+------------------------+----------------------
+ analyze_commands | t1        | a       | f         |         0 |         4 |         -1 |            0 |                  |                   | {1,2,3,4,5,6,7,8,9,10} |           1 |                   |                        | 
+ analyze_commands | t1        | b       | f         |         0 |         4 |        -.2 |            0 | {1,2}            | {.5,.5}           |                        |     .636364 |                   |                        | 
+ analyze_commands | t1        | c       | f         |         0 |         4 |        -.2 |            0 | {1,2}            | {.5,.5}           |                        |     .636364 |                   |                        | 
+(3 rows)
+
+select * from pg_catalog.pg_ext_stats;
+ schemaname | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
+(0 rows)
+
+drop table if exists t1;
+create table t1(a int, b int, c int);
+insert into t1 values(generate_series(1,10),generate_series(1,2),generate_series(1,2));
+set default_statistics_target=-2;
+analyze t1;
+analyze t1((b,c));
+select * from pg_stats where tablename = 't1' order by attname;
+    schemaname    | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs |    histogram_bounds    | correlation | most_common_elems | most_common_elem_freqs | elem_count_histogram 
+------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+------------------------+-------------+-------------------+------------------------+----------------------
+ analyze_commands | t1        | a       | f         |         0 |         4 |         -1 |            0 |                  |                   | {1,2,3,4,5,6,7,8,9,10} |           1 |                   |                        | 
+ analyze_commands | t1        | b       | f         |         0 |         4 |        -.2 |            0 | {1,2}            | {.5,.5}           |                        |     .636364 |                   |                        | 
+ analyze_commands | t1        | c       | f         |         0 |         4 |        -.2 |            0 | {1,2}            | {.5,.5}           |                        |     .636364 |                   |                        | 
+(3 rows)
+
+select * from pg_catalog.pg_ext_stats;
+    schemaname    | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals  | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+-------------------+-------------------+-----------------------+------------------------+------------------
+ analyze_commands | t1        | 2 3     | f         |         0 |         8 |        -.2 |            0 | {"{1,2}","{1,2}"} | {.5,.5}           |                       |                        | 
+(1 row)
+
+insert into t1 values(generate_series(1,10),generate_series(3,4),generate_series(3,4));
+analyze;
+select * from pg_stats where tablename = 't1' order by attname;
+    schemaname    | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |    most_common_vals    |        most_common_freqs        | histogram_bounds | correlation | most_common_elems | most_common_elem_freqs | elem_count_histogram 
+------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------------+---------------------------------+------------------+-------------+-------------------+------------------------+----------------------
+ analyze_commands | t1        | a       | f         |         0 |         4 |        -.5 |            0 | {1,2,3,4,5,6,7,8,9,10} | {.1,.1,.1,.1,.1,.1,.1,.1,.1,.1} |                  |             |                   |                        | 
+ analyze_commands | t1        | b       | f         |         0 |         4 |        -.2 |            0 | {1,2,3,4}              | {.25,.25,.25,.25}               |                  |             |                   |                        | 
+ analyze_commands | t1        | c       | f         |         0 |         4 |        -.2 |            0 | {1,2,3,4}              | {.25,.25,.25,.25}               |                  |             |                   |                        | 
+(3 rows)
+
+select * from pg_catalog.pg_ext_stats;
+    schemaname    | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------+-------------------+-----------------------+------------------------+------------------
+ analyze_commands | t1        | 2 3     | f         |         0 |         8 |        -.2 |            0 | {"{1,2,3,4}","{1,2,3,4}"} | {.25,.25,.25,.25} |                       |                        | 
+(1 row)
+
+reset search_path;
+drop schema analyze_commands cascade;
+NOTICE:  drop cascades to table analyze_commands.t1

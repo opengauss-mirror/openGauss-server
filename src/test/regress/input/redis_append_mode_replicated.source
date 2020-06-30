@@ -1,0 +1,153 @@
+--prepare
+create table t1 (c1 int, c2 int)  ;
+create table source_table(c1 int, c2 int);
+insert into source_table values(generate_series(1,100),10);
+
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_get_redis_rel_start_ctid' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_get_redis_rel_end_ctid' LANGUAGE C STABLE not fenced;
+create view ctid_view as
+select * from t1 
+where ctid between pg_get_redis_rel_start_ctid('t1',NULL) and pg_get_redis_rel_end_ctid('t1',NULL);
+
+create schema data_redis;
+CREATE TABLE data_redis.data_redis_tmp_12345 (LIKE t1 INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION, nodeid int,tupleblocknum bigint,tupleoffset int);
+
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	block_number bigint,
+	block_offset int
+)
+ ;
+
+--ut1 UT2 TEST empty table
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);   
+select count(*) from ctid_view;
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+select count(*) from ctid_view;
+
+--UT3 TEST SELECT FROM INSERT 
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+insert into t1 select * from source_table;
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+select count(*) from ctid_view;
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+select count(*) from ctid_view;
+
+--UT4 insert several values
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+insert into t1 values(11,11);
+insert into t1 values(12,12);
+insert into t1 values(13,13);
+insert into t1 values(14,14);
+insert into t1 values(15,15);
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+select count(*) from ctid_view;
+
+--UT5 test delete  
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+ delete from t1 where c1 < 50;
+ insert into t1 values(16,16),(17,17),(18,18);
+ insert into t1 select * from source_table where c1 < 50;
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+ select count(*) from data_redis.pg_delete_delta_12345;
+ select min(c1),max(c1),count(*) from ctid_view;
+ select * from ctid_view where c1 = 17 order by c2;
+
+ --UT6 test update
+ truncate data_redis.pg_delete_delta_12345;
+ truncate t1;
+ insert into t1 select * from source_table;
+
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+ update t1 set c2 = 20 where c1 < 50;
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+ select count(*) from data_redis.pg_delete_delta_12345;
+ select min(c1),max(c1),count(*) from ctid_view;
+ 
+--UT7 insert null values
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+ insert into t1 values(NULL,NULL);
+ insert into t1 values(NULL,NULL);
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+ select min(c1),max(c1),count(*) from ctid_view;
+
+--UT8 check copy
+ truncate data_redis.pg_delete_delta_12345;
+ truncate t1;
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+ COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ft1.data';
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+ select min(c1),max(c1),count(*) from ctid_view;
+
+--UT9 delete after insert 
+ truncate table data_redis.pg_delete_delta_12345;
+ truncate table t1;
+
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+ insert into t1 values(100,100);
+ delete from t1 where c1 = 100;
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+ select count(*) from data_redis.pg_delete_delta_12345; 
+
+ select min(c1),max(c1),count(*) from ctid_view;
+
+ --UT10 insert then truncate
+ truncate table data_redis.pg_delete_delta_12345;
+
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+ insert into t1 select * from source_table;
+ truncate table t1;
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+ select count(*) from data_redis.pg_delete_delta_12345; 
+
+ select min(c1),max(c1),count(*) from ctid_view;
+ 
+ --UT11 truncate then insert 
+ truncate table data_redis.pg_delete_delta_12345;
+ 
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+ insert into t1 select * from source_table;
+ truncate table t1;
+ insert into t1 values(100,100),(200,200);
+ delete from t1 where c1 = 200;
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+ select count(*) from data_redis.pg_delete_delta_12345; 
+
+ select min(c1),max(c1),count(*) from ctid_view;
+
+ --UT11 test vacuum full
+ truncate table data_redis.pg_delete_delta_12345;
+ truncate table t1;
+ insert into t1 select * from source_table;
+
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+ --do some udpate and delete
+ delete from t1 where c1 < 50;
+ update t1 set c2 = 20 where c1 > 50;
+ vacuum full t1;
+ ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+
+ select count(*) from data_redis.pg_delete_delta_12345; 
+
+ select min(c1),max(c1),count(*) from ctid_view;
+ 
+ --clear 
+drop view ctid_view;
+drop function pg_get_redis_rel_start_ctid;
+drop function pg_get_redis_rel_end_ctid; 
+
+drop table t1;
+drop table source_table;
+drop table data_redis.pg_delete_delta_12345;
+drop table data_redis.data_redis_tmp_12345;
+drop schema data_redis;

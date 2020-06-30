@@ -1,0 +1,801 @@
+/*
+################################################################################
+# TESTCASE NAME : wlm_plan_encoding1
+# COMPONENT(S)  : plan encoding
+# MODIFIED BY   : WHO            WHEN          COMMENT
+#               : -------------- ------------- ---------------------------------
+#               :                12-16-2019    created
+################################################################################
+*/
+-- 0. aiEngine
+-- 0.1 illegal ip
+select check_engine_status(' ',' ');
+INFO:  ip address   is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('111','11');
+INFO:  ip address 111 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('11.11.11','11');
+INFO:  ip address 11.11.11 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('.11.11.11','11');
+INFO:  ip address .11.11.11 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('.11.11.11','11');
+INFO:  ip address .11.11.11 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('1111.11.11.11','11');
+INFO:  ip address 1111.11.11.11 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('111.1111.11.11','11');
+INFO:  ip address 111.1111.11.11 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('111.11.1111.11','11');
+INFO:  ip address 111.11.1111.11 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('111.11.11.1111','11');
+INFO:  ip address 111.11.11.1111 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+-- 0.2 illegal port
+select check_engine_status('11.11.11.11','-1');
+INFO:  port number -1 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('11.11.11.11','65537');
+INFO:  port number 65537 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('11.11.11.11','100000');
+INFO:  port number 100000 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+select check_engine_status('11.11.11.11','0');
+INFO:  port number 0 is not valid
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+-- 0.3 unreachable engine
+select check_engine_status('11.11.11.11','11');
+INFO:  AI engine @11.11.11.11:11 is not running
+CONTEXT:  referenced column: check_engine_status
+ check_engine_status 
+---------------------
+ Failed
+(1 row)
+
+\c postgres
+-- 1.TPCH Q1
+-- 1.1 clean temporary tables
+delete from gs_wlm_plan_encoding_table;
+delete from gs_wlm_plan_operator_info;
+select create_wlm_operator_info(0);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+\c regression
+-- 1.2 run query
+explain (analyze on, costs off, verbose off)
+select
+        l_returnflag,
+        l_linestatus,
+        sum(l_quantity) as sum_qty,
+        sum(l_extendedprice) as sum_base_price,
+        sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+        sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)/1000) as sum_charge, --add /1000
+        avg(l_quantity) as avg_qty,
+        avg(l_extendedprice) as avg_price,
+        avg(l_discount) as avg_disc,
+        count(*) as count_order
+from
+        lineitem
+where
+        l_shipdate <= date '1998-12-01' - interval '3 day'
+group by
+        l_returnflag,
+        l_linestatus
+order by
+        l_returnflag,
+        l_linestatus;
+--?
+--?
+--? Sort (actual time=.* rows=4 loops=1)
+   Sort Key: l_returnflag, l_linestatus
+   Sort Method: quicksort  Memory: 25kB
+--?   ->  HashAggregate (actual time=.* rows=4 loops=1)
+         Group By Key: l_returnflag, l_linestatus
+--?         ->  Seq Scan on lineitem (actual time=.* rows=60173 loops=1)
+               Filter: (l_shipdate <= 'Sat Nov 28 00:00:00 1998'::timestamp without time zone)
+               Rows Removed by Filter: 2
+--? Total runtime: .* ms
+(9 rows)
+
+\c postgres
+-- 1.3 collect temporary information to _info tables
+select create_wlm_operator_info(1);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+-- 1.4 show plan_operator_info
+select * from gs_wlm_plan_operator_info order by queryid, plan_node_id;
+  datname   |     queryid     | plan_node_id | startup_time | total_time | actual_rows | max_peak_memory | query_dop | parent_node_id | left_child_id | right_child_id | operation | orientation | strategy | options |                                          condition                                           |                                                                                                                                                                                                            projection                                                                                                                                                                                                             
+------------+-----------------+--------------+--------------+------------+-------------+-----------------+-----------+----------------+---------------+----------------+-----------+-------------+----------+---------+----------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--? regression | .* |            1 |            0 |        .* |           4 |               1 |         1 |              0 |             2 |              0 | SORT      | ROW         |          |         |                                                                                              |  public.lineitem.l_returnflag, public.lineitem.l_linestatus, \(sum\(lineitem.l_quantity\)\), \(sum\(lineitem.l_extendedprice\)\), \(sum\(\(lineitem.l_extendedprice \* \(1::numeric - lineitem.l_discount\)\)\)\), \(sum\(\(\(\(lineitem.l_extendedprice \* \(1::numeric - lineitem.l_discount\)\) \* \(1::numeric + lineitem.l_tax\)\) / 1000::numeric\)\)\), \(avg\(lineitem.l_quantity\)\), \(avg\(lineitem.l_extendedprice\)\), \(avg\(lineitem.l_discount\)\), \(count\(*\)\)
+--? regression | .* |            2 |            0 |        .* |           4 |               1 |         1 |              1 |             3 |              0 | AGG       | ROW         | HASHED   |         |   &&                                                                                         |  public.lineitem.l_returnflag, public.lineitem.l_linestatus, sum\(lineitem.l_quantity\), sum\(lineitem.l_extendedprice\), sum\(\(lineitem.l_extendedprice \* \(1::numeric - lineitem.l_discount\)\)\), sum\(\(\(\(lineitem.l_extendedprice \* \(1::numeric - lineitem.l_discount\)\) \* \(1::numeric + lineitem.l_tax\)\) / 1000::numeric\)\), avg\(lineitem.l_quantity\), avg\(lineitem.l_extendedprice\), avg\(lineitem.l_discount\), count\(*\)
+--? regression | .* |            3 |            0 |        .* |       60173 |               1 |         1 |              2 |             0 |              0 | SCAN      | ROW         | SEQ      |         |   && \(public.lineitem.l_shipdate <= 'Sat Nov 28 00:00:00 1998'::timestamp without time zone\) |  public.lineitem.l_returnflag, public.lineitem.l_linestatus, public.lineitem.l_quantity, public.lineitem.l_extendedprice, public.lineitem.l_discount, public.lineitem.l_tax
+(3 rows)
+
+-- 1.5 run plan encoding
+select gather_encoding_info('regression');
+ gather_encoding_info 
+----------------------
+                    0
+(1 row)
+
+-- 1.6 show plan encoding
+select * from gs_wlm_plan_encoding_table;
+     queryid     | plan_node_id | parent_node_id | startup_time | total_time | rows  | peak_memory |                                                                   encode                                                                   
+-----------------+--------------+----------------+--------------+------------+-------+-------------+--------------------------------------------------------------------------------------------------------------------------------------------
+--? .* |            1 |              0 |            0 |        .* |     4 |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 1 0 1 1 1 1 0 0 1 1 0 
+--? .* |            2 |              1 |            0 |        .* |     4 |           1 | 1.000 1 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 1 1 0 0 0 1 1 1 1 0 1 0 
+--? .* |            3 |              2 |            0 |        .* | 60173 |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 0 0 0 0 0 0 1 1 0 0 0 1 1 1 1 1 1 0 0 
+(3 rows)
+
+-- 2.TPCH Q2
+-- 2.1 clean temporary tables
+delete from gs_wlm_plan_encoding_table;
+delete from gs_wlm_plan_operator_info;
+select create_wlm_operator_info(0);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+\c regression
+-- 2.2 run query
+explain (analyze on, costs off, verbose off)
+select
+	s_acctbal,
+	s_name,
+	n_name,
+	p_partkey,
+	p_mfgr,
+	s_address,
+	s_phone,
+	s_comment
+from
+	part,
+	supplier,
+	partsupp,
+	nation,
+	region
+where
+	p_partkey = ps_partkey
+	and s_suppkey = ps_suppkey
+	and p_size = 15
+	and p_type like 'SMALL%'
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'EUROPE '
+	and ps_supplycost = (
+		select
+			min(ps_supplycost)
+		from
+			partsupp,
+			supplier,
+			nation,
+			region
+		where
+			p_partkey = ps_partkey
+			and s_suppkey = ps_suppkey
+			and s_nationkey = n_nationkey
+			and n_regionkey = r_regionkey
+			and r_name = 'EUROPE '
+	)
+order by
+	s_acctbal desc,
+	n_name,
+	s_name,
+	p_partkey
+limit 100
+;
+--?
+--?
+--? Limit (actual time=.*  rows=3 loops=1)
+--?   ->  Sort (actual time=.*  rows=3 loops=1)
+         Sort Key: public.supplier.s_acctbal DESC, public.nation.n_name, public.supplier.s_name, public.part.p_partkey
+--?         Sort Method: quicksort  Memory: .*kB
+--?         ->  Nested Loop (actual time=.*  rows=3 loops=1)
+               Join Filter: (public.nation.n_regionkey = public.region.r_regionkey)
+--?               ->  Nested Loop (actual time=.*  rows=3 loops=1)
+                     Join Filter: (public.supplier.s_nationkey = public.nation.n_nationkey)
+                     Rows Removed by Join Filter: 72
+--?                     ->  Nested Loop (actual time=.*  rows=3 loops=1)
+                           Join Filter: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+                           Rows Removed by Join Filter: 297
+--?                           ->  Nested Loop (actual time=.*  rows=3 loops=1)
+                                 Join Filter: ((public.part.p_partkey = public.partsupp.ps_partkey) AND (public.partsupp.ps_supplycost = (min(public.partsupp.ps_supplycost))))
+                                 Rows Removed by Join Filter: 33
+--?                                 ->  Hash Join (actual time=.*  rows=12 loops=1)
+                                       Hash Cond: (public.partsupp.ps_partkey = public.part.p_partkey)
+--?                                       ->  Seq Scan on partsupp (actual time=.*  rows=8000 loops=1)
+--?                                       ->  Hash (actual time=.*  rows=3 loops=1)
+                                              Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?                                             ->  Seq Scan on part (actual time=.*  rows=3 loops=1)
+                                                   Filter: (((p_type)::text ~~ 'SMALL%'::text) AND (p_size = 15))
+                                                   Rows Removed by Filter: 1997
+--?                                 ->  Materialize (actual time=.*  rows=36 loops=12)
+--?                                       ->  HashAggregate (actual time=.*  rows=3 loops=1)
+                                             Group By Key: public.partsupp.ps_partkey
+--?                                             ->  Nested Loop (actual time=.*  rows=4 loops=1)
+                                                   Join Filter: (public.nation.n_nationkey = public.supplier.s_nationkey)
+                                                   Rows Removed by Join Filter: 56
+--?                                                   ->  Nested Loop (actual time=.*  rows=5 loops=1)
+                                                         Join Filter: (public.nation.n_regionkey = public.region.r_regionkey)
+                                                         Rows Removed by Join Filter: 20
+--?                                                         ->  Seq Scan on region (actual time=.*  rows=1 loops=1)
+                                                               Filter: (r_name = 'EUROPE '::bpchar)
+                                                               Rows Removed by Filter: 4
+--?                                                         ->  Seq Scan on nation (actual time=.*  rows=25 loops=1)
+--?                                                   ->  Materialize (actual time=.*  rows=60 loops=5)
+--?                                                         ->  Hash Join (actual time=.*  rows=12 loops=1)
+                                                               Hash Cond: (public.partsupp.ps_suppkey = public.supplier.s_suppkey)
+--?                                                               ->  Hash Semi Join (actual time=.*  rows=12 loops=1)
+                                                                     Hash Cond: (public.partsupp.ps_partkey = public.part.p_partkey)
+--?                                                                     ->  Seq Scan on partsupp (actual time=.*  rows=8000 loops=1)
+--?                                                                     ->  Hash (actual time=.*  rows=3 loops=1)
+                                                                            Buckets: 32768  Batches: 1  Memory Usage: 1kB
+--?                                                                           ->  Seq Scan on part (actual time=.*  rows=3 loops=1)
+                                                                                 Filter: (((p_type)::text ~~ 'SMALL%'::text) AND (p_size = 15))
+                                                                                 Rows Removed by Filter: 1997
+--?                                                               ->  Hash (actual time=.*  rows=100 loops=1)
+                                                                      Buckets: 32768  Batches: 1  Memory Usage: 4kB
+--?                                                                     ->  Seq Scan on supplier (actual time=.*  rows=100 loops=1)
+--?                           ->  Seq Scan on supplier (actual time=.*  rows=300 loops=3)
+--?                     ->  Seq Scan on nation (actual time=.*  rows=75 loops=3)
+--?               ->  Seq Scan on region (actual time=.*  rows=3 loops=3)
+                     Filter: (r_name = 'EUROPE '::bpchar)
+                     Rows Removed by Filter: 12
+--? Total runtime: .* ms
+(56 rows)
+
+\c postgres
+-- 2.3 collect temporary information to _info tables
+select create_wlm_operator_info(1);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+-- 2.4 show plan_operator_info
+select * from gs_wlm_plan_operator_info order by queryid, plan_node_id;
+  datname   |     queryid     | plan_node_id | startup_time | total_time | actual_rows | max_peak_memory | query_dop | parent_node_id | left_child_id | right_child_id |  operation  | orientation |  strategy   | options |                                                                 condition                                                                  |                                                                                                          projection                                                                                                           
+------------+-----------------+--------------+--------------+------------+-------------+-----------------+-----------+----------------+---------------+----------------+-------------+-------------+-------------+---------+--------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--? regression | .* |            1 |            .* |         .* |           3 |               1 |         1 |              0 |             2 |              0 | LIMIT       | ROW         |             |         |                                                                                                                                            |  public.supplier.s_acctbal, public.supplier.s_name, public.nation.n_name, public.part.p_partkey, public.part.p_mfgr, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment
+--? regression | .* |            2 |            .* |         .* |           3 |               1 |         1 |              1 |             3 |              0 | SORT        | ROW         |             |         |                                                                                                                                            |  public.supplier.s_acctbal, public.supplier.s_name, public.nation.n_name, public.part.p_partkey, public.part.p_mfgr, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment
+--? regression | .* |            3 |            .* |         .* |           3 |               1 |         1 |              2 |             4 |             27 | JOIN        | ROW         | NESTED_LOOP | INNER   |   && \(public.nation.n_regionkey = public.region.r_regionkey\) &&                                                                            |  public.supplier.s_acctbal, public.supplier.s_name, public.nation.n_name, public.part.p_partkey, public.part.p_mfgr, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment
+--? regression | .* |            4 |            .* |         .* |           3 |               1 |         1 |              3 |             5 |             26 | JOIN        | ROW         | NESTED_LOOP | INNER   |   && \(public.supplier.s_nationkey = public.nation.n_nationkey\) &&                                                                          |  public.part.p_partkey, public.part.p_mfgr, public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.nation.n_name, public.nation.n_regionkey
+--? regression | .* |            5 |            .* |         .* |           3 |               1 |         1 |              4 |             6 |             25 | JOIN        | ROW         | NESTED_LOOP | INNER   |   && \(public.partsupp.ps_suppkey = public.supplier.s_suppkey\) &&                                                                           |  public.part.p_partkey, public.part.p_mfgr, public.supplier.s_acctbal, public.supplier.s_name, public.supplier.s_address, public.supplier.s_phone, public.supplier.s_comment, public.supplier.s_nationkey
+--? regression | .* |            6 |            .* |         .* |           3 |               1 |         1 |              5 |             7 |             11 | JOIN        | ROW         | NESTED_LOOP | INNER   |   && \(\(public.part.p_partkey = public.partsupp.ps_partkey\) AND \(public.partsupp.ps_supplycost = \(min\(public.partsupp.ps_supplycost\)\)\)\) &&  |  public.part.p_partkey, public.part.p_mfgr, public.partsupp.ps_suppkey
+--? regression | .* |            7 |            .* |         .* |          12 |               1 |         1 |              6 |             8 |              9 | JOIN        | ROW         | HASH        | INNER   |   && \(public.partsupp.ps_partkey = public.part.p_partkey\) &&  &&                                                                           |  public.part.p_partkey, public.part.p_mfgr, public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.partsupp.ps_supplycost
+--? regression | .* |            8 |            .* |         .* |        8000 |               1 |         1 |              7 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   &&                                                                                                                                       |  public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.partsupp.ps_availqty, public.partsupp.ps_supplycost, public.partsupp.ps_comment
+--? regression | .* |            9 |            .* |         .* |           3 |               1 |         1 |              7 |            10 |              0 | HASH        | ROW         |             |         |                                                                                                                                            |  public.part.p_partkey, public.part.p_mfgr
+--? regression | .* |           10 |            .* |         .* |           3 |               1 |         1 |              9 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   && \(\(\(public.part.p_type\)::text ~~ 'SMALL%'::text\) AND \(public.part.p_size = 15\)\)                                                        |  public.part.p_partkey, public.part.p_mfgr
+--? regression | .* |           11 |            .* |         .* |          36 |               1 |         1 |              6 |            12 |              0 | MATERIALIZE | ROW         |             |         |                                                                                                                                            |  \(min\(public.partsupp.ps_supplycost\)\), public.partsupp.ps_partkey
+--? regression | .* |           12 |            .* |         .* |           3 |               1 |         1 |             11 |            13 |              0 | AGG         | ROW         | HASHED      |         |   &&                                                                                                                                       |  min\(public.partsupp.ps_supplycost\), public.partsupp.ps_partkey
+--? regression | .* |           13 |            .* |         .* |           4 |               1 |         1 |             12 |            14 |             17 | JOIN        | ROW         | NESTED_LOOP | INNER   |   && \(public.nation.n_nationkey = public.supplier.s_nationkey\) &&                                                                          |  public.partsupp.ps_partkey, public.partsupp.ps_supplycost
+--? regression | .* |           14 |            .* |         .* |           5 |               1 |         1 |             13 |            15 |             16 | JOIN        | ROW         | NESTED_LOOP | INNER   |   && \(public.nation.n_regionkey = public.region.r_regionkey\) &&                                                                            |  public.nation.n_nationkey
+--? regression | .* |           15 |            .* |         .* |           1 |               1 |         1 |             14 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   && \(public.region.r_name = 'EUROPE '::bpchar\)                                                                                            |  public.region.r_regionkey, public.region.r_name, public.region.r_comment
+--? regression | .* |           16 |            .* |         .* |          25 |               1 |         1 |             14 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   &&                                                                                                                                       |  public.nation.n_nationkey, public.nation.n_name, public.nation.n_regionkey, public.nation.n_comment
+--? regression | .* |           17 |            .* |         .* |          60 |               1 |         1 |             13 |            18 |              0 | MATERIALIZE | ROW         |             |         |                                                                                                                                            |  public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.supplier.s_nationkey
+--? regression | .* |           18 |            .* |         .* |          12 |               1 |         1 |             17 |            19 |             23 | JOIN        | ROW         | HASH        | INNER   |   && \(public.partsupp.ps_suppkey = public.supplier.s_suppkey\) &&  &&                                                                       |  public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.supplier.s_nationkey
+--? regression | .* |           19 |            .* |         .* |          12 |               1 |         1 |             18 |            20 |             21 | JOIN        | ROW         | HASH        | SEMI    |   && \(public.partsupp.ps_partkey = public.part.p_partkey\) &&  &&                                                                           |  public.partsupp.ps_partkey, public.partsupp.ps_supplycost, public.partsupp.ps_suppkey
+--? regression | .* |           20 |            .* |         .* |        8000 |               1 |         1 |             19 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   &&                                                                                                                                       |  public.partsupp.ps_partkey, public.partsupp.ps_suppkey, public.partsupp.ps_availqty, public.partsupp.ps_supplycost, public.partsupp.ps_comment
+--? regression | .* |           21 |            .* |         .* |           3 |               1 |         1 |             19 |            22 |              0 | HASH        | ROW         |             |         |                                                                                                                                            |  public.part.p_partkey
+--? regression | .* |           22 |            .* |         .* |           3 |               1 |         1 |             21 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   && \(\(\(public.part.p_type\)::text ~~ 'SMALL%'::text\) AND \(public.part.p_size = 15\)\)                                                        |  public.part.p_partkey
+--? regression | .* |           23 |            .* |         .* |         100 |               1 |         1 |             18 |            24 |              0 | HASH        | ROW         |             |         |                                                                                                                                            |  public.supplier.s_suppkey, public.supplier.s_nationkey
+--? regression | .* |           24 |            .* |         .* |         100 |               1 |         1 |             23 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   &&                                                                                                                                       |  public.supplier.s_suppkey, public.supplier.s_nationkey
+--? regression | .* |           25 |            .* |         .* |         300 |               1 |         1 |              5 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   &&                                                                                                                                       |  public.supplier.s_suppkey, public.supplier.s_name, public.supplier.s_address, public.supplier.s_nationkey, public.supplier.s_phone, public.supplier.s_acctbal, public.supplier.s_comment
+--? regression | .* |           26 |            .* |         .* |          75 |               1 |         1 |              4 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   &&                                                                                                                                       |  public.nation.n_nationkey, public.nation.n_name, public.nation.n_regionkey, public.nation.n_comment
+--? regression | .* |           27 |            .* |         .* |           3 |               1 |         1 |              3 |             0 |              0 | SCAN        | ROW         | SEQ         |         |   && \(public.region.r_name = 'EUROPE '::bpchar\)                                                                                            |  public.region.r_regionkey, public.region.r_name, public.region.r_comment
+(27 rows)
+
+-- 2.5 run plan encoding
+select gather_encoding_info('regression');
+ gather_encoding_info 
+----------------------
+                    0
+(1 row)
+
+-- 2.6 show plan encoding
+select * from gs_wlm_plan_encoding_table;
+     queryid     | plan_node_id | parent_node_id | startup_time | total_time | rows | peak_memory |                                                                   encode                                                                   
+-----------------+--------------+----------------+--------------+------------+------+-------------+--------------------------------------------------------------------------------------------------------------------------------------------
+--? .* |            1 |              0 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 1 0 0 0 0 0 0 0 0 1 1 
+--? .* |            2 |              1 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 1 0 0 0 0 0 0 0 0 1 1 
+--? .* |            3 |              2 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 1 0 1 0 0 0 0 0 0 0 0 1 1 
+--? .* |            4 |              3 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 1 1 1 1 0 0 1 0 0 1 1 0 0 0 0 1 1 0 0 0 
+--? .* |            5 |              4 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 0 0 1 0 1 0 1 1 1 1 1 0 1 1 1 0 1 0 
+--? .* |            6 |              5 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 1 1 1 0 1 0 1 0 0 1 0 1 0 0 
+--? .* |            7 |              6 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 1 1 1 0 1 0 1 1 0 0 1 1 0 0 0 1 
+--? .* |            8 |              7 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 1 0 0 1 0 1 1 0 1 0 1 0 
+--? .* |            9 |              7 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 1 1 1 0 1 0 1 1 0 0 0 0 
+--? .* |           10 |              9 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 1 0 1 1 0 0 0 1 1 1 0 1 0 1 1 0 0 0 0 
+--? .* |           11 |              6 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 0 1 0 1 0 0 1 0 1 0 0 
+--? .* |           12 |             11 |            .* |         .* | .* |           1 | 1.000 1 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 0 0 0 1 0 1 0 1 0 1 0 0 
+--? .* |           13 |             12 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 0 0 1 1 1 1 0 1 1 1 1 1 1 0 0 
+--? .* |           14 |             13 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 1 1 1 0 0 0 0 0 1 1 1 1 1 
+--? .* |           15 |             14 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 1 0 1 1 0 0 1 1 0 1 0 0 0 0 1 1 
+--? .* |           16 |             14 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 0 0 0 1 1 0 0 0 1 1 1 0 
+--? .* |           17 |             13 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 1 0 1 1 1 0 0 0 0 1 0 1 
+--? .* |           18 |             17 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 0 1 1 1 1 1 1 0 1 1 1 0 0 0 0 1 0 1 
+--? .* |           19 |             18 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 1 0 1 1 1 0 0 1 1 0 0 0 0 0 0 1 1 0 
+--? .* |           20 |             19 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 1 0 0 1 0 1 1 0 1 0 1 0 
+--? .* |           21 |             19 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 1 0 0 0 0 1 0 1 0 0 0 0 
+--? .* |           22 |             21 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 1 0 1 1 0 0 0 1 0 0 0 0 1 0 1 0 0 0 0 
+--? .* |           23 |             18 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 1 1 0 1 1 0 1 1 0 1 1 1 
+--? .* |           24 |             23 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 1 1 0 1 1 0 1 1 0 1 1 1 
+--? .* |           25 |              5 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 1 0 0 1 1 1 0 0 1 1 0 0 
+--? .* |           26 |              4 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 0 0 0 1 1 0 0 0 1 1 1 0 
+--? .* |           27 |              3 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 1 0 1 1 0 0 1 1 0 1 0 0 0 0 1 1 
+(27 rows)
+
+-- 3.TPCH Q3
+-- 3.1 clean temporary tables
+delete from gs_wlm_plan_encoding_table;
+delete from gs_wlm_plan_operator_info;
+select create_wlm_operator_info(0);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+\c regression
+-- 3.2 run query
+explain (analyze on, costs off, verbose off)
+select
+	l_orderkey,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	o_orderdate,
+	o_shippriority
+from
+	customer,
+	orders,
+	lineitem
+where
+	c_mktsegment = 'BUILDING'
+	and c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate < '1995-03-15'::date
+	and l_shipdate > '1995-03-15'::date
+group by
+	l_orderkey,
+	o_orderdate,
+	o_shippriority
+order by
+	revenue desc,
+	o_orderdate
+limit 10
+;
+--?
+--?
+--? Limit (actual time=.* rows=10 loops=1)
+--?   ->  Sort (actual time=.* rows=10 loops=1)
+         Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))) DESC, orders.o_orderdate
+--?         Sort Method: top-N heapsort  Memory: .*kB
+--?         ->  HashAggregate (actual time=.* rows=138 loops=1)
+               Group By Key: lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority
+--?               ->  Hash Join (actual time=.* rows=356 loops=1)
+                     Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+--?                     ->  Seq Scan on lineitem (actual time=.* rows=32260 loops=1)
+                           Filter: (l_shipdate > 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                           Rows Removed by Filter: 27915
+--?                     ->  Hash (actual time=.* rows=1797 loops=1)
+--?                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                           ->  Hash Join (actual time=.* rows=1797 loops=1)
+                                 Hash Cond: (orders.o_custkey = customer.c_custkey)
+--?                                 ->  Seq Scan on orders (actual time=.* rows=7286 loops=1)
+                                       Filter: (o_orderdate < 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                                       Rows Removed by Filter: 7714
+--?                                 ->  Hash (actual time=.* rows=337 loops=1)
+--?                                        Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                       ->  Seq Scan on customer (actual time=.* rows=337 loops=1)
+                                             Filter: (c_mktsegment = 'BUILDING'::bpchar)
+                                             Rows Removed by Filter: 1163
+--? Total runtime: .* ms
+(24 rows)
+
+\c postgres
+-- 3.3 collect temporary information to _info tables
+select create_wlm_operator_info(1);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+-- 3.4 show plan_operator_info
+select * from gs_wlm_plan_operator_info order by queryid, plan_node_id;
+  datname   |     queryid     | plan_node_id | startup_time | total_time | actual_rows | max_peak_memory | query_dop | parent_node_id | left_child_id | right_child_id | operation | orientation | strategy | options |                                           condition                                            |                                                                                                                                                                                                                                 projection                                                                                                                                                                                                                                  
+------------+-----------------+--------------+--------------+------------+-------------+-----------------+-----------+----------------+---------------+----------------+-----------+-------------+----------+---------+------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--? regression | .* |            1 |            0 |         43 |          10 |               1 |         1 |              0 |             2 |              0 | LIMIT     | ROW         |          |         |                                                                                                |  public.lineitem.l_orderkey, (sum((lineitem.l_extendedprice \* (1::numeric - lineitem.l_discount)))), public.orders.o_orderdate, public.orders.o_shippriority
+--? regression | .* |            2 |            0 |         43 |          10 |               1 |         1 |              1 |             3 |              0 | SORT      | ROW         |          |         |                                                                                                |  public.lineitem.l_orderkey, (sum((lineitem.l_extendedprice \* (1::numeric - lineitem.l_discount)))), public.orders.o_orderdate, public.orders.o_shippriority
+--? regression | .* |            3 |            0 |         42 |         138 |               1 |         1 |              2 |             4 |              0 | AGG       | ROW         | HASHED   |         |   &&                                                                                           |  public.lineitem.l_orderkey, sum((lineitem.l_extendedprice \* (1::numeric - lineitem.l_discount))), public.orders.o_orderdate, public.orders.o_shippriority
+--? regression | .* |            4 |            0 |         41 |         356 |               1 |         1 |              3 |             5 |              6 | JOIN      | ROW         | HASH     | INNER   |   && (public.lineitem.l_orderkey = public.orders.o_orderkey) &&  &&                            |  public.orders.o_orderdate, public.orders.o_shippriority, public.lineitem.l_orderkey, public.lineitem.l_extendedprice, public.lineitem.l_discount
+--? regression | .* |            5 |            0 |         25 |       32260 |               1 |         1 |              4 |             0 |              0 | SCAN      | ROW         | SEQ      |         |   && (public.lineitem.l_shipdate > 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone) |  public.lineitem.l_orderkey, public.lineitem.l_partkey, public.lineitem.l_suppkey, public.lineitem.l_linenumber, public.lineitem.l_quantity, public.lineitem.l_extendedprice, public.lineitem.l_discount, public.lineitem.l_tax, public.lineitem.l_returnflag, public.lineitem.l_linestatus, public.lineitem.l_shipdate, public.lineitem.l_commitdate, public.lineitem.l_receiptdate, public.lineitem.l_shipinstruct, public.lineitem.l_shipmode, public.lineitem.l_comment
+--? regression | .* |            6 |            0 |          9 |        1797 |               1 |         1 |              4 |             7 |              0 | HASH      | ROW         |          |         |                                                                                                |  public.orders.o_orderdate, public.orders.o_shippriority, public.orders.o_orderkey
+--? regression | .* |            7 |            0 |          8 |        1797 |               1 |         1 |              6 |             8 |              9 | JOIN      | ROW         | HASH     | INNER   |   && (public.orders.o_custkey = public.customer.c_custkey) &&  &&                              |  public.orders.o_orderdate, public.orders.o_shippriority, public.orders.o_orderkey
+--? regression | .* |            8 |            0 |          6 |        7286 |               1 |         1 |              7 |             0 |              0 | SCAN      | ROW         | SEQ      |         |   && (public.orders.o_orderdate < 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)  |  public.orders.o_orderkey, public.orders.o_custkey, public.orders.o_orderstatus, public.orders.o_totalprice, public.orders.o_orderdate, public.orders.o_orderpriority, public.orders.o_clerk, public.orders.o_shippriority, public.orders.o_comment
+--? regression | .* |            9 |            0 |          0 |         337 |               1 |         1 |              7 |            10 |              0 | HASH      | ROW         |          |         |                                                                                                |  public.customer.c_custkey
+--? regression | .* |           10 |            0 |          0 |         337 |               1 |         1 |              9 |             0 |              0 | SCAN      | ROW         | SEQ      |         |   && (public.customer.c_mktsegment = 'BUILDING'::bpchar)                                       |  public.customer.c_custkey
+(10 rows)
+
+-- 3.5 run plan encoding
+select gather_encoding_info('regression');
+ gather_encoding_info 
+----------------------
+                    0
+(1 row)
+
+-- 3.6 show plan encoding
+select * from gs_wlm_plan_encoding_table;
+     queryid     | plan_node_id | parent_node_id | startup_time | total_time | rows  | peak_memory |                                                                   encode                                                                   
+-----------------+--------------+----------------+--------------+------------+-------+-------------+--------------------------------------------------------------------------------------------------------------------------------------------
+--? .* |            1 |              0 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 0 1 0 1 1 1 1 1 0 1 0 
+--? .* |            2 |              1 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 0 1 0 1 1 1 1 1 0 1 0 
+--? .* |            3 |              2 |            .* |         .* | .* |           1 | 1.000 1 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 0 1 1 0 1 0 0 1 0 0 1 1 
+--? .* |            4 |              3 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 1 0 0 1 1 1 0 1 0 0 0 1 0 0 1 0 
+--? .* |            5 |              4 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 1 1 1 1 0 1 0 1 1 1 0 1 0 0 0 1 1 0 0 1 1 
+--? .* |            6 |              4 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 0 0 1 1 1 0 1 1 1 1 0 
+--? .* |            7 |              6 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 0 0 0 1 1 1 0 0 0 0 0 1 1 1 0 1 1 1 1 0 
+--? .* |            8 |              7 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 1 1 0 1 1 0 0 0 1 1 0 0 1 0 0 1 1 1 0 1 
+--? .* |            9 |              7 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 
+--? .* |           10 |              9 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 1 0 1 1 0 0 0 0 1 0 1 0 0 0 0 0 
+(10 rows)
+
+-- 4.TPCH Q4
+-- 4.1 clean temporary tables
+delete from gs_wlm_plan_encoding_table;
+delete from gs_wlm_plan_operator_info;
+select create_wlm_operator_info(0);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+\c regression
+-- 4.2 run query
+explain (analyze on, costs off, verbose off)
+select
+	o_orderpriority,
+	count(*) as order_count
+from
+	orders
+where
+	o_orderdate >= '1993-07-01'::date
+	and o_orderdate < '1993-07-01'::date + interval '3 month'
+	and exists (
+		select
+			*
+		from
+			lineitem
+		where
+			l_orderkey = o_orderkey
+			and l_commitdate < l_receiptdate
+	)
+group by
+	o_orderpriority
+order by
+	o_orderpriority;
+--?
+--?
+--? Sort (actual time=.* rows=5 loops=1)
+   Sort Key: orders.o_orderpriority
+--?   Sort Method: quicksort  Memory: .*kB
+--?   ->  HashAggregate (actual time=.* rows=5 loops=1)
+         Group By Key: orders.o_orderpriority
+--?         ->  Hash Right Semi Join (actual time=.* rows=535 loops=1)
+               Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+--?               ->  Seq Scan on lineitem (actual time=.* rows=37897 loops=1)
+                     Filter: (l_commitdate < l_receiptdate)
+                     Rows Removed by Filter: 22278
+--?               ->  Hash (actual time=.* rows=582 loops=1)
+--?                      Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                     ->  Seq Scan on orders (actual time=.* rows=582 loops=1)
+                           Filter: ((o_orderdate >= 'Thu Jul 01 00:00:00 1993'::timestamp(0) without time zone) AND (o_orderdate < 'Fri Oct 01 00:00:00 1993'::timestamp without time zone))
+                           Rows Removed by Filter: 14418
+--? Total runtime: .* ms
+(16 rows)
+
+\c postgres
+-- 4.3 collect temporary information to _info tables
+select create_wlm_operator_info(1);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+-- 4.4 show plan_operator_info
+select * from gs_wlm_plan_operator_info order by queryid, plan_node_id;
+  datname   |     queryid     | plan_node_id | startup_time | total_time | actual_rows | max_peak_memory | query_dop | parent_node_id | left_child_id | right_child_id | operation | orientation | strategy |   options   |                                                                                         condition                                                                                          |                                                                                                                                                                                                                                 projection                                                                                                                                                                                                                                  
+------------+-----------------+--------------+--------------+------------+-------------+-----------------+-----------+----------------+---------------+----------------+-----------+-------------+----------+-------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--? regression | .* |            1 |            .* |         .* |       .* |               1 |         1 |              0 |             2 |              0 | SORT      | ROW         |          |             |                                                                                                                                                                                            |  public.orders.o_orderpriority, (count(\*))
+--? regression | .* |            2 |            .* |         .* |       .* |               1 |         1 |              1 |             3 |              0 | AGG       | ROW         | HASHED   |             |   &&                                                                                                                                                                                       |  public.orders.o_orderpriority, count(\*)
+--? regression | .* |            3 |            .* |         .* |       .* |               1 |         1 |              2 |             4 |              5 | JOIN      | ROW         | HASH     | RIGHT SEMI  |   && (public.lineitem.l_orderkey = public.orders.o_orderkey) &&  &&                                                                                                                        |  public.orders.o_orderpriority
+--? regression | .* |            4 |            .* |         .* |       .* |               1 |         1 |              3 |             0 |              0 | SCAN      | ROW         | SEQ      |             |   && (public.lineitem.l_commitdate < public.lineitem.l_receiptdate)                                                                                                                        |  public.lineitem.l_orderkey, public.lineitem.l_partkey, public.lineitem.l_suppkey, public.lineitem.l_linenumber, public.lineitem.l_quantity, public.lineitem.l_extendedprice, public.lineitem.l_discount, public.lineitem.l_tax, public.lineitem.l_returnflag, public.lineitem.l_linestatus, public.lineitem.l_shipdate, public.lineitem.l_commitdate, public.lineitem.l_receiptdate, public.lineitem.l_shipinstruct, public.lineitem.l_shipmode, public.lineitem.l_comment
+--? regression | .* |            5 |            .* |         .* |       .* |               1 |         1 |              3 |             6 |              0 | HASH      | ROW         |          |             |                                                                                                                                                                                            |  public.orders.o_orderpriority, public.orders.o_orderkey
+--? regression | .* |            6 |            .* |         .* |       .* |               1 |         1 |              5 |             0 |              0 | SCAN      | ROW         | SEQ      |             |   && ((public.orders.o_orderdate >= 'Thu Jul 01 00:00:00 1993'::timestamp(0) without time zone) AND (public.orders.o_orderdate < 'Fri Oct 01 00:00:00 1993'::timestamp without time zone)) |  public.orders.o_orderpriority, public.orders.o_orderkey
+(6 rows)
+
+-- 4.5 run plan encoding
+select gather_encoding_info('regression');
+ gather_encoding_info 
+----------------------
+                    0
+(1 row)
+
+-- 4.6 show plan encoding
+select * from gs_wlm_plan_encoding_table;
+     queryid     | plan_node_id | parent_node_id | startup_time | total_time | rows  | peak_memory |                                                                   encode                                                                   
+-----------------+--------------+----------------+--------------+------------+-------+-------------+--------------------------------------------------------------------------------------------------------------------------------------------
+--? .* |            1 |              0 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 0 1 0 0 1 0 1 1 1 1 1 1 
+--? .* |            2 |              1 |            .* |         .* | .* |           1 | 1.000 1 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 1 1 1 0 1 0 1 0 1 1 0 0 0 1 0 
+--? .* |            3 |              2 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 1 0 0 1 0 1 1 0 0 1 1 0 0 1 0 1 
+--? .* |            4 |              3 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0 0 1 0 0 1 0 1 0 0 0 1 1 0 0 1 1 
+--? .* |            5 |              3 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 0 1 0 0 0 0 1 1 0 1 1 1 0 1 0 0 1 1 
+--? .* |            6 |              5 |            .* |         .* | .* |           1 | 1.000 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 0 0 1 1 1 1 0 0 1 1 0 1 1 1 0 1 0 0 1 1 
+(6 rows)
+
+-- 5 model train
+-- 5.1 train with model not existed in gs_opt_model 
+delete from gs_opt_model;
+select * from model_train_opt('void', 'void');
+ERROR:  void is not supported as template_name.
+select * from model_train_opt('rlstm', 'void');
+ERROR:  OPT_Model not found for model name void
+-- 5. invalid template_name
+insert into gs_opt_model values('rlstm1', 'tmp_name', 'regression', '128.0.0.1', 5000, 0, 0, 0, 0, 0, 0, false, false, '{S, T}', '{0,0}', '{0,0}', 'Description');
+select model_train_opt('rlstm1', 'tmp_name');
+ERROR:  rlstm1 is not supported as template_name.
+CONTEXT:  referenced column: model_train_opt
+-- 5. train with false label targets
+delete from gs_opt_model;
+insert into gs_opt_model values('rlstm', 'rlstm_tmp', 'regression', '128.0.0.1', 5000, 1000, 1, -1, 50, 2000, 0, false, false, '{}', '{}', '{}', 'Description');
+select model_train_opt('rlstm', 'rlstm_tmp');
+ERROR:  Model labels are not a 1-D char array.
+CONTEXT:  referenced column: model_train_opt
+update gs_opt_model set label = '{t}';
+update gs_opt_model set label = '{T,T}';
+select model_train_opt('rlstm', 'rlstm_tmp');
+ERROR:  Repetitive labels found in model labels attribute for template name rlstm model name rlstm_tmp
+CONTEXT:  referenced column: model_train_opt
+-- 5. positive cases: connection failure
+update gs_opt_model set label = '{T}';
+select model_train_opt('rlstm', 'rlstm_tmp');
+ERROR:  AI engine connection failed.
+CONTEXT:  referenced column: model_train_opt
+update gs_opt_model set label = '{S,T}';
+select model_train_opt('rlstm', 'rlstm_tmp');
+ERROR:  AI engine connection failed.
+CONTEXT:  referenced column: model_train_opt
+-- 6 model predict
+-- 6.1 predict with model not existed in gs_opt_model
+delete from gs_opt_model;
+\c regression
+explain (analyze on, predictor rlstm_tmp)
+select
+	l_orderkey,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	o_orderdate,
+	o_shippriority
+from
+	customer,
+	orders,
+	lineitem
+where
+	c_mktsegment = 'BUILDING'
+	and c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate < '1995-03-15'::date
+	and l_shipdate > '1995-03-15'::date
+group by
+	l_orderkey,
+	o_orderdate,
+	o_shippriority
+order by
+	revenue desc,
+	o_orderdate
+limit 10
+;
+WARNING:  MLModel not found for model name rlstm_tmp
+--?
+--?
+--? Limit  (cost=.* rows=10 loops=1)
+--?   ->  Sort  (cost=.* rows=10 loops=1)
+         Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))) DESC, orders.o_orderdate
+--?         Sort Method: top-N heapsort  Memory: .*kB
+--?         ->  HashAggregate  (cost=.* rows=138 loops=1)
+               Group By Key: lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority
+--?               ->  Hash Join  (cost=.* rows=356 loops=1)
+                     Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+--?                     ->  Seq Scan on lineitem  (cost=.* rows=32260 loops=1)
+                           Filter: (l_shipdate > 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                           Rows Removed by Filter: 27915
+--?                     ->  Hash  (cost=.* rows=1797 loops=1)
+--?                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                           ->  Hash Join  (cost=.* rows=1797 loops=1)
+                                 Hash Cond: (orders.o_custkey = customer.c_custkey)
+--?                                 ->  Seq Scan on orders  (cost=.* rows=7286 loops=1)
+                                       Filter: (o_orderdate < 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                                       Rows Removed by Filter: 7714
+--?                                 ->  Hash  (cost=.* rows=337 loops=1)
+--?                                        Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                       ->  Seq Scan on customer  (cost=.* rows=337 loops=1)
+                                             Filter: (c_mktsegment = 'BUILDING'::bpchar)
+                                             Rows Removed by Filter: 1163
+--? Total runtime: .* ms
+(24 rows)
+
+-- 6.2 wrong database
+insert into gs_opt_model values('rlstm', 'rlstm_tmp', 'postgres', '128.0.0.1', 5000, 1000, 1, -1, 50, 2000, 0, false, false, '{S,T}', '{10000,10000}', '{10,10}', 'Description');
+explain (analyze on, predictor rlstm_tmp)
+select
+	l_orderkey,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	o_orderdate,
+	o_shippriority
+from
+	customer,
+	orders,
+	lineitem
+where
+	c_mktsegment = 'BUILDING'
+	and c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate < '1995-03-15'::date
+	and l_shipdate > '1995-03-15'::date
+group by
+	l_orderkey,
+	o_orderdate,
+	o_shippriority
+order by
+	revenue desc,
+	o_orderdate
+limit 10
+;
+WARNING:  Predictor rlstm_tmp is not for current database
+--?
+--?
+--? Limit  (cost=.*  rows=10 loops=1)
+--?   ->  Sort  (cost=.*  rows=10 loops=1)
+         Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount)))) DESC, orders.o_orderdate
+--?         Sort Method: top-N heapsort  Memory: .*kB
+--?         ->  HashAggregate  (cost=.*  rows=138 loops=1)
+               Group By Key: lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority
+--?               ->  Hash Join  (cost=.*  rows=356 loops=1)
+                     Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+--?                     ->  Seq Scan on lineitem  (cost=.*  rows=32260 loops=1)
+                           Filter: (l_shipdate > 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+                           Rows Removed by Filter: 27915
+--?                     ->  Hash  (cost=.*  rows=1797 loops=1)
+--?                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                           ->  Hash Join  (cost=.*  rows=1797 loops=1)
+                                 Hash Cond: (orders.o_custkey = customer.c_custkey)
+--?                                 ->  Seq Scan on orders  (cost=.*  rows=7286 loops=1)
+                                       Filter: (o_orderdate < 'Wed Mar 15 00:00:00 1995'::timestamp(0) without time zone)
+--?                                       Rows Removed by Filter: 7714
+--?                                 ->  Hash  (cost=.*  rows=337 loops=1)
+--?                                        Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                       ->  Seq Scan on customer  (cost=.*  rows=337 loops=1)
+                                             Filter: (c_mktsegment = 'BUILDING'::bpchar)
+                                             Rows Removed by Filter: 1163
+--? Total runtime: .* ms
+(24 rows)
+
+-- 6.3 connection failed
+update gs_opt_model set datname = 'regression';
+explain (analyze on, predictor rlstm_tmp)
+select
+	l_orderkey,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	o_orderdate,
+	o_shippriority
+from
+	customer,
+	orders,
+	lineitem
+where
+	c_mktsegment = 'BUILDING'
+	and c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate < '1995-03-15'::date
+	and l_shipdate > '1995-03-15'::date
+group by
+	l_orderkey,
+	o_orderdate,
+	o_shippriority
+order by
+	revenue desc,
+	o_orderdate
+limit 10
+;
+WARNING:  Predictor rlstm_tmp is not converged, results are not reliable
+ERROR:  AI engine connection failed.
+-- final cleanup
+\c postgres
+select create_wlm_operator_info(0);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+select create_wlm_session_info(0);
+ create_wlm_session_info 
+-------------------------
+                       0
+(1 row)
+
+drop database regression;
+create database regression;

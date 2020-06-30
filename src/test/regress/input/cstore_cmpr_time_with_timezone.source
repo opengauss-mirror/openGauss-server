@@ -1,0 +1,17 @@
+set enable_vector_engine=on;
+-- Problem:
+-- basic time with time zone type data compression, including DELTA method, min/max computation.
+CREATE TABLE colcmpr_time_with_timezone
+(
+	distkey INT4,
+	a time with time zone,
+	b time with time zone,
+	c time with time zone,
+	d time with time zone,
+	e time with time zone,
+	f time with time zone
+) with (orientation = column)  ;
+COPY colcmpr_time_with_timezone FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_timestamp_with_timezone.data' delimiter ',';
+SET DATESTYLE='SQL, DMY';
+SELECT * FROM colcmpr_time_with_timezone;
+DROP TABLE colcmpr_time_with_timezone;

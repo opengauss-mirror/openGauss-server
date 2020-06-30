@@ -1,0 +1,1490 @@
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ *
+ * partcache.cpp
+ *
+ * IDENTIFICATION
+ *    src/common/backend/utils/cache/partcache.cpp
+ *
+ * -------------------------------------------------------------------------
+ */
+#include "postgres.h"
+#include "knl/knl_variable.h"
+#include <sys/file.h>
+#include "access/reloptions.h"
+#include "access/sysattr.h"
+#include "access/transam.h"
+#include "access/xact.h"
+#include "catalog/catalog.h"
+#include "catalog/index.h"
+#include "catalog/indexing.h"
+#include "catalog/namespace.h"
+#include "catalog/pg_amproc.h"
+#include "catalog/pg_attrdef.h"
+#include "catalog/pg_authid.h"
+#include "catalog/pg_auth_members.h"
+#include "catalog/pg_constraint.h"
+#include "catalog/pg_database.h"
+#include "catalog/pg_namespace.h"
+#include "catalog/pg_opclass.h"
+#include "catalog/pg_proc.h"
+#include "catalog/pg_rewrite.h"
+#include "catalog/pg_tablespace.h"
+#include "catalog/pg_trigger.h"
+#include "catalog/pg_type.h"
+#include "catalog/schemapg.h"
+#include "commands/tablespace.h"
+#include "commands/trigger.h"
+#include "commands/vacuum.h"
+#include "executor/nodeModifyTable.h"
+#include "miscadmin.h"
+#include "optimizer/clauses.h"
+#include "optimizer/planmain.h"
+#include "optimizer/prep.h"
+#include "optimizer/var.h"
+#include "rewrite/rewriteDefine.h"
+#include "storage/lmgr.h"
+#include "storage/smgr.h"
+#include "catalog/storage.h"
+#include "utils/array.h"
+#include "utils/builtins.h"
+#include "utils/fmgroids.h"
+#include "utils/inval.h"
+#include "utils/lsyscache.h"
+#include "utils/memutils.h"
+#include "utils/relmapper.h"
+#include "utils/resowner.h"
+#include "utils/syscache.h"
+#include "access/cstore_am.h"
+#include "utils/tqual.h"
+#include "utils/partitionmap.h"
+#include "utils/partitionmap_gs.h"
+#include "catalog/pg_partition.h"
+#include "postmaster/autovacuum.h"
+/*
+ * part 1:macro definitions, global virables, and typedefs
+ */
+typedef struct partidcacheent {
+    Oid partoid;
+    Partition partdesc;
+} PartIdCacheEnt;
+
+#define PartitionCacheInsert(PARTITION)                                                            \
+    do {                                                                                           \
+        PartIdCacheEnt* idhentry;                                                                  \
+        bool found = true;                                                                         \
+        idhentry = (PartIdCacheEnt*)hash_search(                                                   \
+            u_sess->cache_cxt.PartitionIdCache, (void*)&((PARTITION)->pd_id), HASH_ENTER, &found); \
+        /* used to give notice if found -- now just keep quiet */                                  \
+        idhentry->partdesc = PARTITION;                                                            \
+    } while (0)
+
+#define PartitionIdCacheLookup(ID, PARTITION)                                                                     \
+    do {                                                                                                          \
+        PartIdCacheEnt* hentry;                                                                                   \
+        hentry = (PartIdCacheEnt*)hash_search(u_sess->cache_cxt.PartitionIdCache, (void*)&(ID), HASH_FIND, NULL); \
+        if (hentry != NULL)                                                                                       \
+            (PARTITION) = hentry->partdesc;                                                                       \
+        else                                                                                                      \
+            (PARTITION) = NULL;                                                                                   \
+    } while (0)
+
+#define PartitionCacheDelete(PARTITION)                                                                               \
+    do {                                                                                                              \
+        PartIdCacheEnt* idhentry;                                                                                     \
+        idhentry = (PartIdCacheEnt*)hash_search(                                                                      \
+            u_sess->cache_cxt.PartitionIdCache, (void*)&((PARTITION)->pd_id), HASH_REMOVE, NULL);                     \
+        if (idhentry == NULL)                                                                                         \
+            ereport(WARNING,                                                                                          \
+                (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("trying to delete a rd_id partdesc that does not exist"))); \
+    } while (0)
+
+#define INITPARTCACHESIZE 100
+
+/*
+ *part 2: static functions used only in this c source file
+ *
+ *non-export function prototypes
+ */
+static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK);
+static Partition AllocatePartitionDesc(Form_pg_partition relp);
+static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt);
+static void PartitionInitPhysicalAddr(Partition partition);
+static void PartitionDestroyPartition(Partition partition);
+static void PartitionFlushPartition(Partition partition);
+static void PartitionClearPartition(Partition partition, bool rebuild);
+static void PartitionReloadIndexInfo(Partition part);
+
+static void PartitionParseRelOptions(Partition partition, HeapTuple tuple);
+
+static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK)
+{
+    HeapTuple pg_partition_tuple;
+    Relation pg_partition_desc;
+    SysScanDesc pg_partition_scan;
+    ScanKeyData key[1];
+
+    /*
+     * If something goes wrong during backend startup, we might find ourselves
+     * trying to read pg_partition before we've selected a database.  That ain't
+     * gonna work, so bail out with a useful error message.  If this happens,
+     * it probably means a partcache entry that needs to be nailed isn't.
+     */
+    if (!OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
+        ereport(FATAL,
+            (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("cannot read pg_class without having selected a database")));
+    }
+
+    /*
+     * form a scan key
+     */
+    ScanKeyInit(&key[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(targetPartId));
+
+    /*
+     * Open pg_partition and fetch a tuple.  Force heap scan if we haven't yet
+     * built the critical partcache entries (this includes initdb and startup
+     * without a pg_internal.init file).  The caller can also force a heap
+     * scan by setting indexOK == false.
+     */
+    /*u_sess->relcache_cxt.criticalRelcachesBuilt--->criticalPartcachesBuilt*/
+    pg_partition_desc = heap_open(PartitionRelationId, AccessShareLock);
+    pg_partition_scan = systable_beginscan(pg_partition_desc,
+        PartitionOidIndexId,
+        indexOK && u_sess->relcache_cxt.criticalRelcachesBuilt,
+        SnapshotNow,
+        1,
+        key);
+
+    pg_partition_tuple = systable_getnext(pg_partition_scan);
+    /*
+     * Must copy tuple before releasing buffer.
+     */
+    if (HeapTupleIsValid(pg_partition_tuple)) {
+        pg_partition_tuple = heap_copytuple(pg_partition_tuple);
+    }
+
+    /* all done */
+    systable_endscan(pg_partition_scan);
+    heap_close(pg_partition_desc, AccessShareLock);
+
+    return pg_partition_tuple;
+}
+
+static Partition AllocatePartitionDesc(Form_pg_partition partp)
+{
+    Partition partition;
+    MemoryContext oldcxt;
+    Form_pg_partition partition_form;
+    errno_t rc = 0;
+
+    /* Relcache entries must live in u_sess->cache_mem_cxt */
+    oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+
+    /*
+     * allocate and zero space for new relation descriptor
+     */
+    partition = (Partition)palloc0(sizeof(PartitionData));
+
+    /* make sure relation is marked as having no open file yet */
+    partition->pd_smgr = NULL;
+
+    /*
+     * Copy the partition tuple form
+     *
+     * We only allocate space for the fixed fields, ie, CLASS_TUPLE_SIZE. The
+     * variable-length fields (relacl, reloptions) are NOT stored in the
+     * partcache --- there'd be little point in it, since we don't copy the
+     * tuple's nulls bitmap and hence wouldn't know if the values are valid.
+     * Bottom line is that relacl *cannot* be retrieved from the partcache. Get
+     * it from the syscache if you need it.  The same goes for the original
+     * form of reloptions (however, we do store the parsed form of reloptions
+     * in rd_options).
+     */
+    partition_form = (Form_pg_partition)palloc(PARTITION_TUPLE_SIZE);
+
+    rc = memcpy_s(partition_form, PARTITION_TUPLE_SIZE, partp, PARTITION_TUPLE_SIZE);
+    securec_check(rc, "\0", "\0");
+
+    /* initialize relation tuple form */
+    partition->pd_part = partition_form;
+
+    (void)MemoryContextSwitchTo(oldcxt);
+    return partition;
+}
+
+static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt)
+{
+    Partition partition;
+    Oid partid;
+    HeapTuple pg_partition_tuple;
+    Form_pg_partition partp;
+
+    /*
+     * find the tuple in pg_class corresponding to the given relation id
+     */
+    pg_partition_tuple = ScanPgPartition(targetPartId, true);
+    /*
+     * if no such tuple exists, return NULL
+     */
+    if (!HeapTupleIsValid(pg_partition_tuple)) {
+        return NULL;
+    }
+
+    /*
+     * get information from the pg_class_tuple
+     */
+    partid = HeapTupleGetOid(pg_partition_tuple);
+    partp = (Form_pg_partition)GETSTRUCT(pg_partition_tuple);
+    Assert(partid == targetPartId);
+
+    /*
+     * allocate storage for the relation descriptor, and copy pg_partition_tuple
+     * to partition->pd_part.
+     */
+    partition = AllocatePartitionDesc(partp);
+
+    /*
+     * initialize the partition's partition id (partition->pd_id)
+     */
+    partition->pd_id = partid;
+
+    /*
+     * normal relations are not nailed into the cache; nor can a pre-existing
+     * relation be new.  It could be temp though.  (Actually, it could be new
+     * too, but it's okay to forget that fact if forced to flush the entry.)
+     */
+    partition->pd_refcnt = 0;
+    partition->pd_createSubid = InvalidSubTransactionId;
+    partition->pd_newRelfilenodeSubid = InvalidSubTransactionId;
+
+    PartitionParseRelOptions(partition, pg_partition_tuple);
+    /*
+     * initialize the relation lock manager information
+     */
+    PartitionInitLockInfo(partition); /* see lmgr.c */
+
+    /*
+     * initialize physical addressing information for the relation
+     */
+    if (partition->pd_part->parentid != InvalidOid) {
+        PartitionInitPhysicalAddr(partition);
+    }
+    partition->pd_node.bucketNode = InvalidBktId;
+
+    /* make sure relation is marked as having no open file yet */
+    partition->pd_smgr = NULL;
+
+    /*
+     * now we can free the memory allocated for pg_class_tuple
+     */
+    heap_freetuple_ext(pg_partition_tuple);
+    /*
+     * Insert newly created relation into partcache hash table, if requested.
+     */
+    if (insertIt) {
+        PartitionCacheInsert(partition);
+    }
+
+    /* It's fully valid */
+    partition->pd_isvalid = true;
+
+    return partition;
+}
+static void PartitionInitPhysicalAddr(Partition partition)
+{
+    partition->pd_node.spcNode = ConvertToRelfilenodeTblspcOid(partition->pd_part->reltablespace);
+    if (partition->pd_node.spcNode == GLOBALTABLESPACE_OID) {
+        partition->pd_node.dbNode = InvalidOid;
+    } else {
+        partition->pd_node.dbNode = u_sess->proc_cxt.MyDatabaseId;
+    }
+
+    if (partition->pd_part->relfilenode) {
+        partition->pd_node.relNode = partition->pd_part->relfilenode;
+    } else if (partition->pd_id) {
+        partition->pd_node.relNode = partition->pd_id;
+    } else {
+        /* Consult the relation mapper */
+        partition->pd_node.relNode = RelationMapOidToFilenode(partition->pd_id, false);
+        if (!OidIsValid(partition->pd_node.relNode)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_NO_DATA_FOUND),
+                    errmsg("could not find relation mapping for partition \"%s\", OID %u",
+                        PartitionGetPartitionName(partition),
+                        partition->pd_id)));
+        }
+    }
+}
+
+/* part 3: functions can be used by  other modules */
+Partition PartitionIdGetPartition(Oid partitionId)
+{
+    Partition pd;
+
+    /*
+     * first try to find reldesc in the cache
+     */
+    PartitionIdCacheLookup(partitionId, pd);
+    if (PartitionIsValid(pd)) {
+        PartitionIncrementReferenceCount(pd);
+        /* revalidate cache entry if necessary */
+        if (!pd->pd_isvalid) {
+            /*
+             * Indexes only have a limited number of possible schema changes,
+             * and we don't want to use the full-blown procedure because it's
+             * a headache for indexes that reload itself depends on.
+             */
+            if (pd->pd_part->parttype == PART_OBJ_TYPE_INDEX_PARTITION) {
+                PartitionReloadIndexInfo(pd);
+            } else {
+                PartitionClearPartition(pd, true);
+            }
+        }
+
+        return pd;
+    }
+
+    /*
+     * no partdesc in the cache, so have PartitionBuildDesc() build one and add
+     * it.
+     */
+    pd = PartitionBuildDesc(partitionId, true);
+    if (PartitionIsValid(pd)) {
+        PartitionIncrementReferenceCount(pd);
+    }
+
+    return pd;
+}
+
+void PartitionClose(Partition partition)
+{
+    /* Note: no locking manipulations needed */
+    PartitionDecrementReferenceCount(partition);
+
+#ifdef PARTCACHE_FORCE_RELEASE
+    if (PartitionHasReferenceCountZero(partition) && partition->pd_createSubid == InvalidSubTransactionId &&
+        partition->pd_newRelfilenodeSubid == InvalidSubTransactionId) {
+        PartitionClearPartition(partition, false);
+    }
+#endif
+}
+
+Partition PartitionBuildLocalPartition(const char* relname, Oid partid, Oid partfilenode, Oid parttablespace)
+{
+    Partition part;
+    MemoryContext oldcxt;
+
+    /*
+     * switch to the cache context to create the partcache entry.
+     */
+    oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+
+    /*
+     * allocate a new relation descriptor and fill in basic state fields.
+     */
+    part = (Partition)palloc0(sizeof(PartitionData));
+
+    /* make sure relation is marked as having no open file yet */
+    part->pd_smgr = NULL;
+    part->pd_refcnt = 0;
+
+    /* it's being created in this transaction */
+    part->pd_createSubid = GetCurrentSubTransactionId();
+    part->pd_newRelfilenodeSubid = InvalidSubTransactionId;
+
+    /* must flag that we have rels created in this transaction */
+    u_sess->cache_cxt.part_cache_need_eoxact_work = true;
+
+    /*
+     * initialize partition tuple form (caller may add/override data later)
+     */
+
+    part->pd_part = (Form_pg_partition)palloc0(PARTITION_TUPLE_SIZE);
+
+    (void)namestrcpy(&part->pd_part->relname, relname);
+    /*
+     * Insert relation physical and logical identifiers (OIDs) into the right
+     * places.  For a mapped relation, we set relfilenode to zero and rely on
+     * relation_init_physical_addr to consult the map.
+     */
+    part->pd_id = partid;
+    part->pd_part->reltablespace = parttablespace;
+
+    part->pd_part->relfilenode = partfilenode;
+
+    /* belowing: cast out from Partition to Relation */
+    PartitionInitLockInfo(part); /* see lmgr.c */
+
+    if (partfilenode != InvalidOid) {
+        PartitionInitPhysicalAddr(part);
+    }
+    part->pd_node.bucketNode = InvalidBktId;
+
+    /*
+     * Okay to insert into the partcache hash tables.
+     */
+    PartitionCacheInsert(part);
+    /*
+     * done building partcache entry.
+     */
+    (void)MemoryContextSwitchTo(oldcxt);
+    /* It's fully valid */
+    part->pd_isvalid = true;
+    /*
+     * Caller expects us to pin the returned entry.
+     */
+    PartitionIncrementReferenceCount(part);
+    return part;
+}
+
+/*
+ * PartitionDestroyPartition
+ *
+ *	Physically delete a partition cache entry and all subsidiary data.
+ *	Caller must already have unhooked the entry from the hash table.
+ */
+static void PartitionDestroyPartition(Partition partition)
+{
+    Assert(PartitionHasReferenceCountZero(partition));
+
+    /*
+     * Make sure smgr and lower levels close the partition's files, if they
+     * weren't closed already.  (This was probably done by caller, but let's
+     * just be real sure.)
+     */
+    PartitionCloseSmgr(partition);
+    /*
+     * Free all the subsidiary data structures of the partcache entry, then the
+     * entry itself.
+     */
+    if (partition->pd_part) {
+        pfree_ext(partition->pd_part);
+    }
+    list_free_ext(partition->pd_indexlist);
+    if (partition->rd_options) {
+        pfree_ext(partition->rd_options);
+    }
+    pfree_ext(partition);
+}
+
+/*
+ * PartitionClearPartition
+ *
+ *	 Physically blow away a partition cache entry, or reset it and rebuild
+ *	 it from scratch (that is, from catalog entries).  The latter path is
+ *	 used when we are notified of a change to an open relation (one with
+ *	 refcount > 0).
+ *
+ *	 NB: when rebuilding, we'd better hold some lock on the relation,
+ *	 else the catalog data we need to read could be changing under us.
+ *	 Also, a rel to be rebuilt had better have refcnt > 0.	This is because
+ *	 an sinval reset could happen while we're accessing the catalogs, and
+ *	 the rel would get blown away underneath us by RelationCacheInvalidate
+ *	 if it has zero refcnt.
+ *
+ *	 The "rebuild" parameter is redundant in current usage because it has
+ *	 to match the relation's refcnt status, but we keep it as a crosscheck
+ *	 that we're doing what the caller expects.
+ */
+static void PartitionClearPartition(Partition partition, bool rebuild)
+{
+    /*
+     * As per notes above, a rel to be rebuilt MUST have refcnt > 0; while of
+     * course it would be a bad idea to blow away one with nonzero refcnt.
+     */
+    Assert(rebuild ? !PartitionHasReferenceCountZero(partition) : PartitionHasReferenceCountZero(partition));
+
+    /*
+     * Make sure smgr and lower levels close the partition's files, if they
+     * weren't closed already.  If the partition is not getting deleted, the
+     * next smgr access should reopen the files automatically.	This ensures
+     * that the low-level file access state is updated after, say, a vacuum
+     * truncation.
+     */
+    PartitionCloseSmgr(partition);
+
+    /*
+     * Never, never ever blow away a nailed-in system relation, because we'd
+     * be unable to recover.  However, we must redo relation_init_physical_addr
+     * in case it is a mapped relation whose mapping changed.
+     *
+     * If it's a nailed index, then we need to re-read the pg_partition row to see
+     * if its relfilenode changed.	We can't necessarily do that here, because
+     * we might be in a failed transaction.  We assume it's okay to do it if
+     * there are open references to the partcache entry (cf notes for
+     * AtEOXact_RelationCache).  Otherwise just mark the entry as possibly
+     * invalid, and it'll be fixed when next opened.
+     */
+    /*
+     * Even non-system indexes should not be blown away if they are open and
+     * have valid index support information.  This avoids problems with active
+     * use of the index support information.  As with nailed indexes, we
+     * re-read the pg_class row to handle possible physical relocation of the
+     * index, and we check for pg_index updates too.
+     */
+    if (partition->pd_part->parttype == PART_OBJ_TYPE_INDEX_PARTITION && partition->pd_refcnt > 0) {
+        partition->pd_isvalid = false; /* needs to be revalidated */
+        PartitionReloadIndexInfo(partition);
+        return;
+    }
+
+    /* Mark it invalid until we've finished rebuild */
+    partition->pd_isvalid = false;
+
+    /*
+     * If we're really done with the partcache entry, blow it away. But if
+     * someone is still using it, reconstruct the whole deal without moving
+     * the physical PartitionData record (so that the someone's pointer is
+     * still valid).
+     */
+    if (!rebuild) {
+        /* Remove it from the hash table */
+        PartitionCacheDelete(partition);
+
+        /* And release storage */
+        PartitionDestroyPartition(partition);
+    } else {
+        /*
+         * Our strategy for rebuilding an open partcache entry is to build a
+         * new entry from scratch, swap its contents with the old entry, and
+         * finally delete the new entry (along with any infrastructure swapped
+         * over from the old entry).  This is to avoid trouble in case an
+         * error causes us to lose control partway through.  The old entry
+         * will still be marked !rd_isvalid, so we'll try to rebuild it again
+         * on next access.	Meanwhile it's not any less valid than it was
+         * before, so any code that might expect to continue accessing it
+         * isn't hurt by the rebuild failure.  (Consider for example a
+         * subtransaction that ALTERs a table and then gets canceled partway
+         * through the cache entry rebuild.  The outer transaction should
+         * still see the not-modified cache entry as valid.)  The worst
+         * consequence of an error is leaking the necessarily-unreferenced new
+         * entry, and this shouldn't happen often enough for that to be a big
+         * problem.
+         *
+         * When rebuilding an open partcache entry, we must preserve ref count,
+         * rd_createSubid/rd_newRelfilenodeSubid, and rd_toastoid state.  Also
+         * attempt to preserve the pg_class entry (rd_rel), tupledesc, and
+         * rewrite-rule substructures in place, because various places assume
+         * that these structures won't move while they are working with an
+         * open partcache entry.  (Note: the refcount mechanism for tupledescs
+         * might someday allow us to remove this hack for the tupledesc.)
+         *
+         * Note that this process does not touch CurrentResourceOwner; which
+         * is good because whatever ref counts the entry may have do not
+         * necessarily belong to that resource owner.
+         */
+        Partition newpart;
+        Oid save_partid = PartitionGetPartid(partition);
+        errno_t rc = 0;
+
+        /* Build temporary entry, but don't link it into hashtable */
+        newpart = PartitionBuildDesc(save_partid, false);
+        if (newpart == NULL) {
+            /* Should only get here if partition was deleted */
+            PartitionCacheDelete(partition);
+            PartitionDestroyPartition(partition);
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_IN_USE), errmsg("partition %u deleted while still in use", save_partid)));
+        }
+
+        /*
+         * Perform swapping of the partcache entry contents.  Within this
+         * process the old entry is momentarily invalid, so there *must* be no
+         * possibility of CHECK_FOR_INTERRUPTS within this sequence. Do it in
+         * all-in-line code for safety.
+         *
+         * Since the vast majority of fields should be swapped, our method is
+         * to swap the whole structures and then re-swap those few fields we
+         * didn't want swapped.
+         */
+#define SWAPFIELD(fldtype, fldname)            \
+    do {                                       \
+        fldtype _tmp = newpart->fldname;       \
+        newpart->fldname = partition->fldname; \
+        partition->fldname = _tmp;             \
+    } while (0)
+
+        /* swap all Partition struct fields */
+        {
+            PartitionData tmpstruct;
+            rc = memcpy_s(&tmpstruct, sizeof(PartitionData), newpart, sizeof(PartitionData));
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(newpart, sizeof(PartitionData), partition, sizeof(PartitionData));
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(partition, sizeof(PartitionData), &tmpstruct, sizeof(PartitionData));
+            securec_check(rc, "\0", "\0");
+        }
+
+        /* rd_smgr must not be swapped, due to back-links from smgr level */
+        SWAPFIELD(SMgrRelation, pd_smgr);
+        /* rd_refcnt must be preserved */
+        SWAPFIELD(int, pd_refcnt);
+        /* creation sub-XIDs must be preserved */
+        SWAPFIELD(SubTransactionId, pd_createSubid);
+        SWAPFIELD(SubTransactionId, pd_newRelfilenodeSubid);
+        /* un-swap rd_rel pointers, swap contents instead */
+        SWAPFIELD(Form_pg_partition, pd_part);
+        /* ... but actually, we don't have to update newrel->rd_rel */
+        rc = memcpy_s(partition->pd_part, PARTITION_TUPLE_SIZE, newpart->pd_part, PARTITION_TUPLE_SIZE);
+        securec_check(rc, "\0", "\0");
+
+        /* toast OID override must be preserved */
+        SWAPFIELD(Oid, pd_toastoid);
+        /* pgstat_info must be preserved */
+        SWAPFIELD(struct PgStat_TableStatus*, pd_pgstat_info);
+
+#undef SWAPFIELD
+
+        /* And now we can throw away the temporary entry */
+        PartitionDestroyPartition(newpart);
+    }
+}
+
+/*
+ * PartitionFlushPartition
+ *
+ *	 Rebuild the partition if it is open (refcount > 0), else blow it away.
+ */
+static void PartitionFlushPartition(Partition partition)
+{
+    if (partition->pd_createSubid != InvalidSubTransactionId ||
+        partition->pd_newRelfilenodeSubid != InvalidSubTransactionId) {
+        /*
+         * New partcache entries are always rebuilt, not flushed; else we'd
+         * forget the "new" status of the partition, which is a useful
+         * optimization to have.  Ditto for the new-relfilenode status.
+         *
+         * The rel could have zero refcnt here, so temporarily increment the
+         * refcnt to ensure it's safe to rebuild it.  We can assume that the
+         * current transaction has some lock on the rel already.
+         */
+        PartitionIncrementReferenceCount(partition);
+        PartitionClearPartition(partition, true);
+        PartitionDecrementReferenceCount(partition);
+    } else {
+        /*
+         * Pre-existing parts can be dropped from the partcache if not open.
+         */
+        bool rebuild = !PartitionHasReferenceCountZero(partition);
+
+        PartitionClearPartition(partition, rebuild);
+    }
+}
+
+/*
+ * PartitionForgetPartition - unconditionally remove a partcache entry
+ *
+ *		   External interface for destroying a partcache entry when we
+ *		   drop the relation.
+ */
+void PartitionForgetPartition(Oid partid)
+{
+    Partition partition;
+
+    PartitionIdCacheLookup(partid, partition);
+
+    if (!PointerIsValid(partition)) {
+        return; /* not in cache, nothing to do */
+    }
+
+    if (!PartitionHasReferenceCountZero(partition)) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE), errmsg("partition %u is still open", partid)));
+    }
+
+    /* Unconditionally destroy the partcache entry */
+    PartitionClearPartition(partition, false);
+}
+
+/*
+ *		RelationCacheInvalidateEntry
+ *
+ *		This routine is invoked for SI cache flush messages.
+ *
+ * Any relcache entry matching the relid must be flushed.  (Note: caller has
+ * already determined that the relid belongs to our database or is a shared
+ * relation.)
+ *
+ * We used to skip local relations, on the grounds that they could
+ * not be targets of cross-backend SI update messages; but it seems
+ * safer to process them, so that our *own* SI update messages will
+ * have the same effects during CommandCounterIncrement for both
+ * local and nonlocal relations.
+ */
+void PartitionCacheInvalidateEntry(Oid partitionId)
+{
+    Partition partition;
+
+    PartitionIdCacheLookup(partitionId, partition);
+
+    if (PointerIsValid(partition)) {
+        PartitionFlushPartition(partition);
+    }
+}
+
+/*
+ * RelationCacheInvalidate
+ *	 Blow away cached relation descriptors that have zero reference counts,
+ *	 and rebuild those with positive reference counts.	Also reset the smgr
+ *	 relation cache and re-read relation mapping data.
+ *
+ *	 This is currently used only to recover from SI message buffer overflow,
+ *	 so we do not touch new-in-transaction relations; they cannot be targets
+ *	 of cross-backend SI updates (and our own updates now go through a
+ *	 separate linked list that isn't limited by the SI message buffer size).
+ *	 Likewise, we need not discard new-relfilenode-in-transaction hints,
+ *	 since any invalidation of those would be a local event.
+ *
+ *	 We do this in two phases: the first pass deletes deletable items, and
+ *	 the second one rebuilds the rebuildable items.  This is essential for
+ *	 safety, because hash_seq_search only copes with concurrent deletion of
+ *	 the element it is currently visiting.	If a second SI overflow were to
+ *	 occur while we are walking the table, resulting in recursive entry to
+ *	 this routine, we could crash because the inner invocation blows away
+ *	 the entry next to be visited by the outer scan.  But this way is OK,
+ *	 because (a) during the first pass we won't process any more SI messages,
+ *	 so hash_seq_search will complete safely; (b) during the second pass we
+ *	 only hold onto pointers to nondeletable entries.
+ *
+ *	 The two-phase approach also makes it easy to update relfilenodes for
+ *	 mapped relations before we do anything else, and to ensure that the
+ *	 second pass processes nailed-in-cache items before other nondeletable
+ *	 items.  This should ensure that system catalogs are up to date before
+ *	 we attempt to use them to reload information about other open relations.
+ */
+void PartitionCacheInvalidate(void)
+{
+    HASH_SEQ_STATUS status;
+    PartIdCacheEnt* idhentry = NULL;
+    Partition partition;
+    List* rebuild_list = NIL;
+    ListCell* l = NULL;
+
+    /*
+     * Reload relation mapping data before starting to reconstruct cache.
+     */
+    /* Phase 1 */
+    hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
+
+    while ((idhentry = (PartIdCacheEnt*)hash_seq_search(&status)) != NULL) {
+        partition = idhentry->partdesc;
+
+        /* Must close all smgr references to avoid leaving dangling ptrs */
+        PartitionCloseSmgr(partition);
+
+        /* Ignore new relations, since they are never cross-backend targets */
+        if (partition->pd_createSubid != InvalidSubTransactionId)
+            continue;
+
+        if (PartitionHasReferenceCountZero(partition)) {
+            /* Delete this entry immediately */
+            PartitionClearPartition(partition, false);
+        } else {
+            rebuild_list = lappend(rebuild_list, partition);
+        }
+    }
+
+    /*
+     * Now zap any remaining smgr cache entries.  This must happen before we
+     * start to rebuild entries, since that may involve catalog fetches which
+     * will re-open catalog files.
+     */
+    smgrcloseall();
+
+    /* Phase 2: rebuild the items found to need rebuild in phase 1 */
+    foreach (l, rebuild_list) {
+        partition = (Partition)lfirst(l);
+        PartitionClearPartition(partition, true);
+    }
+    list_free_ext(rebuild_list);
+}
+
+/*
+ * RelationCloseSmgrByOid - close a relcache entry's smgr link
+ *
+ * Needed in some cases where we are changing a relation's physical mapping.
+ * The link will be automatically reopened on next use.
+ */
+void PartitionCloseSmgrByOid(Oid partitionId)
+{
+    Partition partition;
+
+    PartitionIdCacheLookup(partitionId, partition);
+
+    if (!PointerIsValid(partition)) {
+        return; /* not in cache, nothing to do */
+    }
+
+    PartitionCloseSmgr(partition);
+}
+
+/*
+ * AtEOXact_PartitionCache
+ *
+ *	Clean up the partitonCache at main-transaction commit or abort.
+ *
+ * Note: this must be called *before* processing invalidation messages.
+ * In the case of abort, we don't want to try to rebuild any invalidated
+ * cache entries (since we can't safely do database accesses).  Therefore
+ * we must reset refcnts before handling pending invalidations.
+ *
+ * We also need to do special cleanup when the current transaction
+ * created any partitions or made use of forced index lists.
+ */
+void AtEOXact_PartitionCache(bool isCommit)
+{
+    HASH_SEQ_STATUS status;
+    PartIdCacheEnt* idhentry = NULL;
+
+    /*
+     * To speed up transaction exit, we want to avoid scanning the partitioncache
+     * unless there is actually something for this routine to do.  Other than
+     * the debug-only Assert checks, most transactions don't create any work
+     * for us to do here, so we keep a static flag that gets set if there is
+     * anything to do.	(Currently, this means either a partition is created in
+     * the current xact, or one is given a new relfilenode, or an index list
+     * is forced.)	For simplicity, the flag remains set till end of top-level
+     * transaction, even though we could clear it at subtransaction end in
+     * some cases.
+     */
+    if (!u_sess->cache_cxt.part_cache_need_eoxact_work
+#ifdef USE_ASSERT_CHECKING
+        && !assert_enabled
+#endif
+    ) {
+        return;
+    }
+
+    hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
+
+    while ((idhentry = (PartIdCacheEnt*)hash_seq_search(&status)) != NULL) {
+        Partition partition = idhentry->partdesc;
+
+        /*
+         * The relcache entry's ref count should be back to its normal
+         * not-in-a-transaction state: 0 unless it's nailed in cache.
+         *
+         * In bootstrap mode, this is NOT true, so don't check it --- the
+         * bootstrap code expects relations to stay open across start/commit
+         * transaction calls.  (That seems bogus, but it's not worth fixing.)
+         */
+#ifdef USE_ASSERT_CHECKING
+        if (!IsBootstrapProcessingMode()) {
+            const int expected_refcnt = 0;
+            Assert(partition->pd_refcnt == expected_refcnt);
+        }
+#endif
+
+        /*
+         * Is it a partition created in the current transaction?
+         *
+         * During commit, reset the flag to zero, since we are now out of the
+         * creating transaction.  During abort, simply delete the relcache
+         * entry --- it isn't interesting any longer.  (NOTE: if we have
+         * forgotten the new-ness of a new relation due to a forced cache
+         * flush, the entry will get deleted anyway by shared-cache-inval
+         * processing of the aborted pg_class insertion.)
+         */
+        if (partition->pd_createSubid != InvalidSubTransactionId) {
+            if (isCommit) {
+                partition->pd_createSubid = InvalidSubTransactionId;
+            } else {
+                PartitionClearPartition(partition, false);
+                continue;
+            }
+        }
+
+        /*
+         * Likewise, reset the hint about the relfilenode being new.
+         */
+        partition->pd_newRelfilenodeSubid = InvalidSubTransactionId;
+    }
+
+    /* Once done with the transaction, we can reset need_eoxact_work */
+    u_sess->cache_cxt.part_cache_need_eoxact_work = false;
+}
+
+/*
+ * AtEOSubXact_RelationCache
+ *
+ *	Clean up the partitioncache at sub-transaction commit or abort.
+ *
+ * Note: this must be called *before* processing invalidation messages.
+ */
+void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTransactionId parent_subid)
+{
+    HASH_SEQ_STATUS status;
+    PartIdCacheEnt* idhentry = NULL;
+
+    /*
+     * Skip the relcache scan if nothing to do --- see notes for
+     * AtEOXact_PartitionCache.
+     */
+    if (!u_sess->cache_cxt.part_cache_need_eoxact_work)
+        return;
+
+    hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
+
+    while ((idhentry = (PartIdCacheEnt*)hash_seq_search(&status)) != NULL) {
+        Partition partition = idhentry->partdesc;
+
+        /*
+         * Is it a partition created in the current subtransaction?
+         *
+         * During subcommit, mark it as belonging to the parent, instead.
+         * During subabort, simply delete the partition entry.
+         */
+        if (partition->pd_createSubid == mySubid) {
+            if (isCommit)
+                partition->pd_createSubid = parent_subid;
+            else {
+                PartitionClearPartition(partition, false);
+                continue;
+            }
+        }
+
+        /*
+         * Likewise, update or drop any new-relfilenode-in-subtransaction
+         * hint.
+         */
+        if (partition->pd_newRelfilenodeSubid == mySubid) {
+            if (isCommit)
+                partition->pd_newRelfilenodeSubid = parent_subid;
+            else
+                partition->pd_newRelfilenodeSubid = InvalidSubTransactionId;
+        }
+    }
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: This initializes the relation descriptor cache
+ * Description	: At the time that this is invoked, we can't do database access yet (mainly
+ *			: because the transaction subsystem is not up); all we are doing is making
+ *			: an empty cache hashtable.  This must be done before starting the initialization
+ *			: transaction, because otherwise AtEOXact_RelationCache would crash if that
+ *			: transaction aborts before we can get the relcache set up.
+ * Notes		:
+ */
+
+void PartitionCacheInitialize(void)
+{
+    HASHCTL ctl;
+    errno_t rc;
+
+    /*
+     * create hashtable that indexes the partcache
+     */
+    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "", "");
+
+    ctl.keysize = sizeof(Oid);
+    ctl.entrysize = sizeof(PartIdCacheEnt);
+    ctl.hash = oid_hash;
+    ctl.hcxt = u_sess->cache_mem_cxt;
+    u_sess->cache_cxt.PartitionIdCache =
+        hash_create("Partcache by OID", INITPARTCACHESIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+}
+
+/* ----------------------------------------------------------------
+ *				cache invalidation support routines
+ * ----------------------------------------------------------------
+ */
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: Increments partition reference count.
+ * Description	:
+ * Notes		: bootstrap mode has its own weird ideas about relation refcount
+ *			: behavior; we ought to fix it someday, but for now, just disable
+ *			: reference count ownership tracking in bootstrap mode.
+ */
+void PartitionIncrementReferenceCount(Partition part)
+{
+    ResourceOwnerEnlargePartitionRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+    part->pd_refcnt += 1;
+    if (!IsBootstrapProcessingMode()) {
+        ResourceOwnerRememberPartitionRef(t_thrd.utils_cxt.CurrentResourceOwner, part);
+    }
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: Decrements relation reference count.
+ * Description	:
+ * Notes		:
+ */
+void PartitionDecrementReferenceCount(Partition part)
+{
+    Assert(part->pd_refcnt > 0);
+    part->pd_refcnt -= 1;
+
+    if (!IsBootstrapProcessingMode()) {
+        ResourceOwnerForgetPartitionRef(t_thrd.utils_cxt.CurrentResourceOwner, part);
+    }
+}
+
+bytea* merge_rel_part_reloption(Oid rel_oid, Oid part_oid)
+{
+    HeapTuple part_tuple = NULL;
+    HeapTuple rel_tuple = NULL;
+    Datum rel_reloptions = (Datum)0;
+    Datum part_reloptions = (Datum)0;
+    Datum merged_reloptions = (Datum)0;
+
+    List* rel_reloptions_list = NIL;
+    List* part_reloptions_list = NIL;
+    List* merged_reloptions_list = NIL;
+    ListCell* lc = NULL;
+
+    bytea* merged_rd_options = NULL;
+    bool isnull = false;
+
+    /* get tuples */
+    part_tuple = SearchSysCache1WithLogLevel(PARTRELID, ObjectIdGetDatum(part_oid), LOG);
+    if (!HeapTupleIsValid(part_tuple))
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", part_oid)));
+    part_reloptions = SysCacheGetAttr(PARTRELID, part_tuple, Anum_pg_partition_reloptions, &isnull);
+
+    rel_tuple = SearchSysCache1WithLogLevel(RELOID, ObjectIdGetDatum(rel_oid), LOG);
+    if (!HeapTupleIsValid(rel_tuple))
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", rel_oid)));
+    rel_reloptions = SysCacheGetAttr(RELOID, rel_tuple, Anum_pg_class_reloptions, &isnull);
+
+    /* datum ==> list */
+    rel_reloptions_list = untransformRelOptions(rel_reloptions);
+    part_reloptions_list = untransformRelOptions(part_reloptions);
+
+    ReleaseSysCache(part_tuple);
+    ReleaseSysCache(rel_tuple);
+
+    if (part_reloptions_list == NIL || list_length(part_reloptions_list) == 0) {
+        merged_reloptions_list = rel_reloptions_list;
+    } else {
+        foreach (lc, rel_reloptions_list) {
+            DefElem* d = (DefElem*)lfirst(lc);
+            ListCell* cell = NULL;
+            int i = 0;
+
+            foreach (cell, part_reloptions_list) {
+                DefElem* d2 = (DefElem*)lfirst(cell);
+                if (pg_strncasecmp(d->defname, d2->defname, strlen(d->defname)) == 0) {
+                    merged_reloptions_list = lappend(merged_reloptions_list, (void*)d2);
+                    break;
+                }
+                i++;
+            }
+
+            if (i == list_length(part_reloptions_list)) {
+                merged_reloptions_list = lappend(merged_reloptions_list, (void*)d);
+            }
+        }
+    }
+
+    /* list ==> datum */
+    merged_reloptions = transformRelOptions((Datum)0, merged_reloptions_list, NULL, NULL, false, false);
+
+    /* datum ==> bytea * */
+    merged_rd_options = heap_reloptions(RELKIND_RELATION, merged_reloptions, true);
+
+    return merged_rd_options;
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		:
+ * Description	:
+ * Notes		: the invoker should release the EMS memory
+ */
+Relation partitionGetRelation(Relation rel, Partition part)
+{
+    Relation relation;
+    MemoryContext oldcxt;
+    bytea* merge_reloption = NULL;
+    bytea* des_reloption = NULL;
+
+    Assert(PointerIsValid(rel) && PointerIsValid(part));
+
+    /*
+     * Memory malloced in merge_rel_part_reloption cannot mount in CacheMemoryContext,
+     * the same is true for other memory in this function and these may be optimized later.
+     */
+    if (RelationInClusterResizing(rel)) {
+        /* tuple.column(datum) ==> list ==> datum ==> bytea * */
+        merge_reloption = merge_rel_part_reloption(RelationGetRelid(rel), PartitionGetPartid(part));
+    }
+
+    oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    relation = (Relation)palloc0(sizeof(RelationData));
+    if (!IsBootstrapProcessingMode()) {
+        ResourceOwnerRememberFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, relation);
+    }
+
+    relation->rd_node = part->pd_node;
+    relation->rd_refcnt = part->pd_refcnt;
+    relation->rd_backend = InvalidBackendId;
+    relation->rd_isnailed = false;
+    relation->rd_isvalid = part->pd_isvalid;
+    relation->rd_indexvalid = part->pd_indexvalid;
+    relation->rd_createSubid = part->pd_createSubid;
+    relation->rd_newRelfilenodeSubid = part->pd_newRelfilenodeSubid;
+    relation->rd_rel = (Form_pg_class)palloc(sizeof(FormData_pg_class));
+    errno_t rc = memcpy_s(relation->rd_rel, sizeof(FormData_pg_class), rel->rd_rel, sizeof(FormData_pg_class));
+    securec_check(rc, "\0", "\0");
+    relation->rd_rel->reltoastrelid = part->pd_part->reltoastrelid;
+    relation->rd_rel->reltablespace = part->pd_part->reltablespace;
+    relation->rd_rel->parttype = PARTTYPE_NON_PARTITIONED_RELATION;
+    relation->rd_rel->relfilenode = part->pd_part->relfilenode;
+    relation->rd_rel->relpages = part->pd_part->relpages;
+    relation->rd_rel->reltuples = part->pd_part->reltuples;
+    relation->rd_rel->relallvisible = part->pd_part->relallvisible;
+    relation->rd_rel->relcudescrelid = part->pd_part->relcudescrelid;
+    relation->rd_rel->relcudescidx = part->pd_part->relcudescidx;
+    relation->rd_rel->reldeltarelid = part->pd_part->reldeltarelid;
+    relation->rd_rel->reldeltaidx = part->pd_part->reldeltaidx;
+	relation->rd_bucketoid = rel->rd_bucketoid;
+    if (REALTION_BUCKETKEY_INITED(rel))
+        relation->rd_bucketkey = rel->rd_bucketkey;
+    else
+        relation->rd_bucketkey = NULL;	
+    relation->rd_att = rel->rd_att;
+    relation->rd_index = rel->rd_index;
+    relation->rd_indextuple = rel->rd_indextuple;
+    relation->rd_am = rel->rd_am;
+
+    if (!OidIsValid(rel->rd_rel->relam)) {
+        relation->rd_indexcxt = NULL;
+    } else {
+        Assert(rel->rd_indexcxt != NULL);
+        relation->rd_indexcxt = AllocSetContextCreate(rel->rd_indexcxt,
+            PartitionGetPartitionName(part),
+            ALLOCSET_SMALL_MINSIZE,
+            ALLOCSET_SMALL_INITSIZE,
+            ALLOCSET_SMALL_MAXSIZE);
+    }
+
+    relation->rd_aminfo = rel->rd_aminfo;
+    relation->rd_opfamily = rel->rd_opfamily;
+    relation->rd_opcintype = rel->rd_opcintype;
+    relation->rd_support = rel->rd_support;
+    relation->rd_supportinfo = rel->rd_supportinfo;
+
+    relation->rd_indoption = rel->rd_indoption;
+    relation->rd_indexprs = rel->rd_indexprs;
+    relation->rd_indpred = rel->rd_indpred;
+    relation->rd_exclops = rel->rd_exclops;
+    relation->rd_exclprocs = rel->rd_exclprocs;
+    relation->rd_exclstrats = rel->rd_exclstrats;
+
+    relation->rd_amcache = rel->rd_amcache;
+    relation->rd_indcollation = rel->rd_indcollation;
+    relation->rd_id = part->pd_id;
+    relation->rd_indexlist = part->pd_indexlist;
+    relation->rd_oidindex = part->pd_oidindex;
+    relation->rd_lockInfo = part->pd_lockInfo;
+    relation->rd_toastoid = part->pd_toastoid;
+    relation->partMap = NULL;
+    relation->pgstat_info = part->pd_pgstat_info;
+    relation->parentId = rel->rd_id;
+    relation->rd_smgr = part->pd_smgr;
+
+    /* detach the binding between partition and SmgrRelation */
+    part->pd_smgr = NULL;
+
+    /* build the binding between dummy Relation and SmgrRelation */
+    if (relation->rd_smgr) {
+        smgrsetowner(&((relation)->rd_smgr), relation->rd_smgr);
+    }
+
+    if (merge_reloption != NULL) {
+        des_reloption = merge_reloption;
+    } else {
+        des_reloption = rel->rd_options;
+    }
+
+    if (des_reloption != NULL) {
+        int relOptSize = VARSIZE_ANY(des_reloption);
+        errno_t ret = EOK;
+        relation->rd_options = (bytea*)palloc(relOptSize);
+        ret = memcpy_s(relation->rd_options, relOptSize, des_reloption, relOptSize);
+        securec_check(ret, "\0", "\0");
+    }
+
+    (void)MemoryContextSwitchTo(oldcxt);
+
+    return relation;
+}
+
+/*
+ * NOTICE: caller MUST be sure relation parameter is a temprary RelationData, which is NOT in relcache.
+ */
+void releaseDummyRelation(Relation* relation)
+{
+    if (relation == NULL || *relation == NULL) {
+        elog(LOG, "error parameter when release fake relation");
+        return;
+    }
+    if (!IsBootstrapProcessingMode()) {
+        ResourceOwnerForgetFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, *relation);
+    }
+    /* detach the binding between Relation and SmgrRelation */
+    if ((*relation)->rd_smgr != NULL) {
+		/* put SmgrRelation object into unowned list */
+        smgrclearowner(&(*relation)->rd_smgr, (*relation)->rd_smgr);
+    }
+
+    if (!RelationIsBucket(*relation) && (*relation)->rd_indexcxt != NULL) {
+        MemoryContextDelete((*relation)->rd_indexcxt);
+        (*relation)->rd_indexcxt = NULL;
+    }
+
+    /* free relation */
+    /* if palloc(sizeof(FormData_pg_class)) throw exception, (*relation)->rd_rel will be null */
+    if (PointerIsValid((*relation)->rd_rel)) {
+        pfree_ext((*relation)->rd_rel);
+    }
+
+    if ((*relation)->rd_options != NULL) {
+        pfree_ext((*relation)->rd_options);
+    }
+
+    pfree_ext(*relation);
+    *relation = NULL;
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: reload minimal information for an open  index partition
+ * Description	:
+ */
+static void PartitionReloadIndexInfo(Partition part)
+{
+    HeapTuple pg_partition_tuple;
+    Form_pg_partition partForm;
+
+    /*
+     * Should be called only for invalidated indexe partition
+     */
+    Assert(part->pd_part->parttype == PART_OBJ_TYPE_INDEX_PARTITION && !part->pd_isvalid);
+
+    /*
+     * Should be closed at smgr level
+     */
+    Assert(part->pd_smgr == NULL);
+
+    pg_partition_tuple = ScanPgPartition(PartitionGetPartid(part), true);
+    if (!HeapTupleIsValid(pg_partition_tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_NO_DATA),
+                errmsg("could not find pg_partition tuple for index %u", PartitionGetPartid(part))));
+    }
+
+    if (part->rd_options) {
+        pfree_ext(part->rd_options);
+    }
+
+    PartitionParseRelOptions(part, pg_partition_tuple);
+
+    partForm = (Form_pg_partition)GETSTRUCT(pg_partition_tuple);
+
+    errno_t rc = memcpy_s(part->pd_part, PARTITION_TUPLE_SIZE, partForm, PARTITION_TUPLE_SIZE);
+    securec_check(rc, "\0", "\0");
+
+    heap_freetuple_ext(pg_partition_tuple);
+
+    /* We must recalculate physical address in case it changed */
+    PartitionInitPhysicalAddr(part);
+    part->pd_node.bucketNode = InvalidBktId;
+
+    /*
+     * we can't read value from pg_index, we should read value from pg_partition
+     * or a other catalog for partition index but indisvalid  indcheckxmin indisready
+     * is not been added.
+     */
+    part->pd_isvalid = true;
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: Assign a new relfilenode (physical file name) to the partition.
+ * Description	:
+ * Input		:
+ * Output	:
+ * Notes		:
+ */
+void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid)
+{
+    Oid newrelfilenode;
+    RelFileNodeBackend newrnode;
+    Relation pg_partition;
+    HeapTuple tuple;
+    HeapTuple ntup;
+    Form_pg_partition partform;
+    Datum values[Natts_pg_partition];
+    bool nulls[Natts_pg_partition];
+    bool replaces[Natts_pg_partition];
+    errno_t rc;
+
+    Assert((parent->rd_rel->relkind == RELKIND_INDEX || parent->rd_rel->relkind == RELKIND_SEQUENCE)
+                ? freezeXid == InvalidTransactionId
+                : TransactionIdIsNormal(freezeXid));
+
+    /* Allocate a new relfilenode */
+    newrelfilenode = GetNewRelFileNode(part->pd_part->reltablespace, NULL, parent->rd_rel->relpersistence);
+
+    /*
+     * Get a writable copy of the pg_partition tuple for the given relation.
+     */
+    pg_partition = heap_open(PartitionRelationId, RowExclusiveLock);
+
+    tuple = SearchSysCacheCopy1(PARTRELID, ObjectIdGetDatum(PartitionGetPartid(part)));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("could not find tuple for partition %u", PartitionGetPartid(part))));
+    }
+    partform = (Form_pg_partition)GETSTRUCT(tuple);
+
+    // CStore Relation must deal with cudesc relation, delta relation
+    //
+    if (RelationIsColStore(parent)) {
+        // step 1: CUDesc relation must set new relfilenode
+        // step 2: CUDesc index must be set new relfilenode
+        //
+        DescTableSetNewRelfilenode(part->pd_part->relcudescrelid, freezeXid, true);
+
+        // Step 3: Deta relation must be set new relfilenode
+        //
+        DeltaTableSetNewRelfilenode(part->pd_part->reldeltarelid, freezeXid, true);
+
+        // Step 4: Create first data file for newrelfilenode
+        // Note that we need add xlog when create file
+        //
+        Relation partRel = partitionGetRelation(parent, part);
+        CStore::CreateStorage(partRel, newrelfilenode);
+        releaseDummyRelation(&partRel);
+    }
+
+    ereport(LOG,
+        (errmsg("Partition %s(%u) set newfilenode %u oldfilenode %u xid %lu",
+            PartitionGetPartitionName(part),
+            PartitionGetPartid(part),
+            newrelfilenode,
+            part->pd_node.relNode,
+            GetCurrentTransactionIdIfAny())));
+
+    /*
+     * Create storage for the main fork of the new relfilenode.
+     *
+     * NOTE: any conflict in relfilenode value will be caught here, if
+     * GetN
+     * ewRelFileNode messes up for any reason.
+     */
+    newrnode.node = part->pd_node;
+    newrnode.node.relNode = newrelfilenode;
+    newrnode.backend = parent->rd_backend;
+
+    partition_create_new_storage(parent, part, newrnode);
+
+    Assert(!((part)->pd_part->relfilenode == InvalidOid));
+    partform->relfilenode = newrelfilenode;
+
+    Assert(parent->rd_rel->relkind != RELKIND_SEQUENCE);
+    partform->relpages = 0; /* it's empty until further notice */
+    partform->reltuples = 0;
+    partform->relallvisible = 0;
+
+    /* set relfrozenxid64 */
+    partform->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
+    values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(freezeXid);
+
+    ntup = heap_modify_tuple(tuple, RelationGetDescr(pg_partition), values, nulls, replaces);
+
+    simple_heap_update(pg_partition, &ntup->t_self, ntup);
+    CatalogUpdateIndexes(pg_partition, ntup);
+
+    heap_freetuple_ext(ntup);
+    heap_freetuple_ext(tuple);
+
+    heap_close(pg_partition, RowExclusiveLock);
+
+    CommandCounterIncrement();
+
+    /*
+     * Mark the part as having been given a new relfilenode in the current
+     * (sub) transaction.  This is a hint that can be used to optimize later
+     * operations on the rel in the same transaction.
+     */
+    part->pd_newRelfilenodeSubid = GetCurrentSubTransactionId();
+
+    /* ... and now we have eoxact cleanup work to do */
+    u_sess->cache_cxt.part_cache_need_eoxact_work = true;
+}
+
+static void PartitionParseRelOptions(Partition partition, HeapTuple tuple)
+{
+    bytea* options = NULL;
+    bool isnull = false;
+    Datum datum;
+    Relation partition_rel;
+    errno_t rc;
+
+    partition->rd_options = NULL;
+
+    partition_rel = relation_open(PartitionRelationId, RowExclusiveLock);
+    /*
+     * Fetch reloptions from tuple; have to use a hardwired descriptor because
+     * we might not have any other for pg_class yet (consider executing this
+     * code for pg_class itself)
+     */
+    datum = fastgetattr(tuple, Anum_pg_partition_reloptions, RelationGetDescr(partition_rel), &isnull);
+
+    /* close pg_partition catalog */
+    relation_close(partition_rel, RowExclusiveLock);
+
+    if (isnull) {
+        return;
+    }
+
+    options = heap_reloptions(RELKIND_RELATION, datum, false);
+    /*
+     * Copy parsed data into u_sess->cache_mem_cxt.  To guard against the
+     * possibility of leaks in the reloptions code, we want to do the actual
+     * parsing in the caller's memory context and copy the results into
+     * u_sess->cache_mem_cxt after the fact.
+     */
+    if (options != NULL) {
+        partition->rd_options = (bytea*)MemoryContextAlloc(u_sess->cache_mem_cxt, VARSIZE(options));
+        rc = memcpy_s(partition->rd_options, VARSIZE(options), options, VARSIZE(options));
+        securec_check(rc, "", "");
+        pfree_ext(options);
+    }
+
+    return;
+}

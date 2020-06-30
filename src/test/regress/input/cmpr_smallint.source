@@ -1,0 +1,74 @@
+--
+-- case 1: small integer type
+--
+CREATE TABLE cmpr_smallint_raw (
+	RS_ID smallint,
+	R0_ID smallint NOT NULL,
+	R1_ID smallint NOT NULL,
+	R2_ID smallint NOT NULL,
+	R3_ID smallint NOT NULL,
+	R4_ID smallint NOT NULL,
+	R5_ID smallint NOT NULL,
+	R6_ID smallint NOT NULL,
+	R7_ID smallint NOT NULL,
+	R8_ID smallint NOT NULL,
+	R9_ID smallint NOT NULL
+);
+COPY cmpr_smallint_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+
+CREATE TABLE cmpr_smallint_auto (
+	RS_ID smallint,
+	R0_ID smallint NOT NULL,
+	R1_ID smallint NOT NULL,
+	R2_ID smallint NOT NULL,
+	R3_ID smallint NOT NULL,
+	R4_ID smallint NOT NULL,
+	R5_ID smallint NOT NULL,
+	R6_ID smallint NOT NULL,
+	R7_ID smallint NOT NULL,
+	R8_ID smallint NOT NULL,
+	R9_ID smallint NOT NULL
+)  COMPRESS;
+COPY cmpr_smallint_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_auto);
+(SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_auto);
+(SELECT * FROM cmpr_smallint_auto) MINUS ALL (SELECT * FROM cmpr_smallint_raw);
+DROP TABLE cmpr_smallint_auto;
+
+CREATE TABLE cmpr_smallint_dict (
+	RS_ID smallint dictionary,
+	R0_ID smallint dictionary NOT NULL,
+	R1_ID smallint dictionary NOT NULL,
+	R2_ID smallint dictionary NOT NULL,
+	R3_ID smallint dictionary NOT NULL,
+	R4_ID smallint dictionary NOT NULL,
+	R5_ID smallint dictionary NOT NULL,
+	R6_ID smallint dictionary NOT NULL,
+	R7_ID smallint dictionary NOT NULL,
+	R8_ID smallint dictionary NOT NULL,
+	R9_ID smallint dictionary NOT NULL
+)  COMPRESS;
+COPY cmpr_smallint_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_dict);
+(SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_dict);
+(SELECT * FROM cmpr_smallint_dict) MINUS ALL (SELECT * FROM cmpr_smallint_raw);
+DROP TABLE cmpr_smallint_dict;
+
+CREATE TABLE cmpr_smallint_delta (
+	RS_ID smallint delta,
+	R0_ID smallint delta NOT NULL,
+	R1_ID smallint delta NOT NULL,
+	R2_ID smallint delta NOT NULL,
+	R3_ID smallint delta NOT NULL,
+	R4_ID smallint delta NOT NULL,
+	R5_ID smallint delta NOT NULL,
+	R6_ID smallint delta NOT NULL,
+	R7_ID smallint delta NOT NULL,
+	R8_ID smallint delta NOT NULL,
+	R9_ID smallint delta NOT NULL
+)  COMPRESS;
+COPY cmpr_smallint_delta FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_delta);
+(SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_delta);
+(SELECT * FROM cmpr_smallint_delta) MINUS ALL (SELECT * FROM cmpr_smallint_raw);
+DROP TABLE cmpr_smallint_delta;

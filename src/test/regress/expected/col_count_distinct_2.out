@@ -1,0 +1,335 @@
+/*
+ * This file is used to test pull down of count(distinct) expression
+ */
+create schema col_distribute_count_distinct_2;
+set current_schema = col_distribute_count_distinct_2;
+-- Create Table and Insert Data
+create table src(c1 int);
+insert into src values(0);
+create table t_distinct(a int, b int, c int, d int) with (orientation=column);
+INSERT INTO t_distinct select generate_series(1, 1000)%501, generate_series(1, 1000)%75, generate_series(1, 1000)%25, generate_series(1, 1000)%7 from src;
+analyze t_distinct;
+-- Case 2 (without group by clause)
+-- Case 2.1 top level
+-- Case 2.1.1 count_distinct within target list
+explain (costs off, nodes off) select count(distinct(a)), max(b+c), avg(d::numeric(15,10)) from t_distinct;
+              QUERY PLAN               
+---------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  CStore Scan on t_distinct
+(3 rows)
+
+select count(distinct(a)), max(b+c), avg(d::numeric(15,10)) from t_distinct;
+ count | max |        avg         
+-------+-----+--------------------
+   501 |  98 | 3.0030000000000000
+(1 row)
+
+explain (costs off, nodes off) select count(distinct(b)), max(a-c), avg(d::numeric(15,10)) from t_distinct;
+              QUERY PLAN               
+---------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  CStore Scan on t_distinct
+(3 rows)
+
+select avg(distinct(b)), max(a-c), avg(d::numeric(15,10)) from t_distinct;
+         avg         | max |        avg         
+---------------------+-----+--------------------
+ 37.0000000000000000 | 500 | 3.0030000000000000
+(1 row)
+
+explain (costs off, nodes off) select count(distinct(b+c)), max(a-c), avg(d::numeric(15,10)) from t_distinct;
+              QUERY PLAN               
+---------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  CStore Scan on t_distinct
+(3 rows)
+
+select sum(distinct(b+c)), max(a-c), avg(d::numeric(15,10)) from t_distinct;
+ sum  | max |        avg         
+------+-----+--------------------
+ 3675 | 500 | 3.0030000000000000
+(1 row)
+
+-- Case 2.1.2 count_distinct within other place
+explain (costs off, nodes off) select max(b) from t_distinct order by count(distinct(d));
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (count(DISTINCT d))
+         ->  Vector Aggregate
+               ->  CStore Scan on t_distinct
+(5 rows)
+
+select max(b) from t_distinct order by count(distinct(d));
+ max 
+-----
+  74
+(1 row)
+
+explain (costs off, nodes off) select max(b) from t_distinct having count(distinct(d))=7;
+               QUERY PLAN                
+-----------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         Filter: (count(DISTINCT d) = 7)
+         ->  CStore Scan on t_distinct
+(4 rows)
+
+select max(b) from t_distinct having count(distinct(d))=7;
+ max 
+-----
+  74
+(1 row)
+
+explain (costs off, nodes off) select avg(a+b+c+d) from t_distinct having count(distinct(a))=max(a)+1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         Filter: (count(DISTINCT a) = (max(a) + 1))
+         ->  CStore Scan on t_distinct
+(4 rows)
+
+select avg((a+b+c+d)::numeric(15,10)) from t_distinct having count(distinct(a))=max(a)+1;
+         avg          
+----------------------
+ 301.4030000000000000
+(1 row)
+
+explain (costs off, nodes off) select avg(c) from t_distinct order by count(distinct(a));
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (count(DISTINCT a))
+         ->  Vector Aggregate
+               ->  CStore Scan on t_distinct
+(5 rows)
+
+select avg(c::numeric(15,10)) from t_distinct order by count(distinct(a));
+         avg         
+---------------------
+ 12.0000000000000000
+(1 row)
+
+explain (costs off, nodes off) select avg(c) from t_distinct order by count(distinct(d));
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (count(DISTINCT d))
+         ->  Vector Aggregate
+               ->  CStore Scan on t_distinct
+(5 rows)
+
+select avg(c::numeric(15,10)) from t_distinct order by count(distinct(d));
+         avg         
+---------------------
+ 12.0000000000000000
+(1 row)
+
+-- Case 2.2 sub level
+-- Case 2.2.1 count_distinct within target list
+explain (costs off, nodes off) select distinct da from (select count(distinct(a)) da, max(b+c), avg(d) from t_distinct);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: __unnamed_subquery__.da
+         ->  Vector Subquery Scan on __unnamed_subquery__
+               ->  Vector Aggregate
+                     ->  CStore Scan on t_distinct
+(6 rows)
+
+select distinct da from (select min(distinct(a)) da, max(b+c), avg(d) from t_distinct);
+ da 
+----
+  0
+(1 row)
+
+explain (costs off, nodes off) select distinct db from (select count(distinct(b)) db, max(a-c), avg(d) from t_distinct);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: __unnamed_subquery__.db
+         ->  Vector Subquery Scan on __unnamed_subquery__
+               ->  Vector Aggregate
+                     ->  CStore Scan on t_distinct
+(6 rows)
+
+select distinct db from (select max(distinct(b)) db, max(a-c), avg(d) from t_distinct);
+ db 
+----
+ 74
+(1 row)
+
+explain (costs off, nodes off) select distinct db from (select count(distinct(b+c)) db, max(a-c), avg(d) from t_distinct);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: __unnamed_subquery__.db
+         ->  Vector Subquery Scan on __unnamed_subquery__
+               ->  Vector Aggregate
+                     ->  CStore Scan on t_distinct
+(6 rows)
+
+select distinct db from (select count(distinct(b+c)) db, max(a-c), avg(d) from t_distinct);
+ db 
+----
+ 75
+(1 row)
+
+-- Case 2.2.2 count_distinct within other place
+explain (costs off, nodes off) select distinct mb from (select max(b) mb from t_distinct order by count(distinct(d)));
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: __unnamed_subquery__.mb
+         ->  Vector Subquery Scan on __unnamed_subquery__
+               ->  Vector Sort
+                     Sort Key: (count(DISTINCT t_distinct.d))
+                     ->  Vector Aggregate
+                           ->  CStore Scan on t_distinct
+(8 rows)
+
+select distinct mb from (select max(b) mb from t_distinct order by count(distinct(d)));
+ mb 
+----
+ 74
+(1 row)
+
+explain (costs off, nodes off) select distinct mb from (select max(b) mb from t_distinct having count(distinct(d))=7);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: max(t_distinct.b)
+         ->  Vector Aggregate
+               Filter: (count(DISTINCT t_distinct.d) = 7)
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+select distinct mb from (select max(b) mb from t_distinct having count(distinct(d))=7);
+ mb 
+----
+ 74
+(1 row)
+
+explain (costs off, nodes off) select distinct aabcd from (select avg(a+b+c+d) aabcd from t_distinct having count(distinct(a))=max(a)+1);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: avg((((t_distinct.a + t_distinct.b) + t_distinct.c) + t_distinct.d))
+         ->  Vector Aggregate
+               Filter: (count(DISTINCT t_distinct.a) = (max(t_distinct.a) + 1))
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+select distinct aabcd from (select avg(a+b+c+d) aabcd from t_distinct having count(distinct(a))=max(a)+1);
+        aabcd         
+----------------------
+ 301.4030000000000000
+(1 row)
+
+explain (costs off, nodes off) select distinct ac from (select avg(c) ac from t_distinct order by count(distinct(a)));
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: __unnamed_subquery__.ac
+         ->  Vector Subquery Scan on __unnamed_subquery__
+               ->  Vector Sort
+                     Sort Key: (count(DISTINCT t_distinct.a))
+                     ->  Vector Aggregate
+                           ->  CStore Scan on t_distinct
+(8 rows)
+
+select distinct ac from (select avg(c::numeric(15,10)) ac from t_distinct order by count(distinct(a)));
+         ac          
+---------------------
+ 12.0000000000000000
+(1 row)
+
+explain (costs off, nodes off) select distinct ac from (select avg(c) ac from t_distinct order by count(distinct(d)));
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: __unnamed_subquery__.ac
+         ->  Vector Subquery Scan on __unnamed_subquery__
+               ->  Vector Sort
+                     Sort Key: (count(DISTINCT t_distinct.d))
+                     ->  Vector Aggregate
+                           ->  CStore Scan on t_distinct
+(8 rows)
+
+select distinct ac from (select avg(c::numeric(15,10)) ac from t_distinct order by count(distinct(d)));
+         ac          
+---------------------
+ 12.0000000000000000
+(1 row)
+
+-- Case 2.3 with distinct
+explain (costs off, nodes off) select distinct count(distinct(b)) from t_distinct;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: count(DISTINCT b)
+         ->  Vector Aggregate
+               ->  CStore Scan on t_distinct
+(5 rows)
+
+select distinct count(distinct(b)) from t_distinct;
+ count 
+-------
+    75
+(1 row)
+
+explain (costs off, nodes off) select distinct count(distinct(a)) from t_distinct;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: count(DISTINCT a)
+         ->  Vector Aggregate
+               ->  CStore Scan on t_distinct
+(5 rows)
+
+select distinct count(distinct(a)) from t_distinct;
+ count 
+-------
+   501
+(1 row)
+
+-- Case 2.4 non-projection-capable-subplan
+explain (costs off, nodes off) select count(distinct(b+c)) from (select b, c, d from t_distinct union all select b, c, d from t_distinct);
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Append
+               ->  CStore Scan on t_distinct
+               ->  CStore Scan on t_distinct
+(5 rows)
+
+select count(distinct(b+c)) from (select b, c, d from t_distinct union all select b, c, d from t_distinct);
+ count 
+-------
+    75
+(1 row)
+
+-- Clean Table
+drop table t_distinct;
+reset current_schema;
+drop schema col_distribute_count_distinct_2 cascade;
+NOTICE:  drop cascades to table col_distribute_count_distinct_2.src

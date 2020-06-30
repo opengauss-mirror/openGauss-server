@@ -1,0 +1,20 @@
+<refentry id="SQL-SET_TRANSACTION">
+<refmeta>
+<refentrytitle>SET TRANSACTION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SET TRANSACTION</refname>
+<refpurpose>set the characteristics of the current transaction</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+{SET [ LOCAL ] TRANSACTION|SET SESSION CHARACTERISTICS AS TRANSACTION}
+  { ISOLATION LEVEL { READ COMMITTED | READ UNCOMMITTED }
+  | { READ WRITE | READ ONLY | SERIALIZABLE | REPEATABLE READ }
+  } [, ...]
+SET TRANSACTION SNAPSHOT snapshot_id;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

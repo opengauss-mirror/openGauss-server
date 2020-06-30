@@ -1,0 +1,188 @@
+CREATE SCHEMA cstore_alter_table3;
+SET SEARCH_PATH TO cstore_alter_table3;
+SET INTERVALsTYLE = POSTGRES;
+-- Add column for not-empty table
+CREATE TABLE alter_addcols_56 (initial int4) with(orientation = column);
+insert into alter_addcols_56 values(1);
+insert into alter_addcols_56 values(2);
+ALTER TABLE alter_addcols_56 ADD COLUMN xmin integer;
+ALTER TABLE alter_addcols_56 ADD COLUMN a int4 default 3;
+ALTER TABLE alter_addcols_56 ADD COLUMN b tinyint default 1;
+ALTER TABLE alter_addcols_56 ADD COLUMN c smallint default 2;
+ALTER TABLE alter_addcols_56 ADD COLUMN d bigint;
+ALTER TABLE alter_addcols_56 ADD COLUMN e decimal(5,2);
+ALTER TABLE alter_addcols_56 ADD COLUMN f numeric(10,5);
+ALTER TABLE alter_addcols_56 ADD COLUMN g float4;
+ALTER TABLE alter_addcols_56 ADD COLUMN h float8;
+ALTER TABLE alter_addcols_56 ADD COLUMN i char;
+ALTER TABLE alter_addcols_56 ADD COLUMN j varchar(10);
+ALTER TABLE alter_addcols_56 ADD COLUMN k char(5);
+ALTER TABLE alter_addcols_56 ADD COLUMN l text;
+ALTER TABLE alter_addcols_56 ADD COLUMN m nvarchar2;
+ALTER TABLE alter_addcols_56 ADD COLUMN o timestamptz;
+ALTER TABLE alter_addcols_56 ADD COLUMN p timestamp;
+ALTER TABLE alter_addcols_56 ADD COLUMN q date;
+ALTER TABLE alter_addcols_56 ADD COLUMN r timetz;
+ALTER TABLE alter_addcols_56 ADD COLUMN s time;
+ALTER TABLE alter_addcols_56 ADD COLUMN t tinterval;
+ALTER TABLE alter_addcols_56 ADD COLUMN u interval;
+ALTER TABLE alter_addcols_56 ADD COLUMN v smalldatetime;
+ALTER TABLE alter_addcols_56 ADD COLUMN w oid;
+ALTER TABLE alter_addcols_56 ADD COLUMN x bit(8);
+ALTER TABLE alter_addcols_56 ADD COLUMN y varbit(8);
+
+INSERT INTO alter_addcols_56 (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00 PST', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+SELECT * FROM alter_addcols_56;
+DROP TABLE alter_addcols_56;
+
+-- Add mutliple column 
+CREATE TABLE alter_addcols_57 (initial int4) with(orientation = column);
+insert into alter_addcols_57 values(1);
+ALTER TABLE alter_addcols_57 ADD(mychar char default 'a', mychar1 varchar(10) NOT NULL default 'ab', id integer NULL);
+select * from alter_addcols_57;
+insert into alter_addcols_57 values(2,'b','abc',2);
+select * from alter_addcols_57;
+drop table alter_addcols_57;
+
+-- Add column for patitioned table
+CREATE TABLE alter_addcols_58(a int, b int) with ( orientation = column )  partition by range(b)
+(
+	partition p1 values less than (3),
+	partition p2 values less than (6),
+	partition p3 values less than (10)
+);
+insert into alter_addcols_58 values(1,1);
+insert into alter_addcols_58 values(2,4);
+insert into alter_addcols_58 values(3,9);
+select * from alter_addcols_58 order by a;
+Alter table alter_addcols_58 add column c int default 2;
+select * from alter_addcols_58 order by a;
+insert into alter_addcols_58 values(2,5,4);
+select * from alter_addcols_58 order by a, b;
+
+DROP TABLE alter_addcols_58;
+
+--------------------------------------------------------- ALTER TABLE SET DATA TYPE
+-- unsupported datatype
+CREATE TABLE alter_addcols_58( a int , b int) WITH ( ORIENTATION = COLUMN);
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE name;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE tid;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE xid;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE oidvector;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE smgr;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE point;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE lseg;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE path;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE box;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE polygon;
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float8[];
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float4[];
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE int2[];
+-- test: cannot change data type of DISTRIBUTE column.
+ALTER TABLE alter_addcols_58 ALTER COLUMN a SET DATA TYPE varchar(100);
+DROP TABLE alter_addcols_58;
+
+-- char,char(n),varchar(n),integer
+CREATE TABLE alter_addcols_61(id1 integer, mychar char, name char(5), name2 varchar(5)) WITH(ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_61 VALUES(1,'1','12','1234');
+INSERT INTO alter_addcols_61 VALUES(1,'a','ab','abcd');
+SELECT * FROM alter_addcols_61;
+\d+ alter_addcols_61;
+
+--can't alter distributed key
+ALTER TABLE alter_addcols_61 ALTER id1 TYPE char;
+
+-- CHAR->INT, failed
+ALTER TABLE alter_addcols_61 ALTER mychar TYPE int;
+
+-- char(n) extended
+ALTER TABLE alter_addcols_61 ALTER name TYPE char(10);
+\d+ alter_addcols_61;
+SELECT * FROM alter_addcols_61;
+
+--test altered column char extended
+UPDATE alter_addcols_61 SET name = 'abcdefg' WHERE id1=2;
+SELECT * FROM alter_addcols_61;
+UPDATE alter_addcols_61 SET name = 'abcdefg' WHERE mychar='a';
+SELECT * FROM alter_addcols_61;
+DELETE FROM alter_addcols_61 WHERE mychar='a';
+SELECT * FROM alter_addcols_61;
+
+-- char->int, succeed
+ALTER TABLE alter_addcols_61 ALTER COLUMN mychar SET DATA TYPE int;
+SELECT * FROM alter_addcols_61;
+
+-- int-->char after deleting
+INSERT INTO alter_addcols_61 VALUES (1, 3, 'cc', 'dd');
+INSERT INTO alter_addcols_61 VALUES (1, 4, '34', 'dd');
+DELETE FROM alter_addcols_61 WHERE name = 'cc';
+ALTER TABLE alter_addcols_61 ALTER COLUMN name SET DATA TYPE int;
+SELECT * FROM alter_addcols_61;
+-- test altered column char->int, can't insert succeed
+INSERT INTO alter_addcols_61 VALUES(1, 'b', 'abcdef', '1234');
+-- varchar(n) extended
+ALTER TABLE alter_addcols_61 ALTER name2 TYPE varchar(20);
+\d+ alter_addcols_61;
+SELECT * FROM alter_addcols_61;
+
+ALTER TABLE alter_addcols_61 ALTER name TYPE varchar(20);
+INSERT INTO alter_addcols_61 VALUES(1, 3, 'abcdef', '1234567');
+SELECT * FROM alter_addcols_61;
+
+-- test the FULL NULL cu
+CREATE TABLE alter_addcols_64(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_64 VALUES(1), (1), (1), (1), (1);
+VACUUM FULL alter_addcols_64;
+ALTER TABLE alter_addcols_64 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_64;
+SELECT DISTINCT * FROM alter_addcols_64;
+
+-- forbit alter the same column within a sql clause.
+CREATE TABLE alter_addcols_79(a int, b int) WITH ( ORIENTATION = COLUMN);
+ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE bigint;
+ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl';
+
+-- test multiple SET DATA TYPE within one sql clause.
+CREATE TABLE alter_addcols_80(a int, b int, c varchar(10)) WITH ( ORIENTATION = COLUMN);
+create table base_alter_addcols(a int, b int, c varchar(10));
+insert into base_alter_addcols values(1, generate_series(1,10), 'hello');
+insert into base_alter_addcols values(1,generate_series(1,10), 'love');
+insert into base_alter_addcols values(1, generate_series(1,10), 'pig');
+insert into base_alter_addcols values(1, generate_series(1,10), 'dog');
+insert into base_alter_addcols values(1, generate_series(1,10), 'kitty');
+
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 VALUES(1, 6), (1, 7), (1, 8);
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+VACUUM FULL alter_addcols_80;
+DELETE FROM alter_addcols_80 WHERE b > 6;
+DELETE FROM alter_addcols_80 WHERE b = 2;
+ALTER TABLE alter_addcols_80 ALTER COLUMN b SET DATA TYPE varchar(7) USING b::char || 'zcw', ALTER COLUMN c SET DATA TYPE varchar(8);
+SELECT COUNT(*) FROM alter_addcols_80;
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '1zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '2zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '3zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '4zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '5zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '6zcw';
+SELECT DISTINCT * FROM alter_addcols_80 ORDER BY b;
+ALTER TABLE alter_addcols_80 ALTER COLUMN b SET DATA TYPE varchar(10), ALTER COLUMN c SET DATA TYPE varchar(10);
+SELECT COUNT(*) FROM alter_addcols_80;
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '1zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '2zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '3zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '4zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '5zcw';
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '6zcw';
+SELECT DISTINCT * FROM alter_addcols_80 ORDER BY b;
+
+drop schema cstore_alter_table3 cascade;

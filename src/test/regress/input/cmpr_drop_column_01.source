@@ -1,0 +1,51 @@
+-- TEST CASE: when one column is dropped, 0 is returned to for only fixed length value, excluding varlen datatype
+--
+CREATE TABLE cmpr_drop_varlen_col(
+        c_tsvector_1 tsvector NOT NULL,
+        c_tsvector_2 tsvector NOT NULL,
+        c_tsvector_3 tsvector NOT NULL,
+        c_tsvector_4 tsvector NOT NULL,
+        c_tsvector_5 tsvector NOT NULL,
+        c_tsvector_6 tsvector NOT NULL,
+        c_tsvector_7 tsvector NOT NULL,
+        c_tsvector_8 tsvector NOT NULL,
+        c_tsvector_9 tsvector NOT NULL,
+        c_tsvector_10 tsvector NOT NULL,
+        c_tsvector_11 tsvector NOT NULL,
+        c_tsvector_12 tsvector NOT NULL);
+CREATE OR REPLACE FUNCTION cmpr_func_drop_varlen_col(rownums INTEGER) RETURNs boolean AS $$ DECLARE 
+i INTEGER;
+BEGIN
+    FOR i IN 1..rownums LOOP
+        INSERT INTO cmpr_drop_varlen_col VALUES ('a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector,'a fat cat sat on a mat and ate a fat rat'::tsvector);
+    END LOOP;
+    RETURN TRUE;
+END;
+$$ LANGUAGE PLPGSQL;
+CALL cmpr_func_drop_varlen_col(1000);
+
+CREATE TABLE cmpr_drop_varlen_col_01(
+        c_tsvector_1 tsvector NOT NULL,
+        c_tsvector_2 tsvector NOT NULL,
+        c_tsvector_3 tsvector NOT NULL,
+        c_tsvector_4 tsvector NOT NULL,
+        c_tsvector_5 tsvector NOT NULL,
+        c_tsvector_6 tsvector NOT NULL,
+        c_tsvector_7 tsvector NOT NULL,
+        c_tsvector_8 tsvector NOT NULL,
+        c_tsvector_9 tsvector NOT NULL,
+        c_tsvector_10 tsvector NOT NULL,
+        c_tsvector_11 tsvector NOT NULL,
+        c_tsvector_12 tsvector NOT NULL) COMPRESS;
+
+COPY cmpr_drop_varlen_col TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col.data';
+COPY cmpr_drop_varlen_col_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col.data';
+
+alter table cmpr_drop_varlen_col_01 drop column c_tsvector_12;
+SELECT COUNT(*) FROM cmpr_drop_varlen_col_01;
+SELECT (SELECT COUNT(*) FROM cmpr_drop_varlen_col_01) - (SELECT COUNT(*) FROM cmpr_drop_varlen_col);
+(SELECT COUNT(*) FROM cmpr_drop_varlen_col) MINUS ALL (SELECT COUNT(*) FROM cmpr_drop_varlen_col_01);
+(SELECT COUNT(*) FROM cmpr_drop_varlen_col_01) MINUS ALL (SELECT COUNT(*) FROM cmpr_drop_varlen_col);
+DROP TABLE cmpr_drop_varlen_col;
+DROP TABLE cmpr_drop_varlen_col_01;
+\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_varlen_col.data

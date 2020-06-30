@@ -1,0 +1,95 @@
+show current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+select current_schema;
+ current_schema 
+----------------
+ public
+(1 row)
+
+create schema temp;
+set current_schema to temp;
+show current_schema;
+ current_schema 
+----------------
+ temp
+(1 row)
+
+reset current_schema;
+set current_schema to 111;
+show current_schema;
+ current_schema 
+----------------
+ 111
+(1 row)
+
+show search_path;
+ search_path 
+-------------
+ 111
+(1 row)
+
+reset search_path;
+show search_path;
+  search_path   
+----------------
+ "$user",public
+(1 row)
+
+show current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+show current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+select current_schema;
+ current_schema 
+----------------
+ public
+(1 row)
+
+create schema temp;
+ERROR:  schema "temp" already exists
+set current_schema to temp;
+show current_schema;
+ current_schema 
+----------------
+ temp
+(1 row)
+
+reset current_schema;
+set current_schema to 111;
+show current_schema;
+ current_schema 
+----------------
+ 111
+(1 row)
+
+show search_path;
+ search_path 
+-------------
+ 111
+(1 row)
+
+reset search_path;
+show search_path;
+  search_path   
+----------------
+ "$user",public
+(1 row)
+
+show current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+

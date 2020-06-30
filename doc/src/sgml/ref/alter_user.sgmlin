@@ -1,0 +1,45 @@
+<refentry id="SQL-ALTER_USER">
+<refmeta>
+<refentrytitle>ALTER USER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER USER</refname>
+<refpurpose>change a database role</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER USER user_name [ [ WITH ] option [ ... ] ];
+ALTER USER user_name
+    RENAME TO new_name;
+ALTER USER user_name [ IN DATABASE database_name ]
+    SET configuration_parameter {{ TO | = } { value | DEFAULT }|FROM CURRENT};
+ALTER USER user_name
+    [ IN DATABASE database_name ] RESET {configuration_parameter|ALL};
+
+where option can be:
+{CREATEDB | NOCREATEDB}
+    | {CREATEROLE | NOCREATEROLE}
+    | {INHERIT | NOINHERIT}
+    | {AUDITADMIN | NOAUDITADMIN}
+    | {SYSADMIN | NOSYSADMIN}
+    | {USEFT | NOUSEFT}
+    | {LOGIN | NOLOGIN}
+    | {REPLICATION | NOREPLICATION}
+    | {INDEPENDENT | NOINDEPENDENT}
+    | {VCADMIN | NOVCADMIN}
+    | CONNECTION LIMIT connlimit
+    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD { 'password' | DISABLE }
+    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY { 'password' [ REPLACE 'old_password' ] | DISABLE }
+    | VALID BEGIN 'timestamp'
+    | VALID UNTIL 'timestamp'
+    | RESOURCE POOL 'respool'
+    | USER GROUP 'groupuser'
+    | PERM SPACE 'spacelimit'
+    | NODE GROUP logic_cluster_name
+    | ACCOUNT { LOCK | UNLOCK }
+    | PGUSER
+</synopsis>
+</refsynopsisdiv>
+</refentry>

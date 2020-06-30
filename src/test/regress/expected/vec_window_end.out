@@ -1,0 +1,26 @@
+----
+--- Drop Tables
+----
+set current_schema=vector_window_engine;
+drop schema vector_window_engine cascade;
+NOTICE:  drop cascades to 20 other objects
+DETAIL:  drop cascades to table vector_window_table_01
+drop cascades to table row_window_table_02
+drop cascades to table vector_window_table_02
+drop cascades to table row_window_table_03
+drop cascades to table vector_window_table_03
+drop cascades to table tmp_tt_1
+drop cascades to table vector_window_table_04
+drop cascades to table row_window_table_05
+drop cascades to table vector_window_table_05
+drop cascades to table vector_window_table_06
+drop cascades to table vector_window_table_07
+drop cascades to table empsalary
+drop cascades to table tmp_csum_1
+drop cascades to table loan_dpsit_acct_event_info
+drop cascades to table col_tenk1
+drop cascades to table tenk1
+drop cascades to table temp_t1
+drop cascades to table tmp_t1
+drop cascades to table vec_count_over
+drop cascades to table hl_test001

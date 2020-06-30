@@ -1,0 +1,18 @@
+<refentry id="SQL-CREATE_SERVER">
+<refmeta>
+<refentrytitle>CREATE SERVER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE SERVER</refname>
+<refpurpose>define a new foreign server</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE SERVER server_name 
+    FOREIGN DATA WRAPPER fdw_name
+    OPTIONS ( { option_name ' value ' } [, ...] ) ;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

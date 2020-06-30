@@ -1,0 +1,45 @@
+--INT4
+CREATE TABLE vint4_test(a INT4, b INT4, c INT4) with (orientation = column) ;
+copy vint4_test from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vint4_normal.data' delimiter '|' NULL '';
+
+select * from vint4_test order by a;
+
+--test vint4pl
+--select b+c, (b+c) is NULL from vint4_test where a <= 3 order by a;
+select b+c as result from vint4_test where a <= 3 order by a;
+select b+c as result from vint4_test where a <= 10 order by a; --out-of-range
+
+--test vint4mul
+--select b-c, (b-c) is NULL from vint4_test  where a > 10 and a <= 14 order by a;
+select b-c as result from vint4_test  where a > 10 and a <= 14 order by a;
+select b-c as result from vint4_test where a > 10 and a <= 20 order by a; --out-of-range
+
+--test vint4mi
+--select b*c, (b*c) is NULL from vint4_test where a > 20 and a <= 24 order by a ;
+select b*c as result from vint4_test where a > 20 and a <= 24 order by a;
+select b*c as result from vint4_test where a > 20 and a <= 30 order by a; --out-of-range
+
+--others
+select max(b),max(c) from vint4_test;
+select min(b),min(c) from vint4_test;
+select avg(b),avg(c) from vint4_test;
+select sum(b),sum(c) from vint4_test;
+
+--test vint4_sop
+select b,c from vint4_test where b=c order by a;
+select b,c from vint4_test where b<>c order by a;
+select b,c from vint4_test where b>c order by a;
+select b,c from vint4_test where b>=c order by a;
+select b,c from vint4_test where b<c order by a;
+select b,c from vint4_test where b<=c order by a;
+
+                      
+select abs(c) from vint4_test where  c>-2147483647 and b > 1 order by c;
+select abs(c) from vint4_test order by c;
+select abs(c) from vint4_test where a < 30 and b > 0 order by c;
+
+
+--clean table
+drop table vint4_test;
+
+

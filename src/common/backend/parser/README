@@ -1,0 +1,31 @@
+src/common/backend/parser/README
+
+Parser
+======
+
+This directory does more than tokenize and parse SQL queries.  It also
+creates Query structures for the various complex queries that are passed
+to the optimizer and then executor.
+
+parser.cpp	things start here
+scan.l		break query into tokens
+scansup.cpp	handle escapes in input strings
+kwlookup.cpp	turn keywords into specific tokens
+keywords.cpp	table of standard keywords (passed to kwlookup.c)
+gram.y		parse the tokens and produce a "raw" parse tree
+analyze.cpp	top level of parse analysis for optimizable queries
+parse_agg.cpp	handle aggregates, like SUM(col1),  AVG(col2), ...
+parse_clause.cpp	handle clauses like WHERE, ORDER BY, GROUP BY, ...
+parse_compatibility.cpp	Handle a db compatibal syntax and feature support
+parse_coerce.cpp	handle coercing expressions to different data types
+parse_collate.cpp	assign collation information in completed expressions
+parse_cte.cpp	handle Common Table Expressions (WITH clauses)
+parse_expr.cpp	handle expressions like col, col + 3, x = 3 or x = 4
+parse_func.cpp	handle functions, table.column and column identifiers
+parse_node.cpp	create nodes for various structures
+parse_oper.cpp	handle operators in expressions
+parse_param.cpp	handle Params (for the cases used in the core backend)
+parse_relation.cpp	support routines for tables and column handling
+parse_target.cpp	handle the result list of the query
+parse_type.cpp		support routines for data type handling
+parse_utilcmd.cpp	parse analysis for utility commands (done at execution time)

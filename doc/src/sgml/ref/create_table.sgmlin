@@ -1,0 +1,50 @@
+<refentry id="SQL-CREATE_TABLE">
+<refmeta>
+<refentrytitle>CREATE TABLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE TABLE</refname>
+<refpurpose>define a new table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] table_name 
+({ column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | table_constraint
+    | LIKE source_table [ like_option [...] ] }
+    [, ... ])
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
+[ COMPRESS | NOCOMPRESS ]
+[ TABLESPACE tablespace_name ]
+[ DISTRIBUTE BY { REPLICATION | { HASH ( column_name [,...] ) } } ]
+[ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ];
+
+where column_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ NOT NULL |
+  NULL |
+  CHECK ( expression ) |
+  DEFAULT default_expr |
+  UNIQUE index_parameters |
+  PRIMARY KEY index_parameters }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where table_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ CHECK ( expression ) |
+  UNIQUE ( column_name [, ... ] ) index_parameters |
+  PRIMARY KEY ( column_name [, ... ] ) index_parameters |
+  PARTIAL CLUSTER KEY ( column_name [, ... ] ) }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where compress_mode can be:
+{ DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
+where like_option can be:
+{ INCLUDING | EXCLUDING } { DEFAULTS | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | PARTITION | RELOPTIONS | DISTRIBUTION | ALL }
+where index_parameters can be:
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ USING INDEX TABLESPACE tablespace_name ]
+</synopsis>
+</refsynopsisdiv>
+</refentry>

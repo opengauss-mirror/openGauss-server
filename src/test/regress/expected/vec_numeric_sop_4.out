@@ -1,0 +1,176 @@
+/*
+ * This file is used to test the simple operation for different data-type
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_sop_engine_4;
+set current_schema=vector_sop_engine_4;
+create table vector_sop_engine_4.VECTOR_SOP_TABLE_04
+(
+    col_int	int
+   ,col_num	numeric
+)with(orientation = column)  ;
+COPY VECTOR_SOP_TABLE_04(col_int, col_num) FROM stdin;
+create table vector_sop_engine_4.VECTOR_SOP_TABLE_05
+(
+    col_int	int
+   ,col_num	numeric
+)with(orientation = column)  ;
+COPY VECTOR_SOP_TABLE_05(col_int, col_num) FROM stdin;
+analyze vector_sop_table_04;
+analyze vector_sop_table_05;
+----
+--- test 1: Simple Operation for numeric 
+----
+select * from vector_sop_table_04 where col_num <> 11.25 order by 1, 2;
+ col_int | col_num 
+---------+---------
+       1 |   2.568
+       2 |   11.23
+       2 |     NaN
+       6 |   2.789
+       7 |    36.5
+      10 |    2.57
+      52 |   11.23
+         |    3.65
+(8 rows)
+
+select * from vector_sop_table_04 where col_num <> 'NaN' order by 1, 2;
+ col_int | col_num 
+---------+---------
+       1 |   2.568
+       2 |   11.23
+       3 |   11.25
+       6 |   2.789
+       7 |    36.5
+      10 |    2.57
+      52 |   11.23
+         |    3.65
+(8 rows)
+
+select * from vector_sop_table_04 where 11.23 <> col_num order by 1, 2; 
+ col_int | col_num 
+---------+---------
+       1 |   2.568
+       2 |     NaN
+       3 |   11.25
+       6 |   2.789
+       7 |    36.5
+      10 |    2.57
+         |    3.65
+(7 rows)
+
+select * from vector_sop_table_04 where 'NaN' <> col_num order by 1, 2;
+ col_int | col_num 
+---------+---------
+       1 |   2.568
+       2 |   11.23
+       3 |   11.25
+       6 |   2.789
+       7 |    36.5
+      10 |    2.57
+      52 |   11.23
+         |    3.65
+(8 rows)
+
+select * from vector_sop_table_04 A inner join vector_sop_table_05 B on A.col_num <> B.col_num order by 1, 2, 3, 4; 
+ col_int | col_num | col_int | col_num 
+---------+---------+---------+---------
+       1 |   2.568 |      12 |     NaN
+       1 |   2.568 |      65 |   11.23
+       2 |   11.23 |       2 |   2.568
+       2 |   11.23 |      12 |     NaN
+       2 |     NaN |       2 |   2.568
+       2 |     NaN |      65 |   11.23
+       3 |   11.25 |       2 |   2.568
+       3 |   11.25 |      12 |     NaN
+       3 |   11.25 |      65 |   11.23
+       6 |   2.789 |       2 |   2.568
+       6 |   2.789 |      12 |     NaN
+       6 |   2.789 |      65 |   11.23
+       7 |    36.5 |       2 |   2.568
+       7 |    36.5 |      12 |     NaN
+       7 |    36.5 |      65 |   11.23
+      10 |    2.57 |       2 |   2.568
+      10 |    2.57 |      12 |     NaN
+      10 |    2.57 |      65 |   11.23
+      52 |   11.23 |       2 |   2.568
+      52 |   11.23 |      12 |     NaN
+         |    3.65 |       2 |   2.568
+         |    3.65 |      12 |     NaN
+         |    3.65 |      65 |   11.23
+(23 rows)
+
+select * from vector_sop_table_04 where col_num <> 11.25 and col_int > 5 order by 1, 2;
+ col_int | col_num 
+---------+---------
+       6 |   2.789
+       7 |    36.5
+      10 |    2.57
+      52 |   11.23
+(4 rows)
+
+select * from vector_sop_table_04 where col_num <> 'NaN' and col_int < 75 order by 1, 2;
+ col_int | col_num 
+---------+---------
+       1 |   2.568
+       2 |   11.23
+       3 |   11.25
+       6 |   2.789
+       7 |    36.5
+      10 |    2.57
+      52 |   11.23
+(7 rows)
+
+select * from vector_sop_table_04 where 11.23 <> col_num and col_int > 5 order by 1, 2; 
+ col_int | col_num 
+---------+---------
+       6 |   2.789
+       7 |    36.5
+      10 |    2.57
+(3 rows)
+
+select * from vector_sop_table_04 where 'NaN' <> col_num and col_num > 2.5 order by 1, 2;
+ col_int | col_num 
+---------+---------
+       1 |   2.568
+       2 |   11.23
+       3 |   11.25
+       6 |   2.789
+       7 |    36.5
+      10 |    2.57
+      52 |   11.23
+         |    3.65
+(8 rows)
+
+select * from vector_sop_table_04 A inner join vector_sop_table_05 B on A.col_num <> B.col_num and A.col_int <> B.col_int order by 1, 2, 3, 4; 
+ col_int | col_num | col_int | col_num 
+---------+---------+---------+---------
+       1 |   2.568 |      12 |     NaN
+       1 |   2.568 |      65 |   11.23
+       2 |   11.23 |      12 |     NaN
+       2 |     NaN |      65 |   11.23
+       3 |   11.25 |       2 |   2.568
+       3 |   11.25 |      12 |     NaN
+       3 |   11.25 |      65 |   11.23
+       6 |   2.789 |       2 |   2.568
+       6 |   2.789 |      12 |     NaN
+       6 |   2.789 |      65 |   11.23
+       7 |    36.5 |       2 |   2.568
+       7 |    36.5 |      12 |     NaN
+       7 |    36.5 |      65 |   11.23
+      10 |    2.57 |       2 |   2.568
+      10 |    2.57 |      12 |     NaN
+      10 |    2.57 |      65 |   11.23
+      52 |   11.23 |       2 |   2.568
+      52 |   11.23 |      12 |     NaN
+(18 rows)
+
+----
+--- Clean Resource and Tables
+----
+drop schema vector_sop_engine_4 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table vector_sop_table_04
+drop cascades to table vector_sop_table_05

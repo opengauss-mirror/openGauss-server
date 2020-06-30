@@ -1,0 +1,1479 @@
+--
+-- XC_FQS
+--
+-- This file contains tests for Fast Query Shipping (FQS) for queries involving
+-- a single table
+-- Testset 1 for distributed table (by roundrobin)
+CREATE TABLE tab1_rr(val int, val2 int);
+insert into tab1_rr values (1, 2);
+insert into tab1_rr values (2, 4);
+insert into tab1_rr values (5, 3);
+insert into tab1_rr values (7, 8);
+insert into tab1_rr values (9, 2);
+explain (costs off, verbose on, nodes off, num_nodes on) insert into tab1_rr values (9, 2);
+        QUERY PLAN        
+--------------------------
+ [Bypass]
+ Insert on public.tab1_rr
+   ->  Result
+         Output: 9, 2
+(4 rows)
+
+-- simple select
+-- should get FQSed
+select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_rr where val2 = 4;
+ val | ?column? |           case            
+-----+----------+---------------------------
+   2 |        6 | val and val2 are not same
+(1 row)
+
+explain (costs off, verbose on, nodes off) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_rr where val2 = 4;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Seq Scan on public.tab1_rr
+   Output: val, (val2 + 2), CASE val WHEN val2 THEN 'val and val2 are same'::text ELSE 'val and val2 are not same'::text END
+   Filter: (tab1_rr.val2 = 4)
+(3 rows)
+
+-- should get FQSed even within a subquery
+select * from (select * from tab1_rr where val2 = 4) t1;
+ val | val2 
+-----+------
+   2 |    4
+(1 row)
+
+explain (costs off, verbose on, nodes off)
+	select * from (select * from tab1_rr where val2 = 4) t1;
+             QUERY PLAN              
+-------------------------------------
+ Seq Scan on public.tab1_rr
+   Output: tab1_rr.val, tab1_rr.val2
+   Filter: (tab1_rr.val2 = 4)
+(3 rows)
+
+-- should not get FQSed because of aggregates
+select sum(val), avg(val), count(*) from tab1_rr;
+ sum |        avg         | count 
+-----+--------------------+-------
+  24 | 4.8000000000000000 |     5
+(1 row)
+
+explain (costs off, verbose on, nodes off) select sum(val), avg(val), count(*) from tab1_rr;
+               QUERY PLAN               
+----------------------------------------
+ Aggregate
+   Output: sum(val), avg(val), count(*)
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+(4 rows)
+
+-- should not get FQSed because of window functions
+select first_value(val) over (partition by val2 order by val) from tab1_rr;
+ first_value 
+-------------
+           1
+           1
+           5
+           2
+           7
+(5 rows)
+
+explain (costs off, verbose on, nodes off) select first_value(val) over (partition by val2 order by val) from tab1_rr;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ WindowAgg
+   Output: first_value(val) OVER (PARTITION BY val2 ORDER BY val USING = NULLS LAST), val, val2
+   ->  Sort
+         Output: val, val2
+         Sort Key: tab1_rr.val2, tab1_rr.val
+         ->  Seq Scan on public.tab1_rr
+               Output: val, val2
+(7 rows)
+
+-- should not get FQSed because of LIMIT clause
+select * from tab1_rr where val2 = 3 limit 1;
+ val | val2 
+-----+------
+   5 |    3
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from tab1_rr where val2 = 3 limit 1;
+             QUERY PLAN             
+------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+         Filter: (tab1_rr.val2 = 3)
+(5 rows)
+
+-- should not FQSed because of OFFSET clause
+select * from tab1_rr where val2 = 4 offset 1;
+ val | val2 
+-----+------
+(0 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_rr where val2 = 4 offset 1;
+             QUERY PLAN             
+------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+         Filter: (tab1_rr.val2 = 4)
+(5 rows)
+
+-- should not get FQSed because of SORT clause
+select * from tab1_rr order by val;
+ val | val2 
+-----+------
+   1 |    2
+   2 |    4
+   5 |    3
+   7 |    8
+   9 |    2
+(5 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_rr order by val;
+            QUERY PLAN            
+----------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_rr.val
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+(5 rows)
+
+-- should not get FQSed because of DISTINCT clause
+select distinct val, val2 from tab1_rr where val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select distinct val, val2 from tab1_rr where val2 = 8;
+                QUERY PLAN                 
+-------------------------------------------
+ HashAggregate
+   Output: val, val2
+   Group By Key: tab1_rr.val, tab1_rr.val2
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+         Filter: (tab1_rr.val2 = 8)
+(6 rows)
+
+-- should not get FQSed because of GROUP clause
+select val, val2 from tab1_rr where val2 = 8 group by val, val2;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select val, val2 from tab1_rr where val2 = 8 group by val, val2;
+                QUERY PLAN                 
+-------------------------------------------
+ HashAggregate
+   Output: val, val2
+   Group By Key: tab1_rr.val, tab1_rr.val2
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+         Filter: (tab1_rr.val2 = 8)
+(6 rows)
+
+-- should not get FQSed because of presence of aggregates and HAVING clause,
+select sum(val) from tab1_rr where val2 = 2 group by val2 having sum(val) > 1;
+ sum 
+-----
+  10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select sum(val) from tab1_rr where val2 = 2 group by val2 having sum(val) > 1;
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Output: sum(val), val2
+   Group By Key: tab1_rr.val2
+   Filter: (sum(tab1_rr.val) > 1)
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+         Filter: (tab1_rr.val2 = 2)
+(7 rows)
+
+-- tests for node reduction by application of quals, for roundrobin node
+-- reduction is not applicable. Having query not FQSed because of existence of ORDER BY,
+-- implies that nodes did not get reduced.
+select * from tab1_rr where val = 7;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from tab1_rr where val = 7;
+         QUERY PLAN          
+-----------------------------
+ Seq Scan on public.tab1_rr
+   Output: val, val2
+   Filter: (tab1_rr.val = 7)
+(3 rows)
+
+select * from tab1_rr where val = 7 or val = 2 order by val;
+ val | val2 
+-----+------
+   2 |    4
+   7 |    8
+(2 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_rr where val = 7 or val = 2 order by val;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_rr.val
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+         Filter: ((tab1_rr.val = 7) OR (tab1_rr.val = 2))
+(6 rows)
+
+select * from tab1_rr where val = 7 and val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from tab1_rr where val = 7 and val2 = 8 order by val;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Seq Scan on public.tab1_rr
+   Output: val, val2
+   Filter: ((tab1_rr.val = 7) AND (tab1_rr.val2 = 8))
+(3 rows)
+
+select * from tab1_rr where val = 3 + 4 and val2 = 8 order by val;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from tab1_rr where val = 3 + 4 order by val;
+         QUERY PLAN          
+-----------------------------
+ Seq Scan on public.tab1_rr
+   Output: val, val2
+   Filter: (tab1_rr.val = 7)
+(3 rows)
+
+select * from tab1_rr where val = char_length('len')+4 order by val;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from tab1_rr where val = char_length('len')+4 order by val;
+         QUERY PLAN          
+-----------------------------
+ Seq Scan on public.tab1_rr
+   Output: val, val2
+   Filter: (tab1_rr.val = 7)
+(3 rows)
+
+-- insert some more values 
+insert into tab1_rr values (7, 2); 
+select avg(val) from tab1_rr where val = 7;
+        avg         
+--------------------
+ 7.0000000000000000
+(1 row)
+
+explain (costs off, verbose on, nodes off) select avg(val) from tab1_rr where val = 7;
+            QUERY PLAN             
+-----------------------------------
+ Aggregate
+   Output: avg(val)
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+         Filter: (tab1_rr.val = 7)
+(5 rows)
+
+select val, val2 from tab1_rr where val = 7 order by val2;
+ val | val2 
+-----+------
+   7 |    2
+   7 |    8
+(2 rows)
+
+explain (costs off, verbose on, nodes off) select val, val2 from tab1_rr where val = 7 order by val2;
+            QUERY PLAN             
+-----------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_rr.val2
+   ->  Seq Scan on public.tab1_rr
+         Output: val, val2
+         Filter: (tab1_rr.val = 7)
+(6 rows)
+
+select distinct val2 from tab1_rr where val = 7 order by val2;
+ val2 
+------
+    2
+    8
+(2 rows)
+
+explain (costs off, verbose on, nodes off) select distinct val2 from tab1_rr where val = 7;
+            QUERY PLAN             
+-----------------------------------
+ HashAggregate
+   Output: val2
+   Group By Key: tab1_rr.val2
+   ->  Seq Scan on public.tab1_rr
+         Output: val2
+         Filter: (tab1_rr.val = 7)
+(6 rows)
+
+-- DMLs
+update tab1_rr set val2 = 1000 where val = 7; 
+explain (costs off, verbose on, nodes off) update tab1_rr set val2 = 1000 where val = 7; 
+            QUERY PLAN             
+-----------------------------------
+ Update on public.tab1_rr
+   ->  Seq Scan on public.tab1_rr
+         Output: val, 1000, ctid
+         Filter: (tab1_rr.val = 7)
+(4 rows)
+
+select * from tab1_rr where val = 7;
+ val | val2 
+-----+------
+   7 | 1000
+   7 | 1000
+(2 rows)
+
+delete from tab1_rr where val = 7; 
+explain (costs off, verbose on, nodes off) delete from tab1_rr where val = 7; 
+            QUERY PLAN             
+-----------------------------------
+ Delete on public.tab1_rr
+   ->  Seq Scan on public.tab1_rr
+         Output: ctid
+         Filter: (tab1_rr.val = 7)
+(4 rows)
+
+select * from tab1_rr where val = 7;
+ val | val2 
+-----+------
+(0 rows)
+
+-- Testset 2 for distributed tables (by hash)
+CREATE TABLE tab1_hash(val int, val2 int);
+insert into tab1_hash values (1, 2);
+insert into tab1_hash values (2, 4);
+insert into tab1_hash values (5, 3);
+insert into tab1_hash values (7, 8);
+insert into tab1_hash values (9, 2);
+explain (costs off, verbose on, nodes off) insert into tab1_hash values (9, 2);
+         QUERY PLAN         
+----------------------------
+ [Bypass]
+ Insert on public.tab1_hash
+   ->  Result
+         Output: 9, 2
+(4 rows)
+
+-- simple select
+-- should get FQSed
+select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_hash where val2 = 4;
+ val | ?column? |           case            
+-----+----------+---------------------------
+   2 |        6 | val and val2 are not same
+(1 row)
+
+explain (costs off, verbose on, nodes off) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_hash where val2 = 2;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Seq Scan on public.tab1_hash
+   Output: val, (val2 + 2), CASE val WHEN val2 THEN 'val and val2 are same'::text ELSE 'val and val2 are not same'::text END
+   Filter: (tab1_hash.val2 = 2)
+(3 rows)
+
+-- should not get FQSed because of aggregates
+select sum(val), avg(val), count(*) from tab1_hash;
+ sum |        avg         | count 
+-----+--------------------+-------
+  24 | 4.8000000000000000 |     5
+(1 row)
+
+explain (costs off, verbose on, nodes off) select sum(val), avg(val), count(*) from tab1_hash;
+               QUERY PLAN               
+----------------------------------------
+ Aggregate
+   Output: sum(val), avg(val), count(*)
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+(4 rows)
+
+-- should not get FQSed because of window functions
+select first_value(val) over (partition by val2 order by val) from tab1_hash order by 1;
+ first_value 
+-------------
+           1
+           1
+           2
+           5
+           7
+(5 rows)
+
+explain (costs off, verbose on, nodes off) select first_value(val) over (partition by val2 order by val) from tab1_hash;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ WindowAgg
+   Output: first_value(val) OVER (PARTITION BY val2 ORDER BY val USING = NULLS LAST), val, val2
+   ->  Sort
+         Output: val, val2
+         Sort Key: tab1_hash.val2, tab1_hash.val
+         ->  Seq Scan on public.tab1_hash
+               Output: val, val2
+(7 rows)
+
+-- should not get FQSed because of LIMIT clause
+select * from tab1_hash where val2 = 3 limit 1;
+ val | val2 
+-----+------
+   5 |    3
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from tab1_hash where val2 = 3 limit 1;
+              QUERY PLAN              
+--------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: (tab1_hash.val2 = 3)
+(5 rows)
+
+-- should not FQSed because of OFFSET clause
+select * from tab1_hash where val2 = 4 offset 1;
+ val | val2 
+-----+------
+(0 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_hash where val2 = 4 offset 1;
+              QUERY PLAN              
+--------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: (tab1_hash.val2 = 4)
+(5 rows)
+
+-- should not get FQSed because of SORT clause
+select * from tab1_hash order by val;
+ val | val2 
+-----+------
+   1 |    2
+   2 |    4
+   5 |    3
+   7 |    8
+   9 |    2
+(5 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_hash order by val;
+             QUERY PLAN             
+------------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_hash.val
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+(5 rows)
+
+-- should get FQSed because of DISTINCT clause with distribution column in it
+select distinct val, val2 from tab1_hash where val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select distinct val, val2 from tab1_hash where val2 = 8;
+                  QUERY PLAN                   
+-----------------------------------------------
+ HashAggregate
+   Output: val, val2
+   Group By Key: tab1_hash.val, tab1_hash.val2
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: (tab1_hash.val2 = 8)
+(6 rows)
+
+-- should get FQSed because of GROUP clause with distribution column in it
+select val, val2 from tab1_hash where val2 = 8 group by val, val2;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select val, val2 from tab1_hash where val2 = 8 group by val, val2;
+                  QUERY PLAN                   
+-----------------------------------------------
+ HashAggregate
+   Output: val, val2
+   Group By Key: tab1_hash.val, tab1_hash.val2
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: (tab1_hash.val2 = 8)
+(6 rows)
+
+-- should not get FQSed because of DISTINCT clause
+select distinct on (val2) val, val2 from tab1_hash where val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select distinct on (val2) val, val2 from tab1_hash where val2 = 8;
+              QUERY PLAN              
+--------------------------------------
+ Unique
+   Output: val, val2
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: (tab1_hash.val2 = 8)
+(5 rows)
+
+-- should not get FQSed because of presence of aggregates and HAVING clause
+-- withour distribution column in GROUP BY clause
+select sum(val) from tab1_hash where val2 = 2 group by val2 having sum(val) > 1;
+ sum 
+-----
+  10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select sum(val) from tab1_hash where val2 = 2 group by val2 having sum(val) > 1;
+              QUERY PLAN              
+--------------------------------------
+ GroupAggregate
+   Output: sum(val), val2
+   Group By Key: tab1_hash.val2
+   Filter: (sum(tab1_hash.val) > 1)
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: (tab1_hash.val2 = 2)
+(7 rows)
+
+-- tests for node reduction by application of quals. Having query FQSed because of
+-- existence of ORDER BY, implies that nodes got reduced.
+select * from tab1_hash where val = 7;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_hash where val = 7;
+          QUERY PLAN           
+-------------------------------
+ Seq Scan on public.tab1_hash
+   Output: val, val2
+   Filter: (tab1_hash.val = 7)
+(3 rows)
+
+select * from tab1_hash where val = 7 or val = 2 order by val;
+ val | val2 
+-----+------
+   2 |    4
+   7 |    8
+(2 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_hash where val = 7 or val = 2 order by val;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_hash.val
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: ((tab1_hash.val = 7) OR (tab1_hash.val = 2))
+(6 rows)
+
+select * from tab1_hash where val = 7 and val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_hash where val = 7 and val2 = 8;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Seq Scan on public.tab1_hash
+   Output: val, val2
+   Filter: ((tab1_hash.val = 7) AND (tab1_hash.val2 = 8))
+(3 rows)
+
+select * from tab1_hash where val = 3 + 4 and val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_hash where val = 3 + 4;
+          QUERY PLAN           
+-------------------------------
+ Seq Scan on public.tab1_hash
+   Output: val, val2
+   Filter: (tab1_hash.val = 7)
+(3 rows)
+
+select * from tab1_hash where val = char_length('len')+4;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_hash where val = char_length('len')+4;
+          QUERY PLAN           
+-------------------------------
+ Seq Scan on public.tab1_hash
+   Output: val, val2
+   Filter: (tab1_hash.val = 7)
+(3 rows)
+
+-- insert some more values 
+insert into tab1_hash values (7, 2); 
+select avg(val) from tab1_hash where val = 7;
+        avg         
+--------------------
+ 7.0000000000000000
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select avg(val) from tab1_hash where val = 7;
+             QUERY PLAN              
+-------------------------------------
+ Aggregate
+   Output: avg(val)
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: (tab1_hash.val = 7)
+(5 rows)
+
+select val, val2 from tab1_hash where val = 7 order by val2;
+ val | val2 
+-----+------
+   7 |    2
+   7 |    8
+(2 rows)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select val, val2 from tab1_hash where val = 7 order by val2;
+             QUERY PLAN              
+-------------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_hash.val2
+   ->  Seq Scan on public.tab1_hash
+         Output: val, val2
+         Filter: (tab1_hash.val = 7)
+(6 rows)
+
+select distinct val2 from tab1_hash where val = 7;
+ val2 
+------
+    8
+    2
+(2 rows)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select distinct val2 from tab1_hash where val = 7;
+             QUERY PLAN              
+-------------------------------------
+ HashAggregate
+   Output: val2
+   Group By Key: tab1_hash.val2
+   ->  Seq Scan on public.tab1_hash
+         Output: val2
+         Filter: (tab1_hash.val = 7)
+(6 rows)
+
+-- FQS for subqueries
+select * from (select avg(val) from tab1_hash where val = 7) t1;
+        avg         
+--------------------
+ 7.0000000000000000
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on)
+	select * from (select avg(val) from tab1_hash where val = 7) t1;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Aggregate
+   Output: avg(tab1_hash.val)
+   ->  Seq Scan on public.tab1_hash
+         Output: tab1_hash.val, tab1_hash.val2
+         Filter: (tab1_hash.val = 7)
+(5 rows)
+
+-- DMLs
+update tab1_hash set val2 = 1000 where val = 7; 
+explain (costs off, verbose on, nodes off) update tab1_hash set val2 = 1000 where val = 7; 
+             QUERY PLAN              
+-------------------------------------
+ Update on public.tab1_hash
+   ->  Seq Scan on public.tab1_hash
+         Output: val, 1000, ctid
+         Filter: (tab1_hash.val = 7)
+(4 rows)
+
+select * from tab1_hash where val = 7;
+ val | val2 
+-----+------
+   7 | 1000
+   7 | 1000
+(2 rows)
+
+delete from tab1_hash where val = 7; 
+explain (costs off, verbose on, nodes off) delete from tab1_hash where val = 7; 
+             QUERY PLAN              
+-------------------------------------
+ Delete on public.tab1_hash
+   ->  Seq Scan on public.tab1_hash
+         Output: ctid
+         Filter: (tab1_hash.val = 7)
+(4 rows)
+
+select * from tab1_hash where val = 7;
+ val | val2 
+-----+------
+(0 rows)
+
+-- Testset 3 for distributed tables (by modulo)
+CREATE TABLE tab1_modulo(val int, val2 int);
+insert into tab1_modulo values (1, 2);
+insert into tab1_modulo values (2, 4);
+insert into tab1_modulo values (5, 3);
+insert into tab1_modulo values (7, 8);
+insert into tab1_modulo values (9, 2);
+explain (costs off, verbose on, nodes off) insert into tab1_modulo values (9, 2);
+          QUERY PLAN          
+------------------------------
+ [Bypass]
+ Insert on public.tab1_modulo
+   ->  Result
+         Output: 9, 2
+(4 rows)
+
+-- simple select
+-- should get FQSed
+select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_modulo where val2 = 4;
+ val | ?column? |           case            
+-----+----------+---------------------------
+   2 |        6 | val and val2 are not same
+(1 row)
+
+explain (costs off, verbose on, nodes off) select val, val2 + 2, case val when val2 then 'val and val2 are same' else 'val and val2 are not same' end from tab1_modulo where val2 = 4;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Seq Scan on public.tab1_modulo
+   Output: val, (val2 + 2), CASE val WHEN val2 THEN 'val and val2 are same'::text ELSE 'val and val2 are not same'::text END
+   Filter: (tab1_modulo.val2 = 4)
+(3 rows)
+
+-- should not get FQSed because of aggregates
+select sum(val), avg(val), count(*) from tab1_modulo;
+ sum |        avg         | count 
+-----+--------------------+-------
+  24 | 4.8000000000000000 |     5
+(1 row)
+
+explain (costs off, verbose on, nodes off) select sum(val), avg(val), count(*) from tab1_modulo;
+               QUERY PLAN               
+----------------------------------------
+ Aggregate
+   Output: sum(val), avg(val), count(*)
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+(4 rows)
+
+-- should not get FQSed because of window functions
+select first_value(val) over (partition by val2 order by val) from tab1_modulo;
+ first_value 
+-------------
+           1
+           1
+           5
+           2
+           7
+(5 rows)
+
+explain (costs off, verbose on, nodes off) select first_value(val) over (partition by val2 order by val) from tab1_modulo;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ WindowAgg
+   Output: first_value(val) OVER (PARTITION BY val2 ORDER BY val USING = NULLS LAST), val, val2
+   ->  Sort
+         Output: val, val2
+         Sort Key: tab1_modulo.val2, tab1_modulo.val
+         ->  Seq Scan on public.tab1_modulo
+               Output: val, val2
+(7 rows)
+
+-- should not get FQSed because of LIMIT clause
+select * from tab1_modulo where val2 = 3 limit 1;
+ val | val2 
+-----+------
+   5 |    3
+(1 row)
+
+explain (costs off, verbose on, nodes off) select * from tab1_modulo where val2 = 3 limit 1;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: (tab1_modulo.val2 = 3)
+(5 rows)
+
+-- should not FQSed because of OFFSET clause
+select * from tab1_modulo where val2 = 4 offset 1;
+ val | val2 
+-----+------
+(0 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_modulo where val2 = 4 offset 1;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: (tab1_modulo.val2 = 4)
+(5 rows)
+
+-- should not get FQSed because of SORT clause
+select * from tab1_modulo order by val;
+ val | val2 
+-----+------
+   1 |    2
+   2 |    4
+   5 |    3
+   7 |    8
+   9 |    2
+(5 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_modulo order by val;
+              QUERY PLAN              
+--------------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_modulo.val
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+(5 rows)
+
+-- should get FQSed because of DISTINCT clause with distribution column in it
+select distinct val, val2 from tab1_modulo where val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select distinct val, val2 from tab1_modulo where val2 = 8;
+                    QUERY PLAN                     
+---------------------------------------------------
+ HashAggregate
+   Output: val, val2
+   Group By Key: tab1_modulo.val, tab1_modulo.val2
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: (tab1_modulo.val2 = 8)
+(6 rows)
+
+-- should get FQSed because of GROUP clause with distribution column in it
+select val, val2 from tab1_modulo where val2 = 8 group by val, val2;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select val, val2 from tab1_modulo where val2 = 8 group by val, val2;
+                    QUERY PLAN                     
+---------------------------------------------------
+ HashAggregate
+   Output: val, val2
+   Group By Key: tab1_modulo.val, tab1_modulo.val2
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: (tab1_modulo.val2 = 8)
+(6 rows)
+
+-- should not get FQSed because of DISTINCT clause without distribution column
+-- in it
+select distinct on (val2) val, val2 from tab1_modulo where val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off) select distinct on (val2) val, val2 from tab1_modulo where val2 = 8;
+               QUERY PLAN               
+----------------------------------------
+ Unique
+   Output: val, val2
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: (tab1_modulo.val2 = 8)
+(5 rows)
+
+-- should not get FQSed because of presence of aggregates and HAVING clause
+-- without distribution column in GROUP BY clause
+select sum(val) from tab1_modulo where val2 = 2 group by val2 having sum(val) > 1;
+ sum 
+-----
+  10
+(1 row)
+
+explain (costs off, verbose on, nodes off) select sum(val) from tab1_modulo where val2 = 2 group by val2 having sum(val) > 1;
+               QUERY PLAN               
+----------------------------------------
+ GroupAggregate
+   Output: sum(val), val2
+   Group By Key: tab1_modulo.val2
+   Filter: (sum(tab1_modulo.val) > 1)
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: (tab1_modulo.val2 = 2)
+(7 rows)
+
+-- tests for node reduction by application of quals. Having query FQSed because of
+-- existence of ORDER BY, implies that nodes got reduced.
+select * from tab1_modulo where val = 7;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_modulo where val = 7;
+           QUERY PLAN            
+---------------------------------
+ Seq Scan on public.tab1_modulo
+   Output: val, val2
+   Filter: (tab1_modulo.val = 7)
+(3 rows)
+
+select * from tab1_modulo where val = 7 or val = 2 order by val;
+ val | val2 
+-----+------
+   2 |    4
+   7 |    8
+(2 rows)
+
+explain (costs off, verbose on, nodes off) select * from tab1_modulo where val = 7 or val = 2 order by val;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_modulo.val
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: ((tab1_modulo.val = 7) OR (tab1_modulo.val = 2))
+(6 rows)
+
+select * from tab1_modulo where val = 7 and val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_modulo where val = 7 and val2 = 8;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Seq Scan on public.tab1_modulo
+   Output: val, val2
+   Filter: ((tab1_modulo.val = 7) AND (tab1_modulo.val2 = 8))
+(3 rows)
+
+select * from tab1_modulo where val = 3 + 4 and val2 = 8;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_modulo where val = 3 + 4;
+           QUERY PLAN            
+---------------------------------
+ Seq Scan on public.tab1_modulo
+   Output: val, val2
+   Filter: (tab1_modulo.val = 7)
+(3 rows)
+
+select * from tab1_modulo where val = char_length('len')+4;
+ val | val2 
+-----+------
+   7 |    8
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select * from tab1_modulo where val = char_length('len')+4;
+           QUERY PLAN            
+---------------------------------
+ Seq Scan on public.tab1_modulo
+   Output: val, val2
+   Filter: (tab1_modulo.val = 7)
+(3 rows)
+
+-- insert some more values 
+insert into tab1_modulo values (7, 2); 
+select avg(val) from tab1_modulo where val = 7;
+        avg         
+--------------------
+ 7.0000000000000000
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select avg(val) from tab1_modulo where val = 7;
+              QUERY PLAN               
+---------------------------------------
+ Aggregate
+   Output: avg(val)
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: (tab1_modulo.val = 7)
+(5 rows)
+
+select val, val2 from tab1_modulo where val = 7 order by val2;
+ val | val2 
+-----+------
+   7 |    2
+   7 |    8
+(2 rows)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select val, val2 from tab1_modulo where val = 7 order by val2;
+              QUERY PLAN               
+---------------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_modulo.val2
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, val2
+         Filter: (tab1_modulo.val = 7)
+(6 rows)
+
+select distinct val2 from tab1_modulo where val = 7;
+ val2 
+------
+    8
+    2
+(2 rows)
+
+explain (costs off, verbose on, nodes off, num_nodes on) select distinct val2 from tab1_modulo where val = 7;
+              QUERY PLAN               
+---------------------------------------
+ HashAggregate
+   Output: val2
+   Group By Key: tab1_modulo.val2
+   ->  Seq Scan on public.tab1_modulo
+         Output: val2
+         Filter: (tab1_modulo.val = 7)
+(6 rows)
+
+-- FQS for subqueries
+select * from (select avg(val) from tab1_modulo where val = 7) t1;
+        avg         
+--------------------
+ 7.0000000000000000
+(1 row)
+
+explain (costs off, verbose on, nodes off, num_nodes on)
+	select * from (select avg(val) from tab1_modulo where val = 7) t1;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Aggregate
+   Output: avg(tab1_modulo.val)
+   ->  Seq Scan on public.tab1_modulo
+         Output: tab1_modulo.val, tab1_modulo.val2
+         Filter: (tab1_modulo.val = 7)
+(5 rows)
+
+-- DMLs
+update tab1_modulo set val2 = 1000 where val = 7; 
+explain (costs off, verbose on, nodes off) update tab1_modulo set val2 = 1000 where val = 7; 
+              QUERY PLAN               
+---------------------------------------
+ Update on public.tab1_modulo
+   ->  Seq Scan on public.tab1_modulo
+         Output: val, 1000, ctid
+         Filter: (tab1_modulo.val = 7)
+(4 rows)
+
+select * from tab1_modulo where val = 7;
+ val | val2 
+-----+------
+   7 | 1000
+   7 | 1000
+(2 rows)
+
+delete from tab1_modulo where val = 7; 
+explain (costs off, verbose on, nodes off) delete from tab1_modulo where val = 7; 
+              QUERY PLAN               
+---------------------------------------
+ Delete on public.tab1_modulo
+   ->  Seq Scan on public.tab1_modulo
+         Output: ctid
+         Filter: (tab1_modulo.val = 7)
+(4 rows)
+
+select * from tab1_modulo where val = 7;
+ val | val2 
+-----+------
+(0 rows)
+
+-- Testset 4 for replicated tables, for replicated tables, unless the expression
+-- is itself unshippable, any query involving a single replicated table is shippable
+CREATE TABLE tab1_replicated(val int, val2 int);
+insert into tab1_replicated values (1, 2);
+insert into tab1_replicated values (2, 4);
+insert into tab1_replicated values (5, 3);
+insert into tab1_replicated values (7, 8);
+insert into tab1_replicated values (9, 2);
+explain (costs off, verbose on, nodes off) insert into tab1_replicated values (9, 2);
+            QUERY PLAN            
+----------------------------------
+ [Bypass]
+ Insert on public.tab1_replicated
+   ->  Result
+         Output: 9, 2
+(4 rows)
+
+-- simple select
+select * from tab1_replicated;
+ val | val2 
+-----+------
+   1 |    2
+   2 |    4
+   5 |    3
+   7 |    8
+   9 |    2
+(5 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select * from tab1_replicated;
+             QUERY PLAN             
+------------------------------------
+ Seq Scan on public.tab1_replicated
+   Output: val, val2
+(2 rows)
+
+select sum(val), avg(val), count(*) from tab1_replicated;
+ sum |        avg         | count 
+-----+--------------------+-------
+  24 | 4.8000000000000000 |     5
+(1 row)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select sum(val), avg(val), count(*) from tab1_replicated;
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   Output: sum(val), avg(val), count(*)
+   ->  Seq Scan on public.tab1_replicated
+         Output: val, val2
+(4 rows)
+
+select first_value(val) over (partition by val2 order by val) from tab1_replicated;
+ first_value 
+-------------
+           1
+           1
+           5
+           2
+           7
+(5 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select first_value(val) over (partition by val2 order by val) from tab1_replicated;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ WindowAgg
+   Output: first_value(val) OVER (PARTITION BY val2 ORDER BY val USING = NULLS LAST), val, val2
+   ->  Sort
+         Output: val, val2
+         Sort Key: tab1_replicated.val2, tab1_replicated.val
+         ->  Seq Scan on public.tab1_replicated
+               Output: val, val2
+(7 rows)
+
+select * from tab1_replicated where val2 = 2 limit 2;
+ val | val2 
+-----+------
+   1 |    2
+   9 |    2
+(2 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select * from tab1_replicated where val2 = 2 limit 2;
+                 QUERY PLAN                 
+--------------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.tab1_replicated
+         Output: val, val2
+         Filter: (tab1_replicated.val2 = 2)
+(5 rows)
+
+select * from tab1_replicated where val2 = 4 offset 1;
+ val | val2 
+-----+------
+(0 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select * from tab1_replicated where val2 = 4 offset 1;
+                 QUERY PLAN                 
+--------------------------------------------
+ Limit
+   Output: val, val2
+   ->  Seq Scan on public.tab1_replicated
+         Output: val, val2
+         Filter: (tab1_replicated.val2 = 4)
+(5 rows)
+
+select * from tab1_replicated order by val;
+ val | val2 
+-----+------
+   1 |    2
+   2 |    4
+   5 |    3
+   7 |    8
+   9 |    2
+(5 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select * from tab1_replicated order by val;
+                QUERY PLAN                
+------------------------------------------
+ Sort
+   Output: val, val2
+   Sort Key: tab1_replicated.val
+   ->  Seq Scan on public.tab1_replicated
+         Output: val, val2
+(5 rows)
+
+select distinct val, val2 from tab1_replicated order by val;
+ val | val2 
+-----+------
+   1 |    2
+   2 |    4
+   5 |    3
+   7 |    8
+   9 |    2
+(5 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select distinct val, val2 from tab1_replicated;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ HashAggregate
+   Output: val, val2
+   Group By Key: tab1_replicated.val, tab1_replicated.val2
+   ->  Seq Scan on public.tab1_replicated
+         Output: val, val2
+(5 rows)
+
+select val, val2 from tab1_replicated group by val, val2 order by val;
+ val | val2 
+-----+------
+   1 |    2
+   2 |    4
+   5 |    3
+   7 |    8
+   9 |    2
+(5 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select val, val2 from tab1_replicated group by val, val2;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ HashAggregate
+   Output: val, val2
+   Group By Key: tab1_replicated.val, tab1_replicated.val2
+   ->  Seq Scan on public.tab1_replicated
+         Output: val, val2
+(5 rows)
+
+select sum(val) from tab1_replicated group by val2 having sum(val) > 1 order by 1;
+ sum 
+-----
+   2
+   5
+   7
+  10
+(4 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off) select sum(val) from tab1_replicated group by val2 having sum(val) > 1;
+                QUERY PLAN                
+------------------------------------------
+ HashAggregate
+   Output: sum(val), val2
+   Group By Key: tab1_replicated.val2
+   Filter: (sum(tab1_replicated.val) > 1)
+   ->  Seq Scan on public.tab1_replicated
+         Output: val2, val
+(6 rows)
+
+-- FQS for subqueries
+select * from (select sum(val), val2 from tab1_replicated group by val2 order by val2) t1;
+ sum | val2 
+-----+------
+  10 |    2
+   5 |    3
+   2 |    4
+   7 |    8
+(4 rows)
+
+explain (costs off, verbose on, nodes off, num_nodes on)
+	select * from (select sum(val), val2 from tab1_replicated group by val2 order by val2) t1;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Output: (sum(tab1_replicated.val)), tab1_replicated.val2
+   Sort Key: tab1_replicated.val2
+   ->  HashAggregate
+         Output: sum(tab1_replicated.val), tab1_replicated.val2
+         Group By Key: tab1_replicated.val2
+         ->  Seq Scan on public.tab1_replicated
+               Output: tab1_replicated.val2, tab1_replicated.val
+(8 rows)
+
+-- DMLs
+update tab1_replicated set val2 = 1000 where val = 7; 
+explain (costs off, verbose on, nodes off) update tab1_replicated set val2 = 1000 where val = 7; 
+                QUERY PLAN                 
+-------------------------------------------
+ Update on public.tab1_replicated
+   ->  Seq Scan on public.tab1_replicated
+         Output: val, 1000, ctid
+         Filter: (tab1_replicated.val = 7)
+(4 rows)
+
+select * from tab1_replicated where val = 7;
+ val | val2 
+-----+------
+   7 | 1000
+(1 row)
+
+delete from tab1_replicated where val = 7; 
+explain (costs off, verbose on, nodes off) delete from tab1_replicated where val = 7; 
+                QUERY PLAN                 
+-------------------------------------------
+ Delete on public.tab1_replicated
+   ->  Seq Scan on public.tab1_replicated
+         Output: ctid
+         Filter: (tab1_replicated.val = 7)
+(4 rows)
+
+select * from tab1_replicated where val = 7;
+ val | val2 
+-----+------
+(0 rows)
+
+drop table tab1_rr;
+drop table tab1_hash;
+drop table tab1_modulo;
+drop table tab1_replicated;
+create table ts(sn int, t timestamp);
+explain (costs off, num_nodes on, verbose on, nodes off)
+select * from ts where t < to_date('2014-12-14 11:00:00','yyyy-mm-dd hh:mi:ss');
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Seq Scan on public.ts
+   Output: sn, t
+   Filter: (ts.t < to_date('2014-12-14 11:00:00'::text, 'yyyy-mm-dd hh:mi:ss'::text))
+(3 rows)
+
+explain (costs off, num_nodes on, verbose on, nodes off)
+select * from ts where t < to_date('2014-12-14 11:00:00');
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on public.ts
+   Output: sn, t
+   Filter: (ts.t < to_date('2014-12-14 11:00:00'::text))
+(3 rows)
+
+drop table ts;
+-- shouldn't use stream because of unshippable function
+create table tf(a int, b int);
+insert into tf values(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6);
+create function ff(p int) returns int as 'select b from tf where a=p;' language sql;
+explain (costs off, verbose on, nodes off) select ff(3) from tf;
+      QUERY PLAN       
+-----------------------
+ Seq Scan on public.tf
+   Output: ff(3)
+(2 rows)
+
+select ff(3) from tf;
+ ff 
+----
+  3
+  3
+  3
+  3
+  3
+  3
+(6 rows)
+
+explain (costs off, verbose on) select * from (select '', a from tf);
+         QUERY PLAN         
+----------------------------
+ Seq Scan on public.tf
+   Output: NULL::text, tf.a
+(2 rows)
+
+select * from (select '', a from tf where a = 1);
+ ?column? | a 
+----------+---
+          | 1
+(1 row)
+
+drop function ff;
+drop table tf;
+-- Fix 
+create table location_plan
+(
+    LOCATION_ID INTEGER NOT NULL ,
+    COST_CD VARCHAR(50) NOT NULL ,
+    PERIOD_START_DT DATE NOT NULL ,
+    PERIOD_END_DT DATE NULL ,
+    ACTUAL_COST_AMT NUMBER(18,10) NULL ,
+    PLAN_COST_AMT NUMBER(18,4) NULL ,
+	primary key(location_id,COST_CD,period_start_dt)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "location_plan_pkey" for table "location_plan"
+SELECT * FROM ONLY public.location_plan lop WHERE location_id IS NOT NULL AND cost_cd IS NOT NULL AND plan_cost_amt::text ~~ '_w%'::text;
+ location_id | cost_cd | period_start_dt | period_end_dt | actual_cost_amt | plan_cost_amt 
+-------------+---------+-----------------+---------------+-----------------+---------------
+(0 rows)
+
+drop table location_plan;
+-- special case for ship query
+CREATE TABLE f06_wide_v2 (
+    billcycleid timestamp without time zone,
+    curincome double precision,
+    customer_sort_c character varying(64),
+    customerid character varying(128),
+    orderitemid character varying(128)
+)
+WITH (orientation=column, compression=low);
+explain (costs off) SELECT  SUM(CASE WHEN ((CAST(EXTRACT(YEAR FROM "F06"."billcycleid") AS INTEGER) = 2019) AND (CAST(EXTRACT(MONTH FROM "F06"."billcycleid") AS INTEGER) = 1)) THEN (CASE WHEN 10000 = 0 THEN NULL ELSE "F06"."curincome" / 10000 END) ELSE 0 END) AS "sum_Calculation_3479593716341772288_ok" 
+FROM "public"."f06_wide_v2" "F06" 
+WHERE ("F06"."customer_sort_c" = '外部客户') 
+HAVING (COUNT(1) > 0)
+LIMIT 100000;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Aggregate
+               Filter: (count(1) > 0)
+               ->  CStore Scan on f06_wide_v2 "F06"
+                     Filter: ((customer_sort_c)::text = '外部客户'::text)
+(6 rows)
+
+explain (costs off) SELECT  CASE WHEN ((CAST(EXTRACT(YEAR FROM "F06"."billcycleid") AS INTEGER) = 2019) AND (CAST(EXTRACT(MONTH FROM "F06"."billcycleid") AS INTEGER) = 1)) THEN (CASE WHEN 10000 = 0 THEN NULL ELSE "F06"."curincome" / 10000 END) ELSE 0 END AS "sum_Calculation_3479593716341772288_ok" 
+FROM "public"."f06_wide_v2" "F06" 
+WHERE ("F06"."customer_sort_c" = '外部客户') 
+LIMIT 10000;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         ->  CStore Scan on f06_wide_v2 "F06"
+               Filter: ((customer_sort_c)::text = '外部客户'::text)
+(4 rows)
+

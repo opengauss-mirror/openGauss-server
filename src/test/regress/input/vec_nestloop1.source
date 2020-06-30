@@ -1,0 +1,58 @@
+set enable_force_vector_engine=on;
+set current_schema = vec_nestloop_engine;
+SET statement_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET default_tablespace = '';
+SET default_with_oids = false;
+----
+--- case 1: NestLoop Inner Join
+----
+create or replace function test_vec_Nestloop() returns integer
+as
+$$
+	declare int_result_1 integer;
+	int_result_2 integer;
+        var_result_1 varchar;
+        var_result_2 varchar;
+begin
+	select A.col_vchar, B.col_vchar into var_result_1, var_result_2 from vector_nestloop_table_01 A, vector_nestloop_table_02 B where A.col_int < B.col_int order by 1, 2 limit 1;
+        raise info '%, %', var_result_1, var_result_2;
+        return 0;
+end;
+$$language plpgsql;
+select test_vec_Nestloop();
+
+explain (verbose on, costs off) select A.col_int, B.col_int, A.col_vchar, B.col_vchar from vector_nestloop_table_01 A, vector_nestloop_table_02 B where A.col_int < B.col_int order by 1,2;
+select A.col_int, B.col_int, A.col_vchar, B.col_vchar from vector_nestloop_table_01 A, vector_nestloop_table_02 B where A.col_int < B.col_int order by 1,2;
+select A.col_vchar, B.col_vchar from vector_nestloop_table_01 A, vector_nestloop_table_02 B where A.col_vchar < B.col_vchar order by 1,2;
+select sum(A.col_int), max(A.col_int), avg(B.col_int), min(B.col_int) from vector_nestloop_table_01 A, vector_nestloop_table_02 B where A.col_int < B.col_int order by 1, 2;
+select max(A.col_vchar), min(B.col_vchar) from vector_nestloop_table_01 A, vector_nestloop_table_02 B where A.col_vchar < B.col_vchar group by A.col_vchar order by 1, 2;
+select * from vector_nestloop_table_03 A, vector_nestloop_table_04 B where A.col_int > B.col_int and A.col_int < 100;
+select A.col_int, B.col_int, A.col_float1, B.col_float1 from vector_nestloop_table_03 A, vector_nestloop_table_04 B where A.col_int >= B.col_int and A.col_int >= 200 order by 1 ,2;
+select count(*) from vector_nestloop_table_03 A, vector_nestloop_table_04 B where B.col_int > A.col_int and A.col_int < 3;
+
+----
+--- case 2: NestLoop Left Join
+----
+select A.col_vchar, B.col_vchar from vector_nestloop_table_03 A left join vector_nestloop_table_04 B on (A.col_int > B.col_int) where A.col_int < 100 order by 1, 2 limit 220;
+select A.col_int, B.col_int, A.col_date, b.col_date from vector_nestloop_table_03 A left join vector_nestloop_table_04 B on(A.col_int < B.col_int) where A.col_int = 550 order by 1, 2 limit 1000;
+
+----
+--- case 3: NestLoop Anti Join and Semi Join
+----
+set enable_mergejoin=false;
+set enable_hashjoin=false;
+explain (verbose on, costs off) select * from vector_nestloop_table_01 A where A.col_int in (select B.col_int from vector_nestloop_table_02 B);
+explain (verbose on, costs off) select * from vector_nestloop_table_01 A where A.col_int not in (select B.col_int from vector_nestloop_table_02 B);
+select * from vector_nestloop_table_01 A where A.col_int in (select B.col_int from vector_nestloop_table_02 B) order by 1, 2;
+select count(*) from vector_nestloop_table_01 A where A.col_int in (select B.col_int from vector_nestloop_table_02 B);
+select * from vector_nestloop_table_01 A where A.col_int not in (select B.col_int from vector_nestloop_table_02 B) order by 1, 2;
+select count(*) from vector_nestloop_table_01 A where A.col_int not in (select B.col_int from vector_nestloop_table_02 B);
+
+----
+--- Special Case: both joinqual and otherqual be NULL
+----
+select A.col_int as c1, A.col_char as c2, A.col_vchar from vector_nestloop_table_01 A inner join vector_nestloop_table_01 B on A.col_int = B.col_int where A.col_int=1 and A.col_char = 'test_char_1' and B.col_char = 'test_char_1' order by 1, 2, 3;
+select count(*) from vector_nestloop_table_01 A inner join vector_nestloop_table_01 B on A.col_int = B.col_int where A.col_int=1 and A.col_char = 'test_char_1' and B.col_char = 'test_char_1';

@@ -1,0 +1,83 @@
+create table t3 (c1 int, c2 int);
+CREATE TABLE t3_like (LIKE t3 INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION, nodeid int,tupleblocknum bigint,tupleoffset int);
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_start_ctid' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_end_ctid' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_start_ctid' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_end_ctid' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_blocknum(tid) RETURNS bigint AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_tupleid_get_blocknum' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_offset(tid) RETURNS int AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_tupleid_get_offset' LANGUAGE C STABLE not fenced;
+ALTER TABLE t3 SET(append_mode=on, rel_cn_oid=12345);
+-- test empty table
+select count(*) from t3 where ctid between pg_get_redis_rel_start_ctid('t3', NULL) and pg_get_redis_rel_end_ctid('t3', NULL);
+ count 
+-------
+     0
+(1 row)
+
+-- 1st load 
+insert into t3 select * from source_table;
+insert into t3 select * from t3;
+insert into t3 select * from t3;
+insert into t3 select * from t3;
+insert into t3 select * from t3;
+ALTER TABLE t3 SET(append_mode=on, rel_cn_oid=12345);
+select count(*) from t3;
+ count  
+--------
+ 480000
+(1 row)
+
+explain (costs off) select count(*) from t3 where ctid between pg_get_redis_rel_start_ctid('t3', NULL) and pg_get_redis_rel_end_ctid('t3', NULL);
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Streaming (type: GATHER)
+         Node/s: All datanodes
+         ->  Aggregate
+               ->  Seq Scan on t3
+                     Filter: ((ctid >= pg_get_redis_rel_start_ctid('t3'::text, NULL::name)) AND (ctid <= pg_get_redis_rel_end_ctid('t3'::text, NULL::name)))
+(6 rows)
+
+select count(*) from t3 where ctid between pg_get_redis_rel_start_ctid('t3', NULL) and pg_get_redis_rel_end_ctid('t3', NULL);
+ count  
+--------
+ 480000
+(1 row)
+
+insert into t3_like select *,xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) FROM ONLY t3 WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('t3',NULL) AND pg_get_redis_rel_end_ctid('t3',NULL);
+select count(*) from t3_like;
+ count  
+--------
+ 480000
+(1 row)
+
+-- 2nd load 
+insert into t3 select * from source_table;
+ALTER TABLE t3 SET(append_mode=on, rel_cn_oid=12345);
+select count(*) from t3;
+ count  
+--------
+ 510000
+(1 row)
+
+select count(*) from t3 where ctid between pg_get_redis_rel_start_ctid('t3', NULL) and pg_get_redis_rel_end_ctid('t3', NULL);
+ count 
+-------
+ 30000
+(1 row)
+
+insert into t3_like select *,xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) FROM ONLY t3 WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('t3',NULL) AND pg_get_redis_rel_end_ctid('t3',NULL);
+select count(*) from t3_like;
+ count  
+--------
+ 510000
+(1 row)
+
+drop function pg_get_redis_rel_start_ctid(text, name);
+drop function pg_get_redis_rel_end_ctid(text, name);
+drop function pg_get_redis_rel_start_ctid(text);
+drop function pg_get_redis_rel_end_ctid(text);
+drop function pg_tupleid_get_offset;
+drop function pg_tupleid_get_blocknum;
+drop table t3;
+drop table t3_like;

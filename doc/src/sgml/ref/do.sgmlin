@@ -1,0 +1,16 @@
+<refentry id="SQL-DO">
+<refmeta>
+<refentrytitle>DO</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DO</refname>
+<refpurpose>execute an anonymous code block</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DO [ LANGUAGE lang_name ] code;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

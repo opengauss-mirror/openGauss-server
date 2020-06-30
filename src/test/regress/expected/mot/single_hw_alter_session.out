@@ -1,0 +1,159 @@
+RESET current_schema;
+SHOW current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+CREATE SCHEMA test_schema_a;
+CREATE SCHEMA test_schema_b;
+SET current_schema TO test_schema_a;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_a
+(1 row)
+
+RESET current_schema;
+SHOW current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+SET current_schema = test_schema_a;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_a
+(1 row)
+
+RESET current_schema;
+SHOW current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+SET current_schema TO test_schema_a;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_a
+(1 row)
+
+SET current_schema TO DEFAULT;
+SHOW current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+SET current_schema=test_schema_a;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_a
+(1 row)
+
+SET current_schema = DEFAULT;
+SHOW current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+SET current_schema TO test_schema_a;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_a
+(1 row)
+
+SET current_schema = test_schema_b;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_b
+(1 row)
+
+RESET current_schema;
+ALTER SESSION SET current_schema=test_schema_a;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_a
+(1 row)
+
+RESET current_schema;
+ALTER SESSION SET current_schema TO test_schema_b;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_b
+(1 row)
+
+ALTER SESSION SET current_schema=DEFAULT;
+SHOW current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+ALTER SESSION SET current_schema TO test_schema_b;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_b
+(1 row)
+
+ALTER SESSION SET current_schema TO DEFAULT;
+SHOW current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+SHOW current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+SHOW default_tablespace;
+ default_tablespace 
+--------------------
+ 
+(1 row)
+
+ALTER SESSION SET current_schema=test_schema_a;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_a
+(1 row)
+
+SHOW default_tablespace;
+ default_tablespace 
+--------------------
+ 
+(1 row)
+
+ALTER SESSION SET current_schema=test_schema_b;
+SHOW current_schema;
+ current_schema 
+----------------
+ test_schema_b
+(1 row)
+
+SHOW default_tablespace;
+ default_tablespace 
+--------------------
+ 
+(1 row)
+
+ALTER SESSION SET current_schema=DEFAULT;
+RESET default_tablespace;
+RESET current_schema;
+DROP SCHEMA test_schema_a;
+DROP SCHEMA test_schema_b;

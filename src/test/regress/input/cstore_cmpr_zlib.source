@@ -1,0 +1,16 @@
+set enable_vector_engine=on;
+-- problem: coredump happens when zlib with high level is used 
+create table cstore_cmpr_zlib_tbl00
+(
+	c_smallint smallint not null
+) 
+with (orientation=column , compression=high)
+partition by range(c_smallint) (
+partition create_columnar_table_partition_p3 values less than(437),
+partition create_columnar_table_partition_p6 values less than(maxvalue) );
+COPY cstore_cmpr_zlib_tbl00 FROM STDIN;
+321
+394
+\.
+SELECT * FROM cstore_cmpr_zlib_tbl00 ORDER BY 1;
+DROP TABLE cstore_cmpr_zlib_tbl00;

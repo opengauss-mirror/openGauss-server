@@ -1,0 +1,156 @@
+/*
+ * This file is used to test the function of ExecVecNestLoop()
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vec_nestloop_engine;
+set current_schema = vec_nestloop_engine;
+SET statement_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET default_tablespace = '';
+SET default_with_oids = false;
+create table vec_nestloop_engine.VECTOR_NESTLOOP_TABLE_01
+(
+   col_int	int
+  ,col_char	char(25)
+  ,col_vchar	varchar(35)
+  ,col_date	date
+  ,col_num	numeric(10,4)
+  ,col_float1	float4
+  ,col_float2	float8
+  ,col_timetz	timetz
+) with(orientation = column);
+create table vec_nestloop_engine.VECTOR_NESTLOOP_TABLE_02
+(
+   col_int	int
+  ,col_char	char(25)
+  ,col_vchar	varchar(35)
+  ,col_date	date
+  ,col_num	numeric(10,4)
+  ,col_float1	float4
+  ,col_float2	float8
+  ,col_timetz	timetz
+) with(orientation = column);
+create table vec_nestloop_engine.ROW_NESTLOOP_TABLE_03
+(
+   col_int	int
+  ,col_char	char(25)
+  ,col_vchar	varchar(35)
+  ,col_date	date
+  ,col_num	numeric(10,4)
+  ,col_float1	float4
+  ,col_float2	float8
+  ,col_timetz	timetz
+);
+create table vec_nestloop_engine.ROW_NESTLOOP_TABLE_04
+(
+   col_int	int
+  ,col_char	char(25)
+  ,col_vchar	varchar(35)
+  ,col_date	date
+  ,col_num	numeric(10,4)
+  ,col_float1	float4
+  ,col_float2	float8
+  ,col_timetz	timetz
+);
+create table vec_nestloop_engine.VECTOR_NESTLOOP_TABLE_03
+(
+   col_int	int
+  ,col_char	char(25)
+  ,col_vchar	varchar(35)
+  ,col_date	date
+  ,col_num	numeric(10,4)
+  ,col_float1	float4
+  ,col_float2	float8
+  ,col_timetz	timetz
+) with(orientation = column);
+create table vec_nestloop_engine.VECTOR_NESTLOOP_TABLE_04
+(
+   col_int	int
+  ,col_char	char(25)
+  ,col_vchar	varchar(35)
+  ,col_date	date
+  ,col_num	numeric(10,4)
+  ,col_float1	float4
+  ,col_float2	float8
+  ,col_timetz	timetz
+) with(orientation = column);
+COPY VECTOR_NESTLOOP_TABLE_01(col_int, col_char, col_vchar, col_date, col_num, col_float1, col_float2, col_timetz) FROM stdin;
+COPY VECTOR_NESTLOOP_TABLE_02(col_int, col_char, col_vchar, col_date, col_num, col_float1, col_float2, col_timetz) FROM stdin;
+copy row_nestloop_table_03 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/row_nestloop_table_03.data';
+copy row_nestloop_table_04 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/row_nestloop_table_04.data';
+insert into vector_nestloop_table_03 select * from row_nestloop_table_03;
+insert into vector_nestloop_table_04 select * from row_nestloop_table_04;
+CREATE TABLE VECTOR_NESTLOOP_TABLE_05 (
+    id integer
+   ,name character varying(100)
+   ,zip character(9)
+)
+WITH (orientation=column)
+PARTITION BY RANGE (id)
+(
+    PARTITION b1_p1 VALUES LESS THAN (3),
+    PARTITION b1_p2 VALUES LESS THAN (4),
+    PARTITION b1_p3 VALUES LESS THAN (MAXVALUE)
+);
+CREATE TABLE VECTOR_NESTLOOP_TABLE_06 (
+    c_id integer,
+    street character varying(300),
+    zip character(9),
+    c_d_id bigint,
+    id integer
+)
+WITH (orientation=column)
+PARTITION BY RANGE (c_id)
+(
+    PARTITION b5_p1 VALUES LESS THAN (3),
+    PARTITION b5_p2 VALUES LESS THAN (4),
+    PARTITION b5_p3 VALUES LESS THAN (30),
+    PARTITION b5_p4 VALUES LESS THAN (31),
+    PARTITION b5_p5 VALUES LESS THAN (1000),
+    PARTITION b5_p6 VALUES LESS THAN (MAXVALUE)
+);
+CREATE TABLE VECTOR_NESTLOOP_TABLE_07 (
+    id integer,
+    street character varying(20),
+    zip character(9),
+    c_d_id integer,
+    c_w_id integer
+)
+WITH (orientation=column)
+PARTITION BY RANGE (c_d_id)
+(
+    PARTITION b7_p1 VALUES LESS THAN (1),
+    PARTITION b7_p2 VALUES LESS THAN (2),
+    PARTITION b7_p3 VALUES LESS THAN (3),
+    PARTITION b7_p4 VALUES LESS THAN (4),
+    PARTITION b7_p5 VALUES LESS THAN (5),
+    PARTITION b7_p6 VALUES LESS THAN (6),
+    PARTITION b7_p7 VALUES LESS THAN (7),
+    PARTITION b7_p8 VALUES LESS THAN (8),
+    PARTITION b7_p9 VALUES LESS THAN (9),
+    PARTITION b7_p10 VALUES LESS THAN (10),
+    PARTITION b7_p11 VALUES LESS THAN (MAXVALUE)
+);
+CREATE TABLE VECTOR_NESTLOOP_TABLE_08 (
+    n_nationkey integer NOT NULL,
+    n_name character(25) NOT NULL,
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)
+with (orientation = column);
+COPY VECTOR_NESTLOOP_TABLE_05(id, name, zip) FROM stdin;
+COPY VECTOR_NESTLOOP_TABLE_06(c_id, street, zip, c_d_id, id) FROM stdin;
+COPY VECTOR_NESTLOOP_TABLE_07(id, street, zip, c_d_id, c_w_id) FROM stdin;
+COPY VECTOR_NESTLOOP_TABLE_08 (n_nationkey, n_name, n_regionkey, n_comment) FROM stdin;
+analyze vector_nestloop_table_01;
+analyze vector_nestloop_table_02;
+analyze vector_nestloop_table_03;
+analyze vector_nestloop_table_04;
+analyze vector_nestloop_table_05;
+analyze vector_nestloop_table_06;
+analyze vector_nestloop_table_07;
+analyze vector_nestloop_table_08;

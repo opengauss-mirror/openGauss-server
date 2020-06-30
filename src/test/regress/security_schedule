@@ -1,0 +1,11 @@
+# ----------
+# src/test/regress/security_schedule
+#
+# By convention, we put no more than twenty tests in any one parallel group;
+# this limits the number of connections needed to run the tests.
+# ----------
+test: security_grant
+test: security_ft
+
+
+

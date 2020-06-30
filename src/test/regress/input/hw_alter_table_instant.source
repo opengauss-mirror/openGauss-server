@@ -1,0 +1,287 @@
+CREATE TABLE alter_table_instant_test_01 (init int4);
+CREATE TABLE alter_table_instant_tmp_00 (a int, tuple_xmin xid);
+INSERT INTO alter_table_instant_test_01 VALUES(1);
+SELECT * from alter_table_instant_test_01;
+
+-- test01: refilenode/xmin/xmax doesn't change
+INSERT INTO alter_table_instant_tmp_00 SELECT 1, xmin FROM alter_table_instant_test_01;
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN a int DEFAULT 4;
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN b integer DEFAULT 3+2;
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN c text DEFAULT 'test_text';
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN d int2 DEFAULT 2;
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN e numeric DEFAULT '3.1415';
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN f float4 DEFAULT 3.14;
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN g boolean DEFAULT true, ADD COLUMN h float8 DEFAULT 3.141592657583, ADD COLUMN i int8 DEFAULT -77856443, ADD COLUMN j char DEFAULT 'a';
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN k text DEFAULT '2E3A4F872F561B90CE', ADD COLUMN l bytea DEFAULT '2E3A4F872F561B90CE';
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN m character(50) DEFAULT 'fix-length string'; 
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN n varchar(256) DEFAULT 'varchar string';
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN t1 abstime DEFAULT '2013-5-1 12:00:02', ADD COLUMN t2 reltime DEFAULT '3:00:02', ADD COLUMN t3 tinterval DEFAULT '["2013-5-1 12:00:02" "2013-5-2 12:00:02"]';
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN t4 date DEFAULT '2013-5-1', ADD COLUMN t5 time DEFAULT '8:00:01', ADD COLUMN t6 timestamp DEFAULT '2013-5-1 8:00:01';
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN t7 timestamptz DEFAULT '2013-5-1 8:00:01', ADD COLUMN t8 timetz DEFAULT '8:00:01', ADD COLUMN t9 interval DEFAULT '10:00:01';
+SELECT (SELECT xmin FROM alter_table_instant_test_01) = (SELECT tuple_xmin FROM alter_table_instant_tmp_00) AS same;
+SELECT COUNT(*) from alter_table_instant_test_01;
+
+-- test02: the result is right
+CREATE TABLE alter_table_instant_tmp_01
+(
+    init    int4            DEFAULT 1,
+    a       int             DEFAULT 4,
+    b       integer         DEFAULT 3+2,
+    c       text            DEFAULT 'test_text',
+    d       int2            DEFAULT 2,
+    e       numeric         DEFAULT 3.1415,
+    f       float4          DEFAULT 3.14,
+    g       boolean         DEFAULT true,
+    h       float8          DEFAULT 3.141592657583,
+    i       int8            DEFAULT -77856443,
+    j       char            DEFAULT 'a',
+    k       text            DEFAULT '2E3A4F872F561B90CE',
+    l       bytea           DEFAULT '2E3A4F872F561B90CE',
+    m       character(50)   DEFAULT 'fix-length string',
+    n       varchar(256)    DEFAULT 'varchar string',
+    t1      abstime         DEFAULT '2013-5-1 12:00:02',
+    t2      reltime         DEFAULT '3:00:02',
+    t3      tinterval       DEFAULT '["2013-5-1 12:00:02" "2013-5-2 12:00:02"]',
+    t4      date            DEFAULT '2013-5-1',
+    t5      time            DEFAULT '8:00:01',
+    t6      timestamp       DEFAULT '2013-5-1 8:00:01',
+    t7      timestamptz     DEFAULT '2013-5-1 8:00:01',
+    t8      timetz          DEFAULT '8:00:01',
+    t9      interval        DEFAULT '10:00:01'
+);
+INSERT INTO alter_table_instant_tmp_01 VALUES( 1 );
+
+SELECT COUNT(*) FROM alter_table_instant_test_01,alter_table_instant_tmp_01 WHERE
+alter_table_instant_test_01.a = alter_table_instant_tmp_01.a AND
+alter_table_instant_test_01.b = alter_table_instant_tmp_01.b AND
+alter_table_instant_test_01.c = alter_table_instant_tmp_01.c AND
+alter_table_instant_test_01.d = alter_table_instant_tmp_01.d AND
+alter_table_instant_test_01.e = alter_table_instant_tmp_01.e AND
+alter_table_instant_test_01.f = alter_table_instant_tmp_01.f AND
+alter_table_instant_test_01.g = alter_table_instant_tmp_01.g AND
+alter_table_instant_test_01.h = alter_table_instant_tmp_01.h AND
+alter_table_instant_test_01.i = alter_table_instant_tmp_01.i AND
+alter_table_instant_test_01.j = alter_table_instant_tmp_01.j AND
+alter_table_instant_test_01.k = alter_table_instant_tmp_01.k AND
+alter_table_instant_test_01.l = alter_table_instant_tmp_01.l AND
+alter_table_instant_test_01.m = alter_table_instant_tmp_01.m AND
+alter_table_instant_test_01.n = alter_table_instant_tmp_01.n AND
+alter_table_instant_test_01.t1 = alter_table_instant_tmp_01.t1 AND
+alter_table_instant_test_01.t2 = alter_table_instant_tmp_01.t2 AND
+alter_table_instant_test_01.t3 = alter_table_instant_tmp_01.t3 AND
+alter_table_instant_test_01.t4 = alter_table_instant_tmp_01.t4 AND
+alter_table_instant_test_01.t5 = alter_table_instant_tmp_01.t5 AND
+alter_table_instant_test_01.t6 = alter_table_instant_tmp_01.t6 AND
+alter_table_instant_test_01.t7 = alter_table_instant_tmp_01.t7 AND
+alter_table_instant_test_01.t8 = alter_table_instant_tmp_01.t8 AND
+alter_table_instant_test_01.t9 = alter_table_instant_tmp_01.t9;
+SELECT * FROM alter_table_instant_test_01 MINUS SELECT * FROM alter_table_instant_tmp_01;
+SELECT * FROM alter_table_instant_tmp_01 MINUS SELECT * FROM alter_table_instant_test_01;
+SELECT SUM(a)*2 AS result FROM alter_table_instant_test_01;
+SELECT COUNT(a) 
+FROM ( SELECT a FROM alter_table_instant_test_01 ORDER BY a ) AS t
+WHERE a IS NOT NULL;
+
+-- test03: clearing attinitdefval in alter data type
+CREATE TABLE alter_table_instant_tmp_02 (attinitdefval int);
+INSERT INTO alter_table_instant_tmp_02 SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_01') AND attinitdefval is not null;
+ALTER TABLE alter_table_instant_test_01 ALTER COLUMN a type varchar(32);
+ALTER TABLE alter_table_instant_tmp_01 ALTER COLUMN a type varchar(32);
+INSERT INTO alter_table_instant_tmp_02 SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_01') AND attinitdefval is not null;
+SELECT COUNT(*) FROM alter_table_instant_tmp_02 WHERE attinitdefval = 0;
+SELECT COUNT(*) FROM alter_table_instant_tmp_02 WHERE attinitdefval != 0;
+SELECT * FROM alter_table_instant_test_01 MINUS SELECT * FROM alter_table_instant_tmp_01;
+SELECT * FROM alter_table_instant_tmp_01 MINUS SELECT * FROM alter_table_instant_test_01;
+
+--  test04: rewriting table and clearing attinitdefval in length of default value > 128
+DELETE FROM alter_table_instant_tmp_00;
+INSERT INTO alter_table_instant_tmp_00 SELECT 1, xmin FROM alter_table_instant_test_01;
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN s character(129) DEFAULT 'str';
+SELECT (SELECT xmin FROM alter_table_instant_test_01) = (SELECT tuple_xmin FROM alter_table_instant_tmp_00) AS same;
+SELECT COUNT(*) from alter_table_instant_test_01;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_01') AND attinitdefval is not null;
+
+ALTER TABLE alter_table_instant_tmp_01 ADD COLUMN s character(129) DEFAULT 'str';
+SELECT * FROM alter_table_instant_test_01 MINUS SELECT * FROM alter_table_instant_tmp_01;
+SELECT * FROM alter_table_instant_tmp_01 MINUS SELECT * FROM alter_table_instant_test_01;
+
+-- test05: domain data type
+-- CREATE DOMAIN ENUM_TEXT AS TEXT CHECK ( VALUE = '1' OR VALUE = '2' OR VALUE = '3' );
+-- ALTER TABLE alter_table_instant_test_01 ADD COLUMN dom ENUM_TEXT DEFAULT '2';
+-- ALTER DOMAIN ENUM_TEXT SET NOT NULL;
+-- ALTER TABLE alter_table_instant_test_01 DROP COLUMN dom;
+-- DROP DOMAIN ENUM_TEXT;
+
+-- test06: clearing attinitdefval in VACUUM FULL table
+ALTER TABLE alter_table_instant_test_01 ADD COLUMN s1 int default 16;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_01') AND attinitdefval is not null;
+VACUUM FULL alter_table_instant_test_01;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_01') AND attinitdefval is not null;
+
+ALTER TABLE alter_table_instant_tmp_01 ADD COLUMN s1 int default 16;
+SELECT * FROM alter_table_instant_test_01 MINUS SELECT * FROM alter_table_instant_tmp_01;
+SELECT * FROM alter_table_instant_tmp_01 MINUS SELECT * FROM alter_table_instant_test_01;
+
+-- finish and drop table alter_table_instant_test_01
+DROP TABLE alter_table_instant_tmp_00;
+DROP TABLE alter_table_instant_tmp_01;
+DROP TABLE alter_table_instant_tmp_02;
+DROP TABLE alter_table_instant_test_01;
+
+-- test07: DEFAULT expression is VOLATILE.
+CREATE TABLE alter_table_instant_test_02 ( a int );
+INSERT INTO alter_table_instant_test_02 VALUES(1), (2), (3);
+ALTER TABLE alter_table_instant_test_02 ADD COLUMN b int DEFAULT random();
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_02') AND attinitdefval is not null;
+SELECT COUNT(*) FROM alter_table_instant_test_02;
+DROP TABLE alter_table_instant_test_02;
+
+-- test08: set DEFAULT expression and its length is greater than 128
+CREATE TABLE alter_table_instant_test_03 ( a int );
+INSERT INTO alter_table_instant_test_03 VALUES (1), (2), (3);
+ALTER TABLE alter_table_instant_test_03 ADD COLUMN b varchar(160) DEFAULT '0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld', ADD COLUMN c int default 15;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_03') AND attinitdefval is not null;
+SELECT DISTINCT b, c FROM alter_table_instant_test_03 ORDER BY 1, 2;
+SELECT COUNT(*) FROM alter_table_instant_test_03;
+DROP TABLE alter_table_instant_test_03;
+
+-- test09: about compressed table
+CREATE TABLE alter_table_instant_test_04 (
+	RS_ID smallint,
+	R0_ID smallint NOT NULL,
+	R1_ID smallint NOT NULL,
+	R2_ID smallint NOT NULL,
+	R3_ID smallint NOT NULL,
+	R4_ID smallint NOT NULL,
+	R5_ID smallint NOT NULL,
+	R6_ID smallint NOT NULL,
+	R7_ID smallint NOT NULL,
+	R8_ID smallint NOT NULL,
+	R9_ID smallint NOT NULL
+)  COMPRESS
+;
+COPY alter_table_instant_test_04 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+CREATE TABLE alter_table_instant_tmp_00 (a int, tuple_xmin xid);
+INSERT INTO alter_table_instant_tmp_00 SELECT 1, xmin FROM alter_table_instant_test_04;
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN a int DEFAULT 4;
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN b integer DEFAULT 3+2;
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN c text DEFAULT 'test_text';
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN d int2 DEFAULT 2;
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN e numeric DEFAULT '3.1415';
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN f float4 DEFAULT 3.14;
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN g boolean DEFAULT true, ADD COLUMN h float8 DEFAULT 3.141592657583, ADD COLUMN i int8 DEFAULT -77856443, ADD COLUMN j char DEFAULT 'a';
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN k text DEFAULT '2E3A4F872F561B90CE', ADD COLUMN l bytea DEFAULT '2E3A4F872F561B90CE';
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN m character(50) DEFAULT 'fix-length string'; 
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN n varchar(256) DEFAULT 'varchar string';
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN t1 abstime DEFAULT '2013-5-1 12:00:02', ADD COLUMN t2 reltime DEFAULT '3:00:02', ADD COLUMN t3 tinterval DEFAULT '["2013-5-1 12:00:02" "2013-5-2 12:00:02"]';
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN t4 date DEFAULT '2013-5-1', ADD COLUMN t5 time DEFAULT '8:00:01', ADD COLUMN t6 timestamp DEFAULT '2013-5-1 8:00:01';
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN t7 timestamptz DEFAULT '2013-5-1 8:00:01', ADD COLUMN t8 timetz DEFAULT '8:00:01', ADD COLUMN t9 interval DEFAULT '10:00:01';
+SELECT (SELECT DISTINCT xmin FROM alter_table_instant_test_04) = (SELECT DISTINCT tuple_xmin FROM alter_table_instant_tmp_00) AS same;
+SELECT COUNT(*) from alter_table_instant_test_04;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_04') AND attinitdefval is not null;
+
+-- test10: rewrite the compressed table
+CREATE TABLE alter_table_instant_tmp_04 (
+	RS_ID smallint,
+	R0_ID smallint NOT NULL,
+	R1_ID smallint NOT NULL,
+	R2_ID smallint NOT NULL,
+	R3_ID smallint NOT NULL,
+	R4_ID smallint NOT NULL,
+	R5_ID smallint NOT NULL,
+	R6_ID smallint NOT NULL,
+	R7_ID smallint NOT NULL,
+	R8_ID smallint NOT NULL,
+	R9_ID smallint NOT NULL
+)  
+;
+COPY alter_table_instant_tmp_04 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN a int DEFAULT 4;
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN b integer DEFAULT 3+2;
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN c text DEFAULT 'test_text';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN d int2 DEFAULT 2;
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN e numeric DEFAULT '3.1415';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN f float4 DEFAULT 3.14;
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN g boolean DEFAULT true, ADD COLUMN h float8 DEFAULT 3.141592657583, ADD COLUMN i int8 DEFAULT -77856443, ADD COLUMN j char DEFAULT 'a';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN k text DEFAULT '2E3A4F872F561B90CE', ADD COLUMN l bytea DEFAULT '2E3A4F872F561B90CE';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN m character(50) DEFAULT 'fix-length string'; 
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN n varchar(256) DEFAULT 'varchar string';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN t1 abstime DEFAULT '2013-5-1 12:00:02', ADD COLUMN t2 reltime DEFAULT '3:00:02', ADD COLUMN t3 tinterval DEFAULT '["2013-5-1 12:00:02" "2013-5-2 12:00:02"]';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN t4 date DEFAULT '2013-5-1', ADD COLUMN t5 time DEFAULT '8:00:01', ADD COLUMN t6 timestamp DEFAULT '2013-5-1 8:00:01';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN t7 timestamptz DEFAULT '2013-5-1 8:00:01', ADD COLUMN t8 timetz DEFAULT '8:00:01', ADD COLUMN t9 interval DEFAULT '10:00:01';
+(SELECT * FROM alter_table_instant_tmp_04) MINUS ALL (SELECT * FROM alter_table_instant_test_04);
+(SELECT * FROM alter_table_instant_test_04) MINUS ALL (SELECT * FROM alter_table_instant_tmp_04);
+
+ALTER TABLE alter_table_instant_test_04 ADD COLUMN s varchar(160) DEFAULT '0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld';
+ALTER TABLE alter_table_instant_tmp_04 ADD COLUMN s varchar(160) DEFAULT '0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld0123456789helloworld';
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_04') AND attinitdefval is not null;
+(SELECT * FROM alter_table_instant_tmp_04) MINUS ALL (SELECT * FROM alter_table_instant_test_04);
+(SELECT * FROM alter_table_instant_test_04) MINUS ALL (SELECT * FROM alter_table_instant_tmp_04);
+
+DROP TABLE alter_table_instant_tmp_04;
+DROP TABLE alter_table_instant_test_04;
+DROP TABLE alter_table_instant_tmp_00;
+
+-- test11: partition table
+create table alter_table_instant_test_05(a int, b int, c text)
+partition by range (a)
+(
+partition p1_test_alter_table_cluster_on values less than (1),
+partition p2_test_alter_table_cluster_on values less than (4),
+partition p3_test_alter_table_cluster_on values less than (7)
+);
+INSERT INTO alter_table_instant_test_05 VALUES(0, 1, 'hello');
+INSERT INTO alter_table_instant_test_05 VALUES(2, 1, 'world');
+INSERT INTO alter_table_instant_test_05 VALUES(5, 1, 'dream');
+ALTER TABLE alter_table_instant_test_05 ADD COLUMN d int default 6+6;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_05') AND attinitdefval is not null; -- 1
+VACUUM FULL alter_table_instant_test_05 PARTITION (p2_test_alter_table_cluster_on);
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_05') AND attinitdefval is not null; -- 1
+-- TODO: clear INIT DEFAULT EXPRESSION after VACUUM FULL PARTITION TABLE
+VACUUM FULL alter_table_instant_test_05;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_05') AND attinitdefval is not null; -- 0
+SELECT * FROM alter_table_instant_test_05 ORDER BY 1, 2;
+DROP TABLE alter_table_instant_test_05;
+
+-- test12: cluster on partiton table
+create table alter_table_instant_test_06(a int, b int, c text)
+partition by range (a)
+(
+partition p1_test_alter_table_cluster_on values less than (1),
+partition p2_test_alter_table_cluster_on values less than (4),
+partition p3_test_alter_table_cluster_on values less than (7)
+);
+CREATE INDEX idx_alter_table_06 ON alter_table_instant_test_06(a) LOCAL;
+INSERT INTO alter_table_instant_test_06 VALUES(0, 1, 'hello');
+INSERT INTO alter_table_instant_test_06 VALUES(2, 1, 'world');
+INSERT INTO alter_table_instant_test_06 VALUES(5, 1, 'dream');
+ALTER TABLE alter_table_instant_test_06 ADD COLUMN d int default 6+6;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_06') AND attinitdefval is not null; -- 1
+VACUUM FULL alter_table_instant_test_06 PARTITION (p2_test_alter_table_cluster_on);
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_06') AND attinitdefval is not null; -- 1
+CLUSTER alter_table_instant_test_06 USING idx_alter_table_06;
+SELECT COUNT(attinitdefval) FROM pg_attribute WHERE attrelid  IN ( SELECT oid FROM pg_class WHERE relname = 'alter_table_instant_test_06') AND attinitdefval is not null; -- 0
+SELECT * FROM alter_table_instant_test_06 ORDER BY 1, 2;
+DROP TABLE alter_table_instant_test_06;
+
+-- test13: degrade to rewrite
+create table alter_table_instant_test_07 (a integer , b text);
+insert into alter_table_instant_test_07 (a,b) values (1, 'test');
+alter table alter_table_instant_test_07 add column c integer  DEFAULT 123 ,add column d numeric(8,2) default 5555, add column e char(130) default '1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890';
+select * from alter_table_instant_test_07;
+alter table alter_table_instant_test_07 add column f int default 33;
+alter table alter_table_instant_test_07 add column g numeric(8,2) default 6666 , add column h char(130) default '1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890';
+select * from alter_table_instant_test_07;
+drop table alter_table_instant_test_07;
+
+create table alter_table_instant_test_08 (a integer , b text);
+insert into alter_table_instant_test_08 (a,b) values (1, 'test');
+insert into alter_table_instant_test_08 (a,b) values (1, 'hello');
+insert into alter_table_instant_test_08 (a,b) values (1, 'world');
+insert into alter_table_instant_test_08 (a,b) values (1, 'kitty');
+alter table alter_table_instant_test_08 add column c integer  DEFAULT 123 ,add column d numeric(8,2) default 5555, add column e char(130) default '1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890';
+select * from alter_table_instant_test_08 order by 2;
+alter table alter_table_instant_test_08 add column f int default 33;
+alter table alter_table_instant_test_08 add column g numeric(8,2) default 6666 , add column h char(130) default '1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890';
+select * from alter_table_instant_test_08 order by 2;
+drop table alter_table_instant_test_08;

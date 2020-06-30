@@ -1,0 +1,344 @@
+--
+-- prepare
+--
+\! mkdir '@testtablespace@/hw_partition_insert_tsp4'
+\! mkdir '@testtablespace@/hw_partition_insert_tsp5'
+\! mkdir '@testtablespace@/hw_partition_insert_tsp6'
+set timezone = 'PRC';
+create tablespace hw_partition_insert_tsp4 location '@testtablespace@/hw_partition_insert_tsp4';
+create tablespace hw_partition_insert_tsp5 location '@testtablespace@/hw_partition_insert_tsp5';
+create tablespace hw_partition_insert_tsp6 location '@testtablespace@/hw_partition_insert_tsp6';
+
+--
+---- without index, without interval, without maxvalue, timestamptz
+--
+-- create table
+create table insert_without_index_without_interval_without_maxvalue_tz(col_timestamptz timestamptz)
+partition by range(col_timestamptz)
+(
+	partition insert_without_index_without_interval_without_maxvalue_tz_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp4,
+	partition insert_without_index_without_interval_without_maxvalue_tz_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp5,
+	partition insert_without_index_without_interval_without_maxvalue_tz_p3 values less than ('2012-3-25') tablespace hw_partition_insert_tsp6
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_tz')
+	order by p.relname;
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_without_maxvalue_tz values ('2011-2-26');
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_without_maxvalue_tz values ('2012-1-25');
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_tz values ('2012-2-20');
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_without_maxvalue_tz values ('2012-2-25');
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_tz values ('2012-3-25');
+insert into insert_without_index_without_interval_without_maxvalue_tz values ('2013-3-25');
+
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_tz')
+	order by p.relname;
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_without_maxvalue_tz order by col_timestamptz;
+select * from insert_without_index_without_interval_without_maxvalue_tz partition (insert_without_index_without_interval_without_maxvalue_tz_p1) order by 1;
+select * from insert_without_index_without_interval_without_maxvalue_tz partition (insert_without_index_without_interval_without_maxvalue_tz_p2) order by 1;
+select * from insert_without_index_without_interval_without_maxvalue_tz partition (insert_without_index_without_interval_without_maxvalue_tz_p3) order by 1;
+
+--clean up
+drop table insert_without_index_without_interval_without_maxvalue_tz;
+
+--
+---- without index, without interval, with maxvalue, timestamptz
+--
+-- create table
+create table insert_without_index_without_interval_with_maxvalue_tz(col_timestamptz timestamptz)
+partition by range(col_timestamptz)
+(
+	partition insert_without_index_without_interval_with_maxvalue_tz_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp4,
+	partition insert_without_index_without_interval_with_maxvalue_tz_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp5,
+	partition insert_without_index_without_interval_with_maxvalue_tz_p3 values less than (maxvalue) tablespace hw_partition_insert_tsp6
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_tz') 
+	order by p.relname;
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_with_maxvalue_tz values ('2011-2-26');
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_with_maxvalue_tz values ('2012-1-25');
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_tz values ('2012-2-20');
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_with_maxvalue_tz values ('2012-2-25');
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_tz values ('2012-3-25');
+insert into insert_without_index_without_interval_with_maxvalue_tz values ('2013-3-25');
+
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) 
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_tz') 
+	order by p.relname;
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_with_maxvalue_tz order by col_timestamptz;
+select * from insert_without_index_without_interval_with_maxvalue_tz partition (insert_without_index_without_interval_with_maxvalue_tz_p1) order by 1;
+select * from insert_without_index_without_interval_with_maxvalue_tz partition (insert_without_index_without_interval_with_maxvalue_tz_p2) order by 1;
+select * from insert_without_index_without_interval_with_maxvalue_tz partition (insert_without_index_without_interval_with_maxvalue_tz_p3) order by 1;
+
+--clean up
+drop table insert_without_index_without_interval_with_maxvalue_tz;
+
+--
+---- MAX_PARTITION_NUM(32767)
+--
+--date
+create table insert_max_partition_num_date(col_date date)
+partition by range(col_date)
+interval (interval '1' day) store in (hw_partition_insert_tsp4, hw_partition_insert_tsp5, hw_partition_insert_tsp6)
+(
+	partition insert_max_partition_num_date_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp4,
+	partition insert_max_partition_num_date_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp5,
+	partition insert_max_partition_num_date_p3 values less than ('2012-3-25') tablespace hw_partition_insert_tsp6
+);
+
+--
+---- test for null, int2
+--
+create table insert_null_without_maxvalue_int2(col_smallint int2)
+partition by range(col_smallint)
+(
+	partition insert_null_without_maxvalue_int2_p1 values less than (-30) tablespace hw_partition_insert_tsp4,
+	partition insert_null_without_maxvalue_int2_p2 values less than (-20) tablespace hw_partition_insert_tsp5,
+	partition insert_null_without_maxvalue_int2_p3 values less than (-10)
+);
+insert into  insert_null_without_maxvalue_int2 values(NULL);
+drop table insert_null_without_maxvalue_int2;
+
+create table insert_null_with_maxvalue_int2(col_smallint int2)
+partition by range(col_smallint)
+(
+	partition insert_null_with_maxvalue_int2_p1 values less than (-30) tablespace hw_partition_insert_tsp4,
+	partition insert_null_with_maxvalue_int2_p2 values less than (-20) tablespace hw_partition_insert_tsp5,
+	partition insert_null_with_maxvalue_int2_p3 values less than (maxvalue)
+);
+insert into  insert_null_with_maxvalue_int2 values(NULL);
+drop table insert_null_with_maxvalue_int2;
+
+--
+---- test for null, int4
+--
+create table insert_null_without_maxvalue_int4(col_int int4)
+partition by range(col_int)
+(
+	partition insert_null_without_maxvalue_int4_p1 values less than (-30) tablespace hw_partition_insert_tsp4,
+	partition insert_null_without_maxvalue_int4_p2 values less than (-20) tablespace hw_partition_insert_tsp5,
+	partition insert_null_without_maxvalue_int4_p3 values less than (-10)
+);
+insert into  insert_null_without_maxvalue_int4 values(NULL);
+drop table insert_null_without_maxvalue_int4;
+
+create table insert_null_with_maxvalue_int4(col_int int4)
+partition by range(col_int)
+(
+	partition insert_null_with_maxvalue_int4_p1 values less than (-30) tablespace hw_partition_insert_tsp4,
+	partition insert_null_with_maxvalue_int4_p2 values less than (-20) tablespace hw_partition_insert_tsp5,
+	partition insert_null_with_maxvalue_int4_p3 values less than (maxvalue)
+);
+insert into  insert_null_with_maxvalue_int4 values(NULL);
+drop table insert_null_with_maxvalue_int4;
+
+--
+---- test for null, int8
+--
+create table insert_null_without_maxvalue_int8(col_bigint int8)
+partition by range(col_bigint)
+(
+	partition insert_null_without_maxvalue_int8_p1 values less than (-30) tablespace hw_partition_insert_tsp4,
+	partition insert_null_without_maxvalue_int8_p2 values less than (-20) tablespace hw_partition_insert_tsp5,
+	partition insert_null_without_maxvalue_int8_p3 values less than (-10)
+);
+insert into  insert_null_without_maxvalue_int8 values(NULL);
+drop table insert_null_without_maxvalue_int8;
+
+create table insert_null_with_maxvalue_int8(col_bigint int8)
+partition by range(col_bigint)
+(
+	partition insert_null_with_maxvalue_int8_p1 values less than (-30) tablespace hw_partition_insert_tsp4,
+	partition insert_null_with_maxvalue_int8_p2 values less than (-20) tablespace hw_partition_insert_tsp5,
+	partition insert_null_with_maxvalue_int8_p3 values less than (maxvalue)
+);
+insert into  insert_null_with_maxvalue_int8 values(NULL);
+drop table insert_null_with_maxvalue_int8;
+
+--
+---- test for null, date
+--
+create table insert_null_without_maxvalue_date(col_date date)
+partition by range(col_date)
+(
+	partition insert_null_without_maxvalue_date_p1 values less than ('2012-1-15') tablespace hw_partition_insert_tsp4,
+	partition insert_null_without_maxvalue_date_p2 values less than ('2012-2-15') tablespace hw_partition_insert_tsp5,
+	partition insert_null_without_maxvalue_date_p3 values less than ('2012-3-15')
+);
+insert into  insert_null_without_maxvalue_date values(NULL);
+drop table insert_null_without_maxvalue_date;
+
+create table insert_null_with_maxvalue_date(col_date date)
+partition by range(col_date)
+(
+	partition insert_null_with_maxvalue_date_p1 values less than ('2012-1-15') tablespace hw_partition_insert_tsp4,
+	partition insert_null_with_maxvalue_date_p2 values less than ('2012-2-15') tablespace hw_partition_insert_tsp5,
+	partition insert_null_with_maxvalue_date_p3 values less than (maxvalue)
+);
+insert into  insert_null_with_maxvalue_date values(NULL);
+drop table insert_null_with_maxvalue_date;
+
+--
+---- test for null, timestamp
+--
+create table insert_null_without_maxvalue_timestamp(col_timestamp timestamp)
+partition by range(col_timestamp)
+(
+	partition insert_null_without_maxvalue_timestamp_p1 values less than ('2012-1-15') tablespace hw_partition_insert_tsp4,
+	partition insert_null_without_maxvalue_timestamp_p2 values less than ('2012-2-15') tablespace hw_partition_insert_tsp5,
+	partition insert_null_without_maxvalue_timestamp_p3 values less than ('2012-3-15')
+);
+insert into  insert_null_without_maxvalue_timestamp values(NULL);
+drop table insert_null_without_maxvalue_timestamp;
+
+create table insert_null_with_maxvalue_timestamp(col_timestamp timestamp)
+partition by range(col_timestamp)
+(
+	partition insert_null_with_maxvalue_timestamp_p1 values less than ('2012-1-15') tablespace hw_partition_insert_tsp4,
+	partition insert_null_with_maxvalue_timestamp_p2 values less than ('2012-2-15') tablespace hw_partition_insert_tsp5,
+	partition insert_null_with_maxvalue_timestamp_p3 values less than (maxvalue)
+);
+insert into  insert_null_with_maxvalue_timestamp values(NULL);
+drop table insert_null_with_maxvalue_timestamp;
+
+--
+---- test for null, timestamptz
+--
+create table insert_null_without_maxvalue_timestamptz(col_timestamptz timestamptz)
+partition by range(col_timestamptz)
+(
+	partition insert_null_without_maxvalue_timestamptz_p1 values less than ('2012-1-15') tablespace hw_partition_insert_tsp4,
+	partition insert_null_without_maxvalue_timestamptz_p2 values less than ('2012-2-15') tablespace hw_partition_insert_tsp5,
+	partition insert_null_without_maxvalue_timestamptz_p3 values less than ('2012-3-15')
+);
+insert into  insert_null_without_maxvalue_timestamptz values(NULL);
+drop table insert_null_without_maxvalue_timestamptz;
+
+create table insert_null_with_maxvalue_timestamptz(col_timestamptz timestamptz)
+partition by range(col_timestamptz)
+(
+	partition insert_null_with_maxvalue_timestamptz_p1 values less than ('2012-1-15') tablespace hw_partition_insert_tsp4,
+	partition insert_null_with_maxvalue_timestamptz_p2 values less than ('2012-2-15') tablespace hw_partition_insert_tsp5,
+	partition insert_null_with_maxvalue_timestamptz_p3 values less than (maxvalue)
+);
+insert into  insert_null_with_maxvalue_timestamptz values(NULL);
+drop table insert_null_with_maxvalue_timestamptz;
+
+--
+---- test for polyallel-cross
+--
+create table insert_polyallel_cross_1(col_date date, col_int2 int, col_text text)
+partition by range(col_date, col_int2)
+(
+	partition insert_polyallel_cross_1_p1 values less than ('2012-1-25', 1) tablespace hw_partition_insert_tsp4,
+	partition insert_polyallel_cross_1_p2 values less than ('2012-2-25', 2) tablespace hw_partition_insert_tsp5,
+	partition insert_polyallel_cross_1_p3 values less than ('2012-3-25', 3) tablespace hw_partition_insert_tsp6
+);
+insert into insert_polyallel_cross_1 values ('2012-1-25', 1, 'dfm');
+insert into insert_polyallel_cross_1 values ('2012-1-25', 1, NULL);
+insert into insert_polyallel_cross_1 values ('2012-2-25', NULL, 'dfm');
+insert into insert_polyallel_cross_1 values (NULL, 1, NULL);
+select * from insert_polyallel_cross_1 order by 1, 2, 3;
+drop table insert_polyallel_cross_1;
+
+--
+---- test for default value
+--
+--create table
+create table insert_partition_with_default(col_smallint int2 default -15, name text default 'dfm')
+partition by range(col_smallint)
+(
+	partition insert_partition_with_default_p1 values less than (-30),
+	partition insert_partition_with_default_p2 values less than (-20),
+	partition insert_partition_with_default_p3 values less than (-10)
+);
+
+insert into insert_partition_with_default values (-30, 'chao');
+select * from insert_partition_with_default order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p1) order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p2) order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p3) order by 1;
+insert into insert_partition_with_default values (-25);
+select * from insert_partition_with_default order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p1) order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p2) order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p3) order by 1;
+insert into insert_partition_with_default values (-20, default);
+select * from insert_partition_with_default order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p1) order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p2) order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p3) order by 1;
+insert into insert_partition_with_default default values;
+select * from insert_partition_with_default order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p1) order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p2) order by 1;
+select * from insert_partition_with_default partition (insert_partition_with_default_p3) order by 1;
+insert into insert_partition_with_default values (-30, 'chao') returning name;
+insert into insert_partition_with_default values (-25) returning name;
+insert into insert_partition_with_default values (-20, default) returning name;
+insert into insert_partition_with_default default values returning name;
+--clean up
+drop table insert_partition_with_default;
+
+--
+-- test for zero
+--
+
+-- test range table without interval
+create table test_pruning_zero_1 (a int, b int) 
+partition by range(a) 
+(
+	partition test_pruning_zero_1_p1 values less than (-10), 
+	partition test_pruning_zero_1_p2 values less than (0),
+	partition test_pruning_zero_1_p3 values less than (10)
+);
+insert into test_pruning_zero_1 values (0, 1);
+select * from test_pruning_zero_1;--(0, 1)
+select * from test_pruning_zero_1 partition(test_pruning_zero_1_p2);--null
+select * from test_pruning_zero_1 partition(test_pruning_zero_1_p3);--(0, 1)
+
+
+create table test_pruning_zero_2 (a int, b int) 
+partition by range(a) 
+(
+	partition test_pruning_zero_2_p1 values less than (-10), 
+	partition test_pruning_zero_2_p2 values less than (10)
+);
+insert into test_pruning_zero_2 values (0, 1);
+select * from test_pruning_zero_2 order by 1;--(0, 1)
+select * from test_pruning_zero_2 partition(test_pruning_zero_2_p2) order by 1;--(0, 1)
+
+
+-- clean up
+drop table test_pruning_zero_1;
+drop table test_pruning_zero_2;
+
+--
+-- clean up
+--
+drop tablespace hw_partition_insert_tsp4;
+drop tablespace hw_partition_insert_tsp5;
+drop tablespace hw_partition_insert_tsp6;
+\! rm -fr '@testtablespace@/hw_partition_insert_tsp4'
+\! rm -fr '@testtablespace@/hw_partition_insert_tsp5'
+\! rm -fr '@testtablespace@/hw_partition_insert_tsp6'

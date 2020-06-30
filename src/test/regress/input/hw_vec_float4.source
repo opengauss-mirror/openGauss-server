@@ -1,0 +1,36 @@
+
+--float4
+CREATE TABLE vfloat4_test(a INT4, b float4, c float4) with (orientation = column) ;
+copy vfloat4_test from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vfloat4_normal.data' delimiter '|' NULL '';
+
+--test vfloat4_sop
+select b,c from vfloat4_test where b=c order by a;
+select b,c from vfloat4_test where b<>c order by a;
+select b,c from vfloat4_test where b>c order by a;
+select b,c from vfloat4_test where b>=c order by a;
+select b,c from vfloat4_test where b<c order by a;
+select b,c from vfloat4_test where b<=c order by a;
+
+select b,c from vfloat4_test where b=c and a > 0 order by a ;
+select b,c from vfloat4_test where b<>c and a > 0 order by a;
+select b,c from vfloat4_test where b>c and a > 0 order by a;
+select b,c from vfloat4_test where b>=c and a > 0 order by a;
+select b,c from vfloat4_test where b<c and a > 0 order by a;
+select b,c from vfloat4_test where b<=c and a > 0 order by a;
+
+select b+c from vfloat4_test where b=c order by a;
+select b+c from vfloat4_test where b<>c order by a;
+select b+c from vfloat4_test where b>c order by a;
+select b+c from vfloat4_test where b>=c order by a;
+select b+c from vfloat4_test where b<c order by a;
+select b+c from vfloat4_test where b<=c order by a;
+
+select b+c from vfloat4_test where b=c and a > 0 order by a ;
+select b+c from vfloat4_test where b<>c and a > 0 order by a;
+select b+c from vfloat4_test where b>c and a > 0 order by a;
+select b+c from vfloat4_test where b>=c and a > 0 order by a;
+select b+c from vfloat4_test where b<c and a > 0 order by a;
+select b+c from vfloat4_test where b<=c and a > 0 order by a;
+--clean table
+drop table vfloat4_test;
+

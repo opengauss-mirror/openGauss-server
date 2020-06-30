@@ -1,0 +1,1387 @@
+# -*-makefile-*-
+# src/Makefile.global.in
+
+#------------------------------------------------------------------------------
+# All PostgreSQL makefiles include this file and use the variables it sets,
+# which in turn are put here by the configure script. There is no need for
+# users to edit this file -- if it turns out to be necessary then that's a
+# bug.
+#
+# A makefile that includes this file needs to set the variable `subdir' to
+# the relative path from the top to itself and `top_builddir' to the relative
+# path from itself to the top before including this file. (The "top" is the
+# parent directory of the directory this file is in.)
+#------------------------------------------------------------------------------
+
+
+##########################################################################
+#
+# Meta configuration
+
+standard_targets = all install installdirs uninstall distprep clean distclean maintainer-clean coverage check installcheck maintainer-check 2pccheck
+# these targets should recurse even into subdirectories not being built:
+standard_always_targets = distprep clean distclean maintainer-clean
+
+.PHONY: $(standard_targets) install-strip html man installcheck-parallel
+
+# make `all' the default target
+all:
+
+# Delete target files if the command fails after it has
+# started to update the file.
+.DELETE_ON_ERROR:
+
+# PostgreSQL version number
+VERSION = @PACKAGE_VERSION@
+MAJORVERSION = @PG_MAJORVERSION@
+
+# Support for VPATH builds
+vpath_build = @vpath_build@
+abs_top_srcdir = @abs_top_srcdir@
+
+CC_VERSION = @CC_VERSION@
+
+ifneq ($(vpath_build),yes)
+top_srcdir = $(top_builddir)
+srcdir = .
+else # vpath_build = yes
+top_srcdir = $(abs_top_srcdir)
+srcdir = $(top_srcdir)/$(subdir)
+VPATH = $(srcdir)
+endif
+
+vpathsearch = `for f in $(addsuffix /$(1),$(subst :, ,. $(VPATH))); do test -r $$f && echo $$f && break; done`
+
+# Saved arguments from configure
+configure_args = @configure_args@
+
+
+##########################################################################
+#
+# Installation directories
+#
+# These are set by the equivalent --xxxdir configure options.  We
+# append "postgresql" to some of them, if the string does not already
+# contain "pgsql" or "postgres", in order to avoid directory clutter.
+#
+# In a PGXS build, we cannot use the values inserted into Makefile.global
+# by configure, since the installation tree may have been relocated.
+# Instead get the path values from pg_config.
+
+ifndef PGXS
+
+# Note that prefix, exec_prefix, and datarootdir aren't defined in a PGXS build;
+# makefiles may only use the derived variables such as bindir.
+
+prefix := @prefix@
+exec_prefix := @exec_prefix@
+datarootdir := @datarootdir@
+
+bindir := @bindir@
+llvmirdir := @llvmirdir@
+
+datadir := @datadir@
+ifeq "$(findstring pgsql, $(datadir))" ""
+ifeq "$(findstring postgres, $(datadir))" ""
+override datadir := $(datadir)/postgresql
+endif
+endif
+
+sysconfdir := @sysconfdir@
+ifeq "$(findstring pgsql, $(sysconfdir))" ""
+ifeq "$(findstring postgres, $(sysconfdir))" ""
+override sysconfdir := $(sysconfdir)/postgresql
+endif
+endif
+
+libdir := @libdir@
+
+pkglibdir = $(libdir)
+ifeq "$(findstring pgsql, $(pkglibdir))" ""
+ifeq "$(findstring postgres, $(pkglibdir))" ""
+override pkglibdir := $(pkglibdir)/postgresql
+endif
+endif
+
+includedir := @includedir@
+
+pkgincludedir = $(includedir)
+ifeq "$(findstring pgsql, $(pkgincludedir))" ""
+ifeq "$(findstring postgres, $(pkgincludedir))" ""
+override pkgincludedir := $(pkgincludedir)/postgresql
+endif
+endif
+
+mandir := @mandir@
+
+docdir := @docdir@
+ifeq "$(findstring pgsql, $(docdir))" ""
+ifeq "$(findstring postgres, $(docdir))" ""
+override docdir := $(docdir)/postgresql
+endif
+endif
+
+htmldir := @htmldir@
+
+localedir := @localedir@
+
+else # PGXS case
+
+# Extension makefiles should set PG_CONFIG, but older ones might not
+ifndef PG_CONFIG
+PG_CONFIG = pg_config
+endif
+
+bindir := $(shell $(PG_CONFIG) --bindir)
+datadir := $(shell $(PG_CONFIG) --sharedir)
+sysconfdir := $(shell $(PG_CONFIG) --sysconfdir)
+libdir := $(shell $(PG_CONFIG) --libdir)
+pkglibdir := $(shell $(PG_CONFIG) --pkglibdir)
+includedir := $(shell $(PG_CONFIG) --includedir)
+pkgincludedir := $(shell $(PG_CONFIG) --pkgincludedir)
+mandir := $(shell $(PG_CONFIG) --mandir)
+docdir := $(shell $(PG_CONFIG) --docdir)
+localedir := $(shell $(PG_CONFIG) --localedir)
+
+endif # PGXS
+
+# These derived path variables aren't separately configurable.
+#
+includedir_server = $(pkgincludedir)/server
+includedir_internal = $(pkgincludedir)/internal
+pgxsdir = $(pkglibdir)/pgxs
+
+##########################################################################
+#
+# Features
+#
+# Records the choice of the various --enable-xxx and --with-xxx options.
+##########################################################################
+with_python	= @with_python@
+with_openssl	= @with_openssl@
+with_ossp_uuid	= @with_ossp_uuid@
+with_selinux	= @with_selinux@
+with_libxml	= @with_libxml@
+with_libxslt	= @with_libxslt@
+with_system_tzdata = @with_system_tzdata@
+with_zlib	= @with_zlib@
+enable_shared	= @enable_shared@
+enable_rpath	= @enable_rpath@
+enable_cassert	= @enable_cassert@
+enable_jemalloc	= @enable_jemalloc@
+enable_jemalloc_debug	= @enable_jemalloc_debug@
+enable_multiple_nodes		= @enable_multiple_nodes@
+enable_memory_check		= @enable_memory_check@
+enable_memory_check_core	= @enable_memory_check_core@
+enable_thread_check		= @enable_thread_check@
+enable_nls	= @enable_nls@
+enable_debug	= @enable_debug@
+enable_dtrace	= @enable_dtrace@
+enable_coverage	= @enable_coverage@
+enable_thread_safety	= @enable_thread_safety@
+enable_llt	= @enable_llt@
+enable_ut	= @enable_ut@
+enable_qunit      = @enable_qunit@
+enable_gstrace  = @enable_gstrace@
+
+python_includespec	= @python_includespec@
+python_libdir		= @python_libdir@
+python_libspec		= @python_libspec@
+python_additional_libs	= @python_additional_libs@
+python_configdir	= @python_configdir@
+python_majorversion	= @python_majorversion@
+python_version		= @python_version@
+
+krb_srvtab = @krb_srvtab@
+
+TCLSH			= @TCLSH@
+TCL_LIB_FILE		= @TCL_LIB_FILE@
+TCL_LIBS		= @TCL_LIBS@
+TCL_LIB_SPEC		= @TCL_LIB_SPEC@
+TCL_INCLUDE_SPEC	= @TCL_INCLUDE_SPEC@
+TCL_SHARED_BUILD	= @TCL_SHARED_BUILD@
+TCL_SHLIB_LD_LIBS	= @TCL_SHLIB_LD_LIBS@
+
+PTHREAD_CFLAGS		= @PTHREAD_CFLAGS@
+PTHREAD_LIBS		= @PTHREAD_LIBS@
+
+
+#############################################################################
+#############################################################################
+#############################################################################
+#                                                                           #
+# set globle paremeters about all depend libs                               #
+# including:                                                                #
+# jemalloc                                                                  #
+# event, libcgroup, kerberos, libxml and protobuf                           #
+# libedit, zlib1.2.11, boost, openssl                                       #
+# if a new lib will be used, please add it here                             #
+#############################################################################
+#############################################################################
+#############################################################################
+
+#############################################################################
+# get  string from script get_PlatForm_str.sh
+#############################################################################
+PLAT_FORM_STR = $(shell sh $(top_builddir)/src/get_PlatForm_str.sh)
+ifeq ($(PLAT_FORM_STR), Failed)
+	exit 1;
+endif
+
+SUPPORT_HOTPATCH = @SUPPORT_HOTPATCH@
+
+SUPPORT_HOTPATCH = no
+#############################################################################
+#############################################################################
+# I leave all this home path here because somewhere will it, e. llvm-config #
+# set globle paremeters about all depend libs's home path                   #
+# including:                                                                #
+# jemalloc                                                                  #
+# event, libcgroup, kerberos, libxml and protobuf                           #
+# libedit, zlib1.2.11, boost, openssl                                       #
+# if a new lib will be used, please add it here                             #
+#############################################################################
+#############################################################################
+# Saved arguments form configure
+with_3rd = @with_3rdpartydir@
+
+ifeq ($(with_3rd), NONE)
+  BINARYPATH = binarylibs/dependency/$(PLAT_FORM_STR)
+  PLATFORMPATH = binarylibs/platform/$(PLAT_FORM_STR)
+  BUILD_TOOLS_PATH = binarylibs/buildtools/$(PLAT_FORM_STR)
+
+  JEMALLOC_HOME = $(top_builddir)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
+  MEMCHECK_HOME = $(top_builddir)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
+  LIBOBS_HOME = $(top_builddir)/$(BINARYPATH)/libobs/$(LIB_NOT_SUPPORT_LLT)
+  ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
+    LIBODBC_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/unixodbc/comm/unixODBC-2.3.6
+    LIBXML_HOME = $(top_builddir)/$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
+  else
+    ifeq ($(PLAT_FORM_STR), centos7.6_x86_64)
+      LIBODBC_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/unixodbc/comm/unixODBC-2.3.6
+      LIBXML_HOME = $(top_builddir)/$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
+    else
+      LIBODBC_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/unixodbc/comm/unixODBC-2.3.0
+      LIBXML_HOME = $(top_builddir)/$(BINARYPATH)/libxml/$(LIB_SUPPORT_LLT)
+    endif
+  endif
+  LIBCGROUP_HOME = $(top_builddir)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
+  LIBHOTPATCH_HOME = $(top_builddir)/$(PLATFORMPATH)/hotpatch
+  LIBLLVM_HOME = $(top_builddir)/$(BINARYPATH)/llvm/comm
+  EVENT_HOME = $(top_builddir)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
+  LIBEDIT_HOME = $(top_builddir)/$(BINARYPATH)/libedit/$(LIB_SUPPORT_LLT)
+  ZLIB_HOME = $(top_builddir)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
+  LZ4_HOME  = $(top_builddir)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
+  HLL_HOME = $(top_builddir)/$(BINARYPATH)/postgresql-hll/$(LIB_SUPPORT_LLT)
+  CJSON_HOME = $(top_builddir)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
+  PROTOBUF_HOME = $(top_builddir)/$(BINARYPATH)/protobuf/$(LIB_SUPPORT_LLT)
+  KERBEROS_HOME = $(top_builddir)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
+  BOOST_HOME = $(top_builddir)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
+  LIBORC_HOME = $(top_builddir)/$(BINARYPATH)/liborc/$(LIB_SUPPORT_LLT)
+  SNAPPY_HOME = $(top_builddir)/$(BINARYPATH)/snappy/$(LIB_SUPPORT_LLT)
+  LIBOPENSSL_HOME = $(top_builddir)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  SECURE_HOME = $(top_builddir)/$(PLATFORMPATH)/securec/$(LIB_NOT_SUPPORT_LLT)
+  LIBSTD_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/libstd/gcc$(CC_VERSION)/$(LIB_NOT_SUPPORT_LLT)
+  GTEST_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/gtest/$(LIB_NOT_SUPPORT_LLT)
+  MOCKCPP_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
+  GRPC_HOME = $(top_builddir)/$(BINARYPATH)/grpc/$(LIB_SUPPORT_LLT)
+  LIBPARQUET_HOME = $(top_builddir)/$(BINARYPATH)/libparquet/$(LIB_SUPPORT_LLT)
+  NUMA_HOME = $(top_builddir)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
+else
+  BINARYPATH = dependency/$(PLAT_FORM_STR)
+  PLATFORMPATH = platform/$(PLAT_FORM_STR)
+  BUILD_TOOLS_PATH = buildtools/$(PLAT_FORM_STR)
+
+  JEMALLOC_HOME = $(with_3rd)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
+  MEMCHECK_HOME = $(with_3rd)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
+  LIBOBS_HOME = $(with_3rd)/$(BINARYPATH)/libobs/$(LIB_NOT_SUPPORT_LLT)
+  ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
+    LIBODBC_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/unixodbc/comm/unixODBC-2.3.6
+    LIBXML_HOME = $(with_3rd)/$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
+  else
+    ifeq ($(PLAT_FORM_STR), centos7.6_x86_64)
+      LIBODBC_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/unixodbc/comm/unixODBC-2.3.6
+      LIBXML_HOME = $(with_3rd)/$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
+    else
+      LIBODBC_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/unixodbc/comm/unixODBC-2.3.0
+      LIBXML_HOME = $(with_3rd)/$(BINARYPATH)/libxml/$(LIB_SUPPORT_LLT)
+    endif
+  endif
+  LIBCGROUP_HOME = $(with_3rd)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
+  LIBHOTPATCH_HOME = $(with_3rd)/$(PLATFORMPATH)/hotpatch
+  LIBLLVM_HOME = $(with_3rd)/$(BINARYPATH)/llvm/comm
+  EVENT_HOME = $(with_3rd)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
+  LIBEDIT_HOME = $(with_3rd)/$(BINARYPATH)/libedit/$(LIB_SUPPORT_LLT)
+  ZLIB_HOME = $(with_3rd)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
+  LZ4_HOME  = $(with_3rd)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
+  HLL_HOME = $(with_3rd)/$(BINARYPATH)/postgresql-hll/$(LIB_SUPPORT_LLT)
+  CJSON_HOME = $(with_3rd)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
+  PROTOBUF_HOME = $(with_3rd)/$(BINARYPATH)/protobuf/$(LIB_SUPPORT_LLT)
+  KERBEROS_HOME = $(with_3rd)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
+  BOOST_HOME = $(with_3rd)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
+  LIBORC_HOME = $(with_3rd)/$(BINARYPATH)/liborc/$(LIB_SUPPORT_LLT)
+  SNAPPY_HOME = $(with_3rd)/$(BINARYPATH)/snappy/$(LIB_SUPPORT_LLT)
+  LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+  SECURE_HOME = $(with_3rd)/$(PLATFORMPATH)/securec/$(LIB_NOT_SUPPORT_LLT)
+  LIBSTD_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/libstd/gcc$(CC_VERSION)/$(LIB_NOT_SUPPORT_LLT)
+  GTEST_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/gtest/$(LIB_NOT_SUPPORT_LLT)
+  MOCKCPP_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
+  GRPC_HOME = $(with_3rd)/$(BINARYPATH)/grpc/$(LIB_SUPPORT_LLT)
+  LIBPARQUET_HOME = $(with_3rd)/$(BINARYPATH)/libparquet/$(LIB_SUPPORT_LLT)
+  NUMA_HOME = $(with_3rd)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
+endif
+
+##############################################################################
+# jemalloc component 
+##############################################################################
+JEMALLOC_BUILD_TYPE =
+JEMALLOC_LIB_NAME =
+ifeq ($(enable_jemalloc_debug), yes)
+    ifeq ($(enable_llt), yes)
+        JEMALLOC_BUILD_TYPE = debug_ll
+        JEMALLOC_LIB_NAME = jemalloc_pic
+    else
+        ifeq ($(enable_ut), yes)
+            JEMALLOC_BUILD_TYPE = debug_ll
+            JEMALLOC_LIB_NAME = jemalloc_pic
+        else
+            JEMALLOC_BUILD_TYPE = debug
+            JEMALLOC_LIB_NAME = jemalloc
+        endif
+    endif
+else
+    ifeq ($(enable_cassert), yes)
+        ifeq ($(enable_llt), yes)
+            JEMALLOC_BUILD_TYPE = debug_llt
+            JEMALLOC_LIB_NAME = jemalloc_pic
+        else
+            ifeq ($(enable_ut), yes)	
+                JEMALLOC_BUILD_TYPE = debug_llt
+                JEMALLOC_LIB_NAME = jemalloc_pic
+            else
+                JEMALLOC_BUILD_TYPE = debug
+                JEMALLOC_LIB_NAME = jemalloc
+            endif
+        endif	
+    else
+        ifeq ($(enable_jemalloc), yes)
+            ifeq ($(enable_llt), yes)
+                JEMALLOC_BUILD_TYPE = release_llt
+                JEMALLOC_LIB_NAME = jemalloc_pic
+            else
+                ifeq ($(enable_ut), yes)
+                    JEMALLOC_BUILD_TYPE = release_llt
+                    JEMALLOC_LIB_NAME = jemalloc_pic
+                else
+                    JEMALLOC_BUILD_TYPE = release
+                    JEMALLOC_LIB_NAME = jemalloc
+                endif
+            endif
+        endif
+    endif
+endif
+
+JEMALLOC_INCLUDE_PATH = $(JEMALLOC_HOME)/include
+JEMALLOC_LIB_PATH = $(JEMALLOC_HOME)/lib
+
+##############################################################################
+# memory and thread checking component 
+##############################################################################
+MEMCHECK_BUILD_TYPE =
+MEMCHECK_LIB_NAME =
+MEMCHECK_BUILD_TYPE = debug
+ifeq ($(enable_memory_check), yes)
+    MEMCHECK_LIB_NAME_ASAN = asan
+    MEMCHECK_LIB_NAME_UBSAN = ubsan
+else
+    ifeq ($(enable_thread_check), yes)
+        MEMCHECK_LIB_NAME_TSAN = tsan
+    endif
+endif
+
+MEMCHECK_LIB_PATH = $(MEMCHECK_HOME)/gcc$(CC_VERSION)/lib/
+
+#############################################################################
+# get the depend lib path
+#    1. libedit, event, libcgroup, kerberos, zlib1.2.11, boost,
+#	libxml and protobuf are support parameter --enable-llt and --enable-ut;
+#    	$(LIB_SUPPORT_LLT)
+#    2. securec, gtest, mockcpp, unixodbc, libstd
+#       and openssl not support parameter --enable-llt and --enable-ut;
+#       $(LIB_NOT_SUPPORT_LLT)
+#############################################################################
+LIB_SUPPORT_LLT=
+ifeq ($(enable_llt), yes)
+    LIB_SUPPORT_LLT = llt
+else   
+    ifeq ($(enable_ut), yes)  
+        LIB_SUPPORT_LLT = llt
+    else
+        LIB_SUPPORT_LLT = comm
+    endif
+endif
+
+LIB_NOT_SUPPORT_LLT = comm
+
+#############################################################################
+# obs component
+#############################################################################
+LIBOBS_INCLUDE_PATH = $(LIBOBS_HOME)/include
+LIBOBS_LIB_PATH = $(LIBOBS_HOME)/lib
+
+#############################################################################
+# libodbc component
+#############################################################################
+LIBODBC_INCLUDE_PATH = $(LIBODBC_HOME)/include
+LIBODBC_LIB_PATH = $(LIBODBC_HOME)/lib
+
+#############################################################################
+# libcgroup component
+#############################################################################
+LIBCGROUP_INCLUDE_PATH = $(LIBCGROUP_HOME)/include
+LIBCGROUP_LIB_PATH = $(LIBCGROUP_HOME)/lib
+
+#############################################################################
+# libhotpatch component
+#############################################################################
+LIBHOTPATCH_INCLUDE_PATH = $(LIBHOTPATCH_HOME)/include
+LIBHOTPATCH_LIB_PATH = $(LIBHOTPATCH_HOME)/lib
+LIBHOTPATCH_TOOL_PATH = $(LIBHOTPATCH_HOME)/tool
+#############################################################################
+# llvm component
+#############################################################################
+LIBLLVM_BIN = $(LIBLLVM_HOME)/bin
+LIBLLVM_INCLUDE_PATH = $(LIBLLVM_HOME)/include
+LIBLLVM_LIB_PATH = $(LIBLLVM_HOME)/lib
+LLVM_CONFIG = $(LIBLLVM_BIN)/llvm-config
+LLVM_LIBS = $(shell $(LLVM_CONFIG)    --libs)
+
+#############################################################################
+# event component
+#############################################################################
+EVENT_INCLUDE_PATH = $(EVENT_HOME)/include
+EVENT_LIB_PATH = $(EVENT_HOME)/lib
+EVENT_LIB_NAME =
+ifeq ($(enable_llt), yes)
+    EVENT_LIB_NAME = event_pic
+else   
+    ifeq ($(enable_ut), yes)
+        EVENT_LIB_NAME = event_pic
+    else 
+        EVENT_LIB_NAME = event
+    endif
+endif
+
+#############################################################################
+# libedit component
+#############################################################################
+LIBEDIT_INCLUDE_PATH = $(LIBEDIT_HOME)/include
+LIBEDIT_LIB_PATH = $(LIBEDIT_HOME)/lib
+
+#############################################################################
+# zlib component
+#############################################################################
+ZLIB_INCLUDE_PATH = $(ZLIB_HOME)/include
+ZLIB_LIB_PATH = $(ZLIB_HOME)/lib
+#############################################################################
+
+#############################################################################
+# lz4 component
+#############################################################################
+LZ4_INCLUDE_PATH = $(LZ4_HOME)/include
+LZ4_LIB_PATH = $(LZ4_HOME)/lib
+
+#############################################################################
+# hll component
+#############################################################################
+HLL_INCLUDE_PATH = $(HLL_HOME)/include
+HLL_LIB_PATH = $(HLL_HOME)/lib
+
+#############################################################################
+# cjson component
+#############################################################################
+CJSON_INCLUDE_PATH = $(CJSON_HOME)/include
+CJSON_LIB_PATH = $(CJSON_HOME)/lib
+
+# protobuf component
+############################################################################# 
+PROTOBUF_INCLUDE_PATH = $(PROTOBUF_HOME)/include
+PROTOBUF_LIB_PATH = $(PROTOBUF_HOME)/lib
+
+#############################################################################
+# kerberos component
+#############################################################################
+KERBEROS_BIN_PATH = $(KERBEROS_HOME)/bin
+KERBEROS_SBIN_PATH = $(KERBEROS_HOME)/sbin
+KERBEROS_INCLUDE_PATH = $(KERBEROS_HOME)/include
+KERBEROS_LIB_PATH = $(KERBEROS_HOME)/lib
+
+#############################################################################
+# boost component
+#############################################################################
+BOOST_INCLUDE_PATH = $(BOOST_HOME)/include
+BOOST_LIB_PATH = $(BOOST_HOME)/lib
+
+#############################################################################
+# libxml component
+#############################################################################
+LIBXML_INCLUDE_PATH = $(LIBXML_HOME)/include
+LIBXML_LIB_PATH = $(LIBXML_HOME)/lib
+
+#############################################################################
+# liborc component
+#############################################################################
+LIBORC_INCLUDE_PATH = $(LIBORC_HOME)/include
+LIBORC_LIB_PATH = $(LIBORC_HOME)/lib
+
+#############################################################################
+# libparquet component
+#############################################################################
+LIBPARQUET_INCLUDE_PATH = $(LIBPARQUET_HOME)/include
+LIBPARQUET_LIB_PATH = $(LIBPARQUET_HOME)/lib
+
+#############################################################################
+# snappy component
+#############################################################################
+SNAPPY_INCLUDE_PATH = $(SNAPPY_HOME)/include
+SNAPPY_LIB_PATH = $(SNAPPY_HOME)/lib
+
+#############################################################################
+# manage ssl component
+#############################################################################
+MANAGESSL_HOME = $(top_builddir)/src/manager
+
+#############################################################################
+# openssl component
+#############################################################################
+LIBOPENSSL_BIN_PATH = $(LIBOPENSSL_HOME)/bin
+LIBOPENSSL_LIB_PATH = $(LIBOPENSSL_HOME)/lib
+LIBOPENSSL_SSL_PATH = $(MANAGESSL_HOME)/ssl
+LIBOPENSSL_INCLUDE_PATH = $(LIBOPENSSL_HOME)/include
+
+#############################################################################
+# security component
+#############################################################################
+SECURE_INCLUDE_PATH = $(SECURE_HOME)/include
+SECURE_LIB_PATH = $(SECURE_HOME)/lib
+
+#############################################################################
+# libstd component
+#############################################################################
+LIBSTD_LIB_PATH = $(LIBSTD_HOME)/lib
+
+############################################################################
+# gtest component
+############################################################################
+GTEST_INCLUDE_PATH = $(GTEST_HOME)/include
+GTEST_LIB_PATH = $(GTEST_HOME)/lib
+
+############################################################################
+# mockcpp component
+############################################################################
+MPCKCPP_LIB_PATH = $(MOCKCPP_HOME)/lib
+
+#############################################################################
+# grpc component
+############################################################################# 
+GRPC_INCLUDE_PATH = $(GRPC_HOME)/include
+GRPC_LIB_PATH = $(GRPC_HOME)/lib
+
+#############################################################################
+# gstrace component
+#############################################################################
+GSTRACE_HOME = $(top_builddir)/src/gstrace/
+GSTRACE_LIB_PATH = $(GSTRACE_HOME)/common
+
+#############################################################################
+# libnuma component
+#############################################################################
+NUMA_INCLUDE_PATH = $(NUMA_HOME)/include
+NUMA_LIB_PATH = $(NUMA_HOME)/lib
+
+############################################################################
+#
+# Programs and flags
+#
+############################################################################
+# Compilers
+CPP = @CPP@
+CPPFLAGS = @CPPFLAGS@
+#CPPFLAGS = @CPPFLAGS@ -DHAVE_LIBREADLINE=1 -DHAVE_READLINE_READLINE_H=1 -DHAVE_READLINE_HISTORY_H=1 -DHAVE_RL_COMPLETION_APPEND_CHARACTER=1 -DHAVE_RL_COMPLETION_MATCHES=1 -DHAVE_RL_FILENAME_COMPLETION_FUNCTION=1 -DHAVE_HISTORY_TRUNCATE_FILE=1 
+ifeq ($(enable_llt), yes)
+CPPFLAGS = @CPPFLAGS@ -DHAVE_LIBREADLINE=1 -DHAVE_READLINE_READLINE_H=1 -DHAVE_READLINE_HISTORY_H=1 -DHAVE_RL_COMPLETION_APPEND_CHARACTER=1 -DHAVE_RL_COMPLETION_MATCHES=1 -DHAVE_RL_FILENAME_COMPLETION_FUNCTION=1 -DHAVE_HISTORY_TRUNCATE_FILE=1 -Wl,-R$(LIBEDIT_LIB_PATH) -fPIC 
+endif
+
+#CPPFLAGS = @CPPFLAGS@
+
+ifeq ($(enable_ut), yes)
+    CPPFLAGS = @CPPFLAGS@ -fPIC 
+else
+    ifeq ($(POSTGIS_PGSQL_VERSION), 92)
+        CPPFLAGS = @CPPFLAGS@ -fPIC
+    else
+        ifeq ($(enable_debug), no)
+            CPPFLAGS = @CPPFLAGS@ -fPIE
+        endif
+     endif
+endif
+
+ifeq ($(enable_multiple_nodes), yes)
+ifeq ($(enable_qunit), yes)
+  override CPPFLAGS := -I$(top_srcdir)/src/distribute/test/QUnit/src/include  $(CPPFLAGS)
+endif
+else
+ifeq ($(enable_qunit), yes)
+  override CPPFLAGS := -I$(top_srcdir)/src/test/QUnit/src/include  $(CPPFLAGS)
+endif
+endif
+
+ifdef PGXS
+  override CPPFLAGS := -I$(includedir_server) -I$(includedir_internal) -I$(top_builddir)/src/lib/gstrace $(CPPFLAGS)
+else # not PGXS
+  override CPPFLAGS := -I$(top_srcdir)/src/include -I$(top_builddir)/src/lib/gstrace $(CPPFLAGS)
+  ifdef VPATH
+    override CPPFLAGS := -I$(top_builddir)/src/include -I$(top_builddir)/src/lib/gstrace $(CPPFLAGS)
+  endif  
+endif
+
+override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${LIBPARQUET_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${GRPC_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(HLL_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH)
+
+ifeq ($(SUPPORT_HOTPATCH), yes)
+  override CPPFLAGS := $(CPPFLAGS) -I$(LIBHOTPATCH_INCLUDE_PATH)
+endif
+
+CC = @CC@
+GCC = @GCC@
+C = gcc 
+SUN_STUDIO_CC = @SUN_STUDIO_CC@
+CFLAGS_SSE42 = @CFLAGS_SSE42@
+
+ifeq ($(enable_llt), yes)
+    CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS) -Wl,-R$(LIBEDIT_LIB_PATH) -fPIC
+else
+    ifeq ($(POSTGIS_PGSQL_VERSION), 92)
+        CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS) -fPIC
+    else
+        ifeq ($(enable_debug), no)
+           CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS) -fPIE
+        else
+            CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS)
+        endif
+    endif
+endif
+
+ifeq ($(enable_llt), no)
+    ifeq ($(enable_ut), yes)
+        CFLAGS = @CFLAGS@ -fPIC
+    else
+        ifeq ($(POSTGIS_PGSQL_VERSION), 92)
+            CFLAGS = @CFLAGS@ -fPIC
+        else
+            ifeq ($(enable_debug), no)
+                CFLAGS = @CFLAGS@ -fPIE
+            else
+                CFLAGS = @CFLAGS@
+            endif
+        endif
+    endif
+endif
+
+CXXFLAGS = @CFLAGS@
+ifeq ($(enable_memory_check), yes)
+  CXXFLAGS += -fsanitize=address -fsanitize=leak -fno-omit-frame-pointer
+else
+  CXXFLAGS += -fstack-protector
+endif
+
+ifeq ($(enable_thread_check), yes)
+  CXXFLAGS += -fsanitize=thread -fno-omit-frame-pointer
+endif
+
+CXXFLAGS += -Wl,-z,relro,-z,now
+CXXFLAGS += -Wl,-z,noexecstack
+#CXXFLAGS += -std=c++11
+override CXXFLAGS += $(PTHREAD_CFLAGS)
+# Kind-of compilers
+
+BISON = @BISON@
+BISONFLAGS = @BISONFLAGS@ $(YFLAGS)
+FLEX = @FLEX@
+FLEXFLAGS = @FLEXFLAGS@ $(LFLAGS)
+DTRACE = @DTRACE@
+DTRACEFLAGS = @DTRACEFLAGS@
+ZIC = @ZIC@
+
+# Linking
+
+AR = @AR@
+DLLTOOL = @DLLTOOL@
+DLLWRAP = @DLLWRAP@
+LIBS = @LIBS@
+# append linking lib for OPENSSL
+LIBS += -ledit -lssl -lcrypto # append linking lib from securec
+LIBS += -lsecurec
+# append linking lib for threading
+ifeq ($(enable_debug), no)
+LIBS += -pthread -D_REENTRANT -lrt -pie
+else
+LIBS += -pthread -D_REENTRANT -lrt
+endif
+
+ifeq ($(enable_memory_check), yes)
+  LIBS += -l$(MEMCHECK_LIB_NAME_ASAN)
+else
+    ifeq ($(enable_thread_check), yes)
+        LIBS += -l$(MEMCHECK_LIB_NAME_TSAN)
+    endif
+endif
+
+##########################################################################
+# append zlib for compression : zlib.a or zlib_pic.a
+############################################################################
+LIBS += -lz -lminiunz
+
+LDAP_LIBS_FE = @LDAP_LIBS_FE@
+LDAP_LIBS_BE = @LDAP_LIBS_BE@
+OSSP_UUID_LIBS = @OSSP_UUID_LIBS@
+LD = @LD@
+with_gnu_ld = @with_gnu_ld@
+ld_R_works = @ld_R_works@
+
+
+# We want -L for libpgport.a to be first in LDFLAGS.  We also need LDFLAGS
+# to be a "recursively expanded" variable, else adjustments to rpathdir
+# don't work right.  So we must NOT do LDFLAGS := something, meaning this has
+# to be done first and elsewhere we must only do LDFLAGS += something.
+# PGXC_BEGIN
+ifdef PGXS
+  LDFLAGS = -L$(libdir) -pthread
+else
+  LDFLAGS = -L$(top_builddir)/src/common/port -pthread
+endif
+# PGXC_END
+# append zlib for compression: zlib
+LDFLAGS += -L$(ZLIB_LIB_PATH)
+
+LDFLAGS += -L$(LIBEDIT_LIB_PATH)
+LDFLAGS += -L$(SECURE_LIB_PATH)
+LDFLAGS += -L$(LIBOPENSSL_LIB_PATH)
+LDFLAGS += -L$(LIBSTD_LIB_PATH)
+LDFLAGS += -L$(LIBCGROUP_LIB_PATH)
+
+ifeq ($(SUPPORT_HOTPATCH), yes)
+LDFLAGS += -L$(LIBHOTPATCH_LIB_PATH)
+endif
+
+LDFLAGS += -L$(BBOX_LIB_PATH)
+LDFLAGS += -L$(LIBODBC_LIB_PATH)
+LDFLAGS += -L$(LIBOBS_LIB_PATH)
+LDFLAGS += -L$(KERBEROS_LIB_PATH)
+ifeq ($(enable_memory_check), yes)
+  LDFLAGS += -L$(MEMCHECK_LIB_PATH) -fsanitize=address -fsanitize=leak -fno-omit-frame-pointer
+endif
+
+LDFLAGS += -L$(GSTRACE_LIB_PATH)
+LDFLAGS += -L$(NUMA_LIB_PATH)
+LDFLAGS += @LDFLAGS@
+
+LDFLAGS_EX = @LDFLAGS_EX@
+# LDFLAGS_SL might have already been assigned by calling makefile
+LDFLAGS_SL += @LDFLAGS_SL@
+LDREL = -r
+LDOUT = -o
+RANLIB = @RANLIB@
+WINDRES = @WINDRES@
+X = @EXEEXT@
+
+ifeq ($(with_3rd), NONE)
+  LIBTINFO_HOME = $(top_builddir)/$(BINARYPATH)/ncurses/comm
+  ETCD_HOME = $(top_builddir)/$(BINARYPATH)/etcd/comm
+  LIBCURL_HOME = $(top_builddir)/$(BINARYPATH)/libcurl/comm
+else
+  LIBTINFO_HOME = $(with_3rd)/$(BINARYPATH)/ncurses/comm
+  ETCD_HOME = $(with_3rd)/$(BINARYPATH)/etcd/comm
+  LIBCURL_HOME = $(with_3rd)/$(BINARYPATH)/libcurl/comm
+endif
+
+#############################################################################
+# libtinfo component
+#############################################################################
+LIBTINFO_INCLUDE_PATH = $(LIBTINFO_HOME)/include
+LIBTINFO_LIB_PATH = $(LIBTINFO_HOME)/lib
+
+#############################################################################
+
+#############################################################################
+# etcd component
+#############################################################################
+ETCD_BIN_PATH = $(ETCD_HOME)/bin
+
+#############################################################################
+
+#############################################################################
+# curl component
+#############################################################################
+LIBCURL_INCLUDE_PATH = $(LIBCURL_HOME)/include
+LIBCURL_LIB_PATH = $(LIBCURL_HOME)/lib
+
+#############################################################################
+# Perl
+
+ifneq (@PERL@,)
+    # quoted to protect pathname with spaces
+    PERL		= '@PERL@'
+else
+    PERL		= $(missing) perl
+endif
+
+# Miscellaneous
+
+AWK	= @AWK@
+LN_S	= @LN_S@
+MSGFMT  = @MSGFMT@
+MSGMERGE = @MSGMERGE@
+PYTHON	= @PYTHON@
+TAR	= @TAR@
+XGETTEXT = @XGETTEXT@
+
+GZIP	= gzip
+BZIP2	= bzip2
+
+# Installation.
+
+INSTALL	= $(SHELL) $(top_srcdir)/config/install-sh -c
+
+INSTALL_SCRIPT_MODE	= 755
+INSTALL_DATA_MODE	= 644
+INSTALL_PROGRAM	= $(INSTALL_PROGRAM_ENV) $(INSTALL) $(INSTALL_STRIP_FLAG)
+INSTALL_SCRIPT	= $(INSTALL) -m $(INSTALL_SCRIPT_MODE)
+INSTALL_DATA	= $(INSTALL) -m $(INSTALL_DATA_MODE)
+INSTALL_STLIB	= $(INSTALL_STLIB_ENV) $(INSTALL_DATA) $(INSTALL_STRIP_FLAG)
+INSTALL_SHLIB	= $(INSTALL_SHLIB_ENV) $(INSTALL) $(INSTALL_SHLIB_OPTS) $(INSTALL_STRIP_FLAG)
+# Override in Makefile.port if necessary
+INSTALL_SHLIB_OPTS = -m 755
+
+MKDIR_P = @MKDIR_P@
+
+missing		= $(SHELL) $(top_srcdir)/config/missing
+
+STRIP		= @STRIP@
+STRIP_STATIC_LIB = @STRIP_STATIC_LIB@
+STRIP_SHARED_LIB = @STRIP_SHARED_LIB@
+
+# Documentation
+
+have_docbook	= @have_docbook@
+COLLATEINDEX	= @COLLATEINDEX@
+DOCBOOKSTYLE	= @DOCBOOKSTYLE@
+JADE			= @JADE@
+NSGMLS			= @NSGMLS@
+OSX				= @OSX@
+XSLTPROC		= @XSLTPROC@
+
+# Code coverage
+
+GCOV = @GCOV@
+LCOV = @LCOV@
+GENHTML = @GENHTML@
+
+ifeq ($(enable_coverage),yes)
+# ccache loses .gcno files
+export CCACHE_DISABLE = 1
+endif
+
+# Feature settings
+
+DEF_PGPORT = @default_port@
+WANTED_LANGUAGES = @WANTED_LANGUAGES@
+
+
+##########################################################################
+#
+# Additional platform-specific settings
+#
+
+# Name of the "template"
+PORTNAME= @PORTNAME@
+
+build_os = @build_os@
+
+host_tuple = @host@
+host_os = @host_os@
+host_cpu = @host_cpu@
+
+# Make HAVE_IPV6 available for initdb script creation
+HAVE_IPV6= @HAVE_IPV6@
+
+# The HP-UX port makefile, for one, needs access to this symbol
+HAVE_POSIX_SIGNALS= @HAVE_POSIX_SIGNALS@
+
+# This is mainly for use on FreeBSD, where we have both a.out and elf
+# systems now.  May be applicable to other systems to?
+ELF_SYSTEM= @ELF_SYS@
+
+# Backend stack size limit has to be hard-wired on Windows (it's in bytes)
+WIN32_STACK_RLIMIT=4194304
+
+# Set if we have a working win32 crashdump header
+have_win32_dbghelp = @have_win32_dbghelp@
+
+# Pull in platform-specific magic
+include $(top_builddir)/src/Makefile.port
+
+# Set up rpath if enabled.  By default it will point to our libdir,
+# but individual Makefiles can force other rpath paths if needed.
+rpathdir = $(libdir)
+
+ifeq ($(enable_rpath), yes)
+LDFLAGS += $(rpath)
+endif
+
+# jemalloc
+ifeq ($(enable_jemalloc), yes)
+    LDFLAGS += -L$(JEMALLOC_LIB_PATH)
+    CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
+endif
+
+ifeq ($(enable_jemalloc_debug), yes)
+    LDFLAGS += -L$(JEMALLOC_LIB_PATH)
+    CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
+endif
+
+##########################################################################
+#
+# Some variables needed to find some client interfaces
+
+ifdef PGXS
+# some contribs assumes headers and libs are in the source tree...
+libpq_srcdir = $(includedir)
+libpq_builddir = $(libdir)
+else
+libpq_srcdir = $(top_srcdir)/src/common/interfaces/libpq
+libpq_builddir = $(top_builddir)/src/common/interfaces/libpq
+endif
+
+# This macro is for use by libraries linking to libpq.  (Because libpgport
+# isn't created with the same link flags as libpq, it can't be used.)
+libpq = -L$(libpq_builddir) -lpq
+
+# If doing static linking, shared library dependency info isn't available,
+# so add in the libraries that libpq depends on.
+ifeq ($(enable_shared), no)
+libpq += $(filter -lintl -lkrb5 -lcrypt, $(LIBS)) \
+	$(LDAP_LIBS_FE) $(PTHREAD_LIBS)
+endif
+
+# This macro is for use by client executables (not libraries) that use libpq.
+# We force clients to pull symbols from the non-shared library libpgport
+# rather than pulling some libpgport symbols from libpq just because
+# libpq uses those functions too.  This makes applications less
+# dependent on changes in libpq's usage of pgport.  To do this we link to
+# pgport before libpq.  This does cause duplicate -lpgport's to appear
+# on client link lines.
+ifdef PGXS
+libpq_pgport = -L$(libdir) -lpgport $(libpq)
+else
+libpq_pgport = -L$(top_builddir)/src/common/port -lpgport $(libpq)
+endif
+
+
+submake-libpq:
+	$(MAKE) -C $(libpq_builddir) all
+
+submake-libpgport:
+	$(MAKE) -C $(top_builddir)/src/common/port all
+
+submake-libplpgsql:
+	$(MAKE) -C $(top_builddir)/src/common/pl/plpgsql/src all
+
+submake-libalarmclient:
+	$(MAKE) -C $(top_builddir)/src/lib/alarm
+
+.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient
+
+
+##########################################################################
+#
+# Testing support
+
+PL_TESTDB = pl_regression
+CONTRIB_TESTDB = contrib_regression
+ifneq ($(MODULE_big),)
+  CONTRIB_TESTDB_MODULE = contrib_regression_$(MODULE_big)
+else 
+  ifneq ($(MODULES),)
+    CONTRIB_TESTDB_MODULE = contrib_regression_$(MODULES)
+  else
+    CONTRIB_TESTDB_MODULE = contrib_regression
+  endif
+endif
+
+ifdef NO_LOCALE
+NOLOCALE += --no-locale
+endif
+
+ifeq ($(enable_multiple_nodes), yes)
+pg_regress_locale_flags = $(if $(ENCODING),--encoding=$(ENCODING)) $(NOLOCALE)
+
+ifeq ($(enable_memory_check), yes)
+pg_regress_check = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && \
+                   export LSAN_OPTIONS='exitcode=0:suppressions=$(abs_top_srcdir)/../Tools/memory_check/memleak_ignore' && \
+                   $(top_builddir)/src/distribute/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+pg_regress_installcheck = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && \
+                          export LSAN_OPTIONS='exitcode=0:suppressions=$(abs_top_srcdir)/../Tools/memory_check/memleak_ignore' && \
+                          $(top_builddir)/src/distribute/test/regress/pg_regress --inputdir=$(srcdir) --psqldir='$(PSQLDIR)' $(pg_regress_locale_flags)
+EXTRA_REGRESS_OPTS = --ignore-exitcode --keep-run
+else
+  pg_regress_check = $(top_builddir)/src/distribute/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+  pg_regress_installcheck = $(top_builddir)/src/distribute/test/regress/pg_regress --inputdir=$(srcdir) --psqldir='$(PSQLDIR)' $(pg_regress_locale_flags)
+endif
+
+pg_regress_clean_files = regression.diffs regression.out tmp_check/ log/
+
+
+pg_isolation_regress_check = $(top_builddir)/src/distribute/test/isolation/pg_isolation_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+pg_isolation_regress_installcheck = $(top_builddir)/src/distribute/test/isolation/pg_isolation_regress --inputdir=$(srcdir) --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+
+else
+
+pg_regress_locale_flags = $(if $(ENCODING),--encoding=$(ENCODING)) $(NOLOCALE)
+
+ifeq ($(enable_memory_check), yes)
+pg_regress_check = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && \
+                   export LSAN_OPTIONS='exitcode=0:suppressions=$(abs_top_srcdir)/../Tools/memory_check/memleak_ignore' && \
+                   $(top_builddir)/src/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+pg_regress_installcheck = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && \
+                          export LSAN_OPTIONS='exitcode=0:suppressions=$(abs_top_srcdir)/../Tools/memory_check/memleak_ignore' && \
+                          $(top_builddir)/src/test/regress/pg_regress --inputdir=$(srcdir) --psqldir='$(PSQLDIR)' $(pg_regress_locale_flags)
+EXTRA_REGRESS_OPTS = --ignore-exitcode --keep-run
+else
+  pg_regress_check = $(top_builddir)/src/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+  pg_regress_installcheck = $(top_builddir)/src/test/regress/pg_regress --inputdir=$(srcdir) --psqldir='$(PSQLDIR)' $(pg_regress_locale_flags)
+endif
+
+pg_regress_clean_files = regression.diffs regression.out tmp_check/ log/
+
+
+pg_isolation_regress_check = $(top_builddir)/src/test/isolation/pg_isolation_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+pg_isolation_regress_installcheck = $(top_builddir)/src/test/isolation/pg_isolation_regress --inputdir=$(srcdir) --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+
+endif
+
+##########################################################################
+#
+# Customization
+#
+# This includes your local customizations if Makefile.custom exists
+# in the source directory.  This file doesn't exist in the original
+# distribution so that it doesn't get overwritten when you upgrade.
+#
+# NOTE:  Makefile.custom is from the pre-Autoconf days of PostgreSQL.
+# You are liable to shoot yourself in the foot if you use it without
+# knowing exactly what you're doing.  The preferred (and more
+# reliable) method is to communicate what you want to do to the
+# configure script, and leave the makefiles alone.
+
+-include $(top_srcdir)/src/Makefile.custom
+
+ifneq ($(CUSTOM_INSTALL),)
+INSTALL= $(CUSTOM_INSTALL)
+endif
+
+ifneq ($(CUSTOM_CC),)
+  CC= $(CUSTOM_CC)
+endif
+
+ifneq ($(CUSTOM_COPT),)
+  COPT= $(CUSTOM_COPT)
+endif
+
+ifdef COPT
+   CXXFLAGS += $(COPT)
+   LDFLAGS += $(COPT)
+endif
+
+ifdef PROFILE
+   CXXFLAGS += $(PROFILE)
+   LDFLAGS += $(PROFILE)
+endif
+
+
+##########################################################################
+#
+# substitute implementations of C library routines (see src/port/)
+# note we already included -L.../src/common/port in LDFLAGS above
+
+LIBOBJS = @LIBOBJS@
+
+LIBS := -lpgport $(LIBS)
+
+# to make ws2_32.lib the last library, and always link with shfolder,
+# so SHGetFolderName isn't picked up from shell32.dll
+ifeq ($(PORTNAME),win32)
+LIBS += -lws2_32 -lshfolder
+endif
+
+# Not really standard libc functions, used by the backend.
+TAS         = @TAS@
+
+
+##########################################################################
+#
+# Global targets and rules
+
+%.i: %.cpp
+	$(CPP) $(CPPFLAGS) -o $@ $<
+
+%.gz: %
+	$(GZIP) --best -c $< >$@
+
+%.bz2: %
+	$(BZIP2) -c $< >$@
+
+# Direct builds of foo.c -> foo are disabled to avoid generating
+# *.dSYM junk on Macs.  All builds should normally go through the
+# foo.c -> foo.o -> foo steps.  This also ensures that dependency
+# tracking (see below) is used.
+%: %.c
+
+ifndef PGXS
+
+# Remake Makefile.global from Makefile.global.in if the latter
+# changed. In order to trigger this rule, the including file must
+# write `include $(top_builddir)/src/Makefile.global', not some
+# shortcut thereof.
+$(top_builddir)/src/Makefile.global: $(top_srcdir)/src/Makefile.global.in $(top_builddir)/config.status
+	cd $(top_builddir) && ./config.status src/Makefile.global
+
+# Remake pg_config.h from pg_config.h.in if the latter changed.
+# config.status will not change the timestamp on pg_config.h if it
+# doesn't change, so as to avoid recompiling the entire tree
+# unnecessarily. Therefore we make config.status update a timestamp file
+# stamp-h every time it runs, so that we don't trigger this rule every time.
+# (We do trigger the null rule for stamp-h to pg_config.h every time; so it's
+# important for that rule to be empty!)
+#
+# Of course you need to turn on dependency tracking to get any
+# dependencies on pg_config.h.
+$(top_builddir)/src/include/pg_config.h: $(top_builddir)/src/include/stamp-h ;
+
+$(top_builddir)/src/include/stamp-h: $(top_srcdir)/src/include/pg_config.h.in $(top_builddir)/config.status
+	cd $(top_builddir) && ./config.status src/include/pg_config.h
+
+# Also remake ecpg_config.h from ecpg_config.h.in if the latter changed, same
+# logic as above.
+$(top_builddir)/src/common/interfaces/ecpg/include/ecpg_config.h: $(top_builddir)/src/common/interfaces/ecpg/include/stamp-h ;
+
+ $(top_builddir)/src/common/interfaces/ecpg/include/stamp-h: $(top_builddir)/src/common/interfaces/ecpg/include/ecpg_config.h.in $(top_builddir)/config.status
+	cd $(top_builddir) && ./config.status src/common/interfaces/ecpg/include/ecpg_config.h
+
+# When configure changes, rerun configure with the same options as
+# last time. To change configure, you need to run autoconf manually.
+$(top_builddir)/config.status: $(top_srcdir)/configure
+	cd $(top_builddir) && ./config.status --recheck
+
+endif # not PGXS
+
+
+install-strip:
+	@$(MAKE) INSTALL_PROGRAM_ENV="STRIPPROG='$(STRIP)'" \
+	    INSTALL_STLIB_ENV="STRIPPROG='$(STRIP_STATIC_LIB)'" \
+	    INSTALL_SHLIB_ENV="STRIPPROG='$(STRIP_SHARED_LIB)'" \
+	    INSTALL_STRIP_FLAG=-s \
+	    install
+
+
+##########################################################################
+#
+# Recursive make support
+# ----------------------
+# Instead of recursing through subdirectories with a for loop or
+# repeated $(MAKE) -C whatever calls, this is a little smarter: it
+# allows parallel make across directories and lets make -k and -q work
+# correctly.
+
+# We need the $(eval) function and order-only prerequisites, which are
+# available in GNU make 3.80.  That also happens to be the version
+# where the .VARIABLES variable was introduced, so this is a simple check.
+ifndef .VARIABLES
+$(error GNU make 3.80 or newer is required.  You are using version $(MAKE_VERSION))
+endif
+
+# This function is only for internal use below.  It should be called
+# using $(eval).  It will set up a target so that it recurses into
+# a given subdirectory.  Note that to avoid a nasty bug in make 3.80,
+# this function has to avoid using any complicated constructs (like
+# multiple targets on a line) and also not contain any lines that expand
+# to more than about 200 bytes.  This is why we make it apply to just one
+# subdirectory at a time, rather than to a list of subdirectories.
+# $1: target name, e.g., all
+# $2: subdir name
+# $3: target to run in subdir, usually same as $1
+define _create_recursive_target
+.PHONY: $(1)-$(2)-recurse
+$(1): $(1)-$(2)-recurse
+$(1)-$(2)-recurse:
+	$$(MAKE) -C $(2) $(3)
+endef
+# Note that the use of $$ on the last line above is important; we want
+# $(MAKE) to be evaluated when the rule is run, not when the $(eval) is run
+# to create the rule.  This is necessary to get make -q working.
+
+# Call this function in a makefile that needs to recurse into subdirectories.
+# In the normal case all arguments can be defaulted.
+# $1: targets to make recursive (defaults to list of standard targets)
+# $2: list of subdirs (defaults to SUBDIRS variable)
+# $3: target to run in subdir (defaults to current element of $1)
+recurse = $(foreach target,$(if $1,$1,$(standard_targets)),$(foreach subdir,$(if $2,$2,$(SUBDIRS)),$(eval $(call _create_recursive_target,$(target),$(subdir),$(if $3,$3,$(target))))))
+
+# If a makefile's list of SUBDIRS varies depending on configuration, then
+# any subdirectories excluded from SUBDIRS should instead be added to
+# ALWAYS_SUBDIRS, and then it must call recurse_always as well as recurse.
+# This ensures that distprep, distclean, etc will apply to all subdirectories.
+# In the normal case all arguments will be defaulted.
+# $1: targets to make recursive (defaults to standard_always_targets)
+# $2: list of subdirs (defaults to ALWAYS_SUBDIRS variable)
+# $3: target to run in subdir (defaults to current element of $1)
+recurse_always = $(foreach target,$(if $1,$1,$(standard_always_targets)),$(foreach subdir,$(if $2,$2,$(ALWAYS_SUBDIRS)),$(eval $(call _create_recursive_target,$(target),$(subdir),$(if $3,$3,$(target))))))
+
+
+##########################################################################
+#
+# Automatic dependency generation
+# -------------------------------
+# When we configure with --enable-depend then we override the default
+# compilation rule with the magic below. While or after creating the
+# actual output file we also create a dependency list for the .c file.
+# Next time we invoke make we will have top-notch information about
+# whether this file needs to be updated. The dependency files are kept
+# in the .deps subdirectory of each directory.
+
+autodepend = @autodepend@
+
+ifeq ($(autodepend), yes)
+
+ifndef COMPILE.c
+COMPILE.c = $(C) $(CFLAGS) $(CPPFLAGS) -c
+endif
+
+ifndef COMPILE.cpp
+COMPILE.cpp = $(CC) $(CXXFLAGS) $(CPPFLAGS) -c
+endif
+
+DEPDIR = .deps
+
+ifeq ($(GCC), yes)
+
+# GCC allows us to create object and dependency file in one invocation.
+%.o : %.cpp %.cc
+	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
+	$(COMPILE.cpp) -o $@ $< -MMD -MP -MF $(DEPDIR)/$(*F).Po
+%.o : %.c
+	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
+        $(COMPILE.c) -o $@ $< -MMD -MP -MF $(DEPDIR)/$(*F).Po
+endif # GCC
+
+# Include all the dependency files generated for the current
+# directory. List /dev/null as dummy because if the wildcard expands
+# to nothing then make would complain.
+-include $(wildcard $(DEPDIR)/*.Po) /dev/null
+
+# hook for clean-up
+clean distclean maintainer-clean: clean-deps
+
+.PHONY: clean-deps
+clean-deps:
+	@rm -rf $(DEPDIR)
+
+# When in automatic dependency mode, never delete any intermediate
+# files automatically.  Otherwise, the following could happen: When
+# starting from a clean source tree, the first build would delete the
+# intermediate file, but also create the dependency file, which
+# mentions the intermediate file, thus making it non-intermediate.
+# The second build will then need to rebuild the now non-intermediate
+# missing file.  So the second build will do work even though nothing
+# had changed.  One place where this happens is the .c -> .o -> .so
+# chain for some contrib modules.
+.SECONDARY:
+
+endif # autodepend
+
+
+##########################################################################
+#
+# Native language support
+
+ifeq ($(enable_nls), yes)
+ifneq (,$(wildcard $(srcdir)/nls.mk))
+
+include $(top_srcdir)/src/nls-global.mk
+
+endif # nls.mk
+endif # enable_nls
+
+
+##########################################################################
+#
+# Coverage
+
+# Explanation of involved files:
+#   foo.c	source file
+#   foo.o	object file
+#   foo.gcno	gcov graph (a.k.a. "notes") file, created at compile time
+#		(by gcc -ftest-coverage)
+#   foo.gcda	gcov data file, created when the program is run (for
+#		programs compiled with gcc -fprofile-arcs)
+#   foo.c.gcov	gcov output file with coverage information, created by
+#		gcov from foo.gcda (by "make coverage")
+#   foo.c.gcov.out  stdout captured when foo.c.gcov is created, mildly
+#		interesting
+#   lcov.info	lcov tracefile, built from gcda files in one directory,
+#		later collected by "make coverage-html"
+
+ifeq ($(enable_coverage), yes)
+
+# There is a strange interaction between lcov and existing .gcov
+# output files.  Hence the rm command and the ordering dependency.
+
+gcda_files := $(wildcard *.gcda)
+
+lcov.info: $(gcda_files)
+	rm -f *.gcov
+	$(if $^,$(LCOV) -d . -c -o $@ $(LCOVFLAGS))
+
+%.c.gcov: %.gcda | lcov.info
+	$(GCOV) -b -f -p -o . $(GCOVFLAGS) $*.c >$*.c.gcov.out
+
+coverage: $(gcda_files:.gcda=.c.gcov) lcov.info
+
+.PHONY: coverage-html
+coverage-html: coverage
+	rm -rf coverage
+	mkdir coverage
+	$(GENHTML) --show-details --legend --output-directory=coverage --title=PostgreSQL --num-spaces=4 --prefix=$(abs_top_srcdir) `find . -name lcov.info -print`
+
+
+# hook for clean-up
+clean distclean maintainer-clean: clean-coverage
+
+.PHONY: clean-coverage
+clean-coverage:
+	rm -rf coverage
+	rm -f *.gcda *.gcno lcov.info *.gcov *.gcov.out
+
+
+# User-callable target to reset counts between test runs
+coverage-clean:
+	rm -f `find . -name '*.gcda' -print`
+
+endif # enable_coverage
+
+#this code is used for increase compile
+#%.depend : %.cpp
+#	$(CXX) -MM $(CPPFLAGS) $< > $@.$$$$;\
+#	sed 's,\($*\)\.o[:]*,\1.o $@ :,g'<$@.$$$$>$@;\
+#	rm -f $@.$$$$
+#CPPSources = $(shell ls |grep ".cpp")
+#DEPEND = $(CPPSources:.cpp=.depend)

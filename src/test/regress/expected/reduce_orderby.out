@@ -1,0 +1,218 @@
+create schema reduce_orderby;
+set current_schema = reduce_orderby;
+--create table
+create table reduce_orderby_t1(a int, b varchar(10));
+create table reduce_orderby_t2(a int, b varchar(10));
+--insert into hash order by in subquery
+explain (costs off, nodes off) insert into reduce_orderby_t1 select a, b from reduce_orderby_t1 order by b;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Insert on reduce_orderby_t1
+   ->  Sort
+         Sort Key: reduce_orderby.reduce_orderby_t1.b
+         ->  Seq Scan on reduce_orderby_t1
+(4 rows)
+
+explain (costs off, nodes off) insert into reduce_orderby_t1 select * from (select a, b from reduce_orderby_t1 order by b) union all (select a, b from reduce_orderby_t2 order by a);
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on reduce_orderby_t1
+   ->  Result
+         ->  Append
+               ->  Seq Scan on reduce_orderby_t1
+               ->  Seq Scan on reduce_orderby_t2
+(5 rows)
+
+explain (costs off, nodes off) insert into reduce_orderby_t1 select v.b from (select * from (select a, b from reduce_orderby_t1 order by b) union all (select a, b from reduce_orderby_t2 order by a)) v group by 1;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on reduce_orderby_t1
+   ->  Subquery Scan on "*SELECT*"
+         ->  HashAggregate
+               Group By Key: reduce_orderby.reduce_orderby_t1.b
+               ->  Append
+                     ->  Seq Scan on reduce_orderby_t1
+                     ->  Seq Scan on reduce_orderby_t2
+(7 rows)
+
+explain (costs off, nodes off) insert into reduce_orderby_t1 select * from (select * from (select * from reduce_orderby_t1 order by 1));
+                      QUERY PLAN                      
+------------------------------------------------------
+ Insert on reduce_orderby_t1
+   ->  Sort
+         Sort Key: reduce_orderby.reduce_orderby_t1.a
+         ->  Seq Scan on reduce_orderby_t1
+(4 rows)
+
+--table setop and there is order by in subquery
+explain (costs off, nodes off) select * from (select a, b from reduce_orderby_t1 order by b) union all (select a, b from reduce_orderby_t2 order by a);
+                QUERY PLAN                 
+-------------------------------------------
+ Result
+   ->  Append
+         ->  Seq Scan on reduce_orderby_t1
+         ->  Seq Scan on reduce_orderby_t2
+(4 rows)
+
+explain (costs off, nodes off) select v.b from (select * from (select a, b from reduce_orderby_t1 order by b) union all (select a, b from reduce_orderby_t2 order by a)) v group by 1;
+                QUERY PLAN                 
+-------------------------------------------
+ HashAggregate
+   Group By Key: reduce_orderby_t1.b
+   ->  Append
+         ->  Seq Scan on reduce_orderby_t1
+         ->  Seq Scan on reduce_orderby_t2
+(5 rows)
+
+explain (costs off, nodes off) (select a,b from reduce_orderby_t1 where a<10 group by 1,2 order by 1,2) intersect (select a,b from reduce_orderby_t1 where a>5 group by 1,2 order by 1,2) except all select a,b from reduce_orderby_t2 where b>10 group by 1,2 order by 1,2;
+                                                            QUERY PLAN                                                            
+----------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".a, "*SELECT* 1".b
+   ->  HashSetOp Except All
+         ->  Append
+               ->  Result
+                     ->  HashSetOp Intersect
+                           ->  Append
+                                 ->  Subquery Scan on "*SELECT* 1"
+                                       ->  HashAggregate
+                                             Group By Key: reduce_orderby.reduce_orderby_t1.a, reduce_orderby.reduce_orderby_t1.b
+                                             ->  Seq Scan on reduce_orderby_t1
+                                                   Filter: (a < 10)
+                                 ->  Subquery Scan on "*SELECT* 2"
+                                       ->  HashAggregate
+                                             Group By Key: reduce_orderby.reduce_orderby_t1.a, reduce_orderby.reduce_orderby_t1.b
+                                             ->  Seq Scan on reduce_orderby_t1
+                                                   Filter: (a > 5)
+               ->  Subquery Scan on "*SELECT* 3"
+                     ->  HashAggregate
+                           Group By Key: reduce_orderby_t2.a, reduce_orderby_t2.b
+                           ->  Seq Scan on reduce_orderby_t2
+                                 Filter: ((b)::bigint > 10)
+(22 rows)
+
+explain (costs off, nodes off) (select a,b from reduce_orderby_t1 t1 where t1.a in (select b from reduce_orderby_t2 where b<100 order by 1) group by 1,2 order by 1,2) intersect (select tt1.a,tt1.b from reduce_orderby_t1 tt1 left join reduce_orderby_t2 tt2 on tt1.a=tt2.b group by 1,2 order by 1,2) except all select t32.a,t32.b from reduce_orderby_t2 t32 right join reduce_orderby_t1 t31 on t31.b=t32.a group by 1,2 order by 1,2; 
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".a, "*SELECT* 1".b
+   ->  HashSetOp Except All
+         ->  Append
+               ->  Result
+                     ->  HashSetOp Intersect
+                           ->  Append
+                                 ->  Subquery Scan on "*SELECT* 1"
+                                       ->  HashAggregate
+                                             Group By Key: t1.a, t1.b
+                                             ->  Hash Join
+                                                   Hash Cond: (t1.a = (reduce_orderby_t2.b)::bigint)
+                                                   ->  Seq Scan on reduce_orderby_t1 t1
+                                                         Filter: (a < 100)
+                                                   ->  Hash
+                                                         ->  HashAggregate
+                                                               Group By Key: (reduce_orderby_t2.b)::bigint
+                                                               ->  Seq Scan on reduce_orderby_t2
+                                                                     Filter: ((b)::bigint < 100)
+                                 ->  Subquery Scan on "*SELECT* 2"
+                                       ->  HashAggregate
+                                             Group By Key: tt1.a, tt1.b
+                                             ->  Hash Left Join
+                                                   Hash Cond: (tt1.a = (tt2.b)::bigint)
+                                                   ->  Seq Scan on reduce_orderby_t1 tt1
+                                                   ->  Hash
+                                                         ->  Seq Scan on reduce_orderby_t2 tt2
+               ->  Subquery Scan on "*SELECT* 3"
+                     ->  HashAggregate
+                           Group By Key: t32.a, t32.b
+                           ->  Hash Left Join
+                                 Hash Cond: ((t31.b)::bigint = t32.a)
+                                 ->  Seq Scan on reduce_orderby_t1 t31
+                                 ->  Hash
+                                       ->  Seq Scan on reduce_orderby_t2 t32
+(35 rows)
+
+explain (costs off, nodes off) 
+(select a,b from reduce_orderby_t1 t1 where t1.a in (select b from reduce_orderby_t2 union all (select b from reduce_orderby_t1 order by 1) order by 1) group by 1,2 order by 1,2) 
+intersect (select tt1.a,tt1.b from reduce_orderby_t1 tt1 left join (select a from reduce_orderby_t2 union (select a from reduce_orderby_t1 order by 1) order by 1) tt2 on tt1.a=tt2.a group by 1,2 order by 1,2) except all select t32.a,t32.b from reduce_orderby_t2 t32 right join reduce_orderby_t1 t31 on t31.b=t32.a group by 1,2 order by 1,2;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".a, "*SELECT* 1".b
+   ->  HashSetOp Except All
+         ->  Append
+               ->  Result
+                     ->  HashSetOp Intersect
+                           ->  Append
+                                 ->  Subquery Scan on "*SELECT* 1"
+                                       ->  HashAggregate
+                                             Group By Key: t1.a, t1.b
+                                             ->  Hash Join
+                                                   Hash Cond: (t1.a = (reduce_orderby_t2.b)::bigint)
+                                                   ->  Seq Scan on reduce_orderby_t1 t1
+                                                   ->  Hash
+                                                         ->  HashAggregate
+                                                               Group By Key: (reduce_orderby_t2.b)::bigint
+                                                               ->  Result
+                                                                     ->  Append
+                                                                           ->  Seq Scan on reduce_orderby_t2
+                                                                           ->  Seq Scan on reduce_orderby_t1
+                                 ->  Subquery Scan on "*SELECT* 2"
+                                       ->  HashAggregate
+                                             Group By Key: tt1.a, tt1.b
+                                             ->  Seq Scan on reduce_orderby_t1 tt1
+               ->  Subquery Scan on "*SELECT* 3"
+                     ->  HashAggregate
+                           Group By Key: t32.a, t32.b
+                           ->  Hash Left Join
+                                 Hash Cond: ((t31.b)::bigint = t32.a)
+                                 ->  Seq Scan on reduce_orderby_t1 t31
+                                 ->  Hash
+                                       ->  Seq Scan on reduce_orderby_t2 t32
+(32 rows)
+
+--table join and there is order by in subquery
+explain (costs off, nodes off) select a, b from reduce_orderby_t1 order by a;
+             QUERY PLAN              
+-------------------------------------
+ Sort
+   Sort Key: a
+   ->  Seq Scan on reduce_orderby_t1
+(3 rows)
+
+explain (costs off, nodes off) select t1.a from reduce_orderby_t1 t1 left join reduce_orderby_t2 t2 on t1.a=t2.b order by t1.a;
+                  QUERY PLAN                  
+----------------------------------------------
+ Merge Left Join
+   Merge Cond: (t1.a = (t2.b)::bigint)
+   ->  Sort
+         Sort Key: t1.a
+         ->  Seq Scan on reduce_orderby_t1 t1
+   ->  Sort
+         Sort Key: ((t2.b)::bigint)
+         ->  Seq Scan on reduce_orderby_t2 t2
+(8 rows)
+
+explain (costs off, nodes off) select t1.a from reduce_orderby_t1 t1 where t1.b in (select t3.b from reduce_orderby_t1 t3 left join reduce_orderby_t2 t2 on t3.a=t2.b order by 1) order by t1.a;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Sort
+   Sort Key: t1.a
+   ->  Hash Join
+         Hash Cond: ((t1.b)::text = (t3.b)::text)
+         ->  Seq Scan on reduce_orderby_t1 t1
+         ->  Hash
+               ->  HashAggregate
+                     Group By Key: (t3.b)::text
+                     ->  Hash Left Join
+                           Hash Cond: (t3.a = (t2.b)::bigint)
+                           ->  Seq Scan on reduce_orderby_t1 t3
+                           ->  Hash
+                                 ->  Seq Scan on reduce_orderby_t2 t2
+(13 rows)
+
+--drop table
+drop table reduce_orderby_t1;
+drop table reduce_orderby_t2;
+--drop schema
+reset current_schema;
+drop schema reduce_orderby cascade;

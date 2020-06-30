@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_TABLESPACE">
+<refmeta>
+<refentrytitle>DROP TABLESPACE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP TABLESPACE</refname>
+<refpurpose>remove a tablespace</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP TABLESPACE [ IF EXISTS ] tablespace_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

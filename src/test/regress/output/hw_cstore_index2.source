@@ -1,0 +1,388 @@
+----
+--- case 10:index scan with qual push down
+----
+set datestyle to iso;
+SET IntervalStyle to postgres;
+set time zone PRC;
+CREATE TABLE PARTITION_SELECT_PICT_TABLE(
+C_CHAR_3 CHAR(102400),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE)
+partition by range (C_CHAR_3,C_VARCHAR_3,C_INT,C_TS_WITHOUT)
+(
+        partition PARTITION_SELECT_PICT_1 values less than ('DEFGHIJ', 'defghij', 444, '2000-04-04 04:04:04'),
+        partition PARTITION_SELECT_PICT_2 values less than ('GHIJKLM', 'ghijklm', 777, '2000-07-07 07:07:07'),
+        partition PARTITION_SELECT_PICT_3 values less than ('MJKLMNO', 'ijklmno', 999, '2000-09-09 09:09:09')
+);
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('ABCDEFG','abcdefg',111,111.1,'2000-01-01 01:01:01');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('BCDEFGH','bcdefgh',222,222.2,'2000-02-02 02:02:02');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('CDEFGHI','cdefghi',333,333.3,'2000-03-03 03:03:03');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('DEFGHIJ','defghij',444,444.4,'2000-04-04 04:04:04');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('EFGHIJK','efghijk',555,555.5,'2000-05-05 05:05:05');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('FGHIJKL','fghijkl',666,666.6,'2000-06-06 06:06:06');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('ABCDEFG',null,111,111.1,'2000-01-01 01:01:01');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('ABCDEFG',null,null,null,null);
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('ABCDEFG','abcdefg',null,111.1,'2000-01-01 01:01:01');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('BCDEFGH','bcdefgh',null,null,'2000-02-02 02:02:02');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('BCDEFGH',null,222,null,'2000-02-02 02:02:02');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('CDEFGHI','cdefghi',333,null,'2000-03-03 03:03:03');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('EFGHIJK',null,null,555.5,'2000-05-05 05:05:05');
+INSERT INTO PARTITION_SELECT_PICT_TABLE VALUES('FGHIJKL','fghijkl',null,null,null);
+insert into PARTITION_SELECT_PICT_TABLE VALUES('A'||generate_series(1,5),'a'||generate_series(1,5),generate_series(1,5),cast( generate_series(1,5)||'.111' as numeric(10,5)),cast('2000-01-'||generate_series(1,5)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('B'||generate_series(101,103),'b'||generate_series(101,103),generate_series(101,103),cast(generate_series(101,103)||'.111' as numeric(10,5)),cast('2000-02-'||generate_series(1,3)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('C'||generate_series(201,205),'c'||generate_series(201,205),generate_series(201,205),cast(generate_series(201,205)||'.111' as numeric(10,5)),cast('2000-03-'||generate_series(1,5)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('D'||generate_series(301,303),'d'||generate_series(301,303),generate_series(301,303),cast(generate_series(301,303)||'.111' as numeric(10,5)),cast('2000-04-'||generate_series(1,3)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('DE'||generate_series(401,405),'de'||generate_series(401,405),generate_series(401,405),cast(generate_series(401,405)||'.111' as numeric(10,5)),cast('2000-05-'||generate_series(1,5)||' 12:12:12' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('E'||generate_series(501,504),'e'||generate_series(501,504),generate_series(501,504),cast( generate_series(501,504)||'.222' as numeric(10,5)),cast('2000-01-'||generate_series(1,4)||' 13:13:13' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('F'||generate_series(601,603),'f'||generate_series(601,603),generate_series(601,603),cast(generate_series(601,603)||'.222' as numeric(10,5)),cast('2000-02-'||generate_series(1,3)||' 13:13:13' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('G'||generate_series(701,705),'g'||generate_series(701,705),generate_series(701,705),cast(generate_series(701,705)||'.222' as numeric(10,5)),cast('2000-03-'||generate_series(1,5)||' 13:13:13' as TIMESTAMP WITHOUT TIME ZONE));
+insert into PARTITION_SELECT_PICT_TABLE VALUES('GH'||generate_series(801,803),'gh'||generate_series(801,803),generate_series(801,803),cast(generate_series(801,803)||'.222' as numeric(10,5)),cast('2000-04-'||generate_series(1,3)||' 13:13:13' as TIMESTAMP WITHOUT TIME ZONE));
+CREATE TABLE VECTOR_PARTITION_SELECT_PICT_TABLE(
+C_CHAR_3 CHAR(102400),
+C_VARCHAR_3 VARCHAR(1024),
+C_INT INTEGER,
+C_NUMERIC numeric(10,5),
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE) with (orientation = column)
+ 
+partition by range (C_CHAR_3,C_VARCHAR_3,C_INT,C_TS_WITHOUT)
+(
+        partition PARTITION_SELECT_PICT_1 values less than ('DEFGHIJ', 'defghij', 444, '2000-04-04 04:04:04'),
+        partition PARTITION_SELECT_PICT_2 values less than ('GHIJKLM', 'ghijklm', 777, '2000-07-07 07:07:07'),
+        partition PARTITION_SELECT_PICT_3 values less than ('MJKLMNO', 'ijklmno', 999, '2000-09-09 09:09:09')
+);
+insert into VECTOR_PARTITION_SELECT_PICT_TABLE select * from PARTITION_SELECT_PICT_TABLE;
+create index PARTITION_SELECT_PICT_INDEX_1 ON VECTOR_PARTITION_SELECT_PICT_TABLE(C_CHAR_3,C_VARCHAR_3,C_INT,C_NUMERIC,C_TS_WITHOUT) local(PARTITION PARTITION_SELECT_PICT_1, PARTITION PARTITION_SELECT_PICT_2, PARTITION PARTITION_SELECT_PICT_3);
+create index PARTITION_SELECT_PICT_INDEX_2 ON VECTOR_PARTITION_SELECT_PICT_TABLE(C_CHAR_3,C_VARCHAR_3,C_INT,C_TS_WITHOUT) local(PARTITION PARTITION_SELECT_PICT_1, PARTITION PARTITION_SELECT_PICT_2, PARTITION PARTITION_SELECT_PICT_3);
+create index PARTITION_SELECT_PICT_INDEX_3 ON VECTOR_PARTITION_SELECT_PICT_TABLE(C_CHAR_3,C_INT,C_TS_WITHOUT) local(PARTITION PARTITION_SELECT_PICT_1, PARTITION PARTITION_SELECT_PICT_2, PARTITION PARTITION_SELECT_PICT_3);
+SELECT trim(C_CHAR_3) , trim(C_VARCHAR_3) , C_INT , C_NUMERIC , C_TS_WITHOUT , lower(trim(C_CHAR_3)) , initcap(trim(C_VARCHAR_3)) , abs(C_INT) , abs(C_NUMERIC) , extract(year from C_TS_WITHOUT) FROM VECTOR_PARTITION_SELECT_PICT_TABLE partition(PARTITION_SELECT_PICT_1) where 'a' not like C_VARCHAR_3 and 1000 != C_INT and C_NUMERIC is not null and (C_TS_WITHOUT >= '2000-01-01 01:01:01' and C_TS_WITHOUT <= '2000-09-09 09:09:09') ORDER BY 1 , 2 , 3 , 4 , 5 ;
+  btrim  |  btrim  | c_int | c_numeric |    c_ts_without     |  lower  | initcap | abs |    abs    | date_part 
+---------+---------+-------+-----------+---------------------+---------+---------+-----+-----------+-----------
+ A1      | a1      |     1 |   1.11100 | 2000-01-01 12:12:12 | a1      | A1      |   1 |   1.11100 |      2000
+ A2      | a2      |     2 |   2.11100 | 2000-01-02 12:12:12 | a2      | A2      |   2 |   2.11100 |      2000
+ A3      | a3      |     3 |   3.11100 | 2000-01-03 12:12:12 | a3      | A3      |   3 |   3.11100 |      2000
+ A4      | a4      |     4 |   4.11100 | 2000-01-04 12:12:12 | a4      | A4      |   4 |   4.11100 |      2000
+ A5      | a5      |     5 |   5.11100 | 2000-01-05 12:12:12 | a5      | A5      |   5 |   5.11100 |      2000
+ ABCDEFG | abcdefg |   111 | 111.10000 | 2000-01-01 01:01:01 | abcdefg | Abcdefg | 111 | 111.10000 |      2000
+ B101    | b101    |   101 | 101.11100 | 2000-02-01 12:12:12 | b101    | B101    | 101 | 101.11100 |      2000
+ B102    | b102    |   102 | 102.11100 | 2000-02-02 12:12:12 | b102    | B102    | 102 | 102.11100 |      2000
+ B103    | b103    |   103 | 103.11100 | 2000-02-03 12:12:12 | b103    | B103    | 103 | 103.11100 |      2000
+ BCDEFGH | bcdefgh |   222 | 222.20000 | 2000-02-02 02:02:02 | bcdefgh | Bcdefgh | 222 | 222.20000 |      2000
+ C201    | c201    |   201 | 201.11100 | 2000-03-01 12:12:12 | c201    | C201    | 201 | 201.11100 |      2000
+ C202    | c202    |   202 | 202.11100 | 2000-03-02 12:12:12 | c202    | C202    | 202 | 202.11100 |      2000
+ C203    | c203    |   203 | 203.11100 | 2000-03-03 12:12:12 | c203    | C203    | 203 | 203.11100 |      2000
+ C204    | c204    |   204 | 204.11100 | 2000-03-04 12:12:12 | c204    | C204    | 204 | 204.11100 |      2000
+ C205    | c205    |   205 | 205.11100 | 2000-03-05 12:12:12 | c205    | C205    | 205 | 205.11100 |      2000
+ CDEFGHI | cdefghi |   333 | 333.30000 | 2000-03-03 03:03:03 | cdefghi | Cdefghi | 333 | 333.30000 |      2000
+ D301    | d301    |   301 | 301.11100 | 2000-04-01 12:12:12 | d301    | D301    | 301 | 301.11100 |      2000
+ D302    | d302    |   302 | 302.11100 | 2000-04-02 12:12:12 | d302    | D302    | 302 | 302.11100 |      2000
+ D303    | d303    |   303 | 303.11100 | 2000-04-03 12:12:12 | d303    | D303    | 303 | 303.11100 |      2000
+ DE401   | de401   |   401 | 401.11100 | 2000-05-01 12:12:12 | de401   | De401   | 401 | 401.11100 |      2000
+ DE402   | de402   |   402 | 402.11100 | 2000-05-02 12:12:12 | de402   | De402   | 402 | 402.11100 |      2000
+ DE403   | de403   |   403 | 403.11100 | 2000-05-03 12:12:12 | de403   | De403   | 403 | 403.11100 |      2000
+ DE404   | de404   |   404 | 404.11100 | 2000-05-04 12:12:12 | de404   | De404   | 404 | 404.11100 |      2000
+ DE405   | de405   |   405 | 405.11100 | 2000-05-05 12:12:12 | de405   | De405   | 405 | 405.11100 |      2000
+(24 rows)
+
+drop table PARTITION_SELECT_PICT_TABLE;
+drop table VECTOR_PARTITION_SELECT_PICT_TABLE;
+CREATE TABLE row_tbl_for_gin_idx(c_id tsvector ,c_d_id tsvector) ;
+CREATE INDEX ginidx_for_rowtbl ON row_tbl_for_gin_idx  USING GIN(c_id,c_d_id) WITH (FASTUPDATE = OFF);
+-- test storage parameters for index normal-relation
+CREATE TABLE heaptbl_idxstorage ( a int, b int , c int ) with ( orientation = column );
+CREATE INDEX idx00_heaptbl_idxstorage ON heaptbl_idxstorage(b) with (max_batchrow = 20000, partial_cluster_rows = 720000, deltarow_threshold = 2000 );
+SELECT relam, relkind, reloptions FROM pg_class WHERE relname = 'idx00_heaptbl_idxstorage';
+ relam | relkind |                                reloptions                                
+-------+---------+--------------------------------------------------------------------------
+  4039 | i       | {max_batchrow=20000,partial_cluster_rows=720000,deltarow_threshold=2000}
+(1 row)
+
+SELECT reloptions FROM pg_class WHERE oid = (SELECT relcudescrelid FROM pg_class WHERE relname = 'idx00_heaptbl_idxstorage');
+                                                   reloptions                                                    
+-----------------------------------------------------------------------------------------------------------------
+ {max_batchrow=20000,partial_cluster_rows=720000,deltarow_threshold=2000,orientation=column,internal_mask=33031}
+(1 row)
+
+ALTER INDEX idx00_heaptbl_idxstorage SET (max_batchrow = 40000, partial_cluster_rows = 920000, deltarow_threshold = 4000 );
+SELECT relam, relkind, reloptions FROM pg_class WHERE relname = 'idx00_heaptbl_idxstorage';
+ relam | relkind |                                reloptions                                
+-------+---------+--------------------------------------------------------------------------
+  4039 | i       | {max_batchrow=40000,partial_cluster_rows=920000,deltarow_threshold=4000}
+(1 row)
+
+SELECT reloptions FROM pg_class WHERE oid = (SELECT relcudescrelid FROM pg_class WHERE relname = 'idx00_heaptbl_idxstorage');
+                                                   reloptions                                                    
+-----------------------------------------------------------------------------------------------------------------
+ {orientation=column,internal_mask=33031,max_batchrow=40000,partial_cluster_rows=920000,deltarow_threshold=4000}
+(1 row)
+
+-- test storage parameters for index partition-relation
+CREATE TABLE parttbl_idxstorage ( a int, b int , c int ) with ( orientation = column ) 
+partition by range(b) (partition p1 values less than (10), partition p2 values less than (100));
+CREATE INDEX idx00_parttbl_idxstorage ON parttbl_idxstorage(c) local with (max_batchrow = 20000, partial_cluster_rows = 720000, deltarow_threshold = 2000 );
+SELECT relam, relkind, reloptions FROM pg_class WHERE relname = 'idx00_parttbl_idxstorage';
+ relam | relkind |                                reloptions                                
+-------+---------+--------------------------------------------------------------------------
+  4039 | i       | {max_batchrow=20000,partial_cluster_rows=720000,deltarow_threshold=2000}
+(1 row)
+
+SELECT reloptions FROM pg_class WHERE oid in (
+  SELECT relcudescrelid from pg_partition where parentid = (SELECT oid FROM pg_class WHERE relname = 'idx00_parttbl_idxstorage') );
+                                                   reloptions                                                    
+-----------------------------------------------------------------------------------------------------------------
+ {max_batchrow=20000,partial_cluster_rows=720000,deltarow_threshold=2000,orientation=column,internal_mask=33031}
+ {max_batchrow=20000,partial_cluster_rows=720000,deltarow_threshold=2000,orientation=column,internal_mask=33031}
+(2 rows)
+
+ALTER INDEX idx00_parttbl_idxstorage SET (max_batchrow = 40000, partial_cluster_rows = 920000, deltarow_threshold = 4000 );
+SELECT relam, relkind, reloptions FROM pg_class WHERE relname = 'idx00_parttbl_idxstorage';
+ relam | relkind |                                reloptions                                
+-------+---------+--------------------------------------------------------------------------
+  4039 | i       | {max_batchrow=40000,partial_cluster_rows=920000,deltarow_threshold=4000}
+(1 row)
+
+SELECT reloptions FROM pg_class WHERE oid in (
+  SELECT relcudescrelid from pg_partition where parentid = (SELECT oid FROM pg_class WHERE relname = 'idx00_parttbl_idxstorage') );
+                                                   reloptions                                                    
+-----------------------------------------------------------------------------------------------------------------
+ {orientation=column,internal_mask=33031,max_batchrow=40000,partial_cluster_rows=920000,deltarow_threshold=4000}
+ {orientation=column,internal_mask=33031,max_batchrow=40000,partial_cluster_rows=920000,deltarow_threshold=4000}
+(2 rows)
+
+-- test: fill vector batch by switching to different CUs
+CREATE TABLE coltbl ( a int, b int ) WITH ( ORIENTATION = COLUMN );
+CREATE TABLE rowtbl ( a int, b int );
+INSERT INTO rowtbl VALUES ( 1, 1) , (1, 2); 
+INSERT INTO coltbl SELECT * FROM rowtbl; 
+TRUNCATE TABLE rowtbl;
+INSERT INTO rowtbl VALUES ( 1, 3) , (1, 4);
+INSERT INTO coltbl SELECT * FROM rowtbl;
+TRUNCATE TABLE rowtbl;
+INSERT INTO rowtbl VALUES ( 1, 5) , (1, 6);
+INSERT INTO coltbl SELECT * FROM rowtbl;
+CREATE INDEX idx_coltbl ON coltbl(b);
+SELECT * FROM coltbl WHERE b < 6 order by b;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+(5 rows)
+
+DROP TABLE coltbl;
+DROP TABLE rowtbl;
+-- index scan: constant target list
+create table test_index_const_targetlist (id int,info int,info1 int) with(orientation=column);
+create index idx1_test_index_const_targetlist on test_index_const_targetlist(info);
+create index idx2_test_index_const_targetlist on test_index_const_targetlist(info1);
+insert into test_index_const_targetlist values(generate_series(1,10),generate_series(1,10), 1);
+update test_index_const_targetlist set info=info+1 where info>5;
+select 1 from test_index_const_targetlist where  info1=1 ;
+ ?column? 
+----------
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+        1
+(10 rows)
+
+DROP TABLE test_index_const_targetlist;
+-- create psort index in schema
+CREATE SCHEMA psort_schema;
+create table psort_schema.psort_base_tab (
+                col_tinyint                  tinyint,
+                col_smallint         smallint,
+                col_int                      integer,
+                col_bigint                   bigint,
+                col_numeric                  numeric,
+                col_real                     real,
+                col_double                   double precision,
+                col_decimal          decimal,
+                col_varchar          varchar,
+                col_char                     char(30),
+                col_nvarchar2        nvarchar2,
+                col_text                     text,
+                col_timestamptz          timestamp with time zone,
+                col_timestamp            timestamp without time zone,
+                col_date                     date,
+                col_time                     time without time zone,
+                col_timetz                   time with time zone,
+                col_interval         interval,
+                col_smalldatetine        smalldatetime,partial cluster key(col_timestamp)
+) with (orientation=column) 
+partition by range (col_int)
+(
+partition vector_base_tab_000_1 values less than (10),
+partition vector_base_tab_000_2 values less than (30),
+partition vector_base_tab_000_3 values less than (137),
+partition vector_base_tab_000_4 values less than (273),
+partition vector_base_tab_000_5 values less than (357),
+partition vector_base_tab_000_6 values less than (433),
+partition vector_base_tab_000_7 values less than (587),
+partition vector_base_tab_000_8 values less than (687),
+partition vector_base_tab_000_9 values less than (787),
+partition vector_base_tab_000_10 values less than (1087),
+partition vector_base_tab_000_11 values less than (1110),
+partition vector_base_tab_000_12 values less than (1200),
+partition vector_base_tab_000_13 values less than (1337),
+partition vector_base_tab_000_14 values less than (1473),
+partition vector_base_tab_000_15 values less than (1557),
+partition vector_base_tab_000_16 values less than (1633),
+partition vector_base_tab_000_17 values less than (1787),
+partition vector_base_tab_000_18 values less than (1887),
+partition vector_base_tab_000_19 values less than (1987),
+partition vector_base_tab_000_20 values less than (2087),
+partition vector_base_tab_000_21 values less than (2110),
+partition vector_base_tab_000_22 values less than (2277),
+partition vector_base_tab_000_23 values less than (2337),
+partition vector_base_tab_000_24 values less than (2473),
+partition vector_base_tab_000_25 values less than (2557),
+partition vector_base_tab_000_26 values less than (2633),
+partition vector_base_tab_000_27 values less than (2787),
+partition vector_base_tab_000_28 values less than (2887),
+partition vector_base_tab_000_29 values less than (2987),
+partition vector_base_tab_000_30 values less than (3187),
+partition vector_base_tab_000_31 values less than (3287),
+partition vector_base_tab_000_32 values less than (3387),
+partition vector_base_tab_000_33 values less than (3488),
+partition vector_base_tab_000_34 values less than (3566),
+partition vector_base_tab_000_35 values less than (3689),
+partition vector_base_tab_000_36 values less than (3785),
+partition vector_base_tab_000_37 values less than (3887),
+partition vector_base_tab_000_38 values less than (3987),
+partition vector_base_tab_000_39 values less than (maxvalue)
+);
+create table psort_base_tab (
+                col_tinyint                  tinyint,
+                col_smallint         smallint,
+                col_int                      integer,
+                col_bigint                   bigint,
+                col_numeric                  numeric,
+                col_real                     real,
+                col_double                   double precision,
+                col_decimal          decimal,
+                col_varchar          varchar,
+                col_char                     char(30),
+                col_nvarchar2        nvarchar2,
+                col_text                     text,
+                col_timestamptz          timestamp with time zone,
+                col_timestamp            timestamp without time zone,
+                col_date                     date,
+                col_time                     time without time zone,
+                col_timetz                   time with time zone,
+                col_interval         interval,
+                col_smalldatetine        smalldatetime,partial cluster key(col_timestamp)
+) with (orientation=column) 
+partition by range (col_int)
+(
+partition vector_base_tab_000_1 values less than (10),
+partition vector_base_tab_000_2 values less than (30),
+partition vector_base_tab_000_3 values less than (137),
+partition vector_base_tab_000_4 values less than (273),
+partition vector_base_tab_000_5 values less than (357),
+partition vector_base_tab_000_6 values less than (433),
+partition vector_base_tab_000_7 values less than (587),
+partition vector_base_tab_000_8 values less than (687),
+partition vector_base_tab_000_9 values less than (787),
+partition vector_base_tab_000_10 values less than (1087),
+partition vector_base_tab_000_11 values less than (1110),
+partition vector_base_tab_000_12 values less than (1200),
+partition vector_base_tab_000_13 values less than (1337),
+partition vector_base_tab_000_14 values less than (1473),
+partition vector_base_tab_000_15 values less than (1557),
+partition vector_base_tab_000_16 values less than (1633),
+partition vector_base_tab_000_17 values less than (1787),
+partition vector_base_tab_000_18 values less than (1887),
+partition vector_base_tab_000_19 values less than (1987),
+partition vector_base_tab_000_20 values less than (2087),
+partition vector_base_tab_000_21 values less than (2110),
+partition vector_base_tab_000_22 values less than (2277),
+partition vector_base_tab_000_23 values less than (2337),
+partition vector_base_tab_000_24 values less than (2473),
+partition vector_base_tab_000_25 values less than (2557),
+partition vector_base_tab_000_26 values less than (2633),
+partition vector_base_tab_000_27 values less than (2787),
+partition vector_base_tab_000_28 values less than (2887),
+partition vector_base_tab_000_29 values less than (2987),
+partition vector_base_tab_000_30 values less than (3187),
+partition vector_base_tab_000_31 values less than (3287),
+partition vector_base_tab_000_32 values less than (3387),
+partition vector_base_tab_000_33 values less than (3488),
+partition vector_base_tab_000_34 values less than (3566),
+partition vector_base_tab_000_35 values less than (3689),
+partition vector_base_tab_000_36 values less than (3785),
+partition vector_base_tab_000_37 values less than (3887),
+partition vector_base_tab_000_38 values less than (3987),
+partition vector_base_tab_000_39 values less than (maxvalue)
+);
+create index psort_base_tab_index_0001 on psort_schema.psort_base_tab(col_smallint,col_int,col_char,col_text,col_timestamp,col_date) local;
+create index psort_base_tab_index_0001 on psort_base_tab(col_smallint,col_int,col_char,col_text,col_timestamp,col_date) local;
+drop table psort_schema.psort_base_tab;
+drop table psort_base_tab;
+----
+-- create index in tablespace
+----
+create table psort_schema.cstore_col_part (id int, cu int, num int, num1 int) with (orientation = column)  
+partition by range (num1)
+(
+	partition p1  values less than (1000),
+	partition p2  values less than (2000),
+	partition p3  values less than (3000),
+	partition p4  values less than (4000),
+	partition p5  values less than (5000),
+	partition p6  values less than (maxvalue)
+);
+create table psort_schema.cstore_row (id int, cu int, num int, num1 int) ;
+insert into psort_schema.cstore_row values(1, 1, generate_series(1, 5000), generate_series(1, 5000));
+insert into psort_schema.cstore_col_part select * from psort_schema.cstore_row;
+create tablespace psort_ts location '@abs_srcdir@/testtablespace/psort_ts' maxsize '256k';
+create index on psort_schema.cstore_col_part(num) local tablespace psort_ts;
+ERROR:  Insufficient storage space for tablespace "psort_ts"
+--?HINT.*
+drop tablespace psort_ts;
+create tablespace psort_ts location '@abs_srcdir@/testtablespace/psort_ts';
+start transaction;
+create index on psort_schema.cstore_col_part(num) local tablespace psort_ts;
+rollback;
+drop tablespace psort_ts;
+drop table psort_schema.cstore_col_part;
+----
+-- CStoreIndexScan and output XMIN
+----
+insert into psort_schema.cstore_row values(1, 2, generate_series(1, 5000), generate_series(1, 5000));
+insert into psort_schema.cstore_row values(1, 3, generate_series(1, 5000), generate_series(1, 5000));
+insert into psort_schema.cstore_row values(1, 4, generate_series(1, 5000), generate_series(1, 5000));
+insert into psort_schema.cstore_row values(1, 5, generate_series(1, 5000), generate_series(1, 5000));
+create table psort_schema.cstore_col (id int, cu int, num int, num1 int) with (orientation = column) ;
+insert into psort_schema.cstore_col select * from psort_schema.cstore_row where cu = 1;
+insert into psort_schema.cstore_col select * from psort_schema.cstore_row where cu = 2;
+insert into psort_schema.cstore_col select * from psort_schema.cstore_row where cu = 3;
+insert into psort_schema.cstore_col select * from psort_schema.cstore_row where cu = 4;
+insert into psort_schema.cstore_col select * from psort_schema.cstore_row where cu = 5;
+create index on psort_schema.cstore_col(num);
+create index on psort_schema.cstore_col(num1);
+analyze psort_schema.cstore_col;
+select count(xmin) from psort_schema.cstore_col where num = 100;
+ count 
+-------
+     5
+(1 row)
+
+select count(xmin) from psort_schema.cstore_col where num = 200 and num1 = 200;
+ count 
+-------
+     5
+(1 row)
+
+drop table psort_schema.cstore_row;
+drop table psort_schema.cstore_col;
+DROP SCHEMA psort_schema CASCADE;

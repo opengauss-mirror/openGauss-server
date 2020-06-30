@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<scene name="install" desc="check cluster parameters before install.">
+    <configuration/>
+
+    <allowitems>
+                <item name="CheckDirLeft"/>
+        <item name="CheckProcessLeft"/>
+        <item name="CheckPortConflict"/>
+        <item name="CheckOmmUserExist"/>
+        <item name="CheckCrontabLeft"/>
+        <item name="CheckSysPortRange"/>
+        <item name="CheckStack"/>
+        <item name="CheckCrondService"/>
+        <item name="CheckSshdService"/>
+        <item name="CheckSctpService"/>
+        <item name="CheckSysParams">
+            <threshold>
+                version=V1R7C00
+            </threshold>
+        </item>
+        <item name="CheckNoCheckSum"/>
+        <item name="CheckDiskFormat"/>
+        <item name="CheckEtcHosts"/>
+        <item name="CheckHyperThread"/>
+        <item name="CheckCpuCount"/>
+
+        <!--check os items-->
+        <item name="CheckTimeZone"/>
+        <item name="CheckEncoding"/>
+        <item name="CheckKernelVer"/>
+        <item name="CheckMaxHandle"/>
+        <item name="CheckNTPD"/>
+        <item name="CheckOSVer"/>
+        <item name="CheckTHP"/>
+        <item name="CheckSwapMemory"/>
+        <item name="CheckBlockdev"/>
+        <item name="CheckLogicalBlock"/>
+        <item name="CheckIOrequestqueue"/>
+        <item name="CheckMaxAsyIOrequests"/>
+        <item name="CheckIOConfigure"/>
+        <item name="CheckFirewall"/>
+        <item name="CheckSpaceUsage"/>
+        <item name="CheckInodeUsage"/>
+        <item name="CheckDiskConfig"/>
+        <item name="CheckMemInfo"/>
+        <item name="CheckBootItems"/>
+
+        <item name="CheckMTU"/>
+        <item name="CheckRXTX"/>
+        <item name="CheckMultiQueue"/>
+        <item name="CheckBond"/>
+        <item name="CheckNetSpeed"/>
+        <item name="CheckRouting"/>
+        <item name="CheckNICModel"/>
+    </allowitems>
+</scene>

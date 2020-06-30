@@ -1,0 +1,74 @@
+alter node node_1 with (port=12000);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+drop node node1;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create node group nodegroup1 with (dn1, dn2, dn3);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+alter node group nodegroup1 rename to nodegroup2;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+drop node group nodegroup1;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create role role1 with node group node_group1 password disable;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+alter role role1 with node group node_group2;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create group group1 with node group node_group1 password disable;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create user user1 node group nodegroup1;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+alter user user1 node group nodegroup1;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create table table1 (id int);
+select /*+ redistribute(table1) +*/ * from table1;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+drop table table1;
+create barrier;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+clean connection to node (dn2);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create table table_neg_tmp (id int);
+create table table1 (id int) to node (dn2);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create table table2 (like table_neg_tmp including distribution);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+drop table table_neg_tmp;
+create node group group1_90 with (datanode);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+alter node group group1_90 set default;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+drop node group group1_90;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create table t1 (id int, value char(3));
+explain plan for select * from t1;
+select id, operation, options, object_name, object_type, projection from plan_table;
+ id |  operation   | options  | object_name | object_type | projection 
+----+--------------+----------+-------------+-------------+------------
+  1 | TABLE ACCESS | SEQ SCAN | t1          | TABLE       | id, value
+(1 row)
+
+delete from plan_table where id=1;
+drop table t1;
+-- add userid field in audit file
+select * from pg_query_audit('1970-1-1', '9999-12-31') limit 0;
+ time | type | result | userid | username | database | client_conninfo | object_name | detail_info | node_name | thread_id | local_port | remote_port 
+------+------+--------+--------+----------+----------+-----------------+-------------+-------------+-----------+-----------+------------+-------------
+(0 rows)
+

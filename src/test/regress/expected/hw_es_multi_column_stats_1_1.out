@@ -1,0 +1,56 @@
+--==========================================================
+--==========================================================
+\set ECHO all
+set current_schema = hw_es_multi_column_stats;
+set default_statistics_target=-2;
+--========================================================== analyze t ((a, b))
+select relname, relpages > 0, reltuples > 0 from pg_class where relname = 't1_1';
+ relname | ?column? | ?column? 
+---------+----------+----------
+ t1_1    | f        | f
+(1 row)
+
+analyze t1_1 ((a, b));
+analyze t1_1 ((b, c));
+analyze t1_1 ((a, d));
+analyze t1_1 ((b, d));
+analyze t1_1 ((c, d));
+analyze t1_1 ((b, c, d));
+analyze t1_1 ((a, b, c, d));
+select relname, relpages > 0, reltuples > 0 from pg_class where relname = 't1_1';
+ relname | ?column? | ?column? 
+---------+----------+----------
+ t1_1    | t        | t
+(1 row)
+
+analyze t1r_1 ((a, b));
+analyze t1r_1 ((b, c));
+analyze t1r_1 ((a, d));
+analyze t1r_1 ((b, d));
+analyze t1r_1 ((c, d));
+analyze t1r_1 ((b, c, d));
+analyze t1r_1 ((a, b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1_1' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            |         most_common_freqs         | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-----------------------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1_1      | 1 2     | f         |         0 |         8 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_1      | 1 2 3 4 | f         |         0 |        16 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_1      | 1 4     | f         |         0 |         8 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_1      | 2 3     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,2,2}"}             | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_1      | 2 3 4   | f         |         0 |        12 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_1      | 2 4     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,1,1}"}             | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_1      | 3 4     | f         |         0 |         8 |   -.333333 |            0 | {"{1,2}","{1,1}"}                     | {.444444,.444444}                 |                       |                        | 
+(7 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r_1' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            |         most_common_freqs         | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-----------------------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1r_1     | 1 2     | f         |         0 |         8 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_1     | 1 2 3 4 | f         |         0 |        16 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_1     | 1 4     | f         |         0 |         8 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_1     | 2 3     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,2,2}"}             | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1r_1     | 2 3 4   | f         |         0 |        12 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1r_1     | 2 4     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,1,1}"}             | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1r_1     | 3 4     | f         |         0 |         8 |   -.333333 |            0 | {"{1,2}","{1,1}"}                     | {.444444,.444444}                 |                       |                        | 
+(7 rows)
+

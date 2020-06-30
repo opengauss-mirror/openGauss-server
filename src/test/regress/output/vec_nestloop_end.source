@@ -1,0 +1,208 @@
+set enable_force_vector_engine=on;
+set current_schema = vec_nestloop_engine;
+SET statement_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET default_tablespace = '';
+SET default_with_oids = false;
+----
+--- Special Case: nestloop + hashjoin + operator with parameters pushed down (openGauss1111111/2014120306303)
+----
+CREATE INDEX vecvtor_nestloop_base_index_01 ON VECTOR_NESTLOOP_TABLE_05 USING psort (id) LOCAL(PARTITION b1_p1_id_idx, PARTITION b1_p2_id_idx, PARTITION b1_p3_id_idx) ;
+CREATE INDEX vecvtor_nestloop_base_index_02 ON VECTOR_NESTLOOP_TABLE_06 USING psort (id, c_d_id, c_id) LOCAL(PARTITION b5_p1_id_c_d_id_c_id_idx, PARTITION b5_p2_id_c_d_id_c_id_idx, PARTITION b5_p3_id_c_d_id_c_id_idx, PARTITION b5_p4_id_c_d_id_c_id_idx, PARTITION b5_p5_id_c_d_id_c_id_idx, PARTITION b5_p6_id_c_d_id_c_id_idx) ;
+CREATE INDEX vecvtor_nestloop_base_index_03 ON VECTOR_NESTLOOP_TABLE_07 USING psort (id, c_d_id, c_w_id) LOCAL(PARTITION b7_p1_id_c_d_id_c_w_id_idx, PARTITION b7_p2_id_c_d_id_c_w_id_idx, PARTITION b7_p3_id_c_d_id_c_w_id_idx, PARTITION b7_p4_id_c_d_id_c_w_id_idx, PARTITION b7_p5_id_c_d_id_c_w_id_idx, PARTITION b7_p6_id_c_d_id_c_w_id_idx, PARTITION b7_p7_id_c_d_id_c_w_id_idx, PARTITION b7_p8_id_c_d_id_c_w_id_idx, PARTITION b7_p9_id_c_d_id_c_w_id_idx, PARTITION b7_p10_id_c_d_id_c_w_id_idx, PARTITION b7_p11_id_c_d_id_c_w_id_idx) ;
+CREATE INDEX zip_idx ON VECTOR_NESTLOOP_TABLE_05 USING psort (zip) LOCAL(PARTITION b1_p1_zip_idx, PARTITION b1_p2_zip_idx, PARTITION b1_p3_zip_idx) ;
+SELECT 	A.id, A.name, A.zip FROM VECTOR_NESTLOOP_TABLE_05 A WHERE (A.id IN (SELECT distinct C.id FROM VECTOR_NESTLOOP_TABLE_07 C WHERE NOT (EXISTS (SELECT * FROM VECTOR_NESTLOOP_TABLE_06 B WHERE B.c_id = C.id)))) ORDER BY 1,2,3;
+ id |    name    |    zip    
+----+------------+-----------
+  3 | qcscbhkkql | 545511111
+  4 | dmkczswa   | 522411111
+  5 | vsfcguexuf | 329711111
+  6 | escpbk     | 784411111
+  7 | jcanwmh    | 950211111
+  8 | wzdnxwhm   | 979511111
+  9 | ydcuynmyud | 684011111
+ 10 | wfnlmpcw   | 760511111
+(8 rows)
+
+----
+--- Special case: material all
+----
+explain (verbose on, costs off) select * from vector_nestloop_table_01 A, vector_nestloop_table_02 B, vector_nestloop_table_03 C, vector_nestloop_table_04 D where A.col_int = B.col_int and C.col_int = D.col_int order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20 limit 5;
+                                                                                                                                                                                                                   QUERY PLAN                                                                                                                                                                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz, b.col_int, b.col_char, b.col_vchar, b.col_date, b.col_num, b.col_float1, b.col_float2, b.col_timetz, c.col_int, c.col_char, c.col_vchar, c.col_date, c.col_num, c.col_float1, c.col_float2, c.col_timetz, d.col_int, d.col_char, d.col_vchar, d.col_date, d.col_num, d.col_float1, d.col_float2, d.col_timetz
+   ->  Vector Limit
+         Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz, b.col_int, b.col_char, b.col_vchar, b.col_date, b.col_num, b.col_float1, b.col_float2, b.col_timetz, c.col_int, c.col_char, c.col_vchar, c.col_date, c.col_num, c.col_float1, c.col_float2, c.col_timetz, d.col_int, d.col_char, d.col_vchar, d.col_date, d.col_num, d.col_float1, d.col_float2, d.col_timetz
+         ->  Vector Sort
+               Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz, b.col_int, b.col_char, b.col_vchar, b.col_date, b.col_num, b.col_float1, b.col_float2, b.col_timetz, c.col_int, c.col_char, c.col_vchar, c.col_date, c.col_num, c.col_float1, c.col_float2, c.col_timetz, d.col_int, d.col_char, d.col_vchar, d.col_date, d.col_num, d.col_float1, d.col_float2, d.col_timetz
+               Sort Key: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz, b.col_char, b.col_vchar, b.col_date, b.col_num, b.col_float1, b.col_float2, b.col_timetz, c.col_int, c.col_char, c.col_vchar, c.col_date
+               ->  Vector Sonic Hash Join
+                     Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz, b.col_int, b.col_char, b.col_vchar, b.col_date, b.col_num, b.col_float1, b.col_float2, b.col_timetz, c.col_int, c.col_char, c.col_vchar, c.col_date, c.col_num, c.col_float1, c.col_float2, c.col_timetz, d.col_int, d.col_char, d.col_vchar, d.col_date, d.col_num, d.col_float1, d.col_float2, d.col_timetz
+                     Hash Cond: (a.col_int = b.col_int)
+                     ->  Vector Nest Loop
+                           Output: c.col_int, c.col_char, c.col_vchar, c.col_date, c.col_num, c.col_float1, c.col_float2, c.col_timetz, d.col_int, d.col_char, d.col_vchar, d.col_date, d.col_num, d.col_float1, d.col_float2, d.col_timetz, a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
+                           ->  Vector Sonic Hash Join
+                                 Output: c.col_int, c.col_char, c.col_vchar, c.col_date, c.col_num, c.col_float1, c.col_float2, c.col_timetz, d.col_int, d.col_char, d.col_vchar, d.col_date, d.col_num, d.col_float1, d.col_float2, d.col_timetz
+                                 Hash Cond: (d.col_int = c.col_int)
+                                 ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_04 d
+                                       Output: d.col_int, d.col_char, d.col_vchar, d.col_date, d.col_num, d.col_float1, d.col_float2, d.col_timetz
+                                 ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_03 c
+                                       Output: c.col_int, c.col_char, c.col_vchar, c.col_date, c.col_num, c.col_float1, c.col_float2, c.col_timetz
+                           ->  Vector Materialize
+                                 Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
+                                 ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_01 a
+                                       Output: a.col_int, a.col_char, a.col_vchar, a.col_date, a.col_num, a.col_float1, a.col_float2, a.col_timetz
+                     ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_02 b
+                           Output: b.col_int, b.col_char, b.col_vchar, b.col_date, b.col_num, b.col_float1, b.col_float2, b.col_timetz
+(25 rows)
+
+select * from vector_nestloop_table_01 A, vector_nestloop_table_02 B, vector_nestloop_table_03 C, vector_nestloop_table_04 D where A.col_int = B.col_int and C.col_int = D.col_int order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20 limit 5;
+ col_int |         col_char          |   col_vchar    |         col_date         | col_num | col_float1 | col_float2 | col_timetz  | col_int |         col_char          |   col_vchar    |         col_date         | col_num | col_float1 | col_float2 | col_timetz  | col_int |         col_char          |      col_vchar       |         col_date         | col_num  | col_float1 | col_float2 | col_timetz  | col_int |         col_char          |      col_vchar       |         col_date         |  col_num  | col_float1 | col_float2 | col_timetz  
+---------+---------------------------+----------------+--------------------------+---------+------------+------------+-------------+---------+---------------------------+----------------+--------------------------+---------+------------+------------+-------------+---------+---------------------------+----------------------+--------------------------+----------+------------+------------+-------------+---------+---------------------------+----------------------+--------------------------+-----------+------------+------------+-------------
+       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |     101 | Vectorize_char101         | Vectorize_Varchar101 | Thu Jan 01 00:00:00 2015 | 110.1200 |    200.123 |  1100.1234 | 16:00:00+08 |     101 | Vectorize_char101         | Vectorize_Varchar101 | Fri Jan 01 00:00:00 2016 | -389.8800 |   -299.877 |   600.1234 | 18:00:00+08
+       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |     102 | Vectorize_char102         | Vectorize_Varchar102 | Thu Jan 01 00:00:00 2015 | 111.1200 |    201.123 |  1101.1234 | 16:00:00+08 |     102 | Vectorize_char102         | Vectorize_Varchar102 | Fri Jan 01 00:00:00 2016 | -388.8800 |   -298.877 |   601.1234 | 18:00:00+08
+       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |     103 | Vectorize_char103         | Vectorize_Varchar103 | Thu Jan 01 00:00:00 2015 | 112.1200 |    202.123 |  1102.1234 | 16:00:00+08 |     103 | Vectorize_char103         | Vectorize_Varchar103 | Fri Jan 01 00:00:00 2016 | -387.8800 |   -297.877 |   602.1234 | 18:00:00+08
+       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |     104 | Vectorize_char104         | Vectorize_Varchar104 | Thu Jan 01 00:00:00 2015 | 113.1200 |    203.123 |  1103.1234 | 16:00:00+08 |     104 | Vectorize_char104         | Vectorize_Varchar104 | Fri Jan 01 00:00:00 2016 | -386.8800 |   -296.877 |   603.1234 | 18:00:00+08
+       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |       1 | test_char_1               | test_varchar_1 | Sat Dec 01 00:00:00 2012 | 10.0100 |      20.01 |      30.01 | 16:00:01+08 |     105 | Vectorize_char105         | Vectorize_Varchar105 | Thu Jan 01 00:00:00 2015 | 114.1200 |    204.123 |  1104.1234 | 16:00:00+08 |     105 | Vectorize_char105         | Vectorize_Varchar105 | Fri Jan 01 00:00:00 2016 | -385.8800 |   -295.877 |   604.1234 | 18:00:00+08
+(5 rows)
+
+---
+---
+explain (verbose on, costs off) select count(*) from vector_nestloop_table_08 t1 left join vector_nestloop_table_08 t2 on t1.n_nationkey=t2.n_regionkey
+ where CASE WHEN t2.n_regionkey=1 then '1' else '2' end = '2';
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*))
+   ->  Vector Aggregate
+         Output: count(*)
+         ->  Vector Hash Right Join
+               Output: 'Dummy'
+               Hash Cond: (t2.n_regionkey = t1.n_nationkey)
+               Filter: (CASE WHEN (t2.n_regionkey = 1) THEN '1'::text ELSE '2'::text END = '2'::text)
+               ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_08 t2
+                     Output: t2.n_regionkey
+               ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_08 t1
+                     Output: t1.n_nationkey
+(12 rows)
+
+select count(*) from vector_nestloop_table_08 t1 left join vector_nestloop_table_08 t2 on t1.n_nationkey=t2.n_regionkey
+ where CASE WHEN t2.n_regionkey=1 then '1' else '2' end = '2';
+ count 
+-------
+    40
+(1 row)
+
+create table t1(a numeric(10,0));
+insert into t1 values(1);
+insert into t1 values(generate_series(1000000, 1000020));
+create table t2(a numeric(10,0));
+insert into t2 values(1);
+insert into t2 values(generate_series(1000021, 1000040));
+create table t1_col (a numeric(10,0))with(orientation = column);
+insert into t1_col select * from t1;
+create table t2_col (b numeric(10,0))with(orientation = column);
+insert into t2_col select * from t2;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain (verbose on, costs off)  select b::numeric(1, 0) from t1_col join t2_col on (a = b);
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Row Adapter
+   Output: ((t2_col.b)::numeric(1,0))
+   ->  Vector Nest Loop
+         Output: (t2_col.b)::numeric(1,0)
+         Join Filter: (t1_col.a = t2_col.b)
+         ->  CStore Scan on vec_nestloop_engine.t1_col
+               Output: t1_col.a
+         ->  Vector Materialize
+               Output: t2_col.b
+               ->  CStore Scan on vec_nestloop_engine.t2_col
+                     Output: t2_col.b
+(11 rows)
+
+select b::numeric(1, 0) from t1_col join t2_col on (a = b);
+ b 
+---
+ 1
+(1 row)
+
+drop table t1;
+drop table t2;
+drop table t1_col;
+drop table t2_col;
+--test ctid
+set enable_hashjoin=on;
+explain (costs off, verbose on) select count(*) from vector_nestloop_table_01 t1 join vector_nestloop_table_02 t2 on t1.ctid = t2.ctid;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*))
+   ->  Vector Aggregate
+         Output: count(*)
+         ->  Vector Nest Loop
+               Output: 'Dummy'
+               Join Filter: (t1.ctid = t2.ctid)
+               ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_01 t1
+                     Output: t1.ctid
+               ->  Vector Materialize
+                     Output: t2.ctid
+                     ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_02 t2
+                           Output: t2.ctid
+(13 rows)
+
+select count(*) from vector_nestloop_table_01 t1 join vector_nestloop_table_02 t2 on t1.ctid = t2.ctid;
+ count 
+-------
+     8
+(1 row)
+
+set enable_mergejoin=on;
+set enable_nestloop=off;
+explain (costs off, verbose on) select count(*) from vector_nestloop_table_01 t1 join vector_nestloop_table_02 t2 on t1.ctid = t2.ctid;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*))
+   ->  Vector Aggregate
+         Output: count(*)
+         ->  Vector Merge Join
+               Output: 'Dummy'
+               Merge Cond: (t1.ctid = t2.ctid)
+               ->  Vector Sort
+                     Output: t1.ctid
+                     Sort Key: t1.ctid
+                     ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_01 t1
+                           Output: t1.ctid
+               ->  Vector Sort
+                     Output: t2.ctid
+                     Sort Key: t2.ctid
+                     ->  CStore Scan on vec_nestloop_engine.vector_nestloop_table_02 t2
+                           Output: t2.ctid
+(17 rows)
+
+select count(*) from vector_nestloop_table_01 t1 join vector_nestloop_table_02 t2 on t1.ctid = t2.ctid;
+ count 
+-------
+    72
+(1 row)
+
+----
+--- Clean table and resource
+----
+drop schema vec_nestloop_engine cascade;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to table vector_nestloop_table_01
+drop cascades to table vector_nestloop_table_02
+drop cascades to table row_nestloop_table_03
+drop cascades to table row_nestloop_table_04
+drop cascades to table vector_nestloop_table_03
+drop cascades to table vector_nestloop_table_04
+drop cascades to table vector_nestloop_table_05
+drop cascades to table vector_nestloop_table_06
+drop cascades to table vector_nestloop_table_07
+drop cascades to table vector_nestloop_table_08
+drop cascades to function test_vec_nestloop()

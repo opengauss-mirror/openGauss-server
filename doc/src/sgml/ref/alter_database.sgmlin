@@ -1,0 +1,29 @@
+<refentry id="SQL-ALTER_DATABASE">
+<refmeta>
+<refentrytitle>ALTER DATABASE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER DATABASE</refname>
+<refpurpose>change a database</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER DATABASE database_name
+    [ [ WITH ] CONNECTION LIMIT connlimit ];
+ALTER DATABASE database_name
+    RENAME TO new_name;
+ALTER DATABASE database_name
+    OWNER TO new_owner;
+ALTER DATABASE database_name
+    SET TABLESPACE new_tablespace;
+ALTER DATABASE database_name
+    SET configuration_parameter { { TO | = } { value | DEFAULT }  | FROM CURRENT };
+ALTER DATABASE database_name
+    RESET { configuration_parameter | ALL };
+ALTER DATABASE database_name
+    [ WITH ] { ENABLE | DISABLE } PRIVATE OBJECT;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,50 @@
+--每个参数单独测试
+\! @abs_bindir@/pg_config --bindir
+\! @abs_bindir@/pg_config --docdir
+\! @abs_bindir@/pg_config --htmldir
+\! @abs_bindir@/pg_config --includedir
+\! @abs_bindir@/pg_config --pkgincludedir
+\! @abs_bindir@/pg_config --includedir-server
+\! @abs_bindir@/pg_config --libdir
+\! @abs_bindir@/pg_config --pkglibdir
+\! @abs_bindir@/pg_config --localedir
+\! @abs_bindir@/pg_config --mandir
+\! @abs_bindir@/pg_config --sharedir
+\! @abs_bindir@/pg_config --sysconfdir
+\! @abs_bindir@/pg_config --pgxs
+\! @abs_bindir@/pg_config --configure
+\! @abs_bindir@/pg_config --cc
+\! @abs_bindir@/pg_config --cppflags
+\! @abs_bindir@/pg_config --cflags
+\! @abs_bindir@/pg_config --cflags_sl
+\! @abs_bindir@/pg_config --ldflags
+\! @abs_bindir@/pg_config --ldflags_ex
+\! @abs_bindir@/pg_config --ldflags_sl
+\! @abs_bindir@/pg_config --libs
+\! @abs_bindir@/pg_config --version
+\! @abs_bindir@/pg_config --help
+--多个参数组合测试
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex --ldflags_sl
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex --ldflags_sl --libs
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex --ldflags_sl --libs --version
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex --ldflags_sl --libs --version --help
+--不符合格式的参数测试执行
+\! @abs_bindir@/pg_config -b

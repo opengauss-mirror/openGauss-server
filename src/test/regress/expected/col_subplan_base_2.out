@@ -1,0 +1,1926 @@
+/*
+ * This file is used to test pull down of subplan expressions
+ */
+create schema col_distribute_subplan_base_2;
+set current_schema = col_distribute_subplan_base_2;
+-- Create Table and Insert Data
+create table t_subplan1(a1 int, b1 int, c1 int, d1 int) with (orientation = column)  ;
+create table t_subplan2(a2 int, b2 int, c2 int, d2 int) with (orientation = column)  ;
+insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6 from public.src;
+insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9 from public.src;
+create table t_subplan5 with (orientation = column) as select * from t_subplan1;
+create table t_subplan6 with (orientation = column) as select * from t_subplan2;
+--create row table
+create table t_subplan7 as select * from t_subplan1;
+-- other sdv failed case
+create table t_subplan3(a3 int, b3 int) with (orientation=column)  
+partition by range(a3) (partition p1 values less than (25), partition p2 values less than (maxvalue));
+insert into t_subplan3 values(1, 20);
+insert into t_subplan3 values(27, 27);
+explain (costs off, nodes off)
+select * from t_subplan3 where b3=(select max(b2) from t_subplan2);
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Partition Iterator
+         Iterations: 2
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan2 (min-max optimization)
+         ->  Partitioned CStore Scan on t_subplan3
+               Filter: (b3 = $0)
+               Selected Partitions:  1..2
+(10 rows)
+
+select * from t_subplan3 where b3=(select max(b2) from t_subplan2);
+ a3 | b3 
+----+----
+ 27 | 27
+(1 row)
+
+explain (costs off, nodes off)
+select count(*) from t_subplan3 t1 group by a3,b3
+having not exists
+(select sum(t2.b3), t2.a3, t2.b3, rank() over (partition by t1.b3 order by t2.a3) from t_subplan3 t2
+group by 2,3 order by 1,2,3,4);
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Hash Aggregate
+         Group By Key: t1.a3, t1.b3
+         Filter: (NOT (SubPlan 1))
+         ->  Vector Partition Iterator
+               Iterations: 2
+               ->  Partitioned CStore Scan on t_subplan3 t1
+                     Selected Partitions:  1..2
+         SubPlan 1
+           ->  Row Adapter
+                 ->  Vector Sort
+                       Sort Key: (sum(t2.b3)), t2.a3, t2.b3, (rank() OVER (ORDER BY t2.a3 USING = NULLS LAST))
+                       ->  Vector WindowAgg
+                             ->  Vector Sort
+                                   Sort Key: t2.a3
+                                   ->  Vector Hash Aggregate
+                                         Group By Key: t2.a3, t2.b3
+                                         ->  Vector Partition Iterator
+                                               Iterations: 2
+                                               ->  Partitioned CStore Scan on t_subplan3 t2
+                                                     Selected Partitions:  1..2
+(21 rows)
+
+select count(*) from t_subplan3 t1 group by a3,b3
+having not exists
+(select sum(t2.b3), t2.a3, t2.b3, rank() over (partition by t1.b3 order by t2.a3) from t_subplan3 t2
+group by 2,3 order by 1,2,3,4);
+ count 
+-------
+(0 rows)
+
+explain (costs off, nodes off, verbose on)
+select c1, d1 from t_subplan1
+where exists(select b3 from t_subplan3 where a3>=2)
+group by c1, d1 order by c1+1 desc, 2 desc limit 5;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.c1, t_subplan1.d1, ((t_subplan1.c1 + 1))
+   ->  Vector Limit
+         Output: t_subplan1.c1, t_subplan1.d1, ((t_subplan1.c1 + 1))
+         InitPlan 1 (returns $1)
+           ->  Row Adapter
+                 Output: ('Dummy')
+                 ->  Vector Partition Iterator
+                       Output: 'Dummy'
+                       Iterations: 2
+                       ->  Partitioned CStore Scan on col_distribute_subplan_base_2.t_subplan3
+                             Output: 'Dummy'
+                             Filter: (t_subplan3.a3 >= 2)
+                             Selected Partitions:  1..2
+         ->  Vector Sort
+               Output: t_subplan1.c1, t_subplan1.d1, ((t_subplan1.c1 + 1))
+               Sort Key: ((t_subplan1.c1 + 1)) DESC, t_subplan1.d1 DESC
+               ->  Vector Sonic Hash Aggregate
+                     Output: t_subplan1.c1, t_subplan1.d1, (t_subplan1.c1 + 1)
+                     Group By Key: t_subplan1.c1, t_subplan1.d1
+                     ->  Vector Result
+                           Output: t_subplan1.c1, t_subplan1.d1
+                           One-Time Filter: $1
+                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                 Output: t_subplan1.c1, t_subplan1.d1
+(25 rows)
+
+select c1, d1 from t_subplan1
+where exists(select b3 from t_subplan3 where a3>=2)
+group by c1, d1 order by c1+1 desc, 2 desc limit 5;
+ c1 | d1 
+----+----
+ 12 |  5
+ 12 |  4
+ 12 |  3
+ 12 |  2
+ 12 |  1
+(5 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan2 where
+ exists (select d1 from t_subplan1 where d1<8 and
+  exists (select b1 from t_subplan1 where c1<20 and
+   exists (select * from t_subplan1 where d1<9 and d1 >1 order by d1 limit 7) order by c1,b1 limit 10))
+and exists( select max(a1),count(b1),c2 from t_subplan1 group by c2 having c2>2 or c2 is null)
+order by a2, b2, c2, d2 limit 10;
+                                                                                                                        QUERY PLAN                                                                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   ->  Vector Limit
+         Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         InitPlan 3 (returns $2)
+           ->  Row Adapter
+                 Output: ('Dummy')
+                 ->  Vector Result
+                       Output: ('Dummy')
+                       One-Time Filter: $1
+                       InitPlan 2 (returns $1)
+                         ->  Row Adapter
+                               Output: col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1
+                               ->  Vector Limit
+                                     Output: col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1
+                                     InitPlan 1 (returns $0)
+                                       ->  Row Adapter
+                                             Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1
+                                             ->  Vector Limit
+                                                   Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1
+                                                   ->  Vector Sort
+                                                         Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1
+                                                         Sort Key: col_distribute_subplan_base_2.t_subplan1.d1
+                                                         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                                               Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1
+                                                               Filter: ((col_distribute_subplan_base_2.t_subplan1.d1 < 9) AND (col_distribute_subplan_base_2.t_subplan1.d1 > 1))
+                                     ->  Vector Sort
+                                           Output: col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1
+                                           Sort Key: col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.b1
+                                           ->  Vector Result
+                                                 Output: col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1
+                                                 One-Time Filter: $0
+                                                 ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                                       Output: col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1
+                                                       Filter: (col_distribute_subplan_base_2.t_subplan1.c1 < 20)
+                       ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                             Output: 'Dummy'
+                             Filter: (col_distribute_subplan_base_2.t_subplan1.d1 < 8)
+         ->  Vector Sort
+               Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               Sort Key: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               ->  Vector Result
+                     Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+                     One-Time Filter: $2
+                     ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                           Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+                           Filter: (SubPlan 4)
+                           SubPlan 4
+                             ->  Row Adapter
+                                   Output: (max(col_distribute_subplan_base_2.t_subplan1.a1)), (count(col_distribute_subplan_base_2.t_subplan1.b1)), ($3)
+                                   ->  Vector Sort Aggregate
+                                         Output: max(col_distribute_subplan_base_2.t_subplan1.a1), count(col_distribute_subplan_base_2.t_subplan1.b1), (t_subplan2.c2)
+                                         Group By Key: t_subplan2.c2
+                                         ->  Vector Result
+                                               Output: t_subplan2.c2, col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1
+                                               One-Time Filter: ((t_subplan2.c2 > 2) OR (t_subplan2.c2 IS NULL))
+                                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                                     Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1
+(58 rows)
+
+select * from t_subplan2 where
+ exists (select d1 from t_subplan1 where d1<8 and
+  exists (select b1 from t_subplan1 where c1<20 and
+   exists (select * from t_subplan1 where d1<9 and d1 >1 order by d1 limit 7) order by c1,b1 limit 10))
+and exists( select max(a1),count(b1),c2 from t_subplan1 group by c2 having c2>2 or c2 is null)
+order by a2, b2, c2, d2 limit 10;
+ a2 | b2 | c2 | d2 
+----+----+----+----
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  0
+ 10 | 10 | 10 |  1
+ 11 | 11 | 11 |  2
+ 15 | 15 |  3 |  6
+(10 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan2 where
+ exists( select max(a1),count(b1),c2 from t_subplan1 group by rollup(c2,c2) having c2>2 and c2 is not null)
+order by a2,b2,c2,d2 limit 10;
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   ->  Vector Limit
+         Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         ->  Vector Sort
+               Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               Sort Key: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                     Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+                     Filter: (SubPlan 1)
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: (max(t_subplan1.a1)), (count(t_subplan1.b1)), ($0)
+                             ->  Vector Sort Aggregate
+                                   Output: max(t_subplan1.a1), count(t_subplan1.b1), (t_subplan2.c2)
+                                   Group By Key: t_subplan2.c2
+                                   Group By Key: t_subplan2.c2
+                                   Group By Key: ()
+                                   Filter: (((t_subplan2.c2) > 2) AND ((t_subplan2.c2) IS NOT NULL))
+                                   ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                         Output: t_subplan2.c2, t_subplan1.a1, t_subplan1.b1
+(21 rows)
+
+select * from t_subplan2 where
+ exists( select max(a1),count(b1),c2 from t_subplan1 group by rollup(c2,c2) having c2>2 and c2 is not null)
+order by a2,b2,c2,d2 limit 10;
+ a2 | b2 | c2 | d2 
+----+----+----+----
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  0
+ 10 | 10 | 10 |  1
+ 11 | 11 | 11 |  2
+ 15 | 15 |  3 |  6
+(10 rows)
+
+-- test any, all, rowcompare, array sublink
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2) or d1=0 order by 1,2,3,4;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: ((hashed SubPlan 1) OR (t_subplan1.d1 = 0))
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: (count(t_subplan2.c2))
+                       ->  Vector Aggregate
+                             Output: count(t_subplan2.c2)
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                   Output: t_subplan2.c2
+(15 rows)
+
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2) or d1=0 order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  6 |  6 |  6 |  0
+ 12 | 12 | 12 |  0
+ 18 | 18 |  5 |  0
+ 24 |  4 | 11 |  0
+ 30 | 10 |  4 |  0
+ 36 | 16 | 10 |  0
+ 42 |  2 |  3 |  0
+ 48 |  8 |  9 |  0
+ 50 | 10 | 11 |  2
+ 54 | 14 |  2 |  0
+ 60 |  0 |  8 |  0
+ 66 |  6 |  1 |  0
+ 72 | 12 |  7 |  0
+ 78 | 18 |  0 |  0
+ 84 |  4 |  6 |  0
+ 90 | 10 | 12 |  0
+ 96 | 16 |  5 |  0
+(17 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2 where c1>d2 minus all select d1 from t_subplan2) or d1=0 order by 1,2,3,4;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: ((SubPlan 1) OR (t_subplan1.d1 = 0))
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: "*SELECT* 1".count, (0)
+                       ->  Vector HashSetOp Except All
+                             Output: "*SELECT* 1".count, (0)
+                             ->  Vector Append
+                                   ->  Vector Subquery Scan on "*SELECT* 1"
+                                         Output: "*SELECT* 1".count, 0
+                                         ->  Vector Aggregate
+                                               Output: count(col_distribute_subplan_base_2.t_subplan2.c2)
+                                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                                     Output: col_distribute_subplan_base_2.t_subplan2.c2
+                                                     Filter: (t_subplan1.c1 > col_distribute_subplan_base_2.t_subplan2.d2)
+                                   ->  Vector Subquery Scan on "*SELECT* 2"
+                                         Output: "*SELECT* 2".d1, 1
+                                         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                               Output: t_subplan1.d1
+(25 rows)
+
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2 where c1>d2 minus all select d1 from t_subplan2) or d1=0 order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  6 |  6 |  6 |  0
+ 12 | 12 | 12 |  0
+ 18 | 18 |  5 |  0
+ 24 |  4 | 11 |  0
+ 30 | 10 |  4 |  0
+ 36 | 16 | 10 |  0
+ 42 |  2 |  3 |  0
+ 48 |  8 |  9 |  0
+ 50 | 10 | 11 |  2
+ 54 | 14 |  2 |  0
+ 60 |  0 |  8 |  0
+ 66 |  6 |  1 |  0
+ 72 | 12 |  7 |  0
+ 78 | 18 |  0 |  0
+ 84 |  4 |  6 |  0
+ 90 | 10 | 12 |  0
+ 96 | 16 |  5 |  0
+(17 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2)::int from t_subplan2 where c1>d2 union all select d1 from t_subplan2) or d1=0 order by 1,2,3,4 limit 5;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Limit
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  Vector Sort
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+                     Filter: ((SubPlan 1) OR (t_subplan1.d1 = 0))
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: ((count(col_distribute_subplan_base_2.t_subplan2.c2))::integer)
+                             ->  Vector Result
+                                   Output: ((count(col_distribute_subplan_base_2.t_subplan2.c2))::integer)
+                                   ->  Vector Append
+                                         ->  Vector Aggregate
+                                               Output: (count(col_distribute_subplan_base_2.t_subplan2.c2))::integer
+                                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                                     Output: col_distribute_subplan_base_2.t_subplan2.c2
+                                                     Filter: (t_subplan1.c1 > col_distribute_subplan_base_2.t_subplan2.d2)
+                                         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                               Output: t_subplan1.d1
+(23 rows)
+
+select * from t_subplan1 where a1 in (select count(c2)::int from t_subplan2 where c1>d2 union all select d1 from t_subplan2) or d1=0 order by 1,2,3,4 limit 5;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off, nodes off, verbose on)
+select b1, count(*) from t_subplan1
+where c1 = all (select b2 from t_subplan2 where b2>4)
+or d1 != all (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.b1, (count(*))
+   ->  Vector Limit
+         Output: t_subplan1.b1, (count(*))
+         ->  Vector Sort
+               Output: t_subplan1.b1, (count(*))
+               Sort Key: t_subplan1.b1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Output: t_subplan1.b1, count(*)
+                     Group By Key: t_subplan1.b1
+                     ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                           Output: t_subplan1.b1
+                           Filter: ((SubPlan 1) OR (SubPlan 2))
+                           SubPlan 1
+                             ->  Row Adapter
+                                   Output: col_distribute_subplan_base_2.t_subplan2.b2
+                                   ->  Vector Materialize
+                                         Output: col_distribute_subplan_base_2.t_subplan2.b2
+                                         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                               Output: col_distribute_subplan_base_2.t_subplan2.b2
+                                               Filter: (col_distribute_subplan_base_2.t_subplan2.b2 > 4)
+                           SubPlan 2
+                             ->  Row Adapter
+                                   Output: col_distribute_subplan_base_2.t_subplan2.c2
+                                   ->  Vector Materialize
+                                         Output: col_distribute_subplan_base_2.t_subplan2.c2
+                                         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                               Output: col_distribute_subplan_base_2.t_subplan2.c2
+                                               Filter: (col_distribute_subplan_base_2.t_subplan2.c2 > 10)
+(29 rows)
+
+select b1, count(*) from t_subplan1
+where c1 = all (select b2 from t_subplan2 where b2>4)
+or d1 != all (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+ b1 | count 
+----+-------
+  0 |     5
+  1 |     5
+  2 |     5
+  3 |     5
+  4 |     5
+(5 rows)
+
+ 
+select b1, count(*) from t_subplan5
+where c1 = all (select b2 from t_subplan6 where b2>4)
+or d1 != all (select c2 from t_subplan6 where c2>10)
+group by b1 order by 1, 2 limit 5;
+ b1 | count 
+----+-------
+  0 |     5
+  1 |     5
+  2 |     5
+  3 |     5
+  4 |     5
+(5 rows)
+
+explain (costs off, nodes off, verbose on)
+select b1, count(*) from t_subplan1
+where c1 = any (select b2 from t_subplan2 where b2>4)
+or d1 != any (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.b1, (count(*))
+   ->  Vector Limit
+         Output: t_subplan1.b1, (count(*))
+         ->  Vector Sort
+               Output: t_subplan1.b1, (count(*))
+               Sort Key: t_subplan1.b1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Output: t_subplan1.b1, count(*)
+                     Group By Key: t_subplan1.b1
+                     ->  Vector Hash Left Join
+                           Output: t_subplan1.b1
+                           Hash Cond: (t_subplan1.c1 = col_distribute_subplan_base_2.t_subplan2.b2)
+                           Filter: ((col_distribute_subplan_base_2.t_subplan2.b2 IS NOT NULL) OR (SubPlan 1))
+                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                 Output: t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+                           ->  Vector Sonic Hash Aggregate
+                                 Output: col_distribute_subplan_base_2.t_subplan2.b2
+                                 Group By Key: col_distribute_subplan_base_2.t_subplan2.b2
+                                 ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                       Output: col_distribute_subplan_base_2.t_subplan2.b2
+                                       Filter: (col_distribute_subplan_base_2.t_subplan2.b2 > 4)
+                           SubPlan 1
+                             ->  Row Adapter
+                                   Output: col_distribute_subplan_base_2.t_subplan2.c2
+                                   ->  Vector Materialize
+                                         Output: col_distribute_subplan_base_2.t_subplan2.c2
+                                         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                               Output: col_distribute_subplan_base_2.t_subplan2.c2
+                                               Filter: (col_distribute_subplan_base_2.t_subplan2.c2 > 10)
+(30 rows)
+
+select b1, count(*) from t_subplan1
+where c1 = any (select b2 from t_subplan2 where b2>4)
+or d1 != any (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+ b1 | count 
+----+-------
+  0 |     5
+  1 |     5
+  2 |     5
+  3 |     5
+  4 |     5
+(5 rows)
+
+select b1, count(*) from t_subplan5
+where c1 = any (select b2 from t_subplan6 where b2>4)
+or d1 != any (select c2 from t_subplan6 where c2>10)
+group by b1 order by 1, 2 limit 5;
+ b1 | count 
+----+-------
+  0 |     5
+  1 |     5
+  2 |     5
+  3 |     5
+  4 |     5
+(5 rows)
+
+select b1, count(*) from t_subplan5
+where (c1 > 10 and c1 = any (select b2 from t_subplan6 where b2>4))
+or d1 != any (select c2 from t_subplan6 where c2>10)
+group by b1 order by 1, 2 limit 5;
+ b1 | count 
+----+-------
+  0 |     5
+  1 |     5
+  2 |     5
+  3 |     5
+  4 |     5
+(5 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where (10,15)<=(select b1, min(b2) from t_subplan2 group by b1) order by a1, b1, c1, d1;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: (SubPlan 1)
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: ($0), (min(t_subplan2.b2))
+                       ->  Vector Sort Aggregate
+                             Output: (t_subplan1.b1), min(t_subplan2.b2)
+                             Group By Key: t_subplan1.b1
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                   Output: t_subplan1.b1, t_subplan2.b2
+(16 rows)
+
+select * from t_subplan1 where (10,15)<=(select b1, min(b2) from t_subplan2 group by b1) order by a1, b1, c1, d1;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  0 | 18 |  7 |  2
+  1 | 19 |  8 |  3
+ 11 | 11 | 11 |  5
+ 12 | 12 | 12 |  0
+ 13 | 13 |  0 |  1
+ 14 | 14 |  1 |  2
+ 15 | 15 |  2 |  3
+ 16 | 16 |  3 |  4
+ 17 | 17 |  4 |  5
+ 18 | 18 |  5 |  0
+ 19 | 19 |  6 |  1
+ 31 | 11 |  5 |  1
+ 32 | 12 |  6 |  2
+ 33 | 13 |  7 |  3
+ 34 | 14 |  8 |  4
+ 35 | 15 |  9 |  5
+ 36 | 16 | 10 |  0
+ 37 | 17 | 11 |  1
+ 38 | 18 | 12 |  2
+ 39 | 19 |  0 |  3
+ 51 | 11 | 12 |  3
+ 52 | 12 |  0 |  4
+ 53 | 13 |  1 |  5
+ 54 | 14 |  2 |  0
+ 55 | 15 |  3 |  1
+ 56 | 16 |  4 |  2
+ 57 | 17 |  5 |  3
+ 58 | 18 |  6 |  4
+ 59 | 19 |  7 |  5
+ 71 | 11 |  6 |  5
+ 72 | 12 |  7 |  0
+ 73 | 13 |  8 |  1
+ 74 | 14 |  9 |  2
+ 75 | 15 | 10 |  3
+ 76 | 16 | 11 |  4
+ 77 | 17 | 12 |  5
+ 78 | 18 |  0 |  0
+ 79 | 19 |  1 |  1
+ 91 | 11 |  0 |  1
+ 92 | 12 |  1 |  2
+ 93 | 13 |  2 |  3
+ 94 | 14 |  3 |  4
+ 95 | 15 |  4 |  5
+ 96 | 16 |  5 |  0
+ 97 | 17 |  6 |  1
+(45 rows)
+
+select * from t_subplan5 where (10,15)<=(select b1, min(b2) from t_subplan6 group by b1) order by a1, b1, c1, d1;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  0 | 18 |  7 |  2
+  1 | 19 |  8 |  3
+ 11 | 11 | 11 |  5
+ 12 | 12 | 12 |  0
+ 13 | 13 |  0 |  1
+ 14 | 14 |  1 |  2
+ 15 | 15 |  2 |  3
+ 16 | 16 |  3 |  4
+ 17 | 17 |  4 |  5
+ 18 | 18 |  5 |  0
+ 19 | 19 |  6 |  1
+ 31 | 11 |  5 |  1
+ 32 | 12 |  6 |  2
+ 33 | 13 |  7 |  3
+ 34 | 14 |  8 |  4
+ 35 | 15 |  9 |  5
+ 36 | 16 | 10 |  0
+ 37 | 17 | 11 |  1
+ 38 | 18 | 12 |  2
+ 39 | 19 |  0 |  3
+ 51 | 11 | 12 |  3
+ 52 | 12 |  0 |  4
+ 53 | 13 |  1 |  5
+ 54 | 14 |  2 |  0
+ 55 | 15 |  3 |  1
+ 56 | 16 |  4 |  2
+ 57 | 17 |  5 |  3
+ 58 | 18 |  6 |  4
+ 59 | 19 |  7 |  5
+ 71 | 11 |  6 |  5
+ 72 | 12 |  7 |  0
+ 73 | 13 |  8 |  1
+ 74 | 14 |  9 |  2
+ 75 | 15 | 10 |  3
+ 76 | 16 | 11 |  4
+ 77 | 17 | 12 |  5
+ 78 | 18 |  0 |  0
+ 79 | 19 |  1 |  1
+ 91 | 11 |  0 |  1
+ 92 | 12 |  1 |  2
+ 93 | 13 |  2 |  3
+ 94 | 14 |  3 |  4
+ 95 | 15 |  4 |  5
+ 96 | 16 |  5 |  0
+ 97 | 17 |  6 |  1
+(45 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where (b1,c1) < (select a2, b2 from t_subplan2 where b2=4 and a2=4) order by a1, b1, c1, d1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         InitPlan 1 (returns $0,$1)
+           ->  Row Adapter
+                 Output: t_subplan2.a2, t_subplan2.b2
+                 ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                       Output: t_subplan2.a2, t_subplan2.b2
+                       Filter: ((t_subplan2.b2 = 4) AND (t_subplan2.a2 = 4))
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: (ROW(t_subplan1.b1, t_subplan1.c1) < ROW($0, $1))
+(14 rows)
+
+select * from t_subplan1 where (b1,c1) < (select a2, b2 from t_subplan2 where b2=4 and a2=4) order by a1, b1, c1, d1;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  0 |  9 |  4
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+ 20 |  0 |  7 |  2
+ 21 |  1 |  8 |  3
+ 22 |  2 |  9 |  4
+ 23 |  3 | 10 |  5
+ 40 |  0 |  1 |  4
+ 41 |  1 |  2 |  5
+ 42 |  2 |  3 |  0
+ 43 |  3 |  4 |  1
+ 60 |  0 |  8 |  0
+ 61 |  1 |  9 |  1
+ 62 |  2 | 10 |  2
+ 63 |  3 | 11 |  3
+ 80 |  0 |  2 |  2
+ 81 |  1 |  3 |  3
+ 82 |  2 |  4 |  4
+ 83 |  3 |  5 |  5
+(20 rows)
+
+select * from t_subplan5 where (b1,c1) < (select a2, b2 from t_subplan6 where b2=4 and a2=4) order by a1, b1, c1, d1;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  0 |  9 |  4
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+ 20 |  0 |  7 |  2
+ 21 |  1 |  8 |  3
+ 22 |  2 |  9 |  4
+ 23 |  3 | 10 |  5
+ 40 |  0 |  1 |  4
+ 41 |  1 |  2 |  5
+ 42 |  2 |  3 |  0
+ 43 |  3 |  4 |  1
+ 60 |  0 |  8 |  0
+ 61 |  1 |  9 |  1
+ 62 |  2 | 10 |  2
+ 63 |  3 | 11 |  3
+ 80 |  0 |  2 |  2
+ 81 |  1 |  3 |  3
+ 82 |  2 |  4 |  4
+ 83 |  3 |  5 |  5
+(20 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where array(select max(b2) from t_subplan2 group by b1)=array(select min(b2) from t_subplan2 group by b1);
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: ((SubPlan 1) = (SubPlan 2))
+         SubPlan 1
+           ->  Row Adapter
+                 Output: (max(col_distribute_subplan_base_2.t_subplan2.b2)), ($0)
+                 ->  Vector Sort Aggregate
+                       Output: max(col_distribute_subplan_base_2.t_subplan2.b2), (t_subplan1.b1)
+                       Group By Key: t_subplan1.b1
+                       ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                             Output: t_subplan1.b1, col_distribute_subplan_base_2.t_subplan2.b2
+         SubPlan 2
+           ->  Row Adapter
+                 Output: (min(col_distribute_subplan_base_2.t_subplan2.b2)), ($1)
+                 ->  Vector Sort Aggregate
+                       Output: min(col_distribute_subplan_base_2.t_subplan2.b2), (t_subplan1.b1)
+                       Group By Key: t_subplan1.b1
+                       ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                             Output: t_subplan1.b1, col_distribute_subplan_base_2.t_subplan2.b2
+(21 rows)
+
+select * from t_subplan1 where array(select max(b2) from t_subplan2 group by b1)=array(select min(b2) from t_subplan2 group by b1);
+ a1 | b1 | c1 | d1 
+----+----+----+----
+(0 rows)
+
+explain (costs off, nodes off, verbose on)
+select array(select max(b2) from t_subplan2 group by b1) from t_subplan1 order by a1, b1, c1, d1;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 1)), t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: ((SubPlan 1)), t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: (SubPlan 1), t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: (max(t_subplan2.b2)), ($0)
+                       ->  Vector Sort Aggregate
+                             Output: max(t_subplan2.b2), (t_subplan1.b1)
+                             Group By Key: t_subplan1.b1
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                   Output: t_subplan1.b1, t_subplan2.b2
+(15 rows)
+
+select array(select max(b2) from t_subplan2 group by b1) from t_subplan1 order by a1, b1, c1, d1;
+ array 
+-------
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+(100 rows)
+
+explain (costs off, nodes off, verbose on)
+select array(select a1 from t_subplan1 where t_subplan1.b1=t_subplan2.b2 order by 1) from t_subplan2 order by a2, b2, c2, d2;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 1)), t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   ->  Vector Sort
+         Output: ((SubPlan 1)), t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         Sort Key: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+               Output: (SubPlan 1), t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: t_subplan1.a1
+                       ->  Vector Sort
+                             Output: t_subplan1.a1
+                             Sort Key: t_subplan1.a1
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                   Output: t_subplan1.a1
+                                   Filter: (t_subplan1.b1 = t_subplan2.b2)
+(16 rows)
+
+select array(select a1 from t_subplan1 where t_subplan1.b1=t_subplan2.b2 order by 1) from t_subplan2 order by a2, b2, c2, d2;
+      array       
+------------------
+ {}
+ {1,21,41,61,81}
+ {}
+ {2,22,42,62,82}
+ {}
+ {3,23,43,63,83}
+ {4,24,44,64,84}
+ {5,25,45,65,85}
+ {6,26,46,66,86}
+ {7,27,47,67,87}
+ {8,28,48,68,88}
+ {9,29,49,69,89}
+ {10,30,50,70,90}
+ {11,31,51,71,91}
+ {12,32,52,72,92}
+ {13,33,53,73,93}
+ {14,34,54,74,94}
+ {15,35,55,75,95}
+ {16,36,56,76,96}
+ {17,37,57,77,97}
+ {0,18,38,58,78}
+ {1,19,39,59,79}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {2,20,40,60,80}
+ {1,21,41,61,81}
+ {2,22,42,62,82}
+ {3,23,43,63,83}
+ {4,24,44,64,84}
+ {5,25,45,65,85}
+ {6,26,46,66,86}
+ {7,27,47,67,87}
+ {8,28,48,68,88}
+ {9,29,49,69,89}
+ {10,30,50,70,90}
+ {11,31,51,71,91}
+ {12,32,52,72,92}
+ {13,33,53,73,93}
+ {14,34,54,74,94}
+ {15,35,55,75,95}
+ {16,36,56,76,96}
+ {17,37,57,77,97}
+ {0,18,38,58,78}
+ {1,19,39,59,79}
+(50 rows)
+
+-- test cte sublink
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select a1) select foo from cte) from t_subplan1 order by 1 limit 3;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 2))
+   ->  Vector Limit
+         Output: ((SubPlan 2))
+         ->  Vector Sort
+               Output: ((SubPlan 2))
+               Sort Key: ((SubPlan 2))
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: (SubPlan 2)
+                     SubPlan 2
+                       ->  CTE Scan on cte
+                             Output: cte.foo
+                             CTE cte
+                               ->  Result
+                                     Output: t_subplan1.a1
+(15 rows)
+
+select (with cte(foo) as (select a1) select foo from cte) from t_subplan1 order by 1 limit 3;
+ foo 
+-----
+   0
+   1
+   1
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select a1 from dual) select foo from cte) from t_subplan1 order by 1 limit 3;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 2))
+   ->  Vector Limit
+         Output: ((SubPlan 2))
+         ->  Vector Sort
+               Output: ((SubPlan 2))
+               Sort Key: ((SubPlan 2))
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: (SubPlan 2)
+                     SubPlan 2
+                       ->  CTE Scan on cte
+                             Output: cte.foo
+                             CTE cte
+                               ->  Subquery Scan on dual
+                                     Output: t_subplan1.a1
+                                     ->  Result
+                                           Output: 'X'::text
+(17 rows)
+
+select (with cte(foo) as (select a1 from dual) select foo from cte) from t_subplan1 order by 1 limit 3;
+ foo 
+-----
+   0
+   1
+   1
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (values(b1)) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 3))
+   ->  Vector Limit
+         Output: ((SubPlan 3))
+         ->  Vector Sort
+               Output: ((SubPlan 3))
+               Sort Key: ((SubPlan 3))
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: (SubPlan 3)
+                     SubPlan 3
+                       ->  Values Scan on "*VALUES*"
+                             Output: "*VALUES*".column1
+                             CTE cte
+                               ->  Values Scan on "*VALUES*"
+                                     Output: "*VALUES*".column1
+                             InitPlan 2 (returns $2)
+                               ->  CTE Scan on cte
+                                     Output: cte.foo
+(18 rows)
+
+select (with cte(foo) as (values(b1)) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+ column1 
+---------
+       0
+       0
+       0
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select avg(a1) from t_subplan1) select foo from cte) from t_subplan1 order by 1 limit 3;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ($1)
+   ->  Vector Limit
+         Output: ($1)
+         InitPlan 2 (returns $1)
+           ->  CTE Scan on cte
+                 Output: cte.foo
+                 CTE cte
+                   ->  Row Adapter
+                         Output: (avg(col_distribute_subplan_base_2.t_subplan1.a1))
+                         ->  Vector Aggregate
+                               Output: avg(col_distribute_subplan_base_2.t_subplan1.a1)
+                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                     Output: col_distribute_subplan_base_2.t_subplan1.a1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: $1
+(16 rows)
+
+select (with cte(foo) as (select avg(a1) from t_subplan1) select foo from cte) from t_subplan1 order by 1 limit 3;
+         foo         
+---------------------
+ 47.5600000000000000
+ 47.5600000000000000
+ 47.5600000000000000
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo from cte) from t_subplan1 order by 1 limit 3;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 2))
+   ->  Vector Limit
+         Output: ((SubPlan 2))
+         ->  Vector Sort
+               Output: ((SubPlan 2))
+               Sort Key: ((SubPlan 2))
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: (SubPlan 2)
+                     SubPlan 2
+                       ->  CTE Scan on cte
+                             Output: cte.foo
+                             CTE cte
+                               ->  Row Adapter
+                                     Output: (t_subplan1.b1)
+                                     ->  Vector Limit
+                                           Output: (t_subplan1.b1)
+                                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                                 Output: t_subplan1.b1
+(19 rows)
+
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo from cte) from t_subplan1 order by 1 limit 3;
+ foo 
+-----
+   0
+   0
+   0
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo+t_subplan1.c1 from cte) from t_subplan1 order by 1 limit 3; 
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 2))
+   ->  Vector Limit
+         Output: ((SubPlan 2))
+         ->  Vector Sort
+               Output: ((SubPlan 2))
+               Sort Key: ((SubPlan 2))
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: (SubPlan 2)
+                     SubPlan 2
+                       ->  CTE Scan on cte
+                             Output: (cte.foo + t_subplan1.c1)
+                             CTE cte
+                               ->  Row Adapter
+                                     Output: (t_subplan1.b1)
+                                     ->  Vector Limit
+                                           Output: (t_subplan1.b1)
+                                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                                 Output: t_subplan1.b1
+(19 rows)
+
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo+t_subplan1.c1 from cte) from t_subplan1 order by 1 limit 3; 
+ ?column? 
+----------
+        1
+        2
+        2
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 3))
+   ->  Vector Limit
+         Output: ((SubPlan 3))
+         ->  Vector Sort
+               Output: ((SubPlan 3))
+               Sort Key: ((SubPlan 3))
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: (SubPlan 3)
+                     SubPlan 3
+                       ->  Values Scan on "*VALUES*"
+                             Output: "*VALUES*".column1
+                             CTE cte
+                               ->  Row Adapter
+                                     Output: (t_subplan1.b1)
+                                     ->  Vector Limit
+                                           Output: (t_subplan1.b1)
+                                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                                 Output: t_subplan1.b1
+                             InitPlan 2 (returns $2)
+                               ->  CTE Scan on cte
+                                     Output: cte.foo
+(22 rows)
+
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+ column1 
+---------
+       0
+       0
+       0
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (values(b1)) select foo from cte) from t_subplan1 order by 1 limit 3;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 2))
+   ->  Vector Limit
+         Output: ((SubPlan 2))
+         ->  Vector Sort
+               Output: ((SubPlan 2))
+               Sort Key: ((SubPlan 2))
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: (SubPlan 2)
+                     SubPlan 2
+                       ->  CTE Scan on cte
+                             Output: cte.foo
+                             CTE cte
+                               ->  Values Scan on "*VALUES*"
+                                     Output: "*VALUES*".column1
+(15 rows)
+
+select (with cte(foo) as (values(b1)) select foo from cte) from t_subplan1 order by 1 limit 3;
+ foo 
+-----
+   0
+   0
+   0
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (select b1 from (values((select b1 from t_subplan2 limit 1), (select a1 from t_subplan2 limit 1))) as t(c,d)) from t_subplan1 order by 1 limit 3; 
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ((SubPlan 3))
+   ->  Vector Limit
+         Output: ((SubPlan 3))
+         ->  Vector Sort
+               Output: ((SubPlan 3))
+               Sort Key: ((SubPlan 3))
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: (SubPlan 3)
+                     SubPlan 3
+                       ->  Values Scan on "*VALUES*"
+                             Output: t_subplan1.b1
+                             InitPlan 1 (returns $1)
+                               ->  Row Adapter
+                                     Output: (t_subplan1.b1)
+                                     ->  Vector Limit
+                                           Output: (t_subplan1.b1)
+                                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                                 Output: t_subplan1.b1
+                             InitPlan 2 (returns $3)
+                               ->  Row Adapter
+                                     Output: (t_subplan1.a1)
+                                     ->  Vector Limit
+                                           Output: (t_subplan1.a1)
+                                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                                 Output: t_subplan1.a1
+(26 rows)
+
+select (select b1 from (values((select b1 from t_subplan2 limit 1), (select a1 from t_subplan2 limit 1))) as t(c,d)) from t_subplan1 order by 1 limit 3; 
+ b1 
+----
+  0
+  0
+  0
+(3 rows)
+
+-- test cte sublink applied in different subquery level
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp))
+ order by 1,2,3,4;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: (t_subplan1.c1 = (SubPlan 2))
+               SubPlan 2
+                 ->  Aggregate
+                       Output: count(*)
+                       CTE tmp
+                         ->  Row Adapter
+                               Output: t_subplan2.d2
+                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                     Output: t_subplan2.d2
+                                     Filter: (t_subplan2.b2 = t_subplan1.a1)
+                       ->  Aggregate
+                             Output: 'abc'::text, count(tmp.d2)
+                             ->  CTE Scan on tmp
+                                   Output: tmp.d2
+(21 rows)
+
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp))
+ order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+ 14 | 14 |  1 |  2
+ 27 |  7 |  1 |  3
+ 40 |  0 |  1 |  4
+ 53 | 13 |  1 |  5
+ 66 |  6 |  1 |  0
+ 79 | 19 |  1 |  1
+ 92 | 12 |  1 |  2
+(8 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp))
+ order by 1,2,3,4;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: (t_subplan1.a1 = (SubPlan 2))
+               SubPlan 2
+                 ->  Aggregate
+                       Output: count(*)
+                       CTE tmp
+                         ->  Row Adapter
+                               Output: t_subplan2.d2
+                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                     Output: t_subplan2.d2
+                                     Filter: (t_subplan2.b2 = t_subplan1.a1)
+                       ->  CTE Scan on tmp
+                             Output: tmp.d2
+(19 rows)
+
+select * from t_subplan1 where a1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp))
+ order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  2 |  0 |  9 |  4
+  2 |  2 |  2 |  2
+(2 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: (t_subplan1.c1 = (SubPlan 3))
+               SubPlan 3
+                 ->  Aggregate
+                       Output: count(*)
+                       CTE tmp
+                         ->  Row Adapter
+                               Output: t_subplan2.d2
+                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                     Output: t_subplan2.d2
+                                     Filter: (t_subplan2.b2 = t_subplan1.a1)
+                       ->  Aggregate
+                             Output: 'abc'::text, count(tmp1.d2)
+                             ->  CTE Scan on tmp tmp1
+                                   Output: tmp1.d2
+                                   Filter: (tmp1.d2 > (SubPlan 2))
+                                   SubPlan 2
+                                     ->  Aggregate
+                                           Output: count(*)
+                                           ->  CTE Scan on tmp tmp2
+                                                 Output: tmp2.d2
+                                                 Filter: (tmp2.d2 = tmp1.d2)
+(28 rows)
+
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+ 14 | 14 |  1 |  2
+ 27 |  7 |  1 |  3
+ 40 |  0 |  1 |  4
+ 53 | 13 |  1 |  5
+ 66 |  6 |  1 |  0
+ 79 | 19 |  1 |  1
+ 92 | 12 |  1 |  2
+(8 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: (t_subplan1.c1 = (SubPlan 3))
+               SubPlan 3
+                 ->  Aggregate
+                       Output: count(*)
+                       CTE tmp
+                         ->  Row Adapter
+                               Output: t_subplan2.d2
+                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                     Output: t_subplan2.d2
+                                     Filter: (t_subplan2.b2 = t_subplan1.a1)
+                       ->  CTE Scan on tmp tmp1
+                             Output: tmp1.d2
+                             Filter: (tmp1.d2 > (SubPlan 2))
+                             SubPlan 2
+                               ->  Aggregate
+                                     Output: count(*)
+                                     ->  CTE Scan on tmp tmp2
+                                           Output: tmp2.d2
+                                           Filter: (tmp2.d2 = tmp1.d2)
+(26 rows)
+
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+ 15 | 15 |  2 |  3
+ 39 | 19 |  0 |  3
+ 52 | 12 |  0 |  4
+ 65 |  5 |  0 |  5
+ 78 | 18 |  0 |  0
+ 91 | 11 |  0 |  1
+(8 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 left join
+(select a2, b2, (select b1 from t_subplan1 limit 1) c2 from t_subplan2)
+on b2=b1 and a1 not in (null)
+inner join t_subplan1 t3 on t3.a1=t_subplan1.c1 where t3.a1=0 order by 1,2,3,4 limit 5;
+                                                                                                                                   QUERY PLAN                                                                                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0), t3.a1, t3.b1, t3.c1, t3.d1
+   ->  Vector Limit
+         Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0), t3.a1, t3.b1, t3.c1, t3.d1
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 Output: col_distribute_subplan_base_2.t_subplan1.b1
+                 ->  Vector Limit
+                       Output: col_distribute_subplan_base_2.t_subplan1.b1
+                       ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                             Output: col_distribute_subplan_base_2.t_subplan1.b1
+         ->  Vector Sort
+               Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0), t3.a1, t3.b1, t3.c1, t3.d1
+               Sort Key: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.d1
+               ->  Vector Nest Loop
+                     Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0), t3.a1, t3.b1, t3.c1, t3.d1
+                     ->  Vector Nest Loop Left Join
+                           Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0)
+                           Join Filter: (NULL::boolean AND (t_subplan2.b2 = col_distribute_subplan_base_2.t_subplan1.b1))
+                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                 Output: col_distribute_subplan_base_2.t_subplan1.a1, col_distribute_subplan_base_2.t_subplan1.b1, col_distribute_subplan_base_2.t_subplan1.c1, col_distribute_subplan_base_2.t_subplan1.d1
+                                 Filter: (col_distribute_subplan_base_2.t_subplan1.c1 = 0)
+                           ->  Vector Adapter
+                                 Output: t_subplan2.a2, t_subplan2.b2, ($0)
+                                 ->  Result
+                                       Output: t_subplan2.a2, t_subplan2.b2, $0
+                                       One-Time Filter: false
+                     ->  Vector Materialize
+                           Output: t3.a1, t3.b1, t3.c1, t3.d1
+                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1 t3
+                                 Output: t3.a1, t3.b1, t3.c1, t3.d1
+                                 Filter: (t3.a1 = 0)
+(32 rows)
+
+select * from t_subplan1 left join
+(select a2, b2, (select b1 from t_subplan1 limit 1) c2 from t_subplan2)
+on b2=b1 and a1 not in (null)
+inner join t_subplan1 t3 on t3.a1=t_subplan1.c1 where t3.a1=0 order by 1,2,3,4 limit 5;
+ a1 | b1 | c1 | d1 | a2 | b2 | c2 | a1 | b1 | c1 | d1 
+----+----+----+----+----+----+----+----+----+----+----
+ 13 | 13 |  0 |  1 |    |    |    |  0 | 18 |  7 |  2
+ 26 |  6 |  0 |  2 |    |    |    |  0 | 18 |  7 |  2
+ 39 | 19 |  0 |  3 |    |    |    |  0 | 18 |  7 |  2
+ 52 | 12 |  0 |  4 |    |    |    |  0 | 18 |  7 |  2
+ 65 |  5 |  0 |  5 |    |    |    |  0 | 18 |  7 |  2
+(5 rows)
+
+explain (costs off, nodes off, verbose on)
+select count(*) from t_subplan2 group by a2,b2 order by (a2,b2) > some(select min(a1), length(trim(b2)) from t_subplan1), 1;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), ((SubPlan 1)), t_subplan2.a2, t_subplan2.b2
+   ->  Vector Sort
+         Output: (count(*)), ((SubPlan 1)), t_subplan2.a2, t_subplan2.b2
+         Sort Key: ((SubPlan 1)), (count(*))
+         ->  Vector Hash Aggregate
+               Output: count(*), (SubPlan 1), t_subplan2.a2, t_subplan2.b2
+               Group By Key: t_subplan2.a2, t_subplan2.b2
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                     Output: t_subplan2.a2, t_subplan2.b2
+               SubPlan 1
+                 ->  Row Adapter
+                       Output: (min(t_subplan1.a1)), (length(btrim(($0)::text)))
+                       ->  Vector Aggregate
+                             Output: min(t_subplan1.a1), length(btrim((t_subplan2.b2)::text))
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                   Output: t_subplan1.a1
+(17 rows)
+
+select count(*) from t_subplan2 group by a2,b2 order by (a2,b2) > some(select min(a1), length(trim(b2)) from t_subplan1), 1 limit 10;
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+(10 rows)
+
+-- update
+explain (costs off, nodes off, verbose on)
+update t_subplan2 set d2 = t1.b from (select max(a1) b from t_subplan1 group by c1 not in (select a1*0-1 from t_subplan1)) t1;
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Update on col_distribute_subplan_base_2.t_subplan2
+         ->  Vector Nest Loop
+               Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t1.b, t_subplan2.ctid, t_subplan2.tableoid, t1.b
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                     Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.ctid, t_subplan2.tableoid
+               ->  Vector Materialize
+                     Output: t1.b
+                     ->  Vector Subquery Scan on t1
+                           Output: t1.b
+                           ->  Vector Hash Aggregate
+                                 Output: max(col_distribute_subplan_base_2.t_subplan1.a1), ((NOT (hashed SubPlan 1)))
+                                 Group By Key: (NOT (hashed SubPlan 1))
+                                 ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                       Output: (NOT (hashed SubPlan 1)), col_distribute_subplan_base_2.t_subplan1.a1
+                                       SubPlan 1
+                                         ->  Row Adapter
+                                               Output: (((col_distribute_subplan_base_2.t_subplan1.a1 * 0) - 1))
+                                               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                                     Output: ((col_distribute_subplan_base_2.t_subplan1.a1 * 0) - 1)
+(20 rows)
+
+update t_subplan2 set d2 = t1.b from (select max(a1) b from t_subplan1 group by c1 not in (select a1*0-1 from t_subplan1)) t1;
+explain (costs off, nodes off, verbose on) 
+select count(*) from t_subplan1 group by a1 having(avg(b1) = some (select b2 from t_subplan2)) order by 1 limit 5;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*)), t_subplan1.a1
+   ->  Vector Limit
+         Output: (count(*)), t_subplan1.a1
+         ->  Vector Sort
+               Output: (count(*)), t_subplan1.a1
+               Sort Key: (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Output: count(*), t_subplan1.a1
+                     Group By Key: t_subplan1.a1
+                     Filter: (hashed SubPlan 1)
+                     ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                           Output: t_subplan1.a1, t_subplan1.b1
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan2.b2
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                   Output: t_subplan2.b2
+(18 rows)
+
+select count(*) from t_subplan1 group by a1 having(avg(b1) = some (select b2 from t_subplan2)) order by 1 limit 5;
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+(5 rows)
+
+explain (costs off, nodes off, verbose on) 
+select max(a1), b1 = some (select b2 from t_subplan2) from t_subplan1 group by b1 order by 1,2 limit 5;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (max(t_subplan1.a1)), ((hashed SubPlan 1)), t_subplan1.b1
+   ->  Vector Limit
+         Output: (max(t_subplan1.a1)), ((hashed SubPlan 1)), t_subplan1.b1
+         ->  Vector Sort
+               Output: (max(t_subplan1.a1)), ((hashed SubPlan 1)), t_subplan1.b1
+               Sort Key: (max(t_subplan1.a1)), ((hashed SubPlan 1))
+               ->  Vector Hash Aggregate
+                     Output: max(t_subplan1.a1), (hashed SubPlan 1), t_subplan1.b1
+                     Group By Key: t_subplan1.b1
+                     ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                           Output: t_subplan1.b1, t_subplan1.a1
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan2.b2
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                   Output: t_subplan2.b2
+(17 rows)
+
+select max(a1), b1 = some (select b2 from t_subplan2) from t_subplan1 group by b1 order by 1,2 limit 5;
+ max | ?column? 
+-----+----------
+  78 | t
+  79 | t
+  80 | t
+  81 | t
+  82 | t
+(5 rows)
+
+explain (costs off, nodes off, verbose on) 
+select max(a1), min(b1) = some (select b2 from t_subplan2) from t_subplan1 group by b1 order by 1,2 limit 5;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (max(t_subplan1.a1)), ((hashed SubPlan 1)), t_subplan1.b1
+   ->  Vector Limit
+         Output: (max(t_subplan1.a1)), ((hashed SubPlan 1)), t_subplan1.b1
+         ->  Vector Sort
+               Output: (max(t_subplan1.a1)), ((hashed SubPlan 1)), t_subplan1.b1
+               Sort Key: (max(t_subplan1.a1)), ((hashed SubPlan 1))
+               ->  Vector Hash Aggregate
+                     Output: max(t_subplan1.a1), (hashed SubPlan 1), t_subplan1.b1
+                     Group By Key: t_subplan1.b1
+                     ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                           Output: t_subplan1.b1, t_subplan1.a1
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan2.b2
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                   Output: t_subplan2.b2
+(17 rows)
+
+select max(a1), min(b1) = some (select b2 from t_subplan2) from t_subplan1 group by b1 order by 1,2 limit 5;
+ max | ?column? 
+-----+----------
+  78 | t
+  79 | t
+  80 | t
+  81 | t
+  82 | t
+(5 rows)
+
+explain (costs off, nodes off, verbose on) 
+select a1, b1 from t_subplan1 group by a1, b1 having(grouping(b1)) = some (select b2 from t_subplan2) order by 1,2 limit 5;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1
+   ->  Vector Limit
+         Output: t_subplan1.a1, t_subplan1.b1
+         ->  Vector Sort
+               Output: t_subplan1.a1, t_subplan1.b1
+               Sort Key: t_subplan1.a1, t_subplan1.b1
+               ->  Vector Sonic Hash Aggregate
+                     Output: t_subplan1.a1, t_subplan1.b1
+                     Group By Key: t_subplan1.a1, t_subplan1.b1
+                     Filter: (hashed SubPlan 1)
+                     ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                           Output: t_subplan1.a1, t_subplan1.b1
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan2.b2
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                   Output: t_subplan2.b2
+(18 rows)
+
+select a1, b1 from t_subplan1 group by a1, b1 having(grouping(b1)) = some (select b2 from t_subplan2) order by 1,2 limit 5;
+ a1 | b1 
+----+----
+  0 | 18
+  1 |  1
+  1 | 19
+  2 |  0
+  2 |  2
+(5 rows)
+
+explain (costs off, nodes off, verbose on) 
+select a1, rank() over(partition by a1)  = some (select a2  from t_subplan2) from t_subplan1 order by 1,2 limit 5;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, ((hashed SubPlan 1))
+   ->  Vector Limit
+         Output: t_subplan1.a1, ((hashed SubPlan 1))
+         ->  Vector Sort
+               Output: t_subplan1.a1, ((hashed SubPlan 1))
+               Sort Key: t_subplan1.a1, ((hashed SubPlan 1))
+               ->  Vector WindowAgg
+                     Output: t_subplan1.a1, (hashed SubPlan 1)
+                     ->  Vector Sort
+                           Output: t_subplan1.a1
+                           Sort Key: t_subplan1.a1
+                           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                                 Output: t_subplan1.a1
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan2.a2
+                             ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                   Output: t_subplan2.a2
+(19 rows)
+
+select a1, rank() over(partition by a1)  = some (select a2  from t_subplan2) from t_subplan1 order by 1,2 limit 5;
+ a1 | ?column? 
+----+----------
+  0 | t
+  1 | t
+  1 | t
+  2 | t
+  2 | t
+(5 rows)
+
+explain (costs off, nodes off, verbose on) 
+select * from t_subplan7 t1 where a1 in (select t1.a1 - 1 from t_subplan1);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on col_distribute_subplan_base_2.t_subplan7 t1
+   Output: t1.a1, t1.b1, t1.c1, t1.d1
+   Filter: (SubPlan 1)
+   SubPlan 1
+     ->  Row Adapter
+           Output: (($0 - 1))
+           ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                 Output: (t1.a1 - 1)
+(8 rows)
+
+select * from t_subplan7 t1 where a1 in (select t1.a1 - 1 from t_subplan1);
+ a1 | b1 | c1 | d1 
+----+----+----+----
+(0 rows)
+
+set work_mem = '1MB';
+set enable_nestloop = off;
+set enable_hashjoin = off;
+explain (costs off, nodes off, verbose on) 
+select * from t_subplan1 where c1 > any(select c2 from t_subplan2 join t_subplan3 on a3 = a2 where b2 < b1) order by 1,2,3,4 limit 10;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Limit
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  Vector Sort
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+                     Filter: (SubPlan 1)
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan2.c2
+                             ->  Vector Merge Join
+                                   Output: t_subplan2.c2
+                                   Merge Cond: (t_subplan2.a2 = t_subplan3.a3)
+                                   ->  Vector Sort
+                                         Output: t_subplan2.c2, t_subplan2.a2
+                                         Sort Key: t_subplan2.a2
+                                         ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                               Output: t_subplan2.c2, t_subplan2.a2
+                                               Filter: (t_subplan2.b2 < t_subplan1.b1)
+                                   ->  Vector Sort
+                                         Output: t_subplan3.a3
+                                         Sort Key: t_subplan3.a3
+                                         ->  Vector Partition Iterator
+                                               Output: t_subplan3.a3
+                                               Iterations: 2
+                                               ->  Partitioned CStore Scan on col_distribute_subplan_base_2.t_subplan3
+                                                     Output: t_subplan3.a3
+                                                     Selected Partitions:  1..2
+(31 rows)
+
+select * from t_subplan1 where c1 > any(select c2 from t_subplan2 join t_subplan3 on a3 = a2 where b2 < b1) order by 1,2,3,4 limit 10;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  0 | 18 |  7 |  2
+  1 | 19 |  8 |  3
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  0
+  7 |  7 |  7 |  1
+  8 |  8 |  8 |  2
+  9 |  9 |  9 |  3
+(10 rows)
+
+set enable_mergejoin=off;
+set enable_hashjoin = on;
+explain (costs off, nodes off, verbose on) 
+select * from t_subplan1 where c1 > any(select c2 from t_subplan2 join t_subplan3 on a3 = a2 where b2 < b1) order by 1,2,3,4 limit 10;
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Vector Limit
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  Vector Sort
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                     Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+                     Filter: (SubPlan 1)
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: t_subplan2.c2
+                             ->  Vector Sonic Hash Join
+                                   Output: t_subplan2.c2
+                                   Hash Cond: (t_subplan3.a3 = t_subplan2.a2)
+                                   ->  Vector Partition Iterator
+                                         Output: t_subplan3.a3
+                                         Iterations: 2
+                                         ->  Partitioned CStore Scan on col_distribute_subplan_base_2.t_subplan3
+                                               Output: t_subplan3.a3
+                                               Selected Partitions:  1..2
+                                   ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                         Output: t_subplan2.c2, t_subplan2.a2
+                                         Filter: (t_subplan2.b2 < t_subplan1.b1)
+(25 rows)
+
+select * from t_subplan1 where c1 > any(select c2 from t_subplan2 join t_subplan3 on a3 = a2 where b2 < b1) order by 1,2,3,4 limit 10;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  0 | 18 |  7 |  2
+  1 | 19 |  8 |  3
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  0
+  7 |  7 |  7 |  1
+  8 |  8 |  8 |  2
+  9 |  9 |  9 |  3
+(10 rows)
+
+explain (costs off, nodes off, verbose on)
+select b1, count(*) from t_subplan1 where c1 = all (select b2 from t_subplan2 where b2 != c1) group by b1 order by 1, 2 limit 5;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t_subplan1.b1, (count(*))
+   ->  Vector Limit
+         Output: t_subplan1.b1, (count(*))
+         ->  Vector Sort
+               Output: t_subplan1.b1, (count(*))
+               Sort Key: t_subplan1.b1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Output: t_subplan1.b1, count(*)
+                     Group By Key: t_subplan1.b1
+                     ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1
+                           Output: t_subplan1.b1
+                           Filter: (SubPlan 1)
+                           SubPlan 1
+                             ->  Row Adapter
+                                   Output: t_subplan2.b2
+                                   ->  CStore Scan on col_distribute_subplan_base_2.t_subplan2
+                                         Output: t_subplan2.b2
+                                         Filter: (t_subplan2.b2 <> t_subplan1.c1)
+(19 rows)
+
+select b1, count(*) from t_subplan1 where c1 = all (select b2 from t_subplan2 where b2 != c1) group by b1 order by 1, 2 limit 5;
+ b1 | count 
+----+-------
+(0 rows)
+
+set enable_seqscan=off;
+create index t_subplan2_idx on t_subplan2(a2, b2);
+explain (verbose on, costs off, nodes off)
+select * from t_subplan1 t1 where exists (select 1 from t_subplan1 t2 join t_subplan2 t3 on t2.a1=t3.b2 and t1.b1=t3.a2);
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a1, t1.b1, t1.c1, t1.d1
+   ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1 t1
+         Output: t1.a1, t1.b1, t1.c1, t1.d1
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Row Adapter
+                 Output: ('Dummy')
+                 ->  Vector Nest Loop
+                       Output: 'Dummy'
+                       ->  CStore Scan on col_distribute_subplan_base_2.t_subplan1 t2
+                             Output: t2.a1
+                       ->  CStore Index Only Scan using t_subplan2_idx on col_distribute_subplan_base_2.t_subplan2 t3
+                             Output: t3.b2
+                             Index Cond: ((t1.b1 = t3.a2) AND (t3.b2 = $1))
+(15 rows)
+
+select * from t_subplan1 t1 where exists (select 1 from t_subplan1 t2 join t_subplan2 t3 on t2.a1=t3.b2 and t1.b1=t3.a2) order by 1,2,3,4 limit 5 offset 5;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  0
+  7 |  7 |  7 |  1
+(5 rows)
+
+drop schema col_distribute_subplan_base_2 cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table t_subplan1
+drop cascades to table t_subplan2
+drop cascades to table t_subplan5
+drop cascades to table t_subplan6
+drop cascades to table t_subplan7
+drop cascades to table t_subplan3

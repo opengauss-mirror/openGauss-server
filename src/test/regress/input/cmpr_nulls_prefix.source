@@ -1,0 +1,47 @@
+-- case: R05 column,  the first 3 has string values, but all the last are NULLs,  so that coredump happens when prefix compress
+--
+CREATE TABLE cmpr_nulls_prefix_raw
+(
+	R00 int,
+	R01 varchar(20),
+	R02 varchar(20),
+	R03 varchar(20),
+	R04 varchar(20),
+	R05 varchar(20),
+	R06 varchar(20),
+	R07 varchar(20),
+	R08 varchar(20),
+	R09 varchar(20)
+);
+-- make the first 3 R05 has non-NULL string.
+insert into cmpr_nulls_prefix_raw(R00, R01, R02, R03, R04, R05, R06, R07, R08, R09) select generate_series(1,3),
+	'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa',
+	'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa';
+-- make the other R05 has NULLs tring.
+insert into cmpr_nulls_prefix_raw(R00, R01, R02, R03, R04, R06, R07, R08, R09) select generate_series(1,600),
+	'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa',
+	'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa', 'aaaaaaaaaaaaa';
+COPY cmpr_nulls_prefix_raw TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls_prefix.data';
+
+CREATE TABLE cmpr_nulls_prefix
+(
+	R00 int,
+	R01 varchar(20) PREFIX,
+	R02 varchar(20) PREFIX,
+	R03 varchar(20) PREFIX,
+	R04 varchar(20) PREFIX,
+	R05 varchar(20) PREFIX,
+	R06 varchar(20) PREFIX,
+	R07 varchar(20) PREFIX,
+	R08 varchar(20) PREFIX,
+	R09 varchar(20) PREFIX
+) COMPRESS;
+COPY cmpr_nulls_prefix FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls_prefix.data';
+
+SELECT (SELECT COUNT(*) FROM cmpr_nulls_prefix) - (SELECT COUNT(*) FROM cmpr_nulls_prefix_raw);
+(SELECT * FROM cmpr_nulls_prefix) MINUS ALL (SELECT * FROM cmpr_nulls_prefix_raw);
+(SELECT * FROM cmpr_nulls_prefix_raw) MINUS ALL (SELECT * FROM cmpr_nulls_prefix);
+
+DROP TABLE cmpr_nulls_prefix;
+DROP TABLE cmpr_nulls_prefix_raw;
+\! rm '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls_prefix.data';

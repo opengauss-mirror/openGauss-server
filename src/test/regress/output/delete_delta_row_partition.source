@@ -1,0 +1,481 @@
+/*
+ * ---OnlineExpansion regression test suits---
+ * Unit tests for delete delta mechanism
+ */
+set enable_nodegroup_debug=on;
+set expected_computing_nodegroup=group_b;
+CREATE SCHEMA data_redis;
+/* Verify delete_delta mechanism via DELETE operation */
+create table tx (c1 int, c2 int, c3 int)
+WITH(hashbucket = off) 
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+);
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int)
+WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+);
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+insert into tx select v,v,v from generate_series(1,30) as v;
+/*
+ * DELETE rows in tx via regular DELETE operation and meanwhile make the deleted rows
+ * are populated in data_redis.pg_delete_delta_12345 and using DELETE-USING on tx_verify
+ */
+delete from tx where c1 < 15;
+delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+           ?column?           
+------------------------------
+ Check result return code: 16
+(1 row)
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+          ?column?           
+-----------------------------
+ Check result return code: 0
+(1 row)
+
+-- error path test expecting error 
+drop table data_redis.pg_delete_delta_12345;
+delete from tx where c1 < 15;
+drop table tx;
+drop table tx_verify;
+/* Verify delete_delta mechanism via UPDATE operation */
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+)
+;
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int)
+WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+)
+;
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+insert into tx select v,v,v from generate_series(1,30) as v;
+update tx set c2 = 999 where c1 > 15;
+update tx_verify as t1 set c2 = 999 from data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+           ?column?           
+------------------------------
+ Check result return code: 30
+(1 row)
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+          ?column?           
+-----------------------------
+ Check result return code: 0
+(1 row)
+
+-- error path test expecting error
+drop table data_redis.pg_delete_delta_12345;
+update tx set c2 = 999 where c1 > 15;
+drop table tx;
+drop table tx_verify;
+------------------------------------------
+/* Verify delete join operation */
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+)
+;
+create table rowtable(c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+);
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+insert into tx select v,v,v from generate_series(1,30) as v;
+insert into rowtable values(10,10,10),(20,20,20),(30,30,30);
+delete from tx as t1 using rowtable as t2 
+where t1.c1 = t2.c1;
+delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+           ?column?           
+------------------------------
+ Check result return code: 27
+(1 row)
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+          ?column?           
+-----------------------------
+ Check result return code: 0
+(1 row)
+
+drop table tx;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+drop table rowtable;
+------------------------------------------
+/* Verify update join operation */
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+);
+create table rowtable(c1 int, c2 int, c3 int);
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int)
+WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+);
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+insert into tx select v,v,v from generate_series(1,30) as v;
+insert into rowtable values(10,10,10),(20,20,20),(30,30,30);
+update tx as t1 set c2 = 1 from rowtable as t2
+where t1.c1 = t2.c1;
+update tx_verify as t1 set c2 = 1 from data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+           ?column?           
+------------------------------
+ Check result return code: 30
+(1 row)
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+          ?column?           
+-----------------------------
+ Check result return code: 0
+(1 row)
+
+drop table tx;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+drop table rowtable;
+------------------------------------------
+/* Verify disable row movement partition update */
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+)
+;
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int)
+WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+);
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+insert into tx select v,v,v from generate_series(1,30) as v;
+update tx set c2 = c2*2 where c1 > 15;
+update tx_verify as t1 set c2 = c2*2 from data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+           ?column?           
+------------------------------
+ Check result return code: 30
+(1 row)
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+          ?column?           
+-----------------------------
+ Check result return code: 0
+(1 row)
+
+drop table tx;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+------------------------------------------
+/* Verify replicated table delete */
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+)
+;
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int)
+WITH(hashbucket = off)
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+);
+ALTER TABLE tx_verify ADD CONSTRAINT uniq_con PRIMARY KEY (c3, xcnodeid,dnrelid,table_bucketid,block_number,block_offset);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "uniq_con" for table "tx_verify"
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+insert into tx select v,v,v from generate_series(1,30) as v;
+delete from tx where c1 < 15;
+delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+           ?column?           
+------------------------------
+ Check result return code: 16
+(1 row)
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+          ?column?           
+-----------------------------
+ Check result return code: 0
+(1 row)
+
+drop table tx;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+------------------------------------------
+/* Verify replicated table update*/
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off) -- distribute by replication
+-- to group group_a
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+)
+ENABLE ROW MOVEMENT
+;
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int)
+WITH(hashbucket = off) -- distribute by replication
+-- to group group_b
+PARTITION BY RANGE (c3)
+(
+	partition p0 values less than (10),
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (maxvalue)
+)
+ENABLE ROW MOVEMENT
+;
+ALTER TABLE tx_verify ADD CONSTRAINT uniq_con PRIMARY KEY (c3,xcnodeid,dnrelid,table_bucketid,block_number,block_offset);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "uniq_con" for table "tx_verify"
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+-- distribute by hash(xcnodeid,dnrelid,table_bucketid,block_number,block_offset) to group group_a;
+insert into tx select v,v,v from generate_series(1,30) as v;
+update tx set c3 = c3*2 where c1 > 15;
+update tx_verify as t1 set c3 = c3*2 from data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+           ?column?           
+------------------------------
+ Check result return code: 30
+(1 row)
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+          ?column?           
+-----------------------------
+ Check result return code: 0
+(1 row)
+
+drop table tx;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+DROP SCHEMA data_redis CASCADE;
+reset expected_computing_nodegroup;
+reset enable_nodegroup_debug;

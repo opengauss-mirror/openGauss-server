@@ -1,0 +1,1367 @@
+ \! rm -fr '@testtablespace@/ts_show_table'
+\! mkdir '@testtablespace@/ts_show_table'
+CREATE TABLESPACE create_foreign_table_like_tblsp1 LOCATION '@testtablespace@/ts_show_table';
+create schema test_show_table;
+set current_schema=test_show_table;
+set max_query_retry_times = 3;
+CREATE  TABLE  a1 (                                                  
+        b integer NOT NULL,                                                
+        c integer DEFAULT 2                                                
+)                                                                          
+WITH (orientation=row, compression=no)                                     
+                                                   
+TO GROUP group1;                                                                
+CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;         
+CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;
+select * from pg_get_tabledef('a1');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                         +
+ CREATE  TABLE a1 (                                                         +
+         b integer NOT NULL,                                                +
+         c integer DEFAULT 2                                                +
+ )                                                                          +
+ WITH (orientation=row, compression=no)                                     +
+                                                    +
+ TO GROUP group1;                                                           +
+ CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
+ CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
+(1 row)
+
+--test cluster
+alter table a1 CLUSTER ON a1_index_2;
+select * from pg_get_tabledef('a1');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                         +
+ CREATE  TABLE a1 (                                                         +
+         b integer NOT NULL,                                                +
+         c integer DEFAULT 2                                                +
+ )                                                                          +
+ WITH (orientation=row, compression=no)                                     +
+                                                    +
+ TO GROUP group1;                                                           +
+ CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
+ ALTER TABLE a1 CLUSTER ON a1_index_2;                                      +
+ CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
+(1 row)
+
+alter table a1 SET WITHOUT CLUSTER;
+select * from pg_get_tabledef('a1');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                         +
+ CREATE  TABLE a1 (                                                         +
+         b integer NOT NULL,                                                +
+         c integer DEFAULT 2                                                +
+ )                                                                          +
+ WITH (orientation=row, compression=no)                                     +
+                                                    +
+ TO GROUP group1;                                                           +
+ CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
+ CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
+(1 row)
+
+--test compress
+ALTER TABLE a1 set compress;
+select * from pg_get_tabledef('a1');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                         +
+ CREATE  TABLE a1 (                                                         +
+         b integer NOT NULL,                                                +
+         c integer DEFAULT 2                                                +
+ )                                                                          +
+ WITH (orientation=row, compression=yes)                                    +
+ COMPRESS                                                                   +
+                                                    +
+ TO GROUP group1;                                                           +
+ CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
+ CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
+(1 row)
+
+--test ADD STATISTICS 
+ALTER TABLE a1 add statistics ((b,c));
+select * from pg_get_tabledef('a1');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                         +
+ CREATE  TABLE a1 (                                                         +
+         b integer NOT NULL,                                                +
+         c integer DEFAULT 2                                                +
+ )                                                                          +
+ WITH (orientation=row, compression=yes)                                    +
+ COMPRESS                                                                   +
+                                                    +
+ TO GROUP group1;                                                           +
+ CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
+ CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
+(1 row)
+
+--test tablespace
+alter table a1 set tablespace create_foreign_table_like_tblsp1;
+select * from pg_get_tabledef('a1');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                         +
+ CREATE  TABLE a1 (                                                         +
+         b integer NOT NULL,                                                +
+         c integer DEFAULT 2                                                +
+ )                                                                          +
+ WITH (orientation=row, compression=yes)                                    +
+ COMPRESS                                                                   +
+ TABLESPACE create_foreign_table_like_tblsp1                                +
+                                                    +
+ TO GROUP group1;                                                           +
+ CREATE UNIQUE INDEX a1_index_2 ON a1 USING btree (b) TABLESPACE pg_default;+
+ CREATE INDEX a1_index ON a1 USING btree (b) TABLESPACE pg_default;
+(1 row)
+
+--test default value
+create table test_default(
+a int,
+b varchar default 'aBc'
+);
+select * from pg_get_tabledef('test_default');
+                       pg_get_tabledef                        
+--------------------------------------------------------------
+ SET search_path = test_show_table;                          +
+ CREATE  TABLE test_default (                                +
+         a integer,                                          +
+         b character varying DEFAULT 'aBc'::character varying+
+ )                                                           +
+ WITH (orientation=row, compression=no)                      +
+                                         +
+ TO GROUP group1;
+(1 row)
+
+--test serial
+CREATE TABLE serialTest (f1 text, f2 serial);
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest_f2_seq" for serial column "serialtest.f2"
+select * from pg_get_tabledef('serialtest');
+                              pg_get_tabledef                               
+----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                        +
+ CREATE  TABLE serialtest (                                                +
+         f1 text,                                                          +
+         f2 integer DEFAULT nextval('serialtest_f2_seq'::regclass) NOT NULL+
+ )                                                                         +
+ WITH (orientation=row, compression=no)                                    +
+                                                      +
+ TO GROUP group1;
+(1 row)
+
+--test column table
+ CREATE  TABLE  hw_cstore_alter_t3 (                         
+         a integer,                                                
+         b integer,                                                
+         c numeric(20,0)                                           
+ )                                                                 
+ WITH (orientation=column, compression=low)                        
+                                               
+ TO GROUP group1                                                        
+ PARTITION BY RANGE (a)                                            
+ (                                                                 
+          PARTITION p1 VALUES LESS THAN (10) TABLESPACE pg_default,
+          PARTITION p2 VALUES LESS THAN (20) TABLESPACE pg_default,
+          PARTITION p3 VALUES LESS THAN (30) TABLESPACE pg_default 
+ )                                                                 
+ ENABLE ROW MOVEMENT;
+ select * from pg_get_tabledef('hw_cstore_alter_t3');
+                          pg_get_tabledef                           
+--------------------------------------------------------------------
+ SET search_path = test_show_table;                                +
+ CREATE  TABLE hw_cstore_alter_t3 (                                +
+         a integer,                                                +
+         b integer,                                                +
+         c numeric(20,0)                                           +
+ )                                                                 +
+ WITH (orientation=column, compression=low)                        +
+                                               +
+ TO GROUP group1                                                   +
+ PARTITION BY RANGE (a)                                            +
+ (                                                                 +
+          PARTITION p1 VALUES LESS THAN (10) TABLESPACE pg_default,+
+          PARTITION p2 VALUES LESS THAN (20) TABLESPACE pg_default,+
+          PARTITION p3 VALUES LESS THAN (30) TABLESPACE pg_default +
+ )                                                                 +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+ 
+ create table storage_para_t1 (a int4, b text)
+WITH 
+(
+	fillfactor =85, 
+	autovacuum_enabled = ON,
+	toast.autovacuum_enabled = ON, 
+	autovacuum_vacuum_threshold = 100,
+	toast.autovacuum_vacuum_threshold = 100,
+	autovacuum_vacuum_scale_factor = 10, 
+	toast.autovacuum_vacuum_scale_factor = 10,
+	autovacuum_analyze_threshold = 8,
+	autovacuum_analyze_scale_factor = 9,
+--  autovacuum_vacuum_cost_delay: Valid values are between "0" and "100".
+	autovacuum_vacuum_cost_delay = 90, 
+	toast.autovacuum_vacuum_cost_delay = 92,
+--	autovacuum_vacuum_cost_limit: Valid values are between "1" and "10000".
+	autovacuum_vacuum_cost_limit = 567, 
+	toast.autovacuum_vacuum_cost_limit = 789,
+	autovacuum_freeze_min_age = 5000, 
+	toast.autovacuum_freeze_min_age = 6000,
+--	autovacuum_freeze_max_age: Valid values are between "100000000" and "2000000000".
+	autovacuum_freeze_max_age = 300000000, 
+	toast.autovacuum_freeze_max_age = 250000000,
+	autovacuum_freeze_table_age = 170000000, 
+	toast.autovacuum_freeze_table_age = 180000000
+)
+partition by range (a)
+(
+	partition storage_para_t1_p1 values less than (10),
+	partition storage_para_t1_p2 values less than (20),
+	partition storage_para_t1_p3 values less than (100)
+);
+select * from pg_get_tabledef('storage_para_t1');
+                                                                                                                                                                                          pg_get_tabledef                                                                                                                                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                                                                                                                                                                                                                                                                                                                +
+ CREATE  TABLE storage_para_t1 (                                                                                                                                                                                                                                                                                                                                                                   +
+         a integer,                                                                                                                                                                                                                                                                                                                                                                                +
+         b text                                                                                                                                                                                                                                                                                                                                                                                    +
+ )                                                                                                                                                                                                                                                                                                                                                                                                 +
+ WITH (orientation=row, fillfactor=85, autovacuum_enabled=on, autovacuum_vacuum_threshold=100, autovacuum_vacuum_scale_factor=10, autovacuum_analyze_threshold=8, autovacuum_analyze_scale_factor=9, autovacuum_vacuum_cost_delay=90, autovacuum_vacuum_cost_limit=567, autovacuum_freeze_min_age=5000, autovacuum_freeze_max_age=300000000, autovacuum_freeze_table_age=170000000, compression=no)+
+                                                                                                                                                                                                                                                                                                                                                                               +
+ TO GROUP group1                                                                                                                                                                                                                                                                                                                                                                                   +
+ PARTITION BY RANGE (a)                                                                                                                                                                                                                                                                                                                                                                            +
+ (                                                                                                                                                                                                                                                                                                                                                                                                 +
+          PARTITION storage_para_t1_p1 VALUES LESS THAN (10) TABLESPACE pg_default,                                                                                                                                                                                                                                                                                                                +
+          PARTITION storage_para_t1_p2 VALUES LESS THAN (20) TABLESPACE pg_default,                                                                                                                                                                                                                                                                                                                +
+          PARTITION storage_para_t1_p3 VALUES LESS THAN (100) TABLESPACE pg_default                                                                                                                                                                                                                                                                                                                +
+ );
+(1 row)
+
+--test unlogged table
+create UNLOGGED table t2(a int, b int)
+ ;
+select * from pg_get_tabledef('t2');
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = test_show_table;    +
+ CREATE  TABLE t2 (                    +
+         a integer,                    +
+         b integer                     +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+                +
+ TO GROUP group1;
+(1 row)
+
+-- test RANGE partition table
+CREATE   TABLE  altertable_rangeparttable (                                                              
+        c1 integer,                                                                                            
+        c2 double precision,                                                                                    
+        c3 real,                                                                                               
+        c4 text                                                                                                
+)                                                                                                              
+WITH (orientation=row, compression=no)                                                                         
+                                                                                          
+TO GROUP group1                                                                                                     
+PARTITION BY RANGE (c1, c2, c3, c4)                                                                            
+(                                                                                                              
+         PARTITION altertable_rangeparttable_p1 VALUES LESS THAN (10, 10.00, 19.156, 'h') TABLESPACE pg_default,
+         PARTITION altertable_rangeparttable_p2 VALUES LESS THAN (20, 20.89, 23.75, 'k') TABLESPACE pg_default,
+         PARTITION altertable_rangeparttable_p3 VALUES LESS THAN (30, 30.45, 32.706, 's') TABLESPACE pg_default
+);
+select * from pg_get_tabledef('altertable_rangeparttable');
+                                                 pg_get_tabledef                                                  
+------------------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                              +
+ CREATE  TABLE altertable_rangeparttable (                                                                       +
+         c1 integer,                                                                                             +
+         c2 double precision,                                                                                    +
+         c3 real,                                                                                                +
+         c4 text                                                                                                 +
+ )                                                                                                               +
+ WITH (orientation=row, compression=no)                                                                          +
+                                                                                            +
+ TO GROUP group1                                                                                                 +
+ PARTITION BY RANGE (c1, c2, c3, c4)                                                                             +
+ (                                                                                                               +
+          PARTITION altertable_rangeparttable_p1 VALUES LESS THAN (10, 10.00, 19.156, 'h') TABLESPACE pg_default,+
+          PARTITION altertable_rangeparttable_p2 VALUES LESS THAN (20, 20.89, 23.75, 'k') TABLESPACE pg_default, +
+          PARTITION altertable_rangeparttable_p3 VALUES LESS THAN (30, 30.45, 32.706, 's') TABLESPACE pg_default +
+ );
+(1 row)
+
+create index index_altertable_rangeparttable_local1 on altertable_rangeparttable (c1, c2) local
+(
+	partition index_altertable_rangeparttable_local1_srp1_index_local tablespace PG_DEFAULT,
+	partition index_altertable_rangeparttable_local1_srp2_index_local tablespace PG_DEFAULT,
+	partition index_altertable_rangeparttable_local1_srp3_index_local tablespace PG_DEFAULT
+); 
+create index index_altertable_rangeparttable_local2 on altertable_rangeparttable (c1, (c1+c2)) local
+(
+	partition index_altertable_rangeparttable_local2_srp1_index_local tablespace PG_DEFAULT,
+	partition index_altertable_rangeparttable_local2_srp2_index_local tablespace PG_DEFAULT,
+ 	partition index_altertable_rangeparttable_local2_srp3_index_local tablespace PG_DEFAULT
+);
+select * from pg_get_tabledef('altertable_rangeparttable');
+                                                                                                                                                                              pg_get_tabledef                                                                                                                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                                                                                                                                                                                                                                                                                       +
+ CREATE  TABLE altertable_rangeparttable (                                                                                                                                                                                                                                                                                                                                +
+         c1 integer,                                                                                                                                                                                                                                                                                                                                                      +
+         c2 double precision,                                                                                                                                                                                                                                                                                                                                             +
+         c3 real,                                                                                                                                                                                                                                                                                                                                                         +
+         c4 text                                                                                                                                                                                                                                                                                                                                                          +
+ )                                                                                                                                                                                                                                                                                                                                                                        +
+ WITH (orientation=row, compression=no)                                                                                                                                                                                                                                                                                                                                   +
+                                                                                                                                                                                                                                                                                                                                                     +
+ TO GROUP group1                                                                                                                                                                                                                                                                                                                                                          +
+ PARTITION BY RANGE (c1, c2, c3, c4)                                                                                                                                                                                                                                                                                                                                      +
+ (                                                                                                                                                                                                                                                                                                                                                                        +
+          PARTITION altertable_rangeparttable_p1 VALUES LESS THAN (10, 10.00, 19.156, 'h') TABLESPACE pg_default,                                                                                                                                                                                                                                                         +
+          PARTITION altertable_rangeparttable_p2 VALUES LESS THAN (20, 20.89, 23.75, 'k') TABLESPACE pg_default,                                                                                                                                                                                                                                                          +
+          PARTITION altertable_rangeparttable_p3 VALUES LESS THAN (30, 30.45, 32.706, 's') TABLESPACE pg_default                                                                                                                                                                                                                                                          +
+ );                                                                                                                                                                                                                                                                                                                                                                       +
+ CREATE INDEX index_altertable_rangeparttable_local2 ON altertable_rangeparttable USING btree (c1, (((c1)::double precision + c2))) LOCAL(PARTITION index_altertable_rangeparttable_local2_srp1_index_local, PARTITION index_altertable_rangeparttable_local2_srp2_index_local, PARTITION index_altertable_rangeparttable_local2_srp3_index_local)  TABLESPACE pg_default;+
+ CREATE INDEX index_altertable_rangeparttable_local1 ON altertable_rangeparttable USING btree (c1, c2) LOCAL(PARTITION index_altertable_rangeparttable_local1_srp1_index_local, PARTITION index_altertable_rangeparttable_local1_srp2_index_local, PARTITION index_altertable_rangeparttable_local1_srp3_index_local)  TABLESPACE pg_default;
+(1 row)
+
+CREATE TABLE hw_partition_update_tt(c_id int NOT NULL,c_first varchar(16) NOT NULL,c_data varchar(500))
+with(orientation = column)
+partition by range(c_id)
+(
+	partition hw_partition_update_tt_p1 values less than (11),
+	partition hw_partition_update_tt_p2 values less than (31)
+) ENABLE ROW MOVEMENT;
+select * from pg_get_tabledef('hw_partition_update_tt');
+                                      pg_get_tabledef                                      
+-------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                       +
+ CREATE  TABLE hw_partition_update_tt (                                                   +
+         c_id integer NOT NULL,                                                           +
+         c_first character varying(16) NOT NULL,                                          +
+         c_data character varying(500)                                                    +
+ )                                                                                        +
+ WITH (orientation=column, compression=low)                                               +
+                                                                   +
+ TO GROUP group1                                                                          +
+ PARTITION BY RANGE (c_id)                                                                +
+ (                                                                                        +
+          PARTITION hw_partition_update_tt_p1 VALUES LESS THAN (11) TABLESPACE pg_default,+
+          PARTITION hw_partition_update_tt_p2 VALUES LESS THAN (31) TABLESPACE pg_default +
+ )                                                                                        +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+create table p_t1 (c1 int) partition by range (c1) (partition p1 start(1));
+select * from pg_get_tabledef('p_t1');
+                              pg_get_tabledef                              
+---------------------------------------------------------------------------
+ SET search_path = test_show_table;                                       +
+ CREATE  TABLE p_t1 (                                                     +
+         c1 integer                                                       +
+ )                                                                        +
+ WITH (orientation=row, compression=no)                                   +
+                                                     +
+ TO GROUP group1                                                          +
+ PARTITION BY RANGE (c1)                                                  +
+ (                                                                        +
+          PARTITION p1_0 VALUES LESS THAN (1) TABLESPACE pg_default,      +
+          PARTITION p1_1 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default+
+ );
+(1 row)
+
+create table p_t2 (c1 int) partition by range(c1) (
+	partition p1 end (-2147483648), 
+	partition p2 end (0), 
+	partition p3 end (100),
+	partition p4 start (100),
+	partition p5 start (200),
+	partition p6 start(400) end (1000) every (499),
+	partition p7 start(1000) end (10000) every (5001),
+	partition p8 start(10000) end (2147483647),
+	partition p9 end (MAXVALUE)
+);
+select * from pg_get_tabledef('p_t2');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                         +
+ CREATE  TABLE p_t2 (                                                       +
+         c1 integer                                                         +
+ )                                                                          +
+ WITH (orientation=row, compression=no)                                     +
+                                                       +
+ TO GROUP group1                                                            +
+ PARTITION BY RANGE (c1)                                                    +
+ (                                                                          +
+          PARTITION p1 VALUES LESS THAN (-2147483648) TABLESPACE pg_default,+
+          PARTITION p2 VALUES LESS THAN (0) TABLESPACE pg_default,          +
+          PARTITION p3 VALUES LESS THAN (100) TABLESPACE pg_default,        +
+          PARTITION p4 VALUES LESS THAN (200) TABLESPACE pg_default,        +
+          PARTITION p5 VALUES LESS THAN (400) TABLESPACE pg_default,        +
+          PARTITION p6_1 VALUES LESS THAN (899) TABLESPACE pg_default,      +
+          PARTITION p6_2 VALUES LESS THAN (1000) TABLESPACE pg_default,     +
+          PARTITION p7_1 VALUES LESS THAN (6001) TABLESPACE pg_default,     +
+          PARTITION p7_2 VALUES LESS THAN (10000) TABLESPACE pg_default,    +
+          PARTITION p8 VALUES LESS THAN (2147483647) TABLESPACE pg_default, +
+          PARTITION p9 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default    +
+ );
+(1 row)
+
+create table test_range_tsp_3(a int)
+partition by range(a)
+(
+	partition test_range_tsp_3_p1 values less than (1) tablespace create_foreign_table_like_tblsp1,
+	partition test_range_tsp_3_p2 values less than (2)
+);
+select * from pg_get_tabledef('test_range_tsp_3');
+                                             pg_get_tabledef                                              
+----------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                      +
+ CREATE  TABLE test_range_tsp_3 (                                                                        +
+         a integer                                                                                       +
+ )                                                                                                       +
+ WITH (orientation=row, compression=no)                                                                  +
+                                                                                     +
+ TO GROUP group1                                                                                         +
+ PARTITION BY RANGE (a)                                                                                  +
+ (                                                                                                       +
+          PARTITION test_range_tsp_3_p1 VALUES LESS THAN (1) TABLESPACE create_foreign_table_like_tblsp1,+
+          PARTITION test_range_tsp_3_p2 VALUES LESS THAN (2) TABLESPACE pg_default                       +
+ );
+(1 row)
+
+--test collate
+ CREATE   TABLE  collate_test1 (             
+         a integer,                                
+         b text COLLATE pg_catalog."en_US" NOT NULL
+ )                                                 
+ WITH (orientation=row, compression=no)            
+                               
+ TO GROUP group1;
+ select * from pg_get_tabledef('collate_test1');
+                  pg_get_tabledef                   
+----------------------------------------------------
+ SET search_path = test_show_table;                +
+ CREATE  TABLE collate_test1 (                     +
+         a integer,                                +
+         b text COLLATE pg_catalog."en_US" NOT NULL+
+ )                                                 +
+ WITH (orientation=row, compression=no)            +
+                               +
+ TO GROUP group1;
+(1 row)
+
+ 
+  CREATE  TABLE  collate_test2 (     
+          a integer,                       
+          b text COLLATE pg_catalog."POSIX"
+  )                                        
+  WITH (orientation=row, compression=no)   
+                       
+  TO GROUP group1;
+  select * from pg_get_tabledef('collate_test2');
+              pg_get_tabledef              
+-------------------------------------------
+ SET search_path = test_show_table;       +
+ CREATE  TABLE collate_test2 (            +
+         a integer,                       +
+         b text COLLATE pg_catalog."POSIX"+
+ )                                        +
+ WITH (orientation=row, compression=no)   +
+                      +
+ TO GROUP group1;
+(1 row)
+
+  
+  --index
+--using index clause
+CREATE TABLE STUDENTS
+(
+	ID INT,
+	NAME VARCHAR2(20),
+	AGE INT,
+	ADDRESS VARCHAR(30)
+)  ;
+ --alter table to add unique index or primary key 
+ALTER TABLE STUDENTS ADD UNIQUE (ID)
+USING INDEX
+PCTFREE 10
+INITRANS 2
+MAXTRANS 255
+STORAGE
+(
+  INITIAL 64K
+  MINEXTENTS 1
+  MAXEXTENTS UNLIMITED
+);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "students_id_key" for table "students"
+select * from pg_get_tabledef('students');
+                         pg_get_tabledef                          
+------------------------------------------------------------------
+ SET search_path = test_show_table;                              +
+ CREATE  TABLE students (                                        +
+         id integer,                                             +
+         name character varying(20),                             +
+         age integer,                                            +
+         address character varying(30)                           +
+ )                                                               +
+ WITH (orientation=row, compression=no)                          +
+                                         +
+ TO GROUP group1;                                                +
+ ALTER TABLE students ADD CONSTRAINT students_id_key UNIQUE (id);
+(1 row)
+
+CREATE TABLE distributors (
+    did     integer,
+    name    varchar(40),
+    UNIQUE(name) WITH (fillfactor=70)
+)
+WITH (fillfactor=70);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "distributors_name_key" for table "distributors"
+select * from pg_get_tabledef('distributors');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                               +
+ CREATE  TABLE distributors (                                                                     +
+         did integer,                                                                             +
+         name character varying(40)                                                               +
+ )                                                                                                +
+ WITH (orientation=row, fillfactor=70, compression=no)                                            +
+                                                                           +
+ TO GROUP group1;                                                                                 +
+ ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--test add column
+ALTER TABLE distributors ADD COLUMN address varchar(30);
+select * from pg_get_tabledef('distributors');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                               +
+ CREATE  TABLE distributors (                                                                     +
+         did integer,                                                                             +
+         name character varying(40),                                                              +
+         address character varying(30)                                                            +
+ )                                                                                                +
+ WITH (orientation=row, fillfactor=70, compression=no)                                            +
+                                                                           +
+ TO GROUP group1;                                                                                 +
+ ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--test drop column
+ALTER TABLE distributors DROP COLUMN address RESTRICT;
+select * from pg_get_tabledef('distributors');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                               +
+ CREATE  TABLE distributors (                                                                     +
+         did integer,                                                                             +
+         name character varying(40)                                                               +
+ )                                                                                                +
+ WITH (orientation=row, fillfactor=70, compression=no)                                            +
+                                                                           +
+ TO GROUP group1;                                                                                 +
+ ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--rename colunm
+ALTER TABLE distributors ADD COLUMN address varchar(30);
+ALTER TABLE distributors RENAME COLUMN address TO city;
+select * from pg_get_tabledef('distributors');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                               +
+ CREATE  TABLE distributors (                                                                     +
+         did integer,                                                                             +
+         name character varying(40),                                                              +
+         city character varying(30)                                                               +
+ )                                                                                                +
+ WITH (orientation=row, fillfactor=70, compression=no)                                            +
+                                                                           +
+ TO GROUP group1;                                                                                 +
+ ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--add not null constraint
+ALTER TABLE distributors ALTER COLUMN name SET NOT NULL;
+select * from pg_get_tabledef('distributors');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                               +
+ CREATE  TABLE distributors (                                                                     +
+         did integer,                                                                             +
+         name character varying(40) NOT NULL,                                                     +
+         city character varying(30)                                                               +
+ )                                                                                                +
+ WITH (orientation=row, fillfactor=70, compression=no)                                            +
+                                                                           +
+ TO GROUP group1;                                                                                 +
+ ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--drop not null constraint
+ALTER TABLE distributors ALTER COLUMN name DROP NOT NULL;
+select * from pg_get_tabledef('distributors');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                               +
+ CREATE  TABLE distributors (                                                                     +
+         did integer,                                                                             +
+         name character varying(40),                                                              +
+         city character varying(30)                                                               +
+ )                                                                                                +
+ WITH (orientation=row, fillfactor=70, compression=no)                                            +
+                                                                           +
+ TO GROUP group1;                                                                                 +
+ ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--add constraint
+ALTER TABLE distributors ADD CONSTRAINT zipchk CHECK (char_length(name) = 5);
+select * from pg_get_tabledef('distributors');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                               +
+ CREATE  TABLE distributors (                                                                     +
+         did integer,                                                                             +
+         name character varying(40),                                                              +
+         city character varying(30),                                                              +
+     CONSTRAINT zipchk CHECK ((char_length((name)::text) = 5))                                    +
+ )                                                                                                +
+ WITH (orientation=row, fillfactor=70, compression=no)                                            +
+                                                                           +
+ TO GROUP group1;                                                                                 +
+ ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--rename constraint name
+ALTER TABLE distributors RENAME CONSTRAINT zipchk TO zip_check;
+select * from pg_get_tabledef('distributors');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                               +
+ CREATE  TABLE distributors (                                                                     +
+         did integer,                                                                             +
+         name character varying(40),                                                              +
+         city character varying(30),                                                              +
+     CONSTRAINT zip_check CHECK ((char_length((name)::text) = 5))                                 +
+ )                                                                                                +
+ WITH (orientation=row, fillfactor=70, compression=no)                                            +
+                                                                           +
+ TO GROUP group1;                                                                                 +
+ ALTER TABLE distributors ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--rename table name
+ALTER TABLE distributors RENAME TO suppliers;
+select * from pg_get_tabledef('suppliers');
+                                        pg_get_tabledef                                         
+------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                            +
+ CREATE  TABLE suppliers (                                                                     +
+         did integer,                                                                          +
+         name character varying(40),                                                           +
+         city character varying(30),                                                           +
+     CONSTRAINT zip_check CHECK ((char_length((name)::text) = 5))                              +
+ )                                                                                             +
+ WITH (orientation=row, fillfactor=70, compression=no)                                         +
+                                                                        +
+ TO GROUP group1;                                                                              +
+ ALTER TABLE suppliers ADD CONSTRAINT distributors_name_key UNIQUE (name) WITH (fillfactor=70);
+(1 row)
+
+--test compress
+ CREATE TABLE  compress_18 (          
+         a00 integer DELTA ,                
+         a01 integer DICTIONARY ,           
+         a02 integer NOCOMPRESS ,           
+         a03 character varying(100) PREFIX ,
+         a04 integer,                       
+         a05 integer DELTA  NOT NULL        
+ )                                          
+ WITH (orientation=row, compression=no)     
+ COMPRESS                                   
+                      
+ TO GROUP group1;
+ 
+ select * from pg_get_tabledef('compress_18');
+              pg_get_tabledef               
+--------------------------------------------
+ SET search_path = test_show_table;        +
+ CREATE  TABLE compress_18 (               +
+         a00 integer DELTA,                +
+         a01 integer DICTIONARY,           +
+         a02 integer,                      +
+         a03 character varying(100) PREFIX,+
+         a04 integer,                      +
+         a05 integer DELTA NOT NULL        +
+ )                                         +
+ WITH (orientation=row, compression=no)    +
+ COMPRESS                                  +
+                     +
+ TO GROUP group1;
+(1 row)
+
+ 
+ --test tablespace
+CREATE   TABLE  create_foreign_table_like_basic_info (                                                                 
+         u_id character varying(10) NOT NULL,                                                                                 
+         u_fname character varying(80),                                                                                       
+         u_sname character varying(80),                                                                                       
+         zipcode character varying(20),                                                                                       
+         phone character varying(40),                                                                                         
+         age numeric(8,0),                                                                                                    
+         rank numeric(8,0)                                                                                                    
+ )                                                                                                                            
+ WITH (orientation=row, compression=no)                                                                                       
+ COMPRESS                                                                                                                     
+ TABLESPACE create_foreign_table_like_tblsp1                                                                                  
+                                                                                                       
+ TO GROUP group1;                                                                                                                  
+ ALTER TABLE create_foreign_table_like_basic_info ADD CONSTRAINT create_foreign_table_like_basic_info_pkey PRIMARY KEY (u_id);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "create_foreign_table_like_basic_info_pkey" for table "create_foreign_table_like_basic_info"
+ 
+  select * from pg_get_tabledef('create_foreign_table_like_basic_info');
+                                                        pg_get_tabledef                                                        
+-------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                                           +
+ CREATE  TABLE create_foreign_table_like_basic_info (                                                                         +
+         u_id character varying(10) NOT NULL,                                                                                 +
+         u_fname character varying(80),                                                                                       +
+         u_sname character varying(80),                                                                                       +
+         zipcode character varying(20),                                                                                       +
+         phone character varying(40),                                                                                         +
+         age numeric(8,0),                                                                                                    +
+         rank numeric(8,0)                                                                                                    +
+ )                                                                                                                            +
+ WITH (orientation=row, compression=no)                                                                                       +
+ COMPRESS                                                                                                                     +
+ TABLESPACE create_foreign_table_like_tblsp1                                                                                  +
+                                                                                                       +
+ TO GROUP group1;                                                                                                             +
+ ALTER TABLE create_foreign_table_like_basic_info ADD CONSTRAINT create_foreign_table_like_basic_info_pkey PRIMARY KEY (u_id);
+(1 row)
+
+  
+ --test comment
+ CREATE  TABLE  ctlt1 (                                                     
+         a text NOT NULL,                                                         
+         b text,                                                                  
+     CONSTRAINT ctlt1_a_check CHECK ((length(a) > 2))                             
+ )                                                                                
+ WITH (orientation=row, compression=no)                                           
+                                                              
+ TO GROUP group1;                                                                      
+ COMMENT ON COLUMN ctlt1.a IS 'A';                                                
+ COMMENT ON COLUMN ctlt1.b IS 'B';                                                
+ COMMENT ON CONSTRAINT ctlt1_a_check ON ctlt1 IS 't1_a_check';                             
+ CREATE INDEX ctlt1_b_key ON ctlt1 USING btree (b) TABLESPACE pg_default;         
+ COMMENT ON INDEX ctlt1_b_key IS 'index b_key';                                   
+ CREATE INDEX ctlt1_fnidx ON ctlt1 USING btree (((a || b))) TABLESPACE pg_default;
+ ALTER TABLE ctlt1 ADD CONSTRAINT ctlt1_pkey PRIMARY KEY (a);                     
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "ctlt1_pkey" for table "ctlt1"
+ COMMENT ON INDEX ctlt1_pkey IS 'index pkey';
+ 
+ select * from pg_get_tabledef('ctlt1');
+                                  pg_get_tabledef                                  
+-----------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                               +
+ CREATE  TABLE ctlt1 (                                                            +
+         a text NOT NULL,                                                         +
+         b text,                                                                  +
+     CONSTRAINT ctlt1_a_check CHECK ((length(a) > 2))                             +
+ )                                                                                +
+ WITH (orientation=row, compression=no)                                           +
+                                                              +
+ TO GROUP group1;                                                                 +
+ COMMENT ON COLUMN ctlt1.a IS 'A';                                                +
+ COMMENT ON COLUMN ctlt1.b IS 'B';                                                +
+ COMMENT ON CONSTRAINT ctlt1_a_check ON ctlt1 IS 't1_a_check';                    +
+ ALTER TABLE ctlt1 ADD CONSTRAINT ctlt1_pkey PRIMARY KEY (a);                     +
+ COMMENT ON INDEX ctlt1_pkey IS 'index pkey';                                     +
+ CREATE INDEX ctlt1_fnidx ON ctlt1 USING btree (((a || b))) TABLESPACE pg_default;+
+ CREATE INDEX ctlt1_b_key ON ctlt1 USING btree (b) TABLESPACE pg_default;         +
+ COMMENT ON INDEX ctlt1_b_key IS 'index b_key';
+(1 row)
+
+ 
+ CREATE   TABLE  tmp (             
+         initial integer                 
+ )                                       
+ WITH (orientation=row, compression=no)  
+               
+ TO GROUP group1;                             
+ COMMENT ON TABLE tmp IS 'table comment';
+ 
+  select * from pg_get_tabledef('tmp');
+             pg_get_tabledef              
+------------------------------------------
+ SET search_path = test_show_table;      +
+ CREATE  TABLE tmp (                     +
+         initial integer                 +
+ )                                       +
+ WITH (orientation=row, compression=no)  +
+               +
+ TO GROUP group1;                        +
+ COMMENT ON TABLE tmp IS 'table comment';
+(1 row)
+
+  
+ --test check constraint
+ CREATE   TABLE  distributors_1 (                                      
+         did integer,                                                      
+         name character varying(40),                                       
+     CONSTRAINT con1 CHECK (((did > 100) AND ((name)::text <> NULL::text)))
+ )                                                                         
+ WITH (orientation=row, compression=no)                                    
+                                                     
+ TO GROUP group1;
+ 
+ select * from pg_get_tabledef('distributors_1');
+                              pg_get_tabledef                               
+----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                        +
+ CREATE  TABLE distributors_1 (                                            +
+         did integer,                                                      +
+         name character varying(40),                                       +
+     CONSTRAINT con1 CHECK (((did > 100) AND ((name)::text <> NULL::text)))+
+ )                                                                         +
+ WITH (orientation=row, compression=no)                                    +
+                                                     +
+ TO GROUP group1;
+(1 row)
+
+ 
+ --test unique
+ CREATE TABLE  unique_tbl (                                                                
+         i integer,                                                                              
+         t text                                                                                  
+ )                                                                                               
+ WITH (orientation=row, compression=no)                                                          
+                                                                         
+ TO GROUP group1;                                                                                     
+ ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_tbl_i_key" for table "unique_tbl"
+ 
+ select * from pg_get_tabledef('unique_tbl');
+                                         pg_get_tabledef                                          
+--------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                              +
+ CREATE  TABLE unique_tbl (                                                                      +
+         i integer,                                                                              +
+         t text                                                                                  +
+ )                                                                                               +
+ WITH (orientation=row, compression=no)                                                          +
+                                                                         +
+ TO GROUP group1;                                                                                +
+ ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
+(1 row)
+
+ 
+ ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_t_key UNIQUE (t) with (fillfactor=70) DEFERRABLE INITIALLY DEFERRED;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_tbl_t_key" for table "unique_tbl"
+ select * from pg_get_tabledef('unique_tbl');
+                                                    pg_get_tabledef                                                    
+-----------------------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                                   +
+ CREATE  TABLE unique_tbl (                                                                                           +
+         i integer,                                                                                                   +
+         t text                                                                                                       +
+ )                                                                                                                    +
+ WITH (orientation=row, compression=no)                                                                               +
+                                                                                              +
+ TO GROUP group1;                                                                                                     +
+ ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_t_key UNIQUE (t) WITH (fillfactor=70) DEFERRABLE INITIALLY DEFERRED;+
+ ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
+(1 row)
+
+ 
+  alter table unique_tbl drop constraint unique_tbl_t_key;
+ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_t_key UNIQUE (t)  DEFERRABLE INITIALLY IMMEDIATE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "unique_tbl_t_key" for table "unique_tbl"
+  select * from pg_get_tabledef('unique_tbl');
+                                         pg_get_tabledef                                          
+--------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                              +
+ CREATE  TABLE unique_tbl (                                                                      +
+         i integer,                                                                              +
+         t text                                                                                  +
+ )                                                                                               +
+ WITH (orientation=row, compression=no)                                                          +
+                                                                         +
+ TO GROUP group1;                                                                                +
+ ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_t_key UNIQUE (t) DEFERRABLE;                   +
+ ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
+(1 row)
+
+  
+  
+ --test primary key
+  CREATE  TABLE  distributors2 (                                          
+          did integer NOT NULL,                                                 
+          name character varying(40)                                            
+  )                                                                             
+  WITH (orientation=row, compression=no)                                        
+                                                          
+  TO GROUP group1;                                                                   
+  ALTER TABLE distributors2 ADD CONSTRAINT distributors2_pkey PRIMARY KEY (did);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "distributors2_pkey" for table "distributors2"
+  
+ select * from pg_get_tabledef('distributors2');
+                                pg_get_tabledef                                 
+--------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                            +
+ CREATE  TABLE distributors2 (                                                 +
+         did integer NOT NULL,                                                 +
+         name character varying(40)                                            +
+ )                                                                             +
+ WITH (orientation=row, compression=no)                                        +
+                                                         +
+ TO GROUP group1;                                                              +
+ ALTER TABLE distributors2 ADD CONSTRAINT distributors2_pkey PRIMARY KEY (did);
+(1 row)
+
+ 
+ --gds foreign table
+ 
+ CREATE FOREIGN TABLE ext_compatible_illegal_chars_test_just_char_type (
+    col1_char character(20) position(0,20) NOT NULL,
+    col2_varchar character varying(20) position(20,20) NOT NULL,
+    col3_varchar2 character varying(20) position(40,20) NOT NULL,
+    col4_nvarchar2 nvarchar2(20) position(60,20) NOT NULL,
+    col5_clob text position(80,20) NOT NULL,
+    col6_text text position(100,20) NOT NULL
+)
+SERVER gsmpp_server
+OPTIONS (
+    compatible_illegal_chars 'true',
+    encoding 'utf8',
+    fix '120',
+    format 'fixed',
+    location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_fixed_format.data',
+    mode 'normal'
+);
+select * from pg_get_tabledef('ext_compatible_illegal_chars_test_just_char_type');
+                                                             pg_get_tabledef                                                              
+------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                                                      +
+ CREATE  FOREIGN TABLE ext_compatible_illegal_chars_test_just_char_type (                                                                +
+         col1_char character(20) position(0,20) NOT NULL,                                                                                +
+         col2_varchar character varying(20) position(20,20) NOT NULL,                                                                    +
+         col3_varchar2 character varying(20) position(40,20) NOT NULL,                                                                   +
+         col4_nvarchar2 nvarchar2(20) position(60,20) NOT NULL,                                                                          +
+         col5_clob text position(80,20) NOT NULL,                                                                                        +
+         col6_text text position(100,20) NOT NULL                                                                                        +
+ )                                                                                                                                       +
+ SERVER gsmpp_server                                                                                                                     +
+ OPTIONS (                                                                                                                               +
+     compatible_illegal_chars 'true',                                                                                                    +
+          encoding 'utf8',                                                                                                               +
+          fix '120',                                                                                                                     +
+          format 'fixed',                                                                                                                +
+          location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_fixed_format.data',+
+          mode 'normal'                                                                                                                  +
+ );
+(1 row)
+
+CREATE   FOREIGN TABLE  f_create_foreign_table_like_basic_info (     
+        u_id character varying(10) NOT NULL,                               
+        u_fname character varying(80),                                     
+        u_sname character varying(80),                                     
+        zipcode character varying(20),                                     
+        phone character varying(40),                                       
+        age numeric(8,0),                                                  
+        rank numeric(8,0)                                                  
+)                                                                          
+SERVER gsmpp_server                                                        
+OPTIONS (                                                                  
+    encoding 'LATIN1',                                                     
+         location 'gsfs://127.0.0.1/BASIC_INFO.bin',                       
+         mode 'Normal'                                                     
+) WITH err_create_foreign_table_like_basic_info PER NODE REJECT LIMIT '10';
+select * from pg_get_tabledef('f_create_foreign_table_like_basic_info');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                         +
+ CREATE  FOREIGN TABLE f_create_foreign_table_like_basic_info (             +
+         u_id character varying(10) NOT NULL,                               +
+         u_fname character varying(80),                                     +
+         u_sname character varying(80),                                     +
+         zipcode character varying(20),                                     +
+         phone character varying(40),                                       +
+         age numeric(8,0),                                                  +
+         rank numeric(8,0)                                                  +
+ )                                                                          +
+ SERVER gsmpp_server                                                        +
+ OPTIONS (                                                                  +
+     encoding 'LATIN1',                                                     +
+          location 'gsfs://127.0.0.1/BASIC_INFO.bin',                       +
+          mode 'Normal'                                                     +
+ ) WITH err_create_foreign_table_like_basic_info PER NODE REJECT LIMIT '10';
+(1 row)
+
+--cluster key
+ CREATE   TABLE  tttt (                 
+         a integer,                           
+         b integer                            
+ )                                            
+ WITH (orientation=column, compression=no)    
+                          
+ TO GROUP group1;                                  
+ ALTER TABLE tttt ADD PARTIAL CLUSTER KEY (b);
+ 
+ select * from pg_get_tabledef('tttt');
+                pg_get_tabledef                
+-----------------------------------------------
+ SET search_path = test_show_table;           +
+ CREATE  TABLE tttt (                         +
+         a integer,                           +
+         b integer                            +
+ )                                            +
+ WITH (orientation=column, compression=no)    +
+                          +
+ TO GROUP group1;                             +
+ ALTER TABLE tttt ADD PARTIAL CLUSTER KEY (b);
+(1 row)
+
+ 
+ --test key word
+ CREATE   TABLE  delete (        
+         "create" character(1)         
+ )                                     
+ WITH (orientation=row, compression=no)
+            
+ TO GROUP group1;
+ 
+  select * from pg_get_tabledef('delete');
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = test_show_table;    +
+ CREATE  TABLE delete (                +
+         "create" character(1)         +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+            +
+ TO GROUP group1;
+(1 row)
+
+  
+ --test multi distribute
+ CREATE   TABLE  update12 (        
+         "create" character(1) ,
+		"select" character(1) 
+ )                                     
+ WITH (orientation=row, compression=no)
+            
+ TO GROUP group1;
+ 
+ select * from pg_get_tabledef('update12');
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = test_show_table;    +
+ CREATE  TABLE update12 (              +
+         "create" character(1),        +
+         "select" character(1)         +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+  +
+ TO GROUP group1;
+(1 row)
+
+ 
+ --test storage option
+ CREATE TABLE ctlt3 (a text CHECK (length(a) < 5), c text);
+ALTER TABLE ctlt3 ALTER COLUMN c SET STORAGE EXTERNAL;
+ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;
+COMMENT ON COLUMN ctlt3.a IS 'A3';
+COMMENT ON COLUMN ctlt3.c IS 'C';
+COMMENT ON CONSTRAINT ctlt3_a_check ON ctlt3 IS 't3_a_check';
+select * from pg_get_tabledef('ctlt3');
+                        pg_get_tabledef                        
+---------------------------------------------------------------
+ SET search_path = test_show_table;                           +
+ CREATE  TABLE ctlt3 (                                        +
+         a text,                                              +
+         c text,                                              +
+     CONSTRAINT ctlt3_a_check CHECK ((length(a) < 5))         +
+ )                                                            +
+ WITH (orientation=row, compression=no)                       +
+                                          +
+ TO GROUP group1;                                             +
+ ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;           +
+ COMMENT ON COLUMN ctlt3.a IS 'A3';                           +
+ ALTER TABLE ctlt3 ALTER COLUMN c SET STORAGE EXTERNAL;       +
+ COMMENT ON COLUMN ctlt3.c IS 'C';                            +
+ COMMENT ON CONSTRAINT ctlt3_a_check ON ctlt3 IS 't3_a_check';
+(1 row)
+
+--test drop constraint
+alter table ctlt3 drop constraint ctlt3_a_check;
+select * from pg_get_tabledef('ctlt3');
+                    pg_get_tabledef                     
+--------------------------------------------------------
+ SET search_path = test_show_table;                    +
+ CREATE  TABLE ctlt3 (                                 +
+         a text,                                       +
+         c text                                        +
+ )                                                     +
+ WITH (orientation=row, compression=no)                +
+                                   +
+ TO GROUP group1;                                      +
+ ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;    +
+ COMMENT ON COLUMN ctlt3.a IS 'A3';                    +
+ ALTER TABLE ctlt3 ALTER COLUMN c SET STORAGE EXTERNAL;+
+ COMMENT ON COLUMN ctlt3.c IS 'C';
+(1 row)
+
+--test not valid constraint
+alter table ctlt3 add check((length(a) < 5))  not valid;
+select * from pg_get_tabledef('ctlt3');
+                                 pg_get_tabledef                                 
+---------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                             +
+ CREATE  TABLE ctlt3 (                                                          +
+         a text,                                                                +
+         c text                                                                 +
+ )                                                                              +
+ WITH (orientation=row, compression=no)                                         +
+                                                            +
+ TO GROUP group1;                                                               +
+ ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;                             +
+ COMMENT ON COLUMN ctlt3.a IS 'A3';                                             +
+ ALTER TABLE ctlt3 ALTER COLUMN c SET STORAGE EXTERNAL;                         +
+ COMMENT ON COLUMN ctlt3.c IS 'C';                                              +
+ ALTER TABLE ctlt3 ADD CONSTRAINT ctlt3_a_check CHECK (length(a) < 5) NOT VALID;
+(1 row)
+
+--test validate constraint
+alter table ctlt3 VALIDATE CONSTRAINT ctlt3_a_check;
+select * from pg_get_tabledef('ctlt3');
+                    pg_get_tabledef                     
+--------------------------------------------------------
+ SET search_path = test_show_table;                    +
+ CREATE  TABLE ctlt3 (                                 +
+         a text,                                       +
+         c text,                                       +
+     CONSTRAINT ctlt3_a_check CHECK ((length(a) < 5))  +
+ )                                                     +
+ WITH (orientation=row, compression=no)                +
+                                   +
+ TO GROUP group1;                                      +
+ ALTER TABLE ctlt3 ALTER COLUMN a SET STORAGE MAIN;    +
+ COMMENT ON COLUMN ctlt3.a IS 'A3';                    +
+ ALTER TABLE ctlt3 ALTER COLUMN c SET STORAGE EXTERNAL;+
+ COMMENT ON COLUMN ctlt3.c IS 'C';
+(1 row)
+
+--test set statistics
+CREATE TABLE alter_set_stat_00 (id int, info int) with (orientation = column);
+ALTER TABLE alter_set_stat_00 ALTER COLUMN info SET STATISTICS 1000;
+select * from pg_get_tabledef('alter_set_stat_00');
+                           pg_get_tabledef                            
+----------------------------------------------------------------------
+ SET search_path = test_show_table;                                  +
+ CREATE  TABLE alter_set_stat_00 (                                   +
+         id integer,                                                 +
+         info integer                                                +
+ )                                                                   +
+ WITH (orientation=column, compression=low)                          +
+                                                +
+ TO GROUP group1;                                                    +
+ ALTER TABLE alter_set_stat_00 ALTER COLUMN info SET STATISTICS 1000;
+(1 row)
+
+ALTER TABLE alter_set_stat_00 ALTER COLUMN info SET STATISTICS PERCENT 80;
+select * from pg_get_tabledef('alter_set_stat_00');
+                              pg_get_tabledef                               
+----------------------------------------------------------------------------
+ SET search_path = test_show_table;                                        +
+ CREATE  TABLE alter_set_stat_00 (                                         +
+         id integer,                                                       +
+         info integer                                                      +
+ )                                                                         +
+ WITH (orientation=column, compression=low)                                +
+                                                      +
+ TO GROUP group1;                                                          +
+ ALTER TABLE alter_set_stat_00 ALTER COLUMN info SET STATISTICS PERCENT 80;
+(1 row)
+
+--test attribute option
+CREATE TABLE hw_cstore_alter_t6 (a int, b int, c int);
+ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a SET (n_distinct = 7);
+select * from pg_get_tabledef('hw_cstore_alter_t6');
+                          pg_get_tabledef                          
+-------------------------------------------------------------------
+ SET search_path = test_show_table;                               +
+ CREATE  TABLE hw_cstore_alter_t6 (                               +
+         a integer,                                               +
+         b integer,                                               +
+         c integer                                                +
+ )                                                                +
+ WITH (orientation=row, compression=no)                           +
+                                              +
+ TO GROUP group1;                                                 +
+ ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a SET (n_distinct=7);
+(1 row)
+
+ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a RESET (n_distinct);
+select * from pg_get_tabledef('hw_cstore_alter_t6');
+            pg_get_tabledef             
+----------------------------------------
+ SET search_path = test_show_table;    +
+ CREATE  TABLE hw_cstore_alter_t6 (    +
+         a integer,                    +
+         b integer,                    +
+         c integer                     +
+ )                                     +
+ WITH (orientation=row, compression=no)+
+                   +
+ TO GROUP group1;
+(1 row)
+
+--test foreign table options
+CREATE FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE (
+		COL1_CHAR		 CHAR(100) NOT NULL,
+		COL2_VARCHAR	 VARCHAR(100) NOT NULL,
+		COL3_VARCHAR2	 VARCHAR2(100) NOT NULL,
+		COL4_NVARCHAR2	 NVARCHAR2(100) NOT NULL,
+		COL5_CLOB		 CLOB NOT NULL,
+		COL6_TEXT		 TEXT NOT NULL
+)SERVER gsmpp_server OPTIONS(format 'text', location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_text_format.data', 
+encoding 'utf8', delimiter '|', mode 'normal', compatible_illegal_chars 'true');
+ERROR:  relation "ext_compatible_illegal_chars_test_just_char_type" already exists
+ALTER FOREIGN TABLE EXT_COMPATIBLE_ILLEGAL_CHARS_TEST_JUST_CHAR_TYPE OPTIONS (SET compatible_illegal_chars 'false');
+select * from pg_get_tabledef('ext_compatible_illegal_chars_test_just_char_type');
+                                                             pg_get_tabledef                                                              
+------------------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                                                      +
+ CREATE  FOREIGN TABLE ext_compatible_illegal_chars_test_just_char_type (                                                                +
+         col1_char character(20) position(0,20) NOT NULL,                                                                                +
+         col2_varchar character varying(20) position(20,20) NOT NULL,                                                                    +
+         col3_varchar2 character varying(20) position(40,20) NOT NULL,                                                                   +
+         col4_nvarchar2 nvarchar2(20) position(60,20) NOT NULL,                                                                          +
+         col5_clob text position(80,20) NOT NULL,                                                                                        +
+         col6_text text position(100,20) NOT NULL                                                                                        +
+ )                                                                                                                                       +
+ SERVER gsmpp_server                                                                                                                     +
+ OPTIONS (                                                                                                                               +
+     compatible_illegal_chars 'false',                                                                                                   +
+          encoding 'utf8',                                                                                                               +
+          fix '120',                                                                                                                     +
+          format 'fixed',                                                                                                                +
+          location 'gsfs://127.0.0.1:8900/bulkload_compatible_illegal_chars_test_data/invalid_char_for_just_char_type_fixed_format.data',+
+          mode 'normal'                                                                                                                  +
+ );
+(1 row)
+
+CREATE FOREIGN TABLE FT_DATETIME_TEST(
+	COL_DATE DATE,
+	COL_TIME TIME,
+	COL_TIMESTAMP TIMESTAMP,
+	COL_SMALLDATETIME SMALLDATETIME
+)
+server gsmpp_server options
+(location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_1.data', format 'text', delimiter '|', mode 'normal')WITH err_dt_format_table;
+ALTER FOREIGN TABLE FT_DATETIME_TEST OPTIONS(ADD date_format 'DD/MM/YYYY', time_format 'HHMISS', timestamp_format 'DD/MM/YYYYHHMISS', smalldatetime_format 'DD/MM/YYYYHHMISS');
+select * from pg_get_tabledef('ft_datetime_test');
+                                              pg_get_tabledef                                               
+------------------------------------------------------------------------------------------------------------
+ SET search_path = test_show_table;                                                                        +
+ CREATE  FOREIGN TABLE ft_datetime_test (                                                                  +
+         col_date timestamp(0) without time zone,                                                          +
+         col_time time without time zone,                                                                  +
+         col_timestamp timestamp without time zone,                                                        +
+         col_smalldatetime smalldatetime                                                                   +
+ )                                                                                                         +
+ SERVER gsmpp_server                                                                                       +
+ OPTIONS (                                                                                                 +
+     date_format 'DD/MM/YYYY',                                                                             +
+          delimiter '|',                                                                                   +
+          format 'text',                                                                                   +
+          location 'gsfs://127.0.0.1:8900/bulkload_datetime_format_test_data/datetime_valid_format_1.data',+
+          mode 'normal',                                                                                   +
+          smalldatetime_format 'DD/MM/YYYYHHMISS',                                                         +
+          time_format 'HHMISS',                                                                            +
+          timestamp_format 'DD/MM/YYYYHHMISS'                                                              +
+ ) WITH err_dt_format_table;
+(1 row)
+
+--test hdfs foreign table
+CREATE SERVER hdfs_server FOREIGN DATA WRAPPER DFS_FDW OPTIONS (hdfscfgpath '/opt/config', type 'HDFS');
+create foreign table info_cons_add_003 (
+ c_id1  TEXT,
+ c_id2  date,
+ c_id3  smallint,
+ c_id4  boolean,
+ c_id5  float4,
+ c_id6  timestamp,
+ c_id7  decimal(4,2),
+ c_id8  bigint,
+ c_id9  char(9),
+ c_id10 int,
+ c_id11 float8,
+ c_id12 varchar(20)
+)
+server hdfs_server OPTIONS(format 'orc', foldername '/user/hive/warehouse/sql_on_hadoop.db/info_cons_tab_2')
+ 
+partition by (c_id12) automapped;
+ALTER FOREIGN TABLE info_cons_add_003
+ADD CONSTRAINT constr_add_003 
+  PRIMARY KEY (c_id9) NOT ENFORCED ENABLE QUERY OPTIMIZATION;
+NOTICE:  ALTER FOREIGN TABLE / ADD PRIMARY KEY will create constraint "constr_add_003" for foreign table "info_cons_add_003"
+--error test
+ select * from pg_get_tabledef('t300'); --not exists
+ERROR:  relation "t300" does not exist
+LINE 1: select * from pg_get_tabledef('t300');
+                                      ^
+ 
+ CREATE temp TABLE reset_test ( data text ) ON COMMIT PRESERVE ROWS;
+ select * from pg_get_tabledef('reset_test'); -- not support temp table
+ERROR:  Can not get temporary tables defination.
+ 
+ create view v1_a1 as select * from a1;
+ select * from pg_get_tabledef('v1_a1'); -- not a table
+ERROR:  Not a ordinary table or foreign table.
+ 
+reset current_schema;
+drop schema test_show_table cascade;
+NOTICE:  drop cascades to 33 other objects
+DETAIL:  drop cascades to table test_show_table.a1
+drop cascades to table test_show_table.test_default
+drop cascades to table test_show_table.serialtest
+drop cascades to table test_show_table.hw_cstore_alter_t3
+drop cascades to table test_show_table.storage_para_t1
+drop cascades to table test_show_table.t2
+drop cascades to table test_show_table.altertable_rangeparttable
+drop cascades to table test_show_table.hw_partition_update_tt
+drop cascades to table test_show_table.p_t1
+drop cascades to table test_show_table.p_t2
+drop cascades to table test_show_table.test_range_tsp_3
+drop cascades to table test_show_table.collate_test1
+drop cascades to table test_show_table.collate_test2
+drop cascades to table test_show_table.students
+drop cascades to table test_show_table.suppliers
+drop cascades to table test_show_table.compress_18
+drop cascades to table test_show_table.create_foreign_table_like_basic_info
+drop cascades to table test_show_table.ctlt1
+drop cascades to table test_show_table.tmp
+drop cascades to table test_show_table.distributors_1
+drop cascades to table test_show_table.unique_tbl
+drop cascades to table test_show_table.distributors2
+drop cascades to foreign table test_show_table.ext_compatible_illegal_chars_test_just_char_type
+drop cascades to foreign table test_show_table.f_create_foreign_table_like_basic_info
+drop cascades to table test_show_table.tttt
+drop cascades to table test_show_table.delete
+drop cascades to table test_show_table.update12
+drop cascades to table test_show_table.ctlt3
+drop cascades to table test_show_table.alter_set_stat_00
+drop cascades to table test_show_table.hw_cstore_alter_t6
+drop cascades to foreign table test_show_table.ft_datetime_test
+drop cascades to foreign table test_show_table.info_cons_add_003
+drop cascades to view test_show_table.v1_a1
+drop tablespace create_foreign_table_like_tblsp1;
+\! rm -fr '@testtablespace@/ts_show_table'

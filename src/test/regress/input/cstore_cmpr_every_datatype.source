@@ -1,0 +1,138 @@
+-- problem:
+--   test every supporting datatype
+CREATE TABLE cstore_cmpr_test_bool
+(
+	b1 BOOL,
+	b2 BOOL,
+	b3 BOOL,
+	b4 BOOL
+)
+with ( orientation = column, compression = high);
+COPY cstore_cmpr_test_bool FROM STDIN NULL 'null';
+FALSE	FALSE	FALSE	FALSE
+FALSE	FALSE	FALSE	TRUE
+FALSE	FALSE	FALSE	null
+FALSE	FALSE	TRUE	FALSE
+FALSE	FALSE	TRUE	TRUE
+FALSE	FALSE	TRUE	null
+FALSE	FALSE	null	FALSE
+FALSE	FALSE	null	TRUE
+FALSE	FALSE	null	null
+FALSE	TRUE	FALSE	FALSE
+FALSE	TRUE	FALSE	TRUE
+FALSE	TRUE	FALSE	null
+FALSE	TRUE	TRUE	FALSE
+FALSE	TRUE	TRUE	TRUE
+FALSE	TRUE	TRUE	null
+FALSE	TRUE	null	FALSE
+FALSE	TRUE	null	TRUE
+FALSE	TRUE	null	null
+FALSE	null	FALSE	FALSE
+FALSE	null	FALSE	TRUE
+FALSE	null	FALSE	null
+FALSE	null	TRUE	FALSE
+FALSE	null	TRUE	TRUE
+FALSE	null	TRUE	null
+FALSE	null	null	FALSE
+FALSE	null	null	TRUE
+FALSE	null	null	null
+TRUE	FALSE	FALSE	FALSE
+TRUE	FALSE	FALSE	TRUE
+TRUE	FALSE	FALSE	null
+TRUE	FALSE	TRUE	FALSE
+TRUE	FALSE	TRUE	TRUE
+TRUE	FALSE	TRUE	null
+TRUE	FALSE	null	FALSE
+TRUE	FALSE	null	TRUE
+TRUE	FALSE	null	null
+TRUE	TRUE	FALSE	FALSE
+TRUE	TRUE	FALSE	TRUE
+TRUE	TRUE	FALSE	null
+TRUE	TRUE	TRUE	FALSE
+TRUE	TRUE	TRUE	TRUE
+TRUE	TRUE	TRUE	null
+TRUE	TRUE	null	FALSE
+TRUE	TRUE	null	TRUE
+TRUE	TRUE	null	null
+TRUE	null	FALSE	FALSE
+TRUE	null	FALSE	TRUE
+TRUE	null	FALSE	null
+TRUE	null	TRUE	FALSE
+TRUE	null	TRUE	TRUE
+TRUE	null	TRUE	null
+TRUE	null	null	FALSE
+TRUE	null	null	TRUE
+TRUE	null	null	null
+null	FALSE	FALSE	FALSE
+null	FALSE	FALSE	TRUE
+null	FALSE	FALSE	null
+null	FALSE	TRUE	FALSE
+null	FALSE	TRUE	TRUE
+null	FALSE	TRUE	null
+null	FALSE	null	FALSE
+null	FALSE	null	TRUE
+null	FALSE	null	null
+null	TRUE	FALSE	FALSE
+null	TRUE	FALSE	TRUE
+null	TRUE	FALSE	null
+null	TRUE	TRUE	FALSE
+null	TRUE	TRUE	TRUE
+null	TRUE	TRUE	null
+null	TRUE	null	FALSE
+null	TRUE	null	TRUE
+null	TRUE	null	null
+null	null	FALSE	FALSE
+null	null	FALSE	TRUE
+null	null	FALSE	null
+null	null	TRUE	FALSE
+null	null	TRUE	TRUE
+null	null	TRUE	null
+null	null	null	FALSE
+null	null	null	TRUE
+null	null	null	null
+\.
+SELECT COUNT(*) FROM cstore_cmpr_test_bool;
+SELECT DISTINCT b1 FROM cstore_cmpr_test_bool ORDER BY 1;
+SELECT DISTINCT b3 FROM cstore_cmpr_test_bool ORDER BY 1;
+SELECT * FROM cstore_cmpr_test_bool WHERE b1 and b4 ORDER BY 1, 2, 3, 4;
+DROP TABLE cstore_cmpr_test_bool;
+-- problem: test tinyint && smallint && int && bigint datatype
+CREATE TABLE cstore_cmpr_test_each_int
+(
+	a1 varchar(32),
+	a2 tinyint,
+	a3 smallint,
+	a4 int,
+	a5 bigint,
+	a7 int,
+	a8 bigint,
+	a9 "char"
+) with ( orientation = column, compression = low )  ;
+COPY cstore_cmpr_test_each_int FROM STDIN NULL 'null';
+'hello world'	0	100	1000	10000	2000	0	0
+'hello world'	1	101	1001	10001	2001	1	1
+'hello world'	2	102	1002	10002	2002	2	2
+'hello world'	3	103	1003	10003	2003	3	3
+'hello world'	4	104	1004	10004	2004	4	4
+'hello world'	5	105	1005	10005	2005	5	5
+'hello world'	6	106	1006	10006	2006	6	6
+'hello world'	7	107	1007	10007	2007	7	7
+'hello world'	8	108	1008	10008	2008	8	8
+'hello world'	9	109	1009	10009	2009	9	9
+'hello world'	10	110	1010	10010	2010	10	a
+'hello world'	11	112	1011	10011	2011	11	b
+'hello world'	12	113	1012	10012	2012	12	z
+'hello world'	13	114	1013	10013	2013	13	y
+'hello world'	14	115	1014	10014	2014	14	@
+'hello world'	15	116	1015	10015	2015	15	)
+'hello world'	16	117	1016	10016	2016	16	$
+'hello world'	17	118	1017	10017	2017	17	,
+'hello world'	18	119	1018	10018	2018	18	\\
+'hello world'	19	111	1019	10019	2019	19	`
+'hello world'	null	null	null	null	2020	20	.
+\.
+SELECT COUNT(*) FROM cstore_cmpr_test_each_int;
+-- SELECT MIN(a2), MAX(a2) FROM cstore_cmpr_test_each_int;
+SELECT a3, a4 FROM cstore_cmpr_test_each_int WHERE a5 > 10005 and a5 < 10010 ORDER BY 1, 2;
+SELECT a9 FROM cstore_cmpr_test_each_int WHERE a9 > 13 ORDER BY 1;
+DROP TABLE cstore_cmpr_test_each_int;

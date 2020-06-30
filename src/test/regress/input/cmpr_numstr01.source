@@ -1,0 +1,52 @@
+--
+-- TEST CASE: all branchs for Number String Compression
+--
+CREATE TABLE cmpr_numstr_02
+(
+	a00 varchar(2000) NUMSTR,
+	a01 varchar(2000) NUMSTR,
+	a02 varchar(2000) NUMSTR,
+	a03 varchar(2000) NUMSTR,
+	a04 varchar(2000) NUMSTR,
+
+	a05 varchar(2000) NUMSTR,
+	a06 varchar(2000) NUMSTR,
+	a07 varchar(2000) NUMSTR,
+	a08 varchar(2000) NUMSTR,
+	a09 varchar(2000) NUMSTR,
+
+	a10 varchar(2000) NUMSTR,
+	a11 varchar(2000) NUMSTR,
+	a12 varchar(2000) NUMSTR,
+	a13 varchar(2000) NUMSTR,
+	a15 varchar(2000) NUMSTR
+) COMPRESS;
+COPY cmpr_numstr_02 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr_01.data';
+
+CREATE TABLE cmpr_numstr_01 (
+	a00 varchar(2000) NUMSTR,
+	a01 varchar(2000) NUMSTR,
+	a02 varchar(2000) NUMSTR,
+	a03 varchar(2000) NUMSTR,
+	a04 varchar(2000) NUMSTR,
+
+	a05 varchar(2000) NUMSTR,
+	a06 varchar(2000) NUMSTR,
+	a07 varchar(2000) NUMSTR,
+	a08 varchar(2000) NUMSTR,
+	a09 varchar(2000) NUMSTR,
+
+	a10 varchar(2000) NUMSTR,
+	a11 varchar(2000) NUMSTR,
+	a12 varchar(2000) NUMSTR,
+	a13 varchar(2000) NUMSTR,
+	a15 varchar(2000) NUMSTR
+);
+COPY cmpr_numstr_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_numstr_01.data';
+
+SELECT (SELECT COUNT(*) FROM cmpr_numstr_02) - (SELECT COUNT(*) FROM cmpr_numstr_01);
+(SELECT * FROM cmpr_numstr_02) MINUS ALL (SELECT * FROM cmpr_numstr_01);
+(SELECT * FROM cmpr_numstr_01) MINUS ALL (SELECT * FROM cmpr_numstr_02);
+
+DROP TABLE cmpr_numstr_02;
+DROP TABLE cmpr_numstr_01;

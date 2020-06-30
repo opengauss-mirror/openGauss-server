@@ -1,0 +1,41 @@
+--
+-- ALTER_TABLE
+-- Add column for empty table, type test
+--
+set time zone 'PRC';
+--
+--
+CREATE TABLE openGauss4444444_tbl
+(
+D_ID int,
+D_W_ID int,
+D_NAME varchar(10),
+D_STREET_1 varchar(20)
+)
+with(orientation = column)
+;
+COPY openGauss4444444_tbl FROM STDIN;
+alter table openGauss4444444_tbl add column d6 decimal(64,10) default null;
+SELECT DISTINCT d6 FROM openGauss4444444_tbl;
+ d6 
+----
+   
+(1 row)
+
+DROP TABLE openGauss4444444_tbl;
+--
+--
+create table openGauss5555555_tbl
+(
+D_ID int, 
+D_W_ID int, 
+D_NAME varchar(10), 
+D_STREET_1 varchar(20) 
+) 
+with(orientation = column) 
+;
+-- rows number is (56, 64), and then touch this bug
+copy openGauss5555555_tbl from STDIN;
+delete from openGauss5555555_tbl;
+alter table openGauss5555555_tbl add column d11 decimal(32,10) not null;
+drop table openGauss5555555_tbl;

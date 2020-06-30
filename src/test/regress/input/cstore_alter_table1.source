@@ -1,0 +1,227 @@
+CREATE SCHEMA cstore_alter_table1;
+SET SEARCH_PATH TO cstore_alter_table1;
+SET INTERVALsTYLE = POSTGRES;
+-- test noempty normal table holding tuples
+DROP TABLE IF EXISTS alter_addcols_51;
+CREATE TABLE alter_addcols_51(a int, b int) with ( orientation = column )  partition by range(b)
+(
+partition p1 values less than (3),
+partition p2 values less than (6),
+partition p3 values less than (maxvalue)
+);
+
+------ test the same partition, only one partition
+INSERT INTO alter_addcols_51 VALUES (1, 1);
+ALTER TABLE alter_addcols_51 ADD COLUMN c int;
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1, 2, 2);
+SELECT * FROM alter_addcols_51;
+
+ALTER TABLE alter_addcols_51 ADD COLUMN d int NULL;
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1,2,3);
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1,2,4,1);
+SELECT * FROM alter_addcols_51;
+
+ALTER TABLE alter_addcols_51 ADD COLUMN e int NOT NULL;
+ALTER TABLE alter_addcols_51 ADD COLUMN e int NOT NULL DEFAULT 55;
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1,2,6,1);
+SELECT * FROM alter_addcols_51;
+INSERT INTO alter_addcols_51 VALUES (1,2,6,1,10);
+SELECT * FROM alter_addcols_51;
+
+ALTER TABLE alter_addcols_51 ADD COLUMN f int NOT NULL DEFAULT 5+5;
+SELECT * FROM alter_addcols_51;
+
+-- some cu whose tuples has been deleted must be skipped.
+DROP TABLE IF EXISTS alter_addcols_52;
+CREATE TABLE alter_addcols_52(a int, b int) with ( orientation = column )  partition by range(b)
+(
+partition p1 values less than (100),
+partition p2 values less than (600),
+partition p3 values less than (maxvalue)
+);
+
+INSERT INTO alter_addcols_52 VALUES (1, 2);
+INSERT INTO alter_addcols_52 VALUES (1, 3);
+INSERT INTO alter_addcols_52 VALUES (1, 4);
+DELETE FROM alter_addcols_52 WHERE b = 2;
+ALTER TABLE alter_addcols_52 ADD COLUMN c int NOT NULL DEFAULT 9*9;
+SELECT * FROM alter_addcols_52;
+
+START TRANSACTION;
+INSERT INTO alter_addcols_52 VALUES (1, 5);
+\! @gsqldir@/gsql -d regression -p @portstring@ -c "INSERT INTO cstore_alter_table1.alter_addcols_52 VALUES (1, 6);"
+\! @gsqldir@/gsql -d regression -p @portstring@ -c "SELECT * FROM cstore_alter_table1.alter_addcols_52"
+ROLLBACK;
+ALTER TABLE alter_addcols_52 ADD COLUMN d int NOT NULL DEFAULT 9*99;
+SELECT * FROM alter_addcols_52;
+
+ALTER TABLE alter_addcols_52 ADD COLUMN e int DEFAULT 100*100, ADD COLUMN f char(31) DEFAULT 'hello world, i am from China!!', ADD COLUMN g char(32) DEFAULT 'hello world, i am from China!!!', ADD COLUMN h char(33) DEFAULT 'hello world, i am from China!!!!', ADD COLUMN i char(130) DEFAULT 'hello world, i am from China!!!!hello world, i am from China!!!!';
+INSERT INTO alter_addcols_52 VALUES (1, 5);
+SELECT * FROM alter_addcols_52;
+
+UPDATE alter_addcols_52 SET b = 7 WHERE b > 4;
+SELECT * FROM alter_addcols_52;
+
+ALTER TABLE alter_addcols_52 ADD COLUMN j varchar(100) NOT NULL DEFAULT 'DEFAULT hello world, i am from China!!!!hello world, i am from DEFAULT hello world, i am !!!!';
+SELECT * FROM alter_addcols_52;
+
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 101);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 102);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 103);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 701);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 702);
+INSERT INTO alter_addcols_52(a, b) VALUES (1, 703);
+ALTER TABLE alter_addcols_52 ADD COLUMN k text NOT NULL DEFAULT 'hello world!';
+SELECT * FROM alter_addcols_52;
+
+VACUUM FULL alter_addcols_52;
+SELECT * FROM alter_addcols_52;
+
+-- test constraint PARTIAL CLUSTER KEY
+CREATE TABLE alter_addcols_53(a int, b int) WITH ( ORIENTATION = column );
+INSERT INTO alter_addcols_53 VALUES(1, 1), (1, 2), (1, 3);
+ALTER TABLE alter_addcols_53 ADD CONSTRAINT pc1  PARTIAL CLUSTER KEY (b);
+SELECT * FROM alter_addcols_53;
+
+-- test case: the continuous two ROLLBACK failed.
+CREATE TABLE alter_addcols_54(a int) with (orientation = column);
+START TRANSACTION;
+ALTER TABLE alter_addcols_54 add column b int;
+ROLLBACK;
+ALTER TABLE alter_addcols_54 add column b int;
+START TRANSACTION;
+ALTER TABLE alter_addcols_54 add column c int;
+ROLLBACK;
+ALTER TABLE alter_addcols_54 add column c int;
+
+-- test all the datatypes
+CREATE TABLE alter_addcols_55 (initial int4) with(orientation = column);
+ALTER TABLE alter_addcols_55 ADD COLUMN xmin integer; -- fails
+ALTER TABLE alter_addcols_55 ADD COLUMN a int4 default 3;
+ALTER TABLE alter_addcols_55 ADD COLUMN b tinyint default 1;
+ALTER TABLE alter_addcols_55 ADD COLUMN c smallint default 2;
+ALTER TABLE alter_addcols_55 ADD COLUMN d bigint;
+ALTER TABLE alter_addcols_55 ADD COLUMN e decimal(5,2);
+ALTER TABLE alter_addcols_55 ADD COLUMN f numeric(10,5);
+ALTER TABLE alter_addcols_55 ADD COLUMN g float4;
+ALTER TABLE alter_addcols_55 ADD COLUMN h float8;
+ALTER TABLE alter_addcols_55 ADD COLUMN i char;
+ALTER TABLE alter_addcols_55 ADD COLUMN j varchar(10);
+ALTER TABLE alter_addcols_55 ADD COLUMN k char(5);
+ALTER TABLE alter_addcols_55 ADD COLUMN l text;
+ALTER TABLE alter_addcols_55 ADD COLUMN m nvarchar2;
+ALTER TABLE alter_addcols_55 ADD COLUMN o timestamptz;
+ALTER TABLE alter_addcols_55 ADD COLUMN p timestamp;
+ALTER TABLE alter_addcols_55 ADD COLUMN q date;
+ALTER TABLE alter_addcols_55 ADD COLUMN r timetz;
+ALTER TABLE alter_addcols_55 ADD COLUMN s time;
+ALTER TABLE alter_addcols_55 ADD COLUMN t tinterval;
+ALTER TABLE alter_addcols_55 ADD COLUMN u interval;
+ALTER TABLE alter_addcols_55 ADD COLUMN v smalldatetime;
+ALTER TABLE alter_addcols_55 ADD COLUMN w oid;
+ALTER TABLE alter_addcols_55 ADD COLUMN x bit(8);
+ALTER TABLE alter_addcols_55 ADD COLUMN y varbit(8);
+\d+ alter_addcols_55;
+-- unsupport type
+ALTER TABLE alter_addcols_55 ADD COLUMN n name;
+ALTER TABLE alter_addcols_55 ADD COLUMN aa tid;
+ALTER TABLE alter_addcols_55 ADD COLUMN bb xid;
+ALTER TABLE alter_addcols_55 ADD COLUMN cc oidvector;
+ALTER TABLE alter_addcols_55 ADD COLUMN dd smgr;
+ALTER TABLE alter_addcols_55 ADD COLUMN ee point;
+ALTER TABLE alter_addcols_55 ADD COLUMN ff lseg;
+ALTER TABLE alter_addcols_55 ADD COLUMN gg path;
+ALTER TABLE alter_addcols_55 ADD COLUMN hh box;
+ALTER TABLE alter_addcols_55 ADD COLUMN ii polygon;
+ALTER TABLE alter_addcols_55 ADD COLUMN ll float8[];
+ALTER TABLE alter_addcols_55 ADD COLUMN mm float4[];
+ALTER TABLE alter_addcols_55 ADD COLUMN nn int2[];
+INSERT INTO alter_addcols_55 (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00 PST', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+SELECT * FROM alter_addcols_55;
+DROP TABLE alter_addcols_55;
+
+-- test THE SAME VALUE cu
+-- case 1.1: char -> int
+CREATE TABLE alter_addcols_65(a int, b char) WITH ( ORIENTATION = COLUMN);
+TRUNCATE TABLE alter_addcols_65;
+INSERT INTO alter_addcols_65 VALUES(1, '2'), (1, '2'), (1, '2'), (1, '2'), (1, '2');
+VACUUM FULL alter_addcols_65;
+ALTER TABLE alter_addcols_65 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_65;
+drop table alter_addcols_65;
+CREATE TABLE alter_addcols_65(a int, b char) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_65 VALUES(1, 'a'), (1, 'a'), (1, 'a'), (1, 'a'), (1, 'a');
+ALTER TABLE alter_addcols_65 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_65;
+\d+ alter_addcols_65
+
+-- case 1.2  int  -> char
+CREATE TABLE alter_addcols_66(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_66 VALUES(1, 6), (1, 6), (1, 6), (1, 6), (1, 6);
+VACUUM FULL alter_addcols_66;
+ALTER TABLE alter_addcols_66 ALTER COLUMN b SET DATA TYPE char;
+SELECT DISTINCT * FROM alter_addcols_66;
+DROP TABLE alter_addcols_66;
+
+CREATE TABLE alter_addcols_66(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_66 VALUES(1, 6666), (1, 6666), (1, 6666), (1, 6666), (1, 6666);
+VACUUM FULL alter_addcols_66;
+ALTER TABLE alter_addcols_66 ALTER COLUMN b SET DATA TYPE char;
+SELECT DISTINCT * FROM alter_addcols_66;
+DROP TABLE alter_addcols_66;
+
+-- case 1.3  int  -> varchar(10)
+CREATE TABLE alter_addcols_67(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_67 VALUES(1, 6), (1, 6), (1, 6), (1, 6), (1, 6);
+VACUUM FULL alter_addcols_67;
+ALTER TABLE alter_addcols_67 ALTER COLUMN b SET DATA TYPE varchar(10);
+SELECT DISTINCT * FROM alter_addcols_67;
+DROP TABLE alter_addcols_67;
+
+CREATE TABLE alter_addcols_67(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_67 VALUES(1, 2147483647), (1, 2147483647), (1, 2147483647), (1, 2147483647), (1, 2147483647);
+VACUUM FULL alter_addcols_67;
+ALTER TABLE alter_addcols_67 ALTER COLUMN b SET DATA TYPE varchar(10);
+SELECT DISTINCT * FROM alter_addcols_67;
+DROP TABLE alter_addcols_67;
+
+CREATE TABLE alter_addcols_67(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_67 VALUES(1, 2147483647), (1, 2147483647), (1, 2147483647), (1, 2147483647), (1, 2147483647);
+VACUUM FULL alter_addcols_67;
+ALTER TABLE alter_addcols_67 ALTER COLUMN b SET DATA TYPE varchar(9);
+SELECT DISTINCT * FROM alter_addcols_67;
+DROP TABLE alter_addcols_67;
+
+-- case 1.4  varchar(10) -> int
+CREATE TABLE alter_addcols_68(a int, b varchar(10)) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_68 VALUES(1, '2147483647'), (1, '2147483647'), (1, '2147483647'), (1, '2147483647'), (1, '2147483647');
+VACUUM FULL alter_addcols_68;
+ALTER TABLE alter_addcols_68 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_68;
+
+-- case 1.5  varchar(40) <-> varchar(50)
+CREATE TABLE alter_addcols_69(a int, b varchar(40)) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_69 VALUES(1, '3147483647'), (1, '3147483647'), (1, '3147483647'), (1, '3147483647'), (1, '3147483647');
+VACUUM FULL alter_addcols_69;
+ALTER TABLE alter_addcols_69 ALTER COLUMN b SET DATA TYPE varchar(50);
+SELECT DISTINCT * FROM alter_addcols_69;
+
+ALTER TABLE alter_addcols_69 ALTER COLUMN b SET DATA TYPE varchar(40);
+SELECT DISTINCT * FROM alter_addcols_69;
+
+INSERT INTO alter_addcols_69 VALUES(1, '0123456789012345678901234567890123456789');
+ALTER TABLE alter_addcols_69 ALTER COLUMN b SET DATA TYPE varchar(50);
+SELECT DISTINCT * FROM alter_addcols_69 ORDER BY b;
+
+INSERT INTO alter_addcols_69 VALUES(1, '01234567890123456789012345678901234567890123456789');
+ALTER TABLE alter_addcols_69 ALTER COLUMN b SET DATA TYPE varchar(40);
+SELECT DISTINCT * FROM alter_addcols_69 ORDER BY b;
+
+drop schema cstore_alter_table1 cascade;

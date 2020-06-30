@@ -1,0 +1,389 @@
+create schema vector_distribute_prepare;
+set current_schema = vector_distribute_prepare;
+create table test_prepare_1(a int, b numeric) ;
+create table test_prepare_2(a int, b int) ;
+insert into test_prepare_1 values(1, 1),(1, 1),(1, 1);
+insert into test_prepare_2 values(1, 1),(1, 1),(1, 1);
+create table prepare_table_01(a int, b int)   with (orientation = column) ;
+insert into prepare_table_01 select * from test_prepare_1;
+create table prepare_table_02(a int, b int)  with (orientation = column) ;
+insert into prepare_table_02 select * from test_prepare_2;
+analyze prepare_table_01;
+analyze prepare_table_02;
+prepare p1 as select * from prepare_table_01, prepare_table_02 where prepare_table_01.a = prepare_table_02.a;
+prepare p2(int) as select * from prepare_table_01, prepare_table_02 where prepare_table_01.a = prepare_table_02.a and prepare_table_01.b = $1;
+prepare p3 as select * from prepare_table_01, prepare_table_02 where prepare_table_01.a = prepare_table_02.a;
+prepare p4(int) as select * from prepare_table_01, prepare_table_02 where prepare_table_01.a = prepare_table_02.a and prepare_table_01.b = $1;
+--stream plan and stream exec.
+explain (costs off, verbose on, nodes off) execute p1;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   ->  Vector Nest Loop
+         Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+         Join Filter: (prepare_table_01.a = prepare_table_02.a)
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+         ->  Vector Materialize
+               Output: prepare_table_02.a, prepare_table_02.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(11 rows)
+
+execute p1;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p1;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+explain (costs off, verbose on, nodes off) execute p2(1);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   ->  Vector Nest Loop
+         Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+         Join Filter: (prepare_table_01.a = prepare_table_02.a)
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+               Filter: (prepare_table_01.b = $1)
+         ->  Vector Materialize
+               Output: prepare_table_02.a, prepare_table_02.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(12 rows)
+
+execute p2(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p2(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p2(2);
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+execute p2(2);
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+--remote plan and stream exec.
+explain (costs off, verbose on, nodes off) execute p3;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   ->  Vector Nest Loop
+         Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+         Join Filter: (prepare_table_01.a = prepare_table_02.a)
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+         ->  Vector Materialize
+               Output: prepare_table_02.a, prepare_table_02.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(11 rows)
+
+execute p3;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+explain (costs off, verbose on, nodes off) execute p4(1);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   ->  Vector Nest Loop
+         Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+         Join Filter: (prepare_table_01.a = prepare_table_02.a)
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+               Filter: (prepare_table_01.b = $1)
+         ->  Vector Materialize
+               Output: prepare_table_02.a, prepare_table_02.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(12 rows)
+
+execute p4(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+--stream plan and remote exec.
+explain (costs off, verbose on, nodes off) execute p1;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   ->  Vector Nest Loop
+         Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+         Join Filter: (prepare_table_01.a = prepare_table_02.a)
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+         ->  Vector Materialize
+               Output: prepare_table_02.a, prepare_table_02.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(11 rows)
+
+execute p1;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p1;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+explain (costs off, verbose on, nodes off) execute p2(1);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   ->  Vector Nest Loop
+         Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+         Join Filter: (prepare_table_01.a = prepare_table_02.a)
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+               Filter: (prepare_table_01.b = $1)
+         ->  Vector Materialize
+               Output: prepare_table_02.a, prepare_table_02.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(12 rows)
+
+execute p2(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p2(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p2(2);
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+--remote plan and remote exec.
+explain (costs off, verbose on, nodes off) execute p3;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   ->  Vector Nest Loop
+         Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+         Join Filter: (prepare_table_01.a = prepare_table_02.a)
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+         ->  Vector Materialize
+               Output: prepare_table_02.a, prepare_table_02.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(11 rows)
+
+execute p3;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+explain (costs off, verbose on, nodes off) execute p4(1);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   ->  Vector Nest Loop
+         Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+         Join Filter: (prepare_table_01.a = prepare_table_02.a)
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+               Filter: (prepare_table_01.b = $1)
+         ->  Vector Materialize
+               Output: prepare_table_02.a, prepare_table_02.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(12 rows)
+
+execute p4(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+prepare p5 as select a from prepare_table_01 INTERSECT select a from prepare_table_02 order by 1 limit 1;
+explain (costs off, verbose on, nodes off) execute p5;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: "*SELECT* 1".a, (0)
+   ->  Vector Limit
+         Output: "*SELECT* 1".a, (0)
+         ->  Vector Sort
+               Output: "*SELECT* 1".a, (0)
+               Sort Key: "*SELECT* 1".a
+               ->  Vector HashSetOp Intersect
+                     Output: "*SELECT* 1".a, (0)
+                     ->  Vector Append
+                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".a, 0
+                                 ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+                                       Output: prepare_table_01.a
+                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".a, 1
+                                 ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                                       Output: prepare_table_02.a
+(18 rows)
+
+prepare p6 as (select * from prepare_table_01) union (select * from prepare_table_02); 
+explain (costs off, verbose on, nodes off) execute p6;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Row Adapter
+   Output: prepare_table_01.a, prepare_table_01.b
+   ->  Vector Sonic Hash Aggregate
+         Output: prepare_table_01.a, prepare_table_01.b
+         Group By Key: prepare_table_01.a, prepare_table_01.b
+         ->  Vector Append
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+                     Output: prepare_table_01.a, prepare_table_01.b
+               ->  CStore Scan on vector_distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(10 rows)
+
+prepare p7 as  select a from prepare_table_01 where current_date<'2013-07-20' ;
+explain (costs off, verbose on, nodes off) execute p7;
+        QUERY PLAN        
+--------------------------
+ Result
+   Output: a
+   One-Time Filter: false
+(3 rows)
+
+drop table test_prepare_1;
+drop table test_prepare_2;
+drop table prepare_table_01;
+drop table prepare_table_02;
+drop schema vector_distribute_prepare cascade;

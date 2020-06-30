@@ -1,0 +1,28 @@
+--test function AddAccountLockTask
+create user test_user password 'Ttest@123';
+\! @abs_bindir@/gsql -d database -U test_user -p @portstring@ -W '123@456';
+drop user test_user;
+
+--test log_duration & log_min_duration_statement
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "log_duration = on" >/dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "log_min_duration_statement = 0" >/dev/null
+\! sleep 5
+CREATE ROLE  CREATE_ROLE_PICT_GAUSS_88889 PASSWORD 'Ttests@123';
+DROP ROLE CREATE_ROLE_PICT_GAUSS_88889;
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "log_duration = off" >/dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc reload -Z coordinator -D @abs_srcdir@/tmp_check/coordinator1 -c "log_min_duration_statement = -1" >/dev/null
+\! sleep 5
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "log_duration = on" >/dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "log_min_duration_statement = 0" >/dev/null
+\! sleep 5
+create table test_maskpwd(id int);
+insert into test_maskpwd select oid from pg_class where oid>0;
+drop table test_maskpwd;
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "log_duration = off" >/dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "log_min_duration_statement = -1" >/dev/null
+\! sleep 5

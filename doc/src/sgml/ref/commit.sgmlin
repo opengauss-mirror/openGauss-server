@@ -1,0 +1,16 @@
+<refentry id="SQL-COMMIT">
+<refmeta>
+<refentrytitle>COMMIT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>COMMIT</refname>
+<refpurpose>commit the current transaction</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+{ COMMIT | END } [ WORK | TRANSACTION ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

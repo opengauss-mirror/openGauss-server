@@ -1,0 +1,83 @@
+-- clean up last work
+\! rm -rf @abs_srcdir@/data/parallel_export >/dev/null 2>&1
+-----Error table name longer than 64 chars
+create table  LOADING_TABLE_011
+(
+C_CHAR_3 CHAR(512),  
+C_VARCHAR_3 VARCHAR(512), 
+C_INT TINYINT,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE
+);
+create table  data_1_1
+(
+c varchar(2),
+id int, 
+num float,  
+time timestamp without time zone,
+memo text
+);
+DELETE FROM data_1_1;
+--complex statement to foreign table
+---
+create table data_1_2 (c1 int);
+--statment contains agg
+select * from data_1_2;
+ c1 
+----
+(0 rows)
+
+--statment contains ORDER BY
+create table  LOADING_TABLE_000(C_CHAR_3 CHAR(10),C_VARCHAR_3 VARCHAR(10),C_INT int,C_NUMERIC numeric(10,5),C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE);
+select * from LOADING_TABLE_000 order by c_int;
+ c_char_3 | c_varchar_3 | c_int | c_numeric | c_ts_without 
+----------+-------------+-------+-----------+--------------
+(0 rows)
+
+create table t_remote(c1 int, c2 varchar);
+\d+ err_f_s_latin1_utf8_001_01
+drop table if exists s_latin1_utf8_001_01;
+NOTICE:  table "s_latin1_utf8_001_01" does not exist, skipping
+CREATE TABLE s_latin1_utf8_001_01
+(
+    C_BIGINT BIGINT,
+    C_CHAR_1 CHAR(100),
+    C_CHAR_2 CHAR(100),
+    C_VARCHAR VARCHAR(1024),
+    C_TEXT TEXT,
+    C_CLOB CLOB,
+    C_NUMERIC NUMERIC(20,5),
+    C_DP DOUBLE PRECISION
+) ;
+\d+ s_latin1_utf8_001_01
+                           Table "public.s_latin1_utf8_001_01"
+  Column   |          Type           | Modifiers | Storage  | Stats target | Description 
+-----------+-------------------------+-----------+----------+--------------+-------------
+ c_bigint  | bigint                  |           | plain    |              | 
+ c_char_1  | character(100)          |           | extended |              | 
+ c_char_2  | character(100)          |           | extended |              | 
+ c_varchar | character varying(1024) |           | extended |              | 
+ c_text    | text                    |           | extended |              | 
+ c_clob    | text                    |           | extended |              | 
+ c_numeric | numeric(20,5)           |           | main     |              | 
+ c_dp      | double precision        |           | plain    |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+select count(*) from s_latin1_utf8_001_01;
+ count 
+-------
+     0
+(1 row)
+
+drop table if exists s_latin1_utf8_001_01;
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
+---
+-- dead circle check gds exit status
+---
+\! gds_num=`ps ux | grep -w gds | grep -v grep | awk '{print $2}'|wc -l`; while(($gds_num>0)); do sleep 1; gds_num=`ps ux | grep -w gds | grep -v grep | awk '{print $2}'|wc -l`; done
+DROP TABLE t_remote;
+DROP TABLE LOADING_TABLE_000;
+DROP TABLE data_1_2;
+DROP TABLE data_1_1;
+DROP TABLE LOADING_TABLE_011;

@@ -1,0 +1,3405 @@
+create schema lazyagg;
+set current_schema=lazyagg;
+set rewrite_rule=lazyagg;
+------------------------------------------------------------------------------------
+-- create table
+------------------------------------------------------------------------------------
+create table t (a int, b int, c int, d int);
+create table t1 (a int, b int, c int, d int);
+create table t2 (a int, b int, c int, d int);
+create table t3 (a int, b int, c int, d int);
+insert into t values 
+ (1, 1, 1, 1)
+,(1, 1, 1, 2)
+,(1, 1, 2, 1)
+,(1, 1, 2, 2)
+,(1, 2, 1, 1)
+,(1, 2, 1, 2)
+,(1, 2, 2, 1)
+,(1, 2, 2, 2)
+,(1, 3, 3, 3)
+,(2, 5, 5, 5)
+,(2, NULL, 6, 6)
+,(2, 6, NULL, 6)
+,(2, 6, 6, NULL)
+,(2, NULL, NULL, 7)
+,(2, NULL, 7, NULL)
+,(2, 7, NULL, NULL)
+,(3, NULL, NULL, NULL)
+;
+insert into t1 select * from t;
+insert into t2 select * from t;
+insert into t3 select * from t;
+analyze t;
+analyze t1;
+analyze t2;
+analyze t3;
+------------------------------------------------------------------------------------
+-- basic single sub-query
+------------------------------------------------------------------------------------
+-- valid for lazy agg
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, (sum((t1.c)::bigint))
+   Sort Key: t.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t.b, sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+ b | sum 
+---+-----
+ 1 |  24
+ 2 |  24
+ 3 |   3
+ 5 |   5
+ 6 |  12
+ 7 |    
+(6 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+ b | sum 
+---+-----
+ 1 |  16
+ 2 |  16
+ 3 |   1
+ 5 |   1
+ 6 |   2
+ 7 |   0
+(6 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, ((count(1::bigint))::numeric)
+   Sort Key: t.b, ((count(1::bigint))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(1::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+select t.b, sum(cc) from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+ b | sum 
+---+-----
+ 1 |  16
+ 2 |  16
+ 3 |   1
+ 5 |   1
+ 6 |   4
+ 7 |   1
+(6 rows)
+
+-- invalid for lazy agg
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, min(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc))
+   Sort Key: t.b, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, min(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+select t.b, sum(cc) from (select b, min(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+ b | sum 
+---+-----
+ 1 |   4
+ 2 |   4
+ 3 |   3
+ 5 |   5
+ 6 |  12
+ 7 |    
+(6 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, avg(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (avg(s1.cc))
+   Sort Key: t.b, (avg(s1.cc))
+   ->  HashAggregate
+         Output: t.b, avg(s1.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+select t.b, avg(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+ b |        avg         
+---+--------------------
+ 1 | 6.0000000000000000
+ 2 | 6.0000000000000000
+ 3 | 3.0000000000000000
+ 5 | 5.0000000000000000
+ 6 | 6.0000000000000000
+ 7 |                   
+(6 rows)
+
+------------------------------------------------------------------------------------
+-- basic setop
+------------------------------------------------------------------------------------
+-- same functions
+explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b, (min(t1.c))
+   Sort Key: t.b, (min(t1.c))
+   ->  HashAggregate
+         Output: t.b, min(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(18 rows)
+
+-- different functions: f(f union all g) or f(g union all f)
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c)::bigint)))
+   Sort Key: t.b, (sum(((t1.c)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: ((t1.c)::bigint), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.b, t1.c
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".b, "*SELECT* 2".cc
+                           ->  HashAggregate
+                                 Output: t2.b, min(t2.c)
+                                 Group By Key: t2.b
+                                 ->  Seq Scan on lazyagg.t2
+                                       Output: t2.b, t2.c
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(23 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c)::bigint)))
+   Sort Key: t.b, (sum(((t1.c)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: ((t1.c)::bigint), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.b
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".cc, "*SELECT* 2".b
+                           ->  HashAggregate
+                                 Output: t2.b, count(t2.c)
+                                 Group By Key: t2.b
+                                 ->  Seq Scan on lazyagg.t2
+                                       Output: t2.b, t2.c
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(23 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, sum(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (min((sum(t1.c))))
+   Sort Key: t.b, (min((sum(t1.c))))
+   ->  HashAggregate
+         Output: t.b, min((sum(t1.c)))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: (sum(t1.c)), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  HashAggregate
+                           Output: t1.b, sum(t1.c)
+                           Group By Key: t1.b
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: t1.b, t1.c
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".b, "*SELECT* 2".cc
+                           ->  Seq Scan on lazyagg.t2
+                                 Output: t2.b, t2.c
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(23 rows)
+
+-- different functions: f(g union all g)
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, max(c) as cc from t1 group by b union all select b, max(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum("*SELECT* 1".cc))
+   Sort Key: t.b, (sum("*SELECT* 1".cc))
+   ->  HashAggregate
+         Output: t.b, sum("*SELECT* 1".cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: "*SELECT* 1".cc, t.b
+               Hash Cond: (t.b = "*SELECT* 1".b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: "*SELECT* 1".cc, "*SELECT* 1".b
+                     ->  Append
+                           ->  Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".cc, "*SELECT* 1".b
+                                 ->  HashAggregate
+                                       Output: t1.b, max(t1.c)
+                                       Group By Key: t1.b
+                                       ->  Seq Scan on lazyagg.t1
+                                             Output: t1.b, t1.c
+                           ->  Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".cc, "*SELECT* 2".b
+                                 ->  HashAggregate
+                                       Output: t2.b, max(t2.c)
+                                       Group By Key: t2.b
+                                       ->  Seq Scan on lazyagg.t2
+                                             Output: t2.b, t2.c
+(28 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(18 rows)
+
+-- different functions: f(g union all h)
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, min(c) as cc from t1 group by b union all select b, max(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum("*SELECT* 1".cc))
+   Sort Key: t.b, (sum("*SELECT* 1".cc))
+   ->  HashAggregate
+         Output: t.b, sum("*SELECT* 1".cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: "*SELECT* 1".cc, t.b
+               Hash Cond: (t.b = "*SELECT* 1".b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: "*SELECT* 1".cc, "*SELECT* 1".b
+                     ->  Append
+                           ->  Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".cc, "*SELECT* 1".b
+                                 ->  HashAggregate
+                                       Output: t1.b, min(t1.c)
+                                       Group By Key: t1.b
+                                       ->  Seq Scan on lazyagg.t1
+                                             Output: t1.b, t1.c
+                           ->  Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".cc, "*SELECT* 2".b
+                                 ->  HashAggregate
+                                       Output: t2.b, max(t2.c)
+                                       Group By Key: t2.b
+                                       ->  Seq Scan on lazyagg.t2
+                                             Output: t2.b, t2.c
+(28 rows)
+
+-- other set op
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union select b, sum(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc))
+   Sort Key: t.b, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, (sum(t1.c))
+                                 Group By Key: t1.b, (sum(t1.c))
+                                 ->  Append
+                                       ->  HashAggregate
+                                             Output: t1.b, sum(t1.c)
+                                             Group By Key: t1.b
+                                             ->  Seq Scan on lazyagg.t1
+                                                   Output: t1.b, t1.c
+                                       ->  HashAggregate
+                                             Output: t2.b, sum(t2.c)
+                                             Group By Key: t2.b
+                                             ->  Seq Scan on lazyagg.t2
+                                                   Output: t2.b, t2.c
+(29 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b intersect all select b, sum(c) as cc from t2 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc))
+   Sort Key: t.b, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashSetOp Intersect All
+                                 Output: "*SELECT* 1".b, "*SELECT* 1".cc, (0)
+                                 ->  Append
+                                       ->  Subquery Scan on "*SELECT* 1"
+                                             Output: "*SELECT* 1".b, "*SELECT* 1".cc, 0
+                                             ->  HashAggregate
+                                                   Output: t1.b, sum(t1.c)
+                                                   Group By Key: t1.b
+                                                   ->  Seq Scan on lazyagg.t1
+                                                         Output: t1.b, t1.c
+                                       ->  Subquery Scan on "*SELECT* 2"
+                                             Output: "*SELECT* 2".b, "*SELECT* 2".cc, 1
+                                             ->  HashAggregate
+                                                   Output: t2.b, sum(t2.c)
+                                                   Group By Key: t2.b
+                                                   ->  Seq Scan on lazyagg.t2
+                                                         Output: t2.b, t2.c
+(32 rows)
+
+------------------------------------------------------------------------------------
+-- complex setop (single super agg)
+------------------------------------------------------------------------------------
+-- uncomplete agg in setop branch
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c as cc from t1 union all select b, sum(c) as cc from t2 group by b union all select b, sum(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum((("*SELECT* 1".cc)::bigint)))
+   Sort Key: t.b, (sum((("*SELECT* 1".cc)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum((("*SELECT* 1".cc)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: (("*SELECT* 1".cc)::bigint), t.b
+               Hash Cond: ("*SELECT* 1".b = t.b)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".b, "*SELECT* 1".cc
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: t1.b, t1.c
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.b, t2.c
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.b, t3.c
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(22 rows)
+
+-- over-complete agg in setop branch, agg number not match
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, count(d) as dd from t2 group by b union all select b, sum(c) as cc, count(*) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c)::bigint)))
+   Sort Key: t.b, (sum(((t1.c)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: ((t1.c)::bigint), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.b
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.c, t3.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(20 rows)
+
+-- three items, all setop are union all, item(s) have same function
+explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b union all select b, min(c) as cc from t2 group by b union all select b, min(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b, (min(t1.c))
+   Sort Key: t.b, (min(t1.c))
+   ->  HashAggregate
+         Output: t.b, min(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.b
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.c, t3.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b union all select b, count(c) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.b
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.c, t3.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(20 rows)
+
+-- three items, all setop are union all, item(s) have different function, non-delay rewrite
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, max(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c)::bigint)))
+   Sort Key: t.b, (sum(((t1.c)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: ((t1.c)::bigint), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.b, t1.c
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.b, t2.c
+                     ->  Subquery Scan on "*SELECT* 3"
+                           Output: "*SELECT* 3".b, "*SELECT* 3".cc
+                           ->  HashAggregate
+                                 Output: t3.b, max(t3.c)
+                                 Group By Key: t3.b
+                                 ->  Seq Scan on lazyagg.t3
+                                       Output: t3.b, t3.c
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(25 rows)
+
+-- three items, all setop are union all, item(s) have different function, delay rewrite
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c)::bigint)))
+   Sort Key: t.b, (sum(((t1.c)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: ((t1.c)::bigint), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.b
+                     ->  Subquery Scan on "*SELECT* 3"
+                           Output: "*SELECT* 3".cc, "*SELECT* 3".b
+                           ->  HashAggregate
+                                 Output: t3.b, count(t3.c)
+                                 Group By Key: t3.b
+                                 ->  Seq Scan on lazyagg.t3
+                                       Output: t3.b, t3.c
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(25 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(*) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b union all select b, sum(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum("*SELECT* 1".cc))
+   Sort Key: t.b, (sum("*SELECT* 1".cc))
+   ->  HashAggregate
+         Output: t.b, sum("*SELECT* 1".cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: "*SELECT* 1".cc, t.b
+               Hash Cond: ("*SELECT* 1".b = t.b)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".cc, "*SELECT* 1".b
+                           ->  HashAggregate
+                                 Output: t1.b, count(*)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.b
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.c, t3.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(25 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b union all select b, count(*) as cc from t2 group by b union all select b, count(c) as cc from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c)::bigint)))
+   Sort Key: t.b, (sum(((t1.c)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: ((t1.c)::bigint), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.b
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".cc, "*SELECT* 2".b
+                           ->  HashAggregate
+                                 Output: t2.b, count(*)
+                                 Group By Key: t2.b
+                                 ->  Seq Scan on lazyagg.t2
+                                       Output: t2.b
+                     ->  Subquery Scan on "*SELECT* 3"
+                           Output: "*SELECT* 3".cc, "*SELECT* 3".b
+                           ->  HashAggregate
+                                 Output: t3.b, count(t3.c)
+                                 Group By Key: t3.b
+                                 ->  Seq Scan on lazyagg.t3
+                                       Output: t3.b, t3.c
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(30 rows)
+
+-- three items, not all setop(s) are union all, item(s) have same function
+explain (costs off, nodes off, verbose on) select t.b, min(cc) from (select b, min(c) as cc from t1 group by b intersect (select b, min(c) as cc from t2 group by b union all select b, min(c) as cc from t3 group by b)) s1, t where s1.b=t.b group by t.b order by 1,2;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, (min(s1.cc))
+   Sort Key: t.b, (min(s1.cc))
+   ->  HashAggregate
+         Output: t.b, min(s1.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashSetOp Intersect
+                                 Output: "*SELECT* 1".b, "*SELECT* 1".cc, (0)
+                                 ->  Append
+                                       ->  Subquery Scan on "*SELECT* 1"
+                                             Output: "*SELECT* 1".b, "*SELECT* 1".cc, 0
+                                             ->  HashAggregate
+                                                   Output: t1.b, min(t1.c)
+                                                   Group By Key: t1.b
+                                                   ->  Seq Scan on lazyagg.t1
+                                                         Output: t1.b, t1.c
+                                       ->  Result
+                                             Output: t2.b, (min(t2.c)), 1
+                                             ->  Append
+                                                   ->  HashAggregate
+                                                         Output: t2.b, min(t2.c)
+                                                         Group By Key: t2.b
+                                                         ->  Seq Scan on lazyagg.t2
+                                                               Output: t2.b, t2.c
+                                                   ->  HashAggregate
+                                                         Output: t3.b, min(t3.c)
+                                                         Group By Key: t3.b
+                                                         ->  Seq Scan on lazyagg.t3
+                                                               Output: t3.b, t3.c
+(38 rows)
+
+------------------------------------------------------------------------------------
+-- parent-query check
+------------------------------------------------------------------------------------
+-- no agg func OR no group by
+explain (costs off, nodes off, verbose on) select t.b from (select b, max(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b from (select b, sum(c) as cc from t1 group by b) s1, (select b, count(c) as cc from t1 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (lazyagg.t1.b = t.b)
+               ->  Hash Join
+                     Output: lazyagg.t1.b, lazyagg.t1.b
+                     Hash Cond: (lazyagg.t1.b = lazyagg.t1.b)
+                     ->  Seq Scan on lazyagg.t1
+                           Output: lazyagg.t1.a, lazyagg.t1.b, lazyagg.t1.c, lazyagg.t1.d
+                     ->  Hash
+                           Output: lazyagg.t1.b
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: lazyagg.t1.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(22 rows)
+
+explain (costs off, nodes off, verbose on) select b from (select b from t1 group by b) group by b;
+          QUERY PLAN          
+------------------------------
+ HashAggregate
+   Output: t1.b
+   Group By Key: t1.b
+   ->  Seq Scan on lazyagg.t1
+         Output: t1.b
+(5 rows)
+
+explain (costs off, nodes off, verbose on) select sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: (sum((t1.c)::bigint))
+   Sort Key: (sum((t1.c)::bigint))
+   ->  Aggregate
+         Output: sum((t1.c)::bigint)
+         ->  Hash Join
+               Output: t1.c
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(14 rows)
+
+explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(*) as cc from t1 group by b) s1, t where s1.b=t.b order by 1;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: (sum(s1.cc))
+   Sort Key: (sum(s1.cc))
+   ->  Aggregate
+         Output: sum(s1.cc)
+         ->  Hash Join
+               Output: s1.cc
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, count(*)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b
+(19 rows)
+
+explain (costs off, nodes off, verbose on) select sum(b) from (select b from t1 group by b);
+             QUERY PLAN             
+------------------------------------
+ Aggregate
+   Output: sum(t1.b)
+   ->  HashAggregate
+         Output: t1.b
+         Group By Key: t1.b
+         ->  Seq Scan on lazyagg.t1
+               Output: t1.b
+(7 rows)
+
+-- agg param is not in subquery, in subquery and super table, OR in multiple subquery
+explain (costs off, nodes off, verbose on) select t.b, sum(t.d) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(t.d))
+   Sort Key: t.b, (sum(t.d))
+   ->  HashAggregate
+         Output: t.b, sum(t.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b, t.d
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(t.d) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc)), (sum(t.d))
+   Sort Key: t.b, (sum(s1.cc)), (sum(t.d))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc), sum(t.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b, t.d
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(t.d) from (select b, sum(c) as cc, a, sum(d) as dd from t1 group by b,a) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc)), (sum(t.d))
+   Sort Key: t.b, (sum(s1.cc)), (sum(t.d))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc), sum(t.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b, t.d
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c), t1.a, sum(t1.d)
+                                 Group By Key: t1.b, t1.a
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.a, t1.c, t1.d
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(s1.cc) from (select b, sum(c) as cc from t1 group by b) s1, (select b, sum(c) as cc from t2 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1,2;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum((t1.c)::bigint))
+   Sort Key: t.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t.b, sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t.b = t1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: t1.c, t1.b, s2.b
+                     ->  Hash Join
+                           Output: t1.c, t1.b, s2.b
+                           Hash Cond: (t1.b = s2.b)
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: t1.a, t1.b, t1.c, t1.d
+                           ->  Hash
+                                 Output: s2.b
+                                 ->  Subquery Scan on s2
+                                       Output: s2.b
+                                       ->  HashAggregate
+                                             Output: t2.b, sum(t2.c)
+                                             Group By Key: t2.b
+                                             ->  Seq Scan on lazyagg.t2
+                                                   Output: t2.b, t2.c
+(27 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, max(s1.cc), max(s2.cc) from (select b, max(c) as cc from t1 group by b) s1, (select b, max(c) as cc from t2 group by b) s2, t where s1.b=t.b and s2.b=t.b group by t.b order by 1,2,3;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Sort
+   Output: t.b, (max((max(t1.c)))), (max(s2.cc))
+   Sort Key: t.b, (max((max(t1.c)))), (max(s2.cc))
+   ->  HashAggregate
+         Output: t.b, max((max(t1.c))), max(s2.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: (max(t1.c)), s2.cc, t.b
+               Hash Cond: (t.b = t1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: (max(t1.c)), t1.b, s2.cc, s2.b
+                     ->  Hash Join
+                           Output: (max(t1.c)), t1.b, s2.cc, s2.b
+                           Hash Cond: (t1.b = s2.b)
+                           ->  HashAggregate
+                                 Output: t1.b, max(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+                           ->  Hash
+                                 Output: s2.cc, s2.b
+                                 ->  Subquery Scan on s2
+                                       Output: s2.cc, s2.b
+                                       ->  HashAggregate
+                                             Output: t2.b, max(t2.c)
+                                             Group By Key: t2.b
+                                             ->  Seq Scan on lazyagg.t2
+                                                   Output: t2.b, t2.c
+(30 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, min(cc), min(t.d) from (select b, min(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (min(s1.cc)), (min(t.d))
+   Sort Key: t.b, (min(s1.cc)), (min(t.d))
+   ->  HashAggregate
+         Output: t.b, min(s1.cc), min(t.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b, t.d
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, min(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+-- expr on agg param
+explain (costs off, nodes off, verbose on) select t.b, sum(cc+cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (sum((s1.cc + s1.cc)))
+   Sort Key: t.b, (sum((s1.cc + s1.cc)))
+   ->  HashAggregate
+         Output: t.b, sum((s1.cc + s1.cc))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc*random()) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(((s1.cc)::double precision * random())))
+   Sort Key: t.b, (sum(((s1.cc)::double precision * random())))
+   ->  HashAggregate
+         Output: t.b, sum(((s1.cc)::double precision * random()))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc)*2.3 from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, ((sum((t1.c)::bigint) * 2.3))
+   Sort Key: t.b, ((sum((t1.c)::bigint) * 2.3))
+   ->  HashAggregate
+         Output: t.b, (sum((t1.c)::bigint) * 2.3)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+-- volatile
+explain (costs off, nodes off, verbose on) select t.b, sum(cc)*random() from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Sort
+   Output: t.b, (((sum((t1.c)::bigint))::double precision * random()))
+   Sort Key: t.b, (((sum((t1.c)::bigint))::double precision * random()))
+   ->  HashAggregate
+         Output: t.b, ((sum((t1.c)::bigint))::double precision * random())
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+-- no subquery
+explain (costs off, nodes off, verbose on) select t.b, sum(t1.c) from t1, t where t1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, (sum(t1.c))
+   Sort Key: t.b, (sum(t1.c))
+   ->  HashAggregate
+         Output: t.b, sum(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+------------------------------------------------------------------------------------
+-- child-query check
+------------------------------------------------------------------------------------
+-- no setop no agg
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, c as cc from t1) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, (sum(t1.c))
+   Sort Key: t.b, (sum(t1.c))
+   ->  HashAggregate
+         Output: t.b, sum(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+-- has agg, but no group by
+explain (costs off, nodes off, verbose on) select t.b from (select max(b) as b, max(c) as cc from t1) s1, t where s1.b=t.b group by t.b order by 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Group
+   Output: t.b
+   Group By Key: t.b
+   ->  Sort
+         Output: t.b
+         Sort Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.b
+                           ->  Aggregate
+                                 Output: max(t1.b), max(t1.c)
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.a, t1.b, t1.c, t1.d
+(19 rows)
+
+-- no agg function, but have group by
+explain (costs off, nodes off, verbose on) select count(*) from (select b,c from t1 group by b,c) s1, t where s1.b=t.b group by s1.c order by 1;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: (count(*)), s1.c
+   Sort Key: (count(*))
+   ->  HashAggregate
+         Output: count(*), s1.c
+         Group By Key: s1.c
+         ->  Hash Join
+               Output: s1.c
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.c, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.c, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, t1.c
+                                 Group By Key: t1.b, t1.c
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+-- expr out of agg function
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c)*2 as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc))
+   Sort Key: t.b, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, (sum(t1.c) * 2)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c)+sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc))
+   Sort Key: t.b, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, (sum(t1.c) + sum(t1.c))
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, cast(sum(c) as int8) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, (sum((t1.c)::bigint))
+   Sort Key: t.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t.b, sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c+d) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c + t1.d))::bigint))
+   Sort Key: t.b, (sum(((t1.c + t1.d))::bigint))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c + t1.d))::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t1.d, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+-- normal function in child-query's target list
+explain (costs off, nodes off, verbose on) select aa from (select a, PG_CLIENT_ENCODING() aa from t group by 1) group by 1 order by 1;
+          QUERY PLAN          
+------------------------------
+ Group
+   Output: ('UTF8'::name)
+   Group By Key: 'UTF8'::name
+   ->  Seq Scan on lazyagg.t
+         Output: 'UTF8'::name
+(5 rows)
+
+------------------------------------------------------------------------------------
+-- joint check
+------------------------------------------------------------------------------------
+-- agg func column in super query join/group by/where
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.cc>t.b group by t.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc))
+   Sort Key: t.b, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc)
+         Group By Key: t.b
+         ->  Nested Loop
+               Output: s1.cc, t.b
+               Join Filter: (s1.cc > t.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Materialize
+                     Output: s1.cc
+                     ->  Subquery Scan on s1
+                           Output: s1.cc
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b and s1.cc>9000 group by t.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc))
+   Sort Key: t.b, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 Filter: (sum(t1.c) > 9000)
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(21 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, cc, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b, s1.cc order by 1,2,3;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, s1.cc, (sum(s1.cc))
+   Sort Key: t.b, s1.cc, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, s1.cc, sum(s1.cc)
+         Group By Key: t.b, s1.cc
+         ->  Hash Join
+               Output: s1.cc, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+-- join type, normal
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, (sum((t1.c)::bigint))
+   Sort Key: t.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t.b, sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Left Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select s1.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 where s1.b not in (select t.b from t) group by s1.b order by 1,2;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Sort
+   Output: t1.b, (sum((t1.c)::bigint))
+   Sort Key: t1.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t1.b, sum((t1.c)::bigint)
+         Group By Key: t1.b
+         ->  Nested Loop Anti Join
+               Output: t1.b, t1.c
+               Join Filter: ((t1.b = t.b) OR (t1.b IS NULL) OR (t.b IS NULL))
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Materialize
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+-- join type, delay rewrite
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c)
+         Group By Key: t.b
+         ->  Hash Left Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from t right join (select b, count(c) as cc from t1 group by b) s1 on s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c)
+         Group By Key: t.b
+         ->  Hash Left Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from t full join (select b, count(c) as cc from t1 group by b) s1 on s1.b=t.b group by t.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.cc))
+   Sort Key: t.b, (sum(s1.cc))
+   ->  HashAggregate
+         Output: t.b, sum(s1.cc)
+         Group By Key: t.b
+         ->  Hash Full Join
+               Output: t.b, s1.cc
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.cc, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.cc, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, count(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+-- join type, multiple join, with SUM(COUNT)
+explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 left join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: s1.b, (sum((t2.c)::bigint))
+   Sort Key: s1.b, (sum((t2.c)::bigint))
+   ->  HashAggregate
+         Output: s1.b, sum((t2.c)::bigint)
+         Group By Key: s1.b
+         ->  Hash Right Join
+               Output: s1.b, t2.c
+               Hash Cond: (t2.b = s1.b)
+               ->  Seq Scan on lazyagg.t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+               ->  Hash
+                     Output: s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 left join (select b, count(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t1.b, (sum(s2.cc2))
+   Sort Key: t1.b, (sum(s2.cc2))
+   ->  HashAggregate
+         Output: t1.b, sum(s2.cc2)
+         Group By Key: t1.b
+         ->  Hash Left Join
+               Output: t1.b, s2.cc2
+               Hash Cond: (t1.b = s2.b)
+               ->  HashAggregate
+                     Output: t1.b, sum(t1.c)
+                     Group By Key: t1.b
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.b, t1.c
+               ->  Hash
+                     Output: s2.cc2, s2.b
+                     ->  Subquery Scan on s2
+                           Output: s2.cc2, s2.b
+                           ->  HashAggregate
+                                 Output: t2.b, count(t2.c)
+                                 Group By Key: t2.b
+                                 ->  Seq Scan on lazyagg.t2
+                                       Output: t2.b, t2.c
+(23 rows)
+
+explain (costs off, nodes off, verbose on) select s1.b, sum(cc3) from (select b, sum(c) as cc1 from t1 group by b) s1 left join ((select b, sum(c) as cc2 from t2 group by b) s2 right join (select b, count(c) as cc3 from t3 group by b) s3 on s2.b=s3.b) on s1.b=s2.b group by s1.b order by 1,2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Output: s1.b, (sum(s3.cc3))
+   Sort Key: s1.b, (sum(s3.cc3))
+   ->  HashAggregate
+         Output: s1.b, sum(s3.cc3)
+         Group By Key: s1.b
+         ->  Hash Right Join
+               Output: s1.b, s3.cc3
+               Hash Cond: (t2.b = s1.b)
+               ->  Hash Join
+                     Output: t2.b, s3.cc3
+                     Hash Cond: (t2.b = s3.b)
+                     ->  HashAggregate
+                           Output: t2.b, sum(t2.c)
+                           Group By Key: t2.b
+                           ->  Seq Scan on lazyagg.t2
+                                 Output: t2.b, t2.c
+                     ->  Hash
+                           Output: s3.cc3, s3.b
+                           ->  Subquery Scan on s3
+                                 Output: s3.cc3, s3.b
+                                 ->  HashAggregate
+                                       Output: t3.b, count(t3.c)
+                                       Group By Key: t3.b
+                                       ->  Seq Scan on lazyagg.t3
+                                             Output: t3.b, t3.c
+               ->  Hash
+                     Output: s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(35 rows)
+
+explain (costs off, nodes off, verbose on) select s1.b, sum(cc1) from ((select b, count(c) as cc1 from t1 group by b) s1 left join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b) right join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Output: t1.b, (sum((count(t1.c))))
+   Sort Key: t1.b, (sum((count(t1.c))))
+   ->  HashAggregate
+         Output: t1.b, sum((count(t1.c)))
+         Group By Key: t1.b
+         ->  Hash Right Join
+               Output: t1.b, (count(t1.c))
+               Hash Cond: (s2.b = s3.b)
+               ->  Hash Join
+                     Output: t1.b, (count(t1.c)), s2.b
+                     Hash Cond: (t1.b = s2.b)
+                     ->  HashAggregate
+                           Output: t1.b, count(t1.c)
+                           Group By Key: t1.b
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: t1.b, t1.c
+                     ->  Hash
+                           Output: s2.b
+                           ->  Subquery Scan on s2
+                                 Output: s2.b
+                                 ->  HashAggregate
+                                       Output: t2.b, sum(t2.c)
+                                       Group By Key: t2.b
+                                       ->  Seq Scan on lazyagg.t2
+                                             Output: t2.b, t2.c
+               ->  Hash
+                     Output: s3.b
+                     ->  Subquery Scan on s3
+                           Output: s3.b
+                           ->  HashAggregate
+                                 Output: t3.b, sum(t3.c)
+                                 Group By Key: t3.b
+                                 ->  Seq Scan on lazyagg.t3
+                                       Output: t3.b, t3.c
+(35 rows)
+
+explain (costs off, nodes off, verbose on) select s1.b, sum(cc3) from (select b, sum(c) as cc1 from t1 group by b) s1 right join (select b, sum(c) as cc2 from t2 group by b) s2 on s1.b=s2.b left join (select b, count(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Output: s1.b, (sum(s3.cc3))
+   Sort Key: s1.b, (sum(s3.cc3))
+   ->  HashAggregate
+         Output: s1.b, sum(s3.cc3)
+         Group By Key: s1.b
+         ->  Hash Left Join
+               Output: s1.b, s3.cc3
+               Hash Cond: (t2.b = s3.b)
+               ->  Hash Left Join
+                     Output: t2.b, s1.b
+                     Hash Cond: (t2.b = s1.b)
+                     ->  HashAggregate
+                           Output: t2.b, sum(t2.c)
+                           Group By Key: t2.b
+                           ->  Seq Scan on lazyagg.t2
+                                 Output: t2.b, t2.c
+                     ->  Hash
+                           Output: s1.b
+                           ->  Subquery Scan on s1
+                                 Output: s1.b
+                                 ->  HashAggregate
+                                       Output: t1.b, sum(t1.c)
+                                       Group By Key: t1.b
+                                       ->  Seq Scan on lazyagg.t1
+                                             Output: t1.b, t1.c
+               ->  Hash
+                     Output: s3.cc3, s3.b
+                     ->  Subquery Scan on s3
+                           Output: s3.cc3, s3.b
+                           ->  HashAggregate
+                                 Output: t3.b, count(t3.c)
+                                 Group By Key: t3.b
+                                 ->  Seq Scan on lazyagg.t3
+                                       Output: t3.b, t3.c
+(35 rows)
+
+explain (costs off, nodes off, verbose on) select s1.b, sum(cc2) from (select b, sum(c) as cc1 from t1 group by b) s1 right join (select b, count(c) as cc2 from t2 group by b) s2 on s1.b=s2.b right join (select b, sum(c) as cc3 from t3 group by b) s3 on s2.b=s3.b group by s1.b order by 1,2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Output: s1.b, (sum(s2.cc2))
+   Sort Key: s1.b, (sum(s2.cc2))
+   ->  HashAggregate
+         Output: s1.b, sum(s2.cc2)
+         Group By Key: s1.b
+         ->  Hash Left Join
+               Output: s2.cc2, s1.b
+               Hash Cond: (s2.b = s1.b)
+               ->  Hash Left Join
+                     Output: s2.cc2, s2.b
+                     Hash Cond: (t3.b = s2.b)
+                     ->  HashAggregate
+                           Output: t3.b, sum(t3.c)
+                           Group By Key: t3.b
+                           ->  Seq Scan on lazyagg.t3
+                                 Output: t3.b, t3.c
+                     ->  Hash
+                           Output: s2.cc2, s2.b
+                           ->  Subquery Scan on s2
+                                 Output: s2.cc2, s2.b
+                                 ->  HashAggregate
+                                       Output: t2.b, count(t2.c)
+                                       Group By Key: t2.b
+                                       ->  Seq Scan on lazyagg.t2
+                                             Output: t2.b, t2.c
+               ->  Hash
+                     Output: s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c)
+                                 Group By Key: t1.b
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.c
+(35 rows)
+
+-- super agg func param come from non-agg func column of sub-query
+explain (costs off, nodes off, verbose on) select t.b, sum(s1.d) from (select b, d, sum(c) as cc from t1 group by b, d) s1, t where s1.b=t.b group by t.b order by 1,2;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(s1.d))
+   Sort Key: t.b, (sum(s1.d))
+   ->  HashAggregate
+         Output: t.b, sum(s1.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s1.d, t.b
+               Hash Cond: (t.b = s1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s1.d, s1.b
+                     ->  Subquery Scan on s1
+                           Output: s1.d, s1.b
+                           ->  HashAggregate
+                                 Output: t1.b, t1.d, sum(t1.c)
+                                 Group By Key: t1.b, t1.d
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.d, t1.c
+(20 rows)
+
+------------------------------------------------------------------------------------
+-- multi-agg functions
+------------------------------------------------------------------------------------
+-- single subquery, different order of super-agg and sub-agg
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), max(dd) from (select b, sum(c) as cc, max(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Output: t.b, (sum((t1.c)::bigint)), (max(t1.d))
+   Sort Key: t.b, (sum((t1.c)::bigint)), (max(t1.d))
+   ->  HashAggregate
+         Output: t.b, sum((t1.c)::bigint), max(t1.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t1.d, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(dd), sum(cc) from (select b, sum(c) as cc, count(*) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Sort
+   Output: t.b, ((count(1::bigint))::numeric), (sum((t1.c)::bigint))
+   Sort Key: t.b, ((count(1::bigint))::numeric), (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t.b, count(1::bigint), sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select max(dd), t.b, sum(cc) from (select b, sum(c) as cc, max(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Output: (max(t1.d)), t.b, (sum((t1.c)::bigint))
+   Sort Key: (max(t1.d)), t.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: max(t1.d), t.b, sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.d, t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, min(cc), sum(dd) from (select b, min(c) as cc, count(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Sort
+   Output: t.b, (min(t1.c)), ((count(t1.d))::numeric)
+   Sort Key: t.b, (min(t1.c)), ((count(t1.d))::numeric)
+   ->  HashAggregate
+         Output: t.b, min(t1.c), count(t1.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t1.d, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, count(*) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric), ((count(1::bigint))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric), ((count(1::bigint))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c), count(1::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+-- simple setop
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, sum(d) as dd from t2 group by b union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c)::bigint))), (sum(((t1.d)::bigint)))
+   Sort Key: t.b, (sum(((t1.c)::bigint))), (sum(((t1.d)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c)::bigint)), sum(((t1.d)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: ((t1.c)::bigint), ((t1.d)::bigint), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.d, t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.d, t2.b
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.c, t3.d, t3.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(20 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), max(dd) from (select b, count(c) as cc, max(d) as dd from t1 group by b union all select b, count(c) as cc, max(d) as dd from t2 group by b union all select b, count(c) as cc, max(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric), (max(t1.d))
+   Sort Key: t.b, ((count(t1.c))::numeric), (max(t1.d))
+   ->  HashAggregate
+         Output: t.b, count(t1.c), max(t1.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t1.d, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.d, t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.c, t2.d, t2.b
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.c, t3.d, t3.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(20 rows)
+
+-- complex setop, one is valid and another is invalid
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), min(dd) from (select b, sum(c) as cc, min(d) as dd from t1 group by b union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum("*SELECT* 1".cc)), (min((("*SELECT* 1".dd)::bigint)))
+   Sort Key: t.b, (sum("*SELECT* 1".cc)), (min((("*SELECT* 1".dd)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum("*SELECT* 1".cc), min((("*SELECT* 1".dd)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: "*SELECT* 1".cc, (("*SELECT* 1".dd)::bigint), t.b
+               Hash Cond: ("*SELECT* 1".b = t.b)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".b, "*SELECT* 1".cc, "*SELECT* 1".dd
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: t1.b, t1.c, t1.d
+                     ->  HashAggregate
+                           Output: t3.b, sum(t3.c), sum(t3.d)
+                           Group By Key: t3.b
+                           ->  Seq Scan on lazyagg.t3
+                                 Output: t3.b, t3.c, t3.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(23 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, sum(d) as dd from t1 group by b union all select b, sum(c) as cc, count(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum(((t1.c)::bigint))), (sum(((t1.d)::bigint)))
+   Sort Key: t.b, (sum(((t1.c)::bigint))), (sum(((t1.d)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum(((t1.c)::bigint)), sum(((t1.d)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: ((t1.c)::bigint), ((t1.d)::bigint), t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.c, t1.d, t1.b
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".cc, "*SELECT* 2".dd, "*SELECT* 2".b
+                           ->  HashAggregate
+                                 Output: t3.b, sum(t3.c), count(t3.d)
+                                 Group By Key: t3.b
+                                 ->  Seq Scan on lazyagg.t3
+                                       Output: t3.b, t3.c, t3.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(23 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t1 group by b union all select b, count(c) as cc, count(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum("*SELECT* 1".cc)), (sum("*SELECT* 1".dd))
+   Sort Key: t.b, (sum("*SELECT* 1".cc)), (sum("*SELECT* 1".dd))
+   ->  HashAggregate
+         Output: t.b, sum("*SELECT* 1".cc), sum("*SELECT* 1".dd)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: "*SELECT* 1".cc, "*SELECT* 1".dd, t.b
+               Hash Cond: (t.b = "*SELECT* 1".b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: "*SELECT* 1".cc, "*SELECT* 1".dd, "*SELECT* 1".b
+                     ->  Append
+                           ->  Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".cc, "*SELECT* 1".dd, "*SELECT* 1".b
+                                 ->  HashAggregate
+                                       Output: t1.b, count(t1.c), sum(t1.d)
+                                       Group By Key: t1.b
+                                       ->  Seq Scan on lazyagg.t1
+                                             Output: t1.b, t1.c, t1.d
+                           ->  Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".cc, "*SELECT* 2".dd, "*SELECT* 2".b
+                                 ->  HashAggregate
+                                       Output: t3.b, count(t3.c), count(t3.d)
+                                       Group By Key: t3.b
+                                       ->  Seq Scan on lazyagg.t3
+                                             Output: t3.b, t3.c, t3.d
+(28 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, count(c) as cc, count(d) as dd from t1 group by b union all select b, count(c) as cc, count(*) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum("*SELECT* 1".cc)), (sum("*SELECT* 1".dd))
+   Sort Key: t.b, (sum("*SELECT* 1".cc)), (sum("*SELECT* 1".dd))
+   ->  HashAggregate
+         Output: t.b, sum("*SELECT* 1".cc), sum("*SELECT* 1".dd)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: "*SELECT* 1".cc, "*SELECT* 1".dd, t.b
+               Hash Cond: (t.b = "*SELECT* 1".b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: "*SELECT* 1".cc, "*SELECT* 1".dd, "*SELECT* 1".b
+                     ->  Append
+                           ->  Subquery Scan on "*SELECT* 1"
+                                 Output: "*SELECT* 1".cc, "*SELECT* 1".dd, "*SELECT* 1".b
+                                 ->  HashAggregate
+                                       Output: t1.b, count(t1.c), count(t1.d)
+                                       Group By Key: t1.b
+                                       ->  Seq Scan on lazyagg.t1
+                                             Output: t1.b, t1.c, t1.d
+                           ->  Subquery Scan on "*SELECT* 2"
+                                 Output: "*SELECT* 2".cc, "*SELECT* 2".dd, "*SELECT* 2".b
+                                 ->  HashAggregate
+                                       Output: t3.b, count(t3.c), count(*)
+                                       Group By Key: t3.b
+                                       ->  Seq Scan on lazyagg.t3
+                                             Output: t3.b, t3.c
+(28 rows)
+
+-- complex setop: agg func number not match in setop branch
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, d as dd from t1 group by b,d union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum("*SELECT* 1".cc)), (sum((("*SELECT* 1".dd)::bigint)))
+   Sort Key: t.b, (sum("*SELECT* 1".cc)), (sum((("*SELECT* 1".dd)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum("*SELECT* 1".cc), sum((("*SELECT* 1".dd)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: "*SELECT* 1".cc, (("*SELECT* 1".dd)::bigint), t.b
+               Hash Cond: ("*SELECT* 1".b = t.b)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".b, "*SELECT* 1".cc, "*SELECT* 1".dd
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c), t1.d
+                                 Group By Key: t1.b, t1.d
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.d, t1.c
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.b, t3.c, t3.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(23 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(dd) from (select b, sum(c) as cc, d as dd from t1 group by b,d union all select b, c as cc, sum(d) as dd from t2 group by b,c union all select b, sum(c) as cc, sum(d) as dd from t3 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, (sum("*SELECT* 1".cc)), (sum((("*SELECT* 1".dd)::bigint)))
+   Sort Key: t.b, (sum("*SELECT* 1".cc)), (sum((("*SELECT* 1".dd)::bigint)))
+   ->  HashAggregate
+         Output: t.b, sum("*SELECT* 1".cc), sum((("*SELECT* 1".dd)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: "*SELECT* 1".cc, (("*SELECT* 1".dd)::bigint), t.b
+               Hash Cond: ("*SELECT* 1".b = t.b)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".b, "*SELECT* 1".cc, "*SELECT* 1".dd
+                           ->  HashAggregate
+                                 Output: t1.b, sum(t1.c), t1.d
+                                 Group By Key: t1.b, t1.d
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.b, t1.d, t1.c
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".b, "*SELECT* 2".cc, "*SELECT* 2".dd
+                           ->  HashAggregate
+                                 Output: t2.b, t2.c, sum(t2.d)
+                                 Group By Key: t2.b, t2.c
+                                 ->  Seq Scan on lazyagg.t2
+                                       Output: t2.b, t2.c, t2.d
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.b, t3.c, t3.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(30 rows)
+
+-- 1--n
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, min(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, (sum((t1.c)::bigint))
+   Sort Key: t.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t.b, sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, sum(c) as cc, avg(d)+1 as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, (sum((t1.c)::bigint))
+   Sort Key: t.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t.b, sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc, sum(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) from (select b, count(c) as cc, avg(d) as dd from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+-- n--1
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Output: t.b, (sum((t1.c)::bigint)), (sum((t1.c)::bigint))
+   Sort Key: t.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t.b, sum((t1.c)::bigint), sum((t1.c)::bigint)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric), ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c), count(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc), sum(cc), sum(cc), sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2,3,4,5;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.c))::numeric), ((count(t1.c))::numeric), ((count(t1.c))::numeric), ((count(t1.c))::numeric)
+   Sort Key: t.b, ((count(t1.c))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.c), count(t1.c), count(t1.c), count(t1.c)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+-- n--1, expr
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) + sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Output: t.b, ((sum((t1.c)::bigint) + sum((t1.c)::bigint)))
+   Sort Key: t.b, ((sum((t1.c)::bigint) + sum((t1.c)::bigint)))
+   ->  HashAggregate
+         Output: t.b, (sum((t1.c)::bigint) + sum((t1.c)::bigint))
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) select t.b, sum(cc) + sum(cc) from (select b, count(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Sort
+   Output: t.b, (((count(t1.c))::numeric + (count(t1.c))::numeric))
+   Sort Key: t.b, (((count(t1.c))::numeric + (count(t1.c))::numeric))
+   ->  HashAggregate
+         Output: t.b, ((count(t1.c))::numeric + (count(t1.c))::numeric)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.c, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+------------------------------------------------------------------------------------
+-- CTE
+------------------------------------------------------------------------------------
+-- basic with as
+explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select t.b, sum(cc) from s, t where s.b=t.b group by t.b order by 1,2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b, (sum(s.cc))
+   Sort Key: t.b, (sum(s.cc))
+   CTE s
+     ->  HashAggregate
+           Output: t1.b, sum(t1.c)
+           Group By Key: t1.b
+           ->  Seq Scan on lazyagg.t1
+                 Output: t1.b, t1.c
+   ->  HashAggregate
+         Output: t.b, sum(s.cc)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: s.cc, t.b
+               Hash Cond: (t.b = s.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: s.cc, s.b
+                     ->  CTE Scan on s
+                           Output: s.cc, s.b
+(21 rows)
+
+-- multi-usage
+explain (costs off, nodes off, verbose on) with s1(b, cc) as (select b, sum(c) from t1 group by b) select count(*) from s1 where cc > (select sum(cc)/100 from s1) order by 1;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Output: (count(*))
+   Sort Key: (count(*))
+   CTE s1
+     ->  HashAggregate
+           Output: t1.b, sum(t1.c)
+           Group By Key: t1.b
+           ->  Seq Scan on lazyagg.t1
+                 Output: t1.b, t1.c
+   InitPlan 2 (returns $1)
+     ->  Aggregate
+           Output: (sum(s1.cc) / 100::numeric)
+           ->  CTE Scan on s1
+                 Output: s1.b, s1.cc
+   ->  Aggregate
+         Output: count(*)
+         ->  CTE Scan on s1
+               Output: s1.b, s1.cc
+               Filter: ((s1.cc)::numeric > $1)
+(19 rows)
+
+-- pull up
+explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select a, b, c, d from t where b not in (select sum(cc) from s group by b) order by 1,2,3,4;
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t.a, t.b, t.c, t.d
+   Sort Key: t.a, t.b, t.c, t.d
+   CTE s
+     ->  HashAggregate
+           Output: t1.b, sum(t1.c)
+           Group By Key: t1.b
+           ->  Seq Scan on lazyagg.t1
+                 Output: t1.b, t1.c
+   ->  Nested Loop Anti Join
+         Output: t.a, t.b, t.c, t.d
+         Join Filter: (((t.b)::numeric = "ANY_subquery".sum) OR ((t.b)::numeric IS NULL) OR ("ANY_subquery".sum IS NULL))
+         ->  Seq Scan on lazyagg.t
+               Output: t.a, t.b, t.c, t.d
+         ->  Materialize
+               Output: "ANY_subquery".sum
+               ->  Subquery Scan on "ANY_subquery"
+                     Output: "ANY_subquery".sum
+                     ->  HashAggregate
+                           Output: sum(s.cc), s.b
+                           Group By Key: s.b
+                           ->  CTE Scan on s
+                                 Output: s.b, s.cc
+(23 rows)
+
+-- not pull up
+explain (costs off, nodes off, verbose on) with s as (select b, sum(c) as cc from t1 group by b) select 1 from t where exists (select b, sum(cc) from s where s.b=t.b group by b);
+              QUERY PLAN              
+--------------------------------------
+ Seq Scan on lazyagg.t
+   Output: 1
+   Filter: (SubPlan 2)
+   CTE s
+     ->  HashAggregate
+           Output: t1.b, sum(t1.c)
+           Group By Key: t1.b
+           ->  Seq Scan on lazyagg.t1
+                 Output: t1.b, t1.c
+   SubPlan 2
+     ->  GroupAggregate
+           Output: s.b, sum(s.cc)
+           Group By Key: s.b
+           ->  CTE Scan on s
+                 Output: s.b, s.cc
+                 Filter: (s.b = t.b)
+(16 rows)
+
+-- multi-cte
+explain (costs off, nodes off, verbose on) 
+with s as
+(select a,b from t1 group by a,b)
+select max(b) from
+(
+	select b from
+	(
+		select max(b) b from
+		(
+			with s as
+			(select a+b a, a-b b from t2 group by 1,2)
+			select max(b) b from
+			(select a*b b from t where a in (select b from s group by b))
+		)
+	)
+) order by 1;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Sort
+   Output: (max((max((max((t.a * t.b)))))))
+   Sort Key: (max((max((max((t.a * t.b)))))))
+   ->  Aggregate
+         Output: max((max((max((t.a * t.b))))))
+         ->  Aggregate
+               Output: max((max((t.a * t.b))))
+               ->  Aggregate
+                     Output: max((t.a * t.b))
+                     CTE s
+                       ->  HashAggregate
+                             Output: ((t2.a + t2.b)), ((t2.a - t2.b))
+                             Group By Key: (t2.a + t2.b), (t2.a - t2.b)
+                             ->  Seq Scan on lazyagg.t2
+                                   Output: (t2.a + t2.b), (t2.a - t2.b)
+                     ->  Hash Join
+                           Output: t.a, t.b
+                           Hash Cond: (t.a = s.b)
+                           ->  Seq Scan on lazyagg.t
+                                 Output: t.a, t.b, t.c, t.d
+                           ->  Hash
+                                 Output: s.b
+                                 ->  HashAggregate
+                                       Output: s.b
+                                       Group By Key: s.b
+                                       ->  CTE Scan on s
+                                             Output: s.b
+(27 rows)
+
+------------------------------------------------------------------------------------
+-- In, Exists
+------------------------------------------------------------------------------------
+explain (costs off, nodes off, verbose on) select t.b from t where exists (select b, sum(c) as cc from t1 where b > 100 group by b) group by t.b order by 1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   InitPlan 1 (returns $0)
+     ->  HashAggregate
+           Output: t1.b, sum(t1.c)
+           Group By Key: t1.b
+           ->  Seq Scan on lazyagg.t1
+                 Output: t1.b, t1.c
+                 Filter: (t1.b > 100)
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Result
+               Output: t.b
+               One-Time Filter: $0
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+(18 rows)
+
+explain (costs off, nodes off, verbose on) select b from t where b in (select b from t1 group by b) group by b order by 1;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t.b = t1.b)
+               ->  Seq Scan on lazyagg.t
+                     Output: t.a, t.b, t.c, t.d
+               ->  Hash
+                     Output: t1.b
+                     ->  HashAggregate
+                           Output: t1.b
+                           Group By Key: t1.b
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: t1.b
+(18 rows)
+
+explain (costs off, nodes off, verbose on) 
+select a,b,c,d from t2 where exists
+(select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2) order by 1,2,3,4;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t2.a, t2.b, t2.c, t2.d
+   Sort Key: t2.a, t2.b, t2.c, t2.d
+   InitPlan 1 (returns $0)
+     ->  Sort
+           Output: t.b, (sum((t1.c)::bigint))
+           Sort Key: t.b, (sum((t1.c)::bigint))
+           ->  HashAggregate
+                 Output: t.b, sum((t1.c)::bigint)
+                 Group By Key: t.b
+                 ->  Hash Join
+                       Output: t1.c, t.b
+                       Hash Cond: (t1.b = t.b)
+                       ->  Seq Scan on lazyagg.t1
+                             Output: t1.a, t1.b, t1.c, t1.d
+                       ->  Hash
+                             Output: t.b
+                             ->  Seq Scan on lazyagg.t
+                                   Output: t.b
+   ->  Result
+         Output: t2.a, t2.b, t2.c, t2.d
+         One-Time Filter: $0
+         ->  Seq Scan on lazyagg.t2
+               Output: t2.a, t2.b, t2.c, t2.d
+(24 rows)
+
+------------------------------------------------------------------------------------
+-- multi-layer lazy agg
+------------------------------------------------------------------------------------
+-- a chain
+explain (costs off, nodes off, verbose on) select * from (select s1.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 group by s1.b) order by 1,2;
+                QUERY PLAN                 
+-------------------------------------------
+ Sort
+   Output: t1.b, (sum((t1.c)::bigint))
+   Sort Key: t1.b, (sum((t1.c)::bigint))
+   ->  HashAggregate
+         Output: t1.b, sum((t1.c)::bigint)
+         Group By Key: t1.b
+         ->  Seq Scan on lazyagg.t1
+               Output: t1.b, t1.c
+(8 rows)
+
+select * from (select s1.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1 group by s1.b) order by 1,2;
+ b | sum 
+---+-----
+ 1 |   6
+ 2 |   6
+ 3 |   3
+ 5 |   5
+ 6 |   6
+ 7 |    
+   |  13
+(7 rows)
+
+explain (costs off, nodes off, verbose on) 
+select b, sum(ccc) as cccc from(
+select b, sum(cc) as ccc from (
+select b, sum(c) as cc from t1 group by b
+) s1 group by b
+) s2 group by b order by 1,2;
+                 QUERY PLAN                 
+--------------------------------------------
+ Sort
+   Output: t1.b, (sum((t1.c)::numeric))
+   Sort Key: t1.b, (sum((t1.c)::numeric))
+   ->  HashAggregate
+         Output: t1.b, sum((t1.c)::numeric)
+         Group By Key: t1.b
+         ->  Seq Scan on lazyagg.t1
+               Output: t1.b, t1.c
+(8 rows)
+
+-- with setop
+explain (costs off, nodes off, verbose on) 
+select b, sum(ccc) as cccc from(
+select b, sum(cc) as ccc from (
+select b, sum(c) as cc from t1 group by b
+) s11 group by b
+union all
+select b, count(cc) as ccc from (
+select b, sum(c) as cc from t2 group by b
+) s12 group by b
+) s2 group by b order by 1,2;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Sort
+   Output: t1.b, (sum(((t1.c)::numeric)))
+   Sort Key: t1.b, (sum(((t1.c)::numeric)))
+   ->  HashAggregate
+         Output: t1.b, sum(((t1.c)::numeric))
+         Group By Key: t1.b
+         ->  Append
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.b, t1.c
+               ->  Subquery Scan on "*SELECT* 2"
+                     Output: "*SELECT* 2".b, "*SELECT* 2".ccc
+                     ->  HashAggregate
+                           Output: t2.b, count((sum(t2.c)))
+                           Group By Key: t2.b
+                           ->  HashAggregate
+                                 Output: t2.b, sum(t2.c)
+                                 Group By Key: t2.b
+                                 ->  Seq Scan on lazyagg.t2
+                                       Output: t2.b, t2.c
+(19 rows)
+
+explain (costs off, nodes off, verbose on) 
+select b, sum(ccc) as cccc from(
+select b, sum(cc) as ccc from (
+select b, count(c) as cc from t1 group by b
+) s11 group by b
+union all
+select b, count(cc) as ccc from (
+select b, sum(c) as cc from t2 group by b
+) s12 group by b
+) s2 group by b order by 1,2;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Sort
+   Output: t1.b, ((count(((t1.c)::bigint)))::numeric)
+   Sort Key: t1.b, ((count(((t1.c)::bigint)))::numeric)
+   ->  HashAggregate
+         Output: t1.b, count(((t1.c)::bigint))
+         Group By Key: t1.b
+         ->  Append
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.b, t1.c
+               ->  HashAggregate
+                     Output: t2.b, sum(t2.c)
+                     Group By Key: t2.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.b, t2.c
+(14 rows)
+
+explain (costs off, nodes off, verbose on) 
+(select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2)
+union all
+(select t.b, sum(cc) from (select b, sum(c) as cc from t1 group by b) s1, t where s1.b=t.b group by t.b order by 1,2) order by 1,2;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Sort
+   Output: lazyagg.t.b, (sum((lazyagg.t1.c)::bigint))
+   Sort Key: lazyagg.t.b, (sum((lazyagg.t1.c)::bigint))
+   ->  Result
+         Output: lazyagg.t.b, (sum((lazyagg.t1.c)::bigint))
+         ->  Append
+               ->  HashAggregate
+                     Output: lazyagg.t.b, sum((lazyagg.t1.c)::bigint)
+                     Group By Key: lazyagg.t.b
+                     ->  Hash Join
+                           Output: lazyagg.t1.c, lazyagg.t.b
+                           Hash Cond: (lazyagg.t1.b = lazyagg.t.b)
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: lazyagg.t1.a, lazyagg.t1.b, lazyagg.t1.c, lazyagg.t1.d
+                           ->  Hash
+                                 Output: lazyagg.t.b
+                                 ->  Seq Scan on lazyagg.t
+                                       Output: lazyagg.t.b
+               ->  HashAggregate
+                     Output: lazyagg.t.b, sum((lazyagg.t1.c)::bigint)
+                     Group By Key: lazyagg.t.b
+                     ->  Hash Join
+                           Output: lazyagg.t1.c, lazyagg.t.b
+                           Hash Cond: (lazyagg.t1.b = lazyagg.t.b)
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: lazyagg.t1.a, lazyagg.t1.b, lazyagg.t1.c, lazyagg.t1.d
+                           ->  Hash
+                                 Output: lazyagg.t.b
+                                 ->  Seq Scan on lazyagg.t
+                                       Output: lazyagg.t.b
+(30 rows)
+
+------------------------------------------------------------------------------------
+-- empty table
+------------------------------------------------------------------------------------
+create table t_empty (a int, b int, c int, d int);
+explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc) from (select b, count(c) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: lazyagg.t_empty.b, count(lazyagg.t_empty.c)
+   Group By Key: lazyagg.t_empty.b
+   ->  Hash Join
+         Output: lazyagg.t_empty.c, lazyagg.t_empty.b
+         Hash Cond: (lazyagg.t_empty.b = lazyagg.t_empty.b)
+         ->  Seq Scan on lazyagg.t_empty
+               Output: lazyagg.t_empty.a, lazyagg.t_empty.b, lazyagg.t_empty.c, lazyagg.t_empty.d
+         ->  Hash
+               Output: lazyagg.t_empty.b
+               ->  Seq Scan on lazyagg.t_empty
+                     Output: lazyagg.t_empty.b
+(12 rows)
+
+explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(c) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: sum(s.cc)
+   ->  Hash Join
+         Output: s.cc
+         Hash Cond: (lazyagg.t_empty.b = s.b)
+         ->  Seq Scan on lazyagg.t_empty
+               Output: lazyagg.t_empty.a, lazyagg.t_empty.b, lazyagg.t_empty.c, lazyagg.t_empty.d
+         ->  Hash
+               Output: s.cc, s.b
+               ->  Subquery Scan on s
+                     Output: s.cc, s.b
+                     ->  HashAggregate
+                           Output: lazyagg.t_empty.b, count(lazyagg.t_empty.c)
+                           Group By Key: lazyagg.t_empty.b
+                           ->  Seq Scan on lazyagg.t_empty
+                                 Output: lazyagg.t_empty.b, lazyagg.t_empty.c
+(16 rows)
+
+explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc) from (select b, count(*) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: lazyagg.t_empty.b, count(1::bigint)
+   Group By Key: lazyagg.t_empty.b
+   ->  Hash Join
+         Output: lazyagg.t_empty.b
+         Hash Cond: (lazyagg.t_empty.b = lazyagg.t_empty.b)
+         ->  Seq Scan on lazyagg.t_empty
+               Output: lazyagg.t_empty.a, lazyagg.t_empty.b, lazyagg.t_empty.c, lazyagg.t_empty.d
+         ->  Hash
+               Output: lazyagg.t_empty.b
+               ->  Seq Scan on lazyagg.t_empty
+                     Output: lazyagg.t_empty.b
+(12 rows)
+
+explain (costs off, nodes off, verbose on) select sum(cc) from (select b, count(*) as cc from t_empty group by b) s, t_empty where s.b=t_empty.b;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: sum(s.cc)
+   ->  Hash Join
+         Output: s.cc
+         Hash Cond: (lazyagg.t_empty.b = s.b)
+         ->  Seq Scan on lazyagg.t_empty
+               Output: lazyagg.t_empty.a, lazyagg.t_empty.b, lazyagg.t_empty.c, lazyagg.t_empty.d
+         ->  Hash
+               Output: s.cc, s.b
+               ->  Subquery Scan on s
+                     Output: s.cc, s.b
+                     ->  HashAggregate
+                           Output: lazyagg.t_empty.b, count(*)
+                           Group By Key: lazyagg.t_empty.b
+                           ->  Seq Scan on lazyagg.t_empty
+                                 Output: lazyagg.t_empty.b
+(16 rows)
+
+explain (costs off, nodes off, verbose on) select t_empty.b, sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t_empty group by b) s, t_empty where s.b=t_empty.b group by t_empty.b;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: lazyagg.t_empty.b, count(lazyagg.t_empty.c), sum((lazyagg.t_empty.d)::bigint)
+   Group By Key: lazyagg.t_empty.b
+   ->  Hash Join
+         Output: lazyagg.t_empty.c, lazyagg.t_empty.d, lazyagg.t_empty.b
+         Hash Cond: (lazyagg.t_empty.b = lazyagg.t_empty.b)
+         ->  Seq Scan on lazyagg.t_empty
+               Output: lazyagg.t_empty.a, lazyagg.t_empty.b, lazyagg.t_empty.c, lazyagg.t_empty.d
+         ->  Hash
+               Output: lazyagg.t_empty.b
+               ->  Seq Scan on lazyagg.t_empty
+                     Output: lazyagg.t_empty.b
+(12 rows)
+
+explain (costs off, nodes off, verbose on) select sum(cc), sum(dd) from (select b, count(c) as cc, sum(d) as dd from t_empty group by b) s, t_empty where s.b=t_empty.b;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: sum(s.cc), sum(s.dd)
+   ->  Hash Join
+         Output: s.cc, s.dd
+         Hash Cond: (lazyagg.t_empty.b = s.b)
+         ->  Seq Scan on lazyagg.t_empty
+               Output: lazyagg.t_empty.a, lazyagg.t_empty.b, lazyagg.t_empty.c, lazyagg.t_empty.d
+         ->  Hash
+               Output: s.cc, s.dd, s.b
+               ->  Subquery Scan on s
+                     Output: s.cc, s.dd, s.b
+                     ->  HashAggregate
+                           Output: lazyagg.t_empty.b, count(lazyagg.t_empty.c), sum(lazyagg.t_empty.d)
+                           Group By Key: lazyagg.t_empty.b
+                           ->  Seq Scan on lazyagg.t_empty
+                                 Output: lazyagg.t_empty.b, lazyagg.t_empty.c, lazyagg.t_empty.d
+(16 rows)
+
+------------------------------------------------------------------------------------
+-- data type convert
+------------------------------------------------------------------------------------
+create table t_type (a int2, b int8, c varchar(10), d char(5), e text, f date, g timestamp, h interval);
+insert into t_type values (1, 2, 'CCC', 'DDD', 'EEE', date '5-4-2017', '4-17-2017', interval '3' day);
+explain (costs off, nodes off, verbose on) select t_type.c, sum(dd) from (select c, count(d) as dd from t_type group by c) s, t_type where s.c=t_type.c group by t_type.c;
+                                                                              QUERY PLAN                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: lazyagg.t_type.c, count(lazyagg.t_type.d)
+   Group By Key: lazyagg.t_type.c
+   ->  Hash Join
+         Output: lazyagg.t_type.d, lazyagg.t_type.c
+         Hash Cond: ((lazyagg.t_type.c)::text = (lazyagg.t_type.c)::text)
+         ->  Seq Scan on lazyagg.t_type
+               Output: lazyagg.t_type.a, lazyagg.t_type.b, lazyagg.t_type.c, lazyagg.t_type.d, lazyagg.t_type.e, lazyagg.t_type.f, lazyagg.t_type.g, lazyagg.t_type.h
+         ->  Hash
+               Output: lazyagg.t_type.c
+               ->  Seq Scan on lazyagg.t_type
+                     Output: lazyagg.t_type.c
+(12 rows)
+
+explain (costs off, nodes off, verbose on) select t_type.c, sum(dd) from (select c, count(d) as dd from t_type group by c union all select c, count(d) as dd from t_type group by c) s, t_type where s.c=t_type.c group by t_type.c order by 1,2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: lazyagg.t_type.c, ((count(lazyagg.t_type.d))::numeric)
+   Sort Key: lazyagg.t_type.c, ((count(lazyagg.t_type.d))::numeric)
+   ->  HashAggregate
+         Output: lazyagg.t_type.c, count(lazyagg.t_type.d)
+         Group By Key: lazyagg.t_type.c
+         ->  Hash Join
+               Output: lazyagg.t_type.d, lazyagg.t_type.c
+               Hash Cond: ((lazyagg.t_type.c)::text = (lazyagg.t_type.c)::text)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t_type
+                           Output: lazyagg.t_type.d, lazyagg.t_type.c
+                     ->  Seq Scan on lazyagg.t_type
+                           Output: lazyagg.t_type.d, lazyagg.t_type.c
+               ->  Hash
+                     Output: lazyagg.t_type.c
+                     ->  Seq Scan on lazyagg.t_type
+                           Output: lazyagg.t_type.c
+(18 rows)
+
+explain (costs off, nodes off, verbose on) select sum(a1), sum(a2), sum(a3) from (select a, sum(b) a1, count(c) a2, count(f) a3 from t_type group by a union all select a, sum(a), count(e), count(g) from t_type group by a) s, t_type where s.a=t_type.a group by t_type.a;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: sum("*SELECT* 1".a1), count((("*SELECT* 1".a2)::character varying(10))), count("*SELECT* 1".a3), lazyagg.t_type.a
+   Group By Key: lazyagg.t_type.a
+   ->  Hash Join
+         Output: "*SELECT* 1".a1, (("*SELECT* 1".a2)::character varying(10)), "*SELECT* 1".a3, lazyagg.t_type.a
+         Hash Cond: ("*SELECT* 1".a = lazyagg.t_type.a)
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     Output: "*SELECT* 1".a, "*SELECT* 1".a1, ("*SELECT* 1".a2)::character varying(10), "*SELECT* 1".a3
+                     ->  Seq Scan on lazyagg.t_type
+                           Output: lazyagg.t_type.a, lazyagg.t_type.b, lazyagg.t_type.c, lazyagg.t_type.f
+               ->  Subquery Scan on "*SELECT* 2"
+                     Output: "*SELECT* 2".a, "*SELECT* 2".sum, "*SELECT* 2".count, "*SELECT* 2".count
+                     ->  Seq Scan on lazyagg.t_type
+                           Output: lazyagg.t_type.a, lazyagg.t_type.a, lazyagg.t_type.e, lazyagg.t_type.g
+         ->  Hash
+               Output: lazyagg.t_type.a
+               ->  Seq Scan on lazyagg.t_type
+                     Output: lazyagg.t_type.a
+(19 rows)
+
+explain (costs off, nodes off, verbose on) select sum(a1), sum(a2), sum(a3) from (select a, sum(b) a1, count(c) a2, count(*) a3 from t_type group by a union all select a, sum(a), count(e), count(*) from t_type group by a) s, t_type where s.a=t_type.a group by t_type.a;
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: sum("*SELECT* 1".a1), count((("*SELECT* 1".a2)::character varying(10))), count((1::bigint)), lazyagg.t_type.a
+   Group By Key: lazyagg.t_type.a
+   ->  Hash Join
+         Output: "*SELECT* 1".a1, (("*SELECT* 1".a2)::character varying(10)), (1::bigint), lazyagg.t_type.a
+         Hash Cond: ("*SELECT* 1".a = lazyagg.t_type.a)
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     Output: "*SELECT* 1".a, "*SELECT* 1".a1, ("*SELECT* 1".a2)::character varying(10), 1::bigint
+                     ->  Seq Scan on lazyagg.t_type
+                           Output: lazyagg.t_type.a, lazyagg.t_type.b, lazyagg.t_type.c, 1::bigint
+               ->  Subquery Scan on "*SELECT* 2"
+                     Output: "*SELECT* 2".a, "*SELECT* 2".sum, "*SELECT* 2".count, 1::bigint
+                     ->  Seq Scan on lazyagg.t_type
+                           Output: lazyagg.t_type.a, lazyagg.t_type.a, lazyagg.t_type.e, 1::bigint
+         ->  Hash
+               Output: lazyagg.t_type.a
+               ->  Seq Scan on lazyagg.t_type
+                     Output: lazyagg.t_type.a
+(19 rows)
+
+------------------------------------------------------------------------------------
+-- CoalesceExpr
+------------------------------------------------------------------------------------
+create view v as select * from t;
+explain (costs off, nodes off, verbose on)  
+select t1.a, sum(cc)
+from t1 full join v using(a) full join (select a, sum(c) as cc from t2 group by a) using(a)
+where t1.a>5
+group by t1.a
+order by 1;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Output: t1.a, (sum((t2.c)::bigint))
+   Sort Key: t1.a
+   ->  HashAggregate
+         Output: t1.a, sum((t2.c)::bigint)
+         Group By Key: t1.a
+         ->  Hash Right Join
+               Output: t1.a, t2.c
+               Hash Cond: (t2.a = COALESCE(t1.a, t.a))
+               ->  Seq Scan on lazyagg.t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+               ->  Hash
+                     Output: t1.a, t.a
+                     ->  Hash Right Join
+                           Output: t1.a, t.a
+                           Hash Cond: (t.a = t1.a)
+                           ->  Seq Scan on lazyagg.t
+                                 Output: t.a, t.b, t.c, t.d
+                           ->  Hash
+                                 Output: t1.a
+                                 ->  Seq Scan on lazyagg.t1
+                                       Output: t1.a
+                                       Filter: (t1.a > 5)
+(23 rows)
+
+create view v1 as select a from t1 group by a;
+explain (costs off, nodes off, verbose on) 
+select t2.b
+from t2 full join v1 using(a) full join t3 using(a)
+group by t2.b order by 1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Output: t2.b
+   Sort Key: t2.b
+   ->  HashAggregate
+         Output: t2.b
+         Group By Key: t2.b
+         ->  Hash Full Join
+               Output: t2.b
+               Hash Cond: (COALESCE(t2.a, t1.a) = t3.a)
+               ->  Hash Full Join
+                     Output: t2.b, t2.a, t1.a
+                     Hash Cond: (t2.a = t1.a)
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                     ->  Hash
+                           Output: t1.a
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: t1.a
+               ->  Hash
+                     Output: t3.a
+                     ->  Seq Scan on lazyagg.t3
+                           Output: t3.a
+(22 rows)
+
+------------------------------------------------------------------------------------
+-- Unused column
+------------------------------------------------------------------------------------
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, max(c) as cc from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, count(c) as cc from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, count(c) as cc, count(d) as dd from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, count(c) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Left Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, count(*) as cc from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, count(*) as cc from t1 group by b) s1 left join t on s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Left Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, avg(c) as cc from t1 group by b) s1 full join t on s1.b=t.b group by t.b order by 1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Full Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, count(c) as cc from t1 group by b) s1 inner join t on s1.b=t.b inner join (select b, count(d) as dd from t2 group by b) s2 on s2.b=t.b group by t.b order by 1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t2.b)
+               ->  Hash Join
+                     Output: t1.b, t.b
+                     Hash Cond: (t1.b = t.b)
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Hash
+                           Output: t.b
+                           ->  Seq Scan on lazyagg.t
+                                 Output: t.b
+               ->  Hash
+                     Output: t2.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.b
+(22 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b, sum(dd) from (select b, count(c) as cc, count(d) as dd from t1 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1,2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: t.b, ((count(t1.d))::numeric)
+   Sort Key: t.b, ((count(t1.d))::numeric)
+   ->  HashAggregate
+         Output: t.b, count(t1.d)
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t1.d, t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(15 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, count(c) as cc from t1 group by b union all select b, sum(c) as cc from t2 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(18 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, c as cc from t1 group by b,c union all select b, count(c) as cc from t2 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: ("*SELECT* 1".b = t.b)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".b, NULL::integer
+                           ->  Seq Scan on lazyagg.t1
+                                 Output: t1.b, NULL::integer
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.b, NULL::bigint
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(20 rows)
+
+explain (costs off, nodes off, verbose on) 
+select t.b from (select b, avg(c) as cc from t1 group by b union all select b, avg(c) as cc from t2 group by b) s1 inner join t on s1.b=t.b group by t.b order by 1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: t.b
+   Sort Key: t.b
+   ->  HashAggregate
+         Output: t.b
+         Group By Key: t.b
+         ->  Hash Join
+               Output: t.b
+               Hash Cond: (t1.b = t.b)
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.b
+               ->  Hash
+                     Output: t.b
+                     ->  Seq Scan on lazyagg.t
+                           Output: t.b
+(18 rows)
+
+explain (costs off, nodes off, verbose on) 
+select b from(
+select b, sum(cc) as ccc from (
+select b, count(c) as cc from t1 group by b
+) s1 group by b
+) s2 group by b order by 1;
+             QUERY PLAN             
+------------------------------------
+ Sort
+   Output: t1.b
+   Sort Key: t1.b
+   ->  HashAggregate
+         Output: t1.b
+         Group By Key: t1.b
+         ->  Seq Scan on lazyagg.t1
+               Output: t1.b
+(8 rows)
+
+explain (costs off, nodes off, verbose on) 
+select * from(
+select b from(
+select b, sum(cc) as ccc from (
+select b, count(c) as cc from t1 group by b
+) s1 group by b
+) s2 group by b
+) order by 1;
+             QUERY PLAN             
+------------------------------------
+ Sort
+   Output: t1.b
+   Sort Key: t1.b
+   ->  HashAggregate
+         Output: t1.b
+         Group By Key: t1.b
+         ->  Seq Scan on lazyagg.t1
+               Output: t1.b
+(8 rows)
+
+explain (costs off, nodes off, verbose on) 
+select b, sum(dd) from(
+select b, sum(cc) as ccc, count(d) as dd from (
+select b, count(c) as cc, d from t1 group by b, d
+) s1 group by b
+) s2 group by b order by 1,2;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Output: s1.b, ((count(s1.d))::numeric)
+   Sort Key: s1.b, ((count(s1.d))::numeric)
+   ->  HashAggregate
+         Output: s1.b, count(s1.d)
+         Group By Key: s1.b
+         ->  Subquery Scan on s1
+               Output: s1.b, s1.d
+               ->  HashAggregate
+                     Output: t1.b, count(t1.c), t1.d
+                     Group By Key: t1.b, t1.d
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.b, t1.d, t1.c
+(13 rows)
+
+explain (costs off, nodes off, verbose on) 
+select b, sum(dd) as ddd from (
+select b, count(d) as dd from (
+select b, d from (
+select b, d, sum(cc) as ccc from (
+select b, d, count(c) as cc from t1 group by b, d
+) s1 group by b, d
+) s2 group by b, d
+) s3 group by b
+) s4 group by b order by 1,2;
+                 QUERY PLAN                 
+--------------------------------------------
+ Sort
+   Output: t1.b, ((count(t1.d))::numeric)
+   Sort Key: t1.b, ((count(t1.d))::numeric)
+   ->  HashAggregate
+         Output: t1.b, count(t1.d)
+         Group By Key: t1.b
+         ->  HashAggregate
+               Output: t1.b, t1.d
+               Group By Key: t1.b, t1.d
+               ->  Seq Scan on lazyagg.t1
+                     Output: t1.b, t1.d
+(11 rows)
+
+explain (costs off, nodes off, verbose on) 
+select b from(
+select b, sum(cc) as ccc from (
+select b, count(c) as cc from t1 group by b
+) s11 group by b
+union all
+select b, sum(cc) as ccc from (
+select b, sum(c) as cc from t2 group by b
+) s12 group by b
+) s2 group by b order by 1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Group
+   Output: t1.b
+   Group By Key: t1.b
+   ->  Sort
+         Output: t1.b
+         Sort Key: t1.b
+         ->  Result
+               Output: t1.b
+               ->  Append
+                     ->  Seq Scan on lazyagg.t1
+                           Output: t1.b
+                     ->  Seq Scan on lazyagg.t2
+                           Output: t2.b
+(13 rows)
+
+CREATE  TABLE sales_transaction (
+         sales_tran_id smallint NOT NULL,
+         tran_type_cd text,
+         mkb_cost_amt bigint  NOT NULL
+ );
+explain  (costs off, nodes off, verbose on)
+SELECT length('l') c1
+    FROM (
+ select s.sales_tran_id,(1 + (select (select sum(s.mkb_cost_amt)))) promo
+    from sales_transaction s
+    group by s.sales_tran_id ) t
+    WHERE promo = sales_tran_id
+    GROUP BY (c1);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Group
+   Output: (1)
+   Group By Key: 1
+   ->  Subquery Scan on t
+         Output: 1
+         ->  HashAggregate
+               Output: s.sales_tran_id, (1::numeric + (SubPlan 2))
+               Group By Key: s.sales_tran_id
+               Filter: ((1::numeric + (SubPlan 4)) = (s.sales_tran_id)::numeric)
+               ->  Seq Scan on lazyagg.sales_transaction s
+                     Output: s.sales_tran_id, s.mkb_cost_amt
+               SubPlan 2
+                 ->  Result
+                       Output: $1
+                       InitPlan 1 (returns $1)
+                         ->  Result
+                               Output: sum(s.mkb_cost_amt)
+               SubPlan 4
+                 ->  Result
+                       Output: $3
+                       InitPlan 3 (returns $3)
+                         ->  Result
+                               Output: sum(s.mkb_cost_amt)
+(23 rows)
+
+drop table sales_transaction;
+-- delete data and shema
+------------------------------------------------------------------------------------
+drop schema lazyagg cascade;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table t
+drop cascades to table t1
+drop cascades to table t2
+drop cascades to table t3
+drop cascades to table t_empty
+drop cascades to table t_type
+drop cascades to view v
+drop cascades to view v1

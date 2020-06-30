@@ -1,0 +1,89 @@
+SET DATESTYLE=ISO;
+--
+-- case 1: datetime type
+--
+CREATE TABLE cmpr_datetime_raw ( 
+	RR_ID int,
+	R0_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R1_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R2_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R3_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R4_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R5_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R6_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R7_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R8_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R9_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R10_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R11_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R12_ID timestamp(3) WITHOUT TIME ZONE NOT NULL
+); 
+COPY cmpr_datetime_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_datetime.data';
+
+CREATE TABLE cmpr_datetime_auto (
+	RR_ID int,
+	R0_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R1_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R2_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R3_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R4_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R5_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R6_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R7_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R8_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R9_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R10_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R11_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R12_ID timestamp(3) WITHOUT TIME ZONE NOT NULL
+) COMPRESS;
+COPY cmpr_datetime_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_datetime.data';
+SELECT (SELECT COUNT(*) FROM cmpr_datetime_raw) - (SELECT COUNT(*) FROM cmpr_datetime_auto);
+(SELECT * FROM cmpr_datetime_raw) MINUS ALL (SELECT * FROM cmpr_datetime_auto);
+(SELECT * FROM cmpr_datetime_auto) MINUS ALL (SELECT * FROM cmpr_datetime_raw);
+
+CREATE TABLE cmpr_datetime_dict (
+	RR_ID int,
+	R0_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R1_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R2_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R3_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R4_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R5_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R6_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R7_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R8_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R9_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R10_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R11_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R12_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL
+) COMPRESS;
+COPY cmpr_datetime_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_datetime.data';
+SELECT (SELECT COUNT(*) FROM cmpr_datetime_raw) - (SELECT COUNT(*) FROM cmpr_datetime_dict);
+(SELECT * FROM cmpr_datetime_raw) MINUS ALL (SELECT * FROM cmpr_datetime_dict);
+(SELECT * FROM cmpr_datetime_dict) MINUS ALL (SELECT * FROM cmpr_datetime_raw);
+
+CREATE TABLE cmpr_datetime_mix (
+	RR_ID int,
+	R0_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R1_ID timestamp(3) WITHOUT TIME ZONE delta NOT NULL,
+	R2_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R3_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R4_ID timestamp(3) WITHOUT TIME ZONE delta NOT NULL,
+	R5_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R6_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R7_ID timestamp(3) WITHOUT TIME ZONE delta NOT NULL,
+	R8_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R9_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL,
+	R10_ID timestamp(3) WITHOUT TIME ZONE delta NOT NULL,
+	R11_ID timestamp(3) WITHOUT TIME ZONE NOT NULL,
+	R12_ID timestamp(3) WITHOUT TIME ZONE dictionary NOT NULL
+) COMPRESS;
+COPY cmpr_datetime_mix FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_datetime.data';
+SELECT (SELECT COUNT(*) FROM cmpr_datetime_raw) - (SELECT COUNT(*) FROM cmpr_datetime_mix);
+(SELECT * FROM cmpr_datetime_raw) MINUS ALL (SELECT * FROM cmpr_datetime_mix);
+(SELECT * FROM cmpr_datetime_mix) MINUS ALL (SELECT * FROM cmpr_datetime_raw);
+
+DROP TABLE cmpr_datetime_raw;
+DROP TABLE cmpr_datetime_auto;
+DROP TABLE cmpr_datetime_dict;
+DROP TABLE cmpr_datetime_mix;

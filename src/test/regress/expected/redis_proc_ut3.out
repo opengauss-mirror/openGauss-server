@@ -1,0 +1,53 @@
+/*
+ *   UT3:  1)redis_proc get access exclusive lock (swap table phase)
+ *         2)Drop wait until swap done
+ */
+start transaction;
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	lock table tx in SHARE mode;
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	select pg_sleep(5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+	select count(*) from tx;
+ count 
+-------
+     0
+(1 row)
+
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+END;
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select count(*) from tx;
+ERROR:  relation "tx" does not exist
+LINE 1: select count(*) from tx;
+                             ^

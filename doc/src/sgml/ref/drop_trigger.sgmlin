@@ -1,0 +1,20 @@
+<refentry id="SQL-DROPTRIGGER">
+<refmeta>
+<refentrytitle>DROP TRIGGER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP TRIGGER</refname>
+<refpurpose>remove a trigger</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<indexterm zone="sql-droptrigger">
+<primary>DROP TRIGGER</primary>
+</indexterm>
+ <refsynopsisdiv>
+<synopsis>
+DROP TRIGGER [ IF EXISTS ] name ON table_name [ CASCADE | RESTRICT ]
+</synopsis>
+</refsynopsisdiv>
+</refentry>

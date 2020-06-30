@@ -1,0 +1,962 @@
+/*
+ * This file is used to test pull down of subplan expressions
+ */
+create schema col_distribute_subplan_base;
+set current_schema = col_distribute_subplan_base;
+-- Create Table and Insert Data
+create table t_subplan1(a1 int, b1 int, c1 int, d1 int) with (orientation = column)  ;
+create table t_subplan2(a2 int, b2 int, c2 int, d2 int) with (orientation = column)  ;
+insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6 from public.src;
+insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9 from public.src;
+-- 1. initplan
+explain (costs off, nodes off)
+select case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 15
+            then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket1 ,
+       case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 25
+             then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket2
+from t_subplan1
+where a1 = 5 or a1 = 6
+;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Row Adapter
+   ->  CStore Scan on t_subplan1
+         Filter: ((a1 = 5) OR (a1 = 6))
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan2
+                             Filter: ((a2 >= 1) AND (a2 <= 20))
+         InitPlan 2 (returns $1)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan2
+                             Filter: ((a2 >= 1) AND (a2 <= 20))
+         InitPlan 3 (returns $2)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan2
+                             Filter: ((a2 >= 1) AND (a2 <= 20))
+         InitPlan 4 (returns $3)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan2
+                             Filter: ((a2 >= 1) AND (a2 <= 20))
+         InitPlan 5 (returns $4)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan2
+                             Filter: ((a2 >= 1) AND (a2 <= 20))
+         InitPlan 6 (returns $5)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan2
+                             Filter: ((a2 >= 1) AND (a2 <= 20))
+(33 rows)
+
+select case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 15
+            then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket1 ,
+       case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 25
+             then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket2
+from t_subplan1
+where a1 = 5 or a1 = 6
+;
+       bucket1       |      bucket2       
+---------------------+--------------------
+ 11.5000000000000000 | 4.7727272727272727
+ 11.5000000000000000 | 4.7727272727272727
+(2 rows)
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         InitPlan 2 (returns $1)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       InitPlan 1 (returns $0)
+                         ->  Row Adapter
+                               ->  Vector Aggregate
+                                     ->  CStore Scan on t_subplan2 t2
+                       ->  CStore Scan on t_subplan1 t1
+                             Filter: ((a1)::numeric > $0)
+         ->  Vector Sort
+               Sort Key: t_subplan1.a1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: t_subplan1.a1
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                           ->  CStore Scan on t_subplan1
+                           ->  CStore Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $1)
+(20 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+  3 |   1
+  4 |   1
+  5 |   1
+  6 |   1
+  7 |   1
+  8 |   1
+  9 |   1
+ 10 |   1
+ 11 |   1
+ 15 |   1
+(10 rows)
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ offset (select avg(d2) from t_subplan2);
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         InitPlan 2 (returns $1)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       InitPlan 1 (returns $0)
+                         ->  Row Adapter
+                               ->  Vector Aggregate
+                                     ->  CStore Scan on t_subplan2 t2
+                       ->  CStore Scan on t_subplan1 t1
+                             Filter: ((a1)::numeric > $0)
+         InitPlan 3 (returns $2)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan2
+         ->  Vector Sort
+               Sort Key: t_subplan1.a1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: t_subplan1.a1
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (t_subplan1.a1 = col_distribute_subplan_base.t_subplan2.a2)
+                           ->  CStore Scan on t_subplan1
+                           ->  CStore Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $1)
+(24 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ offset (select avg(d2) from t_subplan2);
+ a1 | cnt 
+----+-----
+  7 |   1
+  8 |   1
+  9 |   1
+ 10 |   1
+ 11 |   1
+ 15 |   1
+ 16 |   1
+ 17 |   1
+ 18 |   1
+ 19 |   1
+ 20 |   1
+ 21 |   1
+ 22 |   1
+ 23 |   1
+ 27 |   1
+ 28 |   1
+ 29 |   1
+ 30 |   1
+ 31 |   1
+ 32 |   1
+ 33 |   1
+ 34 |   1
+ 35 |   1
+ 39 |   1
+ 40 |   1
+ 41 |   1
+ 42 |   1
+ 43 |   1
+ 44 |   1
+ 45 |   1
+ 46 |   1
+ 47 |   1
+(32 rows)
+
+-- 2. subplan
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2)
+order by 1
+limit 10;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Limit
+   CTE t
+     ->  Row Adapter
+           ->  Vector Sonic Hash Aggregate
+                 Group By Key: t_subplan1.d1, t_subplan2.d2
+                 ->  Vector Sonic Hash Join
+                       Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                       ->  CStore Scan on t_subplan1
+                       ->  CStore Scan on t_subplan2
+   ->  Sort
+         Sort Key: ctr1.total
+         ->  Hash Join
+               Hash Cond: (ctr1.d2 = ctr2.d2)
+               Join Filter: ((ctr1.total)::numeric > ((avg(ctr2.total) * 1.2)))
+               ->  CTE Scan on t ctr1
+               ->  Hash
+                     ->  HashAggregate
+                           Group By Key: ctr2.d2
+                           ->  CTE Scan on t ctr2
+(19 rows)
+
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2)
+order by 1
+limit 10;
+ total 
+-------
+    22
+    26
+    32
+    32
+    37
+    38
+    38
+    43
+    49
+(9 rows)
+
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2))
+order by 1
+limit 10;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Limit
+   CTE t
+     ->  Row Adapter
+           ->  Vector Sonic Hash Aggregate
+                 Group By Key: t_subplan1.d1, t_subplan2.d2
+                 ->  Vector Sonic Hash Join
+                       Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                       ->  CStore Scan on t_subplan1
+                       ->  CStore Scan on t_subplan2
+   ->  Sort
+         Sort Key: ctr1.total
+         ->  CTE Scan on t ctr1
+               Filter: ((total)::numeric > (SubPlan 2))
+               SubPlan 2
+                 ->  Aggregate
+                       ->  Nested Loop
+                             Join Filter: (((ctr1.d2 + ctr2.d2))::numeric < ((avg(ctr3.total) * 3::numeric)))
+                             ->  CTE Scan on t ctr2
+                                   Filter: (d2 = ctr1.d2)
+                             ->  Materialize
+                                   ->  GroupAggregate
+                                         Group By Key: ctr3.d2
+                                         ->  CTE Scan on t ctr3
+                                               Filter: (d2 = ctr1.d2)
+(24 rows)
+
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2))
+order by 1
+limit 10;
+ total 
+-------
+    22
+    26
+    32
+    32
+    37
+    38
+    38
+    43
+    49
+(9 rows)
+
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2
+and ctr1.d1 = ctr3.d1))
+order by 1
+limit 10;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Limit
+   CTE t
+     ->  Row Adapter
+           ->  Vector Sonic Hash Aggregate
+                 Group By Key: t_subplan1.d1, t_subplan2.d2
+                 ->  Vector Sonic Hash Join
+                       Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                       ->  CStore Scan on t_subplan1
+                       ->  CStore Scan on t_subplan2
+   ->  Sort
+         Sort Key: ctr1.total
+         ->  CTE Scan on t ctr1
+               Filter: ((total)::numeric > (SubPlan 3))
+               SubPlan 3
+                 ->  Aggregate
+                       ->  CTE Scan on t ctr2
+                             Filter: ((ctr1.d2 = d2) AND (((ctr1.d2 + d2))::numeric < (SubPlan 2)))
+                             SubPlan 2
+                               ->  Aggregate
+                                     ->  CTE Scan on t ctr3
+                                           Filter: ((ctr2.d2 = d2) AND (ctr1.d1 = d1))
+(21 rows)
+
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2
+and ctr1.d1 = ctr3.d1))
+order by 1
+limit 10;
+ total 
+-------
+    22
+    26
+    32
+    32
+    37
+    38
+    38
+    43
+    49
+(9 rows)
+
+explain (costs off, nodes off)
+select * from t_subplan1 t1
+where
+ exists (select * from t_subplan2 t2
+	where t1.a1=t2.a2) and
+ (exists (select * from t_subplan2 t2
+	where t1.b1+20=t2.b2) or
+  exists (select * from t_subplan2 t2
+	where t1.c1 = t2.c2))
+order by 1,2,3,4;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: t1.a1, t1.b1, t1.c1, t1.d1
+         ->  Vector Hash Left Join
+               Hash Cond: (t1.c1 = t2.c2)
+               Filter: ((t2.b2 IS NOT NULL) OR (t2.c2 IS NOT NULL))
+               ->  Vector Hash Left Join
+                     Hash Cond: ((t1.b1 + 20) = t2.b2)
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (t1.a1 = t2.a2)
+                           ->  CStore Scan on t_subplan1 t1
+                           ->  Vector Sonic Hash Aggregate
+                                 Group By Key: t2.a2
+                                 ->  CStore Scan on t_subplan2 t2
+                     ->  Vector Sonic Hash Aggregate
+                           Group By Key: t2.b2
+                           ->  CStore Scan on t_subplan2 t2
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: t2.c2
+                     ->  CStore Scan on t_subplan2 t2
+(20 rows)
+
+;
+select * from t_subplan1 t1
+where
+ exists (select * from t_subplan2 t2
+	where t1.a1=t2.a2) and
+ (exists (select * from t_subplan2 t2
+	where t1.b1+20=t2.b2) or
+  exists (select * from t_subplan2 t2
+	where t1.c1 = t2.c2))
+order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  0 | 18 |  7 |  2
+  1 |  1 |  1 |  1
+  1 | 19 |  8 |  3
+  2 |  0 |  9 |  4
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  0
+  7 |  7 |  7 |  1
+  8 |  8 |  8 |  2
+  9 |  9 |  9 |  3
+ 10 | 10 | 10 |  4
+ 11 | 11 | 11 |  5
+ 13 | 13 |  0 |  1
+ 14 | 14 |  1 |  2
+ 15 | 15 |  2 |  3
+ 16 | 16 |  3 |  4
+ 17 | 17 |  4 |  5
+ 18 | 18 |  5 |  0
+ 19 | 19 |  6 |  1
+ 20 |  0 |  7 |  2
+ 21 |  1 |  8 |  3
+ 22 |  2 |  9 |  4
+ 23 |  3 | 10 |  5
+ 24 |  4 | 11 |  0
+ 25 |  5 | 12 |  1
+ 26 |  6 |  0 |  2
+ 27 |  7 |  1 |  3
+ 28 |  8 |  2 |  4
+ 29 |  9 |  3 |  5
+ 30 | 10 |  4 |  0
+ 31 | 11 |  5 |  1
+ 32 | 12 |  6 |  2
+ 33 | 13 |  7 |  3
+ 34 | 14 |  8 |  4
+ 35 | 15 |  9 |  5
+ 36 | 16 | 10 |  0
+ 37 | 17 | 11 |  1
+ 39 | 19 |  0 |  3
+ 40 |  0 |  1 |  4
+ 41 |  1 |  2 |  5
+ 42 |  2 |  3 |  0
+ 43 |  3 |  4 |  1
+ 44 |  4 |  5 |  2
+ 45 |  5 |  6 |  3
+ 46 |  6 |  7 |  4
+ 47 |  7 |  8 |  5
+(48 rows)
+
+;
+-- 3. initplan & subplan
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1)
+ group by a1
+ order by a1, cnt
+ limit 10;
+                                                         QUERY PLAN                                                         
+----------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan1
+                             Filter: ((a1 + b1) < 200)
+         ->  Vector Sort
+               Sort Key: col_distribute_subplan_base.t_subplan1.a1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: col_distribute_subplan_base.t_subplan1.a1
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (col_distribute_subplan_base.t_subplan1.a1 = t_subplan2.a2)
+                           ->  Vector Sonic Hash Join
+                                 Hash Cond: (col_distribute_subplan_base.t_subplan1.c1 = t2.c2)
+                                 Join Filter: ((col_distribute_subplan_base.t_subplan1.b1)::numeric > (1.2 * (avg(t2.b2))))
+                                 ->  CStore Scan on t_subplan1
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: t2.c2
+                                       ->  CStore Scan on t_subplan2 t2
+                           ->  CStore Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $0)
+(22 rows)
+
+ 
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1)
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+ 17 |   1
+ 18 |   1
+ 19 |   1
+ 30 |   1
+ 31 |   1
+(5 rows)
+
+ 
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t_subplan1.d1 < (select max(d2) from t_subplan2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan1
+                             Filter: ((a1 + b1) < 200)
+         ->  Vector Sort
+               Sort Key: col_distribute_subplan_base.t_subplan1.a1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: col_distribute_subplan_base.t_subplan1.a1
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (col_distribute_subplan_base.t_subplan1.a1 = col_distribute_subplan_base.t_subplan2.a2)
+                           ->  CStore Scan on t_subplan1
+                                 Filter: ((b1)::numeric > (1.2 * (SubPlan 3)))
+                                 SubPlan 3
+                                   ->  Row Adapter
+                                         ->  Vector Aggregate
+                                               InitPlan 2 (returns $1)
+                                                 ->  Row Adapter
+                                                       ->  Vector Aggregate
+                                                             ->  CStore Scan on t_subplan2 (min-max optimization)
+                                               ->  Vector Result
+                                                     One-Time Filter: (col_distribute_subplan_base.t_subplan1.d1 < $1)
+                                                     ->  CStore Scan on t_subplan2 t2
+                                                           Filter: (c2 = col_distribute_subplan_base.t_subplan1.c1)
+                           ->  CStore Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $0)
+(28 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t_subplan1.d1 < (select max(d2) from t_subplan2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+ 17 |   1
+ 18 |   1
+ 19 |   1
+ 30 |   1
+ 31 |   1
+(5 rows)
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t2.d2 > (select min(d1) from t_subplan1))
+ group by a1
+ order by a1, cnt
+ limit 10;
+                                                         QUERY PLAN                                                         
+----------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  CStore Scan on t_subplan1
+                             Filter: ((a1 + b1) < 200)
+         ->  Vector Sort
+               Sort Key: col_distribute_subplan_base.t_subplan1.a1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: col_distribute_subplan_base.t_subplan1.a1
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (t_subplan2.a2 = col_distribute_subplan_base.t_subplan1.a1)
+                           ->  CStore Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $0)
+                           ->  Vector Sonic Hash Join
+                                 Hash Cond: (col_distribute_subplan_base.t_subplan1.c1 = t2.c2)
+                                 Join Filter: ((col_distribute_subplan_base.t_subplan1.b1)::numeric > (1.2 * (avg(t2.b2))))
+                                 ->  CStore Scan on t_subplan1
+                                 ->  Vector Sonic Hash Aggregate
+                                       Group By Key: t2.c2
+                                       InitPlan 2 (returns $1)
+                                         ->  Row Adapter
+                                               ->  Vector Aggregate
+                                                     ->  CStore Scan on t_subplan1 (min-max optimization)
+                                       ->  CStore Scan on t_subplan2 t2
+                                             Filter: (d2 > $1)
+(27 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t2.d2 > (select min(d1) from t_subplan1))
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+ 16 |   1
+ 17 |   1
+ 18 |   1
+ 19 |   1
+ 30 |   1
+ 31 |   1
+ 32 |   1
+(7 rows)
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2
+					where t1.d1=t2.d2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         InitPlan 1 (returns $0)
+           ->  Row Adapter
+                 ->  Vector Aggregate
+                       ->  Vector Sonic Hash Join
+                             Hash Cond: (t1.d1 = t2.d2)
+                             Join Filter: ((t1.a1)::numeric > (avg(t2.a2)))
+                             ->  CStore Scan on t_subplan1 t1
+                             ->  Vector Sonic Hash Aggregate
+                                   Group By Key: t2.d2
+                                   ->  CStore Scan on t_subplan2 t2
+         ->  Vector Sort
+               Sort Key: t_subplan1.a1, (count(*))
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: t_subplan1.a1
+                     ->  Vector Sonic Hash Join
+                           Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                           ->  CStore Scan on t_subplan1
+                           ->  CStore Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $0)
+(21 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2
+					where t1.d1=t2.d2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+  3 |   1
+  4 |   1
+  5 |   1
+  6 |   1
+  7 |   1
+  8 |   1
+  9 |   1
+ 10 |   1
+ 11 |   1
+ 15 |   1
+(10 rows)
+
+--test sonicagg rescan
+set enable_sonic_hashagg=on;
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)
+from t ctr3
+where ctr2.d2=ctr3.d2  group by d1 order by 1 limit 1)
+group by d1 order by 1 limit 1
+)
+order by 1
+limit 10;
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Limit
+   CTE t
+     ->  Row Adapter
+           ->  Vector Sonic Hash Aggregate
+                 Group By Key: t_subplan1.d1, t_subplan2.d2
+                 ->  Vector Sonic Hash Join
+                       Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                       ->  CStore Scan on t_subplan1
+                       ->  CStore Scan on t_subplan2
+   ->  Sort
+         Sort Key: ctr1.total
+         ->  CTE Scan on t ctr1
+               Filter: ((total)::numeric > (SubPlan 3))
+               SubPlan 3
+                 ->  Limit
+                       ->  Sort
+                             Sort Key: (avg(ctr2.total))
+                             ->  HashAggregate
+                                   Group By Key: ctr2.d1
+                                   ->  CTE Scan on t ctr2
+                                         Filter: ((ctr1.d2 = d2) AND (((ctr1.d2 + d2))::numeric < (SubPlan 2)))
+                                         SubPlan 2
+                                           ->  Limit
+                                                 ->  Sort
+                                                       Sort Key: (avg(ctr3.total))
+                                                       ->  HashAggregate
+                                                             Group By Key: ctr3.d1
+                                                             ->  CTE Scan on t ctr3
+                                                                   Filter: (ctr2.d2 = d2)
+(29 rows)
+
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)
+from t ctr3
+where ctr2.d2=ctr3.d2  group by d1 order by 1 limit 1)
+group by d1 order by 1 limit 1
+)
+order by 1
+limit 10;
+ total 
+-------
+    15
+    21
+    22
+    26
+    27
+    31
+    32
+    32
+    33
+    37
+(10 rows)
+
+set enable_sonic_hashagg=off;
+drop schema col_distribute_subplan_base cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table t_subplan1
+drop cascades to table t_subplan2

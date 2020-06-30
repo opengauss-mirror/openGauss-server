@@ -1,0 +1,140 @@
+CREATE SCHEMA select_views;
+SET search_path TO select_views;
+create table synonym_ob_tb1_sy (a int ,b text);
+insert into synonym_ob_tb1_sy values (generate_series(1,20),88);
+create table synonym_ob_tb2_sy (a int ,b text);
+insert into synonym_ob_tb2_sy select * from synonym_ob_tb1_sy;
+create or replace  view  synonym_ob_view1_1 as select * from synonym_ob_tb1_sy;
+create or replace  view  synonym_ob_view2_1 as select * from  synonym_ob_tb2_sy;
+create or replace  view  synonym_ob_view1_2 as select * from synonym_ob_view1_1;
+create or replace  view  synonym_ob_view2_2 as select * from  synonym_ob_view2_1;
+create or replace  view  synonym_ob_view1_3 as select * from synonym_ob_view1_2;
+create or replace  view  synonym_ob_view2_3 as select * from  synonym_ob_view2_2;
+create or replace  view  synonym_ob_view1_4 as select * from synonym_ob_view1_3;
+create or replace  view  synonym_ob_view2_4 as select * from  synonym_ob_view2_3;
+create or replace  view  synonym_ob_view1_5 as select * from synonym_ob_view1_4;
+create or replace  view  synonym_ob_view2_5 as select * from  synonym_ob_view2_4;
+create or replace  view  synonym_ob_view1_6 as select * from synonym_ob_view1_5;
+create or replace  view  synonym_ob_view2_6 as select * from  synonym_ob_view2_5;
+create or replace  view  synonym_ob_view1_7 as select * from synonym_ob_view1_6;
+create or replace  view  synonym_ob_view2_7 as select * from  synonym_ob_view2_6;
+create or replace  view  synonym_ob_view1_8 as select * from synonym_ob_view1_7;
+create or replace  view  synonym_ob_view2_8 as select * from  synonym_ob_view2_7;
+create or replace  view  synonym_ob_view1_9 as select * from synonym_ob_view1_8;
+create or replace  view  synonym_ob_view2_9 as select * from  synonym_ob_view2_8;
+create or replace  view  synonym_ob_view1_10 as select * from synonym_ob_view1_9;
+create or replace  view  synonym_ob_view2_10 as select * from  synonym_ob_view2_9;
+create or replace  view  synonym_ob_view1_11 as select * from synonym_ob_view1_10;
+create or replace  view  synonym_ob_view2_11 as select * from  synonym_ob_view2_10;
+create or replace  view  synonym_ob_view1_12 as select * from synonym_ob_view1_11;
+create or replace  view  synonym_ob_view2_12 as select * from  synonym_ob_view2_11;
+create or replace  view  synonym_ob_view1_13 as select * from synonym_ob_view1_12;
+create or replace  view  synonym_ob_view2_13 as select * from  synonym_ob_view2_12;
+create or replace  view  synonym_ob_view1_14 as select * from synonym_ob_view1_13;
+create or replace  view  synonym_ob_view2_14 as select * from  synonym_ob_view2_13;
+create or replace  view  synonym_ob_view1_15 as select * from synonym_ob_view1_14;
+create or replace  view  synonym_ob_view2_15 as select * from  synonym_ob_view2_14;
+create or replace  view  synonym_ob_view1_16 as select * from synonym_ob_view1_15;
+create or replace  view  synonym_ob_view2_16 as select * from  synonym_ob_view2_15;
+create or replace  view  synonym_ob_view1_17 as select * from synonym_ob_view1_16;
+create or replace  view  synonym_ob_view2_17 as select * from  synonym_ob_view2_16;
+create or replace  view  synonym_ob_view1_18 as select * from synonym_ob_view1_17;
+create or replace  view  synonym_ob_view2_18 as select * from  synonym_ob_view2_17;
+create or replace  view  synonym_ob_view1_19 as select * from synonym_ob_view1_18;
+create or replace  view  synonym_ob_view2_19 as select * from  synonym_ob_view2_18;
+create or replace  view  synonym_ob_view1_20 as select * from synonym_ob_view1_19;
+create or replace  view  synonym_ob_view2_20 as select * from  synonym_ob_view2_19;
+create or replace  view  synonym_ob_view1_21 as select * from synonym_ob_view1_20;
+create or replace  view  synonym_ob_view2_21 as select * from  synonym_ob_view2_20;
+create or replace  view  synonym_ob_view1_22 as select * from synonym_ob_view1_21;
+create or replace  view  synonym_ob_view2_22 as select * from  synonym_ob_view2_21;
+create or replace  view  synonym_ob_view1_23 as select * from synonym_ob_view1_22;
+create or replace  view  synonym_ob_view2_23 as select * from  synonym_ob_view2_22;
+create or replace  view  synonym_ob_view1_24 as select * from synonym_ob_view1_23;
+create or replace  view  synonym_ob_view2_24 as select * from  synonym_ob_view2_23;
+create or replace  view  synonym_ob_view1_25 as select * from synonym_ob_view1_24;
+create or replace  view  synonym_ob_view2_25 as select * from  synonym_ob_view2_24;
+create or replace  view  synonym_ob_view1_26 as select * from synonym_ob_view1_25;
+create or replace  view  synonym_ob_view2_26 as select * from  synonym_ob_view2_25;
+create or replace  view  synonym_ob_view1_27 as select * from synonym_ob_view1_26;
+create or replace  view  synonym_ob_view2_27 as select * from  synonym_ob_view2_26;
+create or replace  view  synonym_ob_view1_28 as select * from synonym_ob_view1_27;
+create or replace  view  synonym_ob_view2_28 as select * from  synonym_ob_view2_27;
+create or replace  view  synonym_ob_view1_29 as select * from synonym_ob_view1_28;
+create or replace  view  synonym_ob_view2_29 as select * from  synonym_ob_view2_28;
+create or replace  view  synonym_ob_view1_30 as select * from synonym_ob_view1_29;
+create or replace  view  synonym_ob_view2_30 as select * from  synonym_ob_view2_29;
+create or replace  view  synonym_ob_view1_31 as select * from synonym_ob_view1_30;
+create or replace  view  synonym_ob_view2_31 as select * from  synonym_ob_view2_30;
+select count(*) from synonym_ob_view2_31 as t1 ,synonym_ob_view1_31 as t2 where t1.b=t2.b ;
+ count 
+-------
+   400
+(1 row)
+
+DROP SCHEMA select_views CASCADE;
+NOTICE:  drop cascades to 64 other objects
+DETAIL:  drop cascades to table synonym_ob_tb1_sy
+drop cascades to table synonym_ob_tb2_sy
+drop cascades to view synonym_ob_view1_1
+drop cascades to view synonym_ob_view2_1
+drop cascades to view synonym_ob_view1_2
+drop cascades to view synonym_ob_view2_2
+drop cascades to view synonym_ob_view1_3
+drop cascades to view synonym_ob_view2_3
+drop cascades to view synonym_ob_view1_4
+drop cascades to view synonym_ob_view2_4
+drop cascades to view synonym_ob_view1_5
+drop cascades to view synonym_ob_view2_5
+drop cascades to view synonym_ob_view1_6
+drop cascades to view synonym_ob_view2_6
+drop cascades to view synonym_ob_view1_7
+drop cascades to view synonym_ob_view2_7
+drop cascades to view synonym_ob_view1_8
+drop cascades to view synonym_ob_view2_8
+drop cascades to view synonym_ob_view1_9
+drop cascades to view synonym_ob_view2_9
+drop cascades to view synonym_ob_view1_10
+drop cascades to view synonym_ob_view2_10
+drop cascades to view synonym_ob_view1_11
+drop cascades to view synonym_ob_view2_11
+drop cascades to view synonym_ob_view1_12
+drop cascades to view synonym_ob_view2_12
+drop cascades to view synonym_ob_view1_13
+drop cascades to view synonym_ob_view2_13
+drop cascades to view synonym_ob_view1_14
+drop cascades to view synonym_ob_view2_14
+drop cascades to view synonym_ob_view1_15
+drop cascades to view synonym_ob_view2_15
+drop cascades to view synonym_ob_view1_16
+drop cascades to view synonym_ob_view2_16
+drop cascades to view synonym_ob_view1_17
+drop cascades to view synonym_ob_view2_17
+drop cascades to view synonym_ob_view1_18
+drop cascades to view synonym_ob_view2_18
+drop cascades to view synonym_ob_view1_19
+drop cascades to view synonym_ob_view2_19
+drop cascades to view synonym_ob_view1_20
+drop cascades to view synonym_ob_view2_20
+drop cascades to view synonym_ob_view1_21
+drop cascades to view synonym_ob_view2_21
+drop cascades to view synonym_ob_view1_22
+drop cascades to view synonym_ob_view2_22
+drop cascades to view synonym_ob_view1_23
+drop cascades to view synonym_ob_view2_23
+drop cascades to view synonym_ob_view1_24
+drop cascades to view synonym_ob_view2_24
+drop cascades to view synonym_ob_view1_25
+drop cascades to view synonym_ob_view2_25
+drop cascades to view synonym_ob_view1_26
+drop cascades to view synonym_ob_view2_26
+drop cascades to view synonym_ob_view1_27
+drop cascades to view synonym_ob_view2_27
+drop cascades to view synonym_ob_view1_28
+drop cascades to view synonym_ob_view2_28
+drop cascades to view synonym_ob_view1_29
+drop cascades to view synonym_ob_view2_29
+drop cascades to view synonym_ob_view1_30
+drop cascades to view synonym_ob_view2_30
+drop cascades to view synonym_ob_view1_31
+drop cascades to view synonym_ob_view2_31

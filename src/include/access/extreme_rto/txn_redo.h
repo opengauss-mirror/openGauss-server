@@ -1,0 +1,44 @@
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * ---------------------------------------------------------------------------------------
+ *
+ * txn_redo.h
+ *
+ *
+ *
+ * IDENTIFICATION
+ *        src/include/access/extreme_rto/txn_redo.h
+ *
+ * ---------------------------------------------------------------------------------------
+ */
+
+#ifndef EXTREME_RTO_TXN_REDO_H
+#define EXTREME_RTO_TXN_REDO_H
+
+#include "access/parallel_recovery/redo_item.h"
+
+namespace extreme_rto {
+
+typedef struct TxnRedoWorker TxnRedoWorker;
+
+TxnRedoWorker* StartTxnRedoWorker();
+void DestroyTxnRedoWorker(TxnRedoWorker* worker);
+
+void AddTxnRedoItem(PageRedoWorker* worker, void* item);
+void TrxnMngProc(RedoItem* item, PageRedoWorker* wk);
+void TrxnWorkerProc(RedoItem* item);
+XLogRecPtr TrxnStageGetReplayedRecPtrFromWorkers();
+XLogRecPtr TestStageGetReplayedRecPtrFromWorkers();
+}  // namespace extreme_rto
+#endif

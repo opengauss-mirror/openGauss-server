@@ -1,0 +1,25 @@
+1|2|    0.0
+2|1004.30  |100
+10|10e37|3e38
+11|1.2345678901234e-20|3
+12|-10e-2|-100
+13|NaN|-200
+20|10e37|-3e38
+21|nan|0
+22|-200|
+23|infinity|-23
+24|10e37|-inf
+25|-4|-14.86
+26|1.2345678901234e+20|1.2345678901234e-20
+30|10e37|10
+31|NaN|NaN
+32|infinity|infinity
+33|infinity|-infinity
+34|-infinity|-infinity
+35|-inf|-inf
+36|NAN|
+37|infinity|
+38||-inf
+39|NAN|infinity
+40|NAN|-infinity
+41||

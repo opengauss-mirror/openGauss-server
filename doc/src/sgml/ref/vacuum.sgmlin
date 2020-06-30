@@ -1,0 +1,22 @@
+<refentry id="SQL-VACUUM">
+<refmeta>
+<refentrytitle>VACUUM</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>VACUUM</refname>
+<refpurpose>garbage-collect and optionally analyze a database</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+VACUUM [ ( { FULL | FREEZE | VERBOSE | {ANALYZE | ANALYSE }} [,...] ) ]
+    [ table_name [ (column_name [, ...] ) ] ] [ PARTITION ( partition_name ) ];
+VACUUM [ FULL [ COMPACT ] ] [ FREEZE ] [ VERBOSE ] [ table_name ] [ PARTITION ( partition_name ) ];
+VACUUM [ FULL ] [ FREEZE ] [ VERBOSE ] { ANALYZE | ANALYSE } [ VERBOSE ] 
+    [ table_name [ (column_name [, ...] ) ] ] [ PARTITION ( partition_name ) ];
+VACUUM DELTAMERGE [ table_name ];
+VACUUM HDFSDIRECTORY [ table_name ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

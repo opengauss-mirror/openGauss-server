@@ -1,0 +1,147 @@
+--test for tables of vector bitmap.
+create schema vector_bitmap_engine;
+\parallel on 8
+create table vector_bitmap_engine.ROW_BITMAP_TABLE_01
+(
+    col_int1    int
+   ,col_int2    int
+   ,col_int3    int
+   ,col_int4    int
+   ,col_int5    int
+) ;
+create table vector_bitmap_engine.VECTOR_BITMAP_TABLE_01
+(
+    col_int1    int
+   ,col_int2    int
+   ,col_int3    int
+   ,col_int4    int
+   ,col_int5    int
+)
+with(orientation=column) ;
+create table vector_bitmap_engine.ROW_BITMAP_TABLE_02
+(
+    col_int1  int
+   ,col_int2  int
+   ,col_int3  int
+   ,col_int4  int
+   ,col_int5  int
+)
+partition by range (col_int1)
+(
+    partition p1 values less than (2000),
+    partition p2 values less than (4000),
+    partition p3 values less than (6000),
+    partition p4 values less than (8000)
+);
+create table vector_bitmap_engine.VECTOR_BITMAP_TABLE_02
+(
+    col_int1  int
+   ,col_int2  int
+   ,col_int3  int
+   ,col_int4  int
+   ,col_int5  int
+)with(orientation=column) 
+partition by range (col_int1)
+(
+    partition p1 values less than (2000),
+    partition p2 values less than (4000),
+    partition p3 values less than (6000),
+    partition p4 values less than (8000)
+);
+create table vector_bitmap_engine.VECTOR_BITMAP_TABLE_03
+(
+    col_int1  int
+   ,col_num numeric
+   ,col_txt text
+   ,col_int2  int
+)with(orientation=column) ;
+create table vector_bitmap_engine.VECTOR_BITMAP_TABLE_04
+( 
+    c_id int 
+   ,c_d_id  char(20)
+   ,c_w_id  varchar
+   ,c_first varchar(16)
+   ,c_middle  char(2)
+   ,c_last  varchar(16)
+   ,c_street_1  varchar(20)
+   ,c_street_2  varchar(20)
+   ,c_city  varchar(20)
+   ,c_zip   char(9) 
+)with (orientation=column,max_batchrow= 30700, compression = high) ;
+create table vector_bitmap_engine.ROW_BITMAP_TABLE_05(   
+    wd_smallint smallint
+   ,wd_int  integer
+   ,wd_bigint bigint
+   ,wd_numeric  numeric
+   ,wd_real real
+   ,wd_double double precision
+   ,wd_decimal  decimal
+   ,wd_varchar  varchar
+   ,wd_char char(30)
+   ,wd_nvarchar2  nvarchar2
+   ,wd_text text
+   ,wd_date date  
+) ;
+create table vector_bitmap_engine.VECTOR_BITMAP_TABLE_05(   
+    wd_smallint smallint
+   ,wd_int  integer
+   ,wd_bigint bigint
+   ,wd_numeric  numeric
+   ,wd_real real
+   ,wd_double double precision
+   ,wd_decimal  decimal
+   ,wd_varchar  varchar
+   ,wd_char char(30)
+   ,wd_nvarchar2  nvarchar2
+   ,wd_text text
+   ,wd_date date  
+)with (orientation=column,max_batchrow= 30700, compression = high)
+ 
+partition by range (wd_date)
+(
+partition psort_index_06_1 values less than ('20141201'),
+partition psort_index_06_2 values less than ('20201201'),
+partition psort_index_06_3 values less than (maxvalue)
+);
+\parallel off
+\parallel on 11
+create index bitmap_01_b on vector_bitmap_engine.vector_bitmap_table_01(col_int2);
+create index bitmap_01_c on vector_bitmap_engine.vector_bitmap_table_01(col_int3);
+create index bitmap_01_d on vector_bitmap_engine.vector_bitmap_table_01(col_int4);
+create index bitmap_01_e on vector_bitmap_engine.vector_bitmap_table_01(col_int5);
+create index bitmap_02_b on vector_bitmap_engine.vector_bitmap_table_02(col_int2) local;
+create index bitmap_02_c on vector_bitmap_engine.vector_bitmap_table_02(col_int3) local;
+create index bitmap_02_d on vector_bitmap_engine.vector_bitmap_table_02(col_int4) local;
+create index bitmap_02_e on vector_bitmap_engine.vector_bitmap_table_02(col_int5) local;
+create index bitmap_03_1 on vector_bitmap_engine.vector_bitmap_table_03(col_int1, col_num, col_txt, col_int2);
+create index bitmap_03_2 on vector_bitmap_engine.vector_bitmap_table_03(col_int1, col_num, col_int2);
+create index psort_index_05_char on vector_bitmap_engine.vector_bitmap_table_05(wd_varchar) local;
+\parallel off
+\parallel on 2
+copy vector_bitmap_engine.row_bitmap_table_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_bitmap_data1.txt' delimiter as ' ';
+copy vector_bitmap_engine.row_bitmap_table_02 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_bitmap_data2.txt' delimiter as ' ';
+\parallel off
+\parallel on 2
+insert into vector_bitmap_engine.vector_bitmap_table_01 select * from vector_bitmap_engine.row_bitmap_table_01;
+insert into vector_bitmap_engine.vector_bitmap_table_02 select * from vector_bitmap_engine.row_bitmap_table_02;
+\parallel off
+create table vector_bitmap_engine.src(a int);
+insert into vector_bitmap_engine.src values(1);
+create table vector_bitmap_engine.t1(a int);
+insert into vector_bitmap_engine.t1 select generate_series(1,300) from vector_bitmap_engine.src;
+\parallel on 4
+insert into vector_bitmap_engine.row_bitmap_table_02 select generate_series(1, 6000), generate_series(1, 6000)/22, generate_series(1, 6000)/50+1, generate_series(1, 6000)%5+22, generate_series(1,6000)/18 from vector_bitmap_engine.src;
+insert into vector_bitmap_engine.vector_bitmap_table_04 ( c_d_id,c_w_id,c_street_1,c_street_2,c_city,c_zip) values (generate_series(1,10),null,'','dfbj','ayl2','11398765');
+insert into vector_bitmap_engine.vector_bitmap_table_04 ( c_d_id,c_w_id,c_street_1,c_street_2,c_city,c_zip) values (generate_series(23,25),null,'点击发送','ttpbnmv','ama','2234689');
+insert into vector_bitmap_engine.vector_bitmap_table_04 ( c_d_id,c_w_id,c_street_1,c_street_2,c_city,c_zip) values (null,null,'asdfiuopqd','￥%&%&',generate_series(50,100),'332190');
+insert into vector_bitmap_engine.vector_bitmap_table_04 ( c_d_id,c_w_id,c_street_1,c_street_2,c_city,c_zip) values (generate_series(70,100),90909,'gohfbjfkn','','aba','');
+\parallel off
+insert into vector_bitmap_engine.row_bitmap_table_05 select 2, i.a, i.a+1, i.a+2.2, i.a+1.11, i.a+2.15, i.a*0.001, 'ama', 'hja', 'lmn2'||i.a, 'beijing'||i.a, date'2014-5-14'+i.a+30*i.a from vector_bitmap_engine.t1 i where i.a = 19 OR i.a = 29 OR i.a = 39 OR i.a = 99;
+delete from vector_bitmap_engine.t1 i where i.a = 19 OR i.a = 29 OR i.a = 39 OR i.a = 99;
+insert into vector_bitmap_engine.row_bitmap_table_05 select 5, i.a+2, i.a, i.a+3.3, i.a+0.55, i.a+0.16, i.a*0.002, 'ayl'||i.a, 'tpa', 'mjn3'||i.a, 'shenzhen'||i.a, date'2014-5-14'+i.a+30*i.a from vector_bitmap_engine.t1 i where i.a < 50 OR i.a > 250;
+delete from vector_bitmap_engine.t1 i where i.a < 50 OR i.a > 250;
+insert into vector_bitmap_engine.row_bitmap_table_05 select 12, i.a+1, i.a, i.a+3.4, i.a+0.55, i.a+0.16, i.a*0.002, 'bhl'||i.a, 'aaa'||i.a, 'mjn3'||i.a, 'shenzhen'||i.a, date'2014-5-14'+i.a+30*i.a from vector_bitmap_engine.t1 i ;
+insert into vector_bitmap_engine.row_bitmap_table_05 select 3, i.a+2, i.a, i.a+3.3, i.a+0.55, i.a+0.16, i.a*0.002, 'bma'||i.a, 'aba', 'mjn3'||i.a, 'shenzhen'||i.a, date'2014-5-14'+i.a+30*i.a from vector_bitmap_engine.t1 i ;
+drop table vector_bitmap_engine.t1;
+drop table vector_bitmap_engine.src;
+insert into vector_bitmap_engine.vector_bitmap_table_05 select * from vector_bitmap_engine.row_bitmap_table_05;

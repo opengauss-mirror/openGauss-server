@@ -1,0 +1,16 @@
+<refentry id="SQL-REASSIGN_OWNED">
+<refmeta>
+<refentrytitle>REASSIGN OWNED</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>REASSIGN OWNED</refname>
+<refpurpose>change the ownership of database objects owned by a database role</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+REASSIGN OWNED BY old_role [, ...] TO new_role;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

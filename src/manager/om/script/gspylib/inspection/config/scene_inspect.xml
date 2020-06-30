@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<scene name="default" desc="The tool performs an inspection for the cluster.">
+    <configuration/>
+
+    <allowitems>
+        <item name="CheckClusterState"/>
+        <item name="CheckDBParams"/>
+        <item name="CheckDebugSwitch"/>
+        <item name="CheckDirPermissions"/>
+        <item name="CheckReadonlyMode"/>
+        <item name="CheckEnvProfile"/>
+        <item name="CheckBlockdev"/>
+        <item name="CheckCurConnCount"/>
+        <item name="CheckCursorNum"/>
+        <item name="CheckPgxcgroup"/>
+        <item name="CheckDiskFormat"/>
+        <item name="CheckSpaceUsage"/>
+        <item name="CheckInodeUsage"/>
+        <item name="CheckSwapMemory"/>
+        <item name="CheckLogicalBlock"/>
+        <item name="CheckIOrequestqueue"/>
+        <item name="CheckMaxAsyIOrequests"/>
+        <item name="CheckIOConfigure"/>
+        <item name="CheckMTU"/>
+        <item name="CheckPing"/>
+        <item name="CheckRXTX"/>
+        <item name="CheckNetWorkDrop"/>
+        <item name="CheckMultiQueue"/>
+        <item name="CheckEncoding"/>
+        <item name="CheckFirewall"/>
+        <item name="CheckKernelVer"/>
+        <item name="CheckMaxHandle"/>
+        <item name="CheckNTPD"/>
+        <item name="CheckOSVer"/>
+        <item name="CheckSysParams"/>
+        <item name="CheckTHP"/>
+        <item name="CheckTimeZone"/>
+        <item name="CheckCPU"/>
+        <item name="CheckSshdService"/>
+        <item name="CheckSshdConfig"/>
+        <item name="CheckCrondService"/>
+        <item name="CheckStack"/>
+        <item name="CheckNoCheckSum"/>
+        <item name="CheckSysPortRange"/>
+        <item name="CheckMemInfo"/>
+        <item name="CheckHyperThread"/>
+        <item name="CheckTableSpace"/>
+        <item name="CheckSctpService"/>
+        <item name="CheckSysadminUser"/>
+        <item name="CheckGUCConsistent"/>
+        <item name="CheckMaxProcMemory"/>
+        <item name="CheckBootItems"/>
+        <item name="CheckHashIndex"/>
+        <item name="CheckPgxcRedistb"/>
+        <item name="CheckNodeGroupName"/>
+        <item name="CheckTDDate"/>
+        <item name="CheckDilateSysTab"/>
+        <item name="CheckKeyProAdj"/>
+        <item name="CheckProStartTime"/>
+        <item name="CheckFilehandle"/>
+        <item name="CheckRouting"/>
+        <item name="CheckNICModel"/>
+        <item name="CheckDropCache"/>
+        <item name="CheckMpprcFile"/>
+    </allowitems>
+</scene>

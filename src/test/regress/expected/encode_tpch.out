@@ -1,0 +1,34 @@
+/*
+################################################################################
+# TESTCASE NAME : encode_tpch
+# COMPONENT(S)  : plan encoding
+# MODIFIED BY   : WHO            WHEN          COMMENT
+#               : -------------- ------------- ---------------------------------
+#               :                1-9-2019      created
+################################################################################
+*/
+\c postgres
+select create_wlm_operator_info(1);
+ create_wlm_operator_info 
+--------------------------
+                        0
+(1 row)
+
+select count(*) from gs_wlm_plan_operator_info;
+ count 
+-------
+--?   .*
+(1 row)
+
+select gather_encoding_info('regression');
+ gather_encoding_info 
+----------------------
+                    0
+(1 row)
+
+select count(*) from gs_wlm_plan_encoding_table;
+ count 
+-------
+--?   .*
+(1 row)
+

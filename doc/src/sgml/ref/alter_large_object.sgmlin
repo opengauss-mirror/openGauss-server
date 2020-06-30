@@ -1,0 +1,17 @@
+<refentry id="SQL-ALTER_LARGE_OBJECT">
+<refmeta>
+<refentrytitle>ALTER LARGE OBJECT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER LARGE OBJECT</refname>
+<refpurpose>change the definition of a large object</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER LARGE OBJECT large_object_oid
+    OWNER TO new_owner;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

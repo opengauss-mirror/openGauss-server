@@ -1,0 +1,88 @@
+<refentry id="SQL-ALTER_FOREIGN_TABLE">
+<refmeta>
+<refentrytitle>ALTER FOREIGN TABLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER FOREIGN TABLE</refname>
+<refpurpose>change the definition of a foreign table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+
+1. GDS:
+ALTER FOREIGN TABLE [ IF EXISTS ]  table_name
+    OPTIONS ( {[ ADD | SET | DROP ] option ['value']} [, ... ]);
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    OWNER TO new_owner;
+
+2. HDFS:
+ALTER FOREIGN TABLE [ IF EXISTS ]  table_name
+    OPTIONS ( {[ ADD | SET | DROP ] option ['value']} [, ... ]);
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    OWNER TO new_owner;
+ALTER FOREIGN TABLE [ IF EXISTS ] table_name
+    MODIFY ( { column_name data_type | column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ] | column_name [ CONSTRAINT constraint_name ] NULL } [, ...] );
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    ADD [CONSTRAINT constraint_name]
+	{PRIMARY KEY | UNIQUE} (column_name)
+	[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED];
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    DROP CONSTRAINT constraint_name ;
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    action [, ... ];
+
+where action can be:
+ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type
+|   ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+|   ALTER [ COLUMN ] column_name SET STATISTICS  integer
+|   ALTER [ COLUMN ] column_name OPTIONS ( {[ ADD | SET | DROP ] option ['value'] } [, ... ])
+|   MODIFY column_name data_type
+|   MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
+|   MODIFY column_name [ CONSTRAINT constraint_name ] NULL
+
+3. OBS:
+ALTER FOREIGN TABLE [ IF EXISTS ]  table_name
+    OPTIONS ( {[ ADD | SET | DROP ] option ['value']} [, ... ]);
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    OWNER TO new_owner;
+ALTER FOREIGN TABLE [ IF EXISTS ] table_name
+    MODIFY ( { column_name data_type | column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ] | column_name [ CONSTRAINT constraint_name ] NULL } [, ...] );
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    ADD [CONSTRAINT constraint_name]
+	{PRIMARY KEY | UNIQUE} (column_name)
+	[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED];
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    DROP CONSTRAINT constraint_name ;
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    action [, ... ];
+
+where action can be:
+ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type
+|   ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+|   ALTER [ COLUMN ] column_name SET STATISTICS  integer
+|   ALTER [ COLUMN ] column_name OPTIONS ( {[ ADD | SET | DROP ] option ['value'] } [, ... ])
+|   MODIFY column_name data_type
+|   MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
+|   MODIFY column_name [ CONSTRAINT constraint_name ] NULL
+
+4. GC:
+ALTER FOREIGN TABLE [ IF EXISTS ]  tablename
+    OPTIONS ( {[ SET ] option ['value']} [, ... ]);
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    OWNER TO new_owner;
+ALTER FOREIGN TABLE [ IF EXISTS ] table_name
+    MODIFY ( { column_name data_type [, ...] );
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    action [, ... ];
+   
+where action can be:
+ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type
+|   MODIFY column_name data_type
+    
+
+
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,625 @@
+CREATE SCHEMA cstore_alter_table_4;
+SET SEARCH_PATH TO cstore_alter_table_4;
+SET INTERVALsTYLE = POSTGRES;
+-- test rollback
+drop table if exists base_alter_addcols;
+NOTICE:  table "base_alter_addcols" does not exist, skipping
+create table base_alter_addcols(a int, b int, c varchar(10));
+insert into base_alter_addcols values(1, generate_series(1,10), 'hello');
+insert into base_alter_addcols values(1,generate_series(1,10), 'love');
+insert into base_alter_addcols values(1, generate_series(1,10), 'pig');
+insert into base_alter_addcols values(1, generate_series(1,10), 'dog');
+insert into base_alter_addcols values(1, generate_series(1,10), 'kitty');
+CREATE TABLE alter_addcols_81(a int, b int, c varchar(10)) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_81 VALUES(1, 1, 'hello'), (1,2, 'love'), (1, 3, 'pig'), (1, 4, 'dog'), (1, 5, 'kitty');
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 VALUES(1, 6), (1, 7), (1, 8);
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+VACUUM FULL alter_addcols_81;
+DELETE FROM alter_addcols_81 WHERE b > 6;
+DELETE FROM alter_addcols_81 WHERE b = 2;
+START TRANSACTION;
+ALTER TABLE alter_addcols_81 ALTER COLUMN b SET DATA TYPE varchar(7) USING b::char || 'zcw', ALTER COLUMN c SET DATA TYPE varchar(8);
+SELECT COUNT(*) FROM alter_addcols_81;
+ count 
+-------
+   360
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_81 ORDER BY b;
+ a |  b   |   c   
+---+------+-------
+ 1 | 1zcw | hello
+ 1 | 1zcw | love
+ 1 | 1zcw | pig
+ 1 | 1zcw | dog
+ 1 | 1zcw | kitty
+ 1 | 3zcw | hello
+ 1 | 3zcw | dog
+ 1 | 3zcw | pig
+ 1 | 3zcw | kitty
+ 1 | 3zcw | love
+ 1 | 4zcw | hello
+ 1 | 4zcw | love
+ 1 | 4zcw | kitty
+ 1 | 4zcw | pig
+ 1 | 4zcw | dog
+ 1 | 5zcw | pig
+ 1 | 5zcw | love
+ 1 | 5zcw | dog
+ 1 | 5zcw | hello
+ 1 | 5zcw | kitty
+ 1 | 6zcw | dog
+ 1 | 6zcw | 
+ 1 | 6zcw | pig
+ 1 | 6zcw | kitty
+ 1 | 6zcw | hello
+ 1 | 6zcw | love
+(26 rows)
+
+\d+ alter_addcols_81
+                   Table "cstore_alter_table_4.alter_addcols_81"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ a      | integer              |           | plain    |              | 
+ b      | character varying(7) |           | extended |              | 
+ c      | character varying(8) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+ROLLBACK;
+\d+ alter_addcols_81
+                   Table "cstore_alter_table_4.alter_addcols_81"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ a      | integer               |           | plain    |              | 
+ b      | integer               |           | plain    |              | 
+ c      | character varying(10) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+SELECT COUNT(*) FROM alter_addcols_81;
+ count 
+-------
+   360
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_81 ORDER BY b;
+ a | b |   c   
+---+---+-------
+ 1 | 1 | hello
+ 1 | 1 | love
+ 1 | 1 | pig
+ 1 | 1 | dog
+ 1 | 1 | kitty
+ 1 | 3 | hello
+ 1 | 3 | dog
+ 1 | 3 | pig
+ 1 | 3 | kitty
+ 1 | 3 | love
+ 1 | 4 | hello
+ 1 | 4 | love
+ 1 | 4 | kitty
+ 1 | 4 | pig
+ 1 | 4 | dog
+ 1 | 5 | pig
+ 1 | 5 | love
+ 1 | 5 | dog
+ 1 | 5 | hello
+ 1 | 5 | kitty
+ 1 | 6 | dog
+ 1 | 6 | 
+ 1 | 6 | pig
+ 1 | 6 | kitty
+ 1 | 6 | hello
+ 1 | 6 | love
+(26 rows)
+
+-- test DEFAULT constraint value can be changed succssfully.
+CREATE TABLE alter_addcols_82(a int, b int, c varchar(10) DEFAULT 'abcd') WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_82 VALUES (1, 2, '12'), (1, 3, '13'), (1, 4, '14');
+VACUUM FULL alter_addcols_82;
+ALTER TABLE alter_addcols_82 ALTER COLUMN c SET DATA TYPE int;
+\d+ alter_addcols_82
+                        Table "cstore_alter_table_4.alter_addcols_82"
+ Column |  Type   |             Modifiers             | Storage | Stats target | Description 
+--------+---------+-----------------------------------+---------+--------------+-------------
+ a      | integer |                                   | plain   |              | 
+ b      | integer |                                   | plain   |              | 
+ c      | integer | default 'abcd'::character varying | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+SELECT COUNT(*) FROM alter_addcols_82;
+ count 
+-------
+     3
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_82 ORDER BY b;
+ a | b | c  
+---+---+----
+ 1 | 2 | 12
+ 1 | 3 | 13
+ 1 | 4 | 14
+(3 rows)
+
+INSERT INTO alter_addcols_82 VALUES (1, 5);
+ERROR:  invalid input syntax for integer: "abcd"
+CONTEXT:  referenced column: c
+ALTER TABLE alter_addcols_82 ALTER COLUMN c DROP DEFAULT;
+-- test PARTIAL CLUSTER KEY constraint
+CREATE TABLE alter_addcols_83(a int, b int, c varchar(10), PARTIAL CLUSTER KEY(b)) WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+VACUUM FULL alter_addcols_83;
+SELECT COUNT(*) FROM alter_addcols_83;
+ count 
+-------
+   350
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_83 ORDER BY b;
+ a | b  |   c   
+---+----+-------
+ 1 |  1 | love
+ 1 |  1 | hello
+ 1 |  1 | kitty
+ 1 |  1 | pig
+ 1 |  1 | dog
+ 1 |  2 | love
+ 1 |  2 | pig
+ 1 |  2 | hello
+ 1 |  2 | dog
+ 1 |  2 | kitty
+ 1 |  3 | hello
+ 1 |  3 | pig
+ 1 |  3 | dog
+ 1 |  3 | kitty
+ 1 |  3 | love
+ 1 |  4 | pig
+ 1 |  4 | love
+ 1 |  4 | kitty
+ 1 |  4 | hello
+ 1 |  4 | dog
+ 1 |  5 | kitty
+ 1 |  5 | dog
+ 1 |  5 | hello
+ 1 |  5 | pig
+ 1 |  5 | love
+ 1 |  6 | pig
+ 1 |  6 | hello
+ 1 |  6 | love
+ 1 |  6 | dog
+ 1 |  6 | kitty
+ 1 |  7 | pig
+ 1 |  7 | hello
+ 1 |  7 | kitty
+ 1 |  7 | dog
+ 1 |  7 | love
+ 1 |  8 | dog
+ 1 |  8 | pig
+ 1 |  8 | love
+ 1 |  8 | hello
+ 1 |  8 | kitty
+ 1 |  9 | kitty
+ 1 |  9 | dog
+ 1 |  9 | love
+ 1 |  9 | pig
+ 1 |  9 | hello
+ 1 | 10 | hello
+ 1 | 10 | love
+ 1 | 10 | kitty
+ 1 | 10 | dog
+ 1 | 10 | pig
+(50 rows)
+
+\d+ alter_addcols_83;
+                   Table "cstore_alter_table_4.alter_addcols_83"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ a      | integer               |           | plain    |              | 
+ b      | integer               |           | plain    |              | 
+ c      | character varying(10) |           | extended |              | 
+Partial Cluster :
+    "alter_addcols_83_cluster" PARTIAL CLUSTER KEY (b)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+ALTER TABLE alter_addcols_83 ALTER COLUMN b SET DATA TYPE varchar(5);
+\d+ alter_addcols_83;
+                   Table "cstore_alter_table_4.alter_addcols_83"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ a      | integer               |           | plain    |              | 
+ b      | character varying(5)  |           | extended |              | 
+ c      | character varying(10) |           | extended |              | 
+Partial Cluster :
+    "alter_addcols_83_cluster" PARTIAL CLUSTER KEY (b)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+VACUUM FULL alter_addcols_83;
+SELECT COUNT(*) FROM alter_addcols_83;
+ count 
+-------
+   350
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_83 ORDER BY b;
+ a | b  |   c   
+---+----+-------
+ 1 | 1  | pig
+ 1 | 1  | hello
+ 1 | 1  | kitty
+ 1 | 1  | dog
+ 1 | 1  | love
+ 1 | 10 | pig
+ 1 | 10 | love
+ 1 | 10 | kitty
+ 1 | 10 | dog
+ 1 | 10 | hello
+ 1 | 2  | love
+ 1 | 2  | pig
+ 1 | 2  | hello
+ 1 | 2  | dog
+ 1 | 2  | kitty
+ 1 | 3  | pig
+ 1 | 3  | dog
+ 1 | 3  | hello
+ 1 | 3  | kitty
+ 1 | 3  | love
+ 1 | 4  | pig
+ 1 | 4  | love
+ 1 | 4  | kitty
+ 1 | 4  | hello
+ 1 | 4  | dog
+ 1 | 5  | kitty
+ 1 | 5  | dog
+ 1 | 5  | hello
+ 1 | 5  | pig
+ 1 | 5  | love
+ 1 | 6  | pig
+ 1 | 6  | hello
+ 1 | 6  | love
+ 1 | 6  | dog
+ 1 | 6  | kitty
+ 1 | 7  | pig
+ 1 | 7  | hello
+ 1 | 7  | kitty
+ 1 | 7  | dog
+ 1 | 7  | love
+ 1 | 8  | hello
+ 1 | 8  | pig
+ 1 | 8  | love
+ 1 | 8  | kitty
+ 1 | 8  | dog
+ 1 | 9  | kitty
+ 1 | 9  | dog
+ 1 | 9  | love
+ 1 | 9  | pig
+ 1 | 9  | hello
+(50 rows)
+
+--
+-- Alter type for patitioned table
+--
+CREATE TABLE alter_addcols_84(c1 int, c2 int, c3 char(10), c4 varchar(8)) with ( orientation = column )  partition by range(c2)
+(
+partition p1 values less than (3),
+partition p2 values less than (6),
+partition p3 values less than (10)
+);
+INSERT INTO alter_addcols_84 VALUES(1,1,'123','1234');
+INSERT INTO alter_addcols_84 VALUES(2,4,'1234','12345');
+INSERT INTO alter_addcols_84 VALUES(3,9,'1234','123456');
+INSERT INTO alter_addcols_84 VALUES(4,5,'abc','abcde');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+ c1 | c2 |     c3     |   c4   
+----+----+------------+--------
+  1 |  1 | 123        | 1234
+  2 |  4 | 1234       | 12345
+  3 |  9 | 1234       | 123456
+  4 |  5 | abc        | abcde
+(4 rows)
+
+-- disallow alter partitioned key's type
+ALTER TABLE alter_addcols_84 ALTER c2 TYPE char;
+ERROR:  cannot alter data type of partitioning column "c2"
+-- char(n)->int, varchar(n)->int
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int;  --failed
+ERROR:  invalid input syntax for integer: "abc       "
+ALTER TABLE alter_addcols_84 ALTER c4 type int;  --failed
+ERROR:  invalid input syntax for integer: "abcde"
+DELETE FROM alter_addcols_84 WHERE c1=4;
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int;  --succeed
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE int;  --succeed
+\d+ alter_addcols_84;
+            Table "cstore_alter_table_4.alter_addcols_84"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ c1     | integer |           | plain   |              | 
+ c2     | integer |           | plain   |              | 
+ c3     | integer |           | plain   |              | 
+ c4     | integer |           | plain   |              | 
+Range partition by(c2)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+INSERT INTO alter_addcols_84 VALUES(5,7,'a','ab');  --failed
+ERROR:  invalid input syntax for integer: "a"
+LINE 1: INSERT INTO alter_addcols_84 VALUES(5,7,'a','ab');
+                                                ^
+CONTEXT:  referenced column: c3
+-- int->smallint, [set data]type
+ALTER TABLE alter_addcols_84 ALTER c3 SET DATA TYPE smallint;  --succeed
+ALTER TABLE alter_addcols_84 ALTER c4 SET DATA TYPE smallint;  --failed
+ERROR:  smallint out of range
+-- int->char(n)
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE char(10);
+INSERT INTO alter_addcols_84 VALUES(5,8,10,'abc');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+ c1 | c2 |  c3  |     c4     
+----+----+------+------------
+  1 |  1 |  123 | 1234      
+  2 |  4 | 1234 | 12345     
+  3 |  9 | 1234 | 123456    
+  5 |  8 |   10 | abc       
+(4 rows)
+
+-- char(n) cut
+ALTER TABLE alter_addcols_84 ATLER c4 TYPE char(5);  --failed
+ERROR:  syntax error at or near "ATLER"
+LINE 1: ALTER TABLE alter_addcols_84 ATLER c4 TYPE char(5);
+                                     ^
+alter TABLE alter_addcols_84 ALTER c4 TYPE char(7);  --succeed
+\d+ alter_addcols_84;
+               Table "cstore_alter_table_4.alter_addcols_84"
+ Column |     Type     | Modifiers | Storage  | Stats target | Description 
+--------+--------------+-----------+----------+--------------+-------------
+ c1     | integer      |           | plain    |              | 
+ c2     | integer      |           | plain    |              | 
+ c3     | smallint     |           | plain    |              | 
+ c4     | character(7) |           | extended |              | 
+Range partition by(c2)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- char(n) extended
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE char(12);
+INSERT INTO alter_addcols_84 VALUES(6,5,23,'abcdefgh');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+ c1 | c2 |  c3  |      c4      
+----+----+------+--------------
+  1 |  1 |  123 | 1234        
+  2 |  4 | 1234 | 12345       
+  3 |  9 | 1234 | 123456      
+  5 |  8 |   10 | abc         
+  6 |  5 |   23 | abcdefgh    
+(5 rows)
+
+--multiple column altered
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE char(6), ALTER c4 TYPE char(10);  --succeed
+\d+ alter_addcols_84;
+               Table "cstore_alter_table_4.alter_addcols_84"
+ Column |     Type      | Modifiers | Storage  | Stats target | Description 
+--------+---------------+-----------+----------+--------------+-------------
+ c1     | integer       |           | plain    |              | 
+ c2     | integer       |           | plain    |              | 
+ c3     | character(6)  |           | extended |              | 
+ c4     | character(10) |           | extended |              | 
+Range partition by(c2)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int, ALTER c4 TYPE int;  --failed
+ERROR:  invalid input syntax for integer: "abcdefgh  "
+\d+ alter_addcols_84;
+               Table "cstore_alter_table_4.alter_addcols_84"
+ Column |     Type      | Modifiers | Storage  | Stats target | Description 
+--------+---------------+-----------+----------+--------------+-------------
+ c1     | integer       |           | plain    |              | 
+ c2     | integer       |           | plain    |              | 
+ c3     | character(6)  |           | extended |              | 
+ c4     | character(10) |           | extended |              | 
+Range partition by(c2)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- add column mix alter type
+ALTER TABLE alter_addcols_84 ADD COLUMN c5 int DEFAULT 3, ALTER c4 TYPE varchar(10);
+\d+ alter_addcols_84;
+                   Table "cstore_alter_table_4.alter_addcols_84"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ c1     | integer               |           | plain    |              | 
+ c2     | integer               |           | plain    |              | 
+ c3     | character(6)          |           | extended |              | 
+ c4     | character varying(10) |           | extended |              | 
+ c5     | integer               | default 3 | plain    |              | 
+Range partition by(c2)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c6 TYPE int;
+ERROR:  column "c6" of relation "alter_addcols_84" does not exist
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c5 TYPE int;
+ERROR:  cannot alter type of column "c5" twice
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c4 TYPE varchar(12);
+\d+ alter_addcols_84;
+                        Table "cstore_alter_table_4.alter_addcols_84"
+ Column |         Type          |      Modifiers      | Storage  | Stats target | Description 
+--------+-----------------------+---------------------+----------+--------------+-------------
+ c1     | integer               |                     | plain    |              | 
+ c2     | integer               |                     | plain    |              | 
+ c3     | character(6)          |                     | extended |              | 
+ c4     | character varying(12) |                     | extended |              | 
+ c5     | character(2)          | default 3           | extended |              | 
+ c6     | character(1)          | default 'a'::bpchar | extended |              | 
+ c7     | integer               |                     | plain    |              | 
+Range partition by(c2)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+ c1 | c2 |   c3   |    c4    | c5 | c6 | c7 
+----+----+--------+----------+----+----+----
+  1 |  1 | 123    | 1234     | 3  | a  |   
+  2 |  4 | 1234   | 12345    | 3  | a  |   
+  3 |  9 | 1234   | 123456   | 3  | a  |   
+  5 |  8 | 10     | abc      | 3  | a  |   
+  6 |  5 | 23     | abcdefgh | 3  | a  |   
+(5 rows)
+
+-- ALTER TABLE ALTER COLUMN DROP / SET DEFAULT constraint
+CREATE TABLE alter_addcols_85 ( a int , b int default '5') WITH ( ORIENTATION = COLUMN); 
+ALTER TABLE alter_addcols_85 ALTER COLUMN b DROP DEFAULT;
+\d+ alter_addcols_85
+            Table "cstore_alter_table_4.alter_addcols_85"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- testcase: cann't refer to any other column
+ALTER TABLE alter_addcols_85 ALTER COLUMN b SET DEFAULT 10 + a;
+ERROR:  default value cannot reference to a column
+HINT:  Perhaps the default value is enclosed in double quotes
+ALTER TABLE alter_addcols_85 ALTER COLUMN b SET DEFAULT 15;
+\d+ alter_addcols_85
+            Table "cstore_alter_table_4.alter_addcols_85"
+ Column |  Type   | Modifiers  | Storage | Stats target | Description 
+--------+---------+------------+---------+--------------+-------------
+ a      | integer |            | plain   |              | 
+ b      | integer | default 15 | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+INSERT INTO alter_addcols_85 VALUES(1), (2), (3), (4);
+SELECT * FROM alter_addcols_85 ORDER BY a;
+ a | b  
+---+----
+ 1 | 15
+ 2 | 15
+ 3 | 15
+ 4 | 15
+(4 rows)
+
+CREATE TABLE alter_addcols_86 ( a int , b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_86 VALUES(1), (2), (3), (4);
+ALTER TABLE alter_addcols_86 ALTER COLUMN b SET DEFAULT 25;
+INSERT INTO alter_addcols_86 VALUES(5), (6), (7), (8);
+SELECT * FROM alter_addcols_86 ORDER BY a;
+ a | b  
+---+----
+ 1 |   
+ 2 |   
+ 3 |   
+ 4 |   
+ 5 | 25
+ 6 | 25
+ 7 | 25
+ 8 | 25
+(8 rows)
+
+CREATE TABLE alter_addcols_87 ( a int , b varchar(10) default 'abcd') WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_87 VALUES(1, '1'), (2, '2'), (3, '3'), (4, '4');
+ALTER TABLE alter_addcols_87 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_87 ORDER BY a;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 | 3
+ 4 | 4
+(4 rows)
+
+-- error happens because the DEFAULT expression cannot be converted into INT datatype.
+INSERT INTO alter_addcols_87 VALUES (5);
+ERROR:  invalid input syntax for integer: "abcd"
+CONTEXT:  referenced column: b
+ALTER TABLE alter_addcols_87 ALTER COLUMN b DROP DEFAULT;
+ALTER TABLE alter_addcols_87 ALTER COLUMN b SET DEFAULT 5;
+INSERT INTO alter_addcols_87 VALUES (5);
+SELECT DISTINCT * FROM alter_addcols_87 ORDER BY a;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 | 3
+ 4 | 4
+ 5 | 5
+(5 rows)
+
+-- testcase: change DEFAULT constraint directly, without DROP DEFAULT step.
+CREATE TABLE alter_addcols_88 ( a int , b varchar(10) default 'abcd') WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_88 VALUES(1, '1'), (2, '2'), (3, '3'), (4, '4');
+ALTER TABLE alter_addcols_88 ALTER COLUMN b SET DATA TYPE int;
+ALTER TABLE alter_addcols_88 ALTER COLUMN b SET DEFAULT 5;
+INSERT INTO alter_addcols_88 VALUES (5);
+SELECT DISTINCT * FROM alter_addcols_88 ORDER BY a;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 | 3
+ 4 | 4
+ 5 | 5
+(5 rows)
+
+-- testcase: invalid cu cache
+CREATE TABLE alter_addcols_90 ( a int , b varchar(20) NOT NULL ) WITH ( ORIENTATION = COLUMN ) ;
+INSERT INTO alter_addcols_90 VALUES( 1, 'helloworld');
+INSERT INTO alter_addcols_90 VALUES( 1, 'heorlhelld');
+INSERT INTO alter_addcols_90 VALUES( 1, 'worlddheor');
+VACUUM FULL alter_addcols_90;
+START TRANSACTION ; 
+SELECT * FROM alter_addcols_90 ORDER BY b;
+ a |     b      
+---+------------
+ 1 | helloworld
+ 1 | heorlhelld
+ 1 | worlddheor
+(3 rows)
+
+ALTER TABLE alter_addcols_90 ALTER COLUMN  b SET  DATA TYPE varchar(19);
+SELECT * FROM alter_addcols_90 ORDER BY b;
+ a |     b      
+---+------------
+ 1 | helloworld
+ 1 | heorlhelld
+ 1 | worlddheor
+(3 rows)
+
+COMMIT;
+drop schema cstore_alter_table_4 cascade;
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table base_alter_addcols
+drop cascades to table alter_addcols_81
+drop cascades to table alter_addcols_82
+drop cascades to table alter_addcols_83
+drop cascades to table alter_addcols_84
+drop cascades to table alter_addcols_85
+drop cascades to table alter_addcols_86
+drop cascades to table alter_addcols_87
+drop cascades to table alter_addcols_88
+drop cascades to table alter_addcols_90

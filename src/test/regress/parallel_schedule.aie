@@ -1,0 +1,14 @@
+#DO NOT CHANGE THE FILE ORDER OF THIS SECTION
+test: tpchrush
+test: tpch01 tpch02 tpch03 tpch04 
+test: tpch05 tpch06 tpch07 tpch08 
+test: tpch09 tpch10 tpch11 tpch12 
+test: tpch13 tpch14 tpch15 tpch16 
+test: tpch17 tpch18 tpch19 tpch20 
+test: tpch21 tpch22
+test: encode_tpch
+test: rlstm
+test: wlm_plan_encoding
+#END OF NO CHANGE SECTION
+
+

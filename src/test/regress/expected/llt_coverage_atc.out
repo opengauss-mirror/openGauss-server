@@ -1,0 +1,839 @@
+-- add test case for exchange_parameters function
+drop schema if exists test_anonymous_block cascade;
+NOTICE:  schema "test_anonymous_block" does not exist, skipping
+CREATE SCHEMA test_anonymous_block;
+create table tmp_tb1_llt_coverage_atc( a int);
+insert into tmp_tb1_llt_coverage_atc values(1);
+create table test_anonymous_block.test_table_1(
+    ID       INTEGER,
+    NAME     varchar2(20),
+    AGE      INTEGER,
+    ADDRESS  varchar2(20),
+    TELE     varchar2(20)
+);
+insert into test_anonymous_block.test_table_1 values(1,'leon',10,'adsf');
+insert into test_anonymous_block.test_table_1 values(2,'mary',20,'zcv','234');
+insert into test_anonymous_block.test_table_1 values(3,'mike',30,'zcv','567');
+DO $$
+DECLARE
+  url varchar:='hello';
+  i integer;
+  D_SQL varchar(200);
+  arr integer[]:='{43,6,8,10}';
+  MYINTEGER INTEGER;
+  MYCHAR   VARCHAR2(20);
+BEGIN
+  FOR i IN 1..3
+  LOOP
+    RAISE NOTICE 'hi';
+  END LOOP;
+  RAISE NOTICE '%',url;
+  IF exists (select * from information_schema.tables where table_name='_x') then drop table if exists _x;
+  end if;
+  unnest(arr);
+  create table _x(q integer);
+  insert into _x select * from generate_subscripts(arr,1);
+  D_SQL := 'begin 
+    perform * from _x;
+  end;';
+  EXECUTE IMMEDIATE D_SQL;
+  MYINTEGER := 1;
+  D_SQL := 'begin select name into :b from test_anonymous_block.test_table_1 where id = :a ; end;';
+  EXECUTE IMMEDIATE D_SQL USING   out MYCHAR,IN MYINTEGER;
+  raise info 'NAME is %', MYCHAR;
+END
+$$;
+NOTICE:  hi
+NOTICE:  hi
+NOTICE:  hi
+NOTICE:  hello
+INFO:  NAME is leon
+--error condition
+DO $$
+DECLARE
+  D_SQL varchar(200);
+  MYINTEGER INTEGER;
+  MYCHAR   VARCHAR2(20);
+BEGIN
+  MYINTEGER := 1;
+  D_SQL := 'declare tmp integer; begin select name from test_anonymous_block.test_table_1 where id = :a into :b; end;';
+  EXECUTE IMMEDIATE D_SQL USING IN MYINTEGER, out MYCHAR;
+  raise info 'NAME is %', MYCHAR;
+END
+$$;
+ERROR:  syntax error at or near "into"
+CONTEXT:  PL/pgSQL function inline_code_block line 9 at EXECUTE statement
+DO $$
+DECLARE
+  D_SQL varchar(200);
+  MYINTEGER INTEGER;
+  MYCHAR   VARCHAR2(20);
+BEGIN
+  MYINTEGER := 1;
+  D_SQL := 'begin select name from test_anonymous_block.test_table_1 where id = :a into :b; end;';
+  EXECUTE IMMEDIATE D_SQL USING IN MYINTEGER, MYCHAR;
+  raise info 'NAME is %', MYCHAR;
+END
+$$;
+ERROR:  query has no destination for result data in EXECUTE statement
+CONTEXT:  PL/pgSQL function inline_code_block line 9 at EXECUTE statement
+DO $$
+DECLARE
+  D_SQL varchar(200);
+  MYINTEGER INTEGER;
+  MYCHAR   VARCHAR2(20);
+BEGIN
+  MYINTEGER := 1;
+  D_SQL := 'begin select name from test_anonymous_block.test_table_1 where id = :b into :a; end;';
+  EXECUTE IMMEDIATE D_SQL into MYCHAR USING IN MYINTEGER;
+  raise info 'NAME is %', MYCHAR;
+END
+$$;
+ERROR:  the number of place holders doesn't match the number of parameters.
+CONTEXT:  PL/pgSQL function inline_code_block line 9 at EXECUTE statement
+drop table test_anonymous_block.test_table_1;
+--add testcase for mark_windowagg_stream function
+create table test_mark_windowagg_stream_into (
+  q1 int,
+  q2 int
+);
+create table test_mark_windowagg_stream (
+  q1 int,
+  q2 int
+);
+insert into test_mark_windowagg_stream values(1,2);
+insert into test_mark_windowagg_stream values(3,4);
+insert into test_mark_windowagg_stream values(2,4);
+insert into test_mark_windowagg_stream values(1,3);
+insert into test_mark_windowagg_stream values(1,2);
+insert into test_mark_windowagg_stream values(3,4);
+insert into test_mark_windowagg_stream values(2,4);
+insert into test_mark_windowagg_stream values(1,3);
+insert into test_mark_windowagg_stream_into (select q1,q2/sum(q2) over (partition by q2::int8) from test_mark_windowagg_stream);
+drop table test_mark_windowagg_stream_into;
+drop table test_mark_windowagg_stream;
+-- add test case for locate_distributekey_from_tlist function
+SET CHECK_FUNCTION_BODIES TO ON;
+create or replace function llt_func_01
+(
+  param1 in integer,
+  param2 in integer
+)
+returns integer as $$
+declare
+  ret integer;
+begin
+  ret := param1 + param2;
+  return ret;
+END;
+$$ LANGUAGE plpgsql;
+drop table if exists llt_locate_distributekey_from_tlist1;
+NOTICE:  table "llt_locate_distributekey_from_tlist1" does not exist, skipping
+drop table if exists llt_locate_distributekey_from_tlist2;
+NOTICE:  table "llt_locate_distributekey_from_tlist2" does not exist, skipping
+create table llt_locate_distributekey_from_tlist1 
+(
+  q1 integer,
+  q2 integer
+);
+create table llt_locate_distributekey_from_tlist2
+(
+  q1 integer,
+  q2 integer
+);
+insert into llt_locate_distributekey_from_tlist1 values(1,2);
+insert into llt_locate_distributekey_from_tlist2 values(3,1);
+insert into llt_locate_distributekey_from_tlist2 values(3,0);
+analyze llt_locate_distributekey_from_tlist1;
+analyze llt_locate_distributekey_from_tlist2;
+select * from llt_locate_distributekey_from_tlist1 where q1 in (select llt_func_01(q1,q2) from llt_locate_distributekey_from_tlist2 group by llt_func_01(q1,q2) order by 1);
+ q1 | q2 
+----+----
+(0 rows)
+
+-- add test case for explain node
+\o xml_explain_temp.txt
+explain performance select * from llt_locate_distributekey_from_tlist1 where q1 in (select llt_func_01(q1,q2) from llt_locate_distributekey_from_tlist2 group by llt_func_01(q1,q2) order by 1);
+explain performance update llt_locate_distributekey_from_tlist1 set q2 = 3 where q1 = 3;
+\o
+drop function llt_func_01();
+drop table llt_locate_distributekey_from_tlist1;
+drop table llt_locate_distributekey_from_tlist2;
+-- add test case for functions: show_datanode_buffers, show_detail_cpu, show_hash_info
+drop table if exists llt_show_datanode_buffers;
+NOTICE:  table "llt_show_datanode_buffers" does not exist, skipping
+drop table if exists llt_show_datanode_buffers_1;
+NOTICE:  table "llt_show_datanode_buffers_1" does not exist, skipping
+create table llt_show_datanode_buffers(q1 int, q2 int);
+create table llt_show_datanode_buffers_1(q1 int, q2 int);
+create table llt_show_datanode_buffers_2(q1 int, q2 int);
+create table llt_show_datanode_buffers_3(q1 int, q2 int);
+insert into llt_show_datanode_buffers select generate_series(1,1000,9), generate_series(50,500,9) from tmp_tb1_llt_coverage_atc;
+insert into llt_show_datanode_buffers select generate_series(100,700,6), generate_series(500,1000,6) from tmp_tb1_llt_coverage_atc;
+insert into llt_show_datanode_buffers_1 select generate_series(1,1000,6), generate_series(50,500,6) from tmp_tb1_llt_coverage_atc;
+insert into llt_show_datanode_buffers_1 select generate_series(100,700,9), generate_series(500,1000,9) from tmp_tb1_llt_coverage_atc;
+set enable_hashjoin=on;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+explain (ANALYZE on, BUFFERS on, TIMING on, detail off, format text) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
+                                                               QUERY PLAN                                                                
+-----------------------------------------------------------------------------------------------------------------------------------------
+--? Hash Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+   Hash Cond: (llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)
+--?   (Buffers: shared hit=.* dirtied=.*)
+--?   ->  Seq Scan on llt_show_datanode_buffers_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+--?         (Buffers: shared hit=.* dirtied=.*)
+--?   ->  Hash  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+          Buckets: 32768  Batches: 1  Memory Usage: 555kB
+--?         (Buffers: shared hit=.* dirtied=.*)
+--?         ->  Seq Scan on llt_show_datanode_buffers  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+--?               (Buffers: shared hit=.*)
+--? Total runtime: .* ms
+(11 rows)
+
+explain (ANALYZE on, BUFFERS on, TIMING off, detail off, format JSON ) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ [                                                                                    +
+   {                                                                                  +
+     "Plan": {                                                                        +
+       "Node Type": "Hash Join",                                                      +
+       "Join Type": "Inner",                                                          +
+--?       "Startup Cost": .*
+--?       "Total Cost": .*
+--?       "Plan Rows": .*
+--?       "Plan Width": .*
+--?       "Actual Rows": .*
+--?       "Actual Loops": .*
+       "Hash Cond": "(llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)",+
+       "Shared Hit Blocks": 136,                                                      +
+       "Shared Read Blocks": 0,                                                       +
+--?       "Shared Dirtied Blocks": .*
+       "Shared Written Blocks": 0,                                                    +
+       "Local Hit Blocks": 0,                                                         +
+       "Local Read Blocks": 0,                                                        +
+       "Local Dirtied Blocks": 0,                                                     +
+       "Local Written Blocks": 0,                                                     +
+       "Temp Read Blocks": 0,                                                         +
+       "Temp Written Blocks": 0,                                                      +
+       "IO Read Time": 0.000,                                                         +
+       "IO Write Time": 0.000,                                                        +
+       "Plans": [                                                                     +
+         {                                                                            +
+           "Node Type": "Seq Scan",                                                   +
+           "Parent Relationship": "Outer",                                            +
+           "Relation Name": "llt_show_datanode_buffers_1",                            +
+           "Alias": "llt_show_datanode_buffers_1",                                    +
+--?           "Startup Cost": .*
+--?           "Total Cost": .*
+--?           "Plan Rows": .*
+--?           "Plan Width": .*
+--?           "Actual Rows": .*
+--?           "Actual Loops": .*
+           "Shared Hit Blocks": 73,                                                   +
+           "Shared Read Blocks": 0,                                                   +
+--?           "Shared Dirtied Blocks": .*
+           "Shared Written Blocks": 0,                                                +
+           "Local Hit Blocks": 0,                                                     +
+           "Local Read Blocks": 0,                                                    +
+           "Local Dirtied Blocks": 0,                                                 +
+           "Local Written Blocks": 0,                                                 +
+           "Temp Read Blocks": 0,                                                     +
+           "Temp Written Blocks": 0,                                                  +
+           "IO Read Time": 0.000,                                                     +
+           "IO Write Time": 0.000                                                     +
+         },                                                                           +
+         {                                                                            +
+           "Node Type": "Hash",                                                       +
+           "Parent Relationship": "Inner",                                            +
+--?           "Startup Cost": .*
+--?           "Total Cost": .*
+--?           "Plan Rows": .*
+--?           "Plan Width": .*
+--?           "Actual Rows": .*
+--?           "Actual Loops": .*
+           "Hash Buckets": 32768,                                                     +
+           "Hash Batches": 1,                                                         +
+           "Original Hash Batches": 1,                                                +
+           "Peak Memory Usage": 555,                                                  +
+           "Shared Hit Blocks": 63,                                                   +
+           "Shared Read Blocks": 0,                                                   +
+--?           "Shared Dirtied Blocks": .*
+           "Shared Written Blocks": 0,                                                +
+           "Local Hit Blocks": 0,                                                     +
+           "Local Read Blocks": 0,                                                    +
+           "Local Dirtied Blocks": 0,                                                 +
+           "Local Written Blocks": 0,                                                 +
+           "Temp Read Blocks": 0,                                                     +
+           "Temp Written Blocks": 0,                                                  +
+           "IO Read Time": 0.000,                                                     +
+           "IO Write Time": 0.000,                                                    +
+           "Plans": [                                                                 +
+             {                                                                        +
+               "Node Type": "Seq Scan",                                               +
+               "Parent Relationship": "Outer",                                        +
+               "Relation Name": "llt_show_datanode_buffers",                          +
+               "Alias": "llt_show_datanode_buffers",                                  +
+--?               "Startup Cost": .*
+--?               "Total Cost": .*
+--?               "Plan Rows": .*
+--?               "Plan Width": .*
+--?               "Actual Rows": .*
+--?               "Actual Loops": .*
+               "Shared Hit Blocks": 63,                                               +
+               "Shared Read Blocks": 0,                                               +
+--?               "Shared Dirtied Blocks": .*
+               "Shared Written Blocks": 0,                                            +
+               "Local Hit Blocks": 0,                                                 +
+               "Local Read Blocks": 0,                                                +
+               "Local Dirtied Blocks": 0,                                             +
+               "Local Written Blocks": 0,                                             +
+               "Temp Read Blocks": 0,                                                 +
+               "Temp Written Blocks": 0,                                              +
+               "IO Read Time": 0.000,                                                 +
+               "IO Write Time": 0.000                                                 +
+             }                                                                        +
+           ]                                                                          +
+         }                                                                            +
+       ]                                                                              +
+     },                                                                               +
+     "Triggers": [                                                                    +
+     ],                                                                               +
+--?     "Total Runtime": .*
+   }                                                                                  +
+ ]
+(1 row)
+
+explain (ANALYZE on, BUFFERS on, TIMING off, detail off, format text, cpu on) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+--? Hash Join  (cost=.* rows=.* width=.*) (actual rows=.* loops=.*)
+   Hash Cond: (llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)
+--?   (Buffers: shared hit=.* dirtied=.*)
+--?   (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
+--?   ->  Seq Scan on llt_show_datanode_buffers_1  (cost=.* rows=.* width=.*) (actual rows=.* loops=.*)
+--?         (Buffers: shared hit=.* dirtied=.*)
+--?         (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
+--?   ->  Hash  (cost=.* rows=.* width=.*) (actual rows=.* loops=.*)
+          Buckets: 32768  Batches: 1  Memory Usage: 555kB
+--?         (Buffers: shared hit=.* dirtied=.*)
+--?         (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
+--?         ->  Seq Scan on llt_show_datanode_buffers  (cost=.* rows=.* width=.*) (actual rows=.* loops=.*)
+--?               (Buffers: shared hit=.* dirtied=.*)
+--?               (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
+--? Total runtime: .* ms
+(15 rows)
+
+explain (ANALYZE on, BUFFERS on, TIMING off, detail off, format JSON, cpu on) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ [                                                                                    +
+   {                                                                                  +
+     "Plan": {                                                                        +
+       "Node Type": "Hash Join",                                                      +
+       "Join Type": "Inner",                                                          +
+--?       "Startup Cost": .*
+--?       "Total Cost": .*
+--?       "Plan Rows": .*
+--?       "Plan Width": .*
+--?       "Actual Rows": .*
+--?       "Actual Loops": .*
+       "Hash Cond": "(llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)",+
+       "Shared Hit Blocks": 136,                                                      +
+       "Shared Read Blocks": 0,                                                       +
+--?       "Shared Dirtied Blocks": .*
+       "Shared Written Blocks": 0,                                                    +
+       "Local Hit Blocks": 0,                                                         +
+       "Local Read Blocks": 0,                                                        +
+       "Local Dirtied Blocks": 0,                                                     +
+       "Local Written Blocks": 0,                                                     +
+       "Temp Read Blocks": 0,                                                         +
+       "Temp Written Blocks": 0,                                                      +
+       "IO Read Time": 0.000,                                                         +
+       "IO Write Time": 0.000,                                                        +
+--?       "Exclusive Cycles Per Row": .*
+--?       "Exclusive Cycles": .*
+--?       "Inclusive Cycles": .*
+       "Plans": [                                                                     +
+         {                                                                            +
+           "Node Type": "Seq Scan",                                                   +
+           "Parent Relationship": "Outer",                                            +
+           "Relation Name": "llt_show_datanode_buffers_1",                            +
+           "Alias": "llt_show_datanode_buffers_1",                                    +
+--?           "Startup Cost": .*
+--?           "Total Cost": .*
+--?           "Plan Rows": .*
+--?           "Plan Width": .*
+--?           "Actual Rows": .*
+--?           "Actual Loops": .*
+           "Shared Hit Blocks": 73,                                                   +
+           "Shared Read Blocks": 0,                                                   +
+--?           "Shared Dirtied Blocks": .*
+           "Shared Written Blocks": 0,                                                +
+           "Local Hit Blocks": 0,                                                     +
+           "Local Read Blocks": 0,                                                    +
+           "Local Dirtied Blocks": 0,                                                 +
+           "Local Written Blocks": 0,                                                 +
+           "Temp Read Blocks": 0,                                                     +
+           "Temp Written Blocks": 0,                                                  +
+           "IO Read Time": 0.000,                                                     +
+           "IO Write Time": 0.000,                                                    +
+--?           "Exclusive Cycles Per Row": .*
+--?           "Exclusive Cycles": .*
+--?           "Inclusive Cycles": .*
+         },                                                                           +
+         {                                                                            +
+           "Node Type": "Hash",                                                       +
+           "Parent Relationship": "Inner",                                            +
+--?           "Startup Cost": .*
+--?           "Total Cost": .*
+--?           "Plan Rows": .*
+--?           "Plan Width": .*
+--?           "Actual Rows": .*
+--?           "Actual Loops": .*
+           "Hash Buckets": 32768,                                                     +
+           "Hash Batches": 1,                                                         +
+           "Original Hash Batches": 1,                                                +
+           "Peak Memory Usage": 555,                                                  +
+           "Shared Hit Blocks": 63,                                                   +
+           "Shared Read Blocks": 0,                                                   +
+--?           "Shared Dirtied Blocks": .*
+           "Shared Written Blocks": 0,                                                +
+           "Local Hit Blocks": 0,                                                     +
+           "Local Read Blocks": 0,                                                    +
+           "Local Dirtied Blocks": 0,                                                 +
+           "Local Written Blocks": 0,                                                 +
+           "Temp Read Blocks": 0,                                                     +
+           "Temp Written Blocks": 0,                                                  +
+           "IO Read Time": 0.000,                                                     +
+           "IO Write Time": 0.000,                                                    +
+--?           "Exclusive Cycles Per Row": .*
+--?           "Exclusive Cycles": .*
+--?           "Inclusive Cycles": .*
+           "Plans": [                                                                 +
+             {                                                                        +
+               "Node Type": "Seq Scan",                                               +
+               "Parent Relationship": "Outer",                                        +
+               "Relation Name": "llt_show_datanode_buffers",                          +
+               "Alias": "llt_show_datanode_buffers",                                  +
+--?               "Startup Cost": .*
+--?               "Total Cost": .*
+--?               "Plan Rows": .*
+--?               "Plan Width": .*
+--?               "Actual Rows": .*
+--?               "Actual Loops": .*
+               "Shared Hit Blocks": 63,                                               +
+               "Shared Read Blocks": 0,                                               +
+--?               "Shared Dirtied Blocks": .*
+               "Shared Written Blocks": 0,                                            +
+               "Local Hit Blocks": 0,                                                 +
+               "Local Read Blocks": 0,                                                +
+               "Local Dirtied Blocks": 0,                                             +
+               "Local Written Blocks": 0,                                             +
+               "Temp Read Blocks": 0,                                                 +
+               "Temp Written Blocks": 0,                                              +
+               "IO Read Time": 0.000,                                                 +
+               "IO Write Time": 0.000,                                                +
+--?               "Exclusive Cycles Per Row": .*
+--?               "Exclusive Cycles": .*
+--?               "Inclusive Cycles": .*
+             }                                                                        +
+           ]                                                                          +
+         }                                                                            +
+       ]                                                                              +
+     },                                                                               +
+     "Triggers": [                                                                    +
+     ],                                                                               +
+--?     "Total Runtime": .*
+   }                                                                                  +
+ ]
+(1 row)
+
+explain (ANALYZE on, BUFFERS on, TIMING on, detail on, format text) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
+                                                               QUERY PLAN                                                                
+-----------------------------------------------------------------------------------------------------------------------------------------
+--? Hash Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+   Hash Cond: (llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)
+--?   (Buffers: shared hit=.* dirtied=.*)
+--?   ->  Seq Scan on llt_show_datanode_buffers_1  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+--?         (Buffers: shared hit=.* dirtied=.*)
+--?   ->  Hash  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+          Buckets: 32768  Batches: 1  Memory Usage: 555kB
+--?         (Buffers: shared hit=.* dirtied=.*)
+--?         ->  Seq Scan on llt_show_datanode_buffers  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
+--?               (Buffers: shared hit=.* dirtied=.*)
+--? Total runtime: .* ms
+(11 rows)
+
+--add for llt
+explain (cpu on) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
+ERROR:  EXPLAIN option CPU requires ANALYZE
+explain (detail on) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
+ERROR:  EXPLAIN option DETAIL requires ANALYZE
+explain (analyze on, detail on,format xml,costs off) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ <explain xmlns="http://www.postgresql.org/2009/explain">                                    +
+   <Query>                                                                                   +
+     <Plan>                                                                                  +
+       <Node-Type>Hash Join</Node-Type>                                                      +
+       <Join-Type>Inner</Join-Type>                                                          +
+--?       <Actual-Startup-Time>.*
+--?       <Actual-Total-Time>.*
+       <Actual-Rows>0</Actual-Rows>                                                          +
+       <Actual-Loops>1</Actual-Loops>                                                        +
+       <Hash-Cond>(llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)</Hash-Cond>+
+       <Plans>                                                                               +
+         <Plan>                                                                              +
+           <Node-Type>Seq Scan</Node-Type>                                                   +
+           <Parent-Relationship>Outer</Parent-Relationship>                                  +
+           <Relation-Name>llt_show_datanode_buffers_1</Relation-Name>                        +
+           <Alias>llt_show_datanode_buffers_1</Alias>                                        +
+--?           <Actual-Startup-Time>.*
+--?           <Actual-Total-Time>.*
+           <Actual-Rows>16444</Actual-Rows>                                                  +
+           <Actual-Loops>1</Actual-Loops>                                                    +
+         </Plan>                                                                             +
+         <Plan>                                                                              +
+           <Node-Type>Hash</Node-Type>                                                       +
+           <Parent-Relationship>Inner</Parent-Relationship>                                  +
+--?           <Actual-Startup-Time>.*
+--?           <Actual-Total-Time>.*
+           <Actual-Rows>14196</Actual-Rows>                                                  +
+           <Actual-Loops>1</Actual-Loops>                                                    +
+           <Hash-Buckets>32768</Hash-Buckets>                                                +
+           <Hash-Batches>1</Hash-Batches>                                                    +
+           <Original-Hash-Batches>1</Original-Hash-Batches>                                  +
+--?           <Peak-Memory-Usage>.*
+           <Plans>                                                                           +
+             <Plan>                                                                          +
+               <Node-Type>Seq Scan</Node-Type>                                               +
+               <Parent-Relationship>Outer</Parent-Relationship>                              +
+               <Relation-Name>llt_show_datanode_buffers</Relation-Name>                      +
+               <Alias>llt_show_datanode_buffers</Alias>                                      +
+--?               <Actual-Startup-Time>.*
+--?               <Actual-Total-Time>.*
+               <Actual-Rows>14196</Actual-Rows>                                              +
+               <Actual-Loops>1</Actual-Loops>                                                +
+             </Plan>                                                                         +
+           </Plans>                                                                          +
+         </Plan>                                                                             +
+       </Plans>                                                                              +
+     </Plan>                                                                                 +
+     <Triggers>                                                                              +
+     </Triggers>                                                                             +
+--?     <Total-Runtime>.*
+   </Query>                                                                                  +
+ </explain>
+(1 row)
+
+explain (analyze on, detail on,format xml,timing  on) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1 and llt_show_datanode_buffers.q1 > 1000;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ <explain xmlns="http://www.postgresql.org/2009/explain">                                    +
+   <Query>                                                                                   +
+     <Plan>                                                                                  +
+       <Node-Type>Hash Join</Node-Type>                                                      +
+       <Join-Type>Inner</Join-Type>                                                          +
+--?       <Startup-Cost>.*
+--?       <Total-Cost>.*
+--?       <Plan-Rows>.*
+--?       <Plan-Width>.*
+--?       <Actual-Startup-Time>.*
+--?       <Actual-Total-Time>.*
+       <Actual-Rows>0</Actual-Rows>                                                          +
+       <Actual-Loops>1</Actual-Loops>                                                        +
+       <Hash-Cond>(llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)</Hash-Cond>+
+       <Plans>                                                                               +
+         <Plan>                                                                              +
+           <Node-Type>Seq Scan</Node-Type>                                                   +
+           <Parent-Relationship>Outer</Parent-Relationship>                                  +
+           <Relation-Name>llt_show_datanode_buffers_1</Relation-Name>                        +
+           <Alias>llt_show_datanode_buffers_1</Alias>                                        +
+--?           <Startup-Cost>.*
+--?           <Total-Cost>.*
+--?           <Plan-Rows>.*
+--?           <Plan-Width>.*
+--?           <Actual-Startup-Time>.*
+--?           <Actual-Total-Time>.*
+           <Actual-Rows>1</Actual-Rows>                                                      +
+           <Actual-Loops>1</Actual-Loops>                                                    +
+         </Plan>                                                                             +
+         <Plan>                                                                              +
+           <Node-Type>Hash</Node-Type>                                                       +
+           <Parent-Relationship>Inner</Parent-Relationship>                                  +
+--?           <Startup-Cost>.*
+--?           <Total-Cost>.*
+--?           <Plan-Rows>.*
+--?           <Plan-Width>.*
+--?           <Actual-Startup-Time>.*
+--?           <Actual-Total-Time>.*
+           <Actual-Rows>0</Actual-Rows>                                                      +
+           <Actual-Loops>1</Actual-Loops>                                                    +
+           <Hash-Buckets>32768</Hash-Buckets>                                                +
+           <Hash-Batches>1</Hash-Batches>                                                    +
+           <Original-Hash-Batches>1</Original-Hash-Batches>                                  +
+           <Peak-Memory-Usage>0</Peak-Memory-Usage>                                          +
+           <Plans>                                                                           +
+             <Plan>                                                                          +
+               <Node-Type>Seq Scan</Node-Type>                                               +
+               <Parent-Relationship>Outer</Parent-Relationship>                              +
+               <Relation-Name>llt_show_datanode_buffers</Relation-Name>                      +
+               <Alias>llt_show_datanode_buffers</Alias>                                      +
+--?               <Startup-Cost>.*
+--?               <Total-Cost>.*
+--?               <Plan-Rows>.*
+--?               <Plan-Width>.*
+--?               <Actual-Startup-Time>.*
+--?               <Actual-Total-Time>.*
+               <Actual-Rows>0</Actual-Rows>                                                  +
+               <Actual-Loops>1</Actual-Loops>                                                +
+               <Filter>(q1 &gt; 1000)</Filter>                                               +
+               <Rows-Removed-by-Filter>14196</Rows-Removed-by-Filter>                        +
+             </Plan>                                                                         +
+           </Plans>                                                                          +
+         </Plan>                                                                             +
+       </Plans>                                                                              +
+     </Plan>                                                                                 +
+     <Triggers>                                                                              +
+     </Triggers>                                                                             +
+--?     <Total-Runtime>.*
+   </Query>                                                                                  +
+ </explain>
+(1 row)
+
+explain (analyze on, detail on,format xml,timing  off) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1 and llt_show_datanode_buffers.q1 > 1000;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ <explain xmlns="http://www.postgresql.org/2009/explain">                                    +
+   <Query>                                                                                   +
+     <Plan>                                                                                  +
+       <Node-Type>Hash Join</Node-Type>                                                      +
+       <Join-Type>Inner</Join-Type>                                                          +
+--?       <Startup-Cost>.*
+--?       <Total-Cost>.*
+--?       <Plan-Rows>.*
+--?       <Plan-Width>.*
+       <Actual-Rows>0</Actual-Rows>                                                          +
+       <Actual-Loops>1</Actual-Loops>                                                        +
+       <Hash-Cond>(llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)</Hash-Cond>+
+       <Plans>                                                                               +
+         <Plan>                                                                              +
+           <Node-Type>Seq Scan</Node-Type>                                                   +
+           <Parent-Relationship>Outer</Parent-Relationship>                                  +
+           <Relation-Name>llt_show_datanode_buffers_1</Relation-Name>                        +
+           <Alias>llt_show_datanode_buffers_1</Alias>                                        +
+--?           <Startup-Cost>.*
+--?           <Total-Cost>.*
+--?           <Plan-Rows>.*
+--?           <Plan-Width>.*
+           <Actual-Rows>1</Actual-Rows>                                                      +
+           <Actual-Loops>1</Actual-Loops>                                                    +
+         </Plan>                                                                             +
+         <Plan>                                                                              +
+           <Node-Type>Hash</Node-Type>                                                       +
+           <Parent-Relationship>Inner</Parent-Relationship>                                  +
+--?           <Startup-Cost>.*
+--?           <Total-Cost>.*
+--?           <Plan-Rows>.*
+--?           <Plan-Width>.*
+           <Actual-Rows>0</Actual-Rows>                                                      +
+           <Actual-Loops>1</Actual-Loops>                                                    +
+           <Hash-Buckets>32768</Hash-Buckets>                                                +
+           <Hash-Batches>1</Hash-Batches>                                                    +
+           <Original-Hash-Batches>1</Original-Hash-Batches>                                  +
+           <Peak-Memory-Usage>0</Peak-Memory-Usage>                                          +
+           <Plans>                                                                           +
+             <Plan>                                                                          +
+               <Node-Type>Seq Scan</Node-Type>                                               +
+               <Parent-Relationship>Outer</Parent-Relationship>                              +
+               <Relation-Name>llt_show_datanode_buffers</Relation-Name>                      +
+               <Alias>llt_show_datanode_buffers</Alias>                                      +
+--?               <Startup-Cost>.*
+--?               <Total-Cost>.*
+--?               <Plan-Rows>.*
+--?               <Plan-Width>.*
+               <Actual-Rows>0</Actual-Rows>                                                  +
+               <Actual-Loops>1</Actual-Loops>                                                +
+               <Filter>(q1 &gt; 1000)</Filter>                                               +
+               <Rows-Removed-by-Filter>14196</Rows-Removed-by-Filter>                        +
+             </Plan>                                                                         +
+           </Plans>                                                                          +
+         </Plan>                                                                             +
+       </Plans>                                                                              +
+     </Plan>                                                                                 +
+     <Triggers>                                                                              +
+     </Triggers>                                                                             +
+--?     <Total-Runtime>.*
+   </Query>                                                                                  +
+ </explain>
+(1 row)
+
+explain (analyze on, detail on,format xml,cpu  on) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_2 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_2.q1 and llt_show_datanode_buffers.q1 > 1000;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ <explain xmlns="http://www.postgresql.org/2009/explain">                                    +
+   <Query>                                                                                   +
+     <Plan>                                                                                  +
+       <Node-Type>Hash Join</Node-Type>                                                      +
+       <Join-Type>Inner</Join-Type>                                                          +
+--?       <Startup-Cost>.*
+--?       <Total-Cost>.*
+--?       <Plan-Rows>.*
+--?       <Plan-Width>.*
+--?       <Actual-Startup-Time>.*
+--?       <Actual-Total-Time>.*
+       <Actual-Rows>0</Actual-Rows>                                                          +
+       <Actual-Loops>1</Actual-Loops>                                                        +
+       <Hash-Cond>(llt_show_datanode_buffers.q2 = llt_show_datanode_buffers_2.q1)</Hash-Cond>+
+       <Exclusive-Cycles-Per-Row>0</Exclusive-Cycles-Per-Row>                                +
+--?       <Exclusive-Cycles>.*
+--?       <Inclusive-Cycles>.*
+       <Plans>                                                                               +
+         <Plan>                                                                              +
+           <Node-Type>Seq Scan</Node-Type>                                                   +
+           <Parent-Relationship>Outer</Parent-Relationship>                                  +
+           <Relation-Name>llt_show_datanode_buffers</Relation-Name>                          +
+           <Alias>llt_show_datanode_buffers</Alias>                                          +
+--?           <Startup-Cost>.*
+--?           <Total-Cost>.*
+--?           <Plan-Rows>.*
+--?           <Plan-Width>.*
+--?           <Actual-Startup-Time>.*
+--?           <Actual-Total-Time>.*
+           <Actual-Rows>0</Actual-Rows>                                                      +
+           <Actual-Loops>1</Actual-Loops>                                                    +
+           <Filter>(q1 &gt; 1000)</Filter>                                                   +
+           <Rows-Removed-by-Filter>14196</Rows-Removed-by-Filter>                            +
+--?           <Exclusive-Cycles-Per-Row>.*
+--?           <Exclusive-Cycles>.*
+--?           <Inclusive-Cycles>.*
+         </Plan>                                                                             +
+         <Plan>                                                                              +
+           <Node-Type>Hash</Node-Type>                                                       +
+           <Parent-Relationship>Inner</Parent-Relationship>                                  +
+--?           <Startup-Cost>.*
+--?           <Total-Cost>.*
+--?           <Plan-Rows>.*
+--?           <Plan-Width>.*
+--?           <Actual-Startup-Time>.*
+--?           <Actual-Total-Time>.*
+           <Hash-Buckets>0</Hash-Buckets>                                                    +
+           <Hash-Batches>0</Hash-Batches>                                                    +
+           <Original-Hash-Batches>0</Original-Hash-Batches>                                  +
+           <Peak-Memory-Usage>0</Peak-Memory-Usage>                                          +
+           <Exclusive-Cycles-Per-Row>0</Exclusive-Cycles-Per-Row>                            +
+           <Exclusive-Cycles>0</Exclusive-Cycles>                                            +
+           <Inclusive-Cycles>0</Inclusive-Cycles>                                            +
+           <Plans>                                                                           +
+             <Plan>                                                                          +
+               <Node-Type>Seq Scan</Node-Type>                                               +
+               <Parent-Relationship>Outer</Parent-Relationship>                              +
+               <Relation-Name>llt_show_datanode_buffers_2</Relation-Name>                    +
+               <Alias>llt_show_datanode_buffers_2</Alias>                                    +
+--?               <Startup-Cost>.*
+--?               <Total-Cost>.*
+--?               <Plan-Rows>.*
+--?               <Plan-Width>.*
+--?               <Actual-Startup-Time>.*
+--?               <Actual-Total-Time>.*
+               <Exclusive-Cycles-Per-Row>0</Exclusive-Cycles-Per-Row>                        +
+               <Exclusive-Cycles>0</Exclusive-Cycles>                                        +
+               <Inclusive-Cycles>0</Inclusive-Cycles>                                        +
+             </Plan>                                                                         +
+           </Plans>                                                                          +
+         </Plan>                                                                             +
+       </Plans>                                                                              +
+     </Plan>                                                                                 +
+     <Triggers>                                                                              +
+     </Triggers>                                                                             +
+--?     <Total-Runtime>.*
+   </Query>                                                                                  +
+ </explain>
+(1 row)
+
+create table coalesce_test 
+(
+	a	int,
+	b	character varying(5)
+);
+insert into coalesce_test select generate_series(1,50),'ABC' from tmp_tb1_llt_coverage_atc;
+insert into coalesce_test select generate_series(1,50),'EGT' from tmp_tb1_llt_coverage_atc;
+analyze coalesce_test;
+explain select * from coalesce_test where coalesce(btrim(b), '')='ABC';
+                          QUERY PLAN                          
+--------------------------------------------------------------
+--? Seq Scan on coalesce_test  (cost=.* rows=.* width=.*)
+   Filter: (COALESCE(btrim((b)::text)) = 'ABC'::text)
+(2 rows)
+
+explain select * from coalesce_test where coalesce(ltrim(b), '')='ABC';
+                          QUERY PLAN                          
+--------------------------------------------------------------
+--? Seq Scan on coalesce_test  (cost=.* rows=.* width=.*)
+   Filter: (COALESCE(ltrim((b)::text)) = 'ABC'::text)
+(2 rows)
+
+explain select * from coalesce_test where coalesce(rtrim(b), '')='EGT';
+                          QUERY PLAN                          
+--------------------------------------------------------------
+--? Seq Scan on coalesce_test  (cost=.* rows=.* width=.*)
+   Filter: (COALESCE(rtrim((b)::text)) = 'EGT'::text)
+(2 rows)
+
+explain select * from coalesce_test where rtrim(coalesce(b, ''))='EGT';
+                          QUERY PLAN                          
+--------------------------------------------------------------
+--? Seq Scan on coalesce_test  (cost=.* rows=.* width=.*)
+   Filter: (rtrim((COALESCE(b))::text) = 'EGT'::text)
+(2 rows)
+
+explain select * from coalesce_test where coalesce(b, a||'1')='ABC'; 
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+--? Seq Scan on coalesce_test  (cost=.* rows=.* width=.*)
+   Filter: ((COALESCE(b, (((a)::text || '1'::text))::character varying))::text = 'ABC'::text)
+(2 rows)
+
+explain select * from coalesce_test where ltrim(coalesce(b, ''))='ABC';
+                          QUERY PLAN                          
+--------------------------------------------------------------
+--? Seq Scan on coalesce_test  (cost=.* rows=.* width=.*)
+   Filter: (ltrim((COALESCE(b))::text) = 'ABC'::text)
+(2 rows)
+
+explain select * from coalesce_test where coalesce(cast('12.3' as text),b)='ABC';
+                QUERY PLAN                
+------------------------------------------
+--? Result  (cost=.* rows=.* width=.*)
+   One-Time Filter: false
+(2 rows)
+
+explain select * from coalesce_test where coalesce(cast(b as varchar(10)),'1')='ABC';
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+--? Seq Scan on coalesce_test  (cost=.* rows=.* width=.*)
+   Filter: ((COALESCE((b)::character varying(10), '1'::character varying))::text = 'ABC'::text)
+(2 rows)
+
+explain select * from coalesce_test where coalesce(b::text,'1')='ABC';
+                          QUERY PLAN                          
+--------------------------------------------------------------
+--? Seq Scan on coalesce_test  (cost=.* rows=.* width=.*)
+   Filter: (COALESCE((b)::text, '1'::text) = 'ABC'::text)
+(2 rows)
+
+drop table  coalesce_test;
+set enable_hashjoin=on;
+set enable_nestloop=on;
+set enable_mergejoin=on;
+drop table llt_show_datanode_buffers;
+drop table llt_show_datanode_buffers_1;
+-- test explain analyze
+--create table foo_analyze(c int ,d text,e bool,f numeric);
+--PREPARE fooplan (int, text, bool, numeric) AS
+--INSERT INTO foo_analyze VALUES($1, $2, $3, $4);
+--explain analyze EXECUTE fooplan(1, 'Hunter Valley', 't', 200.00);
+--select * from foo_analyze;
+--drop table foo_analyze;
+--?drop table tmp_tb1_llt_coverage_atc;.*

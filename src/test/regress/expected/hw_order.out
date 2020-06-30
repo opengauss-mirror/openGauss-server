@@ -1,0 +1,225 @@
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+SET client_encoding TO UTF8;
+CREATE TABLE order_cn_table(cn VARCHAR(80), sort INTEGER);
+INSERT INTO order_cn_table VALUES('华',28);
+INSERT INTO order_cn_table VALUES('怎',27);
+INSERT INTO order_cn_table VALUES('贼',26);
+INSERT INTO order_cn_table VALUES('以',25);
+INSERT INTO order_cn_table VALUES('希',24);
+INSERT INTO order_cn_table VALUES('我',23);
+INSERT INTO order_cn_table VALUES('提',22);
+INSERT INTO order_cn_table VALUES('疼',21);
+INSERT INTO order_cn_table VALUES('思',20);
+INSERT INTO order_cn_table VALUES('人',19);
+INSERT INTO order_cn_table VALUES('其',18);
+INSERT INTO order_cn_table VALUES('皮',17);
+INSERT INTO order_cn_table VALUES('哦',16);
+INSERT INTO order_cn_table VALUES('你',15);
+INSERT INTO order_cn_table VALUES('米',14);
+INSERT INTO order_cn_table VALUES('绿',13);
+INSERT INTO order_cn_table VALUES('路',12);
+INSERT INTO order_cn_table VALUES('力',11);
+INSERT INTO order_cn_table VALUES('看',10);
+INSERT INTO order_cn_table VALUES('及',9);
+INSERT INTO order_cn_table VALUES('好',8);
+INSERT INTO order_cn_table VALUES('个',7);
+INSERT INTO order_cn_table VALUES('飞',6);
+INSERT INTO order_cn_table VALUES('额',5);
+INSERT INTO order_cn_table VALUES('第',4);
+INSERT INTO order_cn_table VALUES('次',3);
+INSERT INTO order_cn_table VALUES('比',2);
+INSERT INTO order_cn_table VALUES('爱',1);
+SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'NLS_SORT = SCHINESE_PINYIN_M');
+ cn | sort 
+----+------
+ 爱 |    1
+ 比 |    2
+ 次 |    3
+ 第 |    4
+ 额 |    5
+ 飞 |    6
+ 个 |    7
+ 好 |    8
+ 华 |   28
+ 及 |    9
+ 看 |   10
+ 力 |   11
+ 路 |   12
+ 绿 |   13
+ 米 |   14
+ 你 |   15
+ 哦 |   16
+ 皮 |   17
+ 其 |   18
+ 人 |   19
+ 思 |   20
+ 疼 |   21
+ 提 |   22
+ 我 |   23
+ 希 |   24
+ 以 |   25
+ 贼 |   26
+ 怎 |   27
+(28 rows)
+
+SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'NLS_SORT = generic_m_ci');
+ cn | sort 
+----+------
+ 爱 |    1
+ 比 |    2
+ 次 |    3
+ 第 |    4
+ 额 |    5
+ 飞 |    6
+ 个 |    7
+ 好 |    8
+ 华 |   28
+ 及 |    9
+ 看 |   10
+ 力 |   11
+ 路 |   12
+ 绿 |   13
+ 米 |   14
+ 你 |   15
+ 哦 |   16
+ 皮 |   17
+ 其 |   18
+ 人 |   19
+ 思 |   20
+ 疼 |   21
+ 提 |   22
+ 我 |   23
+ 希 |   24
+ 以 |   25
+ 贼 |   26
+ 怎 |   27
+(28 rows)
+
+SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'NLS_SORT = SCHINESE');
+ERROR:  Sort method NLS_SORT = SCHINESE  is not supported!
+SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'nls_sort = schinese_pinyin_m') desc nulls first;
+ cn | sort 
+----+------
+ 怎 |   27
+ 贼 |   26
+ 以 |   25
+ 希 |   24
+ 我 |   23
+ 提 |   22
+ 疼 |   21
+ 思 |   20
+ 人 |   19
+ 其 |   18
+ 皮 |   17
+ 哦 |   16
+ 你 |   15
+ 米 |   14
+ 绿 |   13
+ 路 |   12
+ 力 |   11
+ 看 |   10
+ 及 |    9
+ 华 |   28
+ 好 |    8
+ 个 |    7
+ 飞 |    6
+ 额 |    5
+ 第 |    4
+ 次 |    3
+ 比 |    2
+ 爱 |    1
+(28 rows)
+
+SELECT * FROM order_cn_table t ORDER BY NLSSORT(t.cn, 'nls_sort = schinese_pinyin_m') asc nulls last;
+ cn | sort 
+----+------
+ 爱 |    1
+ 比 |    2
+ 次 |    3
+ 第 |    4
+ 额 |    5
+ 飞 |    6
+ 个 |    7
+ 好 |    8
+ 华 |   28
+ 及 |    9
+ 看 |   10
+ 力 |   11
+ 路 |   12
+ 绿 |   13
+ 米 |   14
+ 你 |   15
+ 哦 |   16
+ 皮 |   17
+ 其 |   18
+ 人 |   19
+ 思 |   20
+ 疼 |   21
+ 提 |   22
+ 我 |   23
+ 希 |   24
+ 以 |   25
+ 贼 |   26
+ 怎 |   27
+(28 rows)
+
+SELECT * FROM order_cn_table ORDER BY NLSSORT(decode(cn,'0','0',cn), 'nls_sort = schinese_pinyin_m') asc nulls last;
+ cn | sort 
+----+------
+ 爱 |    1
+ 比 |    2
+ 次 |    3
+ 第 |    4
+ 额 |    5
+ 飞 |    6
+ 个 |    7
+ 好 |    8
+ 华 |   28
+ 及 |    9
+ 看 |   10
+ 力 |   11
+ 路 |   12
+ 绿 |   13
+ 米 |   14
+ 你 |   15
+ 哦 |   16
+ 皮 |   17
+ 其 |   18
+ 人 |   19
+ 思 |   20
+ 疼 |   21
+ 提 |   22
+ 我 |   23
+ 希 |   24
+ 以 |   25
+ 贼 |   26
+ 怎 |   27
+(28 rows)
+
+DROP TABLE order_cn_table;
+create table order_cn_table(cn varchar(10));
+insert into order_cn_table values('Aa');
+insert into order_cn_table values('AB');
+SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'nls_sort = SCHINESE_PINYIN_M');
+ cn 
+----
+ Aa
+ AB
+(2 rows)
+
+explain (verbose, costs off, nodes off) SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'nls_sort = SCHINESE_PINYIN_M');
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Sort
+   Output: cn, (convert_to_nocase((cn)::text, 'gbk'::name))
+   Sort Key: (convert_to_nocase((order_cn_table.cn)::text, 'gbk'::name))
+   ->  Seq Scan on public.order_cn_table
+         Output: cn, convert_to_nocase((cn)::text, 'gbk'::name)
+(5 rows)
+
+DROP TABLE order_cn_table;

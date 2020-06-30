@@ -1,0 +1,17 @@
+<refentry id="SQL-DROP_SYNONYM">
+<refmeta>
+<refentrytitle>DROP SYNONYM</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP SYNONYM</refname>
+<refpurpose>remove a synonym</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP SYNONYM [ IF EXISTS ] synonym_name [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>
+

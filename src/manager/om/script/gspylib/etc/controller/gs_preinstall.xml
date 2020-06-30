@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8" ?>
+
+<gs_preinstall desc="prepare installation environment">
+    <scene name="OLAP" desc="business flow of LibrA/Elk/DWS">
+        <configuration>
+            <reentry>ture/false</reentry>
+            <auto_rollback>ture/false</auto_rollback>
+            <concurrency_list></concurrency_list>
+        </configuration>
+
+        <flow_list>
+           <flow id="0001">
+               <module>gspylib.common.ParameterParsecheck</module>
+               <function>ParameterCommandLine</function>
+               <scope>current</scope>
+               <expect>0</expect>
+               <block>block</block>
+               <rollback_module>None</rollback_module>
+               <rollback_function>None</rollback_function>
+               <rollback_scope>all</rollback_scope>
+               <rollback_expect>0</rollback_expect>
+               <rollback_block>non-block</rollback_block>
+           </flow>
+
+           <flow id="0002">
+               <module>gspylib.common.ParameterParsecheck</module>
+               <function>ParameterCommandLine</function>
+               <scope>current</scope>
+               <expect>0</expect>
+               <block>block</block>
+               <rollback_module>None</rollback_module>
+               <rollback_function>None</rollback_function>
+               <rollback_scope>all</rollback_scope>
+               <rollback_expect>0</rollback_expect>
+               <rollback_block>non-block</rollback_block>
+           </flow>
+
+           <flow id="0003">
+               <module></module>
+               <function></function>
+               <scope></scope>
+               <expect></expect>
+               <block></block>
+               <rollback_module></rollback_module>
+               <rollback_function></rollback_function>
+               <rollback_scope></rollback_scope>
+               <rollback_expect></rollback_expect>
+               <rollback_block></rollback_block>
+           </flow>
+        </flow_list>
+    </scene>
+
+    <scene name="single" desc="business flow of single cluster">
+        <configuration>
+            <reentry>ture/false</reentry>
+            <auto_rollback>ture/false</auto_rollback>
+            <concurrency_list></concurrency_list>
+        </configuration>
+
+        <flow_list>
+            <flow id="">
+                <module></module>
+                <function></function>
+                <scope></scope>
+                <expect></expect>
+                <block></block>
+                <rollback_module></rollback_module>
+                <rollback_function></rollback_function>
+                <rollback_scope></rollback_scope>
+                <rollback_expect></rollback_expect>
+                <rollback_block></rollback_block>
+            </flow>
+        </flow_list>
+    </scene>
+</gs_preinstall>

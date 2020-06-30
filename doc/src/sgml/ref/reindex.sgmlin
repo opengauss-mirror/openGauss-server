@@ -1,0 +1,18 @@
+<refentry id="SQL-REINDEX">
+<refmeta>
+<refentrytitle>REINDEX</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>REINDEX</refname>
+<refpurpose>rebuild indexes</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+REINDEX { INDEX | [INTERNAL] TABLE | DATABASE | SYSTEM } name [ FORCE ];
+REINDEX  { INDEX | [INTERNAL] TABLE  } name
+    PARTITION partition_name [ FORCE  ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

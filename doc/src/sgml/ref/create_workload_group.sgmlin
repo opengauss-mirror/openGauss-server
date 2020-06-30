@@ -1,0 +1,17 @@
+<refentry id="SQL-CREATE_WORKLOAD_GROUP">
+<refmeta>
+<refentrytitle>CREATE WORKLOAD GROUP</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE WORKLOAD GROUP</refname>
+<refpurpose>define a new workload group</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE WORKLOAD GROUP wg_name
+     [ USING RESOURCE POOL pool_name [ WITH ( ACT_STATEMENTS = counts) ] ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

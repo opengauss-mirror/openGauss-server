@@ -1,0 +1,17 @@
+--
+---
+--- set noescaping to be 'true' for exporting
+---
+CREATE TABLE NOESCAPING_TEST(id int,name text);
+--- noescaping isn't allowed for fixed mode
+SELECT * FROM NOESCAPING_TEST;
+ id | name 
+----+------
+(0 rows)
+
+DROP TABLE NOESCAPING_TEST;
+SELECT pclocatortype FROM pgxc_class WHERE pcrelid=(SELECT oid FROM pg_class WHERE relname='ext_lineitem_shared');
+ pclocatortype 
+---------------
+(0 rows)
+

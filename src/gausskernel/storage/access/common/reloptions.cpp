@@ -1,0 +1,2036 @@
+/* -------------------------------------------------------------------------
+ *
+ * reloptions.cpp
+ *	  Core support for relation options (pg_class.reloptions)
+ *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1994, Regents of the University of California
+ *
+ *
+ * IDENTIFICATION
+ *	  src/gausskernel/storage/access/common/reloptions.cpp
+ *
+ * -------------------------------------------------------------------------
+ */
+#include "postgres.h"
+#include "knl/knl_variable.h"
+
+#include "access/gist_private.h"
+#include "access/hash.h"
+#include "access/nbtree.h"
+#include "access/reloptions.h"
+#include "access/spgist.h"
+#include "catalog/pg_ts_parser.h"
+#include "catalog/pg_type.h"
+#include "commands/defrem.h"
+#include "commands/tablespace.h"
+#include "nodes/makefuncs.h"
+#include "pgxc/redistrib.h"
+#include "tsearch/ts_public.h"
+#include "utils/array.h"
+#include "utils/attoptcache.h"
+#include "utils/builtins.h"
+#include "utils/datetime.h"
+#include "utils/guc.h"
+#include "utils/memutils.h"
+#include "utils/rel.h"
+#include "utils/rel_gs.h"
+
+/*
+ * Contents of pg_class.reloptions
+ *
+ * To add an option:
+ *
+ * (i) decide on a type (integer, real, bool, string), name, default value,
+ * upper and lower bounds (if applicable); for strings, consider a validation
+ * routine.
+ * (ii) add a record below (or use add_<type>_reloption).
+ * (iii) add it to the appropriate options struct (perhaps StdRdOptions)
+ * (iv) add it to the appropriate handling routine (perhaps
+ * default_reloptions)
+ * (v) don't forget to document the option
+ *
+ * Note that we don't handle "oids" in relOpts because it is handled by interpretOidsOption().
+ */
+/* value check functions for reloptions */
+static void ValidateStrOptOrientation(const char* val);
+static void ValidateStrOptCompression(const char* val);
+static void  ValidateStrOptTTL(const char *val);
+static void  ValidateStrOptPeriod(const char *val);
+static void ValidateStrOptVersion(const char* val);
+static void ValidateStrOptSpcFileSystem(const char* val);
+static void ValidateStrOptSpcAddress(const char* val);
+static void ValidateStrOptSpcCfgPath(const char* val);
+static void ValidateStrOptSpcStorePath(const char* val);
+static void check_append_mode(const char* val);
+
+static relopt_bool boolRelOpts[] = {
+    {{"autovacuum_enabled", "Enables autovacuum in this relation", RELOPT_KIND_HEAP | RELOPT_KIND_TOAST}, true},
+    {{"user_catalog_table",
+        "Declare a table as an additional catalog table, e.g. for the purpose of logical replication",
+        RELOPT_KIND_HEAP}, false},
+    {{"fastupdate", "Enables \"fast update\" feature for this GIN index", RELOPT_KIND_GIN}, true},
+    {{"security_barrier", "View acts as a row security barrier", RELOPT_KIND_VIEW}, false},
+    {{"enable_rowsecurity", "Enable row level security or not", RELOPT_KIND_HEAP}, false},
+    {{"force_rowsecurity", "Row security forced for owners or not", RELOPT_KIND_HEAP}, false},
+    {{"punctuation_ignore",
+        "Ignore punctuation in zhparser/N-gram text search praser", RELOPT_KIND_ZHPARSER | RELOPT_KIND_NPARSER}, true},
+    {{"grapsymbol_ignore", "ignore grapsymbol in N-gram text search praser", RELOPT_KIND_NPARSER}, false},
+    {{"seg_with_duality",
+          "segmente interfacing idle words with duality in zhparser text search praser", RELOPT_KIND_ZHPARSER}, false},
+    {{"multi_short", "segmente long words to short words in zhparser text search praser", RELOPT_KIND_ZHPARSER}, true},
+    {{"multi_duality", "segmente long words with duality in zhparser text search praser", RELOPT_KIND_ZHPARSER}, false},
+    {{"multi_zmain", "segmente main word from long words in zhparser text search praser", RELOPT_KIND_ZHPARSER}, false},
+    {{"multi_zall", "segmente all word from long words in zhparser text search praser", RELOPT_KIND_ZHPARSER}, false},
+    {{"ignore_enable_hadoop_env", "ignore enable_hadoop_env option", RELOPT_KIND_HEAP}, false},
+    {{"hashbucket", "Enables hashbucket in this relation", RELOPT_KIND_HEAP}, false},
+    /* list terminator */
+    {{NULL}}};
+
+static relopt_int intRelOpts[] = {{{"fillfactor", "Packs table pages only to this percentage", RELOPT_KIND_HEAP},
+                                      HEAP_DEFAULT_FILLFACTOR,
+                                      HEAP_MIN_FILLFACTOR,
+                                      100},
+    {{"fillfactor", "Packs btree index pages only to this percentage", RELOPT_KIND_BTREE},
+        BTREE_DEFAULT_FILLFACTOR,
+        BTREE_MIN_FILLFACTOR,
+        100},
+    {{"fillfactor", "Packs hash index pages only to this percentage", RELOPT_KIND_HASH},
+        HASH_DEFAULT_FILLFACTOR,
+        HASH_MIN_FILLFACTOR,
+        100},
+    {{"fillfactor", "Packs gist index pages only to this percentage", RELOPT_KIND_GIST},
+        GIST_DEFAULT_FILLFACTOR,
+        GIST_MIN_FILLFACTOR,
+        100},
+    {{"fillfactor", "Packs spgist index pages only to this percentage", RELOPT_KIND_SPGIST},
+        SPGIST_DEFAULT_FILLFACTOR,
+        SPGIST_MIN_FILLFACTOR,
+        100},
+    {{"autovacuum_vacuum_threshold",
+         "Minimum number of tuple updates or deletes prior to vacuum",
+         RELOPT_KIND_HEAP | RELOPT_KIND_TOAST},
+        -1,
+        0,
+        INT_MAX},
+    {{"autovacuum_analyze_threshold",
+         "Minimum number of tuple inserts, updates or deletes prior to analyze",
+         RELOPT_KIND_HEAP},
+        -1,
+        0,
+        INT_MAX},
+    {{"autovacuum_vacuum_cost_delay",
+         "Vacuum cost delay in milliseconds, for autovacuum",
+         RELOPT_KIND_HEAP | RELOPT_KIND_TOAST},
+        -1,
+        0,
+        100},
+    {{"autovacuum_vacuum_cost_limit",
+         "Vacuum cost amount available before napping, for autovacuum",
+         RELOPT_KIND_HEAP | RELOPT_KIND_TOAST},
+        -1,
+        1,
+        10000},
+    {{"max_batchrow", "the upmost rows at each batch inserting", RELOPT_KIND_HEAP | RELOPT_KIND_PSORT},
+        RelDefaultFullCuSize,
+        10 * BatchMaxSize,
+        RelMaxFullCuSize},
+    {{"deltarow_threshold",
+         "if smaller than it, insert into delta table; otherwise insert into normal table",
+         RELOPT_KIND_HEAP | RELOPT_KIND_PSORT},
+        RelDefaultDletaRows,
+        0,
+        9999},
+    {{"partial_cluster_rows", "row numbers of partial cluster feature", RELOPT_KIND_HEAP | RELOPT_KIND_PSORT},
+        RelDefaultPartialClusterRows,
+        -1,
+        0x7fffffff},
+    {{"internal_mask", "internal mask", RELOPT_KIND_HEAP | RELOPT_KIND_PSORT}, 0, 0, 0x7fffffff},
+    {{"gin_pending_list_limit", "Maximum size of the pending list for this GIN index, in kilobytes.", RELOPT_KIND_GIN},
+        -1,
+        64,
+        MAX_KILOBYTES},
+    {{"gram_size", "Gram size for N-gram text search praser.", RELOPT_KIND_NPARSER}, 2, 1, 4},
+
+    /* COMPRESSLEVEL option */
+    {
+        {"compresslevel",
+            "column relation's compress level",
+            /* in fact PSORT is also a heap relation */
+            RELOPT_KIND_HEAP | RELOPT_KIND_PSORT},
+        REL_MIN_COMPRESSLEVEL, /* default value of compress level */
+        REL_MIN_COMPRESSLEVEL, /* min value of compress level */
+        REL_MAX_COMPRESSLEVEL  /* max value of compress level */
+    },
+
+    /* append_mode_internal option */
+    {
+        {"append_mode_internal",
+            "internal value for append_mode",
+            /* in fact PSORT is also a heap relation */
+            RELOPT_KIND_HEAP | RELOPT_KIND_PSORT},
+        REDIS_REL_NORMAL,     /* not using append mode */
+        REDIS_REL_INVALID,    /* min value of append mode */
+        REDIS_REL_DESTINATION /* REDIS_REL_DESTINATION is the max value of append mode that can set by users. */
+    },
+
+    {{"rel_cn_oid", "rel oid on coordinator", RELOPT_KIND_HEAP}, 0, 0, 2000000000},
+
+    /* list terminator */
+    {{NULL}}};
+
+static relopt_int64 int64_rel_opts[] = {{{"autovacuum_freeze_min_age",
+                                            "Minimum age at which VACUUM should freeze a table row, for autovacuum",
+                                            RELOPT_KIND_HEAP | RELOPT_KIND_TOAST,
+                                            ShareUpdateExclusiveLock},
+                                            INT64CONST(-1),
+                                            INT64CONST(0),
+                                            INT64CONST(1000000000)},
+    {{"autovacuum_freeze_max_age", "Age at which to autovacuum a table to prevent excessive clog",
+        RELOPT_KIND_HEAP | RELOPT_KIND_TOAST,
+        ShareUpdateExclusiveLock},
+        INT64CONST(-1),
+        INT64CONST(100000),
+        INT64CONST(2000000000)},
+    {{"autovacuum_freeze_table_age", "Age at which VACUUM should perform a full table sweep to freeze row versions",
+        RELOPT_KIND_HEAP | RELOPT_KIND_TOAST,
+        ShareUpdateExclusiveLock},
+        INT64CONST(-1),
+        INT64CONST(0),
+        INT64CONST(2000000000)},
+    /* list terminator */
+    {{NULL}}};
+
+static relopt_real real_rel_opts[] = {
+    {{"autovacuum_vacuum_scale_factor",
+        "Number of tuple updates or deletes prior to vacuum as a fraction of reltuples",
+        RELOPT_KIND_HEAP | RELOPT_KIND_TOAST},
+        -1,
+        0.0,
+        100.0},
+    {{"autovacuum_analyze_scale_factor",
+        "Number of tuple inserts, updates or deletes prior to analyze as a fraction of reltuples",
+        RELOPT_KIND_HEAP},
+        -1,
+        0.0,
+        100.0},
+    {{"seq_page_cost",
+        "Sets the planner's estimate of the cost of a sequentially fetched disk page.",
+        RELOPT_KIND_TABLESPACE},
+        -1,
+        0.0,
+        DBL_MAX},
+    {{"random_page_cost",
+        "Sets the planner's estimate of the cost of a nonsequentially fetched disk page.",
+        RELOPT_KIND_TABLESPACE},
+        -1,
+        0.0,
+        DBL_MAX},
+    {{"n_distinct",
+        "Sets the planner's estimate of the number of distinct values appearing in a column (excluding child "
+        "relations).",
+        RELOPT_KIND_ATTRIBUTE},
+        0,
+        -1.0,
+        DBL_MAX},
+    {{"n_distinct_inherited",
+        "Sets the planner's estimate of the number of distinct values appearing in a column (including child "
+        "relations).",
+        RELOPT_KIND_ATTRIBUTE},
+        0,
+        -1.0,
+        DBL_MAX},
+    /* list terminator */
+    {{NULL}}};
+
+static relopt_string string_rel_opts[] = {
+    {{"split_flag", "split flag for pound text search praser.", RELOPT_KIND_PPARSER}, 2, false, NULL, "#"},
+    {{"buffering", "Enables buffering build for this GiST index", RELOPT_KIND_GIST},
+        4,
+        false,
+        gistValidateBufferingOption,
+        "auto"},
+
+    {
+        {"orientation", "row-store, col-store, orc-store or timeseries", RELOPT_KIND_HEAP},
+        10,
+        false,
+        ValidateStrOptOrientation,
+        ORIENTATION_ROW,
+    },
+    {
+        {
+            "ttl",
+            "time to live for timeseries data management",
+            RELOPT_KIND_HEAP
+        },
+        9,
+        false,
+        ValidateStrOptTTL,
+        TIME_UNDEFINED,
+    },
+    {
+        {
+            "period",
+            "partition range for timeseries data management",
+            RELOPT_KIND_HEAP
+        },
+        9,
+        false,
+        ValidateStrOptPeriod,
+        TIME_UNDEFINED,
+    },
+    {
+        {"version", "store version", RELOPT_KIND_HEAP},
+        4,
+        false,
+        ValidateStrOptVersion,
+        ORC_VERSION_012,
+    },
+
+    {
+        {"compression", "which compression level applied to, or not compressed", RELOPT_KIND_HEAP},
+        6,
+        false,
+        ValidateStrOptCompression,
+        COMPRESSION_LOW,
+    },
+    {
+        {"filesystem", "which filesystem applied", RELOPT_KIND_TABLESPACE},
+        7,
+        false,
+        ValidateStrOptSpcFileSystem,
+        FILESYSTEM_GENERAL,
+    },
+    {
+        {"address", "which address server applied", RELOPT_KIND_TABLESPACE},
+        6,
+        false,
+        ValidateStrOptSpcAddress,
+        "",
+    },
+    {
+        {"cfgpath", "config information path", RELOPT_KIND_TABLESPACE},
+        6,
+        false,
+        ValidateStrOptSpcCfgPath,
+        "",
+    },
+    {
+        {"storepath", "store information path", RELOPT_KIND_TABLESPACE},
+        6,
+        false,
+        ValidateStrOptSpcStorePath,
+        "",
+    },
+    {
+        {"append_mode", "set relation insert under append mode", RELOPT_KIND_HEAP},
+        6,
+        false,
+        check_append_mode,
+        "",
+    },
+
+    {
+        {"start_ctid_internal", "set relation start ctid during redistribution", RELOPT_KIND_HEAP},
+        6,
+        false,
+        NULL,
+        "",
+    },
+
+    {
+        {"end_ctid_internal", "set relation end ctid during redistribution", RELOPT_KIND_HEAP},
+        6,
+        false,
+        NULL,
+        "",
+    },
+
+    {
+        {"merge_list", "set merge_list as bucketid1:start1:end1;bucketid1:start1:end1...", RELOPT_KIND_HEAP },
+        0,
+        true,
+        NULL,
+        "",
+    },
+    /* list terminator */
+    {{NULL}}};
+
+static void initialize_reloptions(void);
+static void parse_one_reloption(relopt_value* option, const char* text_str, int text_len, bool validate);
+
+/*
+ * initialize_reloptions
+ *		initialization routine, must be called before parsing
+ *
+ * Initialize the relOpts array and fill each variable's type and name length.
+ */
+static void initialize_reloptions(void)
+{
+    int i;
+    int j;
+
+    j = 0;
+    for (i = 0; boolRelOpts[i].gen.name; i++)
+        j++;
+    for (i = 0; intRelOpts[i].gen.name; i++)
+        j++;
+    for (i = 0; int64_rel_opts[i].gen.name; i++)
+        j++;
+    for (i = 0; real_rel_opts[i].gen.name; i++)
+        j++;
+    for (i = 0; string_rel_opts[i].gen.name; i++)
+        j++;
+    j += t_thrd.relopt_cxt.num_custom_options;
+
+    if (t_thrd.relopt_cxt.relOpts)
+        pfree(t_thrd.relopt_cxt.relOpts);
+    t_thrd.relopt_cxt.relOpts = (relopt_gen**)MemoryContextAlloc(t_thrd.top_mem_cxt, (j + 1) * sizeof(relopt_gen*));
+
+    j = 0;
+    for (i = 0; boolRelOpts[i].gen.name; i++) {
+        t_thrd.relopt_cxt.relOpts[j] = &boolRelOpts[i].gen;
+        t_thrd.relopt_cxt.relOpts[j]->type = RELOPT_TYPE_BOOL;
+        t_thrd.relopt_cxt.relOpts[j]->namelen = strlen(t_thrd.relopt_cxt.relOpts[j]->name);
+        j++;
+    }
+
+    for (i = 0; intRelOpts[i].gen.name; i++) {
+        t_thrd.relopt_cxt.relOpts[j] = &intRelOpts[i].gen;
+        t_thrd.relopt_cxt.relOpts[j]->type = RELOPT_TYPE_INT;
+        t_thrd.relopt_cxt.relOpts[j]->namelen = strlen(t_thrd.relopt_cxt.relOpts[j]->name);
+        j++;
+    }
+
+    for (i = 0; int64_rel_opts[i].gen.name; i++) {
+        t_thrd.relopt_cxt.relOpts[j] = &int64_rel_opts[i].gen;
+        t_thrd.relopt_cxt.relOpts[j]->type = RELOPT_TYPE_INT64;
+        t_thrd.relopt_cxt.relOpts[j]->namelen = strlen(t_thrd.relopt_cxt.relOpts[j]->name);
+        j++;
+    }
+
+    for (i = 0; real_rel_opts[i].gen.name; i++) {
+        t_thrd.relopt_cxt.relOpts[j] = &real_rel_opts[i].gen;
+        t_thrd.relopt_cxt.relOpts[j]->type = RELOPT_TYPE_REAL;
+        t_thrd.relopt_cxt.relOpts[j]->namelen = strlen(t_thrd.relopt_cxt.relOpts[j]->name);
+        j++;
+    }
+
+    for (i = 0; string_rel_opts[i].gen.name; i++) {
+        t_thrd.relopt_cxt.relOpts[j] = &string_rel_opts[i].gen;
+        t_thrd.relopt_cxt.relOpts[j]->type = RELOPT_TYPE_STRING;
+        t_thrd.relopt_cxt.relOpts[j]->namelen = strlen(t_thrd.relopt_cxt.relOpts[j]->name);
+        j++;
+    }
+
+    for (i = 0; i < t_thrd.relopt_cxt.num_custom_options; i++) {
+        t_thrd.relopt_cxt.relOpts[j] = t_thrd.relopt_cxt.custom_options[i];
+        j++;
+    }
+
+    /* add a list terminator */
+    t_thrd.relopt_cxt.relOpts[j] = NULL;
+
+    /* flag the work is complete */
+    t_thrd.relopt_cxt.need_initialization = false;
+}
+
+/*
+ * add_reloption_kind
+ *		Create a new relopt_kind value, to be used in custom reloptions by
+ *		user-defined AMs.
+ */
+relopt_kind add_reloption_kind(void)
+{
+    /* don't hand out the last bit so that the enum's behavior is portable */
+    if (t_thrd.relopt_cxt.last_assigned_kind >= RELOPT_KIND_MAX)
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("user-defined relation parameter types limit exceeded")));
+    t_thrd.relopt_cxt.last_assigned_kind <<= 1;
+    return (relopt_kind)t_thrd.relopt_cxt.last_assigned_kind;
+}
+
+/*
+ * add_reloption
+ *		Add an already-created custom reloption to the list, and recompute the
+ *		main parser table.
+ */
+static void add_reloption(relopt_gen* newoption)
+{
+    if (t_thrd.relopt_cxt.num_custom_options >= t_thrd.relopt_cxt.max_custom_options) {
+        MemoryContext oldcxt;
+
+        oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+
+        if (t_thrd.relopt_cxt.max_custom_options == 0) {
+            t_thrd.relopt_cxt.max_custom_options = 8;
+            t_thrd.relopt_cxt.custom_options =
+                (relopt_gen**)palloc(t_thrd.relopt_cxt.max_custom_options * sizeof(relopt_gen*));
+        } else {
+            t_thrd.relopt_cxt.max_custom_options *= 2;
+            t_thrd.relopt_cxt.custom_options = (relopt_gen**)repalloc(
+                t_thrd.relopt_cxt.custom_options, t_thrd.relopt_cxt.max_custom_options * sizeof(relopt_gen*));
+        }
+        (void)MemoryContextSwitchTo(oldcxt);
+    }
+    t_thrd.relopt_cxt.custom_options[t_thrd.relopt_cxt.num_custom_options++] = newoption;
+
+    t_thrd.relopt_cxt.need_initialization = true;
+}
+
+/*
+ * allocate_reloption
+ *		Allocate a new reloption and initialize the type-agnostic fields
+ *		(for types other than string)
+ */
+static relopt_gen* allocate_reloption(bits32 kinds, int type, const char* name, const char* desc)
+{
+    MemoryContext oldcxt;
+    size_t size;
+    relopt_gen* newoption = NULL;
+
+    oldcxt = MemoryContextSwitchTo(t_thrd.top_mem_cxt);
+
+    switch (type) {
+        case RELOPT_TYPE_BOOL:
+            size = sizeof(relopt_bool);
+            break;
+        case RELOPT_TYPE_INT:
+            size = sizeof(relopt_int);
+            break;
+        case RELOPT_TYPE_INT64:
+            size = sizeof(relopt_int64);
+            break;
+        case RELOPT_TYPE_REAL:
+            size = sizeof(relopt_real);
+            break;
+        case RELOPT_TYPE_STRING:
+            size = sizeof(relopt_string);
+            break;
+        default:
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported option type")));
+            return NULL; /* keep compiler quiet */
+    }
+
+    newoption = (relopt_gen*)palloc(size);
+
+    newoption->name = pstrdup(name);
+    if (desc != NULL)
+        newoption->desc = pstrdup(desc);
+    else
+        newoption->desc = NULL;
+    newoption->kinds = kinds;
+    newoption->namelen = strlen(name);
+    newoption->type = (relopt_type)type;
+
+    (void)MemoryContextSwitchTo(oldcxt);
+
+    return newoption;
+}
+
+/*
+ * add_bool_reloption
+ *		Add a new boolean reloption
+ */
+void add_bool_reloption(bits32 kinds, const char* name, const char* desc, bool default_val)
+{
+    relopt_bool* newoption = NULL;
+
+    newoption = (relopt_bool*)allocate_reloption(kinds, RELOPT_TYPE_BOOL, name, desc);
+    newoption->default_val = default_val;
+
+    add_reloption((relopt_gen*)newoption);
+}
+
+/*
+ * add_int_reloption
+ *		Add a new integer reloption
+ */
+void add_int_reloption(bits32 kinds, const char* name, const char* desc, int default_val, int min_val, int max_val)
+{
+    relopt_int* newoption = NULL;
+
+    newoption = (relopt_int*)allocate_reloption(kinds, RELOPT_TYPE_INT, name, desc);
+    newoption->default_val = default_val;
+    newoption->min = min_val;
+    newoption->max = max_val;
+
+    add_reloption((relopt_gen*)newoption);
+}
+
+/*
+ * add_int64_reloption
+ *		Add a new 64-bit integer reloption
+ */
+void add_int64_reloption(
+    bits32 kinds, const char* name, const char* desc, int64 default_val, int64 min_val, int64 max_val)
+{
+    relopt_int64* newoption = NULL;
+    newoption = (relopt_int64*)allocate_reloption(kinds, RELOPT_TYPE_INT64, name, desc);
+    newoption->default_val = default_val;
+    newoption->min = min_val;
+    newoption->max = max_val;
+    add_reloption((relopt_gen*)newoption);
+}
+
+/*
+ * add_real_reloption
+ *		Add a new float reloption
+ */
+void add_real_reloption(
+    bits32 kinds, const char* name, const char* desc, double default_val, double min_val, double max_val)
+{
+    relopt_real* newoption = NULL;
+
+    newoption = (relopt_real*)allocate_reloption(kinds, RELOPT_TYPE_REAL, name, desc);
+    newoption->default_val = default_val;
+    newoption->min = min_val;
+    newoption->max = max_val;
+
+    add_reloption((relopt_gen*)newoption);
+}
+
+/*
+ * add_string_reloption
+ *		Add a new string reloption
+ *
+ * "validator" is an optional function pointer that can be used to test the
+ * validity of the values.	It must elog(ERROR) when the argument string is
+ * not acceptable for the variable.  Note that the default value must pass
+ * the validation.
+ */
+void add_string_reloption(
+    bits32 kinds, const char* name, const char* desc, const char* default_val, validate_string_relopt validator)
+{
+    relopt_string* newoption = NULL;
+
+    /* make sure the validator/default combination is sane */
+    if (validator)
+        (validator)(default_val);
+
+    newoption = (relopt_string*)allocate_reloption(kinds, RELOPT_TYPE_STRING, name, desc);
+    newoption->validate_cb = validator;
+    if (default_val != NULL) {
+        newoption->default_val = MemoryContextStrdup(t_thrd.top_mem_cxt, default_val);
+        newoption->default_len = strlen(default_val);
+        newoption->default_isnull = false;
+    } else {
+        newoption->default_val = "";
+        newoption->default_len = 0;
+        newoption->default_isnull = true;
+    }
+
+    add_reloption((relopt_gen*)newoption);
+}
+
+/*
+ * Transform a relation options list (list of DefElem) into the text array
+ * format that is kept in pg_class.reloptions, including only those options
+ * that are in the passed namespace.  The output values do not include the
+ * namespace.
+ *
+ * This is used for three cases: CREATE TABLE/INDEX, ALTER TABLE SET, and
+ * ALTER TABLE RESET.  In the ALTER cases, oldOptions is the existing
+ * reloptions value (possibly NULL), and we replace or remove entries
+ * as needed.
+ *
+ * If ignoreOids is true, then we should ignore any occurrence of "oids"
+ * in the list (it will be or has been handled by interpretOidsOption()).
+ *
+ * Note that this is not responsible for determining whether the options
+ * are valid, but it does check that namespaces for all the options given are
+ * listed in validnsps.  The NULL namespace is always valid and need not be
+ * explicitly listed.  Passing a NULL pointer means that only the NULL
+ * namespace is valid.
+ *
+ * Both oldOptions and the result are text arrays (or NULL for "default"),
+ * but we declare them as Datums to avoid including array.h in reloptions.h.
+ */
+Datum transformRelOptions(
+    Datum old_options, List* def_list, const char* namspace, const char* const validnsps[], bool ignore_oids, bool is_reset)
+{
+    Datum result;
+    ArrayBuildState* astate = NULL;
+    ListCell* cell = NULL;
+
+    /* no change if empty list */
+    if (def_list == NIL)
+        return old_options;
+
+    /* We build new array using accumArrayResult */
+    astate = NULL;
+
+    /* Copy any oldOptions that aren't to be replaced */
+    if (PointerIsValid(DatumGetPointer(old_options))) {
+        ArrayType* array = DatumGetArrayTypeP(old_options);
+        Datum* oldoptions = NULL;
+        int noldoptions;
+        int i;
+
+        Assert(ARR_ELEMTYPE(array) == TEXTOID);
+
+        deconstruct_array(array, TEXTOID, -1, false, 'i', &oldoptions, NULL, &noldoptions);
+
+        for (i = 0; i < noldoptions; i++) {
+            text* oldoption = DatumGetTextP(oldoptions[i]);
+            char* text_str = VARDATA(oldoption);
+            int text_len = VARSIZE(oldoption) - VARHDRSZ;
+
+            /* Search for a match in defList */
+            foreach (cell, def_list) {
+                DefElem* def = (DefElem*)lfirst(cell);
+                int kw_len;
+
+                /* ignore if not in the same namespace */
+                if (namspace == NULL) {
+                    if (def->defnamespace != NULL)
+                        continue;
+                } else if (def->defnamespace == NULL)
+                    continue;
+                else if (pg_strcasecmp(def->defnamespace, namspace) != 0)
+                    continue;
+
+                kw_len = strlen(def->defname);
+                if (text_len > kw_len && text_str[kw_len] == '=' && pg_strncasecmp(text_str, def->defname, kw_len) == 0)
+                    break;
+            }
+            if (cell == NULL) {
+                /* No match, so keep old option */
+                astate = accumArrayResult(astate, oldoptions[i], false, TEXTOID, CurrentMemoryContext);
+            }
+        }
+
+        /* Free the memory used by array. */
+        if (DatumGetPointer(old_options) != DatumGetPointer(array)) {
+            pfree(array);
+        }
+        pfree(oldoptions);
+    }
+
+    /*
+     * If CREATE/SET, add new options to array; if RESET, just check that the
+     * user didn't say RESET (option=val).  (Must do this because the grammar
+     * doesn't enforce it.)
+     */
+    foreach (cell, def_list) {
+        DefElem* def = (DefElem*)lfirst(cell);
+
+        if (is_reset) {
+            if (def->arg != NULL)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("RESET must not include values for parameters")));
+        } else {
+            text* t = NULL;
+            const char* value = NULL;
+            Size len;
+            errno_t rc = EOK;
+
+            /*
+             * Error out if the namespace is not valid.  A NULL namespace is
+             * always valid.
+             */
+            if (def->defnamespace != NULL) {
+                bool valid = false;
+                int i;
+
+                if (validnsps) {
+                    for (i = 0; validnsps[i]; i++) {
+                        if (pg_strcasecmp(def->defnamespace, validnsps[i]) == 0) {
+                            valid = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!valid)
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("unrecognized parameter namespace \"%s\"", def->defnamespace)));
+            }
+
+            if (ignore_oids && pg_strcasecmp(def->defname, "oids") == 0)
+                continue;
+
+            /* ignore if not in the same namespace */
+            if (namspace == NULL) {
+                if (def->defnamespace != NULL)
+                    continue;
+            } else if (def->defnamespace == NULL)
+                continue;
+            else if (pg_strcasecmp(def->defnamespace, namspace) != 0)
+                continue;
+
+            /*
+             * Flatten the DefElem into a text string like "name=arg". If we
+             * have just "name", assume "name=true" is meant.  Note: the
+             * namespace is not output.
+             */
+            if (def->arg != NULL)
+                value = defGetString(def);
+            else
+                value = "true";
+            len = VARHDRSZ + strlen(def->defname) + 1 + strlen(value);
+            /* +1 leaves room for sprintf's trailing null */
+            t = (text*)palloc(len + 1);
+            SET_VARSIZE(t, len);
+            rc = sprintf_s(VARDATA(t), len + 1, "%s=%s", def->defname, value);
+            securec_check_ss(rc, "\0", "\0");
+            astate = accumArrayResult(astate, PointerGetDatum(t), false, TEXTOID, CurrentMemoryContext);
+        }
+    }
+
+    if (astate != NULL)
+        result = makeArrayResult(astate, CurrentMemoryContext);
+    else
+        result = (Datum)0;
+
+    return result;
+}
+
+/*
+ * Convert the text-array format of reloptions into a List of DefElem.
+ * This is the inverse of transformRelOptions().
+ */
+List* untransformRelOptions(Datum options)
+{
+    List* result = NIL;
+    ArrayType* array = NULL;
+    Datum* optiondatums = NULL;
+    int noptions;
+    int i;
+
+    /* Nothing to do if no options */
+    if (!PointerIsValid(DatumGetPointer(options)))
+        return result;
+
+    array = DatumGetArrayTypeP(options);
+
+    Assert(ARR_ELEMTYPE(array) == TEXTOID);
+
+    deconstruct_array(array, TEXTOID, -1, false, 'i', &optiondatums, NULL, &noptions);
+
+    for (i = 0; i < noptions; i++) {
+        char* s = NULL;
+        char* p = NULL;
+        Node* val = NULL;
+
+        s = TextDatumGetCString(optiondatums[i]);
+        p = strchr(s, '=');
+        if (p != NULL) {
+            *p++ = '\0';
+            val = (Node*)makeString(pstrdup(p));
+        }
+        result = lappend(result, makeDefElem(s, val));
+    }
+
+    /* Free the memory used by array. */
+    if (DatumGetPointer(options) != DatumGetPointer(array)) {
+        pfree(array);
+    }
+    pfree(optiondatums);
+
+    return result;
+}
+
+/*
+ * Extract and parse reloptions from a pg_class tuple.
+ *
+ * This is a low-level routine, expected to be used by relcache code and
+ * callers that do not have a table's relcache entry (e.g. autovacuum).  For
+ * other uses, consider grabbing the rd_options pointer from the relcache entry
+ * instead.
+ *
+ * tupdesc is pg_class' tuple descriptor.  amoptions is the amoptions regproc
+ * in the case of the tuple corresponding to an index, or InvalidOid otherwise.
+ */
+bytea* extractRelOptions(HeapTuple tuple, TupleDesc tupdesc, Oid amoptions)
+{
+    bytea* options = NULL;
+    bool isnull = false;
+    Datum datum;
+    Form_pg_class classForm;
+
+    datum = fastgetattr(tuple, Anum_pg_class_reloptions, tupdesc, &isnull);
+    if (isnull)
+        return NULL;
+
+    classForm = (Form_pg_class)GETSTRUCT(tuple);
+
+    /* Parse into appropriate format; don't error out here */
+    switch (classForm->relkind) {
+        case RELKIND_RELATION:
+        case RELKIND_TOASTVALUE:
+        case RELKIND_VIEW:
+            options = heap_reloptions(classForm->relkind, datum, false);
+            break;
+        case RELKIND_INDEX:
+            options = index_reloptions(amoptions, datum, false);
+            break;
+        case RELKIND_FOREIGN_TABLE:
+            options = NULL;
+            break;
+        default:
+            Assert(false);  /* can't get here */
+            options = NULL; /* keep compiler quiet */
+            break;
+    }
+
+    return options;
+}
+
+/*
+ * Interpret reloptions that are given in text-array format.
+ *
+ * options is a reloption text array as constructed by transformRelOptions.
+ * kind specifies the family of options to be processed.
+ *
+ * The return value is a relopt_value * array on which the options actually
+ * set in the options array are marked with isset=true.  The length of this
+ * array is returned in *numrelopts.  Options not set are also present in the
+ * array; this is so that the caller can easily locate the default values.
+ *
+ * If there are no options of the given kind, numrelopts is set to 0 and NULL
+ * is returned.
+ *
+ * Note: values of type int, bool and real are allocated as part of the
+ * returned array.	Values of type string are allocated separately and must
+ * be freed by the caller.
+ */
+relopt_value* parseRelOptions(Datum options, bool validate, relopt_kind kind, int* numrelopts)
+{
+    relopt_value* reloptions = NULL;
+    int numoptions = 0;
+    int i;
+    int j;
+
+    if (t_thrd.relopt_cxt.need_initialization)
+        initialize_reloptions();
+
+    /* Build a list of expected options, based on kind */
+    for (i = 0; t_thrd.relopt_cxt.relOpts[i]; i++)
+        if (t_thrd.relopt_cxt.relOpts[i]->kinds & kind)
+            numoptions++;
+
+    if (numoptions == 0) {
+        *numrelopts = 0;
+        return NULL;
+    }
+
+    reloptions = (relopt_value*)palloc(numoptions * sizeof(relopt_value));
+
+    for (i = 0, j = 0; t_thrd.relopt_cxt.relOpts[i]; i++) {
+        if (t_thrd.relopt_cxt.relOpts[i]->kinds & kind) {
+            reloptions[j].gen = t_thrd.relopt_cxt.relOpts[i];
+            reloptions[j].isset = false;
+            j++;
+        }
+    }
+
+    /* Done if no options */
+    if (PointerIsValid(DatumGetPointer(options))) {
+        ArrayType* array = NULL;
+        Datum* optiondatums = NULL;
+        int noptions;
+
+        array = DatumGetArrayTypeP(options);
+
+        if (unlikely(ARR_ELEMTYPE(array) != TEXTOID)) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("The array type should be text.\n")));
+        }
+
+        deconstruct_array(array, TEXTOID, -1, false, 'i', &optiondatums, NULL, &noptions);
+
+        for (i = 0; i < noptions; i++) {
+            text* optiontext = DatumGetTextP(optiondatums[i]);
+            char* text_str = VARDATA(optiontext);
+            int text_len = VARSIZE(optiontext) - VARHDRSZ;
+
+            /* Search for a match in reloptions */
+            for (j = 0; j < numoptions; j++) {
+                int kw_len = reloptions[j].gen->namelen;
+
+                if (text_len > kw_len && text_str[kw_len] == '=' &&
+                    pg_strncasecmp(text_str, reloptions[j].gen->name, kw_len) == 0) {
+                    parse_one_reloption(&reloptions[j], text_str, text_len, validate);
+                    break;
+                }
+            }
+
+            if (j >= numoptions && validate) {
+                char* s = NULL;
+                char* p = NULL;
+
+                s = TextDatumGetCString(optiondatums[i]);
+                p = strchr(s, '=');
+                if (p != NULL)
+                    *p = '\0';
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unrecognized parameter \"%s\"", s)));
+            }
+        }
+
+        if (DatumGetPointer(options) != DatumGetPointer(array)) {
+            pfree(array);
+        }
+        pfree(optiondatums);
+    }
+
+    *numrelopts = numoptions;
+    return reloptions;
+}
+
+/*
+ * Subroutine for parseRelOptions, to parse and validate a single option's
+ * value
+ */
+static void parse_one_reloption(relopt_value* option, const char* text_str, int text_len, bool validate)
+{
+    char* value = NULL;
+    int value_len;
+    bool parsed = false;
+    bool nofree = false;
+    errno_t rc = EOK;
+
+    if (option->isset && validate)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("parameter \"%s\" specified more than once", option->gen->name)));
+
+    value_len = text_len - option->gen->namelen - 1;
+    value = (char*)palloc(value_len + 1);
+    rc = memcpy_s(value, value_len + 1, text_str + option->gen->namelen + 1, value_len);
+    securec_check(rc, "\0", "\0");
+    value[value_len] = '\0';
+
+    switch (option->gen->type) {
+        case RELOPT_TYPE_BOOL: {
+            parsed = parse_bool(value, &option->values.bool_val);
+            if (validate && !parsed)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid value for boolean option \"%s\": %s", option->gen->name, value)));
+        } break;
+        case RELOPT_TYPE_INT: {
+            relopt_int* optint = (relopt_int*)option->gen;
+
+            parsed = parse_int(value, &option->values.int_val, 0, NULL);
+            if (validate && !parsed)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid value for integer option \"%s\": %s", option->gen->name, value)));
+            if (validate && (option->values.int_val < optint->min || option->values.int_val > optint->max))
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("value %s out of bounds for option \"%s\"", value, option->gen->name),
+                        errdetail("Valid values are between \"%d\" and \"%d\".", optint->min, optint->max)));
+        } break;
+        case RELOPT_TYPE_INT64: {
+            relopt_int64* optint = (relopt_int64*)option->gen;
+
+            parsed = parse_int64(value, &option->values.int64_val, NULL);
+            if (validate && !parsed)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid value for 64-bit integer option \"%s\": %s", option->gen->name, value)));
+            if (validate && (option->values.int64_val < optint->min || option->values.int64_val > optint->max))
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("value %s out of bounds for option \"%s\"", value, option->gen->name),
+                        errdetail("Valid values are between \"" INT64_FORMAT "\" and \"" INT64_FORMAT "\".",
+                            optint->min,
+                            optint->max)));
+        } break;
+        case RELOPT_TYPE_REAL: {
+            relopt_real* optreal = (relopt_real*)option->gen;
+
+            parsed = parse_real(value, &option->values.real_val);
+            if (validate && !parsed)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid value for floating point option \"%s\": %s", option->gen->name, value)));
+            if (validate && (option->values.real_val < optreal->min || option->values.real_val > optreal->max))
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        (errmsg("value %s out of bounds for option \"%s\"", value, option->gen->name),
+                            errdetail("Valid values are between \"%f\" and \"%f\".", optreal->min, optreal->max))));
+        } break;
+        case RELOPT_TYPE_STRING: {
+            relopt_string* optstring = (relopt_string*)option->gen;
+
+            option->values.string_val = value;
+            nofree = true;
+            if (validate && optstring->validate_cb)
+                (optstring->validate_cb)(value);
+            parsed = true;
+        } break;
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported reloption type %d", option->gen->type)));
+            parsed = true; /* quiet compiler */
+            break;
+    }
+
+    if (parsed)
+        option->isset = true;
+    if (!nofree)
+        pfree(value);
+}
+
+bool CheckRelOptionValue(Datum options, const char* opt_name)
+{
+    int i;
+    bool ret = false;
+
+    if (options == (Datum)0)
+        return false;
+
+    /* Done if no options */
+    if (PointerIsValid(DatumGetPointer(options))) {
+        ArrayType* array = NULL;
+        Datum* optiondatums = NULL;
+        int noptions;
+
+        array = DatumGetArrayTypeP(options);
+
+        Assert(ARR_ELEMTYPE(array) == TEXTOID);
+
+        deconstruct_array(array, TEXTOID, -1, false, 'i', &optiondatums, NULL, &noptions);
+
+        for (i = 0; i < noptions; i++) {
+            const char* s = TextDatumGetCString(optiondatums[i]);
+
+            if (pg_strncasecmp(s, opt_name, strlen(opt_name)) == 0) {
+                ret = true;
+                break;
+            }
+        }
+    }
+
+    return ret;
+}
+
+/*
+ * Given the result from parseRelOptions, allocate a struct that's of the
+ * specified base size plus any extra space that's needed for string variables.
+ *
+ * "base" should be sizeof(struct) of the reloptions struct (StdRdOptions or
+ * equivalent).
+ */
+void* allocateReloptStruct(Size base, relopt_value* options, int numoptions)
+{
+    Size size = base;
+    int i;
+
+    for (i = 0; i < numoptions; i++)
+        if (options[i].gen->type == RELOPT_TYPE_STRING)
+            size += GET_STRING_RELOPTION_LEN(options[i]) + 1;
+
+    return palloc0(size);
+}
+
+/*
+ * @Description: Given user options, find the first invalid option from
+ *    invalidOptions[invalidOptionsNum]. firstInvalidOpt will remember
+ *    position of the first one.
+ * @Param[OUT] firstInvalidOpt: position of the first invalid option
+ * @Param[IN] invalidOptions: invalid options
+ * @Param[IN] invalidOptionsNum: number of invalid options
+ * @Param[IN] userOptions: user options to check
+ * @Return: whether invalid options exist
+ * @See also:
+ */
+static bool FindInvalidOption(
+    List* user_options, const char* invalid_options[], int invalid_options_num, int* first_invalid_opt)
+{
+    ListCell* opt = NULL;
+
+    for (int i = 0; i < invalid_options_num; ++i) {
+        foreach (opt, user_options) {
+            DefElem* def = (DefElem*)lfirst(opt);
+
+            if (pg_strcasecmp(def->defname, invalid_options[i]) == 0) {
+                *first_invalid_opt = i;
+                return true;
+            }
+        }
+    }
+
+    *first_invalid_opt = -1;
+    return false;
+}
+
+/*
+ * @Description: forbid out user to set un-supported options
+ * @Param[IN] errorDetail: detail info for error report
+ * @Param[IN] unsupported: unsupported options
+ * @Param[IN] unsupportedNum: number of unsupported options
+ * @Param[IN] userOptions: user options to be checked
+ * @See also:
+ */
+void ForbidUserToSetUnsupportedOptions(
+    List* user_options, const char* unsupported[], int unsupported_num, const char* error_detail)
+{
+    if (user_options != NIL) {
+        int first_invalid_opt = -1;
+
+        if (FindInvalidOption(user_options, unsupported, unsupported_num, &first_invalid_opt)) {
+            Assert(first_invalid_opt >= 0 && first_invalid_opt < unsupported_num);
+
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("Forbid to set option \"%s\" for %s", unsupported[first_invalid_opt], error_detail)));
+        }
+    }
+}
+
+/*
+ * Given the result of parseRelOptions and a parsing table, fill in the
+ * struct (previously allocated with allocateReloptStruct) with the parsed
+ * values.
+ *
+ * rdopts is the pointer to the allocated struct to be filled.
+ * basesize is the sizeof(struct) that was passed to allocateReloptStruct.
+ * options, of length numoptions, is parseRelOptions' output.
+ * elems, of length numelems, is the table describing the allowed options.
+ * When validate is true, it is expected that all options appear in elems.
+ */
+void fillRelOptions(void* rdopts, Size basesize, relopt_value* options, int numoptions, bool validate,
+    const relopt_parse_elt* elems, int numelems)
+{
+    int i;
+    int offset = basesize;
+    errno_t rc = EOK;
+
+    for (i = 0; i < numoptions; i++) {
+        int j;
+        bool found = false;
+
+        for (j = 0; j < numelems; j++) {
+            if (pg_strcasecmp(options[i].gen->name, elems[j].optname) == 0) {
+                relopt_string* optstring = NULL;
+                char* itempos = ((char*)rdopts) + elems[j].offset;
+                char* string_val = NULL;
+
+                switch (options[i].gen->type) {
+                    case RELOPT_TYPE_BOOL:
+                        *(bool*)itempos =
+                            options[i].isset ? options[i].values.bool_val : ((relopt_bool*)options[i].gen)->default_val;
+                        break;
+                    case RELOPT_TYPE_INT:
+                        *(int*)itempos =
+                            options[i].isset ? options[i].values.int_val : ((relopt_int*)options[i].gen)->default_val;
+                        break;
+                    case RELOPT_TYPE_INT64:
+                        *(int64*)itempos = options[i].isset ? options[i].values.int64_val
+                                                            : ((relopt_int64*)options[i].gen)->default_val;
+                        break;
+                    case RELOPT_TYPE_REAL:
+                        *(double*)itempos =
+                            options[i].isset ? options[i].values.real_val : ((relopt_real*)options[i].gen)->default_val;
+                        break;
+                    case RELOPT_TYPE_STRING:
+                        optstring = (relopt_string*)options[i].gen;
+                        if (options[i].isset)
+                            string_val = options[i].values.string_val;
+                        else if (!optstring->default_isnull)
+                            string_val = optstring->default_val;
+                        else
+                            string_val = NULL;
+
+                        /*
+                         * Important:
+                         * for string type, data is appended at the tail of its parent struct.
+                         * CHAR* member of this STRUCT stores the offet of its string data.
+                         * offset=0 means that it's a NULL string.
+                         */
+                        if (string_val == NULL)
+                            *(int*)itempos = 0;
+                        else {
+                            rc = strcpy_s((char*)rdopts + offset, strlen(string_val) + 1, string_val);
+                            securec_check(rc, "\0", "\0");
+                            *(int*)itempos = offset;
+                            offset += strlen(string_val) + 1;
+                        }
+                        break;
+                    default:
+                        ereport(ERROR,
+                            (errcode(ERRCODE_MOST_SPECIFIC_TYPE_MISMATCH),
+                                errmsg("unrecognized reloption type %c", options[i].gen->type)));
+                        break;
+                }
+                found = true;
+                break;
+            }
+        }
+        if (validate && !found)
+            ereport(ERROR,
+                (errcode(ERRCODE_CASE_NOT_FOUND),
+                    errmsg("reloption \"%s\" not found in parse table", options[i].gen->name)));
+    }
+    SET_VARSIZE(rdopts, offset);
+}
+
+/*
+ * @Description: check compression option for row relation
+ * @Param[IN] options: input user options.
+ * @See also:
+ */
+void RowTblCheckCompressionOption(List* options)
+{
+    ListCell* opt = NULL;
+
+    if (options == NULL) {
+        return; /* nothing to do */
+    }
+
+    foreach (opt, options) {
+        DefElem* def = (DefElem*)lfirst(opt);
+
+        if (pg_strcasecmp(def->defname, "compression") == 0) {
+            /* def->arg is NULL, that means it's a RESET action. ignore it.
+             * def->arg is not NULL, that means it's a SET action, so check it.
+             */
+            if (def->arg) {
+                const char* valstr = defGetString(def);
+
+                if (!(pg_strcasecmp(valstr, "yes") == 0 || pg_strcasecmp(valstr, "no") == 0)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Value \"%s\" of option \"compression\" is invalid for row table", valstr),
+                            errdetail("Valid values are \"yes\" and \"no\"")));
+                }
+            }
+            break;
+        }
+    }
+}
+
+/*
+ * @Description: check compression option for row relation
+ * @Param[IN] options: input user options.
+ * @See also:
+ */
+static void tsstore_tbl_check_compression_option(List* options)
+{
+    ListCell* opt = NULL;
+
+    if (options == NULL) {
+        return; /* nothing to do */
+    }
+
+    foreach (opt, options) {
+        DefElem* def = (DefElem*)lfirst(opt);
+
+        if (pg_strcasecmp(def->defname, "compression") == 0) {
+            /* def->arg is NULL, that means it's a RESET action. ignore it.
+             * def->arg is not NULL, that means it's a SET action, so check it.
+             */
+            if (def->arg) {
+                const char* valstr = defGetString(def);
+
+                if (!(pg_strcasecmp(valstr, "yes") == 0 || pg_strcasecmp(valstr, "no") == 0)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Value \"%s\" of option \"compression\" is invalid for timeseries table", valstr),
+                            errdetail("Valid values are \"yes\" and \"no\"")));
+                }
+            }
+            break;
+        }
+    }
+}
+
+/*
+ * @Description: check relation options for row table
+ * @Param[IN] options: input user options
+ * @See also:
+ */
+void ForbidToSetOptionsForRowTbl(List* options)
+{
+    /* row relation's unsupported options */
+    static const char* unsupported[] = {"max_batchrow", "deltarow_threshold", "partial_cluster_rows", "compresslevel"};
+
+    /* check relation's options for row table */
+    ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "row relation");
+
+    /* row table has different COMPRESSION values */
+    RowTblCheckCompressionOption(options);
+}
+
+/*
+ * @Description: check relation options for column table
+ * @Param[IN] options: input user options
+ * @See also:
+ */
+void ForbidToSetOptionsForColTbl(List* options)
+{
+    static const char* unsupported[] = {"fillfactor",
+        "autovacuum_vacuum_threshold",
+        "autovacuum_vacuum_cost_delay",
+        "autovacuum_vacuum_cost_limit",
+        "autovacuum_freeze_min_age",
+        "autovacuum_freeze_max_age",
+        "autovacuum_freeze_table_age",
+        "autovacuum_vacuum_scale_factor",
+        "security_barrier"};
+
+    ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "column/timeseries relation");
+}
+
+/*
+ * @Description: check relation options for timeseries table
+ * @Param[IN] options: input user options
+ * @See also:
+ */
+void forbid_to_set_options_for_timeseries_tbl(List* options)
+{
+	static const char* unsupported[] = {
+		"fillfactor",
+		"autovacuum_vacuum_threshold",
+		"autovacuum_vacuum_cost_delay",
+		"autovacuum_vacuum_cost_limit",
+		"autovacuum_freeze_min_age",
+		"autovacuum_freeze_max_age",
+		"autovacuum_freeze_table_age",
+		"autovacuum_vacuum_scale_factor",
+		"security_barrier",
+		"max_batchrow",
+		"deltarow_threshold",
+		"partial_cluster_rows",
+		"compresslevel"
+	};
+
+	ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "timeseries relation");
+
+    /* tsstore table has different COMPRESSION values */
+    tsstore_tbl_check_compression_option(options);
+}
+
+/*
+ * @Description: check relation options for PSort table
+ * @Param[IN] options: input user options
+ * @See also:
+ */
+void ForbidToSetOptionsForPSort(List* options)
+{
+    static const char* unsupported[] = {"fillfactor",
+        "autovacuum_enabled",
+        "autovacuum_vacuum_threshold",
+        "autovacuum_analyze_threshold",
+        "autovacuum_vacuum_cost_delay",
+        "autovacuum_vacuum_cost_limit",
+        "autovacuum_freeze_min_age",
+        "autovacuum_freeze_max_age",
+        "autovacuum_freeze_table_age",
+        "autovacuum_vacuum_scale_factor",
+        "autovacuum_analyze_scale_factor",
+        "security_barrier",
+        "compression"};
+
+    ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "psort index");
+}
+
+/*
+ * Option parser for anything that uses StdRdOptions (i.e. fillfactor and
+ * autovacuum)
+ */
+bytea* default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
+{
+    relopt_value* options = NULL;
+    StdRdOptions* rdopts = NULL;
+    int numoptions;
+    static const relopt_parse_elt tab[] = {{"fillfactor", RELOPT_TYPE_INT, offsetof(StdRdOptions, fillfactor)},
+        {"autovacuum_enabled", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, enabled)},
+        {"autovacuum_vacuum_threshold",
+            RELOPT_TYPE_INT,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, vacuum_threshold)},
+        {"autovacuum_analyze_threshold",
+            RELOPT_TYPE_INT,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, analyze_threshold)},
+        {"autovacuum_vacuum_cost_delay",
+            RELOPT_TYPE_INT,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, vacuum_cost_delay)},
+        {"autovacuum_vacuum_cost_limit",
+            RELOPT_TYPE_INT,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, vacuum_cost_limit)},
+        {"autovacuum_freeze_min_age",
+            RELOPT_TYPE_INT64,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, freeze_min_age)},
+        {"autovacuum_freeze_max_age",
+            RELOPT_TYPE_INT64,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, freeze_max_age)},
+        {"autovacuum_freeze_table_age",
+            RELOPT_TYPE_INT64,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, freeze_table_age)},
+        {"autovacuum_vacuum_scale_factor",
+            RELOPT_TYPE_REAL,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, vacuum_scale_factor)},
+        {"autovacuum_analyze_scale_factor",
+            RELOPT_TYPE_REAL,
+            offsetof(StdRdOptions, autovacuum) + offsetof(AutoVacOpts, analyze_scale_factor)},
+        {"security_barrier", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, security_barrier)},
+        {"enable_rowsecurity", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, enable_rowsecurity)},
+        {"force_rowsecurity", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, force_rowsecurity)},
+        {"max_batchrow", RELOPT_TYPE_INT, offsetof(StdRdOptions, max_batch_rows)},
+        {"deltarow_threshold", RELOPT_TYPE_INT, offsetof(StdRdOptions, delta_rows_threshold)},
+        {"partial_cluster_rows", RELOPT_TYPE_INT, offsetof(StdRdOptions, partial_cluster_rows)},
+        {"internal_mask", RELOPT_TYPE_INT, offsetof(StdRdOptions, internalMask)},
+        {"orientation", RELOPT_TYPE_STRING, offsetof(StdRdOptions, orientation)},
+        {"compression", RELOPT_TYPE_STRING, offsetof(StdRdOptions, compression)},
+        {"ttl", RELOPT_TYPE_STRING, offsetof(StdRdOptions, ttl) },
+        {"period", RELOPT_TYPE_STRING, offsetof(StdRdOptions, period) },
+        {"version", RELOPT_TYPE_STRING, offsetof(StdRdOptions, version)},
+        {"compresslevel", RELOPT_TYPE_INT, offsetof(StdRdOptions, compresslevel)},
+        {"ignore_enable_hadoop_env", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, ignore_enable_hadoop_env)},
+        {"append_mode", RELOPT_TYPE_STRING, offsetof(StdRdOptions, append_mode)},
+        {"merge_list", RELOPT_TYPE_STRING, offsetof(StdRdOptions, merge_list) },
+        {"rel_cn_oid", RELOPT_TYPE_INT, offsetof(StdRdOptions, rel_cn_oid)},
+        {"append_mode_internal", RELOPT_TYPE_INT, offsetof(StdRdOptions, append_mode_internal)},
+        {"start_ctid_internal", RELOPT_TYPE_STRING, offsetof(StdRdOptions, start_ctid_internal)},
+        {"end_ctid_internal", RELOPT_TYPE_STRING, offsetof(StdRdOptions, end_ctid_internal)},
+        {"user_catalog_table", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, user_catalog_table)},
+        {"hashbucket", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hashbucket)}};
+
+    options = parseRelOptions(reloptions, validate, kind, &numoptions);
+
+    /* if none set, we're done */
+    if (numoptions == 0)
+        return NULL;
+
+    rdopts = (StdRdOptions*)allocateReloptStruct(sizeof(StdRdOptions), options, numoptions);
+
+    fillRelOptions((void*)rdopts, sizeof(StdRdOptions), options, numoptions, validate, tab, lengthof(tab));
+
+    for (int i = 0; i < numoptions; i++) {
+        if (options[i].gen->type == RELOPT_TYPE_STRING && options[i].isset)
+            pfree(options[i].values.string_val);
+    }
+    pfree(options);
+
+    return (bytea*)rdopts;
+}
+
+/*
+ * Parse options for heaps, views and toast tables.
+ */
+bytea* heap_reloptions(char relkind, Datum reloptions, bool validate)
+{
+    StdRdOptions* rdopts = NULL;
+
+    switch (relkind) {
+        case RELKIND_TOASTVALUE:
+            rdopts = (StdRdOptions*)default_reloptions(reloptions, validate, RELOPT_KIND_TOAST);
+            if (rdopts != NULL) {
+                /* adjust default-only parameters for TOAST relations */
+                rdopts->fillfactor = 100;
+                rdopts->autovacuum.analyze_threshold = -1;
+                rdopts->autovacuum.analyze_scale_factor = -1;
+            }
+            return (bytea*)rdopts;
+        case RELKIND_RELATION:
+            return default_reloptions(reloptions, validate, RELOPT_KIND_HEAP);
+        case RELKIND_VIEW:
+            return default_reloptions(reloptions, validate, RELOPT_KIND_VIEW);
+        default:
+            /* other relkinds are not supported */
+            return NULL;
+    }
+}
+
+/*
+ * Parse options for indexes.
+ *
+ *	amoptions	Oid of option parser
+ *	reloptions	options as text[] datum
+ *	validate	error flag
+ */
+bytea* index_reloptions(RegProcedure amoptions, Datum reloptions, bool validate)
+{
+    FmgrInfo flinfo;
+    FunctionCallInfoData fcinfo;
+    Datum result;
+
+    Assert(RegProcedureIsValid(amoptions));
+
+    /* Assume function is strict */
+    if (!PointerIsValid(DatumGetPointer(reloptions)))
+        return NULL;
+
+    /* Can't use OidFunctionCallN because we might get a NULL result */
+    fmgr_info(amoptions, &flinfo);
+
+    InitFunctionCallInfoData(fcinfo, &flinfo, 2, InvalidOid, NULL, NULL);
+
+    fcinfo.arg[0] = reloptions;
+    fcinfo.arg[1] = BoolGetDatum(validate);
+    fcinfo.argnull[0] = false;
+    fcinfo.argnull[1] = false;
+    result = FunctionCallInvoke(&fcinfo);
+    if (fcinfo.isnull || DatumGetPointer(result) == NULL)
+        return NULL;
+
+    return DatumGetByteaP(result);
+}
+
+/*
+ * @Description: Unsupported Option for attribute reloptions
+ * @Param[IN] options: input user options
+ * @See also:
+ */
+void ForbidToSetOptionsForAttribute(List* options)
+{
+    static const char* unsupported_options[] = {"n_distinct_inherited"};
+
+    /* report warning if option 'n_distinct_inherited' exists */
+    ForbidUserToSetUnsupportedOptions(
+        options, unsupported_options, lengthof(unsupported_options), "both row and column relation");
+}
+
+/*
+ * Option parser for attribute reloptions
+ */
+bytea* attribute_reloptions(Datum reloptions, bool validate)
+{
+    relopt_value* options = NULL;
+    AttributeOpts* aopts = NULL;
+    int numoptions;
+    static const relopt_parse_elt tab[] = {{"n_distinct", RELOPT_TYPE_REAL, offsetof(AttributeOpts, n_distinct)},
+        {"n_distinct_inherited", RELOPT_TYPE_REAL, offsetof(AttributeOpts, n_distinct_inherited)}};
+
+    options = parseRelOptions(reloptions, validate, RELOPT_KIND_ATTRIBUTE, &numoptions);
+
+    /* if none set, we're done */
+    if (numoptions == 0)
+        return NULL;
+
+    aopts = (AttributeOpts*)allocateReloptStruct(sizeof(AttributeOpts), options, numoptions);
+
+    fillRelOptions((void*)aopts, sizeof(AttributeOpts), options, numoptions, validate, tab, lengthof(tab));
+
+    pfree(options);
+
+    return (bytea*)aopts;
+}
+
+/*
+ * Option parser for tablespace reloptions
+ */
+bytea* tablespace_reloptions(Datum reloptions, bool validate)
+{
+    relopt_value* options = NULL;
+    TableSpaceOpts* tsopts = NULL;
+    int numoptions;
+    static const relopt_parse_elt tab[] = {
+        {"random_page_cost", RELOPT_TYPE_REAL, offsetof(TableSpaceOpts, random_page_cost)},
+        {"seq_page_cost", RELOPT_TYPE_REAL, offsetof(TableSpaceOpts, seq_page_cost)},
+        {"filesystem", RELOPT_TYPE_STRING, offsetof(TableSpaceOpts, filesystem)},
+        {"address", RELOPT_TYPE_STRING, offsetof(TableSpaceOpts, address)},
+        {"cfgpath", RELOPT_TYPE_STRING, offsetof(TableSpaceOpts, cfgpath)},
+        {"storepath", RELOPT_TYPE_STRING, offsetof(TableSpaceOpts, storepath)}};
+
+    options = parseRelOptions(reloptions, validate, RELOPT_KIND_TABLESPACE, &numoptions);
+
+    /* if none set, we're done */
+    if (numoptions == 0)
+        return NULL;
+
+    tsopts = (TableSpaceOpts*)allocateReloptStruct(sizeof(TableSpaceOpts), options, numoptions);
+
+    fillRelOptions((void*)tsopts, sizeof(TableSpaceOpts), options, numoptions, validate, tab, lengthof(tab));
+
+    pfree(options);
+
+    return (bytea*)tsopts;
+}
+
+/*
+ * Brief        : Check the orientation option Validity.
+ * Input        : val, the version option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptOrientation(const char* val)
+{
+    if (0 != pg_strncasecmp(val, ORIENTATION_COLUMN, strlen(val)) &&
+        0 != pg_strncasecmp(val, ORIENTATION_ROW, strlen(val)) &&
+        0 != pg_strncasecmp(val, ORIENTATION_TIMESERIES, strlen(val)) &&
+        0 != pg_strncasecmp(val, ORIENTATION_ORC, strlen(val))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid string for  \"ORIENTATION\" option"),
+                errdetail("Valid string are \"column\", \"row\", \"timeseries\", \"orc\".")));
+    }
+}
+
+/*
+ * Brief        : Check the TTL option Validity.
+ * Input        : val, the version option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptTTL(const char *val)
+{
+    int32        typmod = -1;
+    Interval    *result = char_to_interval((char *)val, typmod);
+    int64        usec = 0;
+    if (result == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("Invalid interval string for  \"ttl\" option"),
+                 errdetail("Valid interval string are like \"1 day\", \"1 week\", \"2 week\".")));
+    }
+    usec = INTERVAL_TO_USEC(result);
+    if (result->month < 0 || result->day < 0 || 
+        usec > 100 * MONTHS_PER_YEAR * DAYS_PER_MONTH * USECS_PER_DAY) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("Invalid interval range for  \"ttl\" option"),
+                 errdetail("Valid interval range from \"1 hour\" to \"100 year\".")));
+    }
+}
+
+/*
+ * Brief        : Check the Peroid option Validity.
+ * Input        : val, the version option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptPeriod(const char *val)
+{
+    int32        typmod = -1;
+    Interval    *result = char_to_interval((char *)val, typmod);
+    int64        usec = 0;
+    if (result == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("Invalid interval string for  \"period\" option"),
+                 errdetail("Valid period string are like \"1 day\", \"1 week\", \"2 week\".")));
+    }
+    usec = INTERVAL_TO_USEC(result);
+    if (result->month < 0 || result->day < 0 || 
+        usec > 1 * MONTHS_PER_YEAR * DAYS_PER_MONTH * USECS_PER_DAY) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("Invalid interval range for  \"period\" option"),
+                 errdetail("Valid interval range from \"1 hour\" to \"1 year\".")));
+    }
+}
+
+/*
+ * Brief        : Check the version option Validity.
+ * Input        : val, the version option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptVersion(const char* val)
+{
+    if (0 != pg_strcasecmp(val, ORC_VERSION_011) && 0 != pg_strcasecmp(val, ORC_VERSION_012)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid string for  \"VERSION\" option"),
+                errdetail("Valid string are \"0.11\", \"0.12\".")));
+    }
+}
+/*
+ * check parameter of append_mode . Allows "on", "off"
+ * and "auto" values.
+ */
+void check_append_mode(const char* value)
+{
+    if (value == NULL || (strcmp(value, "on") != 0 && strcmp(value, "off") != 0 && strcmp(value, "refresh") != 0 &&
+                             strcmp(value, "read_only") != 0 && strcmp(value, "end_catchup") != 0)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for \"append_mode\" option"),
+                errdetail("Valid values are \"on\", \"off\", \"refresh\", \"read_only\" and \"end_catchup\".")));
+    }
+}
+
+/*
+ * Brief        : Check the compression mode for tablespace.
+ * Input        : val, the compression algorithm value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptCompression(const char* val)
+{
+    if (pg_strcasecmp(val, COMPRESSION_NO) != 0 && pg_strcasecmp(val, COMPRESSION_YES) != 0 &&
+        pg_strcasecmp(val, COMPRESSION_LOW) != 0 && pg_strcasecmp(val, COMPRESSION_MIDDLE) != 0 &&
+        pg_strcasecmp(val, COMPRESSION_HIGH) != 0 && pg_strcasecmp(val, COMPRESSION_ZLIB) != 0 &&
+        pg_strcasecmp(val, COMPRESSION_SNAPPY) != 0 && pg_strcasecmp(val, COMPRESSION_LZ4) != 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid string for  \"COMPRESSION\" option."),
+                errdetail("Valid string are \"no\", \"yes\", \"low\", \"middle\", \"high\" for non-dfs table. "
+                          "Valid string are \"no\", \"yes\", \"low\", \"middle\", \"high\", \"snappy\", \"zlib\", "
+                          "\"lz4\" for dfs table.")));
+}
+
+/*
+ * Brief        : Check the filesystem option for tablespace.
+ * Input        : val, the filesystem option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptSpcFileSystem(const char* val)
+{
+    if ((0 != pg_strcasecmp(val, FILESYSTEM_GENERAL)) && 0 != pg_strcasecmp(val, FILESYSTEM_HDFS)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid string for  \"filesystem\" option."),
+                errdetail("Valid string are \"general\", \"hdfs\".")));
+    }
+}
+
+/*
+ * Brief        : Check the address option for tablespace.
+ * Input        : val, the address option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptSpcAddress(const char* val)
+{
+    CheckGetServerIpAndPort(val, NULL, true, -1);
+}
+
+/*
+ * Brief        : Check the cfgpath option for tablespace.
+ * Input        : val, the cfgpath option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptSpcCfgPath(const char* val)
+{
+    if (0 == strlen(val)) {
+        ereport(
+            ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmsg("No cfgpath is specified for a DFS server.")));
+    }
+
+    CheckFoldernameOrFilenamesOrCfgPtah(val, "cfgpath");
+}
+
+/*
+ * Brief        : Check the storepath option for tablespace.
+ * Input        : val, the storepath option.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptSpcStorePath(const char* val)
+{
+    if (0 == strlen(val)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmsg("No storepath is specified for a DFS server.")));
+    }
+
+    CheckFoldernameOrFilenamesOrCfgPtah(val, "storepath");
+}
+
+/*
+ * @Description: get heap relation's compression option value
+ * @IN compressOpt: compression option string
+ * @Return: *OptCompress* compression option value
+ * @See also:
+ */
+static OptCompress heap_get_compression(const char* compress_opt)
+{
+    /* COMPRESSION is 'no' */
+    if (pg_strcasecmp(compress_opt, COMPRESSION_NO) == 0)
+        return COMPRESS_NO;
+
+    /* COMPRESSION is either 'yes' or 'middle' */
+    if (pg_strcasecmp(compress_opt, COMPRESSION_YES) == 0 || pg_strcasecmp(compress_opt, COMPRESSION_MIDDLE) == 0)
+        return COMPRESS_MIDDLE;
+
+    /* COMPRESSION is 'low' */
+    if (pg_strcasecmp(compress_opt, COMPRESSION_LOW) == 0)
+        return COMPRESS_LOW;
+
+    /* COMPRESSION is 'high' */
+    return COMPRESS_HIGH;
+}
+
+/* we will combine COMPRESSION and COMPRESSLEVEL into an int16 value,
+ * which is called compressing-modes. each one is int8 type, so that
+ * 1. compressing-modes = int8 values array whose size is 2.
+ * 2. COMPRESSION   = int8 values[0]
+ * 3. COMPRESSLEVEL = int8 values[1]
+ */
+const int IDX_COMPRESSION_IN_MODES = 0;
+const int IDX_COMPRESSLEVEL_IN_MODES = 1;
+
+/*
+ * @Description: combine COMPRESSION and COMPRESSLEVEL into compressing-modes
+ * @IN rel: columnar heap relation
+ * @OUT modes: compressing-modes value
+ * @Return:
+ * @See also:
+ */
+void heaprel_set_compressing_modes(Relation rel, int16* modes_ptr)
+{
+    int8* opt = (int8*)modes_ptr;
+    opt[IDX_COMPRESSION_IN_MODES] = (int8)heap_get_compression(RelationGetCompression(rel));
+    opt[IDX_COMPRESSLEVEL_IN_MODES] = (int8)relation_get_compresslevel(rel);
+}
+
+/*
+ * @Description: get COMPRESSION value
+ * @IN modes: compressing-modes value
+ * @Return: COMPRESSION value
+ * @See also:
+ */
+int8 heaprel_get_compression_from_modes(int16 modes)
+{
+    int8* opt = (int8*)&modes;
+    return opt[IDX_COMPRESSION_IN_MODES];
+}
+
+/*
+ * @Description: get COMPRESSLEVEL value
+ * @IN modes: compressing-modes value
+ * @Return: COMPRESSLEVEL value
+ * @See also:
+ */
+int8 heaprel_get_compresslevel_from_modes(int16 modes)
+{
+    int8* opt = (int8*)&modes;
+    return opt[IDX_COMPRESSLEVEL_IN_MODES];
+}
+
+/*
+ * @Description: some storage parameter cannot be changed by ALTER TABLE statement.
+ *   this function do the checking work.
+ * @Param[IN] options: input user options
+ * @See also:
+ */
+void ForbidUserToSetDefinedOptions(List* options)
+{
+    /* the following option must be in tab[] of default_reloptions(). */
+    static const char* unchangedOpt[] = {"orientation"};
+
+    int first_invalid_opt = -1;
+    if (FindInvalidOption(options, unchangedOpt, lengthof(unchangedOpt), &first_invalid_opt)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                (errmsg("Un-support feature"),
+                    errdetail("Option \"%s\" doesn't allow ALTER", unchangedOpt[first_invalid_opt]))));
+    }
+}
+
+/*
+ * @Description: forbid to change inner option
+ *   inner options only can be used by system itself.
+ *   forbid all the users to set or change the inner options.
+ * @Param[IN] userOptions: input user options
+ * @See also:
+ */
+void ForbidOutUsersToSetInnerOptions(List* user_options)
+{
+    static const char* innnerOpts[] = {
+        "internal_mask", "start_ctid_internal", "end_ctid_internal", "append_mode_internal"};
+
+    if (user_options != NULL) {
+        int first_invalid_opt = -1;
+
+        if (FindInvalidOption(user_options, innnerOpts, lengthof(innnerOpts), &first_invalid_opt)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("Forbid to set or change inner option \"%s\"", innnerOpts[first_invalid_opt])));
+        }
+    }
+}
+
+/**
+ * @Description: parse text search options. there are 3 inline parsers(default,zhparser,
+ *                      ngram), and only  configuration defined with N-gram and zhparser
+ *                      support options, configuration's options have strong correlation with
+ *                      its parser, and echo options corresponds to a guc paramater
+ *
+ * @in tsoptions - options defined in create /alter synax
+ * @in validate -if it will check options
+ * @in prsoid - text search parser oid, only N-gram/zhparser have options
+ * @return -option values
+ */
+bytea* tsearch_config_reloptions(Datum tsoptions, bool validate, Oid prsoid, bool missing_ok)
+{
+    relopt_value* options = NULL;
+    ParserCfOpts* cfopts = NULL;
+    NgramCfOpts* ncf = NULL;
+    PoundCfOpts* pcf = NULL;
+    int numoptions;
+
+    /*
+     * N-gram parser's options
+     * ngram_tab.punctuation_ignore -> ngram_punctuation_ignore
+     * ngram_tab.gram_size -> ngram_gram_size
+     * ngram_tab.grapsymbol_ignore -> ngram_grapsymbol_ignore
+     */
+    static const relopt_parse_elt ngram_tab[] = {{"gram_size", RELOPT_TYPE_INT, offsetof(NgramCfOpts, gram_size)},
+        {"punctuation_ignore", RELOPT_TYPE_BOOL, offsetof(NgramCfOpts, punctuation_ignore)},
+        {"grapsymbol_ignore", RELOPT_TYPE_BOOL, offsetof(NgramCfOpts, grapsymbol_ignore)}};
+
+    /*
+     * pound parser's options
+     * pound_tab.pound_split_flag -> pound_split_flag
+     */
+    static const relopt_parse_elt pound_tab[] = {{"split_flag", RELOPT_TYPE_STRING, offsetof(PoundCfOpts, split_flag)}};
+
+    /*
+     * we parse configuration options with following steps
+     *     a) parse the options and validate the value
+     *     b) fill in undefined filed with default value
+     */
+    if (prsoid == NGRAM_PARSER) {
+        options = parseRelOptions(tsoptions, validate, RELOPT_KIND_NPARSER, &numoptions);
+        Assert(options && numoptions);
+        ncf = (NgramCfOpts*)allocateReloptStruct(sizeof(NgramCfOpts), options, numoptions);
+        fillRelOptions((void*)ncf, sizeof(NgramCfOpts), options, numoptions, validate, ngram_tab, lengthof(ngram_tab));
+        cfopts = (ParserCfOpts*)ncf;
+    } else if (prsoid == ZHPARSER_PARSER) {
+        ereport(ERROR, (errmodule(MOD_TS), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Zhparser is not supported!")));
+    } else if (prsoid == POUND_PARSER) {
+        options = parseRelOptions(tsoptions, validate, RELOPT_KIND_PPARSER, &numoptions);
+        Assert(options && numoptions);
+
+        /* Add some restrictions on pound parser split flag configuration. */
+        if (options->isset) {
+            if (strlen(options->values.string_val) != 1) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_ZERO_LENGTH_CHARACTER_STRING),
+                        errmsg("The split flag should exactly be one character and can not be NULL.")));
+            }
+            if (*options->values.string_val != '@' && *options->values.string_val != '/' &&
+                *options->values.string_val != '#' && *options->values.string_val != '$' &&
+                *options->values.string_val != '%') {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("%s is not supported by pound parser.", options->values.string_val)));
+            }
+        }
+
+        pcf = (PoundCfOpts*)allocateReloptStruct(sizeof(PoundCfOpts), options, numoptions);
+        fillRelOptions((void*)pcf, sizeof(PoundCfOpts), options, numoptions, validate, pound_tab, lengthof(pound_tab));
+        cfopts = (ParserCfOpts*)pcf;
+    } else if (!missing_ok) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("current text search configuration doesnot support options"),
+                errdetail("only text search configuration defined with ngram/zhparser parser support options")));
+    }
+
+    if (options != NULL)
+        pfree(options);
+
+    return (bytea*)cfopts;
+}

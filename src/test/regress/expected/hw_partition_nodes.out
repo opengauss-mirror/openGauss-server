@@ -1,0 +1,43 @@
+-- TEST: copyfuncs.c
+START TRANSACTION;
+	DROP TABLE IF EXISTS TEST1_P;
+NOTICE:  table "test1_p" does not exist, skipping
+	CREATE TABLE TEST1_P ( TEST1_F1 INT ) PARTITION BY RANGE(TEST1_F1) ( PARTITION TEST1_P1 VALUES LESS THAN (1000));
+	CREATE INDEX INDEX_ON_TEST1_P ON TEST1_P(TEST1_F1) LOCAL (PARTITION INDEX_ON_TEST1_P1);
+COMMIT;
+START TRANSACTION;
+	INSERT INTO TEST1_P select GENERATE_SERIES(0, 999, 1);
+	SELECT COUNT(*) FROM TEST1_P where TEST1_F1 < 10;
+ count 
+-------
+    10
+(1 row)
+
+COMMIT;
+-- TEST: outfuncs.c
+CREATE VIEW VIEW_TEST1_P AS SELECT * FROM TEST1_P;
+-- TEST: readfuncs.c
+SELECT PG_GET_VIEWDEF('VIEW_TEST1_P');
+     pg_get_viewdef      
+-------------------------
+ SELECT  * FROM test1_p;
+(1 row)
+
+SET ENABLE_SEQSCAN = FALSE;
+SET ENABLE_BITMAPSCAN = FALSE;
+EXPLAIN (COSTS off, NODES off) SELECT * FROM TEST1_P WHERE TEST1_F1 > 5000;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   ->  Partition Iterator
+         Iterations: 0
+         ->  Partitioned Index Only Scan using index_on_test1_p on test1_p
+               Index Cond: (test1_f1 > 5000)
+               Selected Partitions:  NONE
+(6 rows)
+
+RESET ENABLE_SEQSCAN;
+RESET ENABLE_BITMAPSCAN;
+-- clean up
+DROP TABLE TEST1_P CASCADE;
+NOTICE:  drop cascades to view view_test1_p

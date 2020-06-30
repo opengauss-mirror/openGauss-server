@@ -1,0 +1,18 @@
+<refentry id="SQL-CLUSTER">
+<refmeta>
+<refentrytitle>CLUSTER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CLUSTER</refname>
+<refpurpose>cluster a table according to an index</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CLUSTER [ VERBOSE ] table_name [ USING index_name ];
+CLUSTER [ VERBOSE ] table_name PARTITION ( partition_name ) [ USING index_name ];
+CLUSTER [ VERBOSE ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,329 @@
+
+---- test function:
+-- 1. pg_table_size
+-- 2. pg_indexes_size
+-- 3. pg_total_relation_size
+-- 4. pg_relation_size(relationregclass)
+-- 5. pg_relation_size(relationregclass, forktext)
+-- 6. pg_partition_size
+-- 7. pg_partition_indexes_size
+
+
+
+
+---- 1. pg_table_size
+-- a. test ordinary function
+create table test_pg_table_size_ordinary (a int)
+partition by range (a)
+(
+partition test_pg_table_size_ordinary_p1 values less than (2),
+partition test_pg_table_size_ordinary_p2 values less than (4)
+);
+
+insert into test_pg_table_size_ordinary values (1), (3);
+
+-- size: 49152 = 2*24576
+select pg_table_size('test_pg_table_size_ordinary') > 0;
+
+drop table test_pg_table_size_ordinary;
+
+
+-- b. test table has toast
+create table test_pg_table_size_toast (a text)
+partition by range (a)
+(
+partition test_pg_table_size_toast_p1 values less than ('B'),
+partition test_pg_table_size_toast_p2 values less than ('D')
+);
+
+insert into test_pg_table_size_toast values ('A'), ('C');
+
+-- size: 98304 = 4*24576
+select pg_table_size('test_pg_table_size_toast') > 0;
+
+drop table test_pg_table_size_toast;
+
+
+-- c. test table has index
+create table test_pg_table_size_index (a int)
+partition by range (a)
+(
+partition test_pg_table_size_index_p1 values less than (2),
+partition test_pg_table_size_index_p2 values less than (4)
+);
+
+create index test_pg_table_size_a on test_pg_table_size_index (a) local;
+
+insert into test_pg_table_size_index values (1), (3);
+
+-- size: 49152 = 2*24576
+select pg_table_size('test_pg_table_size_index') > 0;
+
+drop table test_pg_table_size_index;
+
+
+
+---- 2. pg_indexes_size
+-- a. test ordinary function
+create table test_pg_index_size_ordinary (a int, b int)
+partition by range (a, b)
+(
+partition test_pg_index_size_ordinary_p1 values less than (2, 2),
+partition test_pg_index_size_ordinary_p2 values less than (4, 4)
+);
+
+create index test_pg_index_size_ordinary_index_a on test_pg_index_size_ordinary (a) local;
+create index test_pg_index_size_ordinary_index_b on test_pg_index_size_ordinary (b) local;
+create index test_pg_index_size_ordinary_index_hash on test_pg_index_size_ordinary using hash (a) local;
+
+insert into test_pg_index_size_ordinary values (1, 1), (3, 3);
+
+
+-- size: 294912 = 2*2*32768 + 2*81920
+select pg_indexes_size('test_pg_index_size_ordinary') > 0;
+
+drop table test_pg_index_size_ordinary;
+
+
+-- b. test table has toast
+create table test_pg_index_size_index_toast (a text, b text)
+partition by range (a, b)
+(
+partition test_pg_index_size_index_toast_p1 values less than ('B', 'B'),
+partition test_pg_index_size_index_toast_p2 values less than ('D', 'D')
+);
+
+create index test_pg_index_size_index_toast_a on test_pg_index_size_index_toast (a) local;
+create index test_pg_index_size_index_toast_b on test_pg_index_size_index_toast (b) local;
+create index test_pg_index_size_index_toast_hash on test_pg_index_size_index_toast using hash (a) local;
+
+insert into test_pg_index_size_index_toast values ('A', 'A'), ('C', 'C');
+
+-- size: 196608 = 2*2*24576 + 2*32768
+select pg_indexes_size('test_pg_index_size_index_toast') > 0;
+
+drop table test_pg_index_size_index_toast;
+
+
+
+
+---- 3. pg_total_relation_size
+-- a. test ordinary function
+create table test_pg_total_relation_size_ordinary (a int)
+partition by range (a)
+(
+partition test_pg_total_relation_size_ordinary_p1 values less than (2),
+partition test_pg_total_relation_size_ordinary_p2 values less than (4)
+);
+
+insert into test_pg_total_relation_size_ordinary values (1), (3);
+
+-- size: 49152 = 2*24576
+select pg_total_relation_size ('test_pg_total_relation_size_ordinary') > 0;
+
+drop table test_pg_total_relation_size_ordinary;
+
+
+-- b. test table has index
+create table test_pg_total_relation_size_index (a int)
+partition by range (a)
+(
+partition test_pg_total_relation_size_index_p1 values less than (2),
+partition test_pg_total_relation_size_index_p2 values less than (4)
+);
+
+create index test_pg_total_relation_size_index_a on test_pg_total_relation_size_index (a) local;
+create index test_pg_total_relation_size_index_hash on test_pg_total_relation_size_index using hash (a) local;
+
+insert into test_pg_total_relation_size_index values (1), (3);
+
+-- size: 278528 = 2*24576 + 2*32768 + 2*81920
+select pg_total_relation_size ('test_pg_total_relation_size_index') > 0;
+
+drop table test_pg_total_relation_size_index;
+
+
+-- c. test table has toast
+create table test_pg_total_relation_size_toast (a text)
+partition by range (a)
+(
+partition test_pg_total_relation_size_toast_p1 values less than ('B'),
+partition test_pg_total_relation_size_toast_p2 values less than ('D')
+);
+
+insert into test_pg_total_relation_size_toast values ('A'), ('C');
+
+-- size: 98304 = 2*24576 + 2*24576
+select pg_total_relation_size ('test_pg_total_relation_size_toast') > 0;
+
+drop table test_pg_total_relation_size_toast;
+
+
+-- d. test table has toast and index
+create table test_pg_total_relation_size_toast_index (a text)
+partition by range (a)
+(
+partition test_pg_total_relation_size_toast_index_p1 values less than ('B'),
+partition test_pg_total_relation_size_toast_index_p2 values less than ('D')
+);
+
+create index test_pg_total_relation_size_toast_index_a on test_pg_total_relation_size_toast_index (a) local;
+create index test_pg_total_relation_size_toast_index_hash on test_pg_total_relation_size_toast_index using hash (a) local;
+
+insert into test_pg_total_relation_size_toast_index values ('A'), ('C');
+
+-- size: 262144 = 2*24576 + 2*24576 + 2*32768 + 2*32768
+select pg_total_relation_size ('test_pg_total_relation_size_toast_index') > 0;
+
+drop table test_pg_total_relation_size_toast_index;
+
+
+
+---- 4. pg_relation_size(relationregclass)
+-- a. test table size
+create table test_pg_relation_size_table (a int)
+partition by range (a)
+(
+partition test_pg_relation_size_table_p1 values less than (2),
+partition test_pg_relation_size_table_p2 values less than (4)
+);
+
+insert into test_pg_relation_size_table values (1), (3);
+
+-- size: 49152 = 2*24576
+select pg_relation_size ('test_pg_relation_size_table') > 0;
+
+drop table test_pg_relation_size_table;
+
+
+-- b. test index size
+create table test_pg_relation_size_index (a int)
+partition by range (a)
+(
+partition test_pg_relation_size_index_p1 values less than (2),
+partition test_pg_relation_size_index_p2 values less than (4)
+);
+
+create index test_pg_relation_size_index_a on test_pg_relation_size_index (a) local;
+create index test_pg_relation_size_index_hash on test_pg_relation_size_index using hash (a) local;
+
+insert into test_pg_relation_size_index values (1), (3);
+
+-- size: 65536 = 2*32768
+select pg_relation_size ('test_pg_relation_size_index_a') > 0;
+-- size: 163840 = 2*81920
+select pg_relation_size ('test_pg_relation_size_index_hash') > 0;
+
+drop table test_pg_relation_size_index;
+
+
+-- c. test table has toast
+create table test_pg_relation_size_toast (a text)
+partition by range (a)
+(
+partition test_pg_relation_size_toast_p1 values less than ('B'),
+partition test_pg_relation_size_toast_p2 values less than ('D')
+);
+
+insert into test_pg_relation_size_toast values ('A'), ('C');
+
+-- size: 49152 = 2*24576
+select pg_relation_size ('test_pg_relation_size_toast') > 0;
+
+drop table test_pg_relation_size_toast;
+
+
+
+
+---- 5. pg_relation_size(relationregclass, forktext)
+-- a. test main
+create table test_pg_relation_size_main (a int)
+partition by range (a)
+(
+partition test_pg_relation_size_main_p1 values less than (4)
+);
+
+create index test_pg_relation_size_main_a on test_pg_relation_size_main (a) local;
+create index test_pg_relation_size_main_hash on test_pg_relation_size_main using hash (a) local;
+
+insert into test_pg_relation_size_main values (1), (3);
+
+-- size: 49152 = 2*24576
+select pg_relation_size ('test_pg_relation_size_main', 'main') > 0;
+-- size: 65536 = 2*32768
+select pg_relation_size ('test_pg_relation_size_main_a', 'main') > 0;
+-- size: 163840 = 2*81920
+select pg_relation_size ('test_pg_relation_size_main_hash', 'main') > 0;
+
+drop table test_pg_relation_size_main;
+
+
+
+-- 6. pg_partition_size
+create table test_pg_partition_size (a int)
+partition by range (a)
+(
+	partition test_pg_partition_size_p1 values less than (4)
+);
+
+insert into test_pg_partition_size values (1);
+
+select pg_partition_size('test_pg_partition_size', 'test_pg_partition_size_p1')>0;
+select pg_partition_size(a.oid, b.oid)>0 from pg_class a, pg_partition b where a.oid=b.parentid and a.relname='test_pg_partition_size' and b.relname='test_pg_partition_size_p1';
+--ERROR
+select pg_partition_size('test_pg_partition_size', 19000)>0;
+--ERROR
+select pg_partition_size('test_pg_partition_size', 'test_pg_partition_size_p2')>0;
+
+drop table test_pg_partition_size;
+
+
+
+-- 7. pg_partition_indexes_size
+create table test_pg_partition_indexes_size (a int)
+partition by range (a)
+(
+	partition test_pg_partition_indexes_size_p1 values less than (4)
+);
+create index test_pg_partition_indexes_size_index on test_pg_partition_indexes_size (a) local;
+
+insert into test_pg_partition_indexes_size values (1);
+
+select pg_partition_indexes_size('test_pg_partition_indexes_size', 'test_pg_partition_indexes_size_p1')>0;
+select pg_partition_indexes_size(a.oid, b.oid)>0 from pg_class a, pg_partition b where a.oid=b.parentid and a.relname='test_pg_partition_indexes_size' and b.relname='test_pg_partition_indexes_size_p1';
+--ERROR
+select pg_partition_indexes_size('test_pg_partition_indexes_size', 19000)>0;
+--ERROR
+select pg_partition_indexes_size('test_pg_partition_indexes_size', 'test_pg_partition_indexes_size_p2')>0;
+
+drop table test_pg_partition_indexes_size;
+
+
+
+create table test_pg_table_size_toast_ord (a text);
+create table test_pg_table_size_toast_rt (a text)
+partition by range (a)
+(
+	partition test_pg_table_size_toast_rt_p1 values less than ('B'),
+	partition test_pg_table_size_toast_rt_p2 values less than ('D'),
+	partition test_pg_table_size_toast_rt_p3 values less than ('F')
+);
+
+insert into test_pg_table_size_toast_ord values (lpad('A',409600,'A'));
+insert into test_pg_table_size_toast_rt values (lpad('A',409600,'A'));
+
+select pg_table_size(a.oid)>0 from pg_class a, pg_class b where a.oid=b.reltoastrelid and b.relname='test_pg_table_size_toast_ord';
+select pg_relation_size(a.oid, 'main')>0 from pg_class a, pg_class b where a.oid=b.reltoastrelid and b.relname='test_pg_table_size_toast_ord';
+select pg_relation_size(a.oid, 'vm')=0 from pg_class a, pg_class b where a.oid=b.reltoastrelid and b.relname='test_pg_table_size_toast_ord';
+select pg_relation_size(a.oid, 'fsm')=0 from pg_class a, pg_class b where a.oid=b.reltoastrelid and b.relname='test_pg_table_size_toast_ord';
+
+select pg_table_size(a.oid)>0 from pg_class a, pg_class b, pg_partition c where a.oid=c.reltoastrelid and b.oid=c.parentid and b.relname='test_pg_table_size_toast_rt' and c.relname='test_pg_table_size_toast_rt_p1';
+select pg_relation_size(a.oid, 'main')>0 from pg_class a, pg_class b, pg_partition c where a.oid=c.reltoastrelid and b.oid=c.parentid and b.relname='test_pg_table_size_toast_rt' and c.relname='test_pg_table_size_toast_rt_p1';
+select pg_relation_size(a.oid, 'vm')=0 from pg_class a, pg_class b, pg_partition c where a.oid=c.reltoastrelid and b.oid=c.parentid and b.relname='test_pg_table_size_toast_rt' and c.relname='test_pg_table_size_toast_rt_p1';
+select pg_relation_size(a.oid, 'fsm')=0 from pg_class a, pg_class b, pg_partition c where a.oid=c.reltoastrelid and b.oid=c.parentid and b.relname='test_pg_table_size_toast_rt' and c.relname='test_pg_table_size_toast_rt_p1';
+
+drop table test_pg_table_size_toast_ord;
+drop table test_pg_table_size_toast_rt;
+
+
+

@@ -1,0 +1,21 @@
+create foreign table test1  (i integer, y int);
+create index text_idx on test1(y,i);
+insert into test1 values (generate_series(1,1000), generate_series(1,1000));
+select * from test1 order by i,y asc limit 10;
+ i  | y  
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+(10 rows)
+
+reindex index text_idx;
+ERROR:  Reindex is not supported for memory table.
+drop foreign table test1;

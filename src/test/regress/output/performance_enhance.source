@@ -1,0 +1,34 @@
+/*
+ * This file is used to add and supply performance cases
+ */
+----
+--- performance case
+----
+create schema enhance_performance;
+set current_schema=enhance_performance;
+create table enhance_performance.PERFORMANCE_1 (
+a INT, 
+b INT
+) with (orientation=column);
+insert into PERFORMANCE_1 VALUES (generate_series(1,100), generate_series(1,100));
+--test distribute key & REPLICATION
+explain performance select count(*) from PERFORMANCE_1 where PERFORMANCE_1.a = 1;
+                                                                 QUERY PLAN                                                                 
+--------------------------------------------------------------------------------------------------------------------------------------------
+--? Row Adapter  (cost=.* rows=1 width=8) (actual time=.* rows=1 loops=1)
+   Output: (count(*))
+--?   (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
+--?   ->  Vector Aggregate  (cost=.* rows=1 width=8) (actual time=.* rows=1 loops=1)
+         Output: count(*)
+--?         (Buffers: shared hit=.*)
+--?         (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
+--?         ->  CStore Scan on enhance_performance.performance_1  (cost=.* rows=11 width=0) (actual time=.* rows=1 loops=1)
+               Output: 'Dummy'
+               Filter: (performance_1.a = 1)
+--?               (Buffers: shared hit=.*)
+--?               (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
+--? Total runtime: .* ms
+(13 rows)
+
+drop table enhance_performance.PERFORMANCE_1;
+drop schema enhance_performance;

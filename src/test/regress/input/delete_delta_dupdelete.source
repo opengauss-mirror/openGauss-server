@@ -1,0 +1,217 @@
+/*
+ * ---OnlineExpansion regression test suits---
+ * Unit tests for delete delta mechanism(dup-delete)
+ */
+set enable_nodegroup_debug=on;
+set expected_computing_nodegroup=group_b;
+CREATE SCHEMA data_redis;
+
+/* Verify delete_delta mechanism via DELETE operation */
+create table tx (c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_dup (c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int) WITH(hashbucket = off);
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+
+insert into tx select v,v,v from generate_series(1,500) as v;
+insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+
+/*
+ * DELETE rows in tx via regular DELETE operation and meanwhile make the deleted rows
+ * are populated in data_redis.pg_delete_delta_12345 and using DELETE-USING on tx_verify
+ */
+delete from tx using tx_dup where tx.c2 = tx_dup.c2;
+select count(*) from data_redis.pg_delete_delta_12345;
+-- delete tx_verify via delete-using clause
+delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+
+-- verify if deleted rows are record into pg_delete_delta table
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+
+drop table tx;
+drop table tx_dup;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+--------------------------------------------------------
+/* Verify delete_delta mechanism via UPDATE operation */
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_dup(c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int) WITH(hashbucket = off);
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+
+insert into tx select v,v,v from generate_series(1,500) as v;
+insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+
+update tx set c2 = 999 from tx_dup where tx.c2 = tx_dup.c2;
+select count(*) from data_redis.pg_delete_delta_12345;
+-- update tx_verify via update-from clause
+update tx_verify as t1 set c2 = 999 from data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+
+-- verify if updated rows are record into pg_delete_delta table
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+
+drop table tx;
+drop table tx_dup;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+------------------------------------------
+/* Verify replicated table delete */
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_dup(c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int) WITH(hashbucket = off);
+ALTER TABLE tx ADD CONSTRAINT tx_uniq_con PRIMARY KEY (c1);
+ALTER TABLE tx_verify ADD CONSTRAINT tx_verify_uniq_con PRIMARY KEY (xcnodeid,dnrelid,table_bucketid,block_number,block_offset);
+
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+
+
+insert into tx select v,v,v from generate_series(1,500) as v;
+insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+
+delete from tx using tx_dup where tx.c2 = tx_dup.c2;
+select count(*) from data_redis.pg_delete_delta_12345;
+-- delete tx_verify via delete-using clause
+delete from tx_verify as t1 using data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+
+-- verify if updated rows are record into pg_delete_delta table
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+
+drop table tx;
+drop table tx_dup;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+
+------------------------------------------
+/* Verify replicated table update*/
+create table tx(c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_dup(c1 int, c2 int, c3 int) WITH(hashbucket = off);
+create table tx_verify(c1 int, c2 int, c3 int, xcnodeid int,dnrelid int, table_bucketid int, block_number bigint, block_offset int) WITH(hashbucket = off);
+ALTER TABLE tx ADD CONSTRAINT tx_uniq_con PRIMARY KEY (c1);
+ALTER TABLE tx_verify ADD CONSTRAINT tx_verify_uniq_con PRIMARY KEY (xcnodeid,dnrelid,table_bucketid,block_number,block_offset);
+create unlogged table data_redis.pg_delete_delta_12345
+(
+	xcnodeid int,
+	dnrelid int,
+	table_bucketid int,
+	block_number bigint,
+	block_offset int
+);
+
+insert into tx select v,v,v from generate_series(1,500) as v;
+insert into tx_dup select v%10,v%20,v%30 from generate_series(1,200) as v;
+
+update tx set c2 = tx.c2*2 from tx_dup where tx.c2 = tx_dup.c2;
+select count(*) from data_redis.pg_delete_delta_12345;
+-- delete tx_verify via delete-using clause
+update tx_verify as t1 set c2 = c2*2 from data_redis.pg_delete_delta_12345 as t2
+where t1.xcnodeid = t2.xcnodeid and
+	  t1.dnrelid = t2.dnrelid and
+	  t1.table_bucketid = t2.table_bucketid and
+	  t1.block_number = t2.block_number and
+	  t1.block_offset = t2.block_offset   
+	  ;
+
+-- verify if updated rows are record into pg_delete_delta table
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx
+   minus all
+   select c1,c2,c3 from tx_verify
+);
+
+select 'Check result return code: ' || count(*)
+from
+(
+   select c1,c2,c3 from tx_verify
+   minus all
+   select c1,c2,c3 from tx
+);
+
+drop table tx;
+drop table tx_dup;
+drop table tx_verify;
+drop table data_redis.pg_delete_delta_12345;
+DROP SCHEMA data_redis CASCADE;
+reset expected_computing_nodegroup;
+reset enable_nodegroup_debug;

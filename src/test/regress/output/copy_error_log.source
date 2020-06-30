@@ -1,0 +1,252 @@
+--case 1: test basic copy error log
+drop table if exists copy_create_err_tab_001_01;
+NOTICE:  table "copy_create_err_tab_001_01" does not exist, skipping
+create table copy_create_err_tab_001_01
+(
+   c_int1  integer not null ,
+   c_int2  integer not null ,
+   c_char1 char(16)  not null,
+   c_char2 char(50),
+   c_varchar1 varchar(200) ,
+   c_varchar2 varchar(400),
+   c_text  text,
+   c_numeric numeric(7,2) ,
+   c_timestamp timestamp without time zone 
+)  ;
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter '|',format 'text',
+encoding 'utf8');
+ERROR:  Unable to open public.pgxc_copy_error_log table for COPY FROM error logging.
+HINT:  You may want to use copy_error_log_create() to create it first.
+drop table if exists pgxc_copy_error_log;
+NOTICE:  table "pgxc_copy_error_log" does not exist, skipping
+select * from copy_error_log_create();
+ copy_error_log_create 
+-----------------------
+ t
+(1 row)
+
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter '|',format 'text',
+encoding 'utf8');
+select count(*) from  copy_create_err_tab_001_01;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from pgxc_copy_error_log;
+ count 
+-------
+   999
+(1 row)
+
+select count(*) from pgxc_copy_error_log where relname='public.copy_create_err_tab_001_01';
+ count 
+-------
+   999
+(1 row)
+
+drop table pgxc_copy_error_log;
+--case 2: test copy_error_log_create function
+select * from copy_error_log_create('error');
+ERROR:  function copy_error_log_create(unknown) does not exist
+LINE 1: select * from copy_error_log_create('error');
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from copy_error_log_create(),copy_error_log_create();
+ERROR:  table name "copy_error_log_create" specified more than once
+select * from copy_error_log_create();
+ copy_error_log_create 
+-----------------------
+ t
+(1 row)
+
+select * from copy_error_log_create();
+ERROR:  relation "pgxc_copy_error_log" already exists
+CONTEXT:  SQL statement "CREATE TABLE public.pgxc_copy_error_log 
+							(relname varchar, begintime timestamptz, filename varchar, rownum int8, rawrecord text, detail text)"
+PL/pgSQL function copy_error_log_create() line 9 at EXECUTE statement
+select * from copy_error_log_create(copy_error_log_create());
+ERROR:  function copy_error_log_create(boolean) does not exist
+LINE 1: select * from copy_error_log_create(copy_error_log_create())...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from reverse(copy_error_log_create());
+ERROR:  function reverse(boolean) does not exist
+LINE 1: select * from reverse(copy_error_log_create());
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+drop table if exists pgxc_copy_error_log;
+select * from copy_error_log_create();
+ copy_error_log_create 
+-----------------------
+ t
+(1 row)
+
+alter table pgxc_copy_error_log alter column rownum type char(50);
+drop table if exists err_copy_create_err_tab_001_01;
+NOTICE:  table "err_copy_create_err_tab_001_01" does not exist, skipping
+create table err_copy_create_err_tab_001_01
+(
+   c_int1  integer not null ,
+   c_int2  integer  ,
+   c_char1 char(16)  ,
+   c_char2 char(50),
+   c_varchar1 varchar(200) ,
+   c_varchar2 varchar(400),
+   c_text  text,
+   c_numeric numeric(7,2) ,
+   c_timestamp timestamp without time zone 
+)  ;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+ERROR:  The column definition of public.pgxc_copy_error_log table is not as intended.
+HINT:  You may want to use copy_error_log_create() to create it instead in order to use COPY FROM error logging.
+alter table pgxc_copy_error_log add  column   ext3 text;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+ERROR:  The column definition of public.pgxc_copy_error_log table is not as intended.
+HINT:  You may want to use copy_error_log_create() to create it instead in order to use COPY FROM error logging.
+alter table pgxc_copy_error_log drop  column rownum ;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+ERROR:  The column definition of public.pgxc_copy_error_log table is not as intended.
+HINT:  You may want to use copy_error_log_create() to create it instead in order to use COPY FROM error logging.
+drop table pgxc_copy_error_log;
+drop table copy_create_err_tab_001_01;
+drop table err_copy_create_err_tab_001_01;
+--case 3: test basic copy error log
+drop table if exists copy_create_err_tab_001_01;
+NOTICE:  table "copy_create_err_tab_001_01" does not exist, skipping
+create table copy_create_err_tab_001_01
+(
+   c_int1  integer not null ,
+   c_int2  integer not null ,
+   c_char1 char(16)  not null,
+   c_char2 char(50),
+   c_varchar1 varchar(200) ,
+   c_varchar2 varchar(400),
+   c_text  text,
+   c_numeric numeric(7,2) ,
+   c_timestamp timestamp without time zone
+)  ;
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter '|',format 'text',
+encoding 'utf8');
+ERROR:  Unable to open public.pgxc_copy_error_log table for COPY FROM error logging.
+HINT:  You may want to use copy_error_log_create() to create it first.
+drop table if exists pgxc_copy_error_log;
+NOTICE:  table "pgxc_copy_error_log" does not exist, skipping
+select * from copy_error_log_create();
+ copy_error_log_create 
+-----------------------
+ t
+(1 row)
+
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter '|',format 'text',
+encoding 'utf8');
+select count(*) from  copy_create_err_tab_001_01;
+ count 
+-------
+     0
+(1 row)
+
+select count(*) from pgxc_copy_error_log where rawrecord is not null;
+ count 
+-------
+   999
+(1 row)
+
+select count(*) from pgxc_copy_error_log where relname='public.copy_create_err_tab_001_01' and rawrecord is not null;
+ count 
+-------
+   999
+(1 row)
+
+drop table pgxc_copy_error_log;
+--case 4: test copy_error_log_create function
+select * from copy_error_log_create('error');
+ERROR:  function copy_error_log_create(unknown) does not exist
+LINE 1: select * from copy_error_log_create('error');
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from copy_error_log_create(),copy_error_log_create();
+ERROR:  table name "copy_error_log_create" specified more than once
+select * from copy_error_log_create();
+ copy_error_log_create 
+-----------------------
+ t
+(1 row)
+
+select * from copy_error_log_create();
+ERROR:  relation "pgxc_copy_error_log" already exists
+CONTEXT:  SQL statement "CREATE TABLE public.pgxc_copy_error_log 
+							(relname varchar, begintime timestamptz, filename varchar, rownum int8, rawrecord text, detail text)"
+PL/pgSQL function copy_error_log_create() line 9 at EXECUTE statement
+select * from copy_error_log_create(copy_error_log_create());
+ERROR:  function copy_error_log_create(boolean) does not exist
+LINE 1: select * from copy_error_log_create(copy_error_log_create())...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+select * from reverse(copy_error_log_create());
+ERROR:  function reverse(boolean) does not exist
+LINE 1: select * from reverse(copy_error_log_create());
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+drop table if exists pgxc_copy_error_log;
+select * from copy_error_log_create();
+ copy_error_log_create 
+-----------------------
+ t
+(1 row)
+
+alter table pgxc_copy_error_log alter column rownum type char(50);
+drop table if exists err_copy_create_err_tab_001_01;
+NOTICE:  table "err_copy_create_err_tab_001_01" does not exist, skipping
+create table err_copy_create_err_tab_001_01
+(
+   c_int1  integer not null ,
+   c_int2  integer  ,
+   c_char1 char(16)  ,
+   c_char2 char(50),
+   c_varchar1 varchar(200) ,
+   c_varchar2 varchar(400),
+   c_text  text,
+   c_numeric numeric(7,2) ,
+   c_timestamp timestamp without time zone
+)  ;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+ERROR:  The column definition of public.pgxc_copy_error_log table is not as intended.
+HINT:  You may want to use copy_error_log_create() to create it instead in order to use COPY FROM error logging.
+alter table pgxc_copy_error_log add  column   ext3 text;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+ERROR:  The column definition of public.pgxc_copy_error_log table is not as intended.
+HINT:  You may want to use copy_error_log_create() to create it instead in order to use COPY FROM error logging.
+alter table pgxc_copy_error_log drop  column rownum ;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+ERROR:  The column definition of public.pgxc_copy_error_log table is not as intended.
+HINT:  You may want to use copy_error_log_create() to create it instead in order to use COPY FROM error logging.
+drop table pgxc_copy_error_log;
+drop table copy_create_err_tab_001_01;
+drop table err_copy_create_err_tab_001_01;

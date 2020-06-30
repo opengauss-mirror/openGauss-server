@@ -1,0 +1,30 @@
+CREATE FOREIGN TABLE products (id serial, price float);
+NOTICE:  CREATE FOREIGN TABLE will create implicit sequence "products_id_seq" for serial column "products.id"
+INSERT INTO products (price) VALUES (80.0);
+INSERT INTO products (price) VALUES (120.0);
+INSERT INTO products (price) VALUES (99.9);
+INSERT INTO products (price) VALUES (101.9) 
+    RETURNING id, price as inserted_price;
+ id | inserted_price 
+----+----------------
+  4 |          101.9
+(1 row)
+
+UPDATE products SET price=price*1.10
+   WHERE price <= 99.9
+   RETURNING id, price AS updated_price;
+ id | updated_price 
+----+---------------
+  1 |            88
+  3 |        109.89
+(2 rows)
+
+DELETE FROM products
+   WHERE price>=110
+   RETURNING id, price AS deleted_price;
+ id | deleted_price 
+----+---------------
+  2 |           120
+(1 row)
+
+DROP FOREIGN TABLE products;

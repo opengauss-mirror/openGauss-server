@@ -1,0 +1,201 @@
+/*
+################################################################################
+# TESTCASE NAME : rlstm
+# COMPONENT(S)  : rlstm model train and predict
+# MODIFIED BY   : WHO            WHEN          COMMENT
+#               : -------------- ------------- ---------------------------------
+#               :                1-9-2019      created
+################################################################################
+*/
+\c postgres
+delete from gs_opt_model;
+select count(*) from gs_wlm_plan_encoding_table;
+ count 
+-------
+--?   .*
+(1 row)
+
+insert into gs_opt_model values('rlstm', 'rlstm_fastcheck', 'regression', '@aie_host@', @aie_port@, 1000, 1, -1, 50, 2500, 0, false, false, '{T}', '{0,0}', '{0,0}', 'Fastcheck Instance of TPCH.');
+select model_train_opt('rlstm', 'rlstm_fastcheck');
+NOTICE:  Model configured successfully.
+CONTEXT:  referenced column: model_train_opt
+--?
+--?
+--?
+(1 row)
+
+select * from gs_opt_model where model_name = 'rlstm_fastcheck';
+--?
+--?
+--?
+(1 row)
+
+\c regression
+insert into gs_opt_model values('rlstm', 'rlstm_fastcheck', 'regression', '10.90.56.229', 9000, 1000, 1,  -1, 50, 2500, 0, false, false, '{T}', '{0,0}', '{0,0}', 'Fastcheck Instance of TPCH.');
+-- tpch Q9
+explain (analyze on, predictor rlstm_fastcheck)
+select
+	nation,
+	o_year,
+	sum(amount) as sum_profit
+from
+	(
+		select
+			n_name as nation,
+			o_orderdate as o_year,
+			l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
+		from
+			part,
+			supplier,
+			lineitem,
+			partsupp,
+			orders,
+			nation
+		where
+			s_suppkey = l_suppkey
+			and ps_suppkey = l_suppkey
+			and ps_partkey = l_partkey
+			and p_partkey = l_partkey
+			and o_orderkey = l_orderkey
+			and s_nationkey = n_nationkey
+			and p_name like '%green%'
+	) as profit
+group by
+	nation,
+	o_year
+order by
+	nation,
+	o_year desc;
+--?
+NOTICE:  Model setup successfully.
+--?                                                                               
+--?
+--? GroupAggregate  (cost=.* rows=.* p-time=.* width=89) (actual time=.* rows=3098 loops=1)
+   Group By Key: nation.n_name, orders.o_orderdate
+--?   ->  Sort  (cost=.* rows=.* p-time=.* width=57) (actual time=.* rows=3223 loops=1)
+         Sort Key: nation.n_name, orders.o_orderdate DESC
+--?         Sort Method: quicksort  Memory: .*kB
+--?         ->  Hash Join  (cost=.* rows=.* p-time=.* width=57) (actual time=.* rows=3223 loops=1)
+               Hash Cond: (lineitem.l_suppkey = supplier.s_suppkey)
+--?               ->  Hash Join  (cost=.* rows=.* p-time=.* width=39) (actual time=.* rows=3223 loops=1)
+                     Hash Cond: (orders.o_orderkey = lineitem.l_orderkey)
+--?                     ->  Seq Scan on orders  (cost=.* rows=15000 p-time=.* width=12) (actual time=.* rows=15000 loops=1)
+--?                     ->  Hash  (cost=.* rows=.* p-time=.* width=35) (actual time=.* rows=3223 loops=1)
+--?                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                           ->  Hash Join  (cost=.* rows=.* p-time=.* width=35) (actual time=.* rows=3223 loops=1)
+                                 Hash Cond: ((partsupp.ps_suppkey = lineitem.l_suppkey) AND (partsupp.ps_partkey = lineitem.l_partkey))
+--?                                 ->  Seq Scan on partsupp  (cost=.* rows=.* p-time=.* width=14) (actual time=.* rows=8000 loops=1)
+--?                                 ->  Hash  (cost=.* rows=.* p-time=.* width=33) (actual time=.* rows=3223 loops=1)
+--?                                        Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                       ->  Hash Join  (cost=.* rows=.* p-time=.* width=33) (actual time=.* rows=3223 loops=1)
+                                             Hash Cond: (lineitem.l_partkey = part.p_partkey)
+--?                                             ->  Seq Scan on lineitem  (cost=.* rows=.* p-time=.* width=29) (actual time=.* rows=60175 loops=1)
+--?                                             ->  Hash  (cost=.* rows=81 p-time=.* width=4) (actual time=.* rows=107 loops=1)
+--?                                                    Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                                   ->  Seq Scan on part  (cost=.* rows=81 p-time=.* width=4) (actual time=.* rows=107 loops=1)
+                                                         Filter: ((p_name)::text ~~ '%green%'::text)
+                                                         Rows Removed by Filter: 1893
+--?               ->  Hash  (cost=.* rows=100 p-time=.* width=30) (actual time=.* rows=100 loops=1)
+--?                      Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                     ->  Hash Join  (cost=.* rows=100 p-time=.* width=30) (actual time=.* rows=100 loops=1)
+                           Hash Cond: (supplier.s_nationkey = nation.n_nationkey)
+--?                           ->  Seq Scan on supplier  (cost=.* rows=100 p-time=.* width=8) (actual time=.* rows=100 loops=1)
+--?                           ->  Hash  (cost=.* rows=25 p-time=.* width=30) (actual time=.* rows=25 loops=1)
+--?                                  Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                 ->  Seq Scan on nation  (cost=.* rows=25 p-time=.* width=30) (actual time=.* rows=25 loops=1)
+--? Total runtime: .* ms
+(34 rows)
+
+-- tpch Q21
+explain (analyze on, predictor rlstm_fastcheck)
+select
+	s_name,
+	count(*) as numwait
+from
+	supplier,
+	lineitem l1,
+	orders,
+	nation
+where
+	s_suppkey = l1.l_suppkey
+	and o_orderkey = l1.l_orderkey
+	and o_orderstatus = 'F'
+	and l1.l_receiptdate > l1.l_commitdate
+	and exists (
+		select
+			*
+		from
+			lineitem l2
+		where
+			l2.l_orderkey = l1.l_orderkey
+			and l2.l_suppkey <> l1.l_suppkey
+	)
+	and not exists (
+		select
+			*
+		from
+			lineitem l3
+		where
+			l3.l_orderkey = l1.l_orderkey
+			and l3.l_suppkey <> l1.l_suppkey
+			and l3.l_receiptdate > l3.l_commitdate
+	)
+	and s_nationkey = n_nationkey
+	and n_name = 'SAUDI ARABIA'
+group by
+	s_name
+order by
+	numwait desc,
+	s_name
+limit 100;
+--?
+NOTICE:  Model setup successfully.
+--?
+--?
+--? Limit  (cost=.* rows=67 p-time=.* width=34) (actual time=.* rows=1 loops=1)
+--?   ->  Sort  (cost=.* rows=67 p-time=.* width=34) (actual time=.* rows=1 loops=1)
+         Sort Key: (count(*)) DESC, supplier.s_name
+--?         Sort Method: quicksort  Memory: .*kB
+--?         ->  HashAggregate  (cost=.* rows=67 p-time=.* width=34) (actual time=.* rows=1 loops=1)
+               Group By Key: supplier.s_name
+--?               ->  Hash Right Semi Join  (cost=.* rows=67 p-time=.* width=26) (actual time=.* rows=9 loops=1)
+                     Hash Cond: (l2.l_orderkey = orders.o_orderkey)
+                     Join Filter: (l2.l_suppkey <> l1.l_suppkey)
+                     Rows Removed by Join Filter: 11
+--?                     ->  Seq Scan on lineitem l2  (cost=.* rows=.* p-time=.* width=8) (actual time=.* rows=60175 loops=1)
+--?                     ->  Hash  (cost=.* rows=71 p-time=.* width=38) (actual time=.* rows=15 loops=1)
+--?                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                           ->  Hash Right Anti Join  (cost=.* rows=71 p-time=.* width=38) (actual time=.* rows=15 loops=1)
+                                 Hash Cond: (l3.l_orderkey = l1.l_orderkey)
+                                 Join Filter: (l3.l_suppkey <> l1.l_suppkey)
+                                 Rows Removed by Join Filter: 69
+--?                                 ->  Seq Scan on lineitem l3  (cost=.* rows=.* p-time=.* width=8) (actual time=.* rows=37897 loops=1)
+                                       Filter: (l_receiptdate > l_commitdate)
+                                       Rows Removed by Filter: 22278
+--?                                 ->  Hash  (cost=.* rows=.* p-time=.* width=38) (actual time=.* rows=182 loops=1)
+--?                                        Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                       ->  Hash Join  (cost=.* rows=.* p-time=.* width=38) (actual time=.* rows=182 loops=1)
+                                             Hash Cond: (orders.o_orderkey = l1.l_orderkey)
+--?                                             ->  Seq Scan on orders  (cost=.* rows=7304 p-time=.* width=4) (actual time=.* rows=7304 loops=1)
+                                                   Filter: (o_orderstatus = 'F'::bpchar)
+                                                   Rows Removed by Filter: 7696
+--?                                             ->  Hash  (cost=.* rows=1124 p-time=.* width=34) (actual time=.* rows=397 loops=1)
+--?                                                    Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                                   ->  Hash Join  (cost=.* rows=.* p-time=.* width=34) (actual time=.* rows=397 loops=1)
+                                                         Hash Cond: (l1.l_suppkey = supplier.s_suppkey)
+--?                                                         ->  Seq Scan on lineitem l1  (cost=.* rows=.* p-time=.* width=8) (actual time=.* rows=37897 loops=1)
+                                                               Filter: (l_receiptdate > l_commitdate)
+                                                               Rows Removed by Filter: 22278
+--?                                                         ->  Hash  (cost=.* rows=4 p-time=.* width=30) (actual time=.* rows=1 loops=1)
+--?                                                                Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                                               ->  Hash Join  (cost=.* rows=4 p-time=.* width=30) (actual time=.* rows=1 loops=1)
+                                                                     Hash Cond: (supplier.s_nationkey = nation.n_nationkey)
+--?                                                                     ->  Seq Scan on supplier  (cost=.* rows=100 p-time=.* width=34) (actual time=.* rows=100 loops=1)
+--?                                                                     ->  Hash  (cost=.* rows=1 p-time=.* width=4) (actual time=.* rows=1 loops=1)
+--?                                                                            Buckets: 32768  Batches: 1  Memory Usage: .*kB
+--?                                                                           ->  Seq Scan on nation  (cost=.* rows=1 p-time=.* width=4) (actual time=.* rows=1 loops=1)
+                                                                                 Filter: (n_name = 'SAUDI ARABIA'::bpchar)
+                                                                                 Rows Removed by Filter: 24
+--? Total runtime: .* ms
+(45 rows)
+

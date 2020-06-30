@@ -1,0 +1,101 @@
+/*
+################################################################################
+# TESTCASE NAME : rlstm
+# COMPONENT(S)  : rlstm model train and predict
+# MODIFIED BY   : WHO            WHEN          COMMENT
+#               : -------------- ------------- ---------------------------------
+#               : y00500405      1-9-2019      created
+################################################################################
+*/
+
+\c postgres
+
+delete from gs_opt_model;
+
+select count(*) from gs_wlm_plan_encoding_table;
+
+insert into gs_opt_model values('rlstm', 'rlstm_fastcheck', 'regression', '@aie_host@', @aie_port@, 1000, 1, -1, 50, 2500, 0, false, false, '{T}', '{0,0}', '{0,0}', 'Fastcheck Instance of TPCH.');
+select model_train_opt('rlstm', 'rlstm_fastcheck');
+
+select * from gs_opt_model where model_name = 'rlstm_fastcheck';
+
+\c regression
+insert into gs_opt_model values('rlstm', 'rlstm_fastcheck', 'regression', '@aie_host@', @aie_port@, 1000, 1,  -1, 50, 2500, 0, false, false, '{T}', '{0,0}', '{0,0}', 'Fastcheck Instance of TPCH.');
+-- tpch Q9
+explain (analyze on, predictor rlstm_fastcheck)
+select
+	nation,
+	o_year,
+	sum(amount) as sum_profit
+from
+	(
+		select
+			n_name as nation,
+			o_orderdate as o_year,
+			l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
+		from
+			part,
+			supplier,
+			lineitem,
+			partsupp,
+			orders,
+			nation
+		where
+			s_suppkey = l_suppkey
+			and ps_suppkey = l_suppkey
+			and ps_partkey = l_partkey
+			and p_partkey = l_partkey
+			and o_orderkey = l_orderkey
+			and s_nationkey = n_nationkey
+			and p_name like '%green%'
+	) as profit
+group by
+	nation,
+	o_year
+order by
+	nation,
+	o_year desc;
+
+-- tpch Q21
+explain (analyze on, predictor rlstm_fastcheck)
+select
+	s_name,
+	count(*) as numwait
+from
+	supplier,
+	lineitem l1,
+	orders,
+	nation
+where
+	s_suppkey = l1.l_suppkey
+	and o_orderkey = l1.l_orderkey
+	and o_orderstatus = 'F'
+	and l1.l_receiptdate > l1.l_commitdate
+	and exists (
+		select
+			*
+		from
+			lineitem l2
+		where
+			l2.l_orderkey = l1.l_orderkey
+			and l2.l_suppkey <> l1.l_suppkey
+	)
+	and not exists (
+		select
+			*
+		from
+			lineitem l3
+		where
+			l3.l_orderkey = l1.l_orderkey
+			and l3.l_suppkey <> l1.l_suppkey
+			and l3.l_receiptdate > l3.l_commitdate
+	)
+	and s_nationkey = n_nationkey
+	and n_name = 'SAUDI ARABIA'
+group by
+	s_name
+order by
+	numwait desc,
+	s_name
+limit 100;
+

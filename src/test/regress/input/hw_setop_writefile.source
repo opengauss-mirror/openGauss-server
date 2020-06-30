@@ -1,0 +1,104 @@
+create schema setop_writefile;
+set current_schema=setop_writefile;
+create table setop_hash_table_01( a int, b int ,c text) ;
+create table setop_hash_table_02( a int, b numeric ,c text) ;
+
+copy setop_hash_table_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hw_setop_writefile_data1.txt' delimiter as ' ';
+copy setop_hash_table_02 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hw_setop_writefile_data2.txt' delimiter as ' ';
+
+analyze setop_hash_table_01;
+analyze setop_hash_table_02;
+
+--test row table
+set work_mem=64;
+\o hw_setop_writefile.out
+explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+\o
+
+select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2 limit 50;
+select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+
+set work_mem='128MB';
+\o hw_setop_writefile.out
+explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+\o
+select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+
+--test col table
+create table vec_setop_hash_table_01( a int, b int ,c text) with (orientation=column) ;
+create table vecsetop_hash_table_02( a int, b numeric ,c text) with (orientation=column) ;
+
+insert into vec_setop_hash_table_01 select * from setop_hash_table_01;
+insert into vecsetop_hash_table_02 select * from setop_hash_table_02;
+
+analyze vec_setop_hash_table_01;
+analyze vecsetop_hash_table_02;
+
+set work_mem=64;
+\o hw_setop_writefile.out
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+\o
+select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+
+set enable_compress_spill = false;
+select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+reset enable_compress_spill;
+
+set work_mem='128MB';
+\o hw_setop_writefile.out
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+\o
+\! rm hw_setop_writefile.out
+select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+
+CREATE TABLE  APPEND_BATCH_2_015_1(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_INT))
+WITH (ORIENTATION=COLUMN) ;
+CREATE TABLE  APPEND_BATCH_2_015_2(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_CHAR))
+WITH (ORIENTATION=COLUMN);
+CREATE TABLE  APPEND_BATCH_2_015_3(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_VARCHAR))
+WITH (ORIENTATION=COLUMN);
+CREATE TABLE  APPEND_BATCH_2_015_4(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_NUMERIC))
+WITH (ORIENTATION=COLUMN) ;
+CREATE TABLE  APPEND_BATCH_2_015_5(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_TS_WITHOUT))
+WITH (ORIENTATION=COLUMN);
+INSERT INTO  APPEND_BATCH_2_015_2 VALUES (1365,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_3 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_3 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_4 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_4 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_4 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_5 VALUES (1386,'TGET','APPEND',100.321,'2013-08-17');
+SELECT* FROM  APPEND_BATCH_2_015_1 UNION SELECT * FROM   APPEND_BATCH_2_015_2 INTERSECT SELECT * FROM   APPEND_BATCH_2_015_3 MINUS SELECT * FROM
+APPEND_BATCH_2_015_4 UNION SELECT * FROM   APPEND_BATCH_2_015_5 order by 1,2,3,4,5;
+
+drop schema setop_writefile cascade;

@@ -1,0 +1,55 @@
+--test create node group
+create user testdb_llt password 'ttest@123';
+set role testdb_llt password 'ttest@123';
+Create node group test_group with(datanode1);
+ERROR:  must be system admin to create cluster node groups
+reset role;
+Create node group group1  with(datanode1);
+ERROR:  PGXC Group group1: group already defined
+Create node group group22  with(datanode100);
+ERROR:  PGXC Node datanode100: object not defined
+Create node group group22  with(coordinator1);
+ERROR:  PGXC node coordinator1: only Datanodes can be group members
+Create node group group22  with(datanode1);
+drop node group group1;
+ERROR:  cannot drop 'group1' because other objects depend on it
+Create node group group1 with(datanode1);
+ERROR:  PGXC Group group1: group already defined
+ 
+Create node group group2 with(datanode1,datanode2);
+drop node group group22;
+drop node group group2;
+CREATE NODE GROUP group1 WITH (datanode1,datanode2,datanode3,datanode4,datanode5,datanode6,datanode7,datanode8,datanode9,datanode10,datanode11,datanode12);
+ERROR:  PGXC Group group1: group already defined
+set role testdb_llt password 'ttest@123';
+drop node group group1;
+ERROR:  must be system admin to remove cluster node groups
+reset role;
+drop node group group100;
+ERROR:  PGXC Group group100: group not defined
+drop user testdb_llt;
+\! @abs_bindir@/gaussdb --single  --coordinator -D @cndata@/coordinator1  -A 0 -b -C port -E -i -l -N 10 -h 127.0.0.1  -p 1234 -P 1234  -t pa
+[BACKEND] FATAL:  gaussdb: invalid command-line argument: -t
+[BACKEND] HINT:  Try "gaussdb --help" for more information.
+\! @abs_bindir@/gaussdb --single  --coordinator -D @cndata@/coordinator1   -S 64 -s -T  -f s -e NULL  -t pa 
+[BACKEND] FATAL:  gaussdb: invalid command-line argument: -t
+[BACKEND] HINT:  Try "gaussdb --help" for more information.
+\! @abs_bindir@/gaussdb --single  --coordinator -D @cndata@/coordinator1   -d 1 -n -W 60  -t pa -r NULL -K NULL
+illegal option -- K
+[BACKEND] FATAL:  gaussdb: invalid command-line argument: -K
+[BACKEND] HINT:  Try "gaussdb --help" for more information.
+\! @abs_bindir@/gaussdb --single  --coordinator -D @cndata@/coordinator1   -k NULL -v
+option requires an argument -- v
+[BACKEND] FATAL:  gaussdb: invalid command-line argument: -v
+[BACKEND] HINT:  Try "gaussdb --help" for more information.
+\! @abs_bindir@/gaussdb --single  --coordinator -D @cndata@/coordinator1   -o NULL
+[BACKEND] FATAL:  gaussdb: invalid command-line argument: NULL
+[BACKEND] HINT:  Try "gaussdb --help" for more information.
+\! @abs_bindir@/gaussdb --single  --coordinator -D @cndata@/coordinator1   -B 64 
+[BACKEND] FATAL:  unrecognized configuration parameter "shared_buffers_default"
+\! @abs_bindir@/gaussdb --single  --coordinator -D @cndata@/coordinator1   -c port
+[BACKEND] FATAL:  -c port requires a value
+\! @abs_bindir@/gaussdb --single  --datanode -D @cndata@/datanode1  -K
+illegal option -- K
+[BACKEND] FATAL:  gaussdb: invalid command-line argument: -K
+[BACKEND] HINT:  Try "gaussdb --help" for more information.

@@ -1,0 +1,238 @@
+--Test for account lock and unlock
+--select pg_sleep(1);
+--select pg_sleep(1);
+----
+--- test 1: basic test with password
+----
+create user account_login password 'Ttest@123';
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@  
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'Ttest@123' -p @portstring@ 
+select pg_sleep(10);
+alter role account_login account unlock;
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'Ttest@123' -p @portstring@ -c ""
+select pg_user_status.failcount,pg_user_status.rolstatus,pg_roles.rolname from pg_user_status,pg_roles where pg_user_status.roloid=pg_roles.oid and pg_roles.rolname='account_login';
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+\! @abs_bindir@/gsql -d postgres -U account_login -W 'ttest@1231' -p @portstring@ 
+ 
+alter role account_login account unlock;
+select failcount,rolstatus from pg_user_status where roloid=(select oid from pg_roles where rolname='account_login');
+alter role account_login account lock;
+select failcount,rolstatus from pg_user_status where roloid=(select oid from pg_roles where rolname='account_login');
+drop user account_login cascade;
+
+----
+--- test 2: alter role lock,permission denied.
+----
+create user account_set password 'Ttest@123';
+set role account_set password 'Ttest@123';
+alter role account_set account lock;
+alter role account_set account unlock;
+reset role;
+drop user account_set cascade;
+
+----
+--- test 3: alter role password
+----
+create user user_account_alter_password_lock_unlock password 'Ttest@123';
+set role user_account_alter_password_lock_unlock password 'Ttest@1232';
+select pg_sleep(1);
+set role user_account_alter_password_lock_unlock password 'Ttest@1232';
+select pg_sleep(1);
+set role user_account_alter_password_lock_unlock password 'Ttest@123';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@1232';
+select pg_sleep(10);
+alter role user_account_alter_password_lock_unlock account unlock;
+alter role user_account_alter_password_lock_unlock identified by 'testdb@123' replace 'Ttest@123';
+reset role;
+drop user user_account_alter_password_lock_unlock cascade;
+
+----
+--- test 4: cases that can't rollback unlock/lock
+----
+create user  user_account_admin_man_lock_tran with sysadmin password 'Ttest@123';
+create table tab_account_admin_man_lock_tran(C_CHAR_3 CHAR(102400),C_CARCHAR_3 VARCHAR(1024),C_INT INTEGER,C_NUMBERIC numeric(10,5),C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE);
+start transaction;
+insert into tab_account_admin_man_lock_tran values('ABCDEFG','abcdefg',111,1.11,'2000-01-01 01:01:01');
+alter user user_account_admin_man_lock_tran account lock;
+rollback;
+select * from tab_account_admin_man_lock_tran;
+\! @abs_bindir@/gsql -d postgres -U user_account_admin_man_lock_tran -W Ttest@123 -p @portstring@ -c "select user;"
+select failcount,rolstatus from pg_user_status where roloid=(select oid from pg_roles where rolname='user_account_admin_man_lock_tran');
+reset role;
+drop user user_account_admin_man_lock_tran cascade;
+drop table tab_account_admin_man_lock_tran;
+
+----
+--- test 5: alter user account with other privilege
+----
+create user account_with_user password 'Ttest@123';
+alter user account_with_user with account lock;
+alter user account_with_user password 'Testdb@1212';
+alter user account_with_user with nocreaterole password 'Testdb@1212';
+drop user account_with_user;
+
+----
+--- test 6: test the date validation of the password
+----
+create user account_with_validpwd0 with password 'Ttest@123' valid begin '2215-10-10 14:00:00' valid until '2015-10-10 14:00:00';
+
+create user account_with_validpwd1 with password 'Ttest@123' valid begin '2015-10-10 14:00:00' valid until '2015-10-10 18:00:00';
+\! @abs_bindir@/gsql -d postgres -U account_with_validpwd1 -W 'Ttest@123' -p @portstring@
+select pg_sleep(5);
+drop user account_with_validpwd1;
+
+create user account_with_validpwd2 with password 'Ttest@123' valid begin '2215-10-10 14:00:00' valid until '2215-10-10 18:00:00';
+\! @abs_bindir@/gsql -d postgres -U account_with_validpwd2 -W 'Ttest@123' -p @portstring@
+
+alter user account_with_validpwd2 with valid begin '2015-10-10 14:00:00';
+\! @abs_bindir@/gsql -d postgres -U account_with_validpwd2 -W 'Ttest@123' -p @portstring@ -c "select * from pg_authid where rolname='account_with_validpwd2'";
+select pg_sleep(5);
+drop user account_with_validpwd2;
+
+create user account_with_validpwd3 with password 'Ttest@123' valid begin '2015-10-10 14:00:00';
+alter user account_with_validpwd3 with valid until '2015-10-10 12:00:00';
+drop user account_with_validpwd3;
+
+create user account_with_validpwd4 with sysadmin password 'Ttest@123' valid begin '2005-10-10 14:00:00' valid until '2215-10-10 14:00:00';
+drop user account_with_validpwd4;
+
+create user account_with_validpwd5 with auditadmin password 'Ttest@234' valid begin '2005-10-10 14:00:00' valid until '2215-10-10 14:00:00';
+
+create user account_with_validpwd6 with inherit password 'Ttest@123' valid until '1212-12-12 00:00:00';
+grant account_with_validpwd5 to account_with_validpwd6;
+set role account_with_validpwd6 password 'Ttest@123';
+SET SESSION AUTHORIZATION account_with_validpwd6 password 'Ttest@123';
+
+create user account_with_validpwd7 with noinherit password 'Ttest@123' valid until '1111-11-11';
+set role account_with_validpwd7 password 'Ttest@123';
+
+alter user account_with_validpwd7 with valid begin '2215-12-12 08:00:00' valid until '2215-12-12 10:00:00';
+set role account_with_validpwd7 password 'Ttest@123';
+
+alter user account_with_validpwd7 with valid begin '2015-10-10 14:00:00' valid until '2215-12-12 10:00:00';
+set role account_with_validpwd7 password 'Ttest@123';
+reset role;
+drop user account_with_validpwd5;
+drop user account_with_validpwd6;
+drop user account_with_validpwd7;
+----
+--- test 7: test set role to locked role/user
+----
+create user user_account_locked password 'Ttest@123';
+alter user user_account_locked account lock;
+set role user_account_locked password 'Ttest@123';
+reset role;
+alter user user_account_locked account unlock;
+set role user_account_locked password 'Ttest@123';
+reset role;
+drop user user_account_locked;
+
+----
+--- test 8: test createrole user's privilege
+----
+create user account_createrole1 createrole password 'Ttest@123';
+create user account_createrole2 createrole password 'Ttest@123';
+/*create resource pool test_user_pool;*/
+set role account_createrole1 password 'Ttest@123';
+alter role account_createrole2 createdb;
+alter role account_createrole2 nocreaterole;
+alter role account_createrole2 noinherit;
+alter role account_createrole2 auditadmin;
+alter role account_createrole2 sysadmin;
+alter role account_createrole2 login;
+alter role account_createrole2 replication;
+alter role account_createrole2 connection limit 10;
+alter role account_createrole2 identified by 'ttest@123' replace 'Ttest@123';
+alter role account_createrole2 valid begin '1111-11-1' valid until '2222-12-12';
+/*alter role account_createrole2 resource pool 'test_user_pool';*/
+alter role account_createrole2 rename to account_createrolenew;
+alter role account_createrole2 set session_timeout to '5min';
+alter role account_createrole2 account lock;
+alter role account_createrole1 account lock;
+reset role;
+drop user account_createrole1;
+drop user account_createrole2;
+/*drop resource pool test_user_pool;*/
+
+----
+--- test 9: test normal users' login privilege with trust mode
+----
+create user user_normal1 with password 'ttest@123';
+create user user_normal2 with password 'ttest@123' valid until '2000-12-12 10:00:00';
+\! @abs_bindir@/gsql -d postgres -U user_normal1 -W 'Ttest@123' -p @portstring@ -h localhost -c "select user";
+\! @abs_bindir@/gsql -d postgres -U user_normal1 -W 'Ttest@123' -p @portstring@ -h 127.0.0.1 -c "select user";
+\! @abs_bindir@/gsql -d postgres -U user_normal2 -W 'ttest@123' -p @portstring@ -h localhost -c "select user";
+\! @abs_bindir@/gsql -d postgres -U user_normal2 -W 'ttest@123' -p @portstring@ -h 127.0.0.1 -c "select user";
+drop user user_normal1;
+drop user user_normal2;
+
+----
+--- test 10: test checking guc parameters with diffrent privilege
+----
+create user user_guc_normal password 'Ttest@123';
+create user user_guc_sysadmin sysadmin password 'Ttest@123';
+set role user_guc_normal password 'Ttest@123';
+select name, setting, sourcefile from pg_settings where name = 'alarm_component';
+select current_setting('alarm_component');
+set role user_guc_sysadmin password 'Ttest@123';
+select name, setting, sourcefile from pg_settings where name = 'alarm_component';
+select current_setting('alarm_component');
+reset role;
+drop user user_guc_normal;
+drop user user_guc_sysadmin;
+
+----
+--- test 11 : test sysadmin users with auditadmin attribute
+----
+create user user_only_sysadmin sysadmin password 'ttest@123';
+create user user_sysadmin_other sysadmin password 'ttest@123';
+set role user_only_sysadmin password 'ttest@123';
+alter user user_sysadmin_other with auditadmin;
+alter user user_sysadmin_other password 'Ttest@123';
+reset role;
+drop user user_only_sysadmin;
+drop user user_sysadmin_other;
+
+----
+--- test 12: alter table to sysadmin
+----
+create user  user_admin with sysadmin password 'Ttest@123';
+create user  user_table_old_owner password 'Ttest@123';
+create table table_test_alter_t1(c1 int, c2 int);
+grant all on table table_test_alter_t1 to user_table_old_owner;
+alter table if exists table_test_alter_t1 owner to user_table_old_owner;
+revoke all on table table_test_alter_t1 from user_table_old_owner;
+alter table if exists table_test_alter_t1 owner to user_admin;
+drop table table_test_alter_t1;
+drop user if exists user_table_old_owner;
+drop user if exists user_admin;

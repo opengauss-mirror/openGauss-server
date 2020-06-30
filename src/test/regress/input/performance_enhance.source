@@ -1,0 +1,20 @@
+/*
+ * This file is used to add and supply performance cases
+ */
+----
+--- performance case
+----
+create schema enhance_performance;
+set current_schema=enhance_performance;
+create table enhance_performance.PERFORMANCE_1 (
+a INT, 
+b INT
+) with (orientation=column);
+
+insert into PERFORMANCE_1 VALUES (generate_series(1,100), generate_series(1,100));
+
+--test distribute key & REPLICATION
+explain performance select count(*) from PERFORMANCE_1 where PERFORMANCE_1.a = 1;
+
+drop table enhance_performance.PERFORMANCE_1;
+drop schema enhance_performance;

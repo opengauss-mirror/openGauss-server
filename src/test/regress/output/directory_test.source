@@ -1,0 +1,121 @@
+---------------------------------------------------------------
+-------------------test pg directory-------------------
+---------------------------------------------------------------
+CREATE SCHEMA test_directory;
+CREATE USER JACK with sysadmin IDENTIFIED BY 'Ttest@123';
+CREATE USER ROSE with sysadmin IDENTIFIED BY 'Ttest@123';
+CREATE USER LEON IDENTIFIED BY 'Ttest@123';
+---create directory
+CREATE DIRECTORY REGRESSDIR AS '@libdir@';
+CREATE DIRECTORY NormalDir AS '/home/test_directory/work/';
+WARNING:  could not get "/home/test_directory/work" status, directory does not exist, must make sure directory existance before using
+CREATE DIRECTORY DummyDir AS '/home/dummydir';
+WARNING:  could not get "/home/dummydir" status, directory does not exist, must make sure directory existance before using
+CREATE OR REPLACE DIRECTORY DummyDir AS '/home/dummydirreplace';
+WARNING:  could not get "/home/dummydirreplace" status, directory does not exist, must make sure directory existance before using
+CREATE DIRECTORY ErrorQuote AS '/home''DIR';
+ERROR:  directory path contains illegal string: "'"
+CREATE DIRECTORY RelativePath AS '../DIR/subdir';
+ERROR:  directory path contains illegal string: "."
+SELECT * FROM PG_DIRECTORY;
+--?.*
+--?.*
+--? regressdir.* 
+--? normaldir.*  
+--? dummydir.*   
+(3 rows)
+
+SELECT pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--grant and revoke
+GRANT READ, WRITE ON DIRECTORY DummyDir TO JACK;
+GRANT ALL ON DIRECTORY DummyDir TO LEON;
+SELECT * FROM PG_DIRECTORY;
+--?.*
+--?.*
+--? regressdir.* 
+--? normaldir.*  
+--? dummydir.*   
+(3 rows)
+
+REVOKE READ ON DIRECTORY DummyDir FROM LEON;
+SELECT * FROM PG_DIRECTORY;
+--?.*
+--?.*
+--? regressdir.* 
+--? normaldir.*  
+--? dummydir.*   
+(3 rows)
+
+REVOKE ALL ON DIRECTORY DummyDir FROM ROSE;
+--alter owner to
+ALTER DIRECTORY DummyDir OWNER TO LEON;
+ERROR:  permission denied to change owner of directory
+HINT:  new owner must be superuser to alter a directory.
+ALTER DIRECTORY DummyDir OWNER TO JACK;
+--drop directory
+DROP DIRECTORY NormalDir;
+DROP DIRECTORY IF EXISTS NormalDir;
+NOTICE:  directory "normaldir" does not exist, skipping
+SELECT * FROM PG_DIRECTORY;
+--?.*
+--?.*
+--? regressdir.* 
+--? dummydir.*   
+(2 rows)
+
+--drop user
+DROP USER ROSE;
+DROP USER JACK;
+ERROR:  role "jack" cannot be dropped because some objects depend on it
+DETAIL:  owner of directory dummydir
+DROP USER JACK Cascade;
+DROP USER LEON Cascade;
+SELECT * FROM PG_DIRECTORY;
+--?.*
+--?.*
+--? regressdir.* 
+(1 row)
+
+--audit
+select type, detail_info from pg_query_audit('2019-01-01 00:00:00','9999-12-31') where detail_info like '%DIRECTORY%' or type='ddl_directory';
+    type     |                   detail_info                    
+-------------+--------------------------------------------------
+ grant_role  | GRANT READ, WRITE ON DIRECTORY DummyDir TO JACK;
+ grant_role  | GRANT ALL ON DIRECTORY DummyDir TO LEON;
+ revoke_role | REVOKE READ ON DIRECTORY DummyDir FROM LEON;
+ revoke_role | REVOKE ALL ON DIRECTORY DummyDir FROM ROSE;
+(4 rows)
+
+-- test permission
+SHOW enableSeparationOfDuty;
+ enableSeparationOfDuty 
+------------------------
+ off
+(1 row)
+
+SHOW enable_access_server_directory;
+ enable_access_server_directory 
+--------------------------------
+ off
+(1 row)
+
+CREATE DIRECTORY data_dir AS '@abs_srcdir@/data';
+DROP DIRECTORY data_dir;
+CREATE USER CARRIE sysadmin PASSWORD 'Ttest@123';
+SET SESSION AUTHORIZATION CARRIE PASSWORD 'Ttest@123';
+CREATE DIRECTORY data_dir AS '@abs_srcdir@/data';
+ERROR:  permission denied to create directory "data_dir"
+HINT:  must be initial user to create a directory.
+DROP DIRECTORY data_dir;
+ERROR:  permission denied to drop directory "data_dir"
+HINT:  must be initial user to drop a directory.
+RESET SESSION AUTHORIZATION;
+SET enable_access_server_directory = ON;
+ERROR:  parameter "enable_access_server_directory" cannot be changed now
+DROP USER CARRIE;
+DROP SCHEMA test_directory;

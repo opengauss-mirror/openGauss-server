@@ -1,0 +1,981 @@
+--
+-- This is a test plan for Extension Connector.
+-- Contents:
+-- 
+-- 	* Part-1: Abnormal scene
+-- 	* Part-2: Data Type of MPPDB
+-- 	* Part-3: Query Plan
+-- 	* Part-4: Query with local and remote tables
+-- 	* Part-5: Test SQL: DDL/DML/DQL/TEXT
+--
+----
+--- Prepare Public Objects: User, Data Source, Table, etc.
+----
+-- create a user to be connected
+create user ploken identified by 'Gs@123456';
+CREATE ROLE
+-- create a data source for connection
+create data source myself options (dsn 'myself');
+CREATE DATA SOURCE
+-- create a table for test
+create table test_tbl (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:23: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+insert into test_tbl values (119);
+INSERT 0 1
+insert into test_tbl values (119);
+INSERT 0 1
+insert into test_tbl values (911);
+INSERT 0 1
+-- grant
+grant select on table test_tbl to ploken;
+GRANT
+----
+--- Part-1: Test Abnormal scene 
+----
+-- create test table
+create table s1_tbl_001 (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:36: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+create table s1_tbl_002 (c1 bool, c2 int, c3 float8, c4 text, c5 numeric(15,5), c6 varchar2(20));
+gsql:@EC_TEST_FILE_IN_HA@:37: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c2' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+create table s1_tbl_003 (c1 int, c2 blob, c3 bytea);
+gsql:@EC_TEST_FILE_IN_HA@:38: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+insert into s1_tbl_002 values (true, 119, 1234.56, '@ploken@', 987654321.01234567, '##ploken##'); 
+INSERT 0 1
+insert into s1_tbl_002 values (false, 119, 1234.56, '@ploken@', 987654321.01234567, '##ploken##'); 
+INSERT 0 1
+grant select on table s1_tbl_002 to ploken;
+GRANT
+grant select on table s1_tbl_003 to ploken;
+GRANT
+-- create test data source
+create data source myself1 options (dsn 'myself', username '', password '');
+CREATE DATA SOURCE
+create data source myself2 type 'MPPDB' version 'V100R007C10' options (dsn 'myself', username 'ploken', password 'Gs@123456', encoding 'utf8');
+CREATE DATA SOURCE
+create data source myself3 options (dsn 'myself', encoding 'utf99');
+CREATE DATA SOURCE
+-- Data Source missing
+select * from exec_on_extension('', 'select * from test_tbl') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:50: ERROR:  missing data source to be connected for first parameter.
+-- DSN missing
+select * from exec_hadoop_sql('', 'select * from test_tbl', '') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:53: ERROR:  DSN should not be NULL!
+-- SQL missing
+select * from exec_on_extension('myself', '') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:56: ERROR:  missing statement to be executed for second parameter.
+select * from exec_hadoop_sql('myself', '', '') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:57: ERROR:  SQL can not be null!
+-- Data Source not found
+select * from exec_on_extension('IAmInvalidDataSource', 'select * from test_tbl') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:60: ERROR:  source "IAmInvalidDataSource" does not exist
+-- Target Tbl missing
+select * from exec_on_extension('myself', 'select * from test_tbl');
+gsql:@EC_TEST_FILE_IN_HA@:63: ERROR:  a column definition list is required for functions returning "record"
+LINE 1: select * from exec_on_extension('myself', 'select * from tes...
+                      ^
+-- No Privileges on the table
+select * from exec_on_extension('myself', 'select * from s1_tbl_001') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:66: ERROR:  Fail to exec SQL with the ODBC connection! Detail can be found in node log of 'datanode1'.
+DETAIL:  ERROR: permission denied for relation s1_tbl_001;
+Error while executing the query 
+-- Invalid SQL
+select * from exec_on_extension('myself', 'select * from ') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:69: ERROR:  Fail to exec SQL with the ODBC connection! Detail can be found in node log of 'datanode1'.
+DETAIL:  ERROR: syntax error at end of input;
+Error while executing the query 
+-- Number(Col_Target_Tbl) > Number(Col_RETSET)
+select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int, c2 int);
+gsql:@EC_TEST_FILE_IN_HA@:72: ERROR:  Fail to get data from ODBC connection! Detail can be found in node log of 'datanode1'.
+DETAIL:  SQL_ERROR: The number of the column in relation definition is greater than the number of the column in result!
+-- Unsupported Data Type in Target Tbl
+select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 blob);
+gsql:@EC_TEST_FILE_IN_HA@:75: ERROR:  unsupport data type: [blob] found in record definition.
+-- Unsupported Data Type in RETSET
+select * from exec_on_extension('myself', 'select * from s1_tbl_003') as (c1 int, c2 text, c3 text);
+gsql:@EC_TEST_FILE_IN_HA@:78: ERROR:  Fail to exec SQL with the ODBC connection! Detail can be found in node log of 'datanode1'.
+DETAIL:  SQL_ERROR: unsupport data type return by ODBC
+-- Unsupported Encoding Method
+select * from exec_on_extension('myself3', 'select * from test_tbl') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:81: ERROR:  invalid destination encoding name "utf99"
+-- Read Full Options
+select * from exec_on_extension('myself2', 'select * from test_tbl') as (c1 int);
+ c1  
+-----
+ 119
+ 119
+ 911
+(3 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from test_tbl', 'utf8') as (c1 int);
+ c1  
+-----
+ 119
+ 119
+ 911
+(3 rows)
+
+-- Read Empty Options
+select * from exec_on_extension('myself1', 'select * from test_tbl') as (c1 int);
+ c1  
+-----
+ 119
+ 119
+ 911
+(3 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int);
+ c1  
+-----
+ 119
+ 119
+ 911
+(3 rows)
+
+-- Done
+revoke select on table s1_tbl_002 from ploken;
+REVOKE
+revoke select on table s1_tbl_003 from ploken;
+REVOKE
+drop table s1_tbl_001;
+DROP TABLE
+drop table s1_tbl_002;
+DROP TABLE
+drop table s1_tbl_003;
+DROP TABLE
+drop data source myself1;
+DROP DATA SOURCE
+drop data source myself2;
+DROP DATA SOURCE
+drop data source myself3;
+DROP DATA SOURCE
+----
+--- Part-2: Test Data Types of MPPDB
+----
+-- create numeric table
+create table t1_row (c1 tinyint, c2 smallint, c3 integer, c4 bigint, c5 float4, c6 float8, c7 numeric(38,25), c8 numeric(38), c9 boolean); 
+gsql:@EC_TEST_FILE_IN_HA@:106: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+insert into t1_row values (255, 32767, 2147483647, 9223372036854775807, 123456789.123456789, 12345678901234567890.1234567890123456789, 1234567890123.1234567890123456789012345, 12345678901234567890123456789012345678, true);
+INSERT 0 1
+insert into t1_row values (0, -32768, -2147483648, -9223372036854775808, -123456789.123456789, -12345678901234567890.1234567890123456789, -1234567890123.1234567890123456789012345, -12345678901234567890123456789012345678, false);
+INSERT 0 1
+create table t1_col with(orientation=column) as select * from t1_row;
+gsql:@EC_TEST_FILE_IN_HA@:109: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+INSERT 0 2
+-- create char table
+create table t2_row (c1 char, c2 char(20), c3 varchar, c4 varchar(20), c5 varchar2, c6 varchar2(20), c7 nchar, c8 nchar(20), c9 nvarchar2, c10 nvarchar2(20), c11 text);
+gsql:@EC_TEST_FILE_IN_HA@:112: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+insert into t2_row values ('@', '+ploken+ char', 'S', '+ploken+ varchar', 'H', '+ploken+ varchar2', 'E', '+ploken+ nchar', 'N', '+ploken+ nvarchar2', '+ploken+ text');
+INSERT 0 1
+insert into t2_row values (':', '+ploken+ char', '#', '+ploken+ varchar', '?', '+ploken+ varchar2', '&', '+ploken+ nchar', '%', '+ploken+ nvarchar2', '+ploken+ text');
+INSERT 0 1
+create table t2_col with(orientation=column) as select * from t2_row;
+gsql:@EC_TEST_FILE_IN_HA@:115: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+INSERT 0 2
+-- create date table
+create table t3_row (c1 date, c2 timestamp(6), c3 timestamp(6) with time zone, c5 interval year(6), c6 interval month(6), c7 interval day(6), c8 interval hour(6), c9 interval minute(6), c10 interval second(6), c11 interval day to hour, c12 interval day to minute, c13 interval day to second(6), c14 interval hour to minute, c15 interval hour to second(6), c16 interval minute to second(6)); 
+gsql:@EC_TEST_FILE_IN_HA@:118: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+insert into t3_row values (date '2012-12-12', timestamp '2012-12-12 12:12:12.999999', timestamp '2012-12-12 12:12:12.999999 pst', interval '12' year, interval '12' month, interval '12' day, interval '12' hour, interval '12' minute, interval '12' second, interval '3 12' day to hour, interval '3 12:12' day to minute, interval '3 12:12:12.999999' day to second, interval '3:12' hour to minute, interval '3:12:12.999999' hour to second, interval '3:12.999999' minute to second);
+INSERT 0 1
+insert into t3_row select * from t3_row;
+INSERT 0 1
+insert into t3_row select * from t3_row;
+INSERT 0 2
+create table t3_col with(orientation=column) as select * from t3_row;
+gsql:@EC_TEST_FILE_IN_HA@:122: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+INSERT 0 4
+-- grant select on table
+grant select on table t1_row to ploken;
+GRANT
+grant select on table t2_row to ploken;
+GRANT
+grant select on table t3_row to ploken;
+GRANT
+grant select on table t1_col to ploken;
+GRANT
+grant select on table t2_col to ploken;
+GRANT
+grant select on table t3_col to ploken;
+GRANT
+-- exec_on_extension
+select * from pgxc_wlm_ec_operator_statistics;
+ queryid | plan_node_id | start_time | ec_status | ec_execute_datanode | ec_dsn | ec_username | ec_query | ec_libodbc_type | ec_fetch_count 
+---------+--------------+------------+-----------+---------------------+--------+-------------+----------+-----------------+----------------
+(0 rows)
+
+select * from pgxc_wlm_ec_operator_history;
+ queryid | plan_node_id | start_time | duration | tuple_processed | min_peak_memory | max_peak_memory | average_peak_memory | ec_status | ec_execute_datanode | ec_dsn | ec_username | ec_query | ec_libodbc_type 
+---------+--------------+------------+----------+-----------------+-----------------+-----------------+---------------------+-----------+---------------------+--------+-------------+----------+-----------------
+(0 rows)
+
+select * from pgxc_wlm_ec_operator_info;
+ queryid | plan_node_id | start_time | duration | tuple_processed | min_peak_memory | max_peak_memory | average_peak_memory | ec_status | ec_execute_datanode | ec_dsn | ec_username | ec_query | ec_libodbc_type 
+---------+--------------+------------+----------+-----------------+-----------------+-----------------+---------------------+-----------+---------------------+--------+-------------+----------+-----------------
+(0 rows)
+
+SET resource_track_cost TO 1;
+SET
+SET resource_track_level TO 'operator';
+SET
+SET resource_track_duration TO '0s';
+SET
+select * from exec_on_extension('myself', 'select * from t1_row') as (c1 tinyint, c2 smallint, c3 integer, c4 bigint, c5 float4, c6 float8, c7 numeric(38,25), c8 numeric(38), c9 boolean);
+ c1  |   c2   |     c3      |          c4          |      c5      |          c6           |                    c7                    |                   c8                    | c9 
+-----+--------+-------------+----------------------+--------------+-----------------------+------------------------------------------+-----------------------------------------+----
+ 255 |  32767 |  2147483647 |  9223372036854775807 |  1.23457e+08 |  1.23456789012346e+19 |  1234567890123.1234567890123456789012345 |  12345678901234567890123456789012345678 | t
+ 0   | -32768 | -2147483648 | -9223372036854775808 | -1.23457e+08 | -1.23456789012346e+19 | -1234567890123.1234567890123456789012345 | -12345678901234567890123456789012345678 | f
+(2 rows)
+
+select plan_node_id,tuple_processed,ec_status,ec_dsn,ec_query,ec_libodbc_type from pgxc_wlm_ec_operator_history;
+ plan_node_id | tuple_processed | ec_status | ec_dsn |       ec_query       | ec_libodbc_type 
+--------------+-----------------+-----------+--------+----------------------+-----------------
+            2 |               2 | END       | myself | select * from t1_row | libodbc.so.2
+(1 row)
+
+SET resource_track_cost TO 100000;
+SET
+SET resource_track_level TO 'query';
+SET
+SET resource_track_duration TO '1min';
+SET
+select * from exec_on_extension('myself', 'select * from t2_row') as (c1 char, c2 char(20), c3 varchar, c4 varchar(20), c5 varchar2, c6 varchar2(20), c7 nchar, c8 nchar(20), c9 nvarchar2, c10 nvarchar2(20), c11 text);
+ c1 |          c2          | c3 |        c4        | c5 |        c6         | c7 |          c8          | c9 |        c10         |      c11      
+----+----------------------+----+------------------+----+-------------------+----+----------------------+----+--------------------+---------------
+ @  | +ploken+ char        | S  | +ploken+ varchar | H  | +ploken+ varchar2 | E  | +ploken+ nchar       | N  | +ploken+ nvarchar2 | +ploken+ text
+ :  | +ploken+ char        | #  | +ploken+ varchar | ?  | +ploken+ varchar2 | &  | +ploken+ nchar       | %  | +ploken+ nvarchar2 | +ploken+ text
+(2 rows)
+
+select * from exec_on_extension('myself', 'select * from t2_row') as (c1 text, c2 text, c3 text, c4 text, c5 text, c6 text, c7 text, c8 text, c9 text, c10 text, c11 text);
+ c1 |          c2          | c3 |        c4        | c5 |        c6         | c7 |          c8          | c9 |        c10         |      c11      
+----+----------------------+----+------------------+----+-------------------+----+----------------------+----+--------------------+---------------
+ @  | +ploken+ char        | S  | +ploken+ varchar | H  | +ploken+ varchar2 | E  | +ploken+ nchar       | N  | +ploken+ nvarchar2 | +ploken+ text
+ :  | +ploken+ char        | #  | +ploken+ varchar | ?  | +ploken+ varchar2 | &  | +ploken+ nchar       | %  | +ploken+ nvarchar2 | +ploken+ text
+(2 rows)
+
+select * from exec_on_extension('myself', 'select * from t3_row') as (c1 date, c2 timestamp(6), c3 timestamp(6) with time zone, c5 interval year(6), c6 interval month(6), c7 interval day(6), c8 interval hour(6), c9 interval minute(6), c10 interval second(6), c11 interval day to hour, c12 interval day to minute, c13 interval day to second(6), c14 interval hour to minute, c15 interval hour to second(6), c16 interval minute to second(6));
+         c1          |             c2             |              c3               |    c5    |   c6   |   c7    |    c8    |    c9    |   c10    |       c11       |       c12       |          c13           |   c14    |       c15       |       c16       
+---------------------+----------------------------+-------------------------------+----------+--------+---------+----------+----------+----------+-----------------+-----------------+------------------------+----------+-----------------+-----------------
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+(4 rows)
+
+ 
+select * from exec_on_extension('myself', 'select * from t1_col') as (c1 tinyint, c2 smallint, c3 integer, c4 bigint, c5 float4, c6 float8, c7 numeric(38,25), c8 numeric(38), c9 boolean);
+ c1  |   c2   |     c3      |          c4          |      c5      |          c6           |                    c7                    |                   c8                    | c9 
+-----+--------+-------------+----------------------+--------------+-----------------------+------------------------------------------+-----------------------------------------+----
+ 255 |  32767 |  2147483647 |  9223372036854775807 |  1.23457e+08 |  1.23456789012346e+19 |  1234567890123.1234567890123456789012345 |  12345678901234567890123456789012345678 | t
+ 0   | -32768 | -2147483648 | -9223372036854775808 | -1.23457e+08 | -1.23456789012346e+19 | -1234567890123.1234567890123456789012345 | -12345678901234567890123456789012345678 | f
+(2 rows)
+
+select * from exec_on_extension('myself', 'select * from t2_col') as (c1 char, c2 char(20), c3 varchar, c4 varchar(20), c5 varchar2, c6 varchar2(20), c7 nchar, c8 nchar(20), c9 nvarchar2, c10 nvarchar2(20), c11 text);
+ c1 |          c2          | c3 |        c4        | c5 |        c6         | c7 |          c8          | c9 |        c10         |      c11      
+----+----------------------+----+------------------+----+-------------------+----+----------------------+----+--------------------+---------------
+ @  | +ploken+ char        | S  | +ploken+ varchar | H  | +ploken+ varchar2 | E  | +ploken+ nchar       | N  | +ploken+ nvarchar2 | +ploken+ text
+ :  | +ploken+ char        | #  | +ploken+ varchar | ?  | +ploken+ varchar2 | &  | +ploken+ nchar       | %  | +ploken+ nvarchar2 | +ploken+ text
+(2 rows)
+
+select * from exec_on_extension('myself', 'select * from t2_col') as (c1 text, c2 text, c3 text, c4 text, c5 text, c6 text, c7 text, c8 text, c9 text, c10 text, c11 text);
+ c1 |          c2          | c3 |        c4        | c5 |        c6         | c7 |          c8          | c9 |        c10         |      c11      
+----+----------------------+----+------------------+----+-------------------+----+----------------------+----+--------------------+---------------
+ @  | +ploken+ char        | S  | +ploken+ varchar | H  | +ploken+ varchar2 | E  | +ploken+ nchar       | N  | +ploken+ nvarchar2 | +ploken+ text
+ :  | +ploken+ char        | #  | +ploken+ varchar | ?  | +ploken+ varchar2 | &  | +ploken+ nchar       | %  | +ploken+ nvarchar2 | +ploken+ text
+(2 rows)
+
+select * from exec_on_extension('myself', 'select * from t3_col') as (c1 date, c2 timestamp(6), c3 timestamp(6) with time zone, c5 interval year(6), c6 interval month(6), c7 interval day(6), c8 interval hour(6), c9 interval minute(6), c10 interval second(6), c11 interval day to hour, c12 interval day to minute, c13 interval day to second(6), c14 interval hour to minute, c15 interval hour to second(6), c16 interval minute to second(6)); 
+         c1          |             c2             |              c3               |    c5    |   c6   |   c7    |    c8    |    c9    |   c10    |       c11       |       c12       |          c13           |   c14    |       c15       |       c16       
+---------------------+----------------------------+-------------------------------+----------+--------+---------+----------+----------+----------+-----------------+-----------------+------------------------+----------+-----------------+-----------------
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+(4 rows)
+
+-- exec_hadoop_sql
+select * from exec_hadoop_sql('myself', 'select * from t1_row', '') as (c1 tinyint, c2 smallint, c3 integer, c4 bigint, c5 float4, c6 float8, c7 numeric(38,25), c8 numeric(38), c9 boolean);
+ c1  |   c2   |     c3      |          c4          |      c5      |          c6           |                    c7                    |                   c8                    | c9 
+-----+--------+-------------+----------------------+--------------+-----------------------+------------------------------------------+-----------------------------------------+----
+ 255 |  32767 |  2147483647 |  9223372036854775807 |  1.23457e+08 |  1.23456789012346e+19 |  1234567890123.1234567890123456789012345 |  12345678901234567890123456789012345678 | t
+ 0   | -32768 | -2147483648 | -9223372036854775808 | -1.23457e+08 | -1.23456789012346e+19 | -1234567890123.1234567890123456789012345 | -12345678901234567890123456789012345678 | f
+(2 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from t2_row', '') as (c1 char, c2 char(20), c3 varchar, c4 varchar(20), c5 varchar2, c6 varchar2(20), c7 nchar, c8 nchar(20), c9 nvarchar2, c10 nvarchar2(20), c11 text);
+ c1 |          c2          | c3 |        c4        | c5 |        c6         | c7 |          c8          | c9 |        c10         |      c11      
+----+----------------------+----+------------------+----+-------------------+----+----------------------+----+--------------------+---------------
+ @  | +ploken+ char        | S  | +ploken+ varchar | H  | +ploken+ varchar2 | E  | +ploken+ nchar       | N  | +ploken+ nvarchar2 | +ploken+ text
+ :  | +ploken+ char        | #  | +ploken+ varchar | ?  | +ploken+ varchar2 | &  | +ploken+ nchar       | %  | +ploken+ nvarchar2 | +ploken+ text
+(2 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from t2_row', '') as (c1 text, c2 text, c3 text, c4 text, c5 text, c6 text, c7 text, c8 text, c9 text, c10 text, c11 text);
+ c1 |          c2          | c3 |        c4        | c5 |        c6         | c7 |          c8          | c9 |        c10         |      c11      
+----+----------------------+----+------------------+----+-------------------+----+----------------------+----+--------------------+---------------
+ @  | +ploken+ char        | S  | +ploken+ varchar | H  | +ploken+ varchar2 | E  | +ploken+ nchar       | N  | +ploken+ nvarchar2 | +ploken+ text
+ :  | +ploken+ char        | #  | +ploken+ varchar | ?  | +ploken+ varchar2 | &  | +ploken+ nchar       | %  | +ploken+ nvarchar2 | +ploken+ text
+(2 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from t3_row', '') as (c1 date, c2 timestamp(6), c3 timestamp(6) with time zone, c5 interval year(6), c6 interval month(6), c7 interval day(6), c8 interval hour(6), c9 interval minute(6), c10 interval second(6), c11 interval day to hour, c12 interval day to minute, c13 interval day to second(6), c14 interval hour to minute, c15 interval hour to second(6), c16 interval minute to second(6));
+         c1          |             c2             |              c3               |    c5    |   c6   |   c7    |    c8    |    c9    |   c10    |       c11       |       c12       |          c13           |   c14    |       c15       |       c16       
+---------------------+----------------------------+-------------------------------+----------+--------+---------+----------+----------+----------+-----------------+-----------------+------------------------+----------+-----------------+-----------------
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+(4 rows)
+
+ 
+select * from exec_hadoop_sql('myself', 'select * from t1_col', '') as (c1 tinyint, c2 smallint, c3 integer, c4 bigint, c5 float4, c6 float8, c7 numeric(38,25), c8 numeric(38), c9 boolean);
+ c1  |   c2   |     c3      |          c4          |      c5      |          c6           |                    c7                    |                   c8                    | c9 
+-----+--------+-------------+----------------------+--------------+-----------------------+------------------------------------------+-----------------------------------------+----
+ 255 |  32767 |  2147483647 |  9223372036854775807 |  1.23457e+08 |  1.23456789012346e+19 |  1234567890123.1234567890123456789012345 |  12345678901234567890123456789012345678 | t
+ 0   | -32768 | -2147483648 | -9223372036854775808 | -1.23457e+08 | -1.23456789012346e+19 | -1234567890123.1234567890123456789012345 | -12345678901234567890123456789012345678 | f
+(2 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from t2_col', '') as (c1 char, c2 char(20), c3 varchar, c4 varchar(20), c5 varchar2, c6 varchar2(20), c7 nchar, c8 nchar(20), c9 nvarchar2, c10 nvarchar2(20), c11 text);
+ c1 |          c2          | c3 |        c4        | c5 |        c6         | c7 |          c8          | c9 |        c10         |      c11      
+----+----------------------+----+------------------+----+-------------------+----+----------------------+----+--------------------+---------------
+ @  | +ploken+ char        | S  | +ploken+ varchar | H  | +ploken+ varchar2 | E  | +ploken+ nchar       | N  | +ploken+ nvarchar2 | +ploken+ text
+ :  | +ploken+ char        | #  | +ploken+ varchar | ?  | +ploken+ varchar2 | &  | +ploken+ nchar       | %  | +ploken+ nvarchar2 | +ploken+ text
+(2 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from t2_col', '') as (c1 text, c2 text, c3 text, c4 text, c5 text, c6 text, c7 text, c8 text, c9 text, c10 text, c11 text);
+ c1 |          c2          | c3 |        c4        | c5 |        c6         | c7 |          c8          | c9 |        c10         |      c11      
+----+----------------------+----+------------------+----+-------------------+----+----------------------+----+--------------------+---------------
+ @  | +ploken+ char        | S  | +ploken+ varchar | H  | +ploken+ varchar2 | E  | +ploken+ nchar       | N  | +ploken+ nvarchar2 | +ploken+ text
+ :  | +ploken+ char        | #  | +ploken+ varchar | ?  | +ploken+ varchar2 | &  | +ploken+ nchar       | %  | +ploken+ nvarchar2 | +ploken+ text
+(2 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from t3_col', '') as (c1 date, c2 timestamp(6), c3 timestamp(6) with time zone, c5 interval year(6), c6 interval month(6), c7 interval day(6), c8 interval hour(6), c9 interval minute(6), c10 interval second(6), c11 interval day to hour, c12 interval day to minute, c13 interval day to second(6), c14 interval hour to minute, c15 interval hour to second(6), c16 interval minute to second(6)); 
+         c1          |             c2             |              c3               |    c5    |   c6   |   c7    |    c8    |    c9    |   c10    |       c11       |       c12       |          c13           |   c14    |       c15       |       c16       
+---------------------+----------------------------+-------------------------------+----------+--------+---------+----------+----------+----------+-----------------+-----------------+------------------------+----------+-----------------+-----------------
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+ 2012-12-12 00:00:00 | 2012-12-12 12:12:12.999999 | 2012-12-12 12:12:12.999999+08 | 12 years | 1 year | 12 days | 12:00:00 | 00:12:00 | 00:00:12 | 3 days 12:00:00 | 3 days 12:12:00 | 3 days 12:12:12.999999 | 03:12:00 | 03:12:12.999999 | 00:03:12.999999
+(4 rows)
+
+-- Done
+revoke select on table t1_row from ploken;
+REVOKE
+revoke select on table t2_row from ploken;
+REVOKE
+revoke select on table t3_row from ploken;
+REVOKE
+revoke select on table t1_col from ploken;
+REVOKE
+revoke select on table t2_col from ploken;
+REVOKE
+revoke select on table t3_col from ploken;
+REVOKE
+drop table t1_row;
+DROP TABLE
+drop table t2_row;
+DROP TABLE
+drop table t3_row;
+DROP TABLE
+drop table t1_col;
+DROP TABLE
+drop table t2_col;
+DROP TABLE
+drop table t3_col;
+DROP TABLE
+----
+--- Part-3: Test Plan
+----
+-- explain select
+explain (costs off) select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int);
+                QUERY PLAN                
+------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Function Scan on exec_on_extension
+(3 rows)
+
+explain (costs off) select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int);
+               QUERY PLAN               
+----------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Function Scan on exec_hadoop_sql
+(3 rows)
+
+-- explain create table
+explain (analyze, costs off, timing off) create table s3_tbl_001 as select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:177: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+--?.*
+--?.*
+--?.*
+   Node/s: All datanodes
+--?   ->  Insert on s3_tbl_001 .*
+--?.*
+               Spawn on: All datanodes
+--?               ->  Function Scan on exec_on_extension .*
+--? Total runtime: .* ms
+(7 rows)
+
+explain (analyze, costs off, timing off) create table s3_tbl_002 as select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:178: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Streaming (type: GATHER) (actual rows=0 loops=1)
+   Node/s: All datanodes
+   ->  Insert on s3_tbl_002 (actual rows=3)
+         ->  Streaming(type: REDISTRIBUTE) (actual rows=3)
+               Spawn on: All datanodes
+               ->  Function Scan on exec_hadoop_sql (actual rows=3)
+--?.*
+(7 rows)
+
+explain (analyze, costs off, timing off) create table s3_tbl_003 with (orientation=column) as select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:179: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+--?.*
+--?.*
+ Row Adapter (actual rows=0 loops=1)
+--?.*
+         Node/s: All datanodes
+--?         ->  Vector Insert on s3_tbl_003 .*
+--?               ->  Vector Adapter .*
+--?.*
+                           Spawn on: All datanodes
+--?                           ->  Function Scan on exec_on_extension .*
+--? Total runtime: .* ms
+(9 rows)
+
+explain (analyze, costs off, timing off) create table s3_tbl_004 with (orientation=column) as select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:180: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Row Adapter (actual rows=0 loops=1)
+   ->  Vector Streaming (type: GATHER) (actual rows=0 loops=1)
+         Node/s: All datanodes
+         ->  Vector Insert on s3_tbl_004 (actual rows=3)
+               ->  Vector Adapter (actual rows=3)
+                     ->  Streaming(type: REDISTRIBUTE) (actual rows=3)
+                           Spawn on: All datanodes
+                           ->  Function Scan on exec_hadoop_sql (actual rows=3)
+--?.*Total runtime: 505.104 ms
+(9 rows)
+
+-- explain insert into
+create table s3_tbl_005 (c1 int);
+gsql:@EC_TEST_FILE_IN_HA@:183: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+explain (costs off) insert into s3_tbl_005 select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Insert on s3_tbl_005
+         ->  Streaming(type: REDISTRIBUTE)
+               Spawn on: All datanodes
+               ->  Function Scan on exec_on_extension
+(6 rows)
+
+explain (costs off) insert into s3_tbl_005 select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Insert on s3_tbl_005
+         ->  Streaming(type: REDISTRIBUTE)
+               Spawn on: All datanodes
+               ->  Function Scan on exec_hadoop_sql
+(6 rows)
+
+-- explain local_row + remote
+explain (costs off) select * from test_tbl inner join (select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) b on test_tbl.c1=b.c1;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_on_extension.c1 = test_tbl.c1)
+         ->  Function Scan on exec_on_extension
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Seq Scan on test_tbl
+(9 rows)
+
+explain (costs off) select * from test_tbl inner join (select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) b on test_tbl.c1=b.c1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_hadoop_sql.c1 = test_tbl.c1)
+         ->  Function Scan on exec_hadoop_sql
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Seq Scan on test_tbl
+(9 rows)
+
+-- explain local_col + remote
+create table test_tbl_col with (orientation=column) as select * from test_tbl;
+gsql:@EC_TEST_FILE_IN_HA@:192: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+INSERT 0 3
+explain (costs off) select * from test_tbl_col inner join (select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) b on test_tbl_col.c1=b.c1;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_on_extension.c1 = test_tbl_col.c1)
+         ->  Function Scan on exec_on_extension
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Row Adapter
+                           ->  CStore Scan on test_tbl_col
+(10 rows)
+
+explain (costs off) select * from test_tbl_col inner join (select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) b on test_tbl_col.c1=b.c1;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_hadoop_sql.c1 = test_tbl_col.c1)
+         ->  Function Scan on exec_hadoop_sql
+         ->  Hash
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  Row Adapter
+                           ->  CStore Scan on test_tbl_col
+(10 rows)
+
+-- two exec_on_extension
+explain (costs off) select * from 
+	test_tbl, 
+	(select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) b 
+where
+	test_tbl.c1 = b.c1 and
+	b.c1 in
+		(select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int));
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_on_extension.c1 = test_tbl.c1)
+         ->  HashAggregate
+               Group By Key: exec_on_extension.c1
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  HashAggregate
+                           Group By Key: exec_on_extension.c1
+                           ->  Function Scan on exec_on_extension
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (exec_on_extension.c1 = test_tbl.c1)
+                     ->  Function Scan on exec_on_extension
+                     ->  Hash
+                           ->  Streaming(type: BROADCAST)
+                                 Spawn on: All datanodes
+                                 ->  Seq Scan on test_tbl
+(19 rows)
+
+-- two exec_hadoop_sql
+explain (costs off) select * from 
+	test_tbl, 
+	(select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) b 
+where
+	test_tbl.c1 = b.c1 and
+	b.c1 in
+		(select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int));
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_hadoop_sql.c1 = test_tbl.c1)
+         ->  HashAggregate
+               Group By Key: exec_hadoop_sql.c1
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  HashAggregate
+                           Group By Key: exec_hadoop_sql.c1
+                           ->  Function Scan on exec_hadoop_sql
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (exec_hadoop_sql.c1 = test_tbl.c1)
+                     ->  Function Scan on exec_hadoop_sql
+                     ->  Hash
+                           ->  Streaming(type: BROADCAST)
+                                 Spawn on: All datanodes
+                                 ->  Seq Scan on test_tbl
+(19 rows)
+
+-- exec_on_extension + exec_hadoop_sql
+explain (costs off) select * from 
+	test_tbl, 
+	(select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) b 
+where
+	test_tbl.c1 = b.c1 and
+	b.c1 in
+		(select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int));
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_hadoop_sql.c1 = test_tbl.c1)
+         ->  HashAggregate
+               Group By Key: exec_hadoop_sql.c1
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  HashAggregate
+                           Group By Key: exec_hadoop_sql.c1
+                           ->  Function Scan on exec_hadoop_sql
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (exec_on_extension.c1 = test_tbl.c1)
+                     ->  Function Scan on exec_on_extension
+                     ->  Hash
+                           ->  Streaming(type: BROADCAST)
+                                 Spawn on: All datanodes
+                                 ->  Seq Scan on test_tbl
+(19 rows)
+
+-- exec_hadoop_sql + exec_on_extension
+explain (costs off) select * from 
+	test_tbl, 
+	(select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) b 
+where
+	test_tbl.c1 = b.c1 and
+	b.c1 in
+		(select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int));
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Hash Join
+         Hash Cond: (exec_on_extension.c1 = test_tbl.c1)
+         ->  HashAggregate
+               Group By Key: exec_on_extension.c1
+               ->  Streaming(type: BROADCAST)
+                     Spawn on: All datanodes
+                     ->  HashAggregate
+                           Group By Key: exec_on_extension.c1
+                           ->  Function Scan on exec_on_extension
+         ->  Hash
+               ->  Hash Join
+                     Hash Cond: (exec_hadoop_sql.c1 = test_tbl.c1)
+                     ->  Function Scan on exec_hadoop_sql
+                     ->  Hash
+                           ->  Streaming(type: BROADCAST)
+                                 Spawn on: All datanodes
+                                 ->  Seq Scan on test_tbl
+(19 rows)
+
+-- Done
+drop table s3_tbl_001, s3_tbl_002, s3_tbl_003, s3_tbl_004, s3_tbl_005;
+DROP TABLE
+----
+--- Part-4: Test Query with local and remote tables
+----
+-- local_row + remote
+select * from test_tbl inner join (select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) b on test_tbl.c1=b.c1 order by 1,2;
+ c1  | c1  
+-----+-----
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 911 | 911
+(5 rows)
+
+select * from test_tbl inner join (select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) b on test_tbl.c1=b.c1 order by 1,2;
+ c1  | c1  
+-----+-----
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 911 | 911
+(5 rows)
+
+-- local_col + remote
+create table  s4_tbl_001 with (orientation=column) as select * from test_tbl;
+gsql:@EC_TEST_FILE_IN_HA@:241: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+INSERT 0 3
+select * from s4_tbl_001 inner join (select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) b on s4_tbl_001.c1=b.c1 order by 1,2;
+ c1  | c1  
+-----+-----
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 911 | 911
+(5 rows)
+
+select * from s4_tbl_001 inner join (select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) b on s4_tbl_001.c1=b.c1 order by 1,2;
+ c1  | c1  
+-----+-----
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 911 | 911
+(5 rows)
+
+-- two exec_on_extension
+select * from 
+	test_tbl, 
+	(select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) b 
+where
+	test_tbl.c1 = b.c1 and
+	b.c1 in
+		(select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) order by 1,2;
+ c1  | c1  
+-----+-----
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 911 | 911
+(5 rows)
+
+-- two exec_hadoop_sql
+select * from 
+	test_tbl, 
+	(select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) b 
+where
+	test_tbl.c1 = b.c1 and
+	b.c1 in
+		(select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) order by 1,2;
+ c1  | c1  
+-----+-----
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 911 | 911
+(5 rows)
+
+-- exec_on_extension + exec_hadoop_sql
+select * from 
+	test_tbl, 
+	(select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) b 
+where
+	test_tbl.c1 = b.c1 and
+	b.c1 in
+		(select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) order by 1,2;
+ c1  | c1  
+-----+-----
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 911 | 911
+(5 rows)
+
+-- exec_hadoop_sql + exec_on_extension
+select * from 
+	test_tbl, 
+	(select * from exec_hadoop_sql('myself', 'select * from test_tbl', '') as (c1 int)) b 
+where
+	test_tbl.c1 = b.c1 and
+	b.c1 in
+		(select * from exec_on_extension('myself', 'select * from test_tbl') as (c1 int)) order by 1,2;
+ c1  | c1  
+-----+-----
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 119 | 119
+ 911 | 911
+(5 rows)
+
+-- complex query
+create table s4_tbl_002 (c1 int, c2 text, c3 timestamp(6), c4 bool, c5 float8);
+gsql:@EC_TEST_FILE_IN_HA@:278: NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'c1' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
+CREATE TABLE
+insert into s4_tbl_002 values (1, 'ploken_line_1',  '2012-12-10 12:12:11.123456', true,  1234561.1234561);
+INSERT 0 1
+insert into s4_tbl_002 values (2, 'ploken_line_1',  '2012-12-11 12:12:12.123456', false, 1234562.1234562);
+INSERT 0 1
+insert into s4_tbl_002 values (3, 'ploken_line_2',  '2012-12-12 12:12:13.123456', true,  1234563.1234563);
+INSERT 0 1
+insert into s4_tbl_002 values (4, 'ploken_line_2',  '2012-12-14 12:12:14.123456', false, 1234564.1234564);
+INSERT 0 1
+insert into s4_tbl_002 values (5, 'ploken_line_3',  '2012-12-15 12:12:15.123456', true,  1234565.1234565);
+INSERT 0 1
+insert into s4_tbl_002 values (6, 'ploken_line_3',  '2012-12-16 12:12:16.123456', false, 1234566.1234566);
+INSERT 0 1
+insert into s4_tbl_002 values (1, 'ploken_line_1',  '2012-12-10 12:12:11.123456', true,  1234561.1234561);
+INSERT 0 1
+insert into s4_tbl_002 values (2, 'ploken_line_1',  '2012-12-11 12:12:12.123456', false, 1234562.1234562);
+INSERT 0 1
+insert into s4_tbl_002 values (3, 'ploken_line_2',  '2012-12-12 12:12:13.123456', true,  1234563.1234563);
+INSERT 0 1
+insert into s4_tbl_002 values (4, 'ploken_line_2',  '2012-12-14 12:12:14.123456', false, 1234564.1234564);
+INSERT 0 1
+insert into s4_tbl_002 values (5, 'ploken_line_3',  '2012-12-15 12:12:15.123456', true,  1234565.1234565);
+INSERT 0 1
+insert into s4_tbl_002 values (6, 'ploken_line_3',  '2012-12-16 12:12:16.123456', false, 1234566.1234566);
+INSERT 0 1
+grant select on table s4_tbl_002 to ploken;
+GRANT
+select 
+	a.c2, avg(b.c5) as avg5
+from 
+	s4_tbl_002 a,
+	(select * from exec_on_extension('myself', 'select * from s4_tbl_002') as (c1 int, c2 text, c3 timestamp(6), c4 bool, c5 float8)) b
+where
+	a.c1 = b.c1 
+	and b.c4 = true
+	and exists (
+		select t.c3 from exec_on_extension('myself', 'select c3 from s4_tbl_002') as t(c3 timestamp(6)) 
+		where t.c3 > '2012-12-12 12:12:12.199999'::timestamp(6) and t.c3 > a.c3
+	)
+group by 
+	a.c2
+order by 
+	avg5 desc;
+      c2       |      avg5       
+---------------+-----------------
+ ploken_line_3 | 1234565.1234565
+ ploken_line_2 | 1234563.1234563
+ ploken_line_1 | 1234561.1234561
+(3 rows)
+
+-- Done
+revoke select on table s4_tbl_002 from ploken;
+REVOKE
+drop table s4_tbl_001, s4_tbl_002;
+DROP TABLE
+----
+--- Part-5: Test DDL/DML/DQL/TEXT
+----
+-- exec_on_extension
+select * from exec_on_extension('myself', 'create table ploken_new_tbl (c1 int, c2 text)') as (c1 text);
+ c1 
+----
+(0 rows)
+
+select * from exec_on_extension('myself', 'select * from ploken_new_tbl') as (c1 int, c2 text);
+ c1 | c2 
+----+----
+(0 rows)
+
+select * from exec_on_extension('myself', 'insert into ploken_new_tbl values (911, ''exec_on_extension_old'')') as (c1 text);
+ c1 
+----
+(0 rows)
+
+select * from exec_on_extension('myself', 'select * from ploken_new_tbl') as (c1 int, c2 text);
+ c1  |          c2           
+-----+-----------------------
+ 911 | exec_on_extension_old
+(1 row)
+
+select * from exec_on_extension('myself', 'update ploken_new_tbl set c2=''exec_on_extension_new'' where c1>100') as (c1 text);
+ c1 
+----
+(0 rows)
+
+select * from exec_on_extension('myself', 'select * from ploken_new_tbl') as (c1 int, c2 text);
+ c1  |          c2           
+-----+-----------------------
+ 911 | exec_on_extension_new
+(1 row)
+
+select * from exec_on_extension('myself', 'drop table ploken_new_tbl') as (c1 text);
+ c1 
+----
+(0 rows)
+
+select * from exec_on_extension('myself', 'select * from ploken_new_tbl') as (c1 int, c2 text);
+gsql:@EC_TEST_FILE_IN_HA@:329: ERROR:  Fail to exec SQL with the ODBC connection! Detail can be found in node log of 'datanode1'.
+DETAIL:  ERROR: relation "ploken_new_tbl" does not exist;
+Error while executing the query 
+select * from exec_on_extension('myself', 'show listen_addresses') as (c1 text);
+    c1     
+-----------
+ localhost
+(1 row)
+
+-- exec_hadoop_sql
+select * from exec_hadoop_sql('myself', 'create table ploken_new_tbl (c1 int, c2 text)', '') as (c1 text);
+ c1 
+----
+(0 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from ploken_new_tbl', '') as (c1 int, c2 text);
+ c1 | c2 
+----+----
+(0 rows)
+
+select * from exec_hadoop_sql('myself', 'insert into ploken_new_tbl values (911, ''exec_hadoop_sql_old'')', '') as (c1 text);
+ c1 
+----
+(0 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from ploken_new_tbl', '') as (c1 int, c2 text);
+ c1  |         c2          
+-----+---------------------
+ 911 | exec_hadoop_sql_old
+(1 row)
+
+select * from exec_hadoop_sql('myself', 'update ploken_new_tbl set c2=''exec_hadoop_sql_new'' where c1>100', '') as (c1 text);
+ c1 
+----
+(0 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from ploken_new_tbl', '') as (c1 int, c2 text);
+ c1  |         c2          
+-----+---------------------
+ 911 | exec_hadoop_sql_new
+(1 row)
+
+select * from exec_hadoop_sql('myself', 'drop table ploken_new_tbl', '') as (c1 text);
+ c1 
+----
+(0 rows)
+
+select * from exec_hadoop_sql('myself', 'select * from ploken_new_tbl', '') as (c1 int, c2 text);
+gsql:@EC_TEST_FILE_IN_HA@:344: ERROR:  Fail to exec SQL with the ODBC connection! Detail can be found in node log of 'datanode1'.
+DETAIL:  ERROR: relation "ploken_new_tbl" does not exist;
+Error while executing the query 
+select * from exec_hadoop_sql('myself', 'show listen_addresses', '') as (c1 text);
+    c1     
+-----------
+ localhost
+(1 row)
+
+----
+--- End: Drop public objects
+----
+revoke select on table test_tbl from ploken;
+REVOKE
+revoke usage on data source myself from ploken;
+REVOKE
+drop table test_tbl;
+DROP TABLE
+--?.*

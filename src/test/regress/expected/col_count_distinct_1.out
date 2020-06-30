@@ -1,0 +1,435 @@
+/*
+ * This file is used to test pull down of count(distinct) expression
+ */
+create schema col_distribute_count_distinct_1;
+set current_schema = col_distribute_count_distinct_1;
+-- Create Table and Insert Data
+create table src(c1 int);
+insert into src values(0);
+create table t_distinct(a int, b int, c int, d int) with (orientation=column);
+INSERT INTO t_distinct select generate_series(1, 1000)%501, generate_series(1, 1000)%75, generate_series(1, 1000)%25, generate_series(1, 1000)%7 from src;
+analyze t_distinct;
+-- Case 1 (with group by clause)
+-- Case 1.1 top level
+explain (costs off, nodes off) select d, count(distinct(a)), avg(a::numeric(7, 2)) from t_distinct group by d;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: d
+         ->  Vector Sort
+               Sort Key: d
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+select d, count(distinct(a)), avg(a::numeric(7, 2)) from t_distinct group by d order by d;
+ d | count |         avg          
+---+-------+----------------------
+ 0 |   142 | 250.0000000000000000
+ 1 |   143 | 249.2517482517482517
+ 2 |   143 | 250.2517482517482517
+ 3 |   143 | 251.2517482517482517
+ 4 |   143 | 248.7482517482517483
+ 5 |   143 | 249.7482517482517483
+ 6 |   143 | 250.7482517482517483
+(7 rows)
+
+explain (costs off, nodes off) select c, count(distinct(b)), avg(a::numeric(7, 2)) from t_distinct group by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: c
+         ->  Vector Sort
+               Sort Key: c
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+select c, count(distinct(b)), avg(a::numeric(7, 2)) from t_distinct group by c order by c limit 10;
+ c | count |         avg          
+---+-------+----------------------
+ 0 |     3 | 262.0000000000000000
+ 1 |     3 | 238.0000000000000000
+ 2 |     3 | 239.0000000000000000
+ 3 |     3 | 240.0000000000000000
+ 4 |     3 | 241.0000000000000000
+ 5 |     3 | 242.0000000000000000
+ 6 |     3 | 243.0000000000000000
+ 7 |     3 | 244.0000000000000000
+ 8 |     3 | 245.0000000000000000
+ 9 |     3 | 246.0000000000000000
+(10 rows)
+
+explain (costs off, nodes off) select 1, 1, b, count(distinct(a)), avg(a::numeric(7, 2)) from t_distinct group by 1,2,3 order by 1,2,3;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: (1), (1), b
+         ->  Vector Sort
+               Sort Key: (1), (1), b
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+select 1, 1, b, count(distinct(a)), avg(a::numeric(7, 2)) from t_distinct group by 1,2,3 order by 1,2,3 limit 10;
+ ?column? | ?column? | b | count |         avg          
+----------+----------+---+-------+----------------------
+        1 |        1 | 0 |    13 | 255.2307692307692308
+        1 |        1 | 1 |    14 | 238.0000000000000000
+        1 |        1 | 2 |    14 | 239.0000000000000000
+        1 |        1 | 3 |    14 | 240.0000000000000000
+        1 |        1 | 4 |    14 | 241.0000000000000000
+        1 |        1 | 5 |    14 | 242.0000000000000000
+        1 |        1 | 6 |    14 | 243.0000000000000000
+        1 |        1 | 7 |    14 | 244.0000000000000000
+        1 |        1 | 8 |    14 | 245.0000000000000000
+        1 |        1 | 9 |    14 | 246.0000000000000000
+(10 rows)
+
+explain (costs off, nodes off) select d, count(distinct(b)), avg(a::numeric(7, 2)) from t_distinct group by d;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: d
+         ->  Vector Sort
+               Sort Key: d
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+select d, count(distinct(b)), avg(a::numeric(7, 2)) from t_distinct group by d order by d;
+ d | count |         avg          
+---+-------+----------------------
+ 0 |    75 | 250.0000000000000000
+ 1 |    75 | 249.2517482517482517
+ 2 |    75 | 250.2517482517482517
+ 3 |    75 | 251.2517482517482517
+ 4 |    75 | 248.7482517482517483
+ 5 |    75 | 249.7482517482517483
+ 6 |    75 | 250.7482517482517483
+(7 rows)
+
+explain (costs off, nodes off) select c, count(distinct(a)), count(distinct(b)), count(distinct(d)) from t_distinct group by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: c
+         ->  Vector Sort
+               Sort Key: c
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+select c, count(distinct(a)), count(distinct(b)), count(distinct(d)) from t_distinct group by c order by count(distinct(a)), c limit 10;
+ c | count | count | count 
+---+-------+-------+-------
+ 0 |    40 |     3 |     7
+ 1 |    40 |     3 |     7
+ 2 |    40 |     3 |     7
+ 3 |    40 |     3 |     7
+ 4 |    40 |     3 |     7
+ 5 |    40 |     3 |     7
+ 6 |    40 |     3 |     7
+ 7 |    40 |     3 |     7
+ 8 |    40 |     3 |     7
+ 9 |    40 |     3 |     7
+(10 rows)
+
+explain (costs off, nodes off) select c, count(distinct(a)) ca, count(distinct(b)) cb, count(distinct(d)) cd from t_distinct group by c having count(distinct(b))+count(distinct(d))=47;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: c
+         Filter: ((count(DISTINCT b) + count(DISTINCT d)) = 47)
+         ->  Vector Sort
+               Sort Key: c
+               ->  CStore Scan on t_distinct
+(7 rows)
+
+select c, count(distinct(a)) ca, count(distinct(b)) cb, count(distinct(d)) cd from t_distinct group by c having count(distinct(b))+count(distinct(d))=47 order by c limit 10;
+ c | ca | cb | cd 
+---+----+----+----
+(0 rows)
+
+explain (costs off, nodes off) select a, count(distinct(b+d)), max(c+b) from t_distinct group by a;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: a
+         ->  Vector Sort
+               Sort Key: a
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+select a, count(distinct(b+d)), max(c+b) from t_distinct group by a order by a limit 10;
+ a | count | max 
+---+-------+-----
+ 0 |     1 |  52
+ 1 |     2 |  54
+ 2 |     2 |  56
+ 3 |     2 |  58
+ 4 |     2 |  60
+ 5 |     2 |  62
+ 6 |     2 |  64
+ 7 |     2 |  66
+ 8 |     2 |  68
+ 9 |     2 |  70
+(10 rows)
+
+explain (costs off, nodes off) select 1, count(distinct(b)), max(c), min(d), avg(a) from t_distinct group by 1;
+              QUERY PLAN               
+---------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: 1
+         ->  CStore Scan on t_distinct
+(4 rows)
+
+select 1, count(distinct(b)), max(c), min(d), avg(a) from t_distinct group by 1;
+ ?column? | count | max | min |         avg          
+----------+-------+-----+-----+----------------------
+        1 |    75 |  24 |   0 | 250.0000000000000000
+(1 row)
+
+explain (costs off, nodes off) SELECT sum(c),avg(c),max(c),min(c),avg(c),avg(c),sum(c),sum(c),count(distinct(c)) FROM t_distinct GROUP BY d order by d;
+                 QUERY PLAN                  
+---------------------------------------------
+ Row Adapter
+   ->  Vector Sort Aggregate
+         Group By Key: d
+         ->  Vector Sort
+               Sort Key: d
+               ->  CStore Scan on t_distinct
+(6 rows)
+
+SELECT sum(c),avg(c),max(c),min(c),avg(c),avg(c),sum(c),sum(c),count(distinct(c)) FROM t_distinct GROUP BY d order by d;
+ sum  |         avg         | max | min |         avg         |         avg         | sum  | sum  | count 
+------+---------------------+-----+-----+---------------------+---------------------+------+------+-------
+ 1721 | 12.1197183098591549 |  24 |   0 | 12.1197183098591549 | 12.1197183098591549 | 1721 | 1721 |    25
+ 1714 | 11.9860139860139860 |  24 |   0 | 11.9860139860139860 | 11.9860139860139860 | 1714 | 1714 |    25
+ 1707 | 11.9370629370629371 |  24 |   0 | 11.9370629370629371 | 11.9370629370629371 | 1707 | 1707 |    25
+ 1725 | 12.0629370629370629 |  24 |   0 | 12.0629370629370629 | 12.0629370629370629 | 1725 | 1725 |    25
+ 1718 | 12.0139860139860140 |  24 |   0 | 12.0139860139860140 | 12.0139860139860140 | 1718 | 1718 |    25
+ 1711 | 11.9650349650349650 |  24 |   0 | 11.9650349650349650 | 11.9650349650349650 | 1711 | 1711 |    25
+ 1704 | 11.9160839160839161 |  24 |   0 | 11.9160839160839161 | 11.9160839160839161 | 1704 | 1704 |    25
+(7 rows)
+
+explain (costs off, nodes off) select sum(a) like '%1%', count(distinct c), d from t_distinct group by d order by 1,2,3;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (((sum(a))::text ~~ '%1%'::text)), (count(DISTINCT c)), d
+         ->  Vector Sort Aggregate
+               Group By Key: d
+               ->  Vector Sort
+                     Sort Key: d
+                     ->  CStore Scan on t_distinct
+(8 rows)
+
+select sum(a) like '%1%', count(distinct c), d from t_distinct group by d order by 1,2,3;
+ ?column? | count | d 
+----------+-------+---
+ f        |    25 | 0
+ f        |    25 | 1
+ f        |    25 | 2
+ f        |    25 | 3
+ f        |    25 | 6
+ t        |    25 | 4
+ t        |    25 | 5
+(7 rows)
+
+explain (costs off, nodes off) select sum(a) like '%1%', count(distinct c), c from t_distinct group by c order by 1,2,3;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (((sum(a))::text ~~ '%1%'::text)), (count(DISTINCT c)), c
+         ->  Vector Sort Aggregate
+               Group By Key: c
+               ->  Vector Sort
+                     Sort Key: c
+                     ->  CStore Scan on t_distinct
+(8 rows)
+
+select sum(a) like '%1%', count(distinct c), c from t_distinct group by c order by 1,2,3 limit 10;
+ ?column? | count | c  
+----------+-------+----
+ f        |     1 |  1
+ f        |     1 |  2
+ f        |     1 |  3
+ f        |     1 |  4
+ f        |     1 |  5
+ f        |     1 |  6
+ f        |     1 |  7
+ f        |     1 |  8
+ f        |     1 |  9
+ f        |     1 | 10
+(10 rows)
+
+explain (costs off, nodes off) select a from (select a, b from t_distinct union all select b, a from t_distinct) group by a having count(distinct(b+1)) = 1 order by 1 limit 5; 
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Limit
+         ->  Vector Sort Aggregate
+               Group By Key: col_distribute_count_distinct_1.t_distinct.a
+               Filter: (count(DISTINCT (col_distribute_count_distinct_1.t_distinct.b + 1)) = 1)
+               ->  Vector Sort
+                     Sort Key: col_distribute_count_distinct_1.t_distinct.a
+                     ->  Vector Result
+                           ->  Vector Append
+                                 ->  CStore Scan on t_distinct
+                                 ->  CStore Scan on t_distinct
+(11 rows)
+
+select a from (select a, b from t_distinct union all select b, a from t_distinct) group by a having count(distinct(b+1)) = 1 order by 1 limit 5; 
+  a  
+-----
+ 500
+(1 row)
+
+-- Case 1.2 sub level
+explain (costs off, nodes off) select c, ca, cb from (select c, count(distinct(a)) ca, max(b) cb, min(c+d) cd from t_distinct group by c) x where cd=7;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Row Adapter
+   ->  Vector Subquery Scan on x
+         ->  Vector Sort Aggregate
+               Group By Key: t_distinct.c
+               Filter: (min((t_distinct.c + t_distinct.d)) = 7)
+               ->  Vector Sort
+                     Sort Key: t_distinct.c
+                     ->  CStore Scan on t_distinct
+(8 rows)
+
+select c, ca, cb from (select c, count(distinct(a)) ca, max(b) cb, min(c+d) cd from t_distinct group by c) x where cd=7;
+ c | ca | cb 
+---+----+----
+ 7 | 40 | 57
+(1 row)
+
+explain (costs off, nodes off) select c, ca, cb from (select c, count(distinct(a)) ca, count(distinct(b)) cb, count(distinct(d)) cd from t_distinct group by c) x where cd=7;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Row Adapter
+   ->  Vector Subquery Scan on x
+         ->  Vector Sort Aggregate
+               Group By Key: t_distinct.c
+               Filter: (count(DISTINCT t_distinct.d) = 7)
+               ->  Vector Sort
+                     Sort Key: t_distinct.c
+                     ->  CStore Scan on t_distinct
+(8 rows)
+
+select c, ca, cb from (select c, count(distinct(a)) ca, count(distinct(b)) cb, count(distinct(d)) cd from t_distinct group by c) x where cd=7 order by 1, 2, 3 limit 10;
+ c | ca | cb 
+---+----+----
+ 0 | 40 |  3
+ 1 | 40 |  3
+ 2 | 40 |  3
+ 3 | 40 |  3
+ 4 | 40 |  3
+ 5 | 40 |  3
+ 6 | 40 |  3
+ 7 | 40 |  3
+ 8 | 40 |  3
+ 9 | 40 |  3
+(10 rows)
+
+explain (costs off, nodes off) select avg(cab) from (select d, count(distinct(a+b)) cab, max(c+a) mca from t_distinct group by d);
+                    QUERY PLAN                     
+---------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Sort Aggregate
+               Group By Key: t_distinct.d
+               ->  Vector Sort
+                     Sort Key: t_distinct.d
+                     ->  CStore Scan on t_distinct
+(7 rows)
+
+select avg(cab::numeric(15,10)) from (select d, count(distinct(a+b)) cab, max(c+a) mca from t_distinct group by d);
+         avg          
+----------------------
+ 142.8571428571428571
+(1 row)
+
+explain (costs off, nodes off) select tt.a, x.cbd, x.ccb from t_distinct tt, (select a, count(distinct(b+d)) cbd, max(c+b) ccb from t_distinct group by a) x where x.cbd=tt.a;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Join
+         Hash Cond: (tt.a = x.cbd)
+         ->  CStore Scan on t_distinct tt
+         ->  Vector Subquery Scan on x
+               ->  Vector Sort Aggregate
+                     Group By Key: t_distinct.a
+                     ->  Vector Sort
+                           Sort Key: t_distinct.a
+                           ->  CStore Scan on t_distinct
+(10 rows)
+
+select tt.a, x.cbd, x.ccb from t_distinct tt, (select a, count(distinct(b+d)) cbd, max(c+b) ccb from t_distinct group by a) x where x.cbd=tt.a order by 1, 2, 3 limit 10;
+ a | cbd | ccb 
+---+-----+-----
+ 1 |   1 |  50
+ 1 |   1 |  50
+ 1 |   1 |  52
+ 1 |   1 |  52
+ 2 |   2 |  25
+ 2 |   2 |  25
+ 2 |   2 |  25
+ 2 |   2 |  25
+ 2 |   2 |  25
+ 2 |   2 |  25
+(10 rows)
+
+-- Case 1.3 with distinct
+explain (costs off, nodes off) select distinct count(distinct(a)) from t_distinct group by d;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: count(DISTINCT a)
+         ->  Vector Sort Aggregate
+               Group By Key: d
+               ->  Vector Sort
+                     Sort Key: d
+                     ->  CStore Scan on t_distinct
+(8 rows)
+
+select distinct count(distinct(a)) from t_distinct group by d order by 1;
+ count 
+-------
+   142
+   143
+(2 rows)
+
+explain (costs off, nodes off) select distinct count(distinct(b)) from t_distinct group by a;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Row Adapter
+   ->  Vector Sonic Hash Aggregate
+         Group By Key: count(DISTINCT b)
+         ->  Vector Sort Aggregate
+               Group By Key: a
+               ->  Vector Sort
+                     Sort Key: a
+                     ->  CStore Scan on t_distinct
+(8 rows)
+
+select distinct count(distinct(b)) from t_distinct group by a order by 1;
+ count 
+-------
+     1
+     2
+(2 rows)
+
+-- Clean Table
+drop table t_distinct;
+reset current_schema;
+drop schema col_distribute_count_distinct_1 cascade;
+NOTICE:  drop cascades to table col_distribute_count_distinct_1.src

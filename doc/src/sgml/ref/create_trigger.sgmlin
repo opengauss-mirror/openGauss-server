@@ -1,0 +1,33 @@
+<refentry id="SQL-CREATETRIGGER">
+<refmeta>
+<refentrytitle>CREATE TRIGGER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE TRIGGER</refname>
+<refpurpose>define a new trigger</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<indexterm zone="sql-createtrigger">
+<primary>CREATE TRIGGER</primary>
+</indexterm>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ CONSTRAINT ] TRIGGER name { BEFORE | AFTER | INSTEAD OF } { event [ OR ... ] }
+    ON table_name
+    [ FROM referenced_table_name ]
+    { NOT DEFERRABLE | [ DEFERRABLE ] { INITIALLY IMMEDIATE | INITIALLY DEFERRED } }
+    [ FOR [ EACH ] { ROW | STATEMENT } ]
+    [ WHEN ( condition ) ]
+    EXECUTE PROCEDURE function_name ( arguments )
+
+where event can be one of:
+
+    INSERT
+    UPDATE [ OF column_name [, ... ] ]
+    DELETE
+    TRUNCATE
+</synopsis>
+</refsynopsisdiv>
+</refentry>

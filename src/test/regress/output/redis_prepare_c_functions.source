@@ -1,0 +1,8 @@
+-- init setup to test drop table cancel redistribution transaction
+-- create function to set/reset proc as redistribution one
+CREATE OR REPLACE FUNCTION pg_enable_redis_proc_cancelable() RETURNS bool AS 
+'@abs_bindir@/../lib/postgresql/gsredistribute.so', 
+'pg_enable_redis_proc_cancelable' LANGUAGE C IMMUTABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION pg_disable_redis_proc_cancelable() RETURNS bool AS 
+'@abs_bindir@/../lib/postgresql/gsredistribute.so', 
+'pg_disable_redis_proc_cancelable' LANGUAGE C IMMUTABLE NOT FENCED;

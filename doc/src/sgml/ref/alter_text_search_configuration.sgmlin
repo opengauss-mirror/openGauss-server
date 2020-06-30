@@ -1,0 +1,29 @@
+<refentry id="SQL-ALTER_TEXT_SEARCH_CONFIGURATION">
+<refmeta>
+<refentrytitle>ALTER TEXT SEARCH CONFIGURATION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER TEXT SEARCH CONFIGURATION</refname>
+<refpurpose>change the definition of a text search configuration</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER TEXT SEARCH CONFIGURATION name
+     ADD MAPPING FOR token_type [, ... ] WITH dictionary_name [, ... ];
+ALTER TEXT SEARCH CONFIGURATION name
+     ALTER MAPPING FOR token_type [, ... ] WITH dictionary_name [, ... ];
+ALTER TEXT SEARCH CONFIGURATION name
+     ALTER MAPPING FOR token_type [, ... ] REPLACE old_dictionary WITH new_dictionary;
+ALTER TEXT SEARCH CONFIGURATION name
+     ALTER MAPPING REPLACE old_dictionary WITH new_dictionary;
+ALTER TEXT SEARCH CONFIGURATION name
+     DROP MAPPING [ IF EXISTS ] FOR token_type [, ... ];
+ALTER TEXT SEARCH CONFIGURATION name RENAME TO new_name;
+ALTER TEXT SEARCH CONFIGURATION name OWNER TO new_owner;
+ALTER TEXT SEARCH CONFIGURATION name SET SCHEMA new_schema;
+ALTER TEXT SEARCH CONFIGURATION name SET ( {configuration_option = value} [, ...] );
+</synopsis>
+</refsynopsisdiv>
+</refentry>

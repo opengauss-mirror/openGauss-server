@@ -1,0 +1,891 @@
+--
+--FOR BLACKLIST FEATURE: REFERENCES/INHERITS/WITH OIDS/RULE/CREATE TYPE/DOMAIN is not supported.
+--
+-- test check constraint adding
+create table atacc1 ( test int );
+-- add a check constraint
+alter table atacc1 add constraint atacc_test1 check (test>3);
+-- should fail
+insert into atacc1 (test) values (2);
+ERROR:  new row for relation "atacc1" violates check constraint "atacc_test1"
+DETAIL:  Failing row contains (2).
+-- should succeed
+insert into atacc1 (test) values (4);
+drop table atacc1;
+-- let's do one where the check fails when added
+create table atacc1 ( test int );
+-- insert a soon to be failing row
+insert into atacc1 (test) values (2);
+-- add a check constraint (fails)
+alter table atacc1 add constraint atacc_test1 check (test>3);
+ERROR:  check constraint "atacc_test1" is violated by some row
+insert into atacc1 (test) values (4);
+drop table atacc1;
+-- let's do one where the check fails because the column doesn't exist
+create table atacc1 ( test int );
+-- add a check constraint (fails)
+alter table atacc1 add constraint atacc_test1 check (test1>3);
+ERROR:  column "test1" does not exist
+drop table atacc1;
+-- something a little more complicated
+create table atacc1 ( test int, test2 int, test3 int);
+-- add a check constraint (fails)
+alter table atacc1 add constraint atacc_test1 check (test+test2<test3*4);
+-- should fail
+insert into atacc1 (test,test2,test3) values (4,4,2);
+ERROR:  new row for relation "atacc1" violates check constraint "atacc_test1"
+DETAIL:  Failing row contains (4, 4, 2).
+-- should succeed
+insert into atacc1 (test,test2,test3) values (4,4,5);
+drop table atacc1;
+-- lets do some naming tests
+create table atacc1 (test int check (test>3), test2 int);
+alter table atacc1 add check (test2>test);
+-- should fail for $2
+insert into atacc1 (test2, test) values (3, 4);
+ERROR:  new row for relation "atacc1" violates check constraint "atacc1_check"
+DETAIL:  Failing row contains (4, 3).
+drop table atacc1;
+-- inheritance related tests
+create table atacc1 (test int);
+create table atacc2 (test2 int);
+create table atacc3 (test3 int) inherits (atacc1, atacc2);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+alter table atacc2 add constraint foo check (test2>0);
+-- fail and then succeed on atacc2
+insert into atacc2 (test2) values (-3);
+ERROR:  new row for relation "atacc2" violates check constraint "foo"
+DETAIL:  Failing row contains (-3).
+insert into atacc2 (test2) values (3);
+-- fail and then succeed on atacc3
+insert into atacc3 (test2) values (-3);
+ERROR:  relation "atacc3" does not exist on datanode1
+LINE 1: insert into atacc3 (test2) values (-3);
+                    ^
+insert into atacc3 (test2) values (3);
+ERROR:  relation "atacc3" does not exist on datanode1
+LINE 1: insert into atacc3 (test2) values (3);
+                    ^
+drop table atacc3;
+ERROR:  table "atacc3" does not exist
+drop table atacc2;
+drop table atacc1;
+-- same things with one created with INHERIT
+create table atacc1 (test int);
+create table atacc2 (test2 int);
+create table atacc3 (test3 int) inherits (atacc1, atacc2);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+alter table atacc3 no inherit atacc2;
+ERROR:  relation "atacc3" does not exist
+-- fail
+alter table atacc3 no inherit atacc2;
+ERROR:  relation "atacc3" does not exist
+-- make sure it really isn't a child
+insert into atacc3 (test2) values (3);
+ERROR:  relation "atacc3" does not exist on datanode1
+LINE 1: insert into atacc3 (test2) values (3);
+                    ^
+select test2 from atacc2;
+ test2 
+-------
+(0 rows)
+
+-- fail due to missing constraint
+alter table atacc2 add constraint foo check (test2>0);
+alter table atacc3 inherit atacc2;
+ERROR:  relation "atacc3" does not exist
+-- fail due to missing column
+alter table atacc3 rename test2 to testx;
+ERROR:  relation "atacc3" does not exist
+alter table atacc3 inherit atacc2;
+ERROR:  relation "atacc3" does not exist
+-- fail due to mismatched data type
+alter table atacc3 add test2 bool;
+ERROR:  relation "atacc3" does not exist
+alter table atacc3 inherit atacc2;
+ERROR:  relation "atacc3" does not exist
+alter table atacc3 drop test2;
+ERROR:  relation "atacc3" does not exist
+-- succeed
+alter table atacc3 add test2 int;
+ERROR:  relation "atacc3" does not exist
+update atacc3 set test2 = 4 where test2 is null;
+ERROR:  relation "atacc3" does not exist on datanode1
+LINE 1: update atacc3 set test2 = 4 where test2 is null;
+               ^
+alter table atacc3 add constraint foo check (test2>0);
+ERROR:  relation "atacc3" does not exist
+alter table atacc3 inherit atacc2;
+ERROR:  relation "atacc3" does not exist
+-- fail due to duplicates and circular inheritance
+alter table atacc3 inherit atacc2;
+ERROR:  relation "atacc3" does not exist
+alter table atacc2 inherit atacc3;
+ERROR:  relation "atacc3" does not exist
+alter table atacc2 inherit atacc2;
+ERROR:  circular inheritance not allowed
+DETAIL:  "atacc2" is already a child of "atacc2".
+-- test that we really are a child now (should see 4 not 3 and cascade should go through)
+select test2 from atacc2;
+ test2 
+-------
+(0 rows)
+
+drop table atacc2 cascade;
+drop table atacc1;
+-- adding only to a parent is allowed as of 9.2
+create table atacc1 (test int);
+create table atacc2 (test2 int) inherits (atacc1);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+-- ok:
+alter table atacc1 add constraint foo check (test>0) no inherit;
+-- check constraint is not there on child
+insert into atacc2 (test) values (-3);
+ERROR:  relation "atacc2" does not exist on datanode1
+LINE 1: insert into atacc2 (test) values (-3);
+                    ^
+-- check constraint is there on parent
+insert into atacc1 (test) values (-3);
+ERROR:  new row for relation "atacc1" violates check constraint "foo"
+DETAIL:  Failing row contains (-3).
+insert into atacc1 (test) values (3);
+-- fail, violating row:
+alter table atacc2 add constraint foo check (test>0) no inherit;
+ERROR:  relation "atacc2" does not exist
+drop table atacc2;
+ERROR:  table "atacc2" does not exist
+drop table atacc1;
+-- test unique constraint adding
+create table atacc1 ( test int ) with oids;
+ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
+-- add a unique constraint
+alter table atacc1 add constraint atacc_test1 unique (test);
+ERROR:  relation "atacc1" does not exist
+-- insert first value
+insert into atacc1 (test) values (2);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (test) values (2);
+                    ^
+-- should fail
+insert into atacc1 (test) values (2);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (test) values (2);
+                    ^
+-- should succeed
+insert into atacc1 (test) values (4);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (test) values (4);
+                    ^
+-- try adding a unique oid constraint
+alter table atacc1 add constraint atacc_oid1 unique(oid);
+ERROR:  relation "atacc1" does not exist
+-- try to create duplicates via alter table using - should fail
+alter table atacc1 alter column test type integer using 0;
+ERROR:  relation "atacc1" does not exist
+drop table atacc1;
+ERROR:  table "atacc1" does not exist
+-- let's do one where the unique constraint fails when added
+create table atacc1 ( test int );
+-- insert soon to be failing rows
+insert into atacc1 (test) values (2);
+insert into atacc1 (test) values (2);
+-- add a unique constraint (fails)
+alter table atacc1 add constraint atacc_test1 unique (test);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "atacc_test1" for table "atacc1"
+ERROR:  could not create unique index "atacc_test1"
+DETAIL:  Key (test)=(2) is duplicated.
+insert into atacc1 (test) values (3);
+drop table atacc1;
+-- let's do one where the unique constraint fails
+-- because the column doesn't exist
+create table atacc1 ( test int );
+-- add a unique constraint (fails)
+alter table atacc1 add constraint atacc_test1 unique (test1);
+ERROR:  column "test1" named in key does not exist
+drop table atacc1;
+-- something a little more complicated
+create table atacc1 ( test int, test2 int);
+-- add a unique constraint
+alter table atacc1 add constraint atacc_test1 unique (test, test2);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "atacc_test1" for table "atacc1"
+-- insert initial value
+insert into atacc1 (test,test2) values (4,4);
+-- should fail
+insert into atacc1 (test,test2) values (4,4);
+ERROR:  duplicate key value violates unique constraint "atacc_test1"
+DETAIL:  Key (test, test2)=(4, 4) already exists.
+-- should all succeed
+insert into atacc1 (test,test2) values (4,5);
+insert into atacc1 (test,test2) values (5,4);
+insert into atacc1 (test,test2) values (5,5);
+drop table atacc1;
+-- lets do some naming tests
+create table atacc1 (test int, test2 int, unique(test));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "atacc1_test_key" for table "atacc1"
+alter table atacc1 add unique (test2);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "atacc1_test2_key" for table "atacc1"
+-- should fail for @@ second one @@
+insert into atacc1 (test2, test) values (3, 3);
+insert into atacc1 (test2, test) values (2, 3);
+ERROR:  duplicate key value violates unique constraint "atacc1_test_key"
+DETAIL:  Key (test)=(3) already exists.
+drop table atacc1;
+-- test primary key constraint adding
+create table atacc1 ( test int ) with oids;
+ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
+-- add a primary key constraint
+alter table atacc1 add constraint atacc_test1 primary key (test);
+ERROR:  relation "atacc1" does not exist
+-- insert first value
+insert into atacc1 (test) values (2);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (test) values (2);
+                    ^
+-- should fail
+insert into atacc1 (test) values (2);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (test) values (2);
+                    ^
+-- should succeed
+insert into atacc1 (test) values (4);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (test) values (4);
+                    ^
+-- inserting NULL should fail
+insert into atacc1 (test) values(NULL);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (test) values(NULL);
+                    ^
+-- try adding a second primary key (should fail)
+alter table atacc1 add constraint atacc_oid1 primary key(oid);
+ERROR:  relation "atacc1" does not exist
+-- drop first primary key constraint
+alter table atacc1 drop constraint atacc_test1 restrict;
+ERROR:  relation "atacc1" does not exist
+-- try adding a primary key on oid (should succeed)
+alter table atacc1 add constraint atacc_oid1 primary key(oid);
+ERROR:  relation "atacc1" does not exist
+drop table atacc1;
+ERROR:  table "atacc1" does not exist
+-- let's do one where the primary key constraint fails when added
+create table atacc1 ( test int );
+-- insert soon to be failing rows
+insert into atacc1 (test) values (2);
+insert into atacc1 (test) values (2);
+-- add a primary key (fails)
+alter table atacc1 add constraint atacc_test1 primary key (test);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "atacc_test1" for table "atacc1"
+ERROR:  could not create unique index "atacc_test1"
+DETAIL:  Key (test)=(2) is duplicated.
+insert into atacc1 (test) values (3);
+drop table atacc1;
+-- let's do another one where the primary key constraint fails when added
+create table atacc1 ( test int );
+-- insert soon to be failing row
+insert into atacc1 (test) values (NULL);
+-- add a primary key (fails)
+alter table atacc1 add constraint atacc_test1 primary key (test);
+ERROR:  column "test" contains null values
+insert into atacc1 (test) values (3);
+drop table atacc1;
+-- let's do one where the primary key constraint fails
+-- because the column doesn't exist
+create table atacc1 ( test int );
+-- add a primary key constraint (fails)
+alter table atacc1 add constraint atacc_test1 primary key (test1);
+ERROR:  column "test1" named in key does not exist
+drop table atacc1;
+-- adding a new column as primary key to a non-empty table.
+-- should fail unless the column has a non-null default value.
+create table atacc1 ( test int );
+insert into atacc1 (test) values (0);
+-- add a primary key column without a default (fails).
+alter table atacc1 add column test2 int primary key;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "atacc1_pkey" for table "atacc1"
+ERROR:  column "test2" contains null values
+-- now add a primary key column with a default (succeeds).
+alter table atacc1 add column test2 int default 0 primary key;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "atacc1_pkey" for table "atacc1"
+drop table atacc1;
+-- something a little more complicated
+create table atacc1 ( test int, test2 int);
+-- add a primary key constraint
+alter table atacc1 add constraint atacc_test1 primary key (test, test2);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "atacc_test1" for table "atacc1"
+-- try adding a second primary key - should fail
+alter table atacc1 add constraint atacc_test2 primary key (test);
+ERROR:  multiple primary keys for table "atacc1" are not allowed
+-- insert initial value
+insert into atacc1 (test,test2) values (4,4);
+-- should fail
+insert into atacc1 (test,test2) values (4,4);
+ERROR:  duplicate key value violates unique constraint "atacc_test1"
+DETAIL:  Key (test, test2)=(4, 4) already exists.
+insert into atacc1 (test,test2) values (NULL,3);
+ERROR:  null value in column "test" violates not-null constraint
+DETAIL:  Failing row contains (null, 3).
+insert into atacc1 (test,test2) values (3, NULL);
+ERROR:  null value in column "test2" violates not-null constraint
+DETAIL:  Failing row contains (3, null).
+insert into atacc1 (test,test2) values (NULL,NULL);
+ERROR:  null value in column "test" violates not-null constraint
+DETAIL:  Failing row contains (null, null).
+-- should all succeed
+insert into atacc1 (test,test2) values (4,5);
+insert into atacc1 (test,test2) values (5,4);
+insert into atacc1 (test,test2) values (5,5);
+drop table atacc1;
+-- lets do some naming tests
+create table atacc1 (test int, test2 int, primary key(test));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "atacc1_pkey" for table "atacc1"
+-- only first should succeed
+insert into atacc1 (test2, test) values (3, 3);
+insert into atacc1 (test2, test) values (2, 3);
+ERROR:  duplicate key value violates unique constraint "atacc1_pkey"
+DETAIL:  Key (test)=(3) already exists.
+insert into atacc1 (test2, test) values (1, NULL);
+ERROR:  null value in column "test" violates not-null constraint
+DETAIL:  Failing row contains (null, 1).
+drop table atacc1;
+-- alter table / alter column [set/drop] not null tests
+-- try altering system catalogs, should fail
+alter table pg_class alter column relname drop not null;
+ERROR:  permission denied: "pg_class" is a system catalog
+alter table pg_class alter relname set not null;
+ERROR:  permission denied: "pg_class" is a system catalog
+-- try altering non-existent table, should fail
+alter table non_existent alter column bar set not null;
+ERROR:  relation "non_existent" does not exist
+alter table non_existent alter column bar drop not null;
+ERROR:  relation "non_existent" does not exist
+-- test setting columns to null and not null and vice versa
+-- test checking for null values and primary key
+create table atacc1 (test int not null) with oids;
+ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
+alter table atacc1 add constraint "atacc1_pkey" primary key (test);
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter column test drop not null;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 drop constraint "atacc1_pkey";
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter column test drop not null;
+ERROR:  relation "atacc1" does not exist
+insert into atacc1 values (null);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 values (null);
+                    ^
+alter table atacc1 alter test set not null;
+ERROR:  relation "atacc1" does not exist
+delete from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: delete from atacc1;
+                    ^
+alter table atacc1 alter test set not null;
+ERROR:  relation "atacc1" does not exist
+-- try altering a non-existent column, should fail
+alter table atacc1 alter bar set not null;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter bar drop not null;
+ERROR:  relation "atacc1" does not exist
+-- try altering the oid column, should fail
+alter table atacc1 alter oid set not null;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter oid drop not null;
+ERROR:  relation "atacc1" does not exist
+-- try creating a view and altering that, should fail
+create view myview as select * from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: create view myview as select * from atacc1;
+                                            ^
+alter table myview alter column test drop not null;
+ERROR:  relation "myview" does not exist
+alter table myview alter column test set not null;
+ERROR:  relation "myview" does not exist
+drop view myview;
+ERROR:  view "myview" does not exist
+drop table atacc1;
+ERROR:  table "atacc1" does not exist
+-- test inheritance
+create table parent (a int);
+create table child (b varchar(255)) inherits (parent);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+alter table parent alter a set not null;
+insert into parent values (NULL);
+ERROR:  null value in column "a" violates not-null constraint
+DETAIL:  Failing row contains (null).
+insert into child (a, b) values (NULL, 'foo');
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: insert into child (a, b) values (NULL, 'foo');
+                    ^
+alter table parent alter a drop not null;
+insert into parent values (NULL);
+insert into child (a, b) values (NULL, 'foo');
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: insert into child (a, b) values (NULL, 'foo');
+                    ^
+alter table only parent alter a set not null;
+ERROR:  column "a" contains null values
+alter table child alter a set not null;
+ERROR:  relation "child" does not exist
+delete from parent;
+alter table only parent alter a set not null;
+insert into parent values (NULL);
+ERROR:  null value in column "a" violates not-null constraint
+DETAIL:  Failing row contains (null).
+alter table child alter a set not null;
+ERROR:  relation "child" does not exist
+insert into child (a, b) values (NULL, 'foo');
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: insert into child (a, b) values (NULL, 'foo');
+                    ^
+delete from child;
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: delete from child;
+                    ^
+alter table child alter a set not null;
+ERROR:  relation "child" does not exist
+insert into child (a, b) values (NULL, 'foo');
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: insert into child (a, b) values (NULL, 'foo');
+                    ^
+drop table child;
+ERROR:  table "child" does not exist
+drop table parent;
+-- test setting and removing default values
+create table def_test (
+	c1	int4 default 5,
+	c2	text default 'initial_default'
+);
+insert into def_test default values;
+alter table def_test alter column c1 drop default;
+insert into def_test default values;
+alter table def_test alter column c2 drop default;
+insert into def_test default values;
+alter table def_test alter column c1 set default 10;
+alter table def_test alter column c2 set default 'new_default';
+insert into def_test default values;
+select * from def_test order by 1, 2;
+ c1 |       c2        
+----+-----------------
+  5 | initial_default
+ 10 | new_default
+    | initial_default
+    | 
+(4 rows)
+
+-- set defaults to an incorrect type: this should fail
+alter table def_test alter column c1 set default 'wrong_datatype';
+ERROR:  invalid input syntax for integer: "wrong_datatype"
+alter table def_test alter column c2 set default 20;
+-- set defaults on a non-existent column: this should fail
+alter table def_test alter column c3 set default 30;
+ERROR:  column "c3" of relation "def_test" does not exist
+-- set defaults on views: we need to create a view, add a rule
+-- to allow insertions into it, and then alter the view to add
+-- a default
+create view def_view_test as select * from def_test;
+create rule def_view_test_ins as
+	on insert to def_view_test
+	do instead insert into def_test select new.*;
+ERROR:  RULE is not yet supported.
+insert into def_view_test default values;
+ERROR:  cannot insert into view "def_view_test"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+alter table def_view_test alter column c1 set default 45;
+insert into def_view_test default values;
+ERROR:  cannot insert into view "def_view_test"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+alter table def_view_test alter column c2 set default 'view_default';
+insert into def_view_test default values;
+ERROR:  cannot insert into view "def_view_test"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+select * from def_view_test order by 1, 2;
+ c1 |       c2        
+----+-----------------
+  5 | initial_default
+ 10 | new_default
+    | initial_default
+    | 
+(4 rows)
+
+drop rule def_view_test_ins on def_view_test;
+ERROR:  rule "def_view_test_ins" for relation "def_view_test" does not exist
+drop view def_view_test;
+drop table def_test;
+-- alter table / drop column tests
+-- try altering system catalogs, should fail
+alter table pg_class drop column relname;
+ERROR:  permission denied: "pg_class" is a system catalog
+-- try altering non-existent table, should fail
+alter table nosuchtable drop column bar;
+ERROR:  relation "nosuchtable" does not exist
+-- test dropping columns
+create table atacc1 (a int4 not null, b int4, c int4 not null, d int4) with oids;
+ERROR:  CREATE TABLE ... WITH OIDS is not yet supported.
+insert into atacc1 values (1, 2, 3, 4);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 values (1, 2, 3, 4);
+                    ^
+alter table atacc1 drop a;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 drop a;
+ERROR:  relation "atacc1" does not exist
+-- SELECTs
+select * from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * from atacc1;
+                      ^
+select * from atacc1 order by a;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * from atacc1 order by a;
+                      ^
+select * from atacc1 order by "........pg.dropped.1........";
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * from atacc1 order by "........pg.dropped.1........"...
+                      ^
+select * from atacc1 group by a;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * from atacc1 group by a;
+                      ^
+select * from atacc1 group by "........pg.dropped.1........";
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * from atacc1 group by "........pg.dropped.1........"...
+                      ^
+select atacc1.* from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select atacc1.* from atacc1;
+                             ^
+select a from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select a from atacc1;
+                      ^
+select atacc1.a from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select atacc1.a from atacc1;
+                             ^
+select b,c,d from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select b,c,d from atacc1;
+                          ^
+select a,b,c,d from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select a,b,c,d from atacc1;
+                            ^
+select * from atacc1 where a = 1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * from atacc1 where a = 1;
+                      ^
+select "........pg.dropped.1........" from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select "........pg.dropped.1........" from atacc1;
+                                                   ^
+select atacc1."........pg.dropped.1........" from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select atacc1."........pg.dropped.1........" from atacc1;
+                                                          ^
+select "........pg.dropped.1........",b,c,d from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select "........pg.dropped.1........",b,c,d from atacc1;
+                                                         ^
+select * from atacc1 where "........pg.dropped.1........" = 1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * from atacc1 where "........pg.dropped.1........" = ...
+                      ^
+-- UPDATEs
+update atacc1 set a = 3;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: update atacc1 set a = 3;
+               ^
+update atacc1 set b = 2 where a = 3;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: update atacc1 set b = 2 where a = 3;
+               ^
+update atacc1 set "........pg.dropped.1........" = 3;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: update atacc1 set "........pg.dropped.1........" = 3;
+               ^
+update atacc1 set b = 2 where "........pg.dropped.1........" = 3;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: update atacc1 set b = 2 where "........pg.dropped.1........"...
+               ^
+-- INSERTs
+insert into atacc1 values (10, 11, 12, 13);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 values (10, 11, 12, 13);
+                    ^
+insert into atacc1 values (default, 11, 12, 13);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 values (default, 11, 12, 13);
+                    ^
+insert into atacc1 values (11, 12, 13);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 values (11, 12, 13);
+                    ^
+insert into atacc1 (a) values (10);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (a) values (10);
+                    ^
+insert into atacc1 (a) values (default);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (a) values (default);
+                    ^
+insert into atacc1 (a,b,c,d) values (10,11,12,13);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (a,b,c,d) values (10,11,12,13);
+                    ^
+insert into atacc1 (a,b,c,d) values (default,11,12,13);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (a,b,c,d) values (default,11,12,13);
+                    ^
+insert into atacc1 (b,c,d) values (11,12,13);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 (b,c,d) values (11,12,13);
+                    ^
+insert into atacc1 ("........pg.dropped.1........") values (10);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 ("........pg.dropped.1........") values (...
+                    ^
+insert into atacc1 ("........pg.dropped.1........") values (default);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 ("........pg.dropped.1........") values (...
+                    ^
+insert into atacc1 ("........pg.dropped.1........",b,c,d) values (10,11,12,13);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 ("........pg.dropped.1........",b,c,d) va...
+                    ^
+insert into atacc1 ("........pg.dropped.1........",b,c,d) values (default,11,12,13);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 ("........pg.dropped.1........",b,c,d) va...
+                    ^
+-- DELETEs
+delete from atacc1 where a = 3;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: delete from atacc1 where a = 3;
+                    ^
+delete from atacc1 where "........pg.dropped.1........" = 3;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: delete from atacc1 where "........pg.dropped.1........" = 3;
+                    ^
+delete from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: delete from atacc1;
+                    ^
+-- try dropping a non-existent column, should fail
+alter table atacc1 drop bar;
+ERROR:  relation "atacc1" does not exist
+-- try dropping the oid column, should succeed
+alter table atacc1 drop oid;
+ERROR:  relation "atacc1" does not exist
+-- try dropping the xmin column, should fail
+alter table atacc1 drop xmin;
+ERROR:  relation "atacc1" does not exist
+-- try creating a view and altering that, should fail
+create view myview as select * from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: create view myview as select * from atacc1;
+                                            ^
+select * from myview;
+ERROR:  relation "myview" does not exist on datanode1
+LINE 1: select * from myview;
+                      ^
+alter table myview drop d;
+ERROR:  relation "myview" does not exist
+drop view myview;
+ERROR:  view "myview" does not exist
+-- test some commands to make sure they fail on the dropped column
+analyze atacc1(a);
+ERROR:  relation "atacc1" does not exist
+analyze atacc1("........pg.dropped.1........");
+ERROR:  relation "atacc1" does not exist
+vacuum analyze atacc1(a);
+ERROR:  relation "atacc1" does not exist
+vacuum analyze atacc1("........pg.dropped.1........");
+ERROR:  relation "atacc1" does not exist
+comment on column atacc1.a is 'testing';
+ERROR:  relation "atacc1" does not exist
+comment on column atacc1."........pg.dropped.1........" is 'testing';
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter a set storage plain;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter "........pg.dropped.1........" set storage plain;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter a set statistics 0;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter "........pg.dropped.1........" set statistics 0;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter a set default 3;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter "........pg.dropped.1........" set default 3;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter a drop default;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter "........pg.dropped.1........" drop default;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter a set not null;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter "........pg.dropped.1........" set not null;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter a drop not null;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 alter "........pg.dropped.1........" drop not null;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 rename a to x;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 rename "........pg.dropped.1........" to x;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 add primary key(a);
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 add primary key("........pg.dropped.1........");
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 add unique(a);
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 add unique("........pg.dropped.1........");
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 add check (a > 3);
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 add check ("........pg.dropped.1........" > 3);
+ERROR:  relation "atacc1" does not exist
+create table atacc2 (id int4 unique);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "atacc2_id_key" for table "atacc2"
+alter table atacc1 add foreign key (a) references atacc2(id);
+ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+alter table atacc1 add foreign key ("........pg.dropped.1........") references atacc2(id);
+ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+alter table atacc2 add foreign key (id) references atacc1(a);
+ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+alter table atacc2 add foreign key (id) references atacc1("........pg.dropped.1........");
+ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+drop table atacc2;
+create index "testing_idx" on atacc1(a);
+ERROR:  relation "atacc1" does not exist
+create index "testing_idx" on atacc1("........pg.dropped.1........");
+ERROR:  relation "atacc1" does not exist
+-- test create as and select into
+insert into atacc1 values (21, 22, 23);
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: insert into atacc1 values (21, 22, 23);
+                    ^
+create table test1 as select * from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: create table test1 as select * from atacc1;
+                                            ^
+select * from test1;
+ERROR:  relation "test1" does not exist on datanode1
+LINE 1: select * from test1;
+                      ^
+drop table test1;
+ERROR:  table "test1" does not exist
+select * into test2 from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * into test2 from atacc1;
+                                 ^
+select * from test2;
+ERROR:  relation "test2" does not exist on datanode1
+LINE 1: select * from test2;
+                      ^
+drop table test2;
+ERROR:  table "test2" does not exist
+-- try dropping all columns
+alter table atacc1 drop c;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 drop d;
+ERROR:  relation "atacc1" does not exist
+alter table atacc1 drop b;
+ERROR:  relation "atacc1" does not exist
+select * from atacc1;
+ERROR:  relation "atacc1" does not exist on datanode1
+LINE 1: select * from atacc1;
+                      ^
+drop table atacc1;
+ERROR:  table "atacc1" does not exist
+-- test constraint error reporting in presence of dropped columns
+create table atacc1 (id serial primary key, value int check (value < 10));
+NOTICE:  CREATE TABLE will create implicit sequence "atacc1_id_seq" for serial column "atacc1.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "atacc1_pkey" for table "atacc1"
+insert into atacc1(value) values (100);
+ERROR:  new row for relation "atacc1" violates check constraint "atacc1_value_check"
+DETAIL:  Failing row contains (1, 100).
+alter table atacc1 drop column value;
+alter table atacc1 add column value int check (value < 10);
+insert into atacc1(value) values (100);
+ERROR:  new row for relation "atacc1" violates check constraint "atacc1_value_check"
+DETAIL:  Failing row contains (2, 100).
+insert into atacc1(id, value) values (null, 0);
+ERROR:  null value in column "id" violates not-null constraint
+DETAIL:  Failing row contains (null, 0).
+drop table atacc1;
+-- test inheritance
+create table parent (a int, b int, c int);
+insert into parent values (1, 2, 3);
+alter table parent drop a;
+create table child (d varchar(255)) inherits (parent);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+insert into child values (12, 13, 'testing');
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: insert into child values (12, 13, 'testing');
+                    ^
+select * from parent order by b;
+ b | c 
+---+---
+ 2 | 3
+(1 row)
+
+select * from child;
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: select * from child;
+                      ^
+alter table parent drop c;
+select * from parent order by b;
+ b 
+---
+ 2
+(1 row)
+
+select * from child;
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: select * from child;
+                      ^
+drop table child;
+ERROR:  table "child" does not exist
+drop table parent;
+-- test copy in/out
+create table test (a int4, b int4, c int4);
+insert into test values (1,2,3);
+alter table test drop a;
+copy test to stdout;
+2	3
+copy test(a) to stdout;
+ERROR:  column "a" of relation "test" does not exist
+copy test("........pg.dropped.1........") to stdout;
+ERROR:  column "........pg.dropped.1........" of relation "test" does not exist
+copy test from stdin;
+ERROR:  extra data after last expected column
+CONTEXT:  COPY test, line 1: "10	11	12"
+select * from test order by b;
+ b | c 
+---+---
+ 2 | 3
+(1 row)
+
+copy test from stdin;
+select * from test order by b;
+ b  | c  
+----+----
+  2 |  3
+ 21 | 22
+(2 rows)
+
+copy test(a) from stdin;
+ERROR:  column "a" of relation "test" does not exist
+copy test("........pg.dropped.1........") from stdin;
+ERROR:  column "........pg.dropped.1........" of relation "test" does not exist
+copy test(b,c) from stdin;
+select * from test order by b;
+ b  | c  
+----+----
+  2 |  3
+ 21 | 22
+ 31 | 32
+(3 rows)
+
+drop table test;

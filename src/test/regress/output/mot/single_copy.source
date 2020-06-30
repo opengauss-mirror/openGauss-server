@@ -1,0 +1,41 @@
+drop foreign table test;
+ERROR:  foreign table "test" does not exist
+drop foreign table test2;
+ERROR:  foreign table "test2" does not exist
+create foreign table test (x integer, y integer);
+create foreign table test2 (x integer, y integer);
+insert into test values (generate_series(1,10), generate_series(1,10));
+select * from test;
+ x  | y  
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+(10 rows)
+
+copy (select * from test) to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv' DELIMITER ',';
+copy test2 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test.csv' DELIMITER ',';
+select * from test2;
+ x  | y  
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+(10 rows)
+
+drop foreign table test;
+drop foreign table test2;

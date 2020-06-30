@@ -1,0 +1,64 @@
+<!--
+doc/src/sgml/ref/anonymous_block.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-ANONYMOUSBLOCK">
+ <refmeta>
+  <refentrytitle>ANONYMOUS BLOCK</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>ANONYMOUS BLOCK</refname>
+  <refpurpose>define an anonymous block</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-anonymousblock">
+  <primary>ANONYMOUS BLOCK</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+
+<synopsis>
+[DECLARE [declare_statements]] 
+	BEGIN
+	execution_staements  
+	END;
+	/
+</synopsis>
+
+</refentry>
+<!--
+doc/src/sgml/ref/anonymous_block.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-ANONYMOUSBLOCK">
+ <refmeta>
+  <refentrytitle>ANONYMOUS BLOCK</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>ANONYMOUS BLOCK</refname>
+  <refpurpose>define an anonymous block</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-anonymousblock">
+  <primary>ANONYMOUS BLOCK</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+
+<synopsis>
+[DECLARE [declare_statements]] 
+	BEGIN
+	execution_staements  
+	END;
+	/
+</synopsis>
+
+</refentry>

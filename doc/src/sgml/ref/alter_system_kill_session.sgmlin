@@ -1,0 +1,16 @@
+<refentry id="SQL-ALTER_SYSTEM_KILL_SESSION">
+<refmeta>
+<refentrytitle>ALTER SYSTEM KILL SESSION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER SYSTEM KILL SESSION</refname>
+<refpurpose>kill and finish a system session</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER SYSTEM KILL SESSION 'session_sid, serial' [ IMMEDIATE ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,50 @@
+<refentry id="sql-createtype">
+ <indexterm zone="sql-createtype">
+  <primary>CREATE TYPE</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle>CREATE TYPE</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>CREATE TYPE</refname>
+  <refpurpose>define a new data type</refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+<synopsis>
+CREATE TYPE <replaceable class="parameter">name</replaceable> AS
+    ( [ <replaceable class="parameter">attribute_name</replaceable> <replaceable class="parameter">data_type</replaceable> [ COLLATE <replaceable>collation</replaceable> ] [, ... ] ] )
+
+CREATE TYPE <replaceable class="parameter">name</replaceable> AS ENUM
+    ( [ '<replaceable class="parameter">label</replaceable>' [, ... ] ] )
+
+CREATE TYPE <replaceable class="parameter">name</replaceable> (
+    INPUT = <replaceable class="parameter">input_function</replaceable>,
+    OUTPUT = <replaceable class="parameter">output_function</replaceable>
+    [ , RECEIVE = <replaceable class="parameter">receive_function</replaceable> ]
+    [ , SEND = <replaceable class="parameter">send_function</replaceable> ]
+    [ , TYPMOD_IN = <replaceable class="parameter">type_modifier_input_function</replaceable> ]
+    [ , TYPMOD_OUT = <replaceable class="parameter">type_modifier_output_function</replaceable> ]
+    [ , ANALYZE = <replaceable class="parameter">analyze_function</replaceable> ]
+    [ , INTERNALLENGTH = { <replaceable class="parameter">internallength</replaceable> | VARIABLE } ]
+    [ , PASSEDBYVALUE ]
+    [ , ALIGNMENT = <replaceable class="parameter">alignment</replaceable> ]
+    [ , STORAGE = <replaceable class="parameter">storage</replaceable> ]
+    [ , LIKE = <replaceable class="parameter">like_type</replaceable> ]
+    [ , CATEGORY = <replaceable class="parameter">category</replaceable> ]
+    [ , PREFERRED = <replaceable class="parameter">preferred</replaceable> ]
+    [ , DEFAULT = <replaceable class="parameter">default</replaceable> ]
+    [ , ELEMENT = <replaceable class="parameter">element</replaceable> ]
+    [ , DELIMITER = <replaceable class="parameter">delimiter</replaceable> ]
+    [ , COLLATABLE = <replaceable class="parameter">collatable</replaceable> ]
+)
+
+CREATE TYPE <replaceable class="parameter">name</replaceable>
+</synopsis>
+ </refsynopsisdiv>
+</refentry>
+

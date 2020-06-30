@@ -1,0 +1,360 @@
+set enable_seqscan=off;
+set enable_bitmapscan=off;
+set enable_material=off;
+set enable_beta_opfusion=on;
+set enable_beta_nestloop_fusion=on;
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1 (c1 int, c2 numeric, c3 numeric, c4 int, colreal real);
+create table t2 (c1 int, c2 numeric, c3 numeric, c4 int, colreal real);
+create index idx1 on t1(c2);
+create index idx2 on t1(c3);
+insert into t1 select generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000);
+insert into t1 select generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000);
+insert into t1 select generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000), generate_series(10, 100000);
+insert into t1 values (1,2,3,5,0),(1,2,3,6,0),(1,3,2,7,0),(1,3,2,8,0);
+insert into t2 select * from t1;
+create index on t2(c2);
+analyze t1;
+analyze t2;
+explain (verbose on, costs off) select sum(c1) from t1 group by c2;
+                QUERY PLAN                
+------------------------------------------
+ GroupAggregate
+   Output: sum(c1), c2
+   Group By Key: t1.c2
+   ->  Index Scan using idx1 on public.t1
+         Output: c1, c2, c3, c4, colreal
+(5 rows)
+
+explain (verbose on, costs off) select count(c1) from t1 where c2=1;
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   Output: count(c1)
+   ->  Index Scan using idx1 on public.t1
+         Output: c1, c2, c3, c4, colreal
+         Index Cond: (t1.c2 = 1::numeric)
+(5 rows)
+
+explain (verbose on, costs off) select sum(colreal) from t1 where c2=1;
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   Output: sum(colreal)
+   ->  Index Scan using idx1 on public.t1
+         Output: c1, c2, c3, c4, colreal
+         Index Cond: (t1.c2 = 1::numeric)
+(5 rows)
+
+explain (verbose on, costs off) select sum(c1) as result from t1 where c2=1 having result !=10;
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   Output: sum(c1)
+   Filter: (sum(t1.c1) <> 10)
+   ->  Index Scan using idx1 on public.t1
+         Output: c1, c2, c3, c4, colreal
+         Index Cond: (t1.c2 = 1::numeric)
+(6 rows)
+
+explain (verbose on, costs off) select sum(c1), sum(c2) from t1 where c3 = 1;
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   Output: sum(c1), sum(c2)
+   ->  Index Scan using idx2 on public.t1
+         Output: c1, c2, c3, c4, colreal
+         Index Cond: (t1.c3 = 1::numeric)
+(5 rows)
+
+explain (verbose on, costs off) select sum(c1)+1 from t1 where c2=1;
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   Output: (sum(c1) + 1)
+   ->  Index Scan using idx1 on public.t1
+         Output: c1, c2, c3, c4, colreal
+         Index Cond: (t1.c2 = 1::numeric)
+(5 rows)
+
+explain (verbose on, costs off) select sum(c1+1) from t1 where c2=1;
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   Output: sum((c1 + 1))
+   ->  Index Scan using idx1 on public.t1
+         Output: c1, c2, c3, c4, colreal
+         Index Cond: (t1.c2 = 1::numeric)
+(5 rows)
+
+explain (verbose on, costs off) select sum(c1) from t1 where c2=1 limit 1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   Output: (sum(c1))
+   ->  Aggregate
+         Output: sum(c1)
+         ->  Index Scan using idx1 on public.t1
+               Output: c1, c2, c3, c4, colreal
+               Index Cond: (t1.c2 = 1::numeric)
+(7 rows)
+
+-- agg fusion
+drop index idx2;
+-- index t1(c2): indexonlyscan
+explain (verbose on, costs off) select sum(c2) from t1 where c2=3;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Aggregate
+   Output: sum(c2)
+   ->  Index Only Scan using idx1 on public.t1
+         Output: c2
+         Index Cond: (t1.c2 = 3::numeric)
+(6 rows)
+
+select sum(c2) from t1 where c2=3;
+ sum 
+-----
+   6
+(1 row)
+
+-- index t1(c2): indexscan
+explain (verbose on, costs off) select sum(c3) from t1 where c2=3;
+                QUERY PLAN                
+------------------------------------------
+ [Bypass]
+ Aggregate
+   Output: sum(c3)
+   ->  Index Scan using idx1 on public.t1
+         Output: c1, c2, c3, c4, colreal
+         Index Cond: (t1.c2 = 3::numeric)
+(6 rows)
+
+select sum(c3) from t1 where c2=3;
+ sum 
+-----
+   4
+(1 row)
+
+-- index t1(c3, c2): indexonlyscan
+drop index idx1;
+create index idx3 on t1(c3, c2);
+explain (verbose on, costs off) select sum(c3) from t1 where c3=3;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Aggregate
+   Output: sum(c3)
+   ->  Index Only Scan using idx3 on public.t1
+         Output: c3, c2
+         Index Cond: (t1.c3 = 3::numeric)
+(6 rows)
+
+explain (verbose on, costs off) select sum(c2) from t1 where c3=3;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Aggregate
+   Output: sum(c2)
+   ->  Index Only Scan using idx3 on public.t1
+         Output: c3, c2
+         Index Cond: (t1.c3 = 3::numeric)
+(6 rows)
+
+explain (verbose on, costs off) select sum(c3) from t1 where c2=3;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Aggregate
+   Output: sum(c3)
+   ->  Index Only Scan using idx3 on public.t1
+         Output: c3, c2
+         Index Cond: (t1.c2 = 3::numeric)
+(6 rows)
+
+explain (verbose on, costs off) select sum(c2) from t1 where c2=3;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Aggregate
+   Output: sum(c2)
+   ->  Index Only Scan using idx3 on public.t1
+         Output: c3, c2
+         Index Cond: (t1.c2 = 3::numeric)
+(6 rows)
+
+select sum(c3) from t1 where c3=3;
+ sum 
+-----
+   6
+(1 row)
+
+select sum(c2) from t1 where c3=3;
+ sum 
+-----
+   4
+(1 row)
+
+select sum(c3) from t1 where c2=3;
+ sum 
+-----
+   4
+(1 row)
+
+select sum(c2) from t1 where c2=3;
+ sum 
+-----
+   6
+(1 row)
+
+-- sort fusion
+explain (verbose on, costs off) select c3 from t1 where c3 < 10 order by c2;
+                  QUERY PLAN                   
+-----------------------------------------------
+ [Bypass]
+ Sort
+   Output: c3, c2
+   Sort Key: t1.c2
+   ->  Index Only Scan using idx3 on public.t1
+         Output: c3, c2
+         Index Cond: (t1.c3 < 10::numeric)
+(7 rows)
+
+select c3 from t1 where c3 < 10 order by c2;
+ c3 
+----
+  2
+  2
+  3
+  3
+(4 rows)
+
+-- nestloop fusion
+drop table if exists tn1, tn2;
+NOTICE:  table "tn1" does not exist, skipping
+NOTICE:  table "tn2" does not exist, skipping
+create table tn1(c1 int, c2 int, c3 int);
+create table tn2(c1 int, c2 int, c3 int);
+insert into tn1 select generate_series(20, 100000), generate_series(20, 100000), generate_series(20, 100000);
+insert into tn2 select * from tn1;
+insert into tn1 values (1,2,3),(4,5,6),(7,8,9);
+insert into tn2 values (11,12,13),(14,15,16),(17,18,19);
+create index on tn1(c2);
+create index on tn2(c2);
+explain (verbose on, costs off) select tn1.c3, tn2.c3 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Nested Loop
+   Output: tn1.c3, tn2.c3
+   ->  Index Scan using tn1_c2_idx on public.tn1
+         Output: tn1.c1, tn1.c2, tn1.c3
+         Index Cond: (tn1.c2 < 20)
+   ->  Index Scan using tn2_c2_idx on public.tn2
+         Output: tn2.c1, tn2.c2, tn2.c3
+         Index Cond: (tn2.c2 < 20)
+(8 rows)
+
+explain (verbose on, costs off) select tn2.c3, tn1.c3 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Nested Loop
+   Output: tn2.c3, tn1.c3
+   ->  Index Scan using tn1_c2_idx on public.tn1
+         Output: tn1.c1, tn1.c2, tn1.c3
+         Index Cond: (tn1.c2 < 20)
+   ->  Index Scan using tn2_c2_idx on public.tn2
+         Output: tn2.c1, tn2.c2, tn2.c3
+         Index Cond: (tn2.c2 < 20)
+(8 rows)
+
+explain (verbose on, costs off) select tn1.c1, tn2.c1 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Nested Loop
+   Output: tn1.c1, tn2.c1
+   ->  Index Scan using tn1_c2_idx on public.tn1
+         Output: tn1.c1, tn1.c2, tn1.c3
+         Index Cond: (tn1.c2 < 20)
+   ->  Index Scan using tn2_c2_idx on public.tn2
+         Output: tn2.c1, tn2.c2, tn2.c3
+         Index Cond: (tn2.c2 < 20)
+(8 rows)
+
+explain (verbose on, costs off) select tn2.c1, tn1.c1 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Nested Loop
+   Output: tn2.c1, tn1.c1
+   ->  Index Scan using tn1_c2_idx on public.tn1
+         Output: tn1.c1, tn1.c2, tn1.c3
+         Index Cond: (tn1.c2 < 20)
+   ->  Index Scan using tn2_c2_idx on public.tn2
+         Output: tn2.c1, tn2.c2, tn2.c3
+         Index Cond: (tn2.c2 < 20)
+(8 rows)
+
+select tn1.c3, tn2.c3 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
+ c3 | c3 
+----+----
+  3 | 13
+  3 | 16
+  3 | 19
+  6 | 13
+  6 | 16
+  6 | 19
+  9 | 13
+  9 | 16
+  9 | 19
+(9 rows)
+
+select tn2.c3, tn1.c3 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
+ c3 | c3 
+----+----
+ 13 |  3
+ 16 |  3
+ 19 |  3
+ 13 |  6
+ 16 |  6
+ 19 |  6
+ 13 |  9
+ 16 |  9
+ 19 |  9
+(9 rows)
+
+select tn1.c1, tn2.c1 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
+ c1 | c1 
+----+----
+  1 | 11
+  1 | 14
+  1 | 17
+  4 | 11
+  4 | 14
+  4 | 17
+  7 | 11
+  7 | 14
+  7 | 17
+(9 rows)
+
+select tn2.c1, tn1.c1 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
+ c1 | c1 
+----+----
+ 11 |  1
+ 14 |  1
+ 17 |  1
+ 11 |  4
+ 14 |  4
+ 17 |  4
+ 11 |  7
+ 14 |  7
+ 17 |  7
+(9 rows)
+
+drop table if exists t1, t2;
+drop table if exists tn1, tn2;
+reset enable_seqscan;
+reset enable_bitmapscan;
+reset enable_material;
+reset enable_beta_opfusion;
+reset enable_beta_nestloop_fusion;

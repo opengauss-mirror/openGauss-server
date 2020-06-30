@@ -1,0 +1,735 @@
+-- b compatibility case
+drop database if exists b;
+NOTICE:  database "b" does not exist, skipping
+create database b dbcompatibility 'b';
+--------------------concat--------------------
+-- concat case in a compatibility
+\c regression
+select concat('','A');
+ concat 
+--------
+ A
+(1 row)
+
+select concat(null,'A');
+ concat 
+--------
+ A
+(1 row)
+
+select concat_ws(',', 'A', null);
+ concat_ws 
+-----------
+ A
+(1 row)
+
+select concat_ws(',', 'A', '');
+ concat_ws 
+-----------
+ A
+(1 row)
+
+create table text1 (a char(10));
+insert into text1 values (concat('A',''));
+insert into text1 values (concat('A',null));
+select * from text1 where a is null;
+ a 
+---
+(0 rows)
+
+drop table text1;
+-- concat case in b compatibility
+\c b
+select concat('','A');
+ concat 
+--------
+ A
+(1 row)
+
+select concat(null,'A');
+ concat 
+--------
+ 
+(1 row)
+
+select concat_ws(',', 'A', null);
+ concat_ws 
+-----------
+ A
+(1 row)
+
+select concat_ws(',', 'A', '');
+ concat_ws 
+-----------
+ A,
+(1 row)
+
+create table text1 (a char(10));
+insert into text1 values (concat('A',''));
+insert into text1 values (concat('A',null));
+select * from text1 where a is null;
+ a 
+---
+ 
+(1 row)
+
+drop table text1;
+-----------null is not equal to ''---------
+-- null case in postgresql
+\c regression
+create table text2 (a char(10));
+insert into text2 values('');
+insert into text2 values (null);
+select * from text2 where a is null;
+ a 
+---
+ 
+ 
+(2 rows)
+
+select * from text2 where a='';
+ a 
+---
+(0 rows)
+
+select * from text2 where a is not null;
+ a 
+---
+(0 rows)
+
+drop table text2;
+-- null case in b
+\c b
+create table text2 (a char(10));
+insert into text2 values('');
+insert into text2 values (null);
+select * from text2 where a is null;
+ a 
+---
+ 
+(1 row)
+
+select * from text2 where a='';
+     a      
+------------
+           
+(1 row)
+
+select * from text2 where a is not null;
+     a      
+------------
+           
+(1 row)
+
+drop table text2;
+-- test int8 int1in int2in int4in
+\c regression
+select '-'::int8;
+ERROR:  invalid input syntax for type bigint: "-"
+LINE 1: select '-'::int8;
+               ^
+CONTEXT:  referenced column: int8
+select int1in('');
+ int1in 
+--------
+ 
+(1 row)
+
+select int1in('.1');
+ERROR:  invalid input syntax for integer: ".1"
+CONTEXT:  referenced column: int1in
+select int2in('s');
+ERROR:  invalid input syntax for integer: "s"
+CONTEXT:  referenced column: int2in
+select int4in('s');
+ERROR:  invalid input syntax for integer: "s"
+CONTEXT:  referenced column: int4in
+\c b
+select '-'::int8;
+ int8 
+------
+    0
+(1 row)
+
+select int1in('');
+ int1in 
+--------
+ 0
+(1 row)
+
+select int1in('.1');
+ int1in 
+--------
+ 0
+(1 row)
+
+select int2in('s');
+ int2in 
+--------
+      0
+(1 row)
+
+select int4in('s');
+ int4in 
+--------
+      0
+(1 row)
+
+-- test substr
+select substr(9, 2) + 1;
+ ?column? 
+----------
+        1
+(1 row)
+
+select substr(9, 2) + 1.2;
+ ?column? 
+----------
+      1.2
+(1 row)
+
+select substr(9, 2) + '1';
+ ?column? 
+----------
+        1
+(1 row)
+
+select substr(9, 2) + '1.2';
+ ?column? 
+----------
+      1.2
+(1 row)
+
+select substr(9, 2) + 'a';
+ ?column? 
+----------
+        0
+(1 row)
+
+select substr(1.2, 1, 3) + '1.2';
+ ?column? 
+----------
+      2.4
+(1 row)
+
+select 'a' + 1;
+ ?column? 
+----------
+        1
+(1 row)
+
+select 'a' + 1.2;
+ ?column? 
+----------
+      1.2
+(1 row)
+
+select 'a' + '1';
+ ?column? 
+----------
+        1
+(1 row)
+
+select 'a' + '1.2';
+ ?column? 
+----------
+      1.2
+(1 row)
+
+select 'a' + 'b';
+ ?column? 
+----------
+        0
+(1 row)
+
+select cast('.1' as int);
+ int4 
+------
+    0
+(1 row)
+
+select cast('' as int);
+ int4 
+------
+    0
+(1 row)
+
+select cast('1.1' as int);
+ int4 
+------
+    1
+(1 row)
+
+select cast('s' as int);
+ int4 
+------
+    0
+(1 row)
+
+--------------- limit #,#-------------------
+-- limit case in postgresql
+\c regression
+create table test(a int);
+insert into test values (1),(2),(3),(4),(5);
+select * from test order by 1 limit 2,3;
+ a 
+---
+ 3
+ 4
+ 5
+(3 rows)
+
+select * from test order by 1 limit 2,6;
+ a 
+---
+ 3
+ 4
+ 5
+(3 rows)
+
+select * from test order by 1 limit 6,2;
+ a 
+---
+(0 rows)
+
+drop table test;
+-- limit case in b
+\c b
+create table test(a int);
+insert into test values (1),(2),(3),(4),(5);
+select * from test order by 1 limit 2,3;
+ a 
+---
+ 3
+ 4
+ 5
+(3 rows)
+
+select * from test order by 1 limit 2,6;
+ a 
+---
+ 3
+ 4
+ 5
+(3 rows)
+
+select * from test order by 1 limit 6,2;
+ a 
+---
+(0 rows)
+
+drop table test;
+--------------timestampdiff-----------------
+-- timestamp with time zone
+-- timestamp1 > timestamp2
+\c b
+select timestampdiff(year, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+              1
+(1 row)
+
+select timestampdiff(quarter, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+              4
+(1 row)
+
+select timestampdiff(week, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+             56
+(1 row)
+
+select timestampdiff(month, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+             13
+(1 row)
+
+select timestampdiff(day, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+            397
+(1 row)
+
+select timestampdiff(hour, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+           9529
+(1 row)
+
+select timestampdiff(minute, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+         571741
+(1 row)
+
+select timestampdiff(second, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+       34304461
+(1 row)
+
+select timestampdiff(microsecond, '2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+ timestamp_diff 
+----------------
+ 34304461000001
+(1 row)
+
+-- timestamp2 > timestamp1
+select timestampdiff(year, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff 
+----------------
+             -1
+(1 row)
+
+select timestampdiff(quarter, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff 
+----------------
+             -4
+(1 row)
+
+select timestampdiff(week, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff 
+----------------
+            -56
+(1 row)
+
+select timestampdiff(month, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff 
+----------------
+            -13
+(1 row)
+
+select timestampdiff(day, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff 
+----------------
+           -397
+(1 row)
+
+select timestampdiff(hour, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff 
+----------------
+          -9529
+(1 row)
+
+select timestampdiff(minute, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff 
+----------------
+        -571741
+(1 row)
+
+select timestampdiff(second, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff 
+----------------
+      -34304461
+(1 row)
+
+select timestampdiff(microsecond, '2019-02-02 02:02:02.000002', '2018-01-01 01:01:01.000001');
+ timestamp_diff  
+-----------------
+ -34304461000001
+(1 row)
+
+-- LEAP YEAR LEAP MONTH
+select timestampdiff(day, '2016-01-01', '2017-01-01');
+ timestamp_diff 
+----------------
+            366
+(1 row)
+
+select timestampdiff(day, '2017-01-01', '2018-01-01');
+ timestamp_diff 
+----------------
+            365
+(1 row)
+
+select timestampdiff(day, '2016-01-01', '2016-02-01');
+ timestamp_diff 
+----------------
+             31
+(1 row)
+
+select timestampdiff(day, '2016-02-01', '2016-03-01');
+ timestamp_diff 
+----------------
+             29
+(1 row)
+
+select timestampdiff(day, '2016-03-01', '2016-04-01');
+ timestamp_diff 
+----------------
+             31
+(1 row)
+
+select timestampdiff(day, '2016-04-01', '2016-05-01');
+ timestamp_diff 
+----------------
+             30
+(1 row)
+
+select timestampdiff(day, '2016-05-01', '2016-06-01');
+ timestamp_diff 
+----------------
+             31
+(1 row)
+
+select timestampdiff(day, '2016-06-01', '2016-07-01');
+ timestamp_diff 
+----------------
+             30
+(1 row)
+
+select timestampdiff(day, '2016-07-01', '2016-08-01');
+ timestamp_diff 
+----------------
+             31
+(1 row)
+
+select timestampdiff(day, '2016-08-01', '2016-09-01');
+ timestamp_diff 
+----------------
+             31
+(1 row)
+
+select timestampdiff(day, '2016-09-01', '2016-10-01');
+ timestamp_diff 
+----------------
+             30
+(1 row)
+
+select timestampdiff(day, '2016-10-01', '2016-11-01');
+ timestamp_diff 
+----------------
+             31
+(1 row)
+
+select timestampdiff(day, '2016-11-01', '2016-12-01');
+ timestamp_diff 
+----------------
+             30
+(1 row)
+
+select timestampdiff(day, '2016-12-01', '2017-01-01');
+ timestamp_diff 
+----------------
+             31
+(1 row)
+
+select timestampdiff(day, '2000-02-01', '2000-03-01');
+ timestamp_diff 
+----------------
+             29
+(1 row)
+
+select timestampdiff(day, '1900-02-01', '1900-03-01');
+ timestamp_diff 
+----------------
+             28
+(1 row)
+
+-- timestamp without time zone
+select timestampdiff(year, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+              1
+(1 row)
+
+select timestampdiff(quarter, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+              4
+(1 row)
+
+select timestampdiff(week, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+             56
+(1 row)
+
+select timestampdiff(month, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+             13
+(1 row)
+
+select timestampdiff(day, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+            397
+(1 row)
+
+select timestampdiff(hour, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+           9529
+(1 row)
+
+select timestampdiff(minute, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+         571741
+(1 row)
+
+select timestampdiff(second, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+       34304461
+(1 row)
+
+select timestampdiff(microsecond, '2018-01-01 01:01:01.000001'::timestamp, '2019-02-02 02:02:02.000002'::timestamp);
+ timestamp_diff 
+----------------
+ 34304461000001
+(1 row)
+
+-- now()
+select timestampdiff(year, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+select timestampdiff(quarter, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+select timestampdiff(week, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+select timestampdiff(month, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+select timestampdiff(day, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+select timestampdiff(hour, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+select timestampdiff(minute, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+select timestampdiff(second, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+select timestampdiff(microsecond, '2018-01-01', now());
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+-- current_timestamp
+select timestampdiff(year,'2018-01-01', current_timestamp);
+ timestamp_diff 
+----------------
+--?.*
+(1 row)
+
+-- test error
+select timestampdiff(yearss, '2018-01-01', now());
+ERROR:  timestamp with time zone units "yearss" not recognized
+CONTEXT:  referenced column: timestamp_diff
+select timestampdiff(century, '2018-01-01', now());
+ERROR:  timestamp units "century" not supported
+CONTEXT:  referenced column: timestamp_diff
+select timestampdiff(year, '-0001-01-01', '2019-01-01');
+ERROR:  invalid input syntax for type timestamp with time zone: "-0001-01-01"
+LINE 1: select timestampdiff(year, '-0001-01-01', '2019-01-01');
+                                   ^
+CONTEXT:  referenced column: timestamp_diff
+select timestampdiff(microsecond, '0001-01-01', '293000-12-31');
+ERROR:  The result of timestampdiff out of range.
+CONTEXT:  referenced column: timestamp_diff
+select timestampdiff(microsecond, '2018-13-01', '2019-12-31');
+ERROR:  date/time field value out of range: "2018-13-01"
+LINE 1: select timestampdiff(microsecond, '2018-13-01', '2019-12-31'...
+                                          ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp_diff
+select timestampdiff(microsecond, '2018-01-01', '2019-12-32');
+ERROR:  date/time field value out of range: "2019-12-32"
+LINE 1: select timestampdiff(microsecond, '2018-01-01', '2019-12-32'...
+                                                        ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp_diff
+-- test table ref
+create table timestamp(a timestamp, b timestamp with time zone);
+insert into timestamp values('2018-01-01 01:01:01.000001', '2019-02-02 02:02:02.000002');
+select timestampdiff(year, '2018-01-01 01:01:01.000001', b) from timestamp;
+ timestamp_diff 
+----------------
+              1
+(1 row)
+
+select timestampdiff(quarter, '2018-01-01 01:01:01.000001', b) from timestamp;
+ timestamp_diff 
+----------------
+              4
+(1 row)
+
+select timestampdiff(week, '2018-01-01 01:01:01.000001', b) from timestamp;;
+ timestamp_diff 
+----------------
+             56
+(1 row)
+
+select timestampdiff(month, '2018-01-01 01:01:01.000001', b) from timestamp;;
+ timestamp_diff 
+----------------
+             13
+(1 row)
+
+select timestampdiff(day, '2018-01-01 01:01:01.000001', b) from timestamp;;
+ timestamp_diff 
+----------------
+            397
+(1 row)
+
+select timestampdiff(hour, '2018-01-01 01:01:01.000001', b) from timestamp;;
+ timestamp_diff 
+----------------
+           9529
+(1 row)
+
+select timestampdiff(minute, '2018-01-01 01:01:01.000001',b) from timestamp;;
+ timestamp_diff 
+----------------
+         571741
+(1 row)
+
+select timestampdiff(second, '2018-01-01 01:01:01.000001', b) from timestamp;
+ timestamp_diff 
+----------------
+       34304461
+(1 row)
+
+select timestampdiff(microsecond, '2018-01-01 01:01:01.000001', b) from timestamp;
+ timestamp_diff 
+----------------
+ 34304461000001
+(1 row)
+
+drop table timestamp;
+\c regression
+drop database b;

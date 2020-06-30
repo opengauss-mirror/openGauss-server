@@ -1,0 +1,19 @@
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+drop table tx;
+select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+

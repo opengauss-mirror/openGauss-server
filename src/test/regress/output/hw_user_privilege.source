@@ -1,0 +1,37 @@
+--test set role/session error with wrong username or password
+create role wrong_role password 'Ttest@123';
+set role wrong_role password 'Ttest@1234';
+ERROR:  Invalid username/password,set role denied.
+\! sleep 0.5
+set role null_role password 'Ttest@123';
+ERROR:  Invalid username/password,set role denied.
+\! sleep 0.5
+set session authorization wrong_role password 'Ttest@1234';
+ERROR:  Invalid username/password,set session_authorization denied.
+\! sleep 0.5
+set session authorization null_role password 'Ttest@123';
+ERROR:  Invalid username/password,set session_authorization denied.
+\! sleep 0.5
+drop role wrong_role;
+--test nouser can alter set initial account
+create user alter_set_initial_user sysadmin password 'ttest@123';
+DECLARE C_USER VARCHAR(100);
+BEGIN
+EXECUTE IMMEDIATE 'select user' INTO C_USER;
+EXECUTE IMMEDIATE ('set role alter_set_initial_user password ''ttest@123'';');
+EXECUTE IMMEDIATE ('alter role '||quote_ident(C_USER)||' set session_timeout to ''5min'' ;');
+END;
+/
+ERROR:  Permission denied.
+--?.*
+PL/pgSQL function inline_code_block line 5 at EXECUTE statement
+reset role;
+drop user alter_set_initial_user;
+--test createrole can't change itself privileges.
+create user createrole_change_itself createrole password 'ttest@123';
+set role createrole_change_itself password 'ttest@123';
+alter user createrole_change_itself  VALID BEGIN '1111-11-11' VALID until '2222-12-12';
+ERROR:  Permission denied.
+reset role;
+drop user createrole_change_itself;
+\c postgres;

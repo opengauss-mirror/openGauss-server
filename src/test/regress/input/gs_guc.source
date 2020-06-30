@@ -1,0 +1,10 @@
+\! @abs_bindir@/gs_guc check  -D @abs_srcdir@/tmp_check/datanode1/ -c max_stack_depth
+\! @abs_bindir@/gs_guc -V
+\! @abs_bindir@/gs_guc -?
+-----Check(GUC)
+\! @abs_bindir@/gs_guc check -D @abs_srcdir@/tmp_check/datanode1/ -c cstore_buffers
+-----Set(GUC)
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "cstore_buffers=10GB"
+-----Reload(GUC)
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "cstore_buffers=10GB"
+

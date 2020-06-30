@@ -1,0 +1,44 @@
+\c postgres
+create user test_rename_user password 'ttest@123';
+\! @gsqldir@/gsql -d postgres -U test_rename_user -W ttest@123 -p @portstring@ -r -c "create table rename_test(id int);"
+CREATE TABLE
+\! @gsqldir@/gsql -d postgres -U test_rename_user -W ttest@123 -p @portstring@ -r -c "table rename_test;"
+ id 
+----
+(0 rows)
+
+alter user test_rename_user rename to test_rename_user2;
+\! @gsqldir@/gsql -d postgres -U test_rename_user2 -W ttest@123 -p @portstring@ -r -c "table rename_test;"
+ id 
+----
+(0 rows)
+
+\! @gsqldir@/gsql -d postgres -U test_rename_user2 -W ttest@123 -p @portstring@ -r -c "alter user test_rename_user2 identified by 'ttest@234' replace 'ttest@123';"
+ALTER ROLE
+drop user test_rename_user2 cascade;
+drop user if exists test_rename_user;
+NOTICE:  role "test_rename_user" does not exist, skipping
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -c "create user user01 password 'ttest@123';"
+CREATE ROLE
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -c "create user user02 password 'ttest@123';"
+CREATE ROLE
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -U user01 -W 'ttest@123' -c "set role user03;"
+ERROR:  Invalid username/password,set role denied.
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -U user01 -W 'ttest@123' -c "set role user02;"
+ERROR:  Invalid username/password,set role denied.
+drop user user01;
+drop user user02;
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -c "create user current_user01 password 'ttest@123';"
+CREATE ROLE
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -c "create user current_user02 password 'ttest@123';"
+CREATE ROLE
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'ttest@123' -c "drop user current_user02;"
+ERROR:  Permission denied to drop role.
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'ttest@123' -c "drop user current_user03;"
+ERROR:  Permission denied to drop role.
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'ttest@123' -c "alter user current_user02 sysadmin;"
+ERROR:  Permission denied.
+\! @gsqldir@/gsql  -d postgres -p @portstring@ -r -U current_user01 -W 'ttest@123' -c "alter user current_user03 sysadmin;"
+ERROR:  Permission denied.
+drop user current_user01;
+drop user current_user02;

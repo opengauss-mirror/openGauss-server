@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_SCHEMA">
+<refmeta>
+<refentrytitle>DROP SCHEMA</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP SCHEMA</refname>
+<refpurpose>remove a schema</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP SCHEMA [ IF EXISTS ] schema_name [, ...] [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

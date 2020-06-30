@@ -1,0 +1,47 @@
+--I1. 创建源表
+SET DATESTYLE TO ISO;
+CREATE TABLE cmpr_time_with_zone_00(
+        c_tw_1 TIME WITH TIME ZONE NOT NULL,
+        c_tw_2 TIME WITH TIME ZONE NOT NULL,
+        c_tw_3 TIME WITH TIME ZONE NOT NULL,
+        c_tw_4 TIME WITH TIME ZONE NOT NULL,
+        c_tw_5 TIME WITH TIME ZONE NOT NULL,
+        c_tw_6 TIME WITH TIME ZONE NOT NULL,
+        c_tw_7 TIME WITH TIME ZONE NOT NULL,
+        c_tw_8 TIME WITH TIME ZONE NOT NULL,
+        c_tw_9 TIME WITH TIME ZONE NOT NULL,
+        c_tw_10 TIME WITH TIME ZONE NOT NULL,
+        c_tw_11 TIME WITH TIME ZONE NOT NULL,
+        c_tw_12 TIME WITH TIME ZONE NOT NULL);
+--I2. 给源表中插入数据
+CREATE OR REPLACE FUNCTION FUNC_COMPRESS_INSERT_020(rownums int) RETURN boolean IS
+i INTEGER;
+star_time TIME WITH TIME ZONE;
+BEGIN
+    star_time := '15:04:04';
+    FOR i IN 1..rownums LOOP
+        INSERT INTO cmpr_time_with_zone_00 VALUES (star_time, star_time, star_time, star_time+INTERVAL '1 hour', star_time+INTERVAL '2 hour', star_time, star_time, star_time, star_time+INTERVAL '1 hour', star_time+INTERVAL '2 hour', star_time, star_time);
+    END LOOP;
+    RETURN TRUE;
+END;
+/
+CALL FUNC_COMPRESS_INSERT_020(1000);
+CREATE TABLE cmpr_time_with_zone_01(
+        c_tw_1 TIME WITH TIME ZONE NOT NULL,
+        c_tw_2 TIME WITH TIME ZONE NOT NULL,
+        c_tw_3 TIME WITH TIME ZONE NOT NULL,
+        c_tw_4 TIME WITH TIME ZONE NOT NULL,
+        c_tw_5 TIME WITH TIME ZONE NOT NULL,
+        c_tw_6 TIME WITH TIME ZONE NOT NULL,
+        c_tw_7 TIME WITH TIME ZONE NOT NULL,
+        c_tw_8 TIME WITH TIME ZONE NOT NULL,
+        c_tw_9 TIME WITH TIME ZONE NOT NULL,
+        c_tw_10 TIME WITH TIME ZONE NOT NULL,
+        c_tw_11 TIME WITH TIME ZONE NOT NULL,
+        c_tw_12 TIME WITH TIME ZONE NOT NULL) COMPRESS;
+CREATE INDEX INDEX_COMPRESS_020_1 ON cmpr_time_with_zone_01(c_tw_11) WHERE c_tw_11='15:04:04';
+CREATE INDEX INDEX_COMPRESS_020_2 ON cmpr_time_with_zone_01(c_tw_8,c_tw_9,c_tw_10);
+--I4. 给目标表中批插数据
+COPY cmpr_time_with_zone_00 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_time_with_zone.out';
+COPY cmpr_time_with_zone_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_time_with_zone.out';
+\! rm -rf @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_time_with_zone.out

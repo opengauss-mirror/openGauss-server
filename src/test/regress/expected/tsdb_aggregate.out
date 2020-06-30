@@ -1,0 +1,53 @@
+create table dcs_cpu(
+  idle real check(idle > 0),
+  vcpu_num int,
+  node text,
+  scope_name text,
+  server_ip text not null,
+  iowait real,
+  time_string timestamp
+);
+insert  into dcs_cpu VALUES(1.0,1,'node_a','scope_a','1.1.1.1',1.0,'2019-07-12 00:10:10');
+insert  into dcs_cpu VALUES(2.0,2,'node_b','scope_a','1.1.1.2',2.0,'2019-07-12 00:12:10');
+insert  into dcs_cpu VALUES(3.0,3,'node_c','scope_b','1.1.1.3',3.0,'2019-07-12 00:13:10');
+select  time_window(interval '1 min',time_string),server_ip from dcs_cpu order by server_ip;
+ERROR:  function time_window(interval, timestamp without time zone) does not exist
+LINE 1: select  time_window(interval '1 min',time_string),server_ip ...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: time_window
+select  time_fill(interval '1 min',time_string,'2019-07-12 00:09:00','2019-07-12 00:14:00'),avg(idle) from dcs_cpu group by time_fill order by time_fill;
+ERROR:  function time_fill(interval, timestamp without time zone, unknown, unknown) does not exist
+LINE 1: select  time_fill(interval '1 min',time_string,'2019-07-12 0...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: time_fill
+select  time_fill(interval '1 min',time_string,'2019-07-12 00:09:00','2019-07-12 00:14:00'), fill_last(avg(idle)) from dcs_cpu group by time_fill order by time_fill;
+ERROR:  function time_fill(interval, timestamp without time zone, unknown, unknown) does not exist
+LINE 1: select  time_fill(interval '1 min',time_string,'2019-07-12 0...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: time_fill
+select  first(array_agg(idle),array_agg(time_string)), sum(idle) from dcs_cpu group by scope_name order by scope_name;
+ERROR:  function first(real[], timestamp without time zone[]) does not exist
+LINE 1: select  first(array_agg(idle),array_agg(time_string)), sum(i...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: first
+select  last(array_agg(idle),array_agg(time_string)), sum(idle) from dcs_cpu group by scope_name order by scope_name;
+ERROR:  function last(real[], timestamp without time zone[]) does not exist
+LINE 1: select  last(array_agg(idle),array_agg(time_string)), sum(id...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: last
+drop table dcs_cpu;
+---
+--- time window
+---
+\set ON_ERROR_STOP 1
+SELECT time_window(interval '1 microsecond', '2019-07-12 11:09:01.001'::timestamptz);
+ERROR:  function time_window(interval, timestamp with time zone) does not exist
+LINE 1: SELECT time_window(interval '1 microsecond', '2019-07-12 11:...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: time_window

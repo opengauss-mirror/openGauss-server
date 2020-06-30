@@ -1,0 +1,325 @@
+set enable_trigger_shipping = off;
+create schema xc_trigship;
+set search_path to xc_trigship,public;
+
+\set EXP 'EXPLAIN  (verbose, num_nodes off, nodes off, costs off)'
+\set CHECK_TABLE 'select * from xctrigemp1 order by id'
+\set RUN_UPDATE 'update xctrigemp1 set empsal = empsal + 1000 where empname != $$Dummy$$';
+\set RUN_DELETE 'delete from xctrigemp1 where empname || now() = $$Dummy$$ || now()';
+\set TRUNC 'truncate table xc_auditlog, xctrigemp1';
+\set RUN_INSERT 'insert into xctrigemp1 values (1, $$Akash$$, 1000, $$AkashAddress$$), (2, $$Prakash$$, 1500, $$PrakashAddress$$), (3, $$Vikas$$, NULL, $$VikasAddress$$), (4, $$Samar$$, -9999, $$SamarAddress$$), (5, $$Sanika$$, 2000, $$SanikaAddress$$), (-1, $$Dummy$$, 9999, $$DummyAddress$$)'
+
+-- Create Objects
+-----------------
+
+-- Base table on which the DML operations would be fired.
+create table xctrigemp1 (id int unique, empname varchar unique, empsal float, empadd varchar, trigop varchar);
+alter table xctrigemp1 alter column id set not null;
+alter table xctrigemp1 alter column empname set not null;
+
+-- Table where all the logs of DML operations would be dumped.
+create table xc_auditlog (trigdata varchar, nodename varchar);
+alter table xc_auditlog add primary key(trigdata, nodename);
+
+
+-- Convenience function to be used by all the trigger functions to dump all the trigger
+-- information including name, operation etc into the xc_auditlog table.
+CREATE FUNCTION xc_auditlog_func (tg_name name, tg_op text, tg_level text, tg_when text,
+	                         oldrow text, newrow text, nodename name) returns void as $$
+DECLARE
+	trigdata varchar;
+BEGIN
+	trigdata := left(tg_level, 1) || left(tg_op, 1) || left(tg_when, 1) || ' ' || tg_name;
+	if (tg_level = 'ROW') then
+		if (oldrow is not null) then
+			trigdata := trigdata || ' ' || oldrow;
+		end if;
+		if (newrow is not null) then
+			trigdata := trigdata || ' ' || newrow;
+		end if;
+	end if;
+	insert into xc_auditlog values (trigdata, nodename::varchar);
+END
+$$ language plpgsql;
+
+
+
+-- STATEMENT trigger function. This also dumps everything except the row.
+CREATE FUNCTION xc_stmttrig_func() RETURNS TRIGGER AS $$
+BEGIN
+	perform xc_auditlog_func(TG_NAME, TG_OP, TG_LEVEL, TG_WHEN, NULL, NULL, pgxc_node_str());
+	RETURN NULL;
+END $$ immutable LANGUAGE 'plpgsql';
+
+
+-- A few statement triggers.
+CREATE TRIGGER xc_stmttrig1 BEFORE INSERT OR UPDATE OR DELETE ON xctrigemp1
+	FOR EACH STATEMENT EXECUTE PROCEDURE xc_stmttrig_func();
+CREATE TRIGGER xc_stmttrig2 AFTER INSERT OR UPDATE OR DELETE ON xctrigemp1
+	FOR EACH STATEMENT EXECUTE PROCEDURE xc_stmttrig_func();
+
+
+-- Main trigger function to be used by triggers. It skips the DML operation if
+-- salary is invalid. And it inserts a 'default' salary amount if it is NULL.
+
+create function xc_brt_func() returns trigger as
+$$
+begin
+	IF (TG_OP = 'DELETE') then
+		OLD.trigop = OLD.trigop || '_' || left(TG_OP, 1) || left(TG_WHEN, 1) || '_' || TG_NAME;
+		perform xc_auditlog_func(TG_NAME, TG_OP, TG_LEVEL, TG_WHEN, OLD::text, NULL, pgxc_node_str());
+		return OLD;
+
+	ELSE
+		if NEW.trigop is NULL then
+			NEW.trigop = '';
+		end if;
+
+		IF (TG_OP = 'INSERT') then
+			IF NEW.empsal IS NULL THEN
+				NEW.empsal := 9999;
+			END IF;
+		END IF;
+
+		NEW.trigop = NEW.trigop || '_' || left(TG_OP, 1) || left(TG_WHEN, 1) || '_' || TG_NAME;
+		perform xc_auditlog_func(TG_NAME, TG_OP, TG_LEVEL, TG_WHEN, NULL, NEW::text, pgxc_node_str());
+
+	END IF;
+
+	IF NEW.empsal < 0 THEN
+		return NULL;
+	ELSE
+		return NEW;
+	END IF;
+
+end
+$$ immutable language plpgsql;
+
+
+-- Additional trigger function so that we can have a mix of shippable and non-shippable
+-- triggers. Turn on or off the volatility of this function as required.
+create function xc_brt_vol_func() returns trigger as
+$$
+begin
+	IF (TG_OP = 'DELETE') then
+		OLD.trigop = OLD.trigop || '_' || left(TG_OP, 1) || left(TG_WHEN, 1) || '_' || TG_NAME;
+		perform xc_auditlog_func(TG_NAME, TG_OP, TG_LEVEL, TG_WHEN, OLD::text, NULL, pgxc_node_str());
+		return OLD;
+	ELSE
+		NEW.trigop = NEW.trigop || '_' || left(TG_OP, 1) || left(TG_WHEN, 1) || '_' || TG_NAME;
+		perform xc_auditlog_func(TG_NAME, TG_OP, TG_LEVEL, TG_WHEN, NULL, NEW::text, pgxc_node_str());
+	END IF;
+	return NEW;
+end
+$$ immutable language plpgsql; -- Declare this initially immutable, to be changed later.
+
+
+-- A few BEFORE ROW triggers to start with
+CREATE TRIGGER brtrig2 BEFORE INSERT ON xctrigemp1
+	FOR EACH ROW EXECUTE PROCEDURE xc_brt_vol_func();
+CREATE TRIGGER brtrig3 BEFORE INSERT OR UPDATE OR DELETE ON xctrigemp1
+	FOR EACH ROW EXECUTE PROCEDURE xc_brt_func();
+CREATE TRIGGER brtrig1 BEFORE INSERT OR UPDATE OR DELETE ON xctrigemp1
+	FOR EACH ROW EXECUTE PROCEDURE xc_brt_func();
+
+\set QUIET false
+
+-- Setup is now ready to test shippability with BR triggers.
+
+-- All functions are immutable, so all the queries should be shippable or should
+-- invoke all of the row triggers on datanode if the query is not shippable.
+-- Statement triggers are always executed on coordinator.
+
+
+:RUN_INSERT;
+:RUN_UPDATE;
+:RUN_DELETE;
+:CHECK_TABLE;
+
+-- Make the statement trigger non-shippable. Even with this, the statement
+-- should be shippable. Statement triggers are anyway invoked separately for
+-- FQS query.
+alter function xc_stmttrig_func() volatile;
+:TRUNC;
+:RUN_INSERT;
+:RUN_UPDATE;
+:RUN_DELETE;
+:CHECK_TABLE;
+
+-- Make trigger brtrig2 non-shippable.
+-- Now, the INSERTs should execute *all* of the ROW triggers on coordinator.
+-- Also, the brtrig2 trigger being non-shippable should not affect the
+-- shippability of DELETEs or UPDATEs. They should still invoke triggers on datanodes.
+-- This is because brtrig2 is defined only for INSERT.
+alter function xc_stmttrig_func() immutable; -- (Turn stmt trigger back to shippable)
+alter function xc_brt_vol_func() volatile;
+:TRUNC;
+:RUN_INSERT;
+:RUN_UPDATE;
+:RUN_DELETE;
+:CHECK_TABLE;
+
+-- Now include UPDATE in the brtrig2 trigger definition, and verify
+-- that the UPDATE is now invoking triggers on coordinator. DELETEs should
+-- continue running on datanodes.
+DROP TRIGGER brtrig2 on xctrigemp1;
+CREATE TRIGGER brtrig2 BEFORE INSERT OR UPDATE ON xctrigemp1
+	FOR EACH ROW EXECUTE PROCEDURE xc_brt_vol_func();
+:TRUNC;
+:RUN_INSERT;
+:RUN_UPDATE;
+:RUN_DELETE;
+:CHECK_TABLE;
+
+
+-- Keep 2 shippable BR triggers, and 1 non-shippable AR trigger.
+-- Since there are non-shippable AR triggers, the BR triggers also should be
+-- executed on coordinator even when they are all shippable.
+DROP TRIGGER brtrig1 on xctrigemp1;
+DROP TRIGGER brtrig2 on xctrigemp1;
+DROP TRIGGER brtrig3 on xctrigemp1;
+CREATE TRIGGER brtrig3 BEFORE INSERT OR UPDATE OR DELETE ON xctrigemp1
+	FOR EACH ROW EXECUTE PROCEDURE xc_brt_func();
+CREATE TRIGGER brtrig1 BEFORE INSERT OR UPDATE OR DELETE ON xctrigemp1
+	FOR EACH ROW EXECUTE PROCEDURE xc_brt_func();
+CREATE TRIGGER artrig AFTER INSERT OR UPDATE OR DELETE ON xctrigemp1
+	FOR EACH ROW EXECUTE PROCEDURE xc_brt_vol_func();
+alter function xc_brt_func() immutable;
+alter function xc_brt_vol_func() volatile;
+:TRUNC;
+:RUN_INSERT;
+:RUN_INSERT; -- This should invoke the constraint triggers.
+:RUN_UPDATE;
+update xctrigemp1 set empname = 'Akash' where empname != $$Dummy$$; -- Constraint triggers
+:RUN_DELETE;
+:CHECK_TABLE;
+
+
+-- Make the above AR trigger shippable. This will cause both AR and BR triggers
+-- to run on datanode.
+alter function xc_brt_vol_func() immutable;
+:TRUNC;
+:RUN_INSERT;
+:RUN_UPDATE;
+:RUN_DELETE;
+:CHECK_TABLE;
+
+
+-- Make one of the BR triggers non-shippable. This should not affect AR triggers.
+-- They should continue to run on datanode.
+alter function xc_brt_func() volatile;
+:TRUNC;
+:RUN_INSERT;
+:RUN_UPDATE;
+:RUN_DELETE;
+:CHECK_TABLE;
+
+
+-- Drop all BR triggers. We have only AR triggers and they are shippable. So the query should be FQSed.
+DROP TRIGGER brtrig1 on xctrigemp1;
+DROP TRIGGER brtrig3 on xctrigemp1;
+:TRUNC;
+:RUN_INSERT;
+:RUN_UPDATE;
+:RUN_DELETE;
+:CHECK_TABLE;
+
+-- When non-shippable AR triggers are present, we do execute BR triggers also on coordinator,
+-- and so in the remote UPDATE stmt, we update *all* the columns. But when we do
+-- not have BR triggers in the first place, this should revert back the remote
+-- UPDATE statement to the normal behaviour where it updates only the user-supplied
+-- columns.
+-- Make the AR trigger function non-shippable.
+alter function xc_brt_vol_func() volatile;
+:TRUNC;
+:RUN_INSERT;
+:RUN_UPDATE;
+:RUN_DELETE;
+:CHECK_TABLE;
+
+drop schema xc_trigship cascade;
+
+--self add
+--test insert/update/delete ship trigger
+--1. create table
+create table test_trigger_src_tbl(id1 int, id2 int, id3 int);
+create table test_trigger_des_tbl(id1 int, id2 int, id3 int);
+--2. create trigger function
+create or replace function tri_insert_func() returns trigger as
+$$
+declare
+begin
+        insert into test_trigger_des_tbl values(new.id1, new.id2, new.id3);  --can ship
+        --insert into test_trigger_des_tbl values(1,2,3);  --can not ship
+        --insert into test_trigger_des_tbl(id2,id3) values(new.id2, new.id3);  --can not ship
+        return new;
+end
+$$ language plpgsql;
+
+create or replace function tri_update_func() returns trigger as
+$$
+declare
+begin
+        update test_trigger_des_tbl set id3 = new.id3 where id1=old.id1 and id1>50 and id1<350;  --can ship
+        update test_trigger_des_tbl set id3 = new.id3 where id1=200 and id1=old.id1 and id1<250;  --can ship
+        update test_trigger_des_tbl set id3 = new.id3 where id1>200 and id1=old.id1;  --can ship
+        update test_trigger_des_tbl set id3 = new.id3 where id1=old.id1 and id1>50;  --can ship
+        update test_trigger_des_tbl set id3 = new.id3 where id1=old.id1;  --can ship
+
+        --update test_trigger_des_tbl set id3 = new.id3 where id1=old.id1 or id1>50;  --can not ship
+        --update test_trigger_des_tbl set id3 = new.id3 where id1=old.id1 and id1=100 or id1>50 or id1<350;  --can not ship
+        --update test_trigger_des_tbl set id3 = new.id3 where id1=old.id1 or id1>50 or id1<350;  --can not ship
+
+        --update test_trigger_des_tbl set id3 = new.id3 where id1>old.id1 and id1=old.id1;  --can not ship
+        --update test_trigger_des_tbl set id3 = new.id3 where id1>old.id1 and id1=50;  --can not ship
+        --update test_trigger_des_tbl set id3 = new.id3 where id2>old.id2 and id2=50;  --can not ship
+        --update test_trigger_des_tbl set id3 = new.id3 where id2=old.id2 and id1=50;  --can not ship
+        --update test_trigger_des_tbl set id3 = new.id3 where id2=old.id2;  --can not ship
+
+        return new;
+end
+$$ language plpgsql;
+
+create or replace function tri_delete_func() returns trigger as
+$$
+declare
+begin
+        delete from test_trigger_des_tbl where id1=old.id1;
+        return old;
+end
+$$ language plpgsql;
+
+create trigger insert_trigger
+  before insert on test_trigger_src_tbl
+  for each row
+  execute procedure tri_insert_func();
+create trigger update_trigger
+  after update on test_trigger_src_tbl
+  for each row
+  execute procedure tri_update_func();
+create trigger delete_trigger
+  before delete on test_trigger_src_tbl
+  for each row
+  execute procedure tri_delete_func();
+
+set enable_trigger_shipping = off;
+PREPARE insert1_call_trigger (int, int, int) AS INSERT INTO test_trigger_src_tbl VALUES($1, $2, $3);
+EXECUTE insert1_call_trigger(100, 100, 100);
+set enable_trigger_shipping = on;
+PREPARE insert2_call_trigger (int, int, int) AS INSERT INTO test_trigger_src_tbl VALUES($1, $2, $3);
+EXECUTE insert2_call_trigger(200, 200, 200);
+select * from test_trigger_src_tbl order by id1;
+select * from test_trigger_des_tbl order by id1;
+
+set enable_trigger_shipping = off;
+set enable_trigger_shipping = on;
+select * from test_trigger_src_tbl order by id1;
+select * from test_trigger_des_tbl order by id1;
+
+set enable_trigger_shipping = off;
+set enable_trigger_shipping = on;
+select * from test_trigger_src_tbl order by id1;
+select * from test_trigger_des_tbl order by id1;
+
+drop table if exists test_trigger_src_tbl;
+drop table if exists test_trigger_des_tbl;

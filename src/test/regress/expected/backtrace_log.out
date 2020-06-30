@@ -1,0 +1,20 @@
+-- test view
+select count(*) from pg_node_env;
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from pg_os_threads;
+ count 
+-------
+    29
+(1 row)
+
+-- test backtrace output to log
+set backtrace_min_messages=error;
+select * from aaa;
+ERROR:  relation "aaa" does not exist on datanode1
+LINE 1: select * from aaa;
+                      ^
+reset backtrace_min_messages;

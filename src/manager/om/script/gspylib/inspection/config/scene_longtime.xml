@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<scene name="longtime" desc="Check items will run for a long time.">
+    <configuration/>
+
+    <allowitems>
+        <item name="CheckDiskFailure"/>
+        <item name="CheckUnAnalyzeTable"/>
+        <item name="CheckTableSkew"/>
+        <item name="CheckSpecialFile"/>
+        <item name="CheckLargeFile"/>
+    </allowitems>
+</scene>

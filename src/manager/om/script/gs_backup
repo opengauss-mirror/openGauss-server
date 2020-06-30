@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_backup is a utility to back up or restore binary files and parameter files.
+#############################################################################
+
+import os
+import sys
+import pwd
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.Common import DefaultValue
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParameterParsecheck import Parameter
+from impl.backup.OLAP.BackupImplOLAP import BackupImplOLAP
+
+ACTION_BACKUP = "backup"
+ACTION_RESTORE = "restore"
+
+
+class Backup(ParallelBaseOM):
+    '''
+    classdocs
+    input : NA
+    output: NA
+    '''
+
+    def __init__(self):
+        '''
+        function: Constructor
+        input : NA
+        output: NA
+        '''
+        ParallelBaseOM.__init__(self)
+        self.nodename = ""
+        self.backupDir = ""
+        self.isParameter = False
+        self.isBinary = False
+
+    ####################################################################################
+    # Help context. U:R:oC:v: 
+    ####################################################################################
+    def usage(self):
+        """
+gs_backup is a utility to back up or restore binary files and parameter files.
+ 
+Usage:
+  gs_backup -? | --help
+  gs_backup -V | --version
+  gs_backup -t backup --backup-dir=BACKUPDIR [-h HOSTNAME] [--parameter]
+                                             [--binary] [--all] [-l LOGFILE]
+  gs_backup -t restore --backup-dir=BACKUPDIR [-h HOSTNAME] [--parameter]
+                                              [--binary] [--all] [-l LOGFILE]
+ 
+General options:
+  -t                            Operation type. It can be backup or restore.
+      --backup-dir=BACKUPDIR    Backup or restore directory.
+  -h                            The node which stored the backup file,
+                                need to specify the node when recovering.
+                                If the node name is not specified,
+                                the backup sets are stored in each node.
+      --parameter               Back up or restore parameter files only.
+                                (This option is used by default.)
+      --binary                  Back up or restore binary files only.
+      --all                     Back up or restore both parameter files and binary files.
+  -l                            Path of log file.
+  -?, --help                    Show help information for this utility,
+                                and exit the command line mode.
+  -V, --version                 Show version information.
+
+        """
+
+        print(self.usage.__doc__)
+
+    def checkAction(self):
+        """
+        function: check action
+        if action if null, throw error
+        input : NA
+        output: NA
+        """
+        if (self.action == ""):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_500["GAUSS_50001"] % 't' + ".")
+
+    def checkUserParameter(self):
+        """
+        function: check User Parameter
+        if clusterUser is null, check user name
+        if user name is null, throw error
+        input : NA
+        output: NA
+        """
+        if (self.user == ""):
+            self.user = pwd.getpwuid(os.getuid()).pw_name
+            if (self.user == ""):
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_500["GAUSS_50001"] % 'U' + ".")
+        # check if user exist and is the right user
+        DefaultValue.checkUser(self.user)
+
+    def checkBackupPara(self):
+        """
+        function: check Backup Parameter
+        if backupDir is null throw error
+        if backupDir is not absolute throw error
+        input : NA
+        output: NA
+        """
+        if (self.backupDir == ""):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_500["GAUSS_50001"] % '-backup-dir' + ".")
+        if (not os.path.isabs(self.backupDir)):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_502["GAUSS_50213"] % self.backupDir)
+
+    def checkLogFilePara(self):
+        """
+        function: check log file parameter
+        input : NA
+        output: NA
+        """
+        # check log file
+        if (self.logFile == ""):
+            self.logFile = DefaultValue.getOMLogPath(
+                DefaultValue.GS_BACKUP_LOG_FILE, self.user, "")
+        if (not os.path.isabs(self.logFile)):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_502["GAUSS_50213"] % "log file")
+
+    def parseCommandLine(self):
+        """
+        function: Parse command line and save to global variable
+        input : NA
+        output: NA
+        """
+        ParaObj = Parameter()
+        # get the dict of paramters
+        ParaDict = ParaObj.ParameterCommandLine("backup")
+        # check if has '--help'
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(0)
+        # parse --all parameter
+        backupAll = False
+        parameter_map = {"action": self.action,
+                         "backupDir": self.backupDir,
+                         "isBinary": self.isBinary,
+                         "isParameter": self.isParameter,
+                         "logFile": self.logFile,
+                         "all": backupAll}
+        parameter_keys = parameter_map.keys()
+
+        for key in parameter_keys:
+            if (ParaDict.__contains__(key)):
+                parameter_map[key] = ParaDict.get(key)
+
+        self.action = parameter_map["action"]
+        self.backupDir = parameter_map["backupDir"]
+        self.isBinary = parameter_map["isBinary"]
+        self.isParameter = parameter_map["isParameter"]
+        self.logFile = parameter_map["logFile"]
+
+        if (parameter_map["all"]):
+            self.isBinary = True
+            self.isParameter = True
+
+        if (ParaDict.__contains__("nodename")):
+            nodename = ParaDict.get("nodename")
+            if (len(nodename) != 1):
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_500["GAUSS_50004"] % "h" + \
+                    " The number of node must be equal 1. Please check it.")
+            self.nodename = nodename[0]
+
+    def checkParameter(self):
+        """
+        function: Check parameter from command line 
+        input : NA
+        output: NA
+        """
+        self.checkAction()
+        # check if user exist and is the right user
+        self.checkUserParameter()
+        self.checkLogFilePara()
+        # check backupDir
+        self.checkBackupPara()
+        # check backup context parameter
+        if (self.isParameter == False and self.isBinary == False):
+            GaussLog.printMessage("Hint:Parameters '--parameter','--binary',"
+                                  "and '--all' were not specified." +
+                                  " Only parameter files will be backed up.")
+            self.isParameter = True
+        if self.action not in (ACTION_BACKUP, ACTION_RESTORE):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"] % 't'
+                                   + " The value of the '-t' parameter :"
+                                     " backup or restore.")
+
+
+if __name__ == '__main__':
+    """
+    function: main
+    input : NA
+    output: NA
+    """
+    # check if is root user
+    if (os.getuid() == 0):
+        GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50105"])
+    try:
+        # Objectize class
+        backupObj = Backup()
+        # Initialize self and Parse command line and save to global variable
+        backupObj.parseCommandLine()
+
+        # check the parameters is not OK
+        backupObj.checkParameter()
+
+        # set action flag file
+        DefaultValue.setActionFlagFile("gs_backup")
+
+        # get clustet Type
+        impl = BackupImplOLAP(backupObj)
+        impl.run()
+    except Exception as e:
+        GaussLog.exitWithError(str(e))
+    finally:
+        DefaultValue.setActionFlagFile("gs_backup", None, False)
+    sys.exit(0)

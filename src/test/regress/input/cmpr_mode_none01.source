@@ -1,0 +1,40 @@
+--
+-- test case: the raw data cann't be compress by any methods.
+--
+CREATE TABLE cmpr_mode_none01
+(
+	RS_ID float,
+	R0_ID float NOT NULL,
+	R1_ID float NOT NULL,
+	R2_ID float NOT NULL,
+	R3_ID float NOT NULL,
+	R4_ID float NOT NULL,
+	R5_ID float NOT NULL,
+	R6_ID float NOT NULL,
+	R7_ID float NOT NULL,
+	R8_ID float NOT NULL,
+	R9_ID float NOT NULL
+) COMPRESS;
+COPY cmpr_mode_none01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_mode_none01.data';
+CREATE TABLE cmpr_mode_none01_raw
+(
+	RS_ID float,
+	R0_ID float NOT NULL,
+	R1_ID float NOT NULL,
+	R2_ID float NOT NULL,
+	R3_ID float NOT NULL,
+	R4_ID float NOT NULL,
+	R5_ID float NOT NULL,
+	R6_ID float NOT NULL,
+	R7_ID float NOT NULL,
+	R8_ID float NOT NULL,
+	R9_ID float NOT NULL
+);
+COPY cmpr_mode_none01_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_mode_none01.data';
+
+SELECT (SELECT COUNT(*) FROM cmpr_mode_none01_raw) - (SELECT COUNT(*) FROM cmpr_mode_none01);
+(SELECT * FROM cmpr_mode_none01_raw) MINUS ALL (SELECT * FROM cmpr_mode_none01);
+(SELECT * FROM cmpr_mode_none01) MINUS ALL (SELECT * FROM cmpr_mode_none01_raw);
+
+DROP TABLE cmpr_mode_none01;
+DROP TABLE cmpr_mode_none01_raw;

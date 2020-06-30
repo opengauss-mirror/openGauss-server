@@ -1,0 +1,82 @@
+--(Y) CREATE INDEX WITH storage parameters
+--(Y) ALTER INDEX SET storage parameters
+--(Y) ALTER INDEX RESET storage parameters
+\! rm -fr '@testtablespace@/ts1_index_storage_para'
+\! mkdir '@testtablespace@/ts1_index_storage_para'
+CREATE TABLESPACE ts1_index_storage_para LOCATION '@testtablespace@/ts1_index_storage_para';
+-- step 1.1: create index: storage parameters
+create table index_storage_para_t1 (a int4, b text)
+partition by range (a)
+(
+	partition p1_rtest_t1 values less than (10),
+	partition p2_rtest_t1 values less than (20),
+	partition p3_rtest_t1 values less than (100)
+);
+create index btree_index_on_index_storage_para_t1 on index_storage_para_t1 using btree (a) local
+(
+	partition p1_btree_index_index_storage_para_t1,
+	partition p2_btree_index_index_storage_para_t1,
+	partition p3_btree_index_index_storage_para_t1 tablespace PG_DEFAULT
+)
+WITH 
+(
+	fillfactor = 92
+)
+TABLESPACE ts1_index_storage_para;
+-- select torage parameters of index
+select relname, reloptions 
+	from pg_class
+	where relname = 'btree_index_on_index_storage_para_t1';
+               relname                |   reloptions    
+--------------------------------------+-----------------
+ btree_index_on_index_storage_para_t1 | {fillfactor=92}
+(1 row)
+
+-- step 1.2: reset, back to default
+alter index btree_index_on_index_storage_para_t1
+RESET 
+(
+	fillfactor
+);
+-- select torage parameters of index
+select relname, reloptions 
+	from pg_class
+	where relname = 'btree_index_on_index_storage_para_t1';
+               relname                | reloptions 
+--------------------------------------+------------
+ btree_index_on_index_storage_para_t1 | 
+(1 row)
+
+-- step 2.1: alter table: storage parameters
+alter index btree_index_on_index_storage_para_t1
+SET 
+(
+	fillfactor =86
+);
+-- select torage parameters of index
+select relname, reloptions 
+	from pg_class
+	where relname = 'btree_index_on_index_storage_para_t1';
+               relname                |   reloptions    
+--------------------------------------+-----------------
+ btree_index_on_index_storage_para_t1 | {fillfactor=86}
+(1 row)
+
+-- step 2.2: reset, back to default
+alter index btree_index_on_index_storage_para_t1
+RESET 
+(
+	fillfactor
+);
+-- select torage parameters of index
+select relname, reloptions 
+	from pg_class
+	where relname = 'btree_index_on_index_storage_para_t1';
+               relname                | reloptions 
+--------------------------------------+------------
+ btree_index_on_index_storage_para_t1 | 
+(1 row)
+
+-- clean up
+drop table index_storage_para_t1;
+drop tablespace ts1_index_storage_para;

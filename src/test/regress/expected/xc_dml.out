@@ -1,0 +1,1738 @@
+CREATE SCHEMA FVT_DBSYSTEM_MANAGE;
+CREATE TABLE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TAB_013(ID INT,ID2 INT);
+COMMENT ON TABLE  FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TAB_013 IS 'PG_DESCRIPTION_TAB_013';
+CREATE TABLE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020(DESCRIPTION TEXT) INHERITS (PG_DESCRIPTION);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+INSERT INTO FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SELECT * FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: INSERT INTO FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SEL...
+                    ^
+SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
+                                ^
+SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+      description       
+------------------------
+ PG_DESCRIPTION_TAB_013
+(1 row)
+
+EXPLAIN (VERBOSE ON, COSTS OFF) UPDATE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SET DESCRIPTION = 'PG_DESCRIPTION_TAB_013_0' WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: EXPLAIN (VERBOSE ON, COSTS OFF) UPDATE FVT_DBSYSTEM_MANAGE.P...
+                                               ^
+UPDATE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SET DESCRIPTION = 'PG_DESCRIPTION_TAB_013_0' WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: UPDATE FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SET DESC...
+               ^
+SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
+                                ^
+SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+      description       
+------------------------
+ PG_DESCRIPTION_TAB_013
+(1 row)
+
+EXPLAIN (VERBOSE ON, COSTS OFF) UPDATE PG_DESCRIPTION SET DESCRIPTION = 'PG_DESCRIPTION_TAB_013_1' WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Update on pg_catalog.pg_description
+   ->  Seq Scan on pg_catalog.pg_description
+         Output: objoid, classoid, objsubid, 'PG_DESCRIPTION_TAB_013_1'::text, ctid
+         Filter: (pg_description.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
+(4 rows)
+
+UPDATE PG_DESCRIPTION SET DESCRIPTION = 'PG_DESCRIPTION_TAB_013_1' WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
+                                ^
+SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+       description        
+--------------------------
+ PG_DESCRIPTION_TAB_013_1
+(1 row)
+
+EXPLAIN (VERBOSE ON, COSTS OFF) DELETE FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: EXPLAIN (VERBOSE ON, COSTS OFF) DELETE FROM FVT_DBSYSTEM_MAN...
+                                                    ^
+DELETE FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: DELETE FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHE...
+                    ^
+SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
+                                ^
+SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+       description        
+--------------------------
+ PG_DESCRIPTION_TAB_013_1
+(1 row)
+
+INSERT INTO FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SELECT * FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: INSERT INTO FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 SEL...
+                    ^
+EXPLAIN (VERBOSE ON, COSTS OFF) DELETE FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Delete on pg_catalog.pg_description
+   ->  Seq Scan on pg_catalog.pg_description
+         Output: ctid
+         Filter: (pg_description.description ~~ 'PG_DESCRIPTION_TAB_013%'::text)
+(4 rows)
+
+DELETE FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%';
+SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_TABLE_020 WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+ERROR:  relation "fvt_dbsystem_manage.pg_description_table_020" does not exist on datanode1
+LINE 1: SELECT description FROM FVT_DBSYSTEM_MANAGE.PG_DESCRIPTION_T...
+                                ^
+SELECT description FROM PG_DESCRIPTION WHERE DESCRIPTION LIKE 'PG_DESCRIPTION_TAB_013%' ORDER BY 1;
+ description 
+-------------
+(0 rows)
+
+DROP SCHEMA FVT_DBSYSTEM_MANAGE CASCADE;
+NOTICE:  drop cascades to table fvt_dbsystem_manage.pg_description_tab_013
+CREATE TABLE DELETE_XC_C(C1 INT, C2 DATE, C3 INT);
+CREATE TABLE DELETE_XC_D(D1 INT, D2 DATE, D3 INT);
+INSERT INTO DELETE_XC_C SELECT GENERATE_SERIES(1,100),NOW(), 1;
+INSERT INTO DELETE_XC_C SELECT GENERATE_SERIES(1,100),NOW(), 2;
+ALTER TABLE DELETE_XC_C ADD PRIMARY KEY (C3, C1);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "delete_xc_c_pkey" for table "delete_xc_c"
+INSERT INTO DELETE_XC_D SELECT * FROM DELETE_XC_C;
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)
+DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D2 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d2
+                 Filter: ((delete_xc_c.c3 = delete_xc_d.d3) AND (delete_xc_c.c1 = delete_xc_d.d1))
+(8 rows)
+
+DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D2 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+DROP TABLE DELETE_XC_C;
+DROP TABLE DELETE_XC_D;
+--
+----/* Teset DML for replication table */
+--
+--
+--- DELETE PREPARE
+--
+DROP TABLE DELETE_XC_C;
+ERROR:  table "delete_xc_c" does not exist
+DROP TABLE DELETE_XC_D;
+ERROR:  table "delete_xc_d" does not exist
+CREATE TABLE DELETE_XC_C(C1 INT, C2 INT, C3 INT);
+CREATE TABLE DELETE_XC_D(D1 INT, D2 INT, D3 INT);
+INSERT INTO DELETE_XC_C SELECT GENERATE_SERIES(1,10), GENERATE_SERIES(1,5), 0;
+INSERT INTO DELETE_XC_C SELECT GENERATE_SERIES(1,10), GENERATE_SERIES(1,5), 1;
+INSERT INTO DELETE_XC_D SELECT * FROM DELETE_XC_C;
+--
+---- DELETE CASE1: UNIQUE NOT DEFERRABLE
+--
+ALTER TABLE DELETE_XC_C ADD CONSTRAINT CON_DELETE UNIQUE (C3, C1);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "con_delete" for table "delete_xc_c"
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c3 = delete_xc_d.d3) AND (delete_xc_c.c1 = delete_xc_d.d1))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c1 = delete_xc_d.d1) AND (delete_xc_c.c2 = delete_xc_d.d2))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 = 2;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c2 = 2)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+(3 rows)
+
+ALTER TABLE DELETE_XC_C ALTER C1 SET NOT NULL;
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c3 = delete_xc_d.d3) AND (delete_xc_c.c1 = delete_xc_d.d1))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c1 = delete_xc_d.d1) AND (delete_xc_c.c2 = delete_xc_d.d2))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 = 2;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c2 = 2)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+(3 rows)
+
+ALTER TABLE DELETE_XC_C ALTER C3 SET NOT NULL;
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c3 = delete_xc_d.d3) AND (delete_xc_c.c1 = delete_xc_d.d1))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c1 = delete_xc_d.d1) AND (delete_xc_c.c2 = delete_xc_d.d2))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 = 2;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c2 = 2)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+(3 rows)
+
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  0
+  1 |  1 |  1
+  2 |  2 |  0
+  2 |  2 |  1
+  3 |  3 |  0
+  3 |  3 |  1
+  4 |  4 |  0
+  4 |  4 |  1
+  5 |  5 |  0
+  5 |  5 |  1
+  6 |  1 |  0
+  6 |  1 |  1
+  7 |  2 |  0
+  7 |  2 |  1
+  8 |  3 |  0
+  8 |  3 |  1
+  9 |  4 |  0
+  9 |  4 |  1
+ 10 |  5 |  0
+ 10 |  5 |  1
+(20 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  6 |  1 |  1
+(2 rows)
+
+DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  0
+  2 |  2 |  0
+  2 |  2 |  1
+  3 |  3 |  0
+  3 |  3 |  1
+  4 |  4 |  0
+  4 |  4 |  1
+  5 |  5 |  0
+  5 |  5 |  1
+  6 |  1 |  0
+  7 |  2 |  0
+  7 |  2 |  1
+  8 |  3 |  0
+  8 |  3 |  1
+  9 |  4 |  0
+  9 |  4 |  1
+ 10 |  5 |  0
+ 10 |  5 |  1
+(18 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  0
+  6 |  1 |  0
+(2 rows)
+
+DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  0
+  2 |  2 |  1
+  3 |  3 |  0
+  3 |  3 |  1
+  4 |  4 |  0
+  4 |  4 |  1
+  5 |  5 |  0
+  5 |  5 |  1
+  7 |  2 |  0
+  7 |  2 |  1
+  8 |  3 |  0
+  8 |  3 |  1
+  9 |  4 |  0
+  9 |  4 |  1
+ 10 |  5 |  0
+ 10 |  5 |  1
+(16 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+ c1 | c2 | c3 
+----+----+----
+  5 |  5 |  1
+(1 row)
+
+DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  0
+  2 |  2 |  1
+  3 |  3 |  0
+  3 |  3 |  1
+  4 |  4 |  0
+  4 |  4 |  1
+  5 |  5 |  0
+  7 |  2 |  0
+  7 |  2 |  1
+  8 |  3 |  0
+  8 |  3 |  1
+  9 |  4 |  0
+  9 |  4 |  1
+ 10 |  5 |  0
+ 10 |  5 |  1
+(15 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C3 = 0;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  0
+  3 |  3 |  0
+  4 |  4 |  0
+  5 |  5 |  0
+  7 |  2 |  0
+  8 |  3 |  0
+  9 |  4 |  0
+ 10 |  5 |  0
+(8 rows)
+
+DELETE FROM DELETE_XC_C WHERE C3 = 0;
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  1
+  3 |  3 |  1
+  4 |  4 |  1
+  7 |  2 |  1
+  8 |  3 |  1
+  9 |  4 |  1
+ 10 |  5 |  1
+(7 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C2 = 2;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  1
+  7 |  2 |  1
+(2 rows)
+
+DELETE FROM DELETE_XC_C WHERE C2 = 2;
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  3 |  3 |  1
+  4 |  4 |  1
+  8 |  3 |  1
+  9 |  4 |  1
+ 10 |  5 |  1
+(5 rows)
+
+SELECT * FROM DELETE_XC_C;
+ c1 | c2 | c3 
+----+----+----
+  3 |  3 |  1
+  4 |  4 |  1
+  8 |  3 |  1
+  9 |  4 |  1
+ 10 |  5 |  1
+(5 rows)
+
+DELETE FROM DELETE_XC_C;
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+(0 rows)
+
+--
+---- DELETE CASE2: UNIQUE DEFERRABLE
+--
+ALTER TABLE DELETE_XC_C DROP CONSTRAINT CON_DELETE;
+ALTER TABLE DELETE_XC_C ADD CONSTRAINT CON_DELETE UNIQUE (C3, C1) DEFERRABLE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "con_delete" for table "delete_xc_c"
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c3 = delete_xc_d.d3) AND (delete_xc_c.c1 = delete_xc_d.d1))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c1 = delete_xc_d.d1) AND (delete_xc_c.c2 = delete_xc_d.d2))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 = 2;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c2 = 2)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+(3 rows)
+
+--
+-- DELETE CASE3: PRIMARY KEY NOT DEFERRABLE
+--
+ALTER TABLE DELETE_XC_C DROP CONSTRAINT CON_DELETE;
+ALTER TABLE DELETE_XC_C ALTER C1 DROP NOT NULL;
+ALTER TABLE DELETE_XC_C ALTER C3 DROP NOT NULL;
+ALTER TABLE DELETE_XC_C ADD CONSTRAINT CON_DELETE PRIMARY KEY (C3, C1);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "con_delete" for table "delete_xc_c"
+TRUNCATE DELETE_XC_C;
+INSERT INTO DELETE_XC_C SELECT GENERATE_SERIES(1,10), GENERATE_SERIES(1,5), 0;
+INSERT INTO DELETE_XC_C SELECT GENERATE_SERIES(1,10), GENERATE_SERIES(1,5), 1;
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c3 = delete_xc_d.d3) AND (delete_xc_c.c1 = delete_xc_d.d1))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c1 = delete_xc_d.d1) AND (delete_xc_c.c2 = delete_xc_d.d2))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Index Scan using con_delete on public.delete_xc_c
+         Output: ctid
+         Index Cond: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
+                   QUERY PLAN                   
+------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Bitmap Heap Scan on public.delete_xc_c
+         Output: ctid
+         Recheck Cond: (delete_xc_c.c3 = 0)
+         ->  Bitmap Index Scan on con_delete
+               Index Cond: (delete_xc_c.c3 = 0)
+(6 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 = 2;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c2 = 2)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+(3 rows)
+
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  0
+  1 |  1 |  1
+  2 |  2 |  0
+  2 |  2 |  1
+  3 |  3 |  0
+  3 |  3 |  1
+  4 |  4 |  0
+  4 |  4 |  1
+  5 |  5 |  0
+  5 |  5 |  1
+  6 |  1 |  0
+  6 |  1 |  1
+  7 |  2 |  0
+  7 |  2 |  1
+  8 |  3 |  0
+  8 |  3 |  1
+  9 |  4 |  0
+  9 |  4 |  1
+ 10 |  5 |  0
+ 10 |  5 |  1
+(20 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  6 |  1 |  1
+(2 rows)
+
+DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  0
+  2 |  2 |  0
+  2 |  2 |  1
+  3 |  3 |  0
+  3 |  3 |  1
+  4 |  4 |  0
+  4 |  4 |  1
+  5 |  5 |  0
+  5 |  5 |  1
+  6 |  1 |  0
+  7 |  2 |  0
+  7 |  2 |  1
+  8 |  3 |  0
+  8 |  3 |  1
+  9 |  4 |  0
+  9 |  4 |  1
+ 10 |  5 |  0
+ 10 |  5 |  1
+(18 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  0
+  6 |  1 |  0
+(2 rows)
+
+DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  0
+  2 |  2 |  1
+  3 |  3 |  0
+  3 |  3 |  1
+  4 |  4 |  0
+  4 |  4 |  1
+  5 |  5 |  0
+  5 |  5 |  1
+  7 |  2 |  0
+  7 |  2 |  1
+  8 |  3 |  0
+  8 |  3 |  1
+  9 |  4 |  0
+  9 |  4 |  1
+ 10 |  5 |  0
+ 10 |  5 |  1
+(16 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+ c1 | c2 | c3 
+----+----+----
+  5 |  5 |  1
+(1 row)
+
+DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  0
+  2 |  2 |  1
+  3 |  3 |  0
+  3 |  3 |  1
+  4 |  4 |  0
+  4 |  4 |  1
+  5 |  5 |  0
+  7 |  2 |  0
+  7 |  2 |  1
+  8 |  3 |  0
+  8 |  3 |  1
+  9 |  4 |  0
+  9 |  4 |  1
+ 10 |  5 |  0
+ 10 |  5 |  1
+(15 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C3 = 0;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  0
+  3 |  3 |  0
+  4 |  4 |  0
+  5 |  5 |  0
+  7 |  2 |  0
+  8 |  3 |  0
+  9 |  4 |  0
+ 10 |  5 |  0
+(8 rows)
+
+DELETE FROM DELETE_XC_C WHERE C3 = 0;
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  1
+  3 |  3 |  1
+  4 |  4 |  1
+  7 |  2 |  1
+  8 |  3 |  1
+  9 |  4 |  1
+ 10 |  5 |  1
+(7 rows)
+
+SELECT * FROM DELETE_XC_C WHERE C2 = 2;
+ c1 | c2 | c3 
+----+----+----
+  2 |  2 |  1
+  7 |  2 |  1
+(2 rows)
+
+DELETE FROM DELETE_XC_C WHERE C2 = 2;
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  3 |  3 |  1
+  4 |  4 |  1
+  8 |  3 |  1
+  9 |  4 |  1
+ 10 |  5 |  1
+(5 rows)
+
+SELECT * FROM DELETE_XC_C;
+ c1 | c2 | c3 
+----+----+----
+  3 |  3 |  1
+  4 |  4 |  1
+  8 |  3 |  1
+  9 |  4 |  1
+ 10 |  5 |  1
+(5 rows)
+
+DELETE FROM DELETE_XC_C;
+SELECT * FROM DELETE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+(0 rows)
+
+--
+-- DELETE CASE3: PRIMARY KEY DEFERRABLE
+--
+ALTER TABLE DELETE_XC_C DROP CONSTRAINT CON_DELETE;
+ALTER TABLE DELETE_XC_C ADD CONSTRAINT CON_DELETE PRIMARY KEY (C3, C1) DEFERRABLE;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "con_delete" for table "delete_xc_c"
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c3 = delete_xc_d.d3) AND (delete_xc_c.c1 = delete_xc_d.d1))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D3 FROM DELETE_XC_D WHERE C1 = D1 AND C2 = D2);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: delete_xc_c.ctid
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on public.delete_xc_d
+                 Output: delete_xc_d.d3
+                 Filter: ((delete_xc_c.c1 = delete_xc_d.d1) AND (delete_xc_c.c2 = delete_xc_d.d2))
+(8 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 = 2;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+         Filter: (delete_xc_c.c2 = 2)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C;
+              QUERY PLAN              
+--------------------------------------
+ Delete on public.delete_xc_c
+   ->  Seq Scan on public.delete_xc_c
+         Output: ctid
+(3 rows)
+
+--
+---- CLEAN UP
+--
+DROP TABLE DELETE_XC_C;
+DROP TABLE DELETE_XC_D;
+--
+-- UPDATE: PREPARE
+--
+DROP TABLE UPDATE_XC_C;
+ERROR:  table "update_xc_c" does not exist
+DROP TABLE UPDATE_XC_D;
+ERROR:  table "update_xc_d" does not exist
+CREATE TABLE UPDATE_XC_C(C1 INT, C2 INT, C3 INT);
+CREATE TABLE UPDATE_XC_D(D1 INT, D2 INT, D3 INT);
+INSERT INTO UPDATE_XC_C SELECT GENERATE_SERIES(1,10), GENERATE_SERIES(1,5), 0;
+INSERT INTO UPDATE_XC_C SELECT GENERATE_SERIES(1,10), GENERATE_SERIES(1,5), 1;
+INSERT INTO UPDATE_XC_D SELECT * FROM UPDATE_XC_C;
+--
+---- UPDATE CASE1: UNIQUE NOT DEFERRABLE
+--
+ALTER TABLE UPDATE_XC_C ADD CONSTRAINT CON_UPDATE UNIQUE (C3, C1);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "con_update" for table "update_xc_c"
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FROM UPDATE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: update_xc_c.c1, (SubPlan 1), update_xc_c.c3, update_xc_c.ctid
+         SubPlan 1
+           ->  Seq Scan on public.update_xc_d
+                 Output: update_xc_d.d3
+                 Filter: ((update_xc_c.c3 = update_xc_d.d3) AND (update_xc_c.c1 = update_xc_d.d1))
+(7 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+         Filter: (update_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: (update_xc_c.c2 = 1)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+(3 rows)
+
+ALTER TABLE UPDATE_XC_C ALTER C1 SET NOT NULL;
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FROM UPDATE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: update_xc_c.c1, (SubPlan 1), update_xc_c.c3, update_xc_c.ctid
+         SubPlan 1
+           ->  Seq Scan on public.update_xc_d
+                 Output: update_xc_d.d3
+                 Filter: ((update_xc_c.c3 = update_xc_d.d3) AND (update_xc_c.c1 = update_xc_d.d1))
+(7 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+         Filter: (update_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: (update_xc_c.c2 = 1)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+(3 rows)
+
+ALTER TABLE UPDATE_XC_C ALTER C3 SET NOT NULL;
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FROM UPDATE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: update_xc_c.c1, (SubPlan 1), update_xc_c.c3, update_xc_c.ctid
+         SubPlan 1
+           ->  Seq Scan on public.update_xc_d
+                 Output: update_xc_d.d3
+                 Filter: ((update_xc_c.c3 = update_xc_d.d3) AND (update_xc_c.c1 = update_xc_d.d1))
+(7 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+         Filter: (update_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: (update_xc_c.c2 = 1)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+(3 rows)
+
+SELECT C1, C3, C2, D3 AS REPLACE_C2 FROM UPDATE_XC_C, UPDATE_XC_D WHERE C3 = D3 AND C1 = D1 ORDER BY 1, 2, 2, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  1 |  0 |  1 |          0
+  1 |  1 |  1 |          1
+  2 |  0 |  2 |          0
+  2 |  1 |  2 |          1
+  3 |  0 |  3 |          0
+  3 |  1 |  3 |          1
+  4 |  0 |  4 |          0
+  4 |  1 |  4 |          1
+  5 |  0 |  5 |          0
+  5 |  1 |  5 |          1
+  6 |  0 |  1 |          0
+  6 |  1 |  1 |          1
+  7 |  0 |  2 |          0
+  7 |  1 |  2 |          1
+  8 |  0 |  3 |          0
+  8 |  1 |  3 |          1
+  9 |  0 |  4 |          0
+  9 |  1 |  4 |          1
+ 10 |  0 |  5 |          0
+ 10 |  1 |  5 |          1
+(20 rows)
+
+UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FROM UPDATE_XC_D WHERE C3 = D3 AND C1 = D1);
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  0 |  0
+  1 |  1 |  1
+  2 |  0 |  0
+  2 |  1 |  1
+  3 |  0 |  0
+  3 |  1 |  1
+  4 |  0 |  0
+  4 |  1 |  1
+  5 |  0 |  0
+  5 |  1 |  1
+  6 |  0 |  0
+  6 |  1 |  1
+  7 |  0 |  0
+  7 |  1 |  1
+  8 |  0 |  0
+  8 |  1 |  1
+  9 |  0 |  0
+  9 |  1 |  1
+ 10 |  0 |  0
+ 10 |  1 |  1
+(20 rows)
+
+SELECT C1, C3, C2, 0 AS REPLACE_C2 FROM UPDATE_XC_C WHERE C3 = 1 AND C1 = 5 ORDER BY 1, 3, 2, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  5 |  1 |  1 |          0
+(1 row)
+
+UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  0 |  0
+  1 |  1 |  1
+  2 |  0 |  0
+  2 |  1 |  1
+  3 |  0 |  0
+  3 |  1 |  1
+  4 |  0 |  0
+  4 |  1 |  1
+  5 |  0 |  0
+  5 |  0 |  1
+  6 |  0 |  0
+  6 |  1 |  1
+  7 |  0 |  0
+  7 |  1 |  1
+  8 |  0 |  0
+  8 |  1 |  1
+  9 |  0 |  0
+  9 |  1 |  1
+ 10 |  0 |  0
+ 10 |  1 |  1
+(20 rows)
+
+SELECT C1, C3, C2, 1 AS REPLACE_C2 FROM UPDATE_XC_C WHERE C3 = 0 ORDER BY 1, 3, 3, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  1 |  0 |  0 |          1
+  2 |  0 |  0 |          1
+  3 |  0 |  0 |          1
+  4 |  0 |  0 |          1
+  5 |  0 |  0 |          1
+  6 |  0 |  0 |          1
+  7 |  0 |  0 |          1
+  8 |  0 |  0 |          1
+  9 |  0 |  0 |          1
+ 10 |  0 |  0 |          1
+(10 rows)
+
+UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  0
+  1 |  1 |  1
+  2 |  1 |  0
+  2 |  1 |  1
+  3 |  1 |  0
+  3 |  1 |  1
+  4 |  1 |  0
+  4 |  1 |  1
+  5 |  0 |  1
+  5 |  1 |  0
+  6 |  1 |  0
+  6 |  1 |  1
+  7 |  1 |  0
+  7 |  1 |  1
+  8 |  1 |  0
+  8 |  1 |  1
+  9 |  1 |  0
+  9 |  1 |  1
+ 10 |  1 |  0
+ 10 |  1 |  1
+(20 rows)
+
+SELECT C1, C3, C2, 0 AS REPLACE_C2 FROM UPDATE_XC_C WHERE C2 = 1 ORDER BY 1, 2, 3, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  1 |  0 |  1 |          0
+  1 |  1 |  1 |          0
+  2 |  0 |  1 |          0
+  2 |  1 |  1 |          0
+  3 |  0 |  1 |          0
+  3 |  1 |  1 |          0
+  4 |  0 |  1 |          0
+  4 |  1 |  1 |          0
+  5 |  0 |  1 |          0
+  6 |  0 |  1 |          0
+  6 |  1 |  1 |          0
+  7 |  0 |  1 |          0
+  7 |  1 |  1 |          0
+  8 |  0 |  1 |          0
+  8 |  1 |  1 |          0
+  9 |  0 |  1 |          0
+  9 |  1 |  1 |          0
+ 10 |  0 |  1 |          0
+ 10 |  1 |  1 |          0
+(19 rows)
+
+UPDATE UPDATE_XC_C SET C2 = 0 WHERE C2 = 1;
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  0 |  0
+  1 |  0 |  1
+  2 |  0 |  0
+  2 |  0 |  1
+  3 |  0 |  0
+  3 |  0 |  1
+  4 |  0 |  0
+  4 |  0 |  1
+  5 |  0 |  0
+  5 |  0 |  1
+  6 |  0 |  0
+  6 |  0 |  1
+  7 |  0 |  0
+  7 |  0 |  1
+  8 |  0 |  0
+  8 |  0 |  1
+  9 |  0 |  0
+  9 |  0 |  1
+ 10 |  0 |  0
+ 10 |  0 |  1
+(20 rows)
+
+SELECT C1, C3, C2, 1 AS REPLACE_C2 FROM UPDATE_XC_C ORDER BY 1, 2, 3, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  1 |  0 |  0 |          1
+  1 |  1 |  0 |          1
+  2 |  0 |  0 |          1
+  2 |  1 |  0 |          1
+  3 |  0 |  0 |          1
+  3 |  1 |  0 |          1
+  4 |  0 |  0 |          1
+  4 |  1 |  0 |          1
+  5 |  0 |  0 |          1
+  5 |  1 |  0 |          1
+  6 |  0 |  0 |          1
+  6 |  1 |  0 |          1
+  7 |  0 |  0 |          1
+  7 |  1 |  0 |          1
+  8 |  0 |  0 |          1
+  8 |  1 |  0 |          1
+  9 |  0 |  0 |          1
+  9 |  1 |  0 |          1
+ 10 |  0 |  0 |          1
+ 10 |  1 |  0 |          1
+(20 rows)
+
+UPDATE_XC_C SET C2 = 1;
+ERROR:  syntax error at or near "UPDATE_XC_C"
+LINE 1: UPDATE_XC_C SET C2 = 1;
+        ^
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  0 |  0
+  1 |  0 |  1
+  2 |  0 |  0
+  2 |  0 |  1
+  3 |  0 |  0
+  3 |  0 |  1
+  4 |  0 |  0
+  4 |  0 |  1
+  5 |  0 |  0
+  5 |  0 |  1
+  6 |  0 |  0
+  6 |  0 |  1
+  7 |  0 |  0
+  7 |  0 |  1
+  8 |  0 |  0
+  8 |  0 |  1
+  9 |  0 |  0
+  9 |  0 |  1
+ 10 |  0 |  0
+ 10 |  0 |  1
+(20 rows)
+
+--
+---- UPDATE CASE2: UNIQUE DEFERRABLE
+--
+ALTER TABLE UPDATE_XC_C DROP CONSTRAINT CON_UPDATE;
+ALTER TABLE UPDATE_XC_C ADD CONSTRAINT CON_UPDATE UNIQUE (C3, C1) DEFERRABLE;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "con_update" for table "update_xc_c"
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FROM UPDATE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: update_xc_c.c1, (SubPlan 1), update_xc_c.c3, update_xc_c.ctid
+         SubPlan 1
+           ->  Seq Scan on public.update_xc_d
+                 Output: update_xc_d.d3
+                 Filter: ((update_xc_c.c3 = update_xc_d.d3) AND (update_xc_c.c1 = update_xc_d.d1))
+(7 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+         Filter: (update_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: (update_xc_c.c2 = 1)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+(3 rows)
+
+--
+---- UPDATE CASE3: PRIMARY KEY NOT DEFERRABLE
+--
+ALTER TABLE UPDATE_XC_C DROP CONSTRAINT CON_UPDATE;
+ALTER TABLE UPDATE_XC_C ALTER C1 DROP NOT NULL;
+ALTER TABLE UPDATE_XC_C ALTER C3 DROP NOT NULL;
+TRUNCATE UPDATE_XC_C;
+INSERT INTO UPDATE_XC_C SELECT GENERATE_SERIES(1,10), GENERATE_SERIES(1,5), 0;
+INSERT INTO UPDATE_XC_C SELECT GENERATE_SERIES(1,10), GENERATE_SERIES(1,5), 1;
+ALTER TABLE UPDATE_XC_C ADD CONSTRAINT CON_UPDATE PRIMARY KEY (C3, C1);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "con_update" for table "update_xc_c"
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FROM UPDATE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: update_xc_c.c1, (SubPlan 1), update_xc_c.c3, update_xc_c.ctid
+         SubPlan 1
+           ->  Seq Scan on public.update_xc_d
+                 Output: update_xc_d.d3
+                 Filter: ((update_xc_c.c3 = update_xc_d.d3) AND (update_xc_c.c1 = update_xc_d.d1))
+(7 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+         Filter: (update_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: (update_xc_c.c2 = 1)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+(3 rows)
+
+SELECT C1, C3, C2, D3 AS REPLACE_C2 FROM UPDATE_XC_C, UPDATE_XC_D WHERE C3 = D3 AND C1 = D1 ORDER BY 1, 2, 2, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  1 |  0 |  1 |          0
+  1 |  1 |  1 |          1
+  2 |  0 |  2 |          0
+  2 |  1 |  2 |          1
+  3 |  0 |  3 |          0
+  3 |  1 |  3 |          1
+  4 |  0 |  4 |          0
+  4 |  1 |  4 |          1
+  5 |  0 |  5 |          0
+  5 |  1 |  5 |          1
+  6 |  0 |  1 |          0
+  6 |  1 |  1 |          1
+  7 |  0 |  2 |          0
+  7 |  1 |  2 |          1
+  8 |  0 |  3 |          0
+  8 |  1 |  3 |          1
+  9 |  0 |  4 |          0
+  9 |  1 |  4 |          1
+ 10 |  0 |  5 |          0
+ 10 |  1 |  5 |          1
+(20 rows)
+
+UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FROM UPDATE_XC_D WHERE C3 = D3 AND C1 = D1);
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  0 |  0
+  1 |  1 |  1
+  2 |  0 |  0
+  2 |  1 |  1
+  3 |  0 |  0
+  3 |  1 |  1
+  4 |  0 |  0
+  4 |  1 |  1
+  5 |  0 |  0
+  5 |  1 |  1
+  6 |  0 |  0
+  6 |  1 |  1
+  7 |  0 |  0
+  7 |  1 |  1
+  8 |  0 |  0
+  8 |  1 |  1
+  9 |  0 |  0
+  9 |  1 |  1
+ 10 |  0 |  0
+ 10 |  1 |  1
+(20 rows)
+
+SELECT C1, C3, C2, 0 AS REPLACE_C2 FROM UPDATE_XC_C WHERE C3 = 1 AND C1 = 5 ORDER BY 1, 3, 2, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  5 |  1 |  1 |          0
+(1 row)
+
+UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  0 |  0
+  1 |  1 |  1
+  2 |  0 |  0
+  2 |  1 |  1
+  3 |  0 |  0
+  3 |  1 |  1
+  4 |  0 |  0
+  4 |  1 |  1
+  5 |  0 |  0
+  5 |  0 |  1
+  6 |  0 |  0
+  6 |  1 |  1
+  7 |  0 |  0
+  7 |  1 |  1
+  8 |  0 |  0
+  8 |  1 |  1
+  9 |  0 |  0
+  9 |  1 |  1
+ 10 |  0 |  0
+ 10 |  1 |  1
+(20 rows)
+
+SELECT C1, C3, C2, 1 AS REPLACE_C2 FROM UPDATE_XC_C WHERE C3 = 0 ORDER BY 1, 3, 3, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  1 |  0 |  0 |          1
+  2 |  0 |  0 |          1
+  3 |  0 |  0 |          1
+  4 |  0 |  0 |          1
+  5 |  0 |  0 |          1
+  6 |  0 |  0 |          1
+  7 |  0 |  0 |          1
+  8 |  0 |  0 |          1
+  9 |  0 |  0 |          1
+ 10 |  0 |  0 |          1
+(10 rows)
+
+UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  0
+  1 |  1 |  1
+  2 |  1 |  0
+  2 |  1 |  1
+  3 |  1 |  0
+  3 |  1 |  1
+  4 |  1 |  0
+  4 |  1 |  1
+  5 |  0 |  1
+  5 |  1 |  0
+  6 |  1 |  0
+  6 |  1 |  1
+  7 |  1 |  0
+  7 |  1 |  1
+  8 |  1 |  0
+  8 |  1 |  1
+  9 |  1 |  0
+  9 |  1 |  1
+ 10 |  1 |  0
+ 10 |  1 |  1
+(20 rows)
+
+SELECT C1, C3, C2, 0 AS REPLACE_C2 FROM UPDATE_XC_C WHERE C2 = 1 ORDER BY 1, 2, 3, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  1 |  0 |  1 |          0
+  1 |  1 |  1 |          0
+  2 |  0 |  1 |          0
+  2 |  1 |  1 |          0
+  3 |  0 |  1 |          0
+  3 |  1 |  1 |          0
+  4 |  0 |  1 |          0
+  4 |  1 |  1 |          0
+  5 |  0 |  1 |          0
+  6 |  0 |  1 |          0
+  6 |  1 |  1 |          0
+  7 |  0 |  1 |          0
+  7 |  1 |  1 |          0
+  8 |  0 |  1 |          0
+  8 |  1 |  1 |          0
+  9 |  0 |  1 |          0
+  9 |  1 |  1 |          0
+ 10 |  0 |  1 |          0
+ 10 |  1 |  1 |          0
+(19 rows)
+
+UPDATE UPDATE_XC_C SET C2 = 0 WHERE C2 = 1;
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  0 |  0
+  1 |  0 |  1
+  2 |  0 |  0
+  2 |  0 |  1
+  3 |  0 |  0
+  3 |  0 |  1
+  4 |  0 |  0
+  4 |  0 |  1
+  5 |  0 |  0
+  5 |  0 |  1
+  6 |  0 |  0
+  6 |  0 |  1
+  7 |  0 |  0
+  7 |  0 |  1
+  8 |  0 |  0
+  8 |  0 |  1
+  9 |  0 |  0
+  9 |  0 |  1
+ 10 |  0 |  0
+ 10 |  0 |  1
+(20 rows)
+
+SELECT C1, C3, C2, 1 AS REPLACE_C2 FROM UPDATE_XC_C ORDER BY 1, 2, 3, 4;
+ c1 | c3 | c2 | replace_c2 
+----+----+----+------------
+  1 |  0 |  0 |          1
+  1 |  1 |  0 |          1
+  2 |  0 |  0 |          1
+  2 |  1 |  0 |          1
+  3 |  0 |  0 |          1
+  3 |  1 |  0 |          1
+  4 |  0 |  0 |          1
+  4 |  1 |  0 |          1
+  5 |  0 |  0 |          1
+  5 |  1 |  0 |          1
+  6 |  0 |  0 |          1
+  6 |  1 |  0 |          1
+  7 |  0 |  0 |          1
+  7 |  1 |  0 |          1
+  8 |  0 |  0 |          1
+  8 |  1 |  0 |          1
+  9 |  0 |  0 |          1
+  9 |  1 |  0 |          1
+ 10 |  0 |  0 |          1
+ 10 |  1 |  0 |          1
+(20 rows)
+
+UPDATE_XC_C SET C2 = 1;
+ERROR:  syntax error at or near "UPDATE_XC_C"
+LINE 1: UPDATE_XC_C SET C2 = 1;
+        ^
+SELECT * FROM UPDATE_XC_C ORDER BY 1, 2, 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  0 |  0
+  1 |  0 |  1
+  2 |  0 |  0
+  2 |  0 |  1
+  3 |  0 |  0
+  3 |  0 |  1
+  4 |  0 |  0
+  4 |  0 |  1
+  5 |  0 |  0
+  5 |  0 |  1
+  6 |  0 |  0
+  6 |  0 |  1
+  7 |  0 |  0
+  7 |  0 |  1
+  8 |  0 |  0
+  8 |  0 |  1
+  9 |  0 |  0
+  9 |  0 |  1
+ 10 |  0 |  0
+ 10 |  0 |  1
+(20 rows)
+
+--
+---- UPDATE CASE4: PRIMARY KEY DEFERRABLE
+--
+ALTER TABLE UPDATE_XC_C DROP CONSTRAINT CON_UPDATE;
+ALTER TABLE UPDATE_XC_C ADD CONSTRAINT CON_UPDATE PRIMARY KEY (C3, C1) DEFERRABLE;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "con_update" for table "update_xc_c"
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FROM UPDATE_XC_D WHERE C3 = D3 AND C1 = D1);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: update_xc_c.c1, (SubPlan 1), update_xc_c.c3, update_xc_c.ctid
+         SubPlan 1
+           ->  Seq Scan on public.update_xc_d
+                 Output: update_xc_d.d3
+                 Filter: ((update_xc_c.c3 = update_xc_d.d3) AND (update_xc_c.c1 = update_xc_d.d1))
+(7 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+         Filter: (update_xc_c.c3 = 0)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 0, c3, ctid
+         Filter: (update_xc_c.c2 = 1)
+(4 rows)
+
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1;
+              QUERY PLAN              
+--------------------------------------
+ Update on public.update_xc_c
+   ->  Seq Scan on public.update_xc_c
+         Output: c1, 1, c3, ctid
+(3 rows)
+
+--
+---- UPDATE/DELETE REPLICATION TABLE WITH CHILD TABLE
+--
+CREATE TABLE parent_replica_table (A INT, B INT, C INT, D VARCHAR(20));
+ALTER TABLE parent_replica_table ADD PRIMARY KEY (A, B);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "parent_replica_table_pkey" for table "parent_replica_table"
+INSERT INTO parent_replica_table VALUES(1, 2, 3, 'sadfadsgdsf');
+CREATE TABLE son_hash_table() INHERITS (parent_replica_table);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+INSERT INTO son_hash_table VALUES(1, 2, 3, 'sadfadsgdsf');
+ERROR:  relation "son_hash_table" does not exist on datanode1
+LINE 1: INSERT INTO son_hash_table VALUES(1, 2, 3, 'sadfadsgdsf');
+                    ^
+INSERT INTO son_hash_table VALUES(1, 1, 1, 'sadfadsgdsf');
+ERROR:  relation "son_hash_table" does not exist on datanode1
+LINE 1: INSERT INTO son_hash_table VALUES(1, 1, 1, 'sadfadsgdsf');
+                    ^
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) DELETE FROM parent_replica_table;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Delete on public.parent_replica_table
+   ->  Seq Scan on public.parent_replica_table
+         Output: ctid
+(3 rows)
+
+DELETE FROM parent_replica_table WHERE A = 1 AND B = 1 AND C = 1;
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Update on public.parent_replica_table
+   ->  Bitmap Heap Scan on public.parent_replica_table
+         Output: a, b, c, 'AAAAA'::character varying(20), ctid
+         Recheck Cond: (parent_replica_table.a > 0)
+         ->  Bitmap Index Scan on parent_replica_table_pkey
+               Index Cond: (parent_replica_table.a > 0)
+(6 rows)
+
+UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0;
+UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0 AND B > 0;
+UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0 AND B > 0 AND C > 0;
+DROP TABLE son_hash_table;
+ERROR:  table "son_hash_table" does not exist
+CREATE TABLE son_replica_table() INHERITS (parent_replica_table);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+ALTER TABLE son_replica_table ADD PRIMARY KEY (A, B);
+ERROR:  relation "son_replica_table" does not exist
+INSERT INTO son_replica_table VALUES(1, 2, 3, 'sadfadsgdsf');
+ERROR:  relation "son_replica_table" does not exist on datanode1
+LINE 1: INSERT INTO son_replica_table VALUES(1, 2, 3, 'sadfadsgdsf')...
+                    ^
+EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Update on public.parent_replica_table
+   ->  Bitmap Heap Scan on public.parent_replica_table
+         Output: a, b, c, 'AAAAA'::character varying(20), ctid
+         Recheck Cond: (parent_replica_table.a > 0)
+         ->  Bitmap Index Scan on parent_replica_table_pkey
+               Index Cond: (parent_replica_table.a > 0)
+(6 rows)
+
+UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0;
+UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0 AND B > 0;
+UPDATE parent_replica_table SET D='AAAAA' WHERE A > 0 AND B > 0 AND C > 0;
+DROP TABLE son_replica_table;
+ERROR:  table "son_replica_table" does not exist
+DROP TABLE parent_replica_table;
+--
+---- CLEAN UP
+--
+DROP TABLE UPDATE_XC_C;
+DROP TABLE UPDATE_XC_D;

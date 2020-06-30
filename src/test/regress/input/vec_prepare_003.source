@@ -1,0 +1,13 @@
+/*
+ * This file is used to analyze tpch table for vector engine tests
+ */
+set current_schema=vector_engine;
+\i @abs_srcdir@/data/tpch.data
+analyze customer;
+analyze lineitem;
+analyze nation;
+analyze orders;
+analyze part;
+analyze partsupp;
+analyze region;
+analyze supplier;

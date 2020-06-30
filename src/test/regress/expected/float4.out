@@ -1,0 +1,601 @@
+--
+-- FLOAT4
+--
+CREATE TABLE FLOAT4_TBL (f1  float4);
+INSERT INTO FLOAT4_TBL(f1) VALUES ('    0.0');
+INSERT INTO FLOAT4_TBL(f1) VALUES ('1004.30   ');
+INSERT INTO FLOAT4_TBL(f1) VALUES ('     -34.84    ');
+INSERT INTO FLOAT4_TBL(f1) VALUES ('1.2345678901234e+20');
+INSERT INTO FLOAT4_TBL(f1) VALUES ('1.2345678901234e-20');
+-- test for over and under flow
+INSERT INTO FLOAT4_TBL(f1) VALUES ('10e70');
+ERROR:  value out of range: overflow
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('10e70');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('-10e70');
+ERROR:  value out of range: overflow
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('-10e70');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('10e-70');
+ERROR:  value out of range: underflow
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('10e-70');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('-10e-70');
+ERROR:  value out of range: underflow
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('-10e-70');
+                                           ^
+CONTEXT:  referenced column: f1
+-- bad input
+INSERT INTO FLOAT4_TBL(f1) VALUES ('');
+INSERT INTO FLOAT4_TBL(f1) VALUES ('       ');
+ERROR:  invalid input syntax for type real: "       "
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('       ');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('xyz');
+ERROR:  invalid input syntax for type real: "xyz"
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('xyz');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('5.0.0');
+ERROR:  invalid input syntax for type real: "5.0.0"
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('5.0.0');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('5 . 0');
+ERROR:  invalid input syntax for type real: "5 . 0"
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('5 . 0');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('5.   0');
+ERROR:  invalid input syntax for type real: "5.   0"
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('5.   0');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('     - 3.0');
+ERROR:  invalid input syntax for type real: "     - 3.0"
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('     - 3.0');
+                                           ^
+CONTEXT:  referenced column: f1
+INSERT INTO FLOAT4_TBL(f1) VALUES ('123            5');
+ERROR:  invalid input syntax for type real: "123            5"
+LINE 1: INSERT INTO FLOAT4_TBL(f1) VALUES ('123            5');
+                                           ^
+CONTEXT:  referenced column: f1
+-- special inputs
+SELECT 'NaN'::float4;
+ float4 
+--------
+    NaN
+(1 row)
+
+SELECT 'nan'::float4;
+ float4 
+--------
+    NaN
+(1 row)
+
+SELECT '   NAN  '::float4;
+ float4 
+--------
+    NaN
+(1 row)
+
+SELECT 'infinity'::float4;
+  float4  
+----------
+ Infinity
+(1 row)
+
+SELECT '          -INFINiTY   '::float4;
+  float4   
+-----------
+ -Infinity
+(1 row)
+
+-- bad special inputs
+SELECT 'N A N'::float4;
+ERROR:  invalid input syntax for type real: "N A N"
+LINE 1: SELECT 'N A N'::float4;
+               ^
+CONTEXT:  referenced column: float4
+SELECT 'NaN x'::float4;
+ERROR:  invalid input syntax for type real: "NaN x"
+LINE 1: SELECT 'NaN x'::float4;
+               ^
+CONTEXT:  referenced column: float4
+SELECT ' INFINITY    x'::float4;
+ERROR:  invalid input syntax for type real: " INFINITY    x"
+LINE 1: SELECT ' INFINITY    x'::float4;
+               ^
+CONTEXT:  referenced column: float4
+SELECT 'Infinity'::float4 + 100.0;
+ ?column? 
+----------
+ Infinity
+(1 row)
+
+SELECT 'Infinity'::float4 / 'Infinity'::float4;
+ ?column? 
+----------
+      NaN
+(1 row)
+
+SELECT 'nan'::float4 / 'nan'::float4;
+ ?column? 
+----------
+      NaN
+(1 row)
+
+SELECT 'nan'::numeric::float4;
+ float4 
+--------
+    NaN
+(1 row)
+
+SELECT '' AS five, * FROM FLOAT4_TBL ORDER BY f1;
+ five |     f1      
+------+-------------
+      |      -34.84
+      |           0
+      | 1.23457e-20
+      |      1004.3
+      | 1.23457e+20
+      |            
+(6 rows)
+
+SELECT '' AS four, f.* FROM FLOAT4_TBL f WHERE f.f1 <> '1004.3' ORDER BY f1;
+ four |     f1      
+------+-------------
+      |      -34.84
+      |           0
+      | 1.23457e-20
+      | 1.23457e+20
+(4 rows)
+
+SELECT '' AS one, f.* FROM FLOAT4_TBL f WHERE f.f1 = '1004.3';
+ one |   f1   
+-----+--------
+     | 1004.3
+(1 row)
+
+SELECT '' AS three, f.* FROM FLOAT4_TBL f WHERE '1004.3' > f.f1 ORDER BY f1;
+ three |     f1      
+-------+-------------
+       |      -34.84
+       |           0
+       | 1.23457e-20
+(3 rows)
+
+SELECT '' AS three, f.* FROM FLOAT4_TBL f WHERE  f.f1 < '1004.3' ORDER BY f1;
+ three |     f1      
+-------+-------------
+       |      -34.84
+       |           0
+       | 1.23457e-20
+(3 rows)
+
+SELECT '' AS four, f.* FROM FLOAT4_TBL f WHERE '1004.3' >= f.f1 ORDER BY f1;
+ four |     f1      
+------+-------------
+      |      -34.84
+      |           0
+      | 1.23457e-20
+      |      1004.3
+(4 rows)
+
+SELECT '' AS four, f.* FROM FLOAT4_TBL f WHERE  f.f1 <= '1004.3' ORDER BY f1;
+ four |     f1      
+------+-------------
+      |      -34.84
+      |           0
+      | 1.23457e-20
+      |      1004.3
+(4 rows)
+
+SELECT '' AS three, f.f1, f.f1 * '-10' AS x FROM FLOAT4_TBL f
+   WHERE f.f1 > '0.0' ORDER BY f1;
+ three |     f1      |      x       
+-------+-------------+--------------
+       | 1.23457e-20 | -1.23457e-19
+       |      1004.3 |       -10043
+       | 1.23457e+20 | -1.23457e+21
+(3 rows)
+
+SELECT '' AS three, f.f1, f.f1 + '-10' AS x FROM FLOAT4_TBL f
+   WHERE f.f1 > '0.0' ORDER BY f1;
+ three |     f1      |      x      
+-------+-------------+-------------
+       | 1.23457e-20 |         -10
+       |      1004.3 |       994.3
+       | 1.23457e+20 | 1.23457e+20
+(3 rows)
+
+SELECT '' AS three, f.f1, f.f1 / '-10' AS x FROM FLOAT4_TBL f
+   WHERE f.f1 > '0.0' ORDER BY f1;
+ three |     f1      |      x       
+-------+-------------+--------------
+       | 1.23457e-20 | -1.23457e-21
+       |      1004.3 |      -100.43
+       | 1.23457e+20 | -1.23457e+19
+(3 rows)
+
+SELECT '' AS three, f.f1, f.f1 - '-10' AS x FROM FLOAT4_TBL f
+   WHERE f.f1 > '0.0' ORDER BY f1;
+ three |     f1      |      x      
+-------+-------------+-------------
+       | 1.23457e-20 |          10
+       |      1004.3 |      1014.3
+       | 1.23457e+20 | 1.23457e+20
+(3 rows)
+
+-- test divide by zero
+SELECT '' AS bad, f.f1 / '0.0' from FLOAT4_TBL f;
+ERROR:  division by zero
+SELECT '' AS five, * FROM FLOAT4_TBL ORDER BY f1;
+ five |     f1      
+------+-------------
+      |      -34.84
+      |           0
+      | 1.23457e-20
+      |      1004.3
+      | 1.23457e+20
+      |            
+(6 rows)
+
+-- test the unary float4abs operator 
+SELECT '' AS five, f.f1, @f.f1 AS abs_f1 FROM FLOAT4_TBL f ORDER BY f1;
+ five |     f1      |   abs_f1    
+------+-------------+-------------
+      |      -34.84 |       34.84
+      |           0 |           0
+      | 1.23457e-20 | 1.23457e-20
+      |      1004.3 |      1004.3
+      | 1.23457e+20 | 1.23457e+20
+      |             |            
+(6 rows)
+
+UPDATE FLOAT4_TBL
+   SET f1 = FLOAT4_TBL.f1 * '-1'
+   WHERE FLOAT4_TBL.f1 > '0.0';
+SELECT '' AS five, * FROM FLOAT4_TBL ORDER BY f1;
+ five |      f1      
+------+--------------
+      | -1.23457e+20
+      |      -1004.3
+      |       -34.84
+      | -1.23457e-20
+      |            0
+      |             
+(6 rows)
+
+--test overstep the boundary float
+CREATE TABLE overstep_float_tbl (f1  float4);
+INSERT INTO overstep_float_tbl(f1) VALUES ('1.2345678901234e+20'); 
+INSERT INTO overstep_float_tbl(f1) VALUES ('1.2345678901234e-20');
+INSERT INTO overstep_float_tbl(f1) VALUES (1.2345678901234e+20);  
+INSERT INTO overstep_float_tbl(f1) VALUES (1.2345678901234e-20);
+SELECT f1, 
+    case f1 
+	WHEN cast('1.2345678901234e+20' as float4) THEN '+20FLOAT4' 
+	when cast('1.2345678901234e-20' as float4) THEN '-20FLOAT4'
+	ELSE 'others' END AS CASE_BINARY_DOUBLE 
+	FROM overstep_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 1.23457e-20 | -20FLOAT4
+ 1.23457e-20 | -20FLOAT4
+ 1.23457e+20 | +20FLOAT4
+ 1.23457e+20 | +20FLOAT4
+(4 rows)
+
+SELECT f1, 
+    case f1 
+	WHEN cast(1.2345678901234e+20 as float4) THEN '+20FLOAT4' 
+	when cast(1.2345678901234e-20 as float4) THEN '-20FLOAT4'
+	ELSE 'others' END AS CASE_BINARY_DOUBLE 
+	FROM overstep_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 1.23457e-20 | -20FLOAT4
+ 1.23457e-20 | -20FLOAT4
+ 1.23457e+20 | +20FLOAT4
+ 1.23457e+20 | +20FLOAT4
+(4 rows)
+
+CREATE TABLE CASE_TABLE_39(COL_NAME varchar2(20),col_popu binary_double);
+INSERT INTO CASE_TABLE_39 VALUES('num_1',999.1239567890123956);
+SELECT COL_POPU,
+            CASE COL_POPU
+            WHEN cast(999.1239567890123956 as BINARY_DOUBLE) THEN 'num'
+            ELSE 'others'
+       END AS CASE_BINARY_DOUBLE
+FROM CASE_TABLE_39 ORDER BY COL_POPU,CASE_BINARY_DOUBLE;
+     col_popu     | case_binary_double 
+------------------+--------------------
+ 999.123956789012 | num
+(1 row)
+
+SELECT f1, 
+    case f1 
+	WHEN cast('1.2345678901234e+20' as float4) THEN '+20FLOAT4' 
+	when cast('1.2345678901234e-20' as float4) THEN '-20FLOAT4'
+	ELSE 'others' END AS CASE_BINARY_DOUBLE 
+	FROM overstep_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 1.23457e-20 | -20FLOAT4
+ 1.23457e-20 | -20FLOAT4
+ 1.23457e+20 | +20FLOAT4
+ 1.23457e+20 | +20FLOAT4
+(4 rows)
+
+SELECT f1, 
+    case f1 
+	WHEN cast(1.2345678901234e+20 as float4) THEN '+20FLOAT4' 
+	when cast(1.2345678901234e-20 as float4) THEN '-20FLOAT4'
+	ELSE 'others' END AS CASE_BINARY_DOUBLE 
+	FROM overstep_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 1.23457e-20 | -20FLOAT4
+ 1.23457e-20 | -20FLOAT4
+ 1.23457e+20 | +20FLOAT4
+ 1.23457e+20 | +20FLOAT4
+(4 rows)
+
+SELECT COL_POPU,
+            CASE COL_POPU
+            WHEN cast(999.1239567890123956 as BINARY_DOUBLE) THEN 'num'
+            ELSE 'others'
+       END AS CASE_BINARY_DOUBLE 
+from CASE_TABLE_39  ORDER BY COL_POPU,CASE_BINARY_DOUBLE;
+     col_popu     | case_binary_double 
+------------------+--------------------
+ 999.123956789012 | num
+(1 row)
+
+drop table overstep_float_tbl;
+drop table CASE_TABLE_39;
+CREATE TABLE over_float_tbl (f1  float8);   
+INSERT INTO over_float_tbl(f1) VALUES (1.234e+20); 
+INSERT INTO over_float_tbl(f1) VALUES ('1.234e+20'); 
+INSERT INTO over_float_tbl(f1) VALUES (1.234e-20); 
+INSERT INTO over_float_tbl(f1) VALUES ('1.234e-20'); 
+SELECT f1, case f1 WHEN cast(1.234e+20 as float8) THEN '+short_num' when cast(1.234e-20 as float8) THEN '-short_num' 
+             ELSE 'others'
+        END AS CASE_BINARY_DOUBLE
+FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+    f1     | case_binary_double 
+-----------+--------------------
+ 1.234e-20 | -short_num
+ 1.234e-20 | -short_num
+ 1.234e+20 | +short_num
+ 1.234e+20 | +short_num
+(4 rows)
+
+SELECT f1, case f1 WHEN cast(1.234e+20 as float8) THEN '+short_num' when cast(1.234e-20 as float8) THEN '-short_num' 
+             ELSE 'others'
+        END AS CASE_BINARY_DOUBLE
+FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+    f1     | case_binary_double 
+-----------+--------------------
+ 1.234e-20 | -short_num
+ 1.234e-20 | -short_num
+ 1.234e+20 | +short_num
+ 1.234e+20 | +short_num
+(4 rows)
+
+delete from over_float_tbl;
+insert into over_float_tbl(f1) values(999.1239567890123956e-20);
+insert into over_float_tbl(f1) values('999.1239567890123956e-20');
+insert into over_float_tbl(f1) values(999.1239567890123956e+20);
+insert into over_float_tbl(f1) values('999.1239567890123956e+20');
+SELECT f1, case f1 WHEN cast(999.1239567890123956e-20 as float8) THEN '-long_num' 
+                   when cast(999.1239567890123956e+20 as float8) then '+long_num'    
+           ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+          f1          | case_binary_double 
+----------------------+--------------------
+ 9.99123956789012e-18 | -long_num
+ 9.99123956789012e-18 | -long_num
+ 9.99123956789012e+22 | +long_num
+ 9.99123956789012e+22 | +long_num
+(4 rows)
+
+SELECT f1, case f1 WHEN cast(999.1239567890123956e-20 as float8) THEN '-long_num' 
+                   when cast(999.1239567890123956e+20 as float8) then '+long_num'    
+           ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+          f1          | case_binary_double 
+----------------------+--------------------
+ 9.99123956789012e-18 | -long_num
+ 9.99123956789012e-18 | -long_num
+ 9.99123956789012e+22 | +long_num
+ 9.99123956789012e+22 | +long_num
+(4 rows)
+
+		  
+delete from over_float_tbl;
+insert into over_float_tbl values(9.99123956789012e-18);
+SELECT f1, case f1  
+                   when cast(9.99123956789012e-18 as float8) then '-18_num'
+          ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+          f1          | case_binary_double 
+----------------------+--------------------
+ 9.99123956789012e-18 | -18_num
+(1 row)
+
+SELECT f1, case f1 WHEN cast(999.1239567890123956e-20 as float8) THEN '-20_num' 
+                   
+          ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+          f1          | case_binary_double 
+----------------------+--------------------
+ 9.99123956789012e-18 | others
+(1 row)
+
+SELECT f1, case f1  
+                   when cast(9.99123956789012e-18 as float8) then '-18_num'
+          ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+          f1          | case_binary_double 
+----------------------+--------------------
+ 9.99123956789012e-18 | -18_num
+(1 row)
+
+SELECT f1, case f1 WHEN cast(999.1239567890123956e-20 as float8) THEN '-20_num' 
+                   
+          ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+          f1          | case_binary_double 
+----------------------+--------------------
+ 9.99123956789012e-18 | others
+(1 row)
+
+		  
+drop table over_float_tbl;
+CREATE TABLE over_float_tbl (f1  float4);   
+INSERT INTO over_float_tbl(f1) VALUES (1.234e+20); 
+INSERT INTO over_float_tbl(f1) VALUES ('1.234e+20'); 
+INSERT INTO over_float_tbl(f1) VALUES (1.234e-20); 
+INSERT INTO over_float_tbl(f1) VALUES ('1.234e-20'); 
+SELECT f1, case f1 WHEN cast(1.234e+20 as float4) THEN '+short_num' when cast(1.234e-20 as float8) THEN '-short_num' 
+             ELSE 'others'
+        END AS CASE_BINARY_DOUBLE
+FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+    f1     | case_binary_double 
+-----------+--------------------
+ 1.234e-20 | others
+ 1.234e-20 | others
+ 1.234e+20 | +short_num
+ 1.234e+20 | +short_num
+(4 rows)
+
+SELECT f1, case f1 WHEN cast(1.234e+20 as float4) THEN '+short_num' when cast(1.234e-20 as float8) THEN '-short_num' 
+             ELSE 'others'
+        END AS CASE_BINARY_DOUBLE
+FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+    f1     | case_binary_double 
+-----------+--------------------
+ 1.234e-20 | others
+ 1.234e-20 | others
+ 1.234e+20 | +short_num
+ 1.234e+20 | +short_num
+(4 rows)
+
+delete from over_float_tbl;
+insert into over_float_tbl(f1) values(999.1239567890123956e-20);
+insert into over_float_tbl(f1) values('999.1239567890123956e-20');
+insert into over_float_tbl(f1) values(999.1239567890123956e+20);
+insert into over_float_tbl(f1) values('999.1239567890123956e+20');
+SELECT f1, case f1 WHEN cast(999.1239567890123956e-20 as float4) THEN '-long_num' 
+                   when cast(999.1239567890123956e+20 as float4) then '+long_num'    
+           ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 9.99124e-18 | -long_num
+ 9.99124e-18 | -long_num
+ 9.99124e+22 | +long_num
+ 9.99124e+22 | +long_num
+(4 rows)
+
+SELECT f1, case f1 WHEN cast(999.1239567890123956e-20 as float4) THEN '-long_num' 
+                   when cast(999.1239567890123956e+20 as float4) then '+long_num'    
+           ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 9.99124e-18 | -long_num
+ 9.99124e-18 | -long_num
+ 9.99124e+22 | +long_num
+ 9.99124e+22 | +long_num
+(4 rows)
+
+		  
+delete from over_float_tbl;
+insert into over_float_tbl values(9.99123956789012e-18);
+SELECT f1, case f1  
+                   when cast(9.99123956789012e-18 as float4) then '-18_num'
+          ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 9.99124e-18 | -18_num
+(1 row)
+
+SELECT f1, case f1 WHEN cast(999.1239567890123956e-20 as float4) THEN '-20_num' 
+          ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 9.99124e-18 | -20_num
+(1 row)
+
+		 
+SELECT f1, case f1  
+                   when cast(9.99123956789012e-18 as float4) then '-18_num'
+          ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 9.99124e-18 | -18_num
+(1 row)
+
+SELECT f1, case f1 WHEN cast(999.1239567890123956e-20 as float4) THEN '-20_num' 
+          ELSE 'others' END AS CASE_BINARY_DOUBLE FROM over_float_tbl ORDER BY f1,CASE_BINARY_DOUBLE;
+     f1      | case_binary_double 
+-------------+--------------------
+ 9.99124e-18 | -20_num
+(1 row)
+
+drop table over_float_tbl;
+-- test edge-case coercions to integer
+SELECT '32767.4'::float4::int2;
+ int2  
+-------
+ 32767
+(1 row)
+
+SELECT '32767.6'::float4::int2;
+ERROR:  smallint out of range
+CONTEXT:  referenced column: int2
+SELECT '-32768.4'::float4::int2;
+  int2  
+--------
+ -32768
+(1 row)
+
+SELECT '-32768.6'::float4::int2;
+ERROR:  smallint out of range
+CONTEXT:  referenced column: int2
+SELECT '2147483520'::float4::int4;
+    int4    
+------------
+ 2147483520
+(1 row)
+
+SELECT '2147483647'::float4::int4;
+ERROR:  integer out of range
+CONTEXT:  referenced column: int4
+SELECT '-2147483648.5'::float4::int4;
+    int4     
+-------------
+ -2147483648
+(1 row)
+
+SELECT '-2147483900'::float4::int4;
+ERROR:  integer out of range
+CONTEXT:  referenced column: int4
+SELECT '9223369837831520256'::float4::int8;
+        int8         
+---------------------
+ 9223369837831520256
+(1 row)
+
+SELECT '9223372036854775807'::float4::int8;
+ERROR:  bigint out of range
+CONTEXT:  referenced column: int8
+SELECT '-9223372036854775808.5'::float4::int8;
+         int8         
+----------------------
+ -9223372036854775808
+(1 row)
+
+SELECT '-9223380000000000000'::float4::int8;
+ERROR:  bigint out of range
+CONTEXT:  referenced column: int8

@@ -1,0 +1,42 @@
+-- $ID$
+-- TPC-H/TPC-R Shipping Priority Query (Q3)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	l_orderkey,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	o_orderdate,
+	o_shippriority
+from
+	customer,
+	orders,
+	lineitem
+where
+	c_mktsegment = 'BUILDING'
+	and c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate < '1995-03-15'::date
+	and l_shipdate > '1995-03-15'::date
+group by
+	l_orderkey,
+	o_orderdate,
+	o_shippriority
+order by
+	revenue desc,
+	o_orderdate
+limit 10
+;
+ l_orderkey |   revenue   |       o_orderdate        | o_shippriority 
+------------+-------------+--------------------------+----------------
+      47714 | 267010.5894 | Sat Mar 11 00:00:00 1995 |              0
+      22276 | 266351.5562 | Sun Jan 29 00:00:00 1995 |              0
+      32965 | 263768.3414 | Sat Feb 25 00:00:00 1995 |              0
+      21956 | 254541.1285 | Thu Feb 02 00:00:00 1995 |              0
+       1637 | 243512.7981 | Wed Feb 08 00:00:00 1995 |              0
+      10916 | 241320.0814 | Sat Mar 11 00:00:00 1995 |              0
+      30497 | 208566.6969 | Tue Feb 07 00:00:00 1995 |              0
+        450 | 205447.4232 | Sun Mar 05 00:00:00 1995 |              0
+      47204 | 204478.5213 | Mon Mar 13 00:00:00 1995 |              0
+       9696 | 201502.2188 | Mon Feb 20 00:00:00 1995 |              0
+(10 rows)
+

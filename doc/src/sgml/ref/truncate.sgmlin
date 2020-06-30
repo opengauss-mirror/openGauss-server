@@ -1,0 +1,19 @@
+<refentry id="SQL-TRUNCATE">
+<refmeta>
+<refentrytitle>TRUNCATE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>TRUNCATE</refname>
+<refpurpose>empty a table or set of tables</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+TRUNCATE [ TABLE ] [ ONLY ] {table_name [ * ]} [, ... ]
+    [ CONTINUE IDENTITY ] [ CASCADE | RESTRICT ];
+ALTER TABLE [ IF EXISTS  ] { [ ONLY  ] table_name  | table_name *  | ONLY ( table_name )  } 
+    TRUNCATE PARTITION { partition_name  | FOR (  partition_value  [, ...] )  } ;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

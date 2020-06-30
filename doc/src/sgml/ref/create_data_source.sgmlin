@@ -1,0 +1,22 @@
+<refentry id="SQL-CREATE_DATA_SOURCE">
+<refmeta>
+<refentrytitle>CREATE DATA SOURCE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE DATA SOURCE</refname>
+<refpurpose>define a data source</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE DATA SOURCE src_name
+    [TYPE 'type_str']
+    [VERSION {'version_str' | NULL}]
+    [OPTIONS (optname 'optvalue' [, ...])];
+
+Valid optname are:
+    DSN, USERNAME, PASSWORD, ENCODING
+</synopsis>
+</refsynopsisdiv>
+</refentry>

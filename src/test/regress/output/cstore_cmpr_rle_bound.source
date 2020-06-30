@@ -1,0 +1,360 @@
+-- problem: test function CompressGetBound()
+CREATE TABLE cstore_cmpr_rle_bound
+(
+	a1 bigint,
+	a2 bigint,
+	a3 bigint,
+	a4 bigint,
+	a5 bigint,
+	a6 bigint,
+	a7 bigint,
+	a8 bigint,
+	a9 bigint
+) with ( orientation = column, compression = low );
+COPY cstore_cmpr_rle_bound FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_bound.data';
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound;
+ count 
+-------
+   204
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 254;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a2 FROM cstore_cmpr_rle_bound ORDER BY 1;
+ a2  
+-----
+   0
+ 254
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a3 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a3 = 65278;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a3 FROM cstore_cmpr_rle_bound ORDER BY 1;
+  a3   
+-------
+     0
+ 65278
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a4 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a4 = 16711422;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a4 FROM cstore_cmpr_rle_bound ORDER BY 1;
+    a4    
+----------
+        0
+ 16711422
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a5 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a5 = 4278124286;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a5 FROM cstore_cmpr_rle_bound ORDER BY 1;
+     a5     
+------------
+          0
+ 4278124286
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a6 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a6 = 1095199817470;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a6 FROM cstore_cmpr_rle_bound ORDER BY 1;
+      a6       
+---------------
+             0
+ 1095199817470
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a7 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a7 = 280371153272574;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a7 FROM cstore_cmpr_rle_bound ORDER BY 1;
+       a7        
+-----------------
+               0
+ 280371153272574
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a8 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a8 = 71775015237779198;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a8 FROM cstore_cmpr_rle_bound ORDER BY 1;
+        a8         
+-------------------
+                 0
+ 71775015237779198
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a9 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a9 = -72340172838076674;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a9 FROM cstore_cmpr_rle_bound ORDER BY 1;
+         a9         
+--------------------
+ -72340172838076674
+                  0
+(2 rows)
+
+SELECT DISTINCT * FROM cstore_cmpr_rle_bound ORDER BY 2;
+ a1 | a2  |  a3   |    a4    |     a5     |      a6       |       a7        |        a8         |         a9         
+----+-----+-------+----------+------------+---------------+-----------------+-------------------+--------------------
+  1 |   0 |     0 |        0 |          0 |             0 |               0 |                 0 |                  0
+  1 | 254 | 65278 | 16711422 | 4278124286 | 1095199817470 | 280371153272574 | 71775015237779198 | -72340172838076674
+(2 rows)
+
+DROP TABLE cstore_cmpr_rle_bound;
+-- problem: test rle bound case with compression = middle
+CREATE TABLE cstore_cmpr_rle_bound
+(
+	a1 bigint,
+	a2 bigint,
+	a3 bigint,
+	a4 bigint,
+	a5 bigint,
+	a6 bigint,
+	a7 bigint,
+	a8 bigint,
+	a9 bigint
+) with ( orientation = column, compression = middle);
+COPY cstore_cmpr_rle_bound FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_bound.data';
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound;
+ count 
+-------
+   204
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 254;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a2 FROM cstore_cmpr_rle_bound ORDER BY 1;
+ a2  
+-----
+   0
+ 254
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a3 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a3 = 65278;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a3 FROM cstore_cmpr_rle_bound ORDER BY 1;
+  a3   
+-------
+     0
+ 65278
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a4 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a4 = 16711422;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a4 FROM cstore_cmpr_rle_bound ORDER BY 1;
+    a4    
+----------
+        0
+ 16711422
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a5 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a5 = 4278124286;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a5 FROM cstore_cmpr_rle_bound ORDER BY 1;
+     a5     
+------------
+          0
+ 4278124286
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a6 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a6 = 1095199817470;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a6 FROM cstore_cmpr_rle_bound ORDER BY 1;
+      a6       
+---------------
+             0
+ 1095199817470
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a7 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a7 = 280371153272574;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a7 FROM cstore_cmpr_rle_bound ORDER BY 1;
+       a7        
+-----------------
+               0
+ 280371153272574
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a8 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a8 = 71775015237779198;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a8 FROM cstore_cmpr_rle_bound ORDER BY 1;
+        a8         
+-------------------
+                 0
+ 71775015237779198
+(2 rows)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a9 = 0;
+ count 
+-------
+    51
+(1 row)
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a9 = -72340172838076674;
+ count 
+-------
+   153
+(1 row)
+
+SELECT DISTINCT a9 FROM cstore_cmpr_rle_bound ORDER BY 1;
+         a9         
+--------------------
+ -72340172838076674
+                  0
+(2 rows)
+
+SELECT DISTINCT * FROM cstore_cmpr_rle_bound ORDER BY 2;
+ a1 | a2  |  a3   |    a4    |     a5     |      a6       |       a7        |        a8         |         a9         
+----+-----+-------+----------+------------+---------------+-----------------+-------------------+--------------------
+  1 |   0 |     0 |        0 |          0 |             0 |               0 |                 0 |                  0
+  1 | 254 | 65278 | 16711422 | 4278124286 | 1095199817470 | 280371153272574 | 71775015237779198 | -72340172838076674
+(2 rows)
+
+DROP TABLE cstore_cmpr_rle_bound;

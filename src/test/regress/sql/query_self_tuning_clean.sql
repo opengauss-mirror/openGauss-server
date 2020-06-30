@@ -1,0 +1,25 @@
+\c postgres
+set current_schema='sql_self_tuning';
+drop table t5;
+drop table t12;
+drop table t13;
+drop table t14;
+drop table t15;
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+drop table t6;
+drop table t_subplan1;
+drop table t_subplan2;
+drop table self_tuning_02;
+drop table t16 cascade;
+drop table ct16 cascade;
+drop schema sql_self_tuning;
+drop node group  sql_self_tuning_01;
+drop node group  sql_self_tuning_02;
+reset resource_track_level;
+reset resource_track_cost;
+reset resource_track_duration;
+
+\c regression

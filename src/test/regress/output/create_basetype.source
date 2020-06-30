@@ -1,0 +1,178 @@
+create type complex;
+CREATE FUNCTION complex_in(cstring)
+    RETURNS complex
+    AS '@libdir@/regress@DLSUFFIX@','complex_in'
+    LANGUAGE C IMMUTABLE STRICT not fenced;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+CREATE FUNCTION complex_out(complex)
+    RETURNS cstring
+    AS '@libdir@/regress@DLSUFFIX@','complex_out'
+    LANGUAGE C IMMUTABLE STRICT not fenced;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+CREATE FUNCTION complex_recv(internal)
+   RETURNS complex
+   AS '@libdir@/regress@DLSUFFIX@','complex_recv'
+   LANGUAGE C IMMUTABLE STRICT not fenced;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+CREATE FUNCTION complex_send(complex)
+   RETURNS bytea
+   AS '@libdir@/regress@DLSUFFIX@','complex_send'
+   LANGUAGE C IMMUTABLE STRICT not fenced;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+CREATE TYPE complex (
+   internallength = 16,
+   input = complex_in,
+   output = complex_out,
+   receive = complex_recv,
+   send = complex_send,
+   alignment = double
+);
+ERROR:  function complex_in(cstring) does not exist
+create table t1 (
+sk int,
+a complex,
+b complex
+)
+WITH (orientation=row);
+ERROR:  type "complex" is only a shell
+LINE 3: a complex,
+          ^
+insert into t1 values(1,'(1,2)','(2,3)');
+ERROR:  relation "t1" does not exist on datanode1
+LINE 1: insert into t1 values(1,'(1,2)','(2,3)');
+                    ^
+insert into t1 values(1,'(3,4)','(4,5)');
+ERROR:  relation "t1" does not exist on datanode1
+LINE 1: insert into t1 values(1,'(3,4)','(4,5)');
+                    ^
+select * from t1;
+ERROR:  relation "t1" does not exist on datanode1
+LINE 1: select * from t1;
+                      ^
+create table t1_rep (
+sk int,
+a complex,
+b complex
+)
+WITH (orientation=row) ;
+ERROR:  type "complex" is only a shell
+LINE 3: a complex,
+          ^
+insert into t1_rep values(1,'(1,2)','(2,3)');
+ERROR:  relation "t1_rep" does not exist on datanode1
+LINE 1: insert into t1_rep values(1,'(1,2)','(2,3)');
+                    ^
+insert into t1_rep values(1,'(3,4)','(4,5)');
+ERROR:  relation "t1_rep" does not exist on datanode1
+LINE 1: insert into t1_rep values(1,'(3,4)','(4,5)');
+                    ^
+select * from t1_rep;
+ERROR:  relation "t1_rep" does not exist on datanode1
+LINE 1: select * from t1_rep;
+                      ^
+insert into t1 values(1,'(1,2)','(2,3)');
+ERROR:  relation "t1" does not exist on datanode1
+LINE 1: insert into t1 values(1,'(1,2)','(2,3)');
+                    ^
+insert into t1 values(1,'(3,4)','(4,5)');
+ERROR:  relation "t1" does not exist on datanode1
+LINE 1: insert into t1 values(1,'(3,4)','(4,5)');
+                    ^
+CREATE FUNCTION test_type(complex) RETURNS complex
+AS 'select $1;'
+LANGUAGE SQL;
+ERROR:  SQL function cannot accept shell type complex
+call test_type(cast('(1,2)' as complex));
+ERROR:  function "test_type" doesn't exist 
+create schema schema1;
+alter type complex set schema schema1;
+ERROR:  type "complex" is only a shell
+create table t1_schema_test1 (
+sk int,
+a complex,
+b complex
+)
+WITH (orientation=row);
+ERROR:  type "complex" is only a shell
+LINE 3: a complex,
+          ^
+set current_schema = schema1;
+create table t1_schema_test2 (
+sk int,
+a complex,
+b complex
+)
+WITH (orientation=row);
+ERROR:  type "complex" does not exist
+LINE 3: a complex,
+          ^
+alter type complex set schema public;
+ERROR:  type "complex" does not exist
+set current_schema = public;
+alter type complex rename to complex_1;
+ERROR:  type "complex" is only a shell
+alter type complex_1 rename to complex;
+ERROR:  type "complex_1" does not exist
+drop type complex cascade;
+drop schema schema1 cascade;
+drop table t1;
+ERROR:  table "t1" does not exist
+drop table t1_rep;
+ERROR:  table "t1_rep" does not exist
+\h create type
+Command:     CREATE TYPE
+Description: define a new data type
+Syntax:
+CREATE TYPE name AS
+    ( [ attribute_name data_type [ COLLATE collation ] [, ... ] ] )
+
+CREATE TYPE name AS ENUM
+    ( [ 'label' [, ... ] ] )
+
+CREATE TYPE name (
+    INPUT = input_function,
+    OUTPUT = output_function
+    [ , RECEIVE = receive_function ]
+    [ , SEND = send_function ]
+    [ , TYPMOD_IN = type_modifier_input_function ]
+    [ , TYPMOD_OUT = type_modifier_output_function ]
+    [ , ANALYZE = analyze_function ]
+    [ , INTERNALLENGTH = { internallength | VARIABLE } ]
+    [ , PASSEDBYVALUE ]
+    [ , ALIGNMENT = alignment ]
+    [ , STORAGE = storage ]
+    [ , LIKE = like_type ]
+    [ , CATEGORY = category ]
+    [ , PREFERRED = preferred ]
+    [ , DEFAULT = default ]
+    [ , ELEMENT = element ]
+    [ , DELIMITER = delimiter ]
+    [ , COLLATABLE = collatable ]
+)
+
+CREATE TYPE name
+
+\h alter type
+Command:     ALTER TYPE
+Description: change the definition of a type
+Syntax:
+ALTER TYPE name action [, ... ]
+ALTER TYPE name OWNER TO { new_owner | CURRENT_USER | SESSION_USER }
+ALTER TYPE name RENAME ATTRIBUTE attribute_name TO new_attribute_name [ CASCADE | RESTRICT ]
+ALTER TYPE name RENAME TO new_name
+ALTER TYPE name SET SCHEMA new_schema
+ALTER TYPE name ADD VALUE [ IF NOT EXISTS ] new_enum_value [ { BEFORE | AFTER } neighbor_enum_value ]
+ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
+
+where action is one of:
+
+    ADD ATTRIBUTE attribute_name data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
+    DROP ATTRIBUTE [ IF EXISTS ] attribute_name [ CASCADE | RESTRICT ]
+    ALTER ATTRIBUTE attribute_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
+
+\h drop type
+Command:     DROP TYPE
+Description: remove a data type
+Syntax:
+DROP TYPE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
+

@@ -1,0 +1,1 @@
+create table cmpts(c1 int, ts timestamp);

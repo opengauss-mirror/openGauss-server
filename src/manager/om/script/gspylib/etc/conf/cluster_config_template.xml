@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ROOT>
+  <CLUSTER>
+    <PARAM name="clusterName" value="Cluster_template" />
+    <PARAM name="nodeNames" value="node1_hostname,node2_hostname"/>
+    <PARAM name="gaussdbAppPath" value="/opt/huawei/install/app" />
+    <PARAM name="gaussdbLogPath" value="/var/log/omm" />
+    <PARAM name="tmpMppdbPath" value="/opt/huawei/tmp"/>
+    <PARAM name="gaussdbToolPath" value="/opt/huawei/install/om" />
+    <PARAM name="corePath" value="/opt/huawei/corefile"/>
+    <PARAM name="backIp1s" value="192.168.0.1,192.168.0.2"/>
+  </CLUSTER>
+  
+  <DEVICELIST>
+    <DEVICE sn="node1_hostname">
+      <PARAM name="name" value="node1_hostname"/>
+      <PARAM name="azName" value="AZ1"/>
+      <PARAM name="azPriority" value="1"/>
+      <PARAM name="backIp1" value="192.168.0.1"/>
+      <PARAM name="sshIp1" value="192.168.0.1"/>
+      <!-- dn -->
+      <PARAM name="dataNum" value="1"/>
+      <PARAM name="dataPortBase" value="15400"/>
+      <PARAM name="dataNode1" value="/opt/huawei/install/data/dn,node2_hostname,/opt/huawei/install/data/dn"/>
+      <PARAM name="dataNode1_syncNum" value="0"/>
+    </DEVICE>
+
+    <DEVICE sn="node2_hostname">
+      <PARAM name="name" value="node2_hostname"/>
+      <PARAM name="azName" value="AZ1"/>
+      <PARAM name="azPriority" value="1"/>
+      <PARAM name="backIp1" value="192.168.0.2"/>
+      <PARAM name="sshIp1" value="192.168.0.2"/>
+    </DEVICE>
+  </DEVICELIST>
+</ROOT>

@@ -1,0 +1,139 @@
+--case 1: test basic copy error log
+drop table if exists copy_create_err_tab_001_01;
+create table copy_create_err_tab_001_01
+(
+   c_int1  integer not null ,
+   c_int2  integer not null ,
+   c_char1 char(16)  not null,
+   c_char2 char(50),
+   c_varchar1 varchar(200) ,
+   c_varchar2 varchar(400),
+   c_text  text,
+   c_numeric numeric(7,2) ,
+   c_timestamp timestamp without time zone 
+)  ;
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter '|',format 'text',
+encoding 'utf8');
+drop table if exists pgxc_copy_error_log;
+select * from copy_error_log_create();
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter '|',format 'text',
+encoding 'utf8');
+select count(*) from  copy_create_err_tab_001_01;
+select count(*) from pgxc_copy_error_log;
+select count(*) from pgxc_copy_error_log where relname='public.copy_create_err_tab_001_01';
+drop table pgxc_copy_error_log;
+
+--case 2: test copy_error_log_create function
+select * from copy_error_log_create('error');
+select * from copy_error_log_create(),copy_error_log_create();
+select * from copy_error_log_create();
+select * from copy_error_log_create();
+select * from copy_error_log_create(copy_error_log_create());
+select * from reverse(copy_error_log_create());
+drop table if exists pgxc_copy_error_log;
+select * from copy_error_log_create();
+alter table pgxc_copy_error_log alter column rownum type char(50);
+drop table if exists err_copy_create_err_tab_001_01;
+create table err_copy_create_err_tab_001_01
+(
+   c_int1  integer not null ,
+   c_int2  integer  ,
+   c_char1 char(16)  ,
+   c_char2 char(50),
+   c_varchar1 varchar(200) ,
+   c_varchar2 varchar(400),
+   c_text  text,
+   c_numeric numeric(7,2) ,
+   c_timestamp timestamp without time zone 
+)  ;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+alter table pgxc_copy_error_log add  column   ext3 text;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+alter table pgxc_copy_error_log drop  column rownum ;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par' 
+log errors reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+drop table pgxc_copy_error_log;
+drop table copy_create_err_tab_001_01;
+drop table err_copy_create_err_tab_001_01;
+
+--case 3: test basic copy error log
+drop table if exists copy_create_err_tab_001_01;
+create table copy_create_err_tab_001_01
+(
+   c_int1  integer not null ,
+   c_int2  integer not null ,
+   c_char1 char(16)  not null,
+   c_char2 char(50),
+   c_varchar1 varchar(200) ,
+   c_varchar2 varchar(400),
+   c_text  text,
+   c_numeric numeric(7,2) ,
+   c_timestamp timestamp without time zone
+)  ;
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter '|',format 'text',
+encoding 'utf8');
+drop table if exists pgxc_copy_error_log;
+select * from copy_error_log_create();
+copy copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter '|',format 'text',
+encoding 'utf8');
+select count(*) from  copy_create_err_tab_001_01;
+select count(*) from pgxc_copy_error_log where rawrecord is not null;
+select count(*) from pgxc_copy_error_log where relname='public.copy_create_err_tab_001_01' and rawrecord is not null;
+drop table pgxc_copy_error_log;
+
+--case 4: test copy_error_log_create function
+select * from copy_error_log_create('error');
+select * from copy_error_log_create(),copy_error_log_create();
+select * from copy_error_log_create();
+select * from copy_error_log_create();
+select * from copy_error_log_create(copy_error_log_create());
+select * from reverse(copy_error_log_create());
+drop table if exists pgxc_copy_error_log;
+select * from copy_error_log_create();
+alter table pgxc_copy_error_log alter column rownum type char(50);
+drop table if exists err_copy_create_err_tab_001_01;
+create table err_copy_create_err_tab_001_01
+(
+   c_int1  integer not null ,
+   c_int2  integer  ,
+   c_char1 char(16)  ,
+   c_char2 char(50),
+   c_varchar1 varchar(200) ,
+   c_varchar2 varchar(400),
+   c_text  text,
+   c_numeric numeric(7,2) ,
+   c_timestamp timestamp without time zone
+)  ;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+alter table pgxc_copy_error_log add  column   ext3 text;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+alter table pgxc_copy_error_log drop  column rownum ;
+copy err_copy_create_err_tab_001_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/data_err_par'
+log errors data reject limit 'unlimited'
+with(delimiter ',',format 'text',
+encoding 'utf8');
+drop table pgxc_copy_error_log;
+drop table copy_create_err_tab_001_01;
+drop table err_copy_create_err_tab_001_01;

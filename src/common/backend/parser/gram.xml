@@ -1,0 +1,2027 @@
+  <Command id="ABORT" desc="abort the current transaction">
+    <MainSentence id="ABORT_SYN"><![CDATA[
+ABORT [ WORK | TRANSACTION ] ;
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER APP WORKLOAD GROUP MAPPING" desc="modify app group relate with group mapping">
+    <MainSentence id="SYN"><![CDATA[
+ALTER APP WORKLOAD GROUP MAPPING app_name
+    WITH ( WORKLOAD_GPNAME = wg_name );
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER DATABASE" desc="change a database">
+    <MainSentence id="CONNECTION LIMIT"><![CDATA[
+ALTER DATABASE database_name
+    [ [ WITH ] CONNECTION LIMIT connlimit ];
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER DATABASE database_name
+    RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="OWNER TO"><![CDATA[
+ALTER DATABASE database_name
+    OWNER TO new_owner;
+]]></MainSentence>
+    <MainSentence id="SET TABLESPACE"><![CDATA[
+ALTER DATABASE database_name
+    SET TABLESPACE new_tablespace;
+]]></MainSentence>
+    <MainSentence id="SET PARAMETER"><![CDATA[
+ALTER DATABASE database_name
+    SET configuration_parameter { { TO | = } { value | DEFAULT }  | FROM CURRENT };
+]]></MainSentence>
+    <MainSentence id="RESET PARAMETER"><![CDATA[
+ALTER DATABASE database_name
+    RESET { configuration_parameter | ALL };
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER DEFAULT PRIVILEGES" desc="define default access privileges">
+    <MainSentence id="SYN"><![CDATA[
+ALTER DEFAULT PRIVILEGES
+    [ FOR { ROLE | USER } target_role [, ...] ]
+    [ IN SCHEMA schema_name [, ...] ]
+    abbreviated_grant_or_revoke;
+]]></MainSentence>
+    <SubSentence id="abbreviated_grant_or_revoke"><![CDATA[
+grant_on_tables_clause
+  | grant_on_functions_clause
+  | grant_on_types_clause
+  | revoke_on_tables_clause
+  | revoke_on_functions_clause
+  | revoke_on_types_clause
+]]></SubSentence>
+    <SubSentence id="grant_on_tables_clause"><![CDATA[
+GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES }
+    [, ...] | ALL [ PRIVILEGES ] }
+    ON TABLES
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ]
+]]></SubSentence>
+    <SubSentence id="grant_on_functions_clause"><![CDATA[
+GRANT { EXECUTE | ALL [ PRIVILEGES ] }
+    ON FUNCTIONS
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ]
+]]></SubSentence>
+    <SubSentence id="grant_on_types_clause"><![CDATA[
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON TYPES
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ]
+]]></SubSentence>
+    <SubSentence id="revoke_on_tables_clause"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES }
+    [, ...] | ALL [ PRIVILEGES ] }
+    ON TABLES
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
+]]></SubSentence>
+    <SubSentence id="revoke_on_functions_clause"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { EXECUTE | ALL [ PRIVILEGES ] }
+    ON FUNCTIONS
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
+]]></SubSentence>
+    <SubSentence id="revoke_on_types_clause"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { USAGE | ALL [ PRIVILEGES ] }
+    ON TYPES
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
+]]></SubSentence>
+  </Command>
+
+  <Command id="ALTER FOREIGN TABLE" desc="change the definition of a foreign table">
+    <MainSentence id="ALTER FOREIGN TABLE FOR GDS"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ]  table_name
+    OPTIONS ( {[ ADD | SET | DROP ] option ['value']} [, ... ]);
+]]></MainSentence>
+    <MainSentence id="HADOOP RENAME COLUMN TO"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    RENAME [ COLUMN ] column_name TO new_column_name;
+]]></MainSentence>
+    <MainSentence id="HADOOP RENAME TO"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    RENAME TO new_tablename;
+]]></MainSentence>
+    <MainSentence id="HADOOP SET SCHEMA"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    SET SCHEMA new_schema;
+]]></MainSentence>
+    <MainSentence id="HADOOP OWNER TO"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    OWNER TO new_owner;
+]]></MainSentence>
+    <MainSentence id="HADOOP OPTIONS"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    OPTIONS ( {[ ADD | SET | DROP ] option ['value']} [, ... ]);
+]]></MainSentence>
+    <MainSentence id="HADOOP ACTION"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    action [, ... ];
+]]></MainSentence>
+    <MainSentence id="HADOOP ADD INFORMATIONAL CONSTRAINT"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    ADD [CONSTRAINT constraint_name]
+{PRIMARY KEY | UNIQUE} (column_name)
+[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED];
+]]></MainSentence>
+    <MainSentence id="HADOOP DROP INFORMATIONAL CONSTRAINT"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    DROP CONSTRAINT constraint_name ;
+]]></MainSentence>
+    <SubSentence id="action"><![CDATA[
+ADD [ COLUMN ] column_name data_type [ NULL | NOT NULL ]
+|    DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
+|    ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type
+|    ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+|    ALTER [ COLUMN ] column_name SET STATISTICS  integer
+|    ALTER [ COLUMN ] column_name SET ( {attribute_option = value} [, ... ] )
+|    ALTER [ COLUMN ] column_name RESET ( attribute_option [, ... ] )
+|    ALTER [ COLUMN ] column_name OPTIONS ( {[ ADD | SET | DROP ] option ['value'] } [, ... ])
+]]></SubSentence>
+  </Command>
+
+<Command id="ALTER FOREIGN TABLE FOR HDFS" desc="change the definition of a foreign table">
+    <MainSentence id="HDFS TABLE OWNER TO"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    OWNER TO new_owner;
+]]></MainSentence>
+    <MainSentence id="HDFS ALTER TABLE ALTER COLUMN"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    action [, ... ];
+]]></MainSentence>
+    <SubSentence id="action"><![CDATA[
+ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type
+|    ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+|    ALTER [ COLUMN ] column_name SET STATISTICS [PERCENT] integer
+]]></SubSentence>
+    <MainSentence id="HADOOP ADD INFORMATIONAL CONSTRAINT"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    ADD [CONSTRAINT constraint_name]
+{PRIMARY KEY | UNIQUE} (column_name)
+[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED];
+]]></MainSentence>
+    <MainSentence id="HADOOP DROP INFORMATIONAL CONSTRAINT"><![CDATA[
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    DROP CONSTRAINT constraint_name ;
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER FUNCTION" desc="change the definition of a function">
+    <MainSentence id="SYN"><![CDATA[
+ALTER FUNCTION function_name ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    action [ ... ] [ RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER FUNCTION funname ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="OWNER TO"><![CDATA[
+ALTER FUNCTION funname ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    OWNER TO new_owner;
+]]></MainSentence>
+    <MainSentence id="SET SCHEMA"><![CDATA[
+ALTER FUNCTION funname ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    SET SCHEMA new_schema;
+]]></MainSentence>
+    <SubSentence id="action"><![CDATA[
+{CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT}
+|    {IMMUTABLE | STABLE | VOLATILE}
+|    [ NOT ] LEAKPROOF
+|    {[ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER}
+|    AUTHID { DEFINER | CURRENT_USER }
+|    COST execution_cost
+|    ROWS result_rows
+|    SET configuration_parameter {{ TO | = } { value | DEFAULT }| FROM CURRENT}
+|    RESET {configuration_parameter| ALL}
+]]></SubSentence>
+  </Command>
+
+  <Command id="ALTER GROUP" desc="change role name or membership">
+    <MainSentence id="ADD USER"><![CDATA[
+ALTER GROUP group_name
+    ADD USER user_name [, ... ];
+]]></MainSentence>
+    <MainSentence id="DROP USER"><![CDATA[
+ALTER GROUP group_name
+    DROP USER user_name [, ... ];
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER GROUP group_name
+   RENAME TO new_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER INDEX" desc="change the definition of an index">
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER INDEX [ IF EXISTS ] index_name 
+    RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="SET TABLESPACE"><![CDATA[
+ALTER INDEX [ IF EXISTS ] index_name 
+    SET TABLESPACE tablespace_name;
+]]></MainSentence>
+    <MainSentence id="SET PARAMETER"><![CDATA[
+ALTER INDEX [ IF EXISTS ] index_name 
+    SET ( {storage_parameter = value} [, ... ] );
+]]></MainSentence>
+    <MainSentence id="RESET PARAMETER"><![CDATA[
+ALTER INDEX [ IF EXISTS ] index_name 
+    RESET ( storage_parameter [, ... ] ) ;
+]]></MainSentence>
+    <MainSentence id="UNUSABLE_SYN"><![CDATA[
+ALTER INDEX [ IF EXISTS ] index_name 
+    [ MODIFY PARTITION partition_name ] UNUSABLE;
+]]></MainSentence>
+    <MainSentence id="REBUILD_SYN"><![CDATA[
+ALTER INDEX [ IF EXISTS ] index_name 
+    REBUILD [ PARTITION partition_name ];
+]]></MainSentence>
+    <MainSentence id="RENAME PARTITION"><![CDATA[
+ALTER INDEX [ IF EXISTS ] index_name 
+    RENAME PARTITION partition_name TO new_partition_name;
+]]></MainSentence>
+    <MainSentence id="MOVE PARTITION"><![CDATA[
+ALTER INDEX [ IF EXISTS ] index_name 
+    MOVE PARTITION index_partition_name TABLESPACE new_tablespace;
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER LARGE OBJECT" desc="change the definition of a large object">
+    <MainSentence id="SYN"><![CDATA[
+ALTER LARGE OBJECT large_object_oid
+    OWNER TO new_owner;
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER NODE" desc="alter a cluster node">
+    <MainSentence id="SYN"><![CDATA[
+ALTER NODE nodename WITH
+  (
+    [ TYPE = nodetype,]
+    [ HOST = hostname,]
+    [ PORT = portnum,]
+    [ HOST1 = 'hostname',]
+    [ PORT1 = portnum,]
+    [ HOSTPRIMARY [ = boolean ],]
+    [ PRIMARY [ = boolean ],]
+    [ PREFERRED [ = boolean ],]
+    [ SCTP_PORT = portnum,]
+    [ CONTROL_PORT = portnum,]
+    [ SCTP_PORT1 = portnum,]
+    [ CONTROL_PORT1 = portnum ]
+  );
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER RESOURCE POOL" desc="change the resource pool">
+    <MainSentence id="SYN"><![CDATA[
+ALTER RESOURCE POOL pool_name
+    WITH ({CONTROL_GROUP= { "group_name" | 'group_name' } | ACTIVE_STATEMENTS=stmt | MAX_DOP = dop | MEMORY_LIMIT='memory_size'}[, ... ]);
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER ROLE" desc="change a database role">
+    <MainSentence id="SYN"><![CDATA[
+ALTER ROLE role_name [ [ WITH ] option [ ... ] ];
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER ROLE role_name
+    RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="SET PARAMETER"><![CDATA[
+ALTER ROLE role_name [ IN DATABASE database_name ]
+    SET configuration_parameter {{ TO | = } { value | DEFAULT }|FROM CURRENT};
+]]></MainSentence>
+    <MainSentence id="RESET PARAMETER"><![CDATA[
+ALTER ROLE role_name
+    [ IN DATABASE database_name ] RESET {configuration_parameter|ALL};
+]]></MainSentence>
+    <SubSentence id="option"><![CDATA[
+{CREATEDB | NOCREATEDB}
+    | {CREATEROLE | NOCREATEROLE}
+    | {INHERIT | NOINHERIT}
+    | {AUDITADMIN | NOAUDITADMIN}
+    | {SYSADMIN | NOSYSADMIN}
+    | {USEFT | NOUSEFT}
+    | {LOGIN | NOLOGIN}
+    | {REPLICATION | NOREPLICATION}
+    | CONNECTION LIMIT connlimit
+    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD 'password'
+    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY 'password' [ REPLACE 'old_password' ]
+    | VALID BEGIN 'timestamp'
+    | VALID UNTIL 'timestamp'
+    | RESOURCE POOL 'respool'
+    | ACCOUNT { LOCK | UNLOCK }
+    | PGUSER
+]]></SubSentence>
+  </Command>
+
+  <Command id="ALTER SCHEMA" desc="change the definition of a schema">
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER SCHEMA schema_name
+    RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="OWNER TO"><![CDATA[
+ALTER SCHEMA schema_name
+    OWNER TO new_owner;
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER SERVER" desc="change the definition of a foreign server">
+    <MainSentence id="ALTER SERVER HADOOP"><![CDATA[
+ALTER SERVER server_name [ VERSION 'new_version' ]
+    [ OPTIONS ( {[ ADD | SET | DROP ] option ['value']} [, ... ] ) ];
+]]></MainSentence>
+    <MainSentence id="OWNER TO"><![CDATA[
+ALTER SERVER server_name 
+    OWNER TO new_owner;
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER SERVER server_name
+     RENAME TO new_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER SESSION" desc="define and modify the current session influenced by condition or parameter">
+    <MainSentence id="SET CONFIG"><![CDATA[
+ALTER SESSION SET 
+    {{config_parameter { { TO  | =  }  { value | DEFAULT }
+      | FROM CURRENT }} | CURRENT_SCHEMA [ TO | = ] { schema | DEFAULT }
+      | TIME ZONE time_zone
+      | SCHEMA schema
+      | NAMES encoding_name
+      | ROLE role_name PASSWORD 'password'
+      | SESSION AUTHORIZATION { role_name PASSWORD 'password' | DEFAULT }
+      | XML OPTION { DOCUMENT | CONTENT }
+    } ;
+]]></MainSentence>
+    <MainSentence id="SET TRANSACTION"><![CDATA[
+ALTER SESSION SET [ SESSION CHARACTERISTICS AS ] TRANSACTION
+    { ISOLATION LEVEL  {  READ COMMITTED  | READ UNCOMMITTED | SERIALIZABLE | REPEATABLE READ }  |  { READ ONLY  | READ WRITE }  } [, ...] ;
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER SYSTEM KILL SESSION" desc="kill and finish a system session">
+    <MainSentence id="SYN"><![CDATA[
+ALTER SYSTEM KILL SESSION 'session_sid, serial' [ IMMEDIATE ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER TABLE" desc="change the definition of a table">
+    <MainSentence id="ALTER TABLE ACTION"><![CDATA[
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    action [, ... ];
+]]></MainSentence>
+    <MainSentence id="ADD COLUMN"><![CDATA[
+ALTER TABLE [ IF EXISTS ] table_name
+    ADD ( { column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]} [, ...] );
+]]></MainSentence>
+    <MainSentence id="MODIFY COLUMN"><![CDATA[
+ALTER TABLE [ IF EXISTS ] table_name
+    MODIFY ( { column_name data_type | column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ] | column_name [ CONSTRAINT constraint_name ] NULL } [, ...] );
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER TABLE [ IF EXISTS ] table_name
+    RENAME TO new_table_name;
+]]></MainSentence>
+    <MainSentence id="RENAME COLUMN TO"><![CDATA[
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    RENAME [ COLUMN ] column_name TO new_column_name;
+]]></MainSentence>
+    <MainSentence id="RENAME CONSTRAINT TO"><![CDATA[
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    RENAME CONSTRAINT constraint_name TO new_constraint_name;
+]]></MainSentence>
+    <MainSentence id="SET SCHEMA"><![CDATA[
+ALTER TABLE [ IF EXISTS ] table_name
+    SET SCHEMA new_schema;
+]]></MainSentence>
+    <SubSentence id="action"><![CDATA[
+    column_clause 
+    | ADD table_constraint [ NOT VALID ]
+    | ADD table_constraint_using_index
+    | VALIDATE CONSTRAINT constraint_name
+    | DROP CONSTRAINT [ IF EXISTS ]  constraint_name [ RESTRICT | CASCADE ]
+    | CLUSTER ON index_name
+    | SET WITHOUT CLUSTER
+    | SET ( {storage_parameter = value} [, ... ] )
+    | RESET ( storage_parameter [, ... ] )
+    | OWNER TO new_owner
+    | SET TABLESPACE new_tablespace
+    | SET {COMPRESS|NOCOMPRESS}
+    | SET WITH OIDS
+    | SET WITHOUT OIDS
+    | TO { GROUP groupname | NODE ( nodename [, ... ] ) }
+    | ADD NODE ( nodename [, ... ] )
+    | DELETE NODE ( nodename [, ... ] )
+]]></SubSentence>
+    <SubSentence id="column_clause"><![CDATA[
+    ADD [ COLUMN ] column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | MODIFY column_name data_type
+    | MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
+    | MODIFY column_name [ CONSTRAINT constraint_name ] NULL
+    | DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
+    | ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ USING expression ]
+    | ALTER [ COLUMN ] column_name { SET DEFAULT expression | DROP DEFAULT }
+    | ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+    | ALTER [ COLUMN ] column_name SET STATISTICS [PERCENT] integer
+    | ALTER [ COLUMN ] column_name ADD STATISTICS (( column_1_name, column_2_name [, ...] ))
+    | ALTER [ COLUMN ] column_name DELETE STATISTICS (( column_1_name, column_2_name [, ...] ))
+    | ALTER [ COLUMN ] column_name SET ( {attribute_option = value} [, ... ] )
+    | ALTER [ COLUMN ] column_name RESET ( attribute_option [, ... ] )
+    | ALTER [ COLUMN ] column_name SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN }
+]]></SubSentence>
+    <SubSentence id="column_constraint"><![CDATA[
+    [ CONSTRAINT constraint_name ]
+    { NOT NULL |
+      NULL |
+      CHECK ( expression ) |
+      DEFAULT default_expr |
+      UNIQUE index_parameters |
+      PRIMARY KEY index_parameters }
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+]]></SubSentence>
+       <SubSentence id="compress_mode"><![CDATA[
+     { DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
+]]></SubSentence>
+    <SubSentence id="table_constraint"><![CDATA[
+    [ CONSTRAINT constraint_name ]
+    { CHECK ( expression ) |
+      UNIQUE ( column_name [, ... ] ) index_parameters |
+      PRIMARY KEY ( column_name [, ... ] ) index_parameters}
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+]]></SubSentence>
+    <SubSentence id="index_parameters"><![CDATA[
+    [ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ USING INDEX TABLESPACE tablespace_name ]
+]]></SubSentence>
+    <SubSentence id="table_constraint_using_index"><![CDATA[
+[ CONSTRAINT constraint_name ]
+    { UNIQUE | PRIMARY KEY } USING INDEX index_name
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+]]></SubSentence>
+  </Command>
+
+  <Command id="ALTER TABLE PARTITION" desc="change the definition of a partition">
+    <MainSentence id="ACTION SYN"><![CDATA[
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    action [, ... ];
+]]></MainSentence>
+    <MainSentence id="RENAME PARTITION"><![CDATA[
+ALTER TABLE [ IF EXISTS ] { table_name [*] | ONLY table_name | ONLY ( table_name  )}
+    RENAME PARTITION { partion_name | FOR ( partition_value [, ...] ) } TO partition_new_name;
+]]></MainSentence>
+    <MainSentence id="MOVE PARTITION"><![CDATA[
+ALTER TABLE [ IF EXISTS ] { table_name [*] | ONLY table_name | ONLY ( table_name  )}
+    MOVE PARTITION { partion_name | FOR ( partition_value [, ...] ) } TABLESPACE tablespacename;
+]]></MainSentence>
+    <MainSentence id="EXCHANGE PARTITION"><![CDATA[
+ALTER TABLE [ IF EXISTS ] { table_name [*] | ONLY table_name | ONLY ( table_name  )}
+    EXCHANGE PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } 
+    WITH TABLE {[ ONLY ] ordinary_table_name | ordinary_table_name * | ONLY ( ordinary_table_name )} 
+    [ { WITH | WITHOUT } VALIDATION ] [ VERBOSE ];
+]]></MainSentence>
+    <SubSentence id="action"><![CDATA[
+    row_clause  |
+    merge_clause  |
+    modify_clause  |
+    split_clause  |
+    add_clause  |
+    drop_clause
+]]></SubSentence>
+    <SubSentence id="row_clause"><![CDATA[
+    { ENABLE | DISABLE } ROW MOVEMENT
+]]></SubSentence>
+    <SubSentence id="merge_clause"><![CDATA[
+    MERGE PARTITIONS { partition_name } [, ...] INTO PARTITION partition_name
+    [ TABLESPACE tablespacename ]
+]]></SubSentence>
+    <SubSentence id="modify_clause"><![CDATA[
+    MODIFY PARTITION partition_name { UNUSABLE LOCAL INDEXES | REBUILD UNUSABLE LOCAL INDEXES }
+]]></SubSentence>
+    <SubSentence id="split_clause"><![CDATA[
+    SPLIT PARTITION { partition_name | FOR ( partition_value [, ...] ) } { split_point_clause | no_split_point_clause }
+]]></SubSentence>
+    <SubSentence id="split_point_clause"><![CDATA[
+        AT ( partition_value [, ...] ) INTO ( {PARTITION partition_name [ TABLESPACE tablespacename ]} [,... ] )
+]]></SubSentence>
+    <SubSentence id="no_split_point_clause"><![CDATA[
+        INTO {(partition_less_than_item [, ...] ) | (partition_start_end_item [, ...] )}
+]]></SubSentence>
+    <SubSentence id="add_clause"><![CDATA[
+    ADD {partition_less_than_item | partition_start_end_item}
+]]></SubSentence>
+    <SubSentence id="partition_less_than_item"><![CDATA[
+PARTITION partition_name VALUES LESS THAN ( { partition_value | MAXVALUE }	[, ...] ) [ TABLESPACE tablespacename ]
+]]></SubSentence>
+    <SubSentence id="partition_start_end_item"><![CDATA[
+PARTITION partition_name {
+	{START(partition_value) END (partition_value) EVERY (interval_value)} |
+	{START(partition_value) END ({partition_value | MAXVALUE})} |
+	{START(partition_value)} |
+	{END({partition_value | MAXVALUE})}
+} [TABLESPACE tablespace_name]
+]]></SubSentence>
+    <SubSentence id="drop_clause"><![CDATA[
+    DROP PARTITION  { partition_name  | FOR (  partition_value [, ...] )  }
+]]></SubSentence>
+  </Command>
+
+  <Command id="ALTER TABLESPACE" desc="change the definition of a tablespace">
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER TABLESPACE tablespace_name
+    RENAME TO new_tablespace_name;
+]]></MainSentence>
+    <MainSentence id="OWNER TO"><![CDATA[
+ALTER TABLESPACE tablespace_name
+    OWNER TO new_owner;
+]]></MainSentence>
+    <MainSentence id="SET OPTION"><![CDATA[
+ALTER TABLESPACE tablespace_name
+    SET ( {tablespace_option = value} [, ... ] );
+]]></MainSentence>
+    <MainSentence id="RESET OPTION"><![CDATA[
+ALTER TABLESPACE tablespace_name
+    RESET ( tablespace_option [, ... ] );
+]]></MainSentence>
+    <MainSentence id="RESIZE MAXSIZE"><![CDATA[
+ALTER TABLESPACE tablespace_name
+    RESIZE MAXSIZE { UNLIMITED | 'space_size' };
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER USER" desc="change a database role">
+    <MainSentence id="SYN"><![CDATA[
+ALTER USER user_name [ [ WITH ] option [ ... ] ];
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER USER user_name
+    RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="SET PARAMETER"><![CDATA[
+ALTER USER user_name
+    SET configuration_parameter {{ TO | = } { value | DEFAULT }|FROM CURRENT};
+]]></MainSentence>
+    <MainSentence id="RESET PARAMETER"><![CDATA[
+ALTER USER user_name
+    RESET {configuration_parameter|ALL};
+]]></MainSentence>
+    <SubSentence id="option"><![CDATA[
+{CREATEDB | NOCREATEDB}
+    | {CREATEROLE | NOCREATEROLE}
+    | {INHERIT | NOINHERIT}
+    | {AUDITADMIN | NOAUDITADMIN}
+    | {SYSADMIN | NOSYSADMIN}
+    | {USEFT | NOUSEFT}
+    | {LOGIN | NOLOGIN}
+    | {REPLICATION | NOREPLICATION}
+    | CONNECTION LIMIT connlimit
+    | [ ENCRYPTED | UNENCRYPTED ] IDENTIFIED BY 'password' [ REPLACE 'old_password' ]
+    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD 'password'
+    | VALID BEGIN 'timestamp'
+    | VALID UNTIL 'timestamp'
+    | RESOURCE POOL 'respool'
+    | ACCOUNT { LOCK | UNLOCK }
+    | PGUSER
+]]></SubSentence>
+  </Command>
+
+  <Command id="ALTER VIEW" desc="change the definition of a view">
+    <MainSentence id="COLUMN SET DEFAULT"><![CDATA[
+ALTER VIEW [ IF EXISTS ] view_name
+    ALTER [ COLUMN ] column_name SET DEFAULT expression;
+]]></MainSentence>
+    <MainSentence id="COLUMN DROP DEFAULT"><![CDATA[
+ALTER VIEW [ IF EXISTS ] view_name
+    ALTER [ COLUMN ] column_name DROP DEFAULT;
+]]></MainSentence>
+    <MainSentence id="OWNER TO"><![CDATA[
+ALTER VIEW [ IF EXISTS ] view_name
+    OWNER TO new_owner;
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER VIEW [ IF EXISTS ] view_name
+    RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="SET SCHEMA"><![CDATA[
+ALTER VIEW [ IF EXISTS ] view_name
+    SET SCHEMA new_schema;
+]]></MainSentence>
+    <MainSentence id="SET OPTION"><![CDATA[
+ALTER VIEW [ IF EXISTS ] view_name
+    SET ( {view_option_name [= view_option_value]} [, ... ] );
+]]></MainSentence>
+    <MainSentence id="RESET OPTION"><![CDATA[
+ALTER VIEW [ IF EXISTS ] view_name
+    RESET ( view_option_name [, ... ] );
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER WORKLOAD GROUP" desc="change the definition of a workload group">
+    <MainSentence id="SYN"><![CDATA[
+ALTER WORKLOAD GROUP wg_name
+     USING RESOURCE POOL pool_name [ WITH ( ACT_STATEMENTS = count ) ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="ANALYZE" desc="collect statistics about a database">
+    <MainSentence id="TABLE SYN"><![CDATA[
+{ANALYZE | ANALYSE} [ VERBOSE ]
+    [ table_name [ ( column_name [, ...] ) ] ];
+]]></MainSentence>
+    <MainSentence id="TABLE PARTITION"><![CDATA[
+{ANALYZE | ANALYSE} [ VERBOSE ]
+    [ table_name [ ( column_name [, ...] ) ] ]
+    PARTITION ( patrition_name );
+]]></MainSentence>
+    <MainSentence id="FOREIGH TABLE"><![CDATA[
+{ANALYZE | ANALYSE} [ VERBOSE ]
+    { foreign_table_name | FOREIGN TABLES };
+]]></MainSentence>
+    <MainSentence id="MULTI COLUMN"><![CDATA[
+{ANALYZE | ANALYSE} [ VERBOSE ]
+    table_name (( column_1_name, column_2_name [, ...] ));
+]]></MainSentence>
+    <MainSentence id="VERIFY"><![CDATA[
+{ANALYZE | ANALYSE} VERIFY [FAST|COMPLETE]
+    table_name|index_name [CASCADE];
+]]></MainSentence>
+    <MainSentence id="VERIFY PARTITION"><![CDATA[
+{ANALYZE | ANALYSE} VERIFY [FAST|COMPLETE]
+    table_name PARTITION partition_name [CASCADE];
+]]></MainSentence>
+  </Command>
+
+  <Command id="BEGIN" desc="start a anonymous block">
+    <MainSentence id="SYN"><![CDATA[
+[DECLARE [declare_statements]] 
+BEGIN
+execution_statements
+END;
+/
+]]></MainSentence>
+  </Command>
+
+  <Command id="CALL" desc="call a defined function">
+    <MainSentence id="SYN"><![CDATA[
+CALL [schema.] func_name ( param_expr );
+]]></MainSentence>
+  </Command>
+
+  <Command id="CLEAN CONNECTION" desc="clean up pooler connections in a cluster">
+    <MainSentence id="SYN"><![CDATA[
+CLEAN CONNECTION
+    TO { COORDINATOR ( nodename [, ... ] ) | NODE ( nodename [, ... ] ) | ALL [ CHECK ] [ FORCE ] }
+    [ FOR DATABASE dbname ]
+    [ TO USER username ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CLOSE" desc="close a cursor">
+    <MainSentence id="SYN"><![CDATA[
+CLOSE { cursor_name | ALL };
+]]></MainSentence>
+  </Command>
+
+  <Command id="CLUSTER" desc="cluster a table according to an index">
+    <MainSentence id="SINGLE TABLE"><![CDATA[
+CLUSTER [ VERBOSE ] table_name [ USING index_name ];
+]]></MainSentence>
+    <MainSentence id="TABLE PARTITION"><![CDATA[
+CLUSTER [ VERBOSE ] table_name PARTITION ( partition_name ) [ USING index_name ];
+]]></MainSentence>
+    <MainSentence id="SYN"><![CDATA[
+CLUSTER [ VERBOSE ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="COMMENT" desc="define or change the comment of an object">
+    <MainSentence id="SYN"><![CDATA[
+COMMENT ON
+{
+  AGGREGATE agg_name (agg_type [, ...] ) |
+  CAST (source_type AS target_type) |
+  COLLATION object_name |
+  COLUMN { table_name.column_name | view_name.column_name } |
+  CONSTRAINT constraint_name ON table_name |
+  CONVERSION object_name |
+  DATABASE object_name |
+  DOMAIN object_name |
+  EXTENSION object_name |
+  FOREIGN DATA WRAPPER object_name |
+  FOREIGN TABLE object_name |
+  FUNCTION function_name ( [ {[ argmode ] [ argname ] argtype} [, ...] ] ) |
+  INDEX object_name |
+  LARGE OBJECT large_object_oid |
+  OPERATOR operator_name (left_type, right_type) |
+  OPERATOR CLASS object_name USING index_method |
+  OPERATOR FAMILY object_name USING index_method |
+  [ PROCEDURAL ] LANGUAGE object_name |
+  ROLE object_name |
+  RULE rule_name ON table_name |
+  SCHEMA object_name |
+  SERVER object_name |
+  TABLE object_name |
+  TABLESPACE object_name |
+  TEXT SEARCH CONFIGURATION object_name |
+  TEXT SEARCH DICTIONARY object_name |
+  TEXT SEARCH PARSER object_name |
+  TEXT SEARCH TEMPLATE object_name |
+  TYPE object_name |
+  VIEW object_name
+}
+   IS 'text';
+]]></MainSentence>
+  </Command>
+
+  <Command id="COMMIT" desc="commit the current transaction">
+    <MainSentence id="SYN"><![CDATA[
+{ COMMIT | END } [ WORK | TRANSACTION ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="COMMIT PREPARED" desc="commit a transaction that was earlier prepared for two-phase commit">
+    <MainSentence id="SYN"><![CDATA[
+COMMIT PREPARED transaction_id;
+]]></MainSentence>
+  </Command>
+
+  <Command id="COPY" desc="copy data between a file and a table">
+    <MainSentence id="FROM SYN"><![CDATA[
+COPY table_name [ ( column_name [, ...] ) ]
+    FROM { 'filename' | STDIN }
+    [ [ USING ] DELIMITERS 'delimiters' ]
+    [ WITHOUT ESCAPING ]
+    [ [ WITH ] ( option [, ...] ) ]
+    | copy_option
+    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
+]]></MainSentence>
+    <MainSentence id="TO SYN"><![CDATA[
+COPY table_name [ ( column_name [, ...] ) ]
+    TO { 'filename' | STDOUT }
+    [ [ USING ] DELIMITERS 'delimiters' ]
+    [ WITHOUT ESCAPING ]
+    [ [ WITH ] ( option [, ...] ) ]
+    | copy_option
+    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
+]]></MainSentence>
+	<MainSentence id="QUERY TO SYN"><![CDATA[
+COPY query
+    TO { 'filename' | STDOUT }
+    [ WITHOUT ESCAPING ]
+    [ [ WITH ] ( option [, ...] ) ]
+    | copy_option
+    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
+]]></MainSentence>
+    <SubSentence id="option"><![CDATA[
+FORMAT format_name
+| OIDS [ boolean ]
+| DELIMITER 'delimiter_character'
+| NULL 'null_string'
+| HEADER [ boolean ]
+| QUOTE 'quote_character'
+| ESCAPE 'escape_character'
+| FORCE_QUOTE { ( column_name [, ...] ) | * }
+| FORCE_NOT_NULL ( column_name [, ...] )
+| ENCODING 'encoding_name'
+| IGNORE_EXTRA_DATA [ boolean ]
+| FILL_MISSING_FIELDS [ boolean ]
+| COMPATIBLE_ILLEGAL_CHARS [ boolean ]
+| DATE_FORMAT 'date_format_string'
+| TIME_FORMAT 'time_format_string'
+| TIMESTAMP_FORMAT 'timestamp_format_string'
+| SMALLDATETIME_FORMAT 'smalldatetime_format_string'
+]]></SubSentence>
+	<SubSentence id="copy_option"><![CDATA[
+OIDS
+| NULL 'null_string'
+| HEADER
+| FILEHEADER 'header_file_string'
+| FREEZE
+| FORCE NOT NULL column_name [, ...]
+| FORCE QUOTE { column_name [, ...] | * }
+| BINARY
+| CSV
+| QUOTE [ AS ] 'quote_character'
+| ESCAPE [ AS ] 'escape_character'
+| ENCODING 'encoding_name'
+| IGNORE_EXTRA_DATA
+| FILL_MISSING_FIELDS
+| COMPATIBLE_ILLEGAL_CHARS
+| DATE_FORMAT 'date_format_string'
+| TIME_FORMAT 'time_format_string'
+| TIMESTAMP_FORMAT 'timestamp_format_string'
+| SMALLDATETIME_FORMAT 'smalldatetime_format_string'
+]]></SubSentence>
+  </Command>
+
+  <Command id="CREATE APP WORKLOAD GROUP MAPPING" desc="create a workload group mapping">
+    <MainSentence id="SYN"><![CDATA[
+CREATE APP WORKLOAD GROUP MAPPING app_name
+    [ WITH ( WORKLOAD_GPNAME  = workload_gpname ) ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE BARRIER" desc="create a new barrier">
+    <MainSentence id="SYN"><![CDATA[
+CREATE BARRIER barrier_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE DATABASE" desc="create a new database">
+    <MainSentence id="CREATE DATABASE"><![CDATA[
+CREATE DATABASE database_name
+    [ [ WITH ] {[ OWNER [=] user_name ]|
+           [ TEMPLATE [=] template ]|
+           [ ENCODING [=] encoding ]|
+           [ LC_COLLATE [=] lc_collate ]|
+           [ LC_CTYPE [=] lc_ctype ]|
+           [ DBCOMPATIBILITY [=] compatibility_type ]|
+           [ TABLESPACE [=] tablespace_name ]|
+           [ CONNECTION LIMIT [=] connlimit ]}[...] ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE FOREIGN TABLE" desc="define a new foreign table">
+    <MainSentence id="CREATE FOREIGN TABLE FOR GDS"><![CDATA[
+CREATE FOREIGN TABLE [ IF NOT EXISTS  ] table_name 
+( { column_name type_name POSITION(offset,length) [column_constraint ]
+	| LIKE source_table | table_constraint [, ...]} [, ...] ) 
+SEVER gsmpp_server 
+OPTIONS (  { option_name ' value '  }  [, ...] ) 
+[  { WRITE ONLY  |  READ ONLY  }] 
+[ WITH error_table_name | LOG INTO error_table_name] 
+[REMOTE LOG 'name'] 
+[PER NODE REJECT LIMIT 'value']  ;
+]]></MainSentence>
+    <MainSentence id="CREATE FOREIGN TABLE FOR HADOOP"><![CDATA[
+CREATE FOREIGN TABLE [ IF NOT EXISTS ] table_name 
+( { column_name type_name 
+    [ { [CONSTRAINT constraint_name] NULL | 
+    [CONSTRAINT constraint_name] NOT NULL | 
+	column_constraint [...]} ] | 
+	table_constraint [, ...]} [, ...] ) 
+SERVER hdfs_server 
+OPTIONS ( { option_name ' value ' } [, ...] ) 
+DISTRIBUTE BY {ROUNDROBIN | REPLICATION}
+[ PARTITION BY ( column_name ) [AUTOMAPPED]] ;
+]]></MainSentence>
+    <SubSentence id="column_constraint"><![CDATA[
+[CONSTRAINT constraint_name]
+{PRIMARY KEY | UNIQUE}
+[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED]
+]]></SubSentence>
+    <SubSentence id="table_constraint"><![CDATA[
+[CONSTRAINT constraint_name]
+{PRIMARY KEY | UNIQUE} (column_name)
+[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED]
+]]></SubSentence>
+  </Command>
+
+  <Command id="CREATE FUNCTION" desc="define a new function">
+    <MainSentence id="RETURN SYN"><![CDATA[
+CREATE [ OR REPLACE  ] FUNCTION function_name
+    ( [  { argname [ argmode  ] argtype [  { DEFAULT | := | =  } expression  ] }  [, ...]  ] )
+    RETURN rettype [ DETERMINISTIC  ]
+    { {IMMUTABLE  | STABLE  | VOLATILE } | [ NOT  ] LEAKPROOF  | {CALLED ON NULL INPUT  | RETURNS NULL ON NULL INPUT  | STRICT } | {[ EXTERNAL  ] SECURITY INVOKER  | [ EXTERNAL  ] SECURITY DEFINER } | COST execution_cost  | ROWS result_rows  | SET configuration_parameter { {TO | =} value | FROM CURRENT }  | AUTHID DEFINER  | AUTHID CURRENT_USER}[...]
+     { IS  | AS  } plsql_body
+/
+]]></MainSentence>
+    <MainSentence id="RETURNS SYN"><![CDATA[
+CREATE [ OR REPLACE  ] FUNCTION function_name
+    ( [  { argname [ argmode  ] argtype [  { DEFAULT  | :=  | =  } expression  ]}  [, ...]  ] )
+    [ RETURNS rettype [ DETERMINISTIC  ]  | RETURNS TABLE (  { column_name column_type  }  [, ...] )]
+    AS ' definition ' LANGUAGE lang_name [ WINDOW  ]
+    {  {IMMUTABLE  | STABLE  | VOLATILE } | [ NOT ] FENCED | [ NOT  ] LEAKPROOF  | {CALLED ON NULL INPUT  | RETURNS NULL ON NULL INPUT  | STRICT } | {[ EXTERNAL  ] SECURITY INVOKER  | [ EXTERNAL  ] SECURITY DEFINER } | COST execution_cost  | ROWS result_rows  | SET configuration_parameter { {TO | =} value | FROM CURRENT }  | AUTHID DEFINER  | AUTHID CURRENT_USER}[...]
+/
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE GROUP" desc="define a new database role">
+    <MainSentence id="SYN"><![CDATA[
+CREATE GROUP group_name [ [ WITH ] option [ ... ] ];
+]]></MainSentence>
+    <SubSentence id="option"><![CDATA[
+{SYSADMIN | NOSYSADMIN}
+    | {CREATEDB | NOCREATEDB}
+    | {CREATEROLE | NOCREATEROLE}
+    | {USEFT | NOUSEFT}
+    | {INHERIT | NOINHERIT}
+    | {LOGIN | NOLOGIN}
+    | [ ENCRYPTED | UNENCRYPTED ] PASSWORD 'password'
+    | VALID UNTIL 'timestamp'
+    | IN ROLE role_name [, ...]
+    | IN GROUP role_name [, ...]
+    | ROLE role_name [, ...]
+    | ADMIN role_name [, ...]
+    | USER role_name [, ...]
+    | SYSID uid
+]]></SubSentence>
+  </Command>
+
+  <Command id="CREATE INDEX" desc="define a new index">
+    <MainSentence id="CREATE INDEX SYN"><![CDATA[
+CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] [ [ schema_name. ] index_name ] ON table_name [ USING method ]
+    ({ { column_name | ( expression ) } [ COLLATE collation ] [ opclass ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ] }[, ...] )
+    [ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ TABLESPACE tablespace_name ]
+    [ WHERE predicate ];
+]]></MainSentence>
+    <MainSentence id="CREATE INDEX PARTITION SYN"><![CDATA[
+CREATE [ UNIQUE ] INDEX [ [ schema_name. ] index_name ] ON table_name [ USING method ]
+( {{ column_name | ( expression ) } [ COLLATE collation ] [ opclass ] [ ASC | DESC ] [ NULLS LAST ] }[, ...] )
+LOCAL [ ( { PARTITION index_partition_name [ TABLESPACE index_partition_tablespace ] } [, ...] ) ]
+[ WITH ( { storage_parameter = value } [, ...] ) ]
+[ TABLESPACE tablespace_name ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE NODE" desc="create a new cluster node">
+    <MainSentence id="SYN"><![CDATA[
+CREATE NODE nodename WITH
+  (
+    [ TYPE = nodetype,]
+    [ HOST = hostname,]
+    [ PORT = portnum,]
+    [ HOST1 = 'hostname',]
+    [ PORT1 = portnum,]
+    [ HOSTPRIMARY [ = boolean ],]
+    [ PRIMARY [ = boolean ],]
+    [ PREFERRED [ = boolean ],]
+    [ SCTP_PORT = portnum,]
+    [ CONTROL_PORT = portnum,]
+    [ SCTP_PORT1 = portnum,]
+    [ CONTROL_PORT1 = portnum ]
+  );
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE NODE GROUP" desc="create a group of cluster nodes">
+    <MainSentence id="SYN"><![CDATA[
+CREATE NODE GROUP groupname
+    WITH ( nodename [, ... ] );
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE PROCEDURE" desc="create a procedure">
+    <MainSentence id="SYN"><![CDATA[
+CREATE [ OR REPLACE ] PROCEDURE procedure_name
+    [ ( {[ argmode ] [ argname ] argtype [ { DEFAULT | := | = } expression ]}[,...]) ]
+   { IS | AS } plsql_body
+/
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE RESOURCE POOL" desc="define a new resource pool">
+    <MainSentence id="SYN"><![CDATA[
+CREATE RESOURCE POOL pool_name
+    [WITH ({CONTROL_GROUP={"group_name" | 'group_name'} | ACTIVE_STATEMENTS=stmt | MAX_DOP = dop | MEMORY_LIMIT='memory_size'}[, ... ])];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE ROLE" desc="define a new database role">
+    <MainSentence id="SYN"><![CDATA[
+CREATE ROLE role_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } 'password';
+]]></MainSentence>
+    <SubSentence id="option"><![CDATA[
+{SYSADMIN | NOSYSADMIN}
+    | {AUDITADMIN | NOAUDITADMIN}
+    | {CREATEDB | NOCREATEDB}
+    | {USEFT | NOUSEFT}
+    | {CREATEROLE | NOCREATEROLE}
+    | {INHERIT | NOINHERIT}
+    | {LOGIN | NOLOGIN}
+    | {REPLICATION | NOREPLICATION}
+    | CONNECTION LIMIT connlimit
+    | VALID BEGIN 'timestamp'
+    | VALID UNTIL 'timestamp'
+    | RESOURCE POOL 'respool'
+    | IN ROLE role_name [, ...]
+    | IN GROUP role_name [, ...]
+    | ROLE role_name [, ...]
+    | ADMIN role_name [, ...]
+    | USER role_name [, ...]
+    | SYSID uid
+    | DEFAULT TABLESPACE tablespace_name
+    | PROFILE DEFAULT
+    | PROFILE profile_name
+    | PGUSER
+]]></SubSentence>
+  </Command>
+
+  <Command id="CREATE SCHEMA" desc="define a new schema">
+    <MainSentence id="WITH SCHEMA"><![CDATA[
+CREATE SCHEMA schema_name
+    [ AUTHORIZATION user_name ] [ schema_element [ ... ] ];
+]]></MainSentence>
+    <MainSentence id="WITH USER"><![CDATA[
+CREATE SCHEMA AUTHORIZATION user_name [ schema_element [ ... ] ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE SERVER" desc="define a new foreign server">
+    <MainSentence id="CREATE SERVER FOR HADOOP"><![CDATA[
+CREATE SERVER server_name 
+    FOREIGN DATA WRAPPER fdw_name
+    OPTIONS ( { option_name ' value ' } [, ...] ) ;
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE TABLE" desc="define a new table">
+    <MainSentence id="CREATE TABLE SYN"><![CDATA[
+CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] table_name 
+({ column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | table_constraint
+    | LIKE source_table [ like_option [...] ] }
+    [, ... ])
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
+[ COMPRESS | NOCOMPRESS ]
+[ TABLESPACE tablespace_name ]
+[ DISTRIBUTE BY { REPLICATION | { HASH ( column_name [,...] ) } } ]
+[ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ];
+]]></MainSentence>
+    <SubSentence id="column_constraint"><![CDATA[
+[ CONSTRAINT constraint_name ]
+{ NOT NULL |
+  NULL |
+  CHECK ( expression ) |
+  DEFAULT default_expr |
+  UNIQUE index_parameters |
+  PRIMARY KEY index_parameters }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+]]></SubSentence>
+    <SubSentence id="table_constraint"><![CDATA[
+[ CONSTRAINT constraint_name ]
+{ CHECK ( expression ) |
+  UNIQUE ( column_name [, ... ] ) index_parameters |
+  PRIMARY KEY ( column_name [, ... ] ) index_parameters}
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+]]></SubSentence>
+      <SubSentence id="compress_mode"><![CDATA[
+ { DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
+]]></SubSentence>
+    <SubSentence id="like_option"><![CDATA[
+{ INCLUDING | EXCLUDING } { DEFAULTS | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | PARTITION | RELOPTIONS | DISTRIBUTION | ALL }
+]]></SubSentence>
+    <SubSentence id="index_parameters"><![CDATA[
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ USING INDEX TABLESPACE tablespace_name ]
+]]></SubSentence>
+  </Command>
+
+  <Command id="CREATE TABLE AS" desc="define a new table from the results of a query">
+    <MainSentence id="CREATE TABLE AS SYN"><![CDATA[
+CREATE [ UNLOGGED ] TABLE table_name
+    [ (column_name [, ...] ) ]
+    [ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ COMPRESS | NOCOMPRESS ]
+    [ TABLESPACE tablespace_name ]
+    [ DISTRIBUTE BY { REPLICATION | { [HASH ] ( column_name ) } } ]
+    AS query
+    [ WITH [ NO ] DATA ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE TABLE PARTITION" desc="define a new table partition">
+    <MainSentence id="CREATE TABLE PARTITION SYN"><![CDATA[
+CREATE TABLE [ IF NOT EXISTS ] partition_table_name 
+( [
+  { column_name data_type [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | table_constraint 
+    | LIKE source_table [ like_option [...] ] }
+    [, ... ]
+] )
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ COMPRESS | NOCOMPRESS ]
+[ TABLESPACE tablespace_name ]
+[ DISTRIBUTE BY { REPLICATION | { [ HASH ] ( column_name ) } } ]
+PARTITION BY { 
+	{VALUES (partition_key)} | 
+	{RANGE (partition_key) ( partition_less_than_item [, ... ] )} |
+	{RANGE (partition_key) ( partition_start_end_item [, ... ] )}
+} [ { ENABLE | DISABLE } ROW MOVEMENT ];
+]]></MainSentence>
+    <SubSentence id="column_constraint"><![CDATA[
+[ CONSTRAINT constraint_name ]
+{ NOT NULL |
+  NULL |
+  CHECK ( expression ) |
+  DEFAULT default_expr |
+  UNIQUE index_parameters |
+  PRIMARY KEY index_parameters }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+]]></SubSentence>
+    <SubSentence id="table_constraint"><![CDATA[
+[ CONSTRAINT constraint_name ]
+{ CHECK ( expression ) |
+  UNIQUE ( column_name [, ... ] ) index_parameters |
+  PRIMARY KEY ( column_name [, ... ] ) index_parameters}
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+]]></SubSentence>
+    <SubSentence id="index_parameters"><![CDATA[
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ USING INDEX TABLESPACE tablespace_name ]
+]]></SubSentence>
+    <SubSentence id="like_option"><![CDATA[
+{ INCLUDING | EXCLUDING } { DEFAULTS | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | RELOPTIONS | DISTRIBUTION | ALL }
+]]></SubSentence>
+    <SubSentence id="partition_less_than_item"><![CDATA[
+PARTITION partition_name VALUES LESS THAN ( { partition_value | MAXVALUE } ) [TABLESPACE tablespace_name]
+]]></SubSentence>
+    <SubSentence id="partition_start_end_item"><![CDATA[
+PARTITION partition_name {
+	{START(partition_value) END (partition_value) EVERY (interval_value)} |
+	{START(partition_value) END ({partition_value | MAXVALUE})} |
+	{START(partition_value)} |
+	{END({partition_value | MAXVALUE})}
+} [TABLESPACE tablespace_name]
+]]></SubSentence>
+  </Command>
+
+  <Command id="CREATE TABLESPACE" desc="define a new tablespace">
+    <MainSentence id="SYN"><![CDATA[
+CREATE TABLESPACE tablespace_name
+    [ OWNER user_name ] [RELATIVE] LOCATION 'directory' [ MAXSIZE 'space_size' ]
+    [with_option_clause];
+]]></MainSentence>
+    <SubSentence id="option_clause"><![CDATA[
+WITH ( filesystem= { 'systemtype '| " systemtype " | systemtype }
+ [ { , address = { ' ip:port [ , ... ] ' | " ip:port [ , ... ] "} } ]
+, cfgpath = { 'path '| " path " } ,storepath = { 'rootpath '| " rootpath "} 
+[{, random_page_cost = { 'value '| " value " | value }}]
+[{,seq_page_cost = { 'value '| " value " | value }}])
+]]></SubSentence>
+  </Command>
+
+  <Command id="CREATE USER" desc="define a new database role">
+    <MainSentence id="SYN"><![CDATA[
+CREATE USER user_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } 'password';
+]]></MainSentence>
+    <SubSentence id="option"><![CDATA[
+{CREATEDB | NOCREATEDB}
+    | {CREATEROLE | NOCREATEROLE}
+    | {INHERIT | NOINHERIT}
+    | {AUDITADMIN | NOAUDITADMIN}
+    | {SYSADMIN | NOSYSADMIN}
+    | {USEFT | NOUSEFT}
+    | {LOGIN | NOLOGIN}
+    | {REPLICATION | NOREPLICATION}
+    | CONNECTION LIMIT connlimit
+    | VALID BEGIN 'timestamp'
+    | VALID UNTIL 'timestamp'
+    | RESOURCE POOL 'respool'
+    | IN ROLE role_name [, ...]
+    | IN GROUP role_name [, ...]
+    | ROLE role_name [, ...]
+    | ADMIN role_name [, ...]
+    | USER role_name [, ...]
+    | SYSID uid
+    | DEFAULT TABLESPACE name
+    | PROFILE DEFAULT
+    | PROFILE name
+    | PGUSER
+]]></SubSentence>
+  </Command>
+
+  <Command id="CREATE VIEW" desc="define a new view">
+    <MainSentence id="SYN"><![CDATA[
+CREATE [ OR REPLACE ] [ TEMP | TEMPORARY ] VIEW view_name [ ( column_name [, ...] ) ]
+    [ WITH ( {view_option_name [= view_option_value]} [, ... ] ) ]
+    AS query;
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE WORKLOAD GROUP" desc="define a new workload group">
+    <MainSentence id="SYN"><![CDATA[
+CREATE WORKLOAD GROUP wg_name
+     [ USING RESOURCE POOL pool_name [ WITH ( ACT_STATEMENTS = counts) ] ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CURSOR" desc="define a cursor">
+    <MainSentence id="SYN"><![CDATA[
+CURSOR cursor_name
+    [ BINARY ] [ NO SCROLL ] [ { WITH | WITHOUT } HOLD ]
+    FOR query ;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DEALLOCATE" desc="deallocate a prepared statement">
+    <MainSentence id="SYN"><![CDATA[
+DEALLOCATE [ PREPARE ] { name | ALL };
+]]></MainSentence>
+  </Command>
+
+  <Command id="DECLARE" desc="define a curosr">
+    <MainSentence id="SYN"><![CDATA[
+DECLARE cursor_name 
+    [ BINARY ] [ NO SCROLL ] CURSOR [ { WITH | WITHOUT } HOLD ]
+    FOR query ;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DELETE" desc="delete rows of a table">
+    <MainSentence id="DELETE SYN"><![CDATA[
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+DELETE FROM [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+    [ USING using_list ]
+    [ WHERE condition | WHERE CURRENT OF cursor_name ]
+    [ RETURNING { * | { output_expr [ [ AS ] output_name ] } [, ...] } ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DO" desc="execute an anonymous code block">
+    <MainSentence id="SYN"><![CDATA[
+DO [ LANGUAGE lang_name ] code;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP APP WORKLOAD GROUP MAPPING" desc="remove a workload group mapping">
+    <MainSentence id="SYN"><![CDATA[
+DROP APP WORKLOAD GROUP MAPPING [ IF EXISTS ] app_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP DATABASE" desc="remove a database">
+    <MainSentence id="SYN"><![CDATA[
+DROP DATABASE [ IF EXISTS ] database_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP FOREIGN TABLE" desc="remove a foreign table">
+    <MainSentence id="DROP FOREIGN TABLE"><![CDATA[
+DROP FOREIGN TABLE [ IF EXISTS ] 
+table_name [, ...] [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP FUNCTION" desc="remove a function">
+    <MainSentence id="SYN"><![CDATA[
+DROP FUNCTION [ IF EXISTS ] function_name ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP GROUP" desc="remove a database role">
+    <MainSentence id="SYN"><![CDATA[
+DROP GROUP [ IF EXISTS ] group_name [, ...];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP INDEX" desc="remove an index">
+    <MainSentence id="DROP INDEX SYN"><![CDATA[
+DROP INDEX [ CONCURRENTLY ] [ IF EXISTS ] 
+index_name [, ...] [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP NODE" desc="drop a cluster node">
+    <MainSentence id="SYN"><![CDATA[
+DROP NODE nodename;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP NODE GROUP" desc="drop a group of cluster nodes">
+    <MainSentence id="SYN"><![CDATA[
+DROP NODE GROUP groupname;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP OWNED" desc="remove database objects owned by a database role">
+    <MainSentence id="SYN"><![CDATA[
+DROP OWNED BY name [, ...] [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP PROCEDURE" desc="drop a defined procedure">
+    <MainSentence id="SYN"><![CDATA[
+DROP PROCEDURE [ IF EXISTS ] procedure_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP RESOURCE POOL" desc="remove a resource pool">
+    <MainSentence id="SYN"><![CDATA[
+DROP RESOURCE POOL [ IF EXISTS ] pool_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP ROLE" desc="remove a database role">
+    <MainSentence id="SYN"><![CDATA[
+DROP ROLE [ IF EXISTS ] role_name [, ...];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP SCHEMA" desc="remove a schema">
+    <MainSentence id="SYN"><![CDATA[
+DROP SCHEMA [ IF EXISTS ] schema_name [, ...] [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP SERVER" desc="remove a foreign server descriptor">
+    <MainSentence id="SYN"><![CDATA[
+DROP SERVER [ IF EXISTS ] server_name [ { CASCADE | RESTRICT } ] ;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP TABLE" desc="remove a table">
+    <MainSentence id="DROP TABLE SYN"><![CDATA[
+DROP TABLE [ IF EXISTS ] 
+{[schema.]table_name} [, ...] [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP TABLESPACE" desc="remove a tablespace">
+    <MainSentence id="SYN"><![CDATA[
+DROP TABLESPACE [ IF EXISTS ] tablespace_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP USER" desc="remove a database role">
+    <MainSentence id="SYN"><![CDATA[
+DROP USER [ IF EXISTS ] user_name [, ...] [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP VIEW" desc="remove a view">
+    <MainSentence id="SYN"><![CDATA[
+DROP VIEW [ IF EXISTS ] view_name [, ...] [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP WORKLOAD GROUP" desc="remove a workload group">
+    <MainSentence id="SYN"><![CDATA[
+DROP WORKLOAD GROUP  [ IF EXISTS ] wg_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="EXECUTE" desc="execute a prepared statement">
+    <MainSentence id="SYN"><![CDATA[
+EXECUTE name [ ( parameter [, ...] ) ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="EXECUTE DIRECT" desc="launch queries directly to dedicated nodes">
+    <MainSentence id="SYN"><![CDATA[
+EXECUTE DIRECT ON ( nodename [, ... ] ) query;
+]]></MainSentence>
+  </Command>
+
+  <Command id="EXPLAIN" desc="show the execution plan of a statement">
+    <MainSentence id="WITH BRACKET"><![CDATA[
+EXPLAIN [ (  option  [, ...] )  ] statement;
+]]></MainSentence>
+    <MainSentence id="NO BRACKET"><![CDATA[
+EXPLAIN  { [  { ANALYZE  | ANALYSE  }  ] [ VERBOSE  ]  | PERFORMANCE  } statement;
+]]></MainSentence>
+    <SubSentence id="option"><![CDATA[
+ANALYZE [ boolean ] |
+    ANALYSE [ boolean ] |
+    VERBOSE [ boolean ] |
+    COSTS [ boolean ] |
+    CPU [ boolean ] |
+    DETAIL [ boolean ] |
+    NODES [ boolean ] |
+    NUM_NODES [ boolean ] |
+    BUFFERS [ boolean ] |
+    TIMING [ boolean ] |
+    PLAN [ boolean ] |
+    FORMAT { TEXT | XML | JSON | YAML }
+]]></SubSentence>
+  </Command>
+
+  <Command id="FETCH" desc="retrieve rows from a query using a cursor">
+    <MainSentence id="SYN"><![CDATA[
+FETCH [ direction { FROM | IN } ] cursor_name;
+]]></MainSentence>
+    <SubSentence id="direction"><![CDATA[
+NEXT
+   | PRIOR
+   | FIRST
+   | LAST
+   | ABSOLUTE count
+   | RELATIVE count
+   | count
+   | ALL
+   | FORWARD
+   | FORWARD count
+   | FORWARD ALL
+   | BACKWARD
+   | BACKWARD count
+   | BACKWARD ALL
+]]></SubSentence>
+  </Command>
+
+  <Command id="GRANT" desc="define access privileges">
+    <MainSentence id="ON TABLE"><![CDATA[
+GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES }
+    [, ...] | ALL [ PRIVILEGES ] }
+    ON { [ TABLE ] table_name [, ...]
+         | ALL TABLES IN SCHEMA schema_name [, ...] }
+    TO { [ GROUP ] role_name | PUBLIC } [, ...] 
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON COLUMN"><![CDATA[
+GRANT { {{ SELECT | INSERT | UPDATE | REFERENCES } ( column_name [, ...] )}
+    [, ...] | ALL [ PRIVILEGES ] ( column_name [, ...] ) }
+    ON [ TABLE ] table_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON DATABASE"><![CDATA[
+GRANT { { CREATE | CONNECT | TEMPORARY | TEMP } [, ...] | ALL [ PRIVILEGES ] }
+    ON DATABASE database_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON DOMAIN"><![CDATA[
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON DOMAIN domain_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON FDW"><![CDATA[
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON FOREIGN DATA WRAPPER fdw_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON FOREIGN SERVER"><![CDATA[
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON FOREIGN SERVER server_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON FUNCTION"><![CDATA[
+GRANT { EXECUTE | ALL [ PRIVILEGES ] }
+    ON { FUNCTION {function_name ( [ {[ argmode ] [ arg_name ] arg_type} [, ...] ] )} [, ...]
+         | ALL FUNCTIONS IN SCHEMA schema_name [, ...] }
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON LANGUAGE"><![CDATA[
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON LANGUAGE lang_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON LARGE OBJECT"><![CDATA[
+GRANT { { SELECT | UPDATE } [, ...] | ALL [ PRIVILEGES ] }
+    ON LARGE OBJECT loid [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON SCHEMA"><![CDATA[
+GRANT { { CREATE | USAGE } [, ...] | ALL [ PRIVILEGES ] }
+    ON SCHEMA schema_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON TABLESPACE"><![CDATA[
+GRANT { CREATE | ALL [ PRIVILEGES ] }
+    ON TABLESPACE tablespace_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON TYPE"><![CDATA[
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON TYPE type_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+]]></MainSentence>
+    <MainSentence id="ON ROLE"><![CDATA[
+GRANT role_name [, ...]
+   TO role_name [, ...]
+   [ WITH ADMIN OPTION ];
+]]></MainSentence>
+    <MainSentence id="ALL TO"><![CDATA[
+GRANT ALL { PRIVILEGES | PRIVILEGE }
+   TO role_name;
+]]></MainSentence>
+  </Command>
+
+  <Command id="INSERT" desc="create new rows in a table">
+    <MainSentence id="INSERT SYN"><![CDATA[
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+INSERT INTO table_name [ ( column_name [, ...] ) ]
+    { DEFAULT VALUES | VALUES {( { expression | DEFAULT } [, ...] ) }[, ...] | query }
+    [ ON DUPLICATE KEY UPDATE { column_name = { expression | DEFAULT } } [, ...] ]
+    [ RETURNING {* | {output_expression [ [ AS ] output_name ] }[, ...]} ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="LOCK" desc="lock a table">
+    <MainSentence id="SYN"><![CDATA[
+LOCK [ TABLE ] {[ ONLY ] name [, ...]| {name [ * ]} [, ...]}
+    [ IN {ACCESS SHARE | ROW SHARE | ROW EXCLUSIVE | SHARE UPDATE EXCLUSIVE | SHARE | SHARE ROW EXCLUSIVE | EXCLUSIVE | ACCESS EXCLUSIVE} MODE ]
+    [ NOWAIT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="MOVE" desc="position a cursor">
+    <MainSentence id="SYN"><![CDATA[
+MOVE [ direction [ FROM | IN ] ] cursor_name;
+]]></MainSentence>
+    <SubSentence id="direction"><![CDATA[
+NEXT
+   | PRIOR
+   | FIRST
+   | LAST
+   | ABSOLUTE count
+   | RELATIVE count
+   | count
+   | ALL
+   | FORWARD
+   | FORWARD count
+   | FORWARD ALL
+   | BACKWARD
+   | BACKWARD count
+   | BACKWARD ALL
+]]></SubSentence>
+  </Command>
+
+  <Command id="PREPARE" desc="prepare a statement for execution">
+    <MainSentence id="SYN"><![CDATA[
+PREPARE name [ ( data_type [, ...] ) ] AS statement;
+]]></MainSentence>
+  </Command>
+
+  <Command id="PREPARE TRANSACTION" desc="prepare the current transaction for two-phase commit">
+    <MainSentence id="SYN"><![CDATA[
+PREPARE TRANSACTION transaction_id;
+]]></MainSentence>
+  </Command>
+
+  <Command id="REASSIGN OWNED" desc="change the ownership of database objects owned by a database role">
+    <MainSentence id="SYN"><![CDATA[
+REASSIGN OWNED BY old_role [, ...] TO new_role;
+]]></MainSentence>
+  </Command>
+
+  <Command id="REINDEX" desc="rebuild indexes">
+    <MainSentence id="REINDEX SYN"><![CDATA[
+REINDEX { INDEX | [INTERNAL] TABLE | DATABASE | SYSTEM } name [ FORCE ];
+]]></MainSentence>
+    <MainSentence id="REINDEX PARTITION"><![CDATA[
+REINDEX  { INDEX | [INTERNAL] TABLE  } name
+    PARTITION partition_name [ FORCE  ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="RESET" desc="restore the value of a run-time parameter to the default value">
+    <MainSentence id="SYN"><![CDATA[
+RESET {configuration_parameter | CURRENT_SCHEMA | TIME ZONE | TRANSACTION ISOLATION LEVEL | SESSION AUTHORIZATION | ALL };
+]]></MainSentence>
+  </Command>
+
+  <Command id="REVOKE" desc="remove access privileges">
+    <MainSentence id="REVOKE ALL"><![CDATA[
+REVOKE ALL { PRIVILEGES | PRIVILEGE } FROM role_name;
+]]></MainSentence>
+    <MainSentence id="ON TABLES"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES }
+    [, ...] | ALL [ PRIVILEGES ] }
+    ON { [ TABLE ] table_name [, ...]
+         | ALL TABLES IN SCHEMA schema_name [, ...] }
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="COLUMNS ON TABLES"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { {{ SELECT | INSERT | UPDATE | REFERENCES } ( column_name [, ...] )}
+    [, ...] | ALL [ PRIVILEGES ] ( column_name [, ...] ) }
+    ON [ TABLE ] table_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON DATABASE"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { { CREATE | CONNECT | TEMPORARY | TEMP } [, ...] | ALL [ PRIVILEGES ] }
+    ON DATABASE database_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON DOMAIN"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { USAGE | ALL [ PRIVILEGES ] }
+    ON DOMAIN domain_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON FDW"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { USAGE | ALL [ PRIVILEGES ] }
+    ON FOREIGN DATA WRAPPER fdw_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON FOREIGN SERVER"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { USAGE | ALL [ PRIVILEGES ] }
+    ON FOREIGN SERVER server_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON FUNCTION"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { EXECUTE | ALL [ PRIVILEGES ] }
+    ON { FUNCTION {function_name ( [ {[ argmode ] [ arg_name ] arg_type} [, ...] ] )} [, ...]
+         | ALL FUNCTIONS IN SCHEMA schema_name [, ...] }
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON LANGUAGE"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { USAGE | ALL [ PRIVILEGES ] }
+    ON LANGUAGE lang_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON LARGE OBJECT"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { { SELECT | UPDATE } [, ...] | ALL [ PRIVILEGES ] }
+    ON LARGE OBJECT loid [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON SCHEMA"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { { CREATE | USAGE } [, ...] | ALL [ PRIVILEGES ] }
+    ON SCHEMA schema_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON TABLESPACE"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { CREATE | ALL [ PRIVILEGES ] }
+    ON TABLESPACE tablespace_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ON TYPE"><![CDATA[
+REVOKE [ GRANT OPTION FOR ]
+    { USAGE | ALL [ PRIVILEGES ] }
+    ON TYPE type_name [, ...]
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="ROLE FROM ROLE"><![CDATA[
+REVOKE [ ADMIN OPTION FOR ]
+    role_name [, ...] FROM role_name [, ...]
+    [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="ROLLBACK" desc="abort the current transaction">
+    <MainSentence id="SYN"><![CDATA[
+ROLLBACK [ WORK | TRANSACTION ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="ROLLBACK PREPARED" desc="cancel a transaction that was earlier prepared for two-phase commit">
+    <MainSentence id="SYN"><![CDATA[
+ROLLBACK PREPARED transaction_id;
+]]></MainSentence>
+  </Command>
+
+  <Command id="SELECT" desc="retrieve rows from a table or view">
+    <MainSentence id="SELECT SYN"><![CDATA[
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+SELECT [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
+    { * | {expression [ [ AS ] output_name ]} [, ...] }
+    [ FROM from_item [, ...] ]
+    [ WHERE condition ]
+    [ GROUP BY grouping_element [, ...] ]
+    [ HAVING condition [, ...] ]
+    [ WINDOW {window_name AS ( window_definition )} [, ...] ]
+    [ { UNION | INTERSECT | EXCEPT | MINUS } [ ALL | DISTINCT ] select ]
+    [ ORDER BY {expression [ [ ASC | DESC | USING operator ] | nlssort_expression_clause ] [ NULLS { FIRST | LAST } ]} [, ...] ]
+    [ LIMIT { count | ALL } ]
+    [ OFFSET start [ ROW | ROWS ] ]
+    [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
+    [ {FOR { UPDATE | SHARE } [ OF table_name [, ...] ] [ NOWAIT ]} [...] ];
+]]></MainSentence>
+    <MainSentence id="TABLE SELECT"><![CDATA[
+TABLE { ONLY {(table_name)| table_name} | table_name [ * ]};
+]]></MainSentence>
+    <SubSentence id="from_item"><![CDATA[
+[ ONLY ] table_name [ * ] [ partition_clause ] [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
+|( select ) [ AS ] alias [ ( column_alias [, ...] ) ]
+|with_query_name [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
+|function_name ( [ argument [, ...] ] ) [ AS ] alias [ ( column_alias [, ...] | column_definition [, ...] ) ]
+|function_name ( [ argument [, ...] ] ) AS ( column_definition [, ...] )
+|from_item [ NATURAL ] join_type from_item [ ON join_condition | USING ( join_column [, ...] ) ]
+]]></SubSentence>
+   <SubSentence id="grouping_element"><![CDATA[
+() 
+|expression 
+|( expression [, ...] ) 
+|ROLLUP ( { expression | ( expression [, ...] ) } [, ...] )
+|CUBE ( { expression | ( expression [, ...] ) } [, ...] )
+|GROUPING SETS ( grouping_element [, ...] )
+]]></SubSentence> 
+    <SubSentence id="with_query"><![CDATA[
+with_query_name [ ( column_name [, ...] ) ] AS ( {select | values | insert | update | delete} )
+]]></SubSentence>
+    <SubSentence id="partition_clause"><![CDATA[
+PARTITION { ( partition_name ) | FOR (  partition_value [, ...] ) }
+]]></SubSentence>
+    <SubSentence id="nlssort_expression_clause"><![CDATA[
+NLSSORT ( column_name, ' NLS_SORT = { SCHINESE_PINYIN_M | generic_m_ci } ' )
+]]></SubSentence>
+  </Command>
+
+  <Command id="SELECT INTO" desc="define a new table from the results of a query">
+    <MainSentence id="SELECT INTO SYN"><![CDATA[
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+SELECT [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
+    { * | {expression [ [ AS ] output_name ]} [, ...] }
+    INTO [ UNLOGGED ] [ TABLE ] new_table
+    [ FROM from_item [, ...] ]
+    [ WHERE condition ]
+    [ GROUP BY expression [, ...] ]
+    [ HAVING condition [, ...] ]
+    [ WINDOW {window_name AS ( window_definition )} [, ...] ]
+    [ { UNION | INTERSECT | EXCEPT | MINUS } [ ALL | DISTINCT ] select ]
+    [ ORDER BY {expression [ [ ASC | DESC | USING operator ] | nlssort_expression_clause ] [ NULLS { FIRST | LAST } ]} [, ...] ]
+    [ LIMIT { count | ALL } ]
+    [ OFFSET start [ ROW | ROWS ] ]
+    [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
+    [ {FOR { UPDATE | SHARE } [ OF table_name [, ...] ] [ NOWAIT ]} [...] ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="SET" desc="change a run-time parameter">
+    <MainSentence id="SYN"><![CDATA[
+SET [ LOCAL | SESSION ]
+    { {config_parameter { { TO | = } { value | DEFAULT } | FROM CURRENT }}};
+]]></MainSentence>
+    <MainSentence id="TIME ZONE"><![CDATA[
+SET [ SESSION | LOCAL ] TIME ZONE { timezone | LOCAL | DEFAULT };
+]]></MainSentence>
+    <MainSentence id="NAMES SYN"><![CDATA[
+SET [ SESSION | LOCAL ] NAMES encoding_name;
+]]></MainSentence>
+    <MainSentence id="CURRENT_SCHEMA SYN"><![CDATA[
+SET [ SESSION | LOCAL ] 
+    {CURRENT_SCHEMA { TO | = } { schema | DEFAULT }
+    | SCHEMA 'schema'};
+]]></MainSentence>
+    <MainSentence id="XML OPTION"><![CDATA[
+SET [ SESSION | LOCAL ] XML OPTION { DOCUMENT | CONTENT };
+]]></MainSentence>
+  </Command>
+
+  <Command id="SET CONSTRAINTS" desc="set constraint check timing for the current transaction">
+    <MainSentence id="SYN"><![CDATA[
+SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE };
+]]></MainSentence>
+  </Command>
+
+  <Command id="SET ROLE" desc="set the current user identifier of the current session">
+    <MainSentence id="SYN"><![CDATA[
+SET [ SESSION | LOCAL ] ROLE role_name PASSWORD 'password';
+]]></MainSentence>
+    <MainSentence id="RESET ROLE"><![CDATA[
+RESET ROLE;
+]]></MainSentence>
+  </Command>
+
+  <Command id="SET SESSION AUTHORIZATION" desc="set the current user identifier and session identifier of the current session">
+    <MainSentence id="SYN"><![CDATA[
+SET [ SESSION | LOCAL ] SESSION AUTHORIZATION role_name PASSWORD 'password';
+]]></MainSentence>
+    <MainSentence id="RESET SESSION AUTHORIZATION"><![CDATA[
+{SET [ SESSION | LOCAL ] SESSION AUTHORIZATION DEFAULT
+   | RESET SESSION AUTHORIZATION};
+]]></MainSentence>
+  </Command>
+
+  <Command id="SET TRANSACTION" desc="set the characteristics of the current transaction">
+    <MainSentence id="TRANSACTION SYN"><![CDATA[
+{SET [ LOCAL ] TRANSACTION|SET SESSION CHARACTERISTICS AS TRANSACTION}
+  { ISOLATION LEVEL { READ COMMITTED | READ UNCOMMITTED | SERIALIZABLE | REPEATABLE READ }
+  | { READ WRITE | READ ONLY }
+  } [, ...]
+]]></MainSentence>
+    <MainSentence id="SNAPSHOT SYN"><![CDATA[
+SET TRANSACTION SNAPSHOT snapshot_id;
+]]></MainSentence>
+  </Command>
+
+  <Command id="SHOW" desc="show the value of a run-time parameter">
+    <MainSentence id="SYN"><![CDATA[
+SHOW { configuration_parameter | CURRENT_SCHEMA | TIME ZONE | TRANSACTION ISOLATION LEVEL | SESSION AUTHORIZATION | ALL };
+]]></MainSentence>
+  </Command>
+
+  <Command id="START TRANSACTION" desc="start a transaction block">
+    <MainSentence id="SYN"><![CDATA[
+START TRANSACTION
+   [ { ISOLATION LEVEL { READ COMMITTED | READ UNCOMMITTED | SERIALIZABLE | REPEATABLE READ }
+   | { READ WRITE | READ ONLY }
+   } [, ...] ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="TRUNCATE" desc="empty a table or set of tables">
+    <MainSentence id="TRUNCATE SYN"><![CDATA[
+TRUNCATE [ TABLE ] [ ONLY ] {table_name [ * ]} [, ... ]
+    [ CONTINUE IDENTITY ] [ CASCADE | RESTRICT ];
+]]></MainSentence>
+    <MainSentence id="TRUNCATE PARTITION"><![CDATA[
+ALTER TABLE [ IF EXISTS  ] { [ ONLY  ] table_name  | table_name *  | ONLY ( table_name )  } 
+    TRUNCATE PARTITION { partition_name  | FOR (  partition_value  [, ...] )  } ;
+]]></MainSentence>
+  </Command>
+
+  <Command id="UPDATE" desc="update rows of a table">
+    <MainSentence id="UPDATE SYN"><![CDATA[
+UPDATE [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+    SET {column_name = { expression | DEFAULT } |
+          ( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }
+          }[, ...]
+    [ FROM from_list] [ WHERE condition ]
+    [ RETURNING {* | {output_expression [ [ AS ] output_name ]} [, ...] }];
+]]></MainSentence>
+  </Command>
+
+  <Command id="VACUUM" desc="garbage-collect and optionally analyze a database">
+    <MainSentence id="WITH BRACKET"><![CDATA[
+VACUUM [ ( { FULL | FREEZE | VERBOSE | {ANALYZE | ANALYSE }} [,...] ) ]
+    [ table_name [ (column_name [, ...] ) ] ] [ PARTITION ( partition_name ) ];
+]]></MainSentence>
+    <MainSentence id="JUST TABLE"><![CDATA[
+VACUUM [ FULL [ COMPACT ] ] [ FREEZE ] [ VERBOSE ] [ table_name ] [ PARTITION ( partition_name ) ];
+]]></MainSentence>
+    <MainSentence id="TABLE AND COLUMN"><![CDATA[
+VACUUM [ FULL ] [ FREEZE ] [ VERBOSE ] { ANALYZE | ANALYSE } [ VERBOSE ] 
+    [ table_name [ (column_name [, ...] ) ] ] [ PARTITION ( partition_name ) ];
+]]></MainSentence>
+    <MainSentence id="DELTAMERGE"><![CDATA[
+VACUUM DELTAMERGE [ table_name ];
+]]></MainSentence>
+    <MainSentence id="HDFSDIRECTORY"><![CDATA[
+VACUUM HDFSDIRECTORY [ table_name ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="VALUES" desc="compute a set of rows">
+    <MainSentence id="SYN"><![CDATA[
+VALUES {( expression [, ...] )} [, ...]
+    [ ORDER BY {sort_expression [ ASC | DESC | USING operator ]} [, ...] ]
+    [ LIMIT { count | ALL } ]
+    [ OFFSET start [ ROW | ROWS ] ]
+    [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE TEXT SEARCH CONFIGURATION" desc="define a new text search configuration">
+    <MainSentence id="CREATE"><![CDATA[
+ CREATE TEXT SEARCH CONFIGURATION name 
+     ( { PARSER = parser_name | COPY = source_config } )
+     [ WITH ( {configuration_option = value} [, ...] )];
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER TEXT SEARCH CONFIGURATION" desc="change the definition of a text search configuration">
+    <MainSentence id="ADD MAPPING FOR"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name
+     ADD MAPPING FOR token_type [, ... ] WITH dictionary_name [, ... ];
+]]></MainSentence>
+    <MainSentence id="ALTER MAPPING FOR"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name
+     ALTER MAPPING FOR token_type [, ... ] WITH dictionary_name [, ... ];
+]]></MainSentence>
+    <MainSentence id="ALTER MAPPING FOR ... REPLACE ... WITH"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name
+     ALTER MAPPING FOR token_type [, ... ] REPLACE old_dictionary WITH new_dictionary;
+]]></MainSentence>
+    <MainSentence id="ALTER MAPPING REPLACE"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name
+     ALTER MAPPING REPLACE old_dictionary WITH new_dictionary;
+]]></MainSentence>
+    <MainSentence id="DROP MAPPING"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name
+     DROP MAPPING [ IF EXISTS ] FOR token_type [, ... ];
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="OWNER TO"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name OWNER TO new_owner;
+]]></MainSentence>
+    <MainSentence id="SET SCHEMA"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name SET SCHEMA new_schema;
+]]></MainSentence>
+    <MainSentence id="SET"><![CDATA[
+ ALTER TEXT SEARCH CONFIGURATION name SET ( {configuration_option = value} [, ...] );
+]]></MainSentence>
+  </Command>
+
+  <Command id="DROP TEXT SEARCH CONFIGURATION" desc="remove a text search configurationn">
+    <MainSentence id="CREATE"><![CDATA[
+ DROP TEXT SEARCH CONFIGURATION [ IF EXISTS ] name [ CASCADE | RESTRICT ];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE EXTENSION" desc="install an extension">
+    <MainSentence id="SYN"><![CDATA[
+ CREATE EXTENSION [ IF NOT EXISTS ] extension_name [ WITH ]
+     [ SCHEMA schema_name ]
+     [ VERSION version ]
+     [ FROM old_version ]
+]]></MainSentence>
+  </Command>
+
+  <Command id="ALTER EXTENSION" desc="change the definition of an extension">
+    <MainSentence id="UPDATE"><![CDATA[
+ ALTER EXTENSION name UPDATE [ TO new_version ]
+]]></MainSentence>
+    <MainSentence id="SET"><![CDATA[
+ ALTER EXTENSION name SET SCHEMA new_schema
+]]></MainSentence>
+    <MainSentence id="ADD"><![CDATA[
+ ALTER EXTENSION name ADD member_object
+]]></MainSentence>
+    <MainSentence id="DROP"><![CDATA[
+ ALTER EXTENSION name DROP member_object
+]]></MainSentence>
+    <SubSentence id="member_object"><![CDATA[
+  FOREIGN TABLE object_name |
+  FUNCTION function_name ( [ [ argmode ] [ argname ] argtype [, ...] ] ) |
+  [ PROCEDURAL ] LANGUAGE object_name |
+  SCHEMA object_name |
+  SERVER object_name |
+  TABLE object_name |
+  TEXT SEARCH CONFIGURATION object_name |
+  TYPE object_name |
+  VIEW object_name
+]]></SubSentence>
+  </Command>
+
+  <Command id="DROP EXTENSION" desc="remove an extension">
+    <MainSentence id="SYN"><![CDATA[
+ DROP EXTENSION [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE DATA SOURCE" desc="define a data source">
+    <MainSentence id="SYN"><![CDATA[
+CREATE DATA SOURCE source_name
+    [TYPE 'type_string']
+    [VERSION {'version_string' | NULL}]
+    [OPTIONS (
+        [ DSN 'dsn_string', ]
+        [ USERNAME 'uid_string', ]
+        [ PASSWORD 'pwd_string', ]
+        [ ENCODING 'encoding_string' ]
+    )];
+]]></MainSentence>
+  </Command>
+
+    <Command id="ALTER DATA SOURCE" desc="alter the data source">
+    <MainSentence id="SYN"><![CDATA[
+ALTER DATA SOURCE source_name
+    [TYPE 'type_string'] 
+    [VERSION {'version_string' | NULL}] 
+    [OPTIONS ({[ADD] optname 'optvalue' | SET optname 'optvalue' | DROP optname} [, ...])];
+]]></MainSentence>
+    <MainSentence id="RENAME TO"><![CDATA[
+ALTER DATA SOURCE source_name
+    RENAME TO new_name;
+]]></MainSentence>
+    <MainSentence id="OWNER TO"><![CDATA[
+ALTER DATA SOURCE source_name
+    OWNER TO new_owner;
+]]></MainSentence>
+  </Command>
+
+    <Command id="DROP DATA SOURCE" desc="drop a data source">
+    <MainSentence id="SYN"><![CDATA[
+DROP DATA SOURCE source_name
+    [CASCADE | RESTRICT];
+]]></MainSentence>
+  </Command>
+
+  <Command id="CREATE SYNONYM" desc="define a synonym">
+    <MainSentence id="SYN"><![CDATA[
+CREATE [ OR REPLACE ] SYNONYM synonym_name
+    FOR object_name;
+]]></MainSentence>
+  </Command>
+
+    <Command id="DROP SYNONYM" desc="drop a synonym">
+    <MainSentence id="SYN"><![CDATA[
+DROP SYNONYM [ IF EXISTS ] synonym_name;
+]]></MainSentence>
+  </Command>
+

@@ -1,0 +1,53 @@
+-- problem: list all unsupported feature in cstore table
+-- feature 1: CREATE TABLE name OF type_name
+CREATE TYPE cstore_person_type AS (id int, name text);
+CREATE TABLE cstore_persions OF cstore_person_type WITH (ORIENTATION = COLUMN, COMPRESSION = HIGH);
+ERROR:  Unsupport feature
+DETAIL:  cstore/timeseries don't support relation defination with composite type using CREATE TABLE OF TYPENAME.
+DROP TYPE cstore_person_type;
+-- feature 2: inheritance
+CREATE TABLE cstore_parent_tbl( a1 int, a2 bool, a3 bigint);
+CREATE TABLE cstore_child_tbl( b1 bool, b2 bool, b3 bigint) INHERITS ( cstore_parent_tbl ) with (ORIENTATION = COLUMN );
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+DROP TABLE cstore_parent_tbl;
+-- feature 3: unchange some storage parameter
+CREATE TABLE cstore_coltbl( a1 int, a2 int ) with (orientation = column);
+ALTER TABLE cstore_coltbl SET ( orientation = 'row' );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE cstore_coltbl SET ( orientation = row );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE cstore_coltbl SET ( compression = low );
+ALTER TABLE cstore_coltbl SET ( compression = high, orientation = 'row' );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE cstore_coltbl SET ( compression = high, orientation = row );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+CREATE TABLE cstore_rowtbl( a1 int, a2 int ) with (orientation = 'row' );
+ALTER TABLE cstore_rowtbl SET ( orientation = column );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE cstore_rowtbl SET ( orientation = column, compression = high );
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+DROP TABLE cstore_coltbl;
+DROP TABLE cstore_rowtbl;
+-- feature 4: at least 1 attribute in column orientated table
+CREATE TABLE cstore_zero_attr () with ( orientation = column );
+ERROR:  must have at least one column
+-- feature 5: don't vacuum column stored table
+CREATE TABLE cstore_vacuum_coltbl1( c_smallint smallint   null,c_double_precision double precision , c_timestamp_with_timezone timestamp with time zone) with (orientation=column , compression=yes)   ;
+VACUUM cstore_vacuum_coltbl1;
+CREATE INDEX cstore_vacuum_coltbl1_idx ON cstore_vacuum_coltbl1 ( c_timestamp_with_timezone);
+VACUUM cstore_vacuum_coltbl1;
+DROP TABLE cstore_vacuum_coltbl1 CASCADE;
+CREATE TABLE cstore_vacuum_coltbl1( c_smallint smallint   null,c_double_precision double precision , c_timestamp_with_timezone timestamp with time zone) with (orientation=column ,compression=yes) partition by range(c_smallint) (
+partition p1 values less than(100),
+partition p2 values less than(200),
+partition p3 values less than(300));
+VACUUM cstore_vacuum_coltbl1;
+CREATE INDEX cstore_vacuum_coltbl1_idx ON cstore_vacuum_coltbl1 ( c_timestamp_with_timezone) LOCAL;
+VACUUM cstore_vacuum_coltbl1;
+DROP TABLE cstore_vacuum_coltbl1 CASCADE;

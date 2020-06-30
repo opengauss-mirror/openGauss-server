@@ -1,0 +1,29 @@
+CREATE FOREIGN TABLE products (id SERIAL, price float);
+NOTICE:  CREATE FOREIGN TABLE will create implicit sequence "products_id_seq" for serial column "products.id"
+INSERT INTO products (price) VALUES (3.141);
+INSERT INTO products (price) VALUES (2.718);
+INSERT INTO products (price) VALUES (2.236);
+INSERT INTO products (price) VALUES (2.828);
+CREATE VIEW products_above_average_price AS
+SELECT id, price FROM products WHERE price > (SELECT AVG(price) FROM products);
+SELECT * FROM products_above_average_price;
+ id | price 
+----+-------
+  1 | 3.141
+  4 | 2.828
+(2 rows)
+
+INSERT INTO products (price) VALUES (-3.412);
+INSERT INTO products (price) VALUES (3.236);
+SELECT * FROM products_above_average_price;
+ id | price 
+----+-------
+  1 | 3.141
+  2 | 2.718
+  3 | 2.236
+  4 | 2.828
+  6 | 3.236
+(5 rows)
+
+DROP VIEW products_above_average_price;
+DROP FOREIGN TABLE products;

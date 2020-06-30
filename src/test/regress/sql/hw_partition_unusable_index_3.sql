@@ -1,0 +1,223 @@
+
+--create table
+DROP TABLE IF EXISTS unsable_index_3;
+CREATE TABLE unsable_index_3 (c1 int, c2 int, c3 int, c4 int, c5 text);
+CREATE INDEX idx1_unsable_index_3 on unsable_index_3(c1);
+
+DROP TABLE IF EXISTS partition_unsable_index_3;
+CREATE TABLE partition_unsable_index_3 (c1 int, c2 int, c3 int, c4 int, c5 text)
+partition by range (c2)
+(
+	partition p1_partition_unsable_index_3 values less than (1000),
+	partition p2_partition_unsable_index_3 values less than (2000),
+	partition p3_partition_unsable_index_3 values less than (3000),
+	partition p4_partition_unsable_index_3 values less than (4000),
+	partition p5_partition_unsable_index_3 values less than (5000),
+	partition p6_partition_unsable_index_3 values less than (6000),
+	partition p7_partition_unsable_index_3 values less than (7000),
+	partition p8_partition_unsable_index_3 values less than (8000),
+	partition p9_partition_unsable_index_3 values less than (9000),
+	partition p10_partition_unsable_index_3 values less than (10000)
+);
+
+--insert data
+insert into partition_unsable_index_3 select v, v, v, v, 'xxx' from generate_series(1, 9999) as v;
+
+-- create 3 indexes, and specify it's partition name 
+CREATE INDEX idx1_partition_unsable_index_3 on partition_unsable_index_3(c1) local 
+(
+	partition idx1_partition_unsable_index_3_p1,
+	partition idx1_partition_unsable_index_3_p2,
+	partition idx1_partition_unsable_index_3_p3,
+	partition idx1_partition_unsable_index_3_p4,
+	partition idx1_partition_unsable_index_3_p5,
+	partition idx1_partition_unsable_index_3_p6,
+	partition idx1_partition_unsable_index_3_p7,
+	partition idx1_partition_unsable_index_3_p8,
+	partition idx1_partition_unsable_index_3_p9,
+	partition idx1_partition_unsable_index_3_p10
+);
+CREATE INDEX idx2_partition_unsable_index_3 on partition_unsable_index_3(c1, c2) local
+(
+	partition idx2_partition_unsable_index_3_p1,
+	partition idx2_partition_unsable_index_3_p2,
+	partition idx2_partition_unsable_index_3_p3,
+	partition idx2_partition_unsable_index_3_p4,
+	partition idx2_partition_unsable_index_3_p5,
+	partition idx2_partition_unsable_index_3_p6,
+	partition idx2_partition_unsable_index_3_p7,
+	partition idx2_partition_unsable_index_3_p8,
+	partition idx2_partition_unsable_index_3_p9,
+	partition idx2_partition_unsable_index_3_p10
+);
+CREATE INDEX idx3_partition_unsable_index_3 on partition_unsable_index_3(c1, c2, c3) local
+(
+	partition idx3_partition_unsable_index_3_p1,
+	partition idx3_partition_unsable_index_3_p2,
+	partition idx3_partition_unsable_index_3_p3,
+	partition idx3_partition_unsable_index_3_p4,
+	partition idx3_partition_unsable_index_3_p5,
+	partition idx3_partition_unsable_index_3_p6,
+	partition idx3_partition_unsable_index_3_p7,
+	partition idx3_partition_unsable_index_3_p8,
+	partition idx3_partition_unsable_index_3_p9,
+	partition idx3_partition_unsable_index_3_p10
+);	
+				
+-- create a new index 
+CREATE INDEX idx4_partition_unsable_index_3 on partition_unsable_index_3(c1, c2, c3) local
+(
+	partition idx4_partition_unsable_index_3_p1,
+	partition idx4_partition_unsable_index_3_p2,
+	partition idx4_partition_unsable_index_3_p3,
+	partition idx4_partition_unsable_index_3_p4,
+	partition idx4_partition_unsable_index_3_p5,
+	partition idx4_partition_unsable_index_3_p6,
+	partition idx4_partition_unsable_index_3_p7,
+	partition idx4_partition_unsable_index_3_p8,
+	partition idx4_partition_unsable_index_3_p9,
+	partition idx4_partition_unsable_index_3_p10
+);
+-- check indunusable info
+select relname, indisusable from pg_partition 
+	where  relname = 'idx1_partition_unsable_index_3_p1' 
+		or relname = 'idx2_partition_unsable_index_3_p1' 
+		or relname = 'idx3_partition_unsable_index_3_p1'
+		or relname = 'idx4_partition_unsable_index_3_p1'
+		or relname = 'p1_partition_unsable_index_3'
+		order by 1;
+
+-- rebuild index partition
+ALTER TABLE partition_unsable_index_3 MODIFY PARTITION p1_partition_unsable_index_3 REBUILD UNUSABLE LOCAL INDEXES;
+
+-- check indunusable info
+select relname, indisusable from pg_partition 
+	where  relname = 'idx1_partition_unsable_index_3_p1' 
+		or relname = 'idx2_partition_unsable_index_3_p1' 
+		or relname = 'idx3_partition_unsable_index_3_p1'
+		or relname = 'idx4_partition_unsable_index_3_p1'
+		or relname = 'p1_partition_unsable_index_3'
+		order by 1;
+
+-- unsupport
+ALTER INDEX idx1_unsable_index_3 REBUILD, REBUILD;
+ALTER INDEX IF EXISTS idx1_unsable_index_3 REBUILD, REBUILD;
+ALTER INDEX IF EXISTS idx1_unsable_index_3 REBUILD;
+
+--5.intersection test
+--5.1 cluster
+-- cluster failed due to unusable index partition
+ALTER INDEX idx1_unsable_index_3 REBUILD;
+CLUSTER unsable_index_3 USING idx1_unsable_index_3;
+
+ALTER INDEX idx1_partition_unsable_index_3 MODIFY PARTITION idx1_partition_unsable_index_3_p1 UNUSABLE;
+CLUSTER partition_unsable_index_3 PARTITION (p1_partition_unsable_index_3) USING idx1_partition_unsable_index_3;
+CLUSTER partition_unsable_index_3 USING idx1_partition_unsable_index_3;
+-- cluster ok
+ALTER INDEX idx1_partition_unsable_index_3 REBUILD;
+CLUSTER unsable_index_3 USING idx1_unsable_index_3;
+
+ALTER INDEX idx1_partition_unsable_index_3 REBUILD PARTITION idx1_partition_unsable_index_3_p1;
+CLUSTER partition_unsable_index_3 PARTITION (p1_partition_unsable_index_3) USING idx1_partition_unsable_index_3;
+CLUSTER partition_unsable_index_3 USING idx1_partition_unsable_index_3;
+--5.2 merge
+-- merge failed due to unusable index partition
+ALTER INDEX idx1_partition_unsable_index_3 MODIFY PARTITION idx1_partition_unsable_index_3_p1 UNUSABLE;
+ALTER TABLE partition_unsable_index_3 MERGE PARTITIONS p1_partition_unsable_index_3, p2_partition_unsable_index_3 
+	INTO PARTITION px_partition_unsable_index_3;
+--rebuild unusable index partition
+ALTER INDEX idx1_partition_unsable_index_3 REBUILD PARTITION idx1_partition_unsable_index_3_p1;
+--5.3 exchange
+-- create plain table and index
+CREATE TABLE table_unusable_index_exchange (c1 int, c2 int, c3 int, c4 int, c5 text);
+CREATE INDEX idx1_table_unusable_index_exchange on table_unusable_index_exchange(c1);
+CREATE INDEX idx2_table_unusable_index_exchange on table_unusable_index_exchange(c1, c2);
+CREATE INDEX idx3_table_unusable_index_exchange on table_unusable_index_exchange(c1, c2, c3);
+CREATE INDEX idx4_table_unusable_index_exchange on table_unusable_index_exchange(c1, c2, c3);
+--- unusable non-partitioned-index
+ALTER INDEX idx1_table_unusable_index_exchange UNUSABLE;
+ALTER TABLE partition_unsable_index_3 EXCHANGE PARTITION (p1_partition_unsable_index_3)
+	WITH TABLE table_unusable_index_exchange;
+ALTER INDEX idx1_table_unusable_index_exchange REBUILD;
+
+-- unusable partitioned-index
+ALTER INDEX idx1_partition_unsable_index_3 UNUSABLE;
+ALTER TABLE partition_unsable_index_3 EXCHANGE PARTITION (p1_partition_unsable_index_3)
+	WITH TABLE table_unusable_index_exchange;
+ALTER INDEX idx1_partition_unsable_index_3 REBUILD;
+
+-- modify one index partition unusable
+-- exchange failed due to unusable index partition
+ALTER INDEX idx1_partition_unsable_index_3 MODIFY PARTITION idx1_partition_unsable_index_3_p1 UNUSABLE;
+ALTER TABLE partition_unsable_index_3 EXCHANGE PARTITION (p1_partition_unsable_index_3)
+	WITH TABLE table_unusable_index_exchange;
+-- exchange ok
+ALTER INDEX idx1_partition_unsable_index_3 REBUILD PARTITION idx1_partition_unsable_index_3_p1;
+ALTER TABLE partition_unsable_index_3 EXCHANGE PARTITION (p1_partition_unsable_index_3)
+	WITH TABLE table_unusable_index_exchange;
+DROP TABLE table_unusable_index_exchange;
+
+--6. index and unique index check
+DROP INDEX idx1_partition_unsable_index_3;
+DROP INDEX idx2_partition_unsable_index_3;
+DROP INDEX idx3_partition_unsable_index_3;
+DROP INDEX idx4_partition_unsable_index_3;
+DELETE FROM partition_unsable_index_3;
+
+--6.1 create a non-unique index
+CREATE INDEX idx_nonunique_partition_unsable_index_3 on partition_unsable_index_3(c1, c2) LOCAL
+(
+	partition idx_nonunique_partition_unsable_index_3_p1,
+	partition idx_nonunique_partition_unsable_index_3_p2,
+	partition idx_nonunique_partition_unsable_index_3_p3,
+	partition idx_nonunique_partition_unsable_index_3_p4,
+	partition idx_nonunique_partition_unsable_index_3_p5,
+	partition idx_nonunique_partition_unsable_index_3_p6,
+	partition idx_nonunique_partition_unsable_index_3_p7,
+	partition idx_nonunique_partition_unsable_index_3_p8,
+	partition idx_nonunique_partition_unsable_index_3_p9,
+	partition idx_nonunique_partition_unsable_index_3_p10
+);
+--insert duplicated rows should not report any error
+insert into partition_unsable_index_3 values(1, 1, 1, 1, 'name_1');
+insert into partition_unsable_index_3 values(1, 1, 1, 1, 'name_1');
+DELETE FROM partition_unsable_index_3;
+
+insert into partition_unsable_index_3 values(1, 1, 1, 1, 'name_1');
+-- set local index unusable
+ALTER INDEX idx_nonunique_partition_unsable_index_3 MODIFY PARTITION idx_nonunique_partition_unsable_index_3_p1 UNUSABLE;
+insert into partition_unsable_index_3 values(1, 1, 1, 1, 'name_1');
+--should not report any error
+ALTER INDEX idx_nonunique_partition_unsable_index_3 REBUILD PARTITION idx_nonunique_partition_unsable_index_3_p1;
+-- cleanup
+DROP INDEX idx_nonunique_partition_unsable_index_3;
+DELETE FROM partition_unsable_index_3;
+--6.2 create a unique index
+CREATE UNIQUE INDEX idx_unique_partition_unsable_index_3 on partition_unsable_index_3(c1, c2) LOCAL
+(
+	partition idx_unique_partition_unsable_index_3_p1,
+	partition idx_unique_partition_unsable_index_3_p2,
+	partition idx_unique_partition_unsable_index_3_p3,
+	partition idx_unique_partition_unsable_index_3_p4,
+	partition idx_unique_partition_unsable_index_3_p5,
+	partition idx_unique_partition_unsable_index_3_p6,
+	partition idx_unique_partition_unsable_index_3_p7,
+	partition idx_unique_partition_unsable_index_3_p8,
+	partition idx_unique_partition_unsable_index_3_p9,
+	partition idx_unique_partition_unsable_index_3_p10
+);
+--insert duplicated rows should report error
+insert into partition_unsable_index_3 values(1, 1, 1, 1, 'name_1');
+insert into partition_unsable_index_3 values(1, 1, 1, 1, 'name_1');--fail
+
+-- set local index unusable
+ALTER INDEX idx_unique_partition_unsable_index_3 MODIFY PARTITION idx_unique_partition_unsable_index_3_p1 UNUSABLE;
+-- bypass the unique index check
+insert into partition_unsable_index_3 values(1, 1, 1, 1, 'name_1');
+--but report unique check error here
+ALTER INDEX idx_unique_partition_unsable_index_3 REBUILD PARTITION idx_unique_partition_unsable_index_3_p1;
+-- cleanup
+DROP INDEX idx_unique_partition_unsable_index_3;
+--cleanup
+DROP TABLE unsable_index_3;
+DROP TABLE partition_unsable_index_3;

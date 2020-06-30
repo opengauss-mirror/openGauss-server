@@ -1,0 +1,67 @@
+set enable_force_vector_engine=on;
+set current_schema = vec_nestloop_engine;
+SET statement_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET default_tablespace = '';
+SET default_with_oids = false;
+----
+--- Special Case: nestloop + hashjoin + operator with parameters pushed down (openGauss1111111/2014120306303)
+----
+CREATE INDEX vecvtor_nestloop_base_index_01 ON VECTOR_NESTLOOP_TABLE_05 USING psort (id) LOCAL(PARTITION b1_p1_id_idx, PARTITION b1_p2_id_idx, PARTITION b1_p3_id_idx) ;
+CREATE INDEX vecvtor_nestloop_base_index_02 ON VECTOR_NESTLOOP_TABLE_06 USING psort (id, c_d_id, c_id) LOCAL(PARTITION b5_p1_id_c_d_id_c_id_idx, PARTITION b5_p2_id_c_d_id_c_id_idx, PARTITION b5_p3_id_c_d_id_c_id_idx, PARTITION b5_p4_id_c_d_id_c_id_idx, PARTITION b5_p5_id_c_d_id_c_id_idx, PARTITION b5_p6_id_c_d_id_c_id_idx) ;
+CREATE INDEX vecvtor_nestloop_base_index_03 ON VECTOR_NESTLOOP_TABLE_07 USING psort (id, c_d_id, c_w_id) LOCAL(PARTITION b7_p1_id_c_d_id_c_w_id_idx, PARTITION b7_p2_id_c_d_id_c_w_id_idx, PARTITION b7_p3_id_c_d_id_c_w_id_idx, PARTITION b7_p4_id_c_d_id_c_w_id_idx, PARTITION b7_p5_id_c_d_id_c_w_id_idx, PARTITION b7_p6_id_c_d_id_c_w_id_idx, PARTITION b7_p7_id_c_d_id_c_w_id_idx, PARTITION b7_p8_id_c_d_id_c_w_id_idx, PARTITION b7_p9_id_c_d_id_c_w_id_idx, PARTITION b7_p10_id_c_d_id_c_w_id_idx, PARTITION b7_p11_id_c_d_id_c_w_id_idx) ;
+CREATE INDEX zip_idx ON VECTOR_NESTLOOP_TABLE_05 USING psort (zip) LOCAL(PARTITION b1_p1_zip_idx, PARTITION b1_p2_zip_idx, PARTITION b1_p3_zip_idx) ;
+
+SELECT 	A.id, A.name, A.zip FROM VECTOR_NESTLOOP_TABLE_05 A WHERE (A.id IN (SELECT distinct C.id FROM VECTOR_NESTLOOP_TABLE_07 C WHERE NOT (EXISTS (SELECT * FROM VECTOR_NESTLOOP_TABLE_06 B WHERE B.c_id = C.id)))) ORDER BY 1,2,3;
+
+----
+--- Special case: material all
+----
+explain (verbose on, costs off) select * from vector_nestloop_table_01 A, vector_nestloop_table_02 B, vector_nestloop_table_03 C, vector_nestloop_table_04 D where A.col_int = B.col_int and C.col_int = D.col_int order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20 limit 5;
+select * from vector_nestloop_table_01 A, vector_nestloop_table_02 B, vector_nestloop_table_03 C, vector_nestloop_table_04 D where A.col_int = B.col_int and C.col_int = D.col_int order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20 limit 5;
+
+---
+---
+explain (verbose on, costs off) select count(*) from vector_nestloop_table_08 t1 left join vector_nestloop_table_08 t2 on t1.n_nationkey=t2.n_regionkey
+ where CASE WHEN t2.n_regionkey=1 then '1' else '2' end = '2';
+select count(*) from vector_nestloop_table_08 t1 left join vector_nestloop_table_08 t2 on t1.n_nationkey=t2.n_regionkey
+ where CASE WHEN t2.n_regionkey=1 then '1' else '2' end = '2';
+
+create table t1(a numeric(10,0));
+insert into t1 values(1);
+insert into t1 values(generate_series(1000000, 1000020));
+
+create table t2(a numeric(10,0));
+insert into t2 values(1);
+insert into t2 values(generate_series(1000021, 1000040));
+
+create table t1_col (a numeric(10,0))with(orientation = column);
+insert into t1_col select * from t1;
+create table t2_col (b numeric(10,0))with(orientation = column);
+insert into t2_col select * from t2;
+
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain (verbose on, costs off)  select b::numeric(1, 0) from t1_col join t2_col on (a = b);
+select b::numeric(1, 0) from t1_col join t2_col on (a = b);
+drop table t1;
+drop table t2;
+drop table t1_col;
+drop table t2_col;
+
+--test ctid
+set enable_hashjoin=on;
+explain (costs off, verbose on) select count(*) from vector_nestloop_table_01 t1 join vector_nestloop_table_02 t2 on t1.ctid = t2.ctid;
+select count(*) from vector_nestloop_table_01 t1 join vector_nestloop_table_02 t2 on t1.ctid = t2.ctid;
+
+set enable_mergejoin=on;
+set enable_nestloop=off;
+explain (costs off, verbose on) select count(*) from vector_nestloop_table_01 t1 join vector_nestloop_table_02 t2 on t1.ctid = t2.ctid;
+select count(*) from vector_nestloop_table_01 t1 join vector_nestloop_table_02 t2 on t1.ctid = t2.ctid;
+
+----
+--- Clean table and resource
+----
+drop schema vec_nestloop_engine cascade;

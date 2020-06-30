@@ -1,0 +1,18 @@
+-- test function hashint1()
+CREATE TABLE hw_hashint1_test
+(
+	a tinyint,
+	b int,
+	c int,
+	d int,
+	e int,
+	a6 int,
+	a7 int,
+	a8 int,
+	a9 int,
+	a10 int,
+	a11 int
+);
+COPY hw_hashint1_test FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT a, b FROM hw_hashint1_test ORDER BY 1, 2;
+DROP TABLE hw_hashint1_test;

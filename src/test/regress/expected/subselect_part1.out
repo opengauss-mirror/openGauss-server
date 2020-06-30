@@ -1,0 +1,637 @@
+--
+-- SUBSELECT
+--
+SELECT 1 AS one WHERE 1 IN (SELECT 1);
+ one 
+-----
+   1
+(1 row)
+
+SELECT 1 AS zero WHERE 1 NOT IN (SELECT 1);
+ zero 
+------
+(0 rows)
+
+SELECT 1 AS zero WHERE 1 IN (SELECT 2);
+ zero 
+------
+(0 rows)
+
+-- Check grammar's handling of extra parens in assorted contexts
+SELECT * FROM (SELECT 1 AS x) ss;
+ x 
+---
+ 1
+(1 row)
+
+SELECT * FROM ((SELECT 1 AS x)) ss;
+ x 
+---
+ 1
+(1 row)
+
+(SELECT 2) UNION SELECT 2;
+ ?column? 
+----------
+        2
+(1 row)
+
+((SELECT 2)) UNION SELECT 2;
+ ?column? 
+----------
+        2
+(1 row)
+
+SELECT ((SELECT 2) UNION SELECT 2);
+ ?column? 
+----------
+        2
+(1 row)
+
+SELECT (((SELECT 2)) UNION SELECT 2);
+ ?column? 
+----------
+        2
+(1 row)
+
+SELECT (SELECT ARRAY[1,2,3])[1];
+ array 
+-------
+     1
+(1 row)
+
+SELECT ((SELECT ARRAY[1,2,3]))[2];
+ array 
+-------
+     2
+(1 row)
+
+SELECT (((SELECT ARRAY[1,2,3])))[3];
+ array 
+-------
+     3
+(1 row)
+
+-- Set up some simple test tables
+CREATE TABLE SUBSELECT_TBL (
+  f1 integer,
+  f2 integer,
+  f3 float
+);
+INSERT INTO SUBSELECT_TBL VALUES (1, 2, 3);
+INSERT INTO SUBSELECT_TBL VALUES (2, 3, 4);
+INSERT INTO SUBSELECT_TBL VALUES (3, 4, 5);
+INSERT INTO SUBSELECT_TBL VALUES (1, 1, 1);
+INSERT INTO SUBSELECT_TBL VALUES (2, 2, 2);
+INSERT INTO SUBSELECT_TBL VALUES (3, 3, 3);
+INSERT INTO SUBSELECT_TBL VALUES (6, 7, 8);
+INSERT INTO SUBSELECT_TBL VALUES (8, 9, NULL);
+SELECT '' AS eight, * FROM SUBSELECT_TBL ORDER BY f1, f2, f3;
+ eight | f1 | f2 | f3 
+-------+----+----+----
+       |  1 |  1 |  1
+       |  1 |  2 |  3
+       |  2 |  2 |  2
+       |  2 |  3 |  4
+       |  3 |  3 |  3
+       |  3 |  4 |  5
+       |  6 |  7 |  8
+       |  8 |  9 |   
+(8 rows)
+
+-- Uncorrelated subselects
+SELECT '' AS two, f1 AS "Constant Select" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT 1) ORDER BY 2;
+ two | Constant Select 
+-----+-----------------
+     |               1
+     |               1
+(2 rows)
+
+SELECT '' AS six, f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL) 
+  ORDER BY 2;
+ six | Uncorrelated Field 
+-----+--------------------
+     |                  1
+     |                  1
+     |                  2
+     |                  2
+     |                  3
+     |                  3
+(6 rows)
+
+SELECT '' AS six, f1 AS "Uncorrelated Field" FROM SUBSELECT_TBL
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE
+    f2 IN (SELECT f1 FROM SUBSELECT_TBL)) 
+    ORDER BY 2;
+ six | Uncorrelated Field 
+-----+--------------------
+     |                  1
+     |                  1
+     |                  2
+     |                  2
+     |                  3
+     |                  3
+(6 rows)
+
+SELECT '' AS three, f1, f2
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) NOT IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                         WHERE f3 IS NOT NULL) 
+                         ORDER BY f1, f2;
+ three | f1 | f2 
+-------+----+----
+       |  1 |  2
+       |  6 |  7
+       |  8 |  9
+(3 rows)
+
+-- Correlated subselects
+SELECT '' AS six, f1 AS "Correlated Field", f2 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN (SELECT f2 FROM SUBSELECT_TBL WHERE f1 = upper.f1) 
+  ORDER BY f1, f2;
+ six | Correlated Field | Second Field 
+-----+------------------+--------------
+     |                1 |            1
+     |                1 |            2
+     |                2 |            2
+     |                2 |            3
+     |                3 |            3
+     |                3 |            4
+(6 rows)
+
+SELECT '' AS six, f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f1 IN
+    (SELECT f2 FROM SUBSELECT_TBL WHERE CAST(upper.f2 AS float) = f3)
+    ORDER BY 2, 3;
+ six | Correlated Field | Second Field 
+-----+------------------+--------------
+     |                1 |            1
+     |                2 |            2
+     |                2 |            4
+     |                3 |            3
+     |                3 |            5
+(5 rows)
+
+SELECT '' AS six, f1 AS "Correlated Field", f3 AS "Second Field"
+  FROM SUBSELECT_TBL upper
+  WHERE f3 IN (SELECT upper.f1 + f2 FROM SUBSELECT_TBL
+               WHERE f2 = CAST(f3 AS integer)) 
+               ORDER BY 2, 3;
+ six | Correlated Field | Second Field 
+-----+------------------+--------------
+     |                1 |            3
+     |                2 |            4
+     |                3 |            5
+     |                6 |            8
+(4 rows)
+
+SELECT '' AS five, f1 AS "Correlated Field"
+  FROM SUBSELECT_TBL
+  WHERE (f1, f2) IN (SELECT f2, CAST(f3 AS int4) FROM SUBSELECT_TBL
+                     WHERE f3 IS NOT NULL) 
+                     ORDER BY 2;
+ five | Correlated Field 
+------+------------------
+      |                1
+      |                2
+      |                2
+      |                3
+      |                3
+(5 rows)
+
+--
+-- Use some existing tables in the regression test
+--
+SELECT '' AS eight, ss.f1 AS "Correlated Field", ss.f3 AS "Second Field"
+  FROM SUBSELECT_TBL ss
+  WHERE f1 NOT IN (SELECT f1+1 FROM INT4_TBL
+                   WHERE f1 != ss.f1 AND f1 < 2147483647) 
+                   ORDER BY 2, 3;
+ eight | Correlated Field | Second Field 
+-------+------------------+--------------
+       |                2 |            2
+       |                2 |            4
+       |                3 |            3
+       |                3 |            5
+       |                6 |            8
+       |                8 |             
+(6 rows)
+
+select q1, float8(count(*)) / (select count(*) from int8_tbl)
+from int8_tbl group by q1 order by q1;
+        q1        |     ?column?     
+------------------+------------------
+              123 | .333333333333333
+ 4567890123456789 |               .5
+                  | .166666666666667
+(3 rows)
+
+--
+-- Test cases to catch unpleasant interactions between IN-join processing
+-- and subquery pullup.
+--
+-- delelte this sentence, because the output is related with number of nodes
+--select count(*) from
+--  (select 1 from tenk1 a
+--   where unique1 IN (select hundred from tenk1 b)) ss;
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select hundred from tenk1 b)) ss;
+ count 
+-------
+    10
+(1 row)
+
+select count(*) from
+  (select 1 from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss;
+ count 
+-------
+   100
+(1 row)
+
+select count(distinct ss.ten) from
+  (select ten from tenk1 a
+   where unique1 IN (select distinct hundred from tenk1 b)) ss;
+ count 
+-------
+    10
+(1 row)
+
+--
+-- Test cases to check for overenthusiastic optimization of
+-- "IN (SELECT DISTINCT ...)" and related cases.  Per example from
+-- Luca Pireddu and Michael Fuhr.
+--
+-- Enforce use of COMMIT instead of 2PC for temporary objects
+SET enforce_two_phase_commit TO off;
+-- CREATE TEMP TABLE subselect_foo (id integer);
+CREATE  TABLE subselect_foo (id integer);
+-- CREATE TEMP TABLE bar (id1 integer, id2 integer);
+CREATE  TABLE subselect_bar (id1 integer, id2 integer);
+INSERT INTO subselect_foo VALUES (1);
+INSERT INTO subselect_bar VALUES (1, 1);
+INSERT INTO subselect_bar VALUES (2, 2);
+INSERT INTO subselect_bar VALUES (3, 1);
+-- These cases require an extra level of distinct-ing above subquery s
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT id1, id2 FROM subselect_bar) AS s);
+ id 
+----
+  1
+(1 row)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1,id2 FROM subselect_bar GROUP BY id1,id2) AS s);
+ id 
+----
+  1
+(1 row)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id1, id2 FROM subselect_bar UNION
+                      SELECT id1, id2 FROM subselect_bar) AS s);
+ id 
+----
+  1
+(1 row)
+
+-- These cases do not
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT DISTINCT ON (id2) id1, id2 FROM subselect_bar) AS s);
+ id 
+----
+  1
+(1 row)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM subselect_bar GROUP BY id2) AS s);
+ id 
+----
+  1
+(1 row)
+
+SELECT * FROM subselect_foo WHERE id IN
+    (SELECT id2 FROM (SELECT id2 FROM subselect_bar UNION
+                      SELECT id2 FROM subselect_bar) AS s);
+ id 
+----
+  1
+(1 row)
+
+--
+-- Test case to catch problems with multiply nested sub-SELECTs not getting
+-- recalculated properly.  Per bug report from Didier Moens.
+--
+CREATE TABLE orderstest (
+    approver_ref integer,
+    po_ref integer,
+    ordercanceled boolean
+);
+INSERT INTO orderstest VALUES (1, 1, false);
+INSERT INTO orderstest VALUES (66, 5, false);
+INSERT INTO orderstest VALUES (66, 6, false);
+INSERT INTO orderstest VALUES (66, 7, false);
+INSERT INTO orderstest VALUES (66, 1, true);
+INSERT INTO orderstest VALUES (66, 8, false);
+INSERT INTO orderstest VALUES (66, 1, false);
+INSERT INTO orderstest VALUES (77, 1, false);
+INSERT INTO orderstest VALUES (1, 1, false);
+INSERT INTO orderstest VALUES (66, 1, false);
+INSERT INTO orderstest VALUES (1, 1, false);
+CREATE VIEW orders_view AS
+SELECT *,
+(SELECT CASE
+   WHEN ord.approver_ref=1 THEN '---' ELSE 'Approved'
+ END) AS "Approved",
+(SELECT CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (SELECT CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (SELECT CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status",
+(CASE
+ WHEN ord.ordercanceled
+ THEN 'Canceled'
+ ELSE
+  (CASE
+		WHEN ord.po_ref=1
+		THEN
+		 (CASE
+				WHEN ord.approver_ref=1
+				THEN '---'
+				ELSE 'Approved'
+			END)
+		ELSE 'PO'
+	END)
+END) AS "Status_OK"
+FROM orderstest ord;
+SELECT * FROM orders_view 
+ORDER BY approver_ref, po_ref, ordercanceled;
+ approver_ref | po_ref | ordercanceled | Approved |  Status  | Status_OK 
+--------------+--------+---------------+----------+----------+-----------
+            1 |      1 | f             | ---      | ---      | ---
+            1 |      1 | f             | ---      | ---      | ---
+            1 |      1 | f             | ---      | ---      | ---
+           66 |      1 | f             | Approved | Approved | Approved
+           66 |      1 | f             | Approved | Approved | Approved
+           66 |      1 | t             | Approved | Canceled | Canceled
+           66 |      5 | f             | Approved | PO       | PO
+           66 |      6 | f             | Approved | PO       | PO
+           66 |      7 | f             | Approved | PO       | PO
+           66 |      8 | f             | Approved | PO       | PO
+           77 |      1 | f             | Approved | Approved | Approved
+(11 rows)
+
+DROP TABLE orderstest cascade;
+NOTICE:  drop cascades to view orders_view
+--
+-- Test cases to catch situations where rule rewriter fails to propagate
+-- hasSubLinks flag correctly.  Per example from Kyle Bateman.
+--
+-- create temp table parts (
+create  table parts (
+    partnum     text,
+    cost        float8
+);
+-- create temp table shipped (
+create  table shipped (
+    ttype       char(2),
+    ordnum      int4,
+    partnum     text,
+    value       float8
+);
+-- create temp view shipped_view as
+create  view shipped_view as
+    select * from shipped where ttype = 'wt';
+create rule shipped_view_insert as on insert to shipped_view do instead
+    insert into shipped values('wt', new.ordnum, new.partnum, new.value);
+ERROR:  RULE is not yet supported.
+insert into parts (partnum, cost) values (1, 1234.56);
+insert into shipped_view (ordnum, partnum, value)
+    values (0, 1, (select cost from parts where partnum = '1'));
+ERROR:  cannot insert into view "shipped_view"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+select * from shipped_view;
+ ttype | ordnum | partnum | value 
+-------+--------+---------+-------
+(0 rows)
+
+create rule shipped_view_update as on update to shipped_view do instead
+    update shipped set partnum = new.partnum, value = new.value
+        where ttype = new.ttype and ordnum = new.ordnum;
+ERROR:  RULE is not yet supported.
+update shipped_view set value = 11
+    from int4_tbl a join int4_tbl b
+      on (a.f1 = (select f1 from int4_tbl c where c.f1=b.f1))
+    where ordnum = a.f1;
+ERROR:  cannot update view "shipped_view"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+select * from shipped_view;
+ ttype | ordnum | partnum | value 
+-------+--------+---------+-------
+(0 rows)
+
+select f1, ss1 as relabel from
+    (select *, (select sum(f1) from int4_tbl b where f1 >= a.f1) as ss1
+     from int4_tbl a) ss 
+     ORDER BY f1, relabel;
+     f1      |  relabel   
+-------------+------------
+ -2147483647 |          0
+     -123456 | 2147483647
+           0 | 2147607103
+      123456 | 2147607103
+  2147483647 | 2147483647
+             |           
+(6 rows)
+
+--
+-- Test cases involving PARAM_EXEC parameters and min/max index optimizations.
+-- Per bug report from David Sanchez i Gregori.
+--
+explain (verbose on, costs off, nodes off)
+select * from (
+  select max(unique1) from tenk1 as a
+  where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
+) ss;
+                                                                                         QUERY PLAN                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: max(a.unique1)
+   ->  Merge Join
+         Output: a.unique1
+         Merge Cond: (a.unique2 = b.thousand)
+         ->  Index Scan using tenk1_unique2 on public.tenk1 a
+               Output: a.unique1, a.unique2, a.two, a.four, a.ten, a.twenty, a.hundred, a.thousand, a.twothousand, a.fivethous, a.tenthous, a.odd, a.even, a.stringu1, a.stringu2, a.string4
+         ->  Sort
+               Output: b.thousand
+               Sort Key: b.thousand
+               ->  HashAggregate
+                     Output: b.thousand
+                     Group By Key: b.thousand
+                     ->  Index Only Scan using tenk1_thous_tenthous on public.tenk1 b
+                           Output: b.thousand
+(15 rows)
+
+select * from (
+  select max(unique1) from tenk1 as a
+  where exists (select 1 from tenk1 as b where b.thousand = a.unique2)
+) ss;
+ max  
+------
+ 9997
+(1 row)
+
+explain (verbose on, costs off, nodes off)
+select * from (
+  select min(unique1) from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Result
+   Output: $1
+   InitPlan 1 (returns $0)
+     ->  Index Only Scan using tenk1_unique2 on public.tenk1 b
+           Index Cond: (b.unique2 = 10000)
+   InitPlan 2 (returns $1)
+     ->  Limit
+           Output: a.unique1
+           ->  Result
+                 Output: a.unique1
+                 One-Time Filter: (NOT $0)
+                 ->  Index Only Scan using tenk1_unique1 on public.tenk1 a
+                       Output: a.unique1
+                       Index Cond: (a.unique1 IS NOT NULL)
+(14 rows)
+
+select * from (
+  select min(unique1) from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss;
+ min 
+-----
+   0
+(1 row)
+
+explain (verbose on, costs off, nodes off)
+select * from (
+  select min(unique1) as b from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss where b>5;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Result
+   Output: $1
+   One-Time Filter: ($1 > 5)
+   InitPlan 1 (returns $0)
+     ->  Index Only Scan using tenk1_unique2 on public.tenk1 b
+           Index Cond: (b.unique2 = 10000)
+   InitPlan 2 (returns $1)
+     ->  Limit
+           Output: a.unique1
+           ->  Result
+                 Output: a.unique1
+                 One-Time Filter: (NOT $0)
+                 ->  Index Only Scan using tenk1_unique1 on public.tenk1 a
+                       Output: a.unique1
+                       Index Cond: (a.unique1 IS NOT NULL)
+(15 rows)
+
+select * from (
+  select min(unique1) as b from tenk1 as a
+  where not exists (select 1 from tenk1 as b where b.unique2 = 10000)
+) ss where b>5;
+ b 
+---
+(0 rows)
+
+explain (verbose on, costs off, nodes off)
+select * from (
+  select min(unique1) from tenk1 as a
+  where exists (select * from generate_series(1,1))
+) ss;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Result
+   Output: $1
+   InitPlan 1 (returns $0)
+     ->  Function Scan on pg_catalog.generate_series
+           Function Call: generate_series(1, 1)
+   InitPlan 2 (returns $1)
+     ->  Limit
+           Output: a.unique1
+           ->  Result
+                 Output: a.unique1
+                 One-Time Filter: $0
+                 ->  Index Only Scan using tenk1_unique1 on public.tenk1 a
+                       Output: a.unique1
+                       Index Cond: (a.unique1 IS NOT NULL)
+(14 rows)
+
+select * from (
+  select min(unique1) from tenk1 as a
+  where exists (select * from generate_series(1,1))
+) ss;
+ min 
+-----
+   0
+(1 row)
+
+explain (verbose on, costs off, nodes off)
+select * from (
+  select min(unique1) from tenk1 as a
+  where exists (select * from generate_series(1,1))
+) ss where exists(select * from generate_series(1,1));
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Result
+   Output: ($2)
+   One-Time Filter: $0
+   InitPlan 1 (returns $0)
+     ->  Function Scan on pg_catalog.generate_series
+           Function Call: generate_series(1, 1)
+   ->  Result
+         Output: $2
+         InitPlan 2 (returns $1)
+           ->  Function Scan on pg_catalog.generate_series
+                 Function Call: generate_series(1, 1)
+         InitPlan 3 (returns $2)
+           ->  Limit
+                 Output: a.unique1
+                 ->  Result
+                       Output: a.unique1
+                       One-Time Filter: $1
+                       ->  Index Only Scan using tenk1_unique1 on public.tenk1 a
+                             Output: a.unique1
+                             Index Cond: (a.unique1 IS NOT NULL)
+(20 rows)
+
+select * from (
+  select min(unique1) from tenk1 as a
+  where exists (select * from generate_series(1,1))
+) ss where exists(select * from generate_series(1,1));
+ min 
+-----
+   0
+(1 row)
+
+DROP TABLE subselect_foo CASCADE;
+DROP TABLE subselect_bar CASCADE;
+DROP table parts CASCADE;
+DROP table shipped CASCADE;
+NOTICE:  drop cascades to view shipped_view

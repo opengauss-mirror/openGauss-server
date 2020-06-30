@@ -1,0 +1,63 @@
+/*
+################################################################################
+# TCASE NAME : explain_sql.py
+# COMPONENT(S)  : 测试包含CN轻量化, PBE,PGXC计划, subplan, initplan, nodegroup
+# PREREQUISITE  : 
+# PLATFORM      : all
+# DESCRIPTION   : enhance the remote query plain description for explain. 
+# TAG           : explain enhance
+# TC LEVEL      : Level 1
+################################################################################
+*/
+
+create schema explain_fqs;
+set current_schema=explain_fqs;
+create table t1(a int) with (orientation=column);
+create table t2(a int) with (orientation=column);
+insert into t1 values(generate_series(1,2000));
+insert into t2 values(generate_series(1900,3000));
+analyze t1;
+analyze t2;
+
+-- initplan && subplan --
+explain select * from t1,t2 where t1.a < (select * from t2 where t2.a = t1.a);
+explain verbose select * from t1,t2 where t1.a = (select * from t2 where t2.a = t1.a);
+
+-- fqs && CN lightproxy --
+explain verbose select * from t1 where t1.a < 10;
+explain verbose select * from t1 where t1.a = 10;
+explain performance select * from t1 where t1.a < 10;
+explain select count(a) from t1 where t1.a < 1000 group by a order by 1;
+
+-- nodegroup && subplan && pgxc--
+-- create node group ngroup1 with (datanode1, datanode3);
+-- create node group ngroup2 with (datanode2, datanode4);
+-- create table t3(c1 int, c2 int)  ;
+-- create table t4(c1 int, c2 int)  ;
+-- insert into t3 select v,v from generate_series(1,30) as v;
+-- insert into t4 select * from t3;
+-- explain (verbose on, costs off) select * from t3 join t4 on t3.c1 = t4.c1 order by 1;
+-- explain (verbose on, costs off) 
+-- select count(*) from t1, (select count(s.c1) as sa, s.c2 as sb from t3 s, t2 where s.c1 = t2.a group by sb)tp(a,b) where t1.a = tp.b;
+-- explain (verbose on, costs off)
+-- with tmp(a,b) as
+-- (
+--    select count(s.c1) as sa, s.c2 as sb from t3 s, t2 where s.c1 = t2.a group by sb
+-- )
+-- select count(*) from t1, tmp where t1.a = tmp.b;
+
+-- pbe --
+prepare a as select * from t1 where t1.a = $1;
+explain insert into t1 values (2001);
+explain execute a(1);
+execute a(1);
+explain verbose execute a(1);
+execute a(1);
+prepare b as select * from t1 where t1.a < (select * from t2 where t2.a= $1);
+explain execute b(2);
+execute b(2);
+explain verbose execute b(2);
+execute b(2);
+DEALLOCATE PREPARE a;
+DEALLOCATE PREPARE b;
+drop schema explain_fqs cascade;

@@ -1,0 +1,110 @@
+--
+-- case 1: small integer type
+--
+CREATE TABLE cmpr_smallint_raw (
+	RS_ID smallint,
+	R0_ID smallint NOT NULL,
+	R1_ID smallint NOT NULL,
+	R2_ID smallint NOT NULL,
+	R3_ID smallint NOT NULL,
+	R4_ID smallint NOT NULL,
+	R5_ID smallint NOT NULL,
+	R6_ID smallint NOT NULL,
+	R7_ID smallint NOT NULL,
+	R8_ID smallint NOT NULL,
+	R9_ID smallint NOT NULL
+);
+COPY cmpr_smallint_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+CREATE TABLE cmpr_smallint_auto (
+	RS_ID smallint,
+	R0_ID smallint NOT NULL,
+	R1_ID smallint NOT NULL,
+	R2_ID smallint NOT NULL,
+	R3_ID smallint NOT NULL,
+	R4_ID smallint NOT NULL,
+	R5_ID smallint NOT NULL,
+	R6_ID smallint NOT NULL,
+	R7_ID smallint NOT NULL,
+	R8_ID smallint NOT NULL,
+	R9_ID smallint NOT NULL
+)  COMPRESS;
+COPY cmpr_smallint_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_auto);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_auto);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_smallint_auto) MINUS ALL (SELECT * FROM cmpr_smallint_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_smallint_auto;
+CREATE TABLE cmpr_smallint_dict (
+	RS_ID smallint dictionary,
+	R0_ID smallint dictionary NOT NULL,
+	R1_ID smallint dictionary NOT NULL,
+	R2_ID smallint dictionary NOT NULL,
+	R3_ID smallint dictionary NOT NULL,
+	R4_ID smallint dictionary NOT NULL,
+	R5_ID smallint dictionary NOT NULL,
+	R6_ID smallint dictionary NOT NULL,
+	R7_ID smallint dictionary NOT NULL,
+	R8_ID smallint dictionary NOT NULL,
+	R9_ID smallint dictionary NOT NULL
+)  COMPRESS;
+COPY cmpr_smallint_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_dict);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_dict);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_smallint_dict) MINUS ALL (SELECT * FROM cmpr_smallint_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_smallint_dict;
+CREATE TABLE cmpr_smallint_delta (
+	RS_ID smallint delta,
+	R0_ID smallint delta NOT NULL,
+	R1_ID smallint delta NOT NULL,
+	R2_ID smallint delta NOT NULL,
+	R3_ID smallint delta NOT NULL,
+	R4_ID smallint delta NOT NULL,
+	R5_ID smallint delta NOT NULL,
+	R6_ID smallint delta NOT NULL,
+	R7_ID smallint delta NOT NULL,
+	R8_ID smallint delta NOT NULL,
+	R9_ID smallint delta NOT NULL
+)  COMPRESS;
+COPY cmpr_smallint_delta FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_smallint_raw) - (SELECT COUNT(*) FROM cmpr_smallint_delta);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_smallint_raw) MINUS ALL (SELECT * FROM cmpr_smallint_delta);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_smallint_delta) MINUS ALL (SELECT * FROM cmpr_smallint_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_smallint_delta;

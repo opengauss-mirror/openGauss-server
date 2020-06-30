@@ -1,0 +1,471 @@
+--
+-- SMP
+-- Create @ 2017-7-11
+--
+--dynamic smp+random plan, plan should be same
+set plan_mode_seed = 1485495508;
+explain (costs off) select count(node_name) as dncnt
+	from pgxc_node where node_type='D'
+	group by node_host order by dncnt desc
+	limit 1;
+                  QUERY PLAN (RANDOM seed 1485495508)                   
+------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (count(node_name)) DESC
+         ->  HashAggregate
+               Group By Key: node_host
+               ->  Bitmap Heap Scan on pgxc_node
+                     Recheck Cond: (node_type = 'D'::"char")
+                     ->  Bitmap Index Scan on pgxc_node_name_type_index
+                           Index Cond: (node_type = 'D'::"char")
+(9 rows)
+
+explain (costs off) select count(node_name) as dncnt
+	from pgxc_node where node_type='D'
+	group by node_host order by dncnt desc
+	limit 1;
+                  QUERY PLAN (RANDOM seed 1485495508)                   
+------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (count(node_name)) DESC
+         ->  HashAggregate
+               Group By Key: node_host
+               ->  Bitmap Heap Scan on pgxc_node
+                     Recheck Cond: (node_type = 'D'::"char")
+                     ->  Bitmap Index Scan on pgxc_node_name_type_index
+                           Index Cond: (node_type = 'D'::"char")
+(9 rows)
+
+set plan_mode_seed = 0;
+create schema hw_smp;
+set current_schema = hw_smp;
+--The join's left and right tree have different execnodes.
+--Merge sort when union two list.
+create table smp_node_a
+(
+    a_sk            integer               not null
+)
+ with (orientation = column)  ;
+insert into smp_node_a values(1);
+create table smp_node_b
+(
+    b_item_sk                integer               not null,
+    b_sk           integer
+ )
+ with (orientation = column)  
+;
+insert into smp_node_b values(1, 1);
+create table smp_node_c
+(
+    c_sk               integer               not null
+ )
+ with (orientation = column)  ;
+insert into smp_node_c values(1);
+with tmp1 as
+ (select a_sk
+    from smp_node_a
+   order by 1)
+select count(distinct b_item_sk), c_sk
+  from (select b_item_sk, a_sk
+          from tmp1
+          left join smp_node_b
+            on b_sk = a_sk)
+ inner join smp_node_c
+    on c_sk = a_sk
+ where c_sk = 1
+ group by 2;
+ count | c_sk 
+-------+------
+     1 |    1
+(1 row)
+
+--Plan node execute only on some DN.
+create table
+smp_dummy_plan(item_sk int,
+				date_sk smallint,
+				ticket_number bigint
+)
+with (orientation = column)  ;
+insert into smp_dummy_plan values(1, 1, 1);
+insert into smp_dummy_plan values(1, 2, 3);
+insert into smp_dummy_plan values(0, 2, 1);
+select date_sk
+	from smp_dummy_plan
+	where
+	exists
+	(
+		select max(ticket_number)
+		from smp_dummy_plan
+	)
+and item_sk = 1;
+ date_sk 
+---------
+       1
+       2
+(2 rows)
+
+--Parallel for array_agg.
+create table smp_array_agg(
+ a int,
+ b int
+);
+insert into smp_array_agg values(1, generate_series(1, 100));
+select array_agg(b order by b) from smp_array_agg group by a;
+                                                                                                                                               array_agg                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100}
+(1 row)
+
+--The join's left and right tree have different execnodes.
+--Merge sort when union two list.
+create table smp_partition
+(
+	a int,
+	b int
+ )
+ with (orientation = column,compression=high)
+  
+PARTITION BY Range(b) (
+        partition p1 values less than(100),
+        partition p2 values less than(200),
+        partition p6 values less than(maxvalue)
+)
+;
+insert into smp_partition values (1, 500);
+insert into smp_partition values (2, 150);
+insert into smp_partition values (3, 50);
+select count(1) from smp_partition where b < 200 group by b;
+ count 
+-------
+     1
+     1
+(2 rows)
+
+--The join key has different type.
+create table smp_jointype_a
+( a int)
+with (orientation = column)
+ 
+;
+create table smp_jointype_b
+( b numeric)
+with (orientation = column)
+ 
+;
+explain (verbose on, costs off) select a from smp_jointype_a join smp_jointype_b on a = b group by a;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Row Adapter
+   Output: smp_jointype_a.a
+   ->  Vector Sonic Hash Aggregate
+         Output: smp_jointype_a.a
+         Group By Key: smp_jointype_a.a
+         ->  Vector Sonic Hash Join
+               Output: smp_jointype_a.a
+               Hash Cond: ((smp_jointype_a.a)::numeric = smp_jointype_b.b)
+               ->  CStore Scan on hw_smp.smp_jointype_a
+                     Output: smp_jointype_a.a
+               ->  CStore Scan on hw_smp.smp_jointype_b
+                     Output: smp_jointype_b.b
+(12 rows)
+
+--Merge append do not support parallel
+create table smp_mergeappend1(a1 int, b1 int)
+partition by range (a1)
+(
+partition p1 values less than (100),
+partition p4 values less than (maxvalue)
+);
+create table smp_mergeappend2(a2 int, b2 int)
+partition by range (a2)
+(
+partition p5 values less than (100),
+partition p8 values less than (maxvalue)
+);
+set enable_hashagg = off;
+explain (nodes off, costs off)
+with s1 as(
+	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
+),
+s2 as(
+	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
+)
+select
+	a1, sum(total) total
+from(
+	select * from s1
+	union all
+	select * from s2
+) tmp1
+group by a1
+order by a1
+;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ GroupAggregate
+   Group By Key: s1.a1
+   CTE s1
+     ->  GroupAggregate
+           Group By Key: hw_smp.smp_mergeappend1.a1
+           ->  Merge Join
+                 Merge Cond: (hw_smp.smp_mergeappend1.a1 = hw_smp.smp_mergeappend2.a2)
+                 ->  Sort
+                       Sort Key: hw_smp.smp_mergeappend1.a1
+                       ->  Partition Iterator
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on smp_mergeappend1
+                                   Selected Partitions:  1..2
+                 ->  Sort
+                       Sort Key: hw_smp.smp_mergeappend2.a2
+                       ->  Partition Iterator
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on smp_mergeappend2
+                                   Selected Partitions:  1..2
+   CTE s2
+     ->  GroupAggregate
+           Group By Key: hw_smp.smp_mergeappend1.a1
+           ->  Merge Join
+                 Merge Cond: (hw_smp.smp_mergeappend1.a1 = hw_smp.smp_mergeappend2.a2)
+                 ->  Sort
+                       Sort Key: hw_smp.smp_mergeappend1.a1
+                       ->  Partition Iterator
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on smp_mergeappend1
+                                   Selected Partitions:  1..2
+                 ->  Sort
+                       Sort Key: hw_smp.smp_mergeappend2.a2
+                       ->  Partition Iterator
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on smp_mergeappend2
+                                   Selected Partitions:  1..2
+   ->  Sort
+         Sort Key: s1.a1
+         ->  Result
+               ->  Append
+                     ->  CTE Scan on s1
+                     ->  CTE Scan on s2
+(42 rows)
+
+set enable_hashagg = on;
+--PG min/max optimization will create subplan which do not support parallel
+create table store_sales_extend_min_1t(ss_item_sk int,
+                                  ss_sold_date_sk smallint,
+                                  ss_ticket_number bigint,
+                                  ss_date date,
+                                  ss_time time,
+                                  ss_timestamp timestamp,
+                                  ss_list_price decimal(7,2)
+)
+with (orientation = column)  ;
+create table store_sales_extend_max_1t(ss_item_sk int,
+                                  ss_sold_date_sk smallint,
+                                  ss_ticket_number bigint,
+                                  ss_date date,
+                                  ss_time time,
+                                  ss_timestamp timestamp,
+                                  ss_list_price decimal(7,2)
+)
+with (orientation = column)  ;
+explain (nodes off, costs off)
+select min((select max(ss_date) from store_sales_extend_min_1t) +
+		(select min(ss_time) from store_sales_extend_max_1t))
+		from store_sales_extend_min_1t;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Result
+   InitPlan 1 (returns $0)
+     ->  Row Adapter
+           ->  Vector Aggregate
+                 ->  CStore Scan on store_sales_extend_min_1t (min-max optimization)
+   InitPlan 2 (returns $1)
+     ->  Row Adapter
+           ->  Vector Aggregate
+                 ->  CStore Scan on store_sales_extend_max_1t (min-max optimization)
+   InitPlan 3 (returns $2)
+     ->  Row Adapter
+           ->  Vector Limit
+                 ->  Vector Result
+                       One-Time Filter: (($0 + ($1)::interval) IS NOT NULL)
+                       ->  CStore Scan on store_sales_extend_min_1t
+(15 rows)
+
+--The plan node above Gather can not be parallelized
+create table item_inventory
+(
+    location_id number(15,0) ,
+    item_inv_dt date
+) with (orientation=column)  ;
+create table item_inventory_plan
+(
+    item_inventory_plan_dt date ,
+    location_id number(35,0)
+)with (orientation=column)  ;
+create  table item_store_sold
+(
+    product_id decimal(15,5) ,
+    location_id number(28,0)
+)with (orientation=column)  ;
+explain (nodes off, costs off)
+select (54 - 9) c1
+from
+    item_store_sold t1,
+	(
+	select location_id
+    from item_inventory
+    union all
+    select location_id
+    from item_inventory_plan)
+group by c1;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Row Adapter
+   ->  Vector Group
+         Group By Key: 45
+         ->  Vector Nest Loop
+               ->  Vector Append
+                     ->  CStore Scan on item_inventory
+                     ->  CStore Scan on item_inventory_plan
+               ->  Vector Materialize
+                     ->  CStore Scan on item_store_sold t1
+(9 rows)
+
+drop table if exists t_bitmapor cascade;
+NOTICE:  table "t_bitmapor" does not exist, skipping
+drop table if exists tc_bitmapor cascade;
+NOTICE:  table "tc_bitmapor" does not exist, skipping
+drop table if exists t cascade;
+NOTICE:  table "t" does not exist, skipping
+drop table if exists tc cascade;
+NOTICE:  table "tc" does not exist, skipping
+set enable_seqscan=off;
+--update
+create table t(c1 int, c2 int, c3 int);
+explain (nodes off, costs off) update t set c2=2;
+     QUERY PLAN      
+---------------------
+ Update on t
+   ->  Seq Scan on t
+(2 rows)
+
+-- update column store
+create table tc(c1 int, c2 int, c3 int)
+WITH (ORIENTATION = COLUMN);
+explain (nodes off, costs off) update tc set c2=2;
+          QUERY PLAN           
+-------------------------------
+ Row Adapter
+   ->  Vector Update on tc
+         ->  CStore Scan on tc
+(3 rows)
+
+-- T_BitmapOr
+create table t_bitmapor (c1 int, c2 int, c3 int);
+create index t_bitmapor_c1 on t_bitmapor (c1);
+create index t_bitmapor_c2 on t_bitmapor (c2);
+create index t_bitmapor_c3 on t_bitmapor (c3);
+explain (nodes off, costs off) select * from t_bitmapor where c1=1 and c2=1 or c3=1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Bitmap Heap Scan on t_bitmapor
+   Recheck Cond: (((c2 = 1) AND (c1 = 1)) OR (c3 = 1))
+   ->  BitmapOr
+         ->  BitmapAnd
+               ->  Bitmap Index Scan on t_bitmapor_c2
+                     Index Cond: (c2 = 1)
+               ->  Bitmap Index Scan on t_bitmapor_c1
+                     Index Cond: (c1 = 1)
+         ->  Bitmap Index Scan on t_bitmapor_c3
+               Index Cond: (c3 = 1)
+(10 rows)
+
+explain (nodes off, costs off) select /*+ rows(t_bitmapor #2000000) */ * from t_bitmapor where c1=1 and c2=1 or c3=1;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Bitmap Heap Scan on t_bitmapor
+   Recheck Cond: ((c2 = 1) OR (c3 = 1))
+   Filter: (((c1 = 1) AND (c2 = 1)) OR (c3 = 1))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on t_bitmapor_c2
+               Index Cond: (c2 = 1)
+         ->  Bitmap Index Scan on t_bitmapor_c3
+               Index Cond: (c3 = 1)
+(8 rows)
+
+-- T_BitmapOr   column store
+create table tc_bitmapor (c1 int, c2 int, c3 int) WITH (ORIENTATION = COLUMN);
+create index tc_bitmapor_c1 on tc_bitmapor (c1);
+create index tc_bitmapor_c2 on tc_bitmapor (c2);
+create index tc_bitmapor_c3 on tc_bitmapor (c3);
+explain (nodes off, costs off) select * from tc_bitmapor where c1=1 and c2=1 or c3=1;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Heap Scan on tc_bitmapor
+         Recheck Cond: ((c2 = 1) OR (c3 = 1))
+         Filter: (((c1 = 1) AND (c2 = 1)) OR (c3 = 1))
+         ->  CStore Index Or
+               ->  CStore Index Ctid Scan on tc_bitmapor_c2
+                     Index Cond: (c2 = 1)
+               ->  CStore Index Ctid Scan on tc_bitmapor_c3
+                     Index Cond: (c3 = 1)
+(9 rows)
+
+explain (nodes off, costs off) select /*+ rows(tc_bitmapor #2000000) */ * from tc_bitmapor where c1=1 and c2=1 or c3=1;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Row Adapter
+   ->  CStore Index Heap Scan on tc_bitmapor
+         Recheck Cond: ((c2 = 1) OR (c3 = 1))
+         Filter: (((c1 = 1) AND (c2 = 1)) OR (c3 = 1))
+         ->  CStore Index Or
+               ->  CStore Index Ctid Scan on tc_bitmapor_c2
+                     Index Cond: (c2 = 1)
+               ->  CStore Index Ctid Scan on tc_bitmapor_c3
+                     Index Cond: (c3 = 1)
+(9 rows)
+
+create table replication_06 (c_id int, c_d_id character(20));
+create table replication_01 (c_id int, c_d_id numeric, c_street_1 text)  ;
+create table replication_02 (col_int int)  ;
+set explain_perf_mode = pretty;
+select 1
+   from replication_06 t6
+  where t6.c_d_id = 5
+    and t6.c_id = 50
+ minus all
+ select 2
+   from replication_01 t1
+  inner join replication_02 t2
+     on t1.c_id = t2.col_int
+  where t1.c_d_id = 8
+    and t1.c_id = 800;
+ ?column? 
+----------
+(0 rows)
+
+drop table if exists t_bitmapor cascade;
+drop table if exists tc_bitmapor cascade;
+drop table if exists t cascade;
+drop table if exists tc cascade;
+drop table if exists replication_01;
+drop table if exists replication_02;
+drop table if exists replication_06;
+drop schema hw_smp cascade;
+NOTICE:  drop cascades to 15 other objects
+DETAIL:  drop cascades to table smp_node_a
+drop cascades to table smp_node_b
+drop cascades to table smp_node_c
+drop cascades to table smp_dummy_plan
+drop cascades to table smp_array_agg
+drop cascades to table smp_partition
+drop cascades to table smp_jointype_a
+drop cascades to table smp_jointype_b
+drop cascades to table smp_mergeappend1
+drop cascades to table smp_mergeappend2
+drop cascades to table store_sales_extend_min_1t
+drop cascades to table store_sales_extend_max_1t
+drop cascades to table item_inventory
+drop cascades to table item_inventory_plan
+drop cascades to table item_store_sold

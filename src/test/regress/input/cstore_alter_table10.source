@@ -1,0 +1,209 @@
+--
+-- ALTER_TABLE
+-- Add column for empty table, type test
+--
+set time zone 'PRC';
+--
+--
+CREATE TABLE openGauss4444444_tbl
+(
+D_ID int,
+D_W_ID int,
+D_NAME varchar(10),
+D_STREET_1 varchar(20)
+)
+with(orientation = column)
+;
+COPY openGauss4444444_tbl FROM STDIN;
+4	1	cayzjsdtio	wiojkmfcmp
+10	1	osmgkxgssu	qjrlstdsqgwbirqefi
+4	2	faelfr	kydmzwgnsnrdtpvuztm
+10	2	chisnplo	uipprcxfvyuwug
+4	5	awtfcvt	yrtotgptcospfdlopmc
+10	5	ygsqhoctc	hgeocdffbawa
+4	6	zgetnp	tqwklknljwkwck
+10	6	tqsqzbjri	afowiivutvfbpyzc
+4	8	tlaomocexy	ytxabkddrdgzbostt
+10	8	bobdqmg	wsfukdtmhgxzxeykerg
+4	9	ygptsjv	nshiuzehbxoticobyid
+10	9	kwtbsuguhm	dfzukkyqjwytsjxitzty
+4	3	ojwgrmuifw	agcukqfjxixvnmttb
+10	3	dzkvjjq	urtfrtmlpunpf
+4	4	oymnvdfit	quyfqefcjejw
+10	4	fgyshw	poqdhqlwut
+4	7	hvfgdobl	vrpixtpapgpstsfs
+10	7	ozizzagz	deoltofiegzyypfi
+4	10	vgpfniure	mfgzmlfaoxvsqmlsgni
+10	10	imapwemf	ntxfdpyzweusmni
+5	1	zskgwbq	dywdmnvyci
+8	1	hlysyik	uslotvsjfagtix
+5	2	vzglpg	qnsvqaarnaayxotrqcm
+8	2	gsjbdx	ntclwbhjctluplkbgzwq
+5	5	xelzyodwi	tscpjnvxmyczubrxvrw
+8	5	efcbsmydh	pnqdpbvopsqidwbyow
+5	6	ywxzwjlxys	cakyiulgxgmku
+8	6	ydkvrah	wxzovpmoogjos
+5	8	fbfemppq	agobgvrsrclu
+8	8	gxddrdn	cyfzjsaxeolv
+5	9	ekmspmzfea	bzvwhbchnyuimensa
+8	9	svoazvjcnf	ckdliqkjmejlpxqe
+5	3	qftxljo	bwybvwxyrxqtumi
+8	3	alhjfmwl	lmffbjuwxzyvc
+5	4	dhcbedta	zqovoksfdzctaz
+8	4	xzwxdnxkq	tyxheriveufuixgn
+5	7	rmxhqc	wehtdwmfgzrq
+8	7	kexewboiue	gttptvetbpvy
+5	10	dvfydtthh	xqkdbrnzbooblduhs
+8	10	pitioj	znwttfvmvscgznjeaceg
+7	1	vlsywc	mtmgjffkmsatzl
+7	2	tetatfq	dalquhejntt
+7	5	gaoglyghes	ggawnjrasiijvi
+7	6	dvvpyupca	eexavordkxhkbo
+7	8	shpmgwdnqz	kdzinruvshsnoputoxj
+7	9	gooxlns	gxcytscfbk
+7	3	thljrhb	uenvarvnig
+7	4	ozwhcvkec	cvklkhrqtyybniykuk
+7	7	efikabx	noazlftprk
+7	10	cpueyrrp	hjxplcssrjbrnsafd
+6	1	ugwscdmy	hfgiduaqisbmkinhi
+6	2	extclapdr	hhrneiwtlzvan
+6	5	ueigupb	builqzzqfdgyui
+6	6	lhlqhw	vgvnvuqovxmmabrvyyt
+6	8	nrfxofzvbi	aogmjfjzch
+6	9	biptkakung	ejtrhjjzkegkxrimaf
+6	3	qenqtql	eafzuypnunaxvk
+6	4	oxwkfeow	kjyiipvbzxlv
+6	7	nsmnszohc	mnbenwtqhy
+6	10	uhxcscv	uytxotyybdiejsjarsn
+3	1	dmvecgmor	tuvhniprofrbvtmsyvw
+3	2	qmnagzh	dpywygfwcrysss
+3	5	uzcyxhfeug	rfzgawwxvwwkdgmkbu
+3	6	etybsh	ifgzihcojfwxegcjb
+3	8	mklxitc	rzcvomvfkwedbzultbul
+3	9	evyqqblokp	ozsiyvpmlpmcximdo
+3	3	didwdzuzn	rkcgbqhlvevuibu
+3	4	lwlxypoap	yvzxpyzldcq
+3	7	gtigpwhlfa	hojhjptvwczhnjmrtoq
+3	10	luwklnucd	ptgijzicsocsyquyglp
+1	1	swotbb	ogsxoekiohenrovqcr
+2	1	ntqarolc	ksnfrqaeubqgaodliopy
+9	1	ddcaijlkq	kqualmlmiihcbgg
+1	2	hqpwuvosy	qaobjrprypislzgkhnz
+2	2	lddvtz	ogtxorjjvsrtw
+9	2	fucjtrfj	bwujieludvojohrxbpgf
+1	5	vrwvitreoe	aelymupryeq
+2	5	azqjfcsiw	wwndhzxkhovdtgqf
+9	5	rkvsdl	csopbdsjyosa
+1	6	eyttjf	eoaagkycmg
+2	6	wqpjybw	smrzajrznqn
+9	6	xbqigxdol	sftebtbabdtuwvtdrx
+1	8	mmdsbia	uaqiijjtzwydhncsl
+2	8	gvgwhgtpja	jsdcqytpxrgftgblwy
+9	8	krnwsrj	laqhpkzzxqsbv
+1	9	ijtuszzrq	lqikvnlljsekw
+2	9	iavkghx	okbixjuzrmoafuksgwk
+9	9	silzxg	ctqystiokwolfgfoth
+1	3	whmwhy	reebdyaozaxksnup
+2	3	phivrwwdgy	kqqnxlbstluvzzirg
+9	3	ppvtexbicb	kbnvbzmsfob
+1	4	tlkkzn	oclenihdtssprz
+2	4	wonkkazby	oyxrtamcnjmsu
+9	4	odrqvl	pvpczfdstgbw
+1	7	ztdmtgo	ypyymqxripxhb
+2	7	gpcocsmje	zjhmdxvihdr
+9	7	lqblvxm	jeyfmmprhwzn
+1	10	jkqqmpgxjx	neoqxkpzuvpvbzmvb
+2	10	ktmaswdx	fdbpzfktvsdxmcerxax
+9	10	qnrbwfhzkm	scyoylodarv
+\.
+alter table openGauss4444444_tbl add column d6 decimal(64,10) default null;
+SELECT DISTINCT d6 FROM openGauss4444444_tbl;
+DROP TABLE openGauss4444444_tbl;
+--
+--
+create table openGauss5555555_tbl
+(
+D_ID int, 
+D_W_ID int, 
+D_NAME varchar(10), 
+D_STREET_1 varchar(20) 
+) 
+with(orientation = column) 
+;
+-- rows number is (56, 64), and then touch this bug
+copy openGauss5555555_tbl from STDIN;
+1	1	cayzjsdtio	wiojkmfcmp
+1	1	osmgkxgssu	qjrlstdsqgwbirqefi
+1	2	faelfr	kydmzwgnsnrdtpvuztm
+1	2	chisnplo	uipprcxfvyuwug
+1	5	awtfcvt	yrtotgptcospfdlopmc
+1	5	ygsqhoctc	hgeocdffbawa
+1	6	zgetnp	tqwklknljwkwck
+1	6	tqsqzbjri	afowiivutvfbpyzc
+1	8	tlaomocexy	ytxabkddrdgzbostt
+1	8	bobdqmg	wsfukdtmhgxzxeykerg
+1	9	ygptsjv	nshiuzehbxoticobyid
+1	9	kwtbsuguhm	dfzukkyqjwytsjxitzty
+1	3	ojwgrmuifw	agcukqfjxixvnmttb
+1	3	dzkvjjq	urtfrtmlpunpf
+1	4	oymnvdfit	quyfqefcjejw
+1	4	fgyshw	poqdhqlwut
+1	7	hvfgdobl	vrpixtpapgpstsfs
+1	7	ozizzagz	deoltofiegzyypfi
+1	10	vgpfniure	mfgzmlfaoxvsqmlsgni
+1	10	imapwemf	ntxfdpyzweusmni
+1	1	zskgwbq	dywdmnvyci
+1	1	hlysyik	uslotvsjfagtix
+1	2	vzglpg	qnsvqaarnaayxotrqcm
+1	2	gsjbdx	ntclwbhjctluplkbgzwq
+1	5	xelzyodwi	tscpjnvxmyczubrxvrw
+1	5	efcbsmydh	pnqdpbvopsqidwbyow
+1	6	ywxzwjlxys	cakyiulgxgmku
+1	6	ydkvrah	wxzovpmoogjos
+1	8	fbfemppq	agobgvrsrclu
+1	8	gxddrdn	cyfzjsaxeolv
+1	9	ekmspmzfea	bzvwhbchnyuimensa
+1	9	svoazvjcnf	ckdliqkjmejlpxqe
+1	3	qftxljo	bwybvwxyrxqtumi
+1	3	alhjfmwl	lmffbjuwxzyvc
+1	4	dhcbedta	zqovoksfdzctaz
+1	4	xzwxdnxkq	tyxheriveufuixgn
+1	7	rmxhqc	wehtdwmfgzrq
+1	7	kexewboiue	gttptvetbpvy
+1	10	dvfydtthh	xqkdbrnzbooblduhs
+1	10	pitioj	znwttfvmvscgznjeaceg
+1	1	vlsywc	mtmgjffkmsatzl
+1	2	tetatfq	dalquhejntt
+1	5	gaoglyghes	ggawnjrasiijvi
+1	6	dvvpyupca	eexavordkxhkbo
+1	8	shpmgwdnqz	kdzinruvshsnoputoxj
+1	9	gooxlns	gxcytscfbk
+1	3	thljrhb	uenvarvnig
+1	4	ozwhcvkec	cvklkhrqtyybniykuk
+1	7	efikabx	noazlftprk
+1	10	cpueyrrp	hjxplcssrjbrnsafd
+1	1	ugwscdmy	hfgiduaqisbmkinhi
+1	2	extclapdr	hhrneiwtlzvan
+1	5	ueigupb	builqzzqfdgyui
+1	6	lhlqhw	vgvnvuqovxmmabrvyyt
+1	8	nrfxofzvbi	aogmjfjzch
+1	9	biptkakung	ejtrhjjzkegkxrimaf
+1	3	qenqtql	eafzuypnunaxvk
+1	4	oxwkfeow	kjyiipvbzxlv
+1	7	nsmnszohc	mnbenwtqhy
+1	10	uhxcscv	uytxotyybdiejsjarsn
+1	1	dmvecgmor	tuvhniprofrbvtmsyvw
+1	2	qmnagzh	dpywygfwcrysss
+1	5	uzcyxhfeug	rfzgawwxvwwkdgmkbu
+1	6	etybsh	ifgzihcojfwxegcjb
+1	8	mklxitc	rzcvomvfkwedbzultbul
+1	9	evyqqblokp	ozsiyvpmlpmcximdo
+1	3	didwdzuzn	rkcgbqhlvevuibu
+1	4	lwlxypoap	yvzxpyzldcq
+1	7	gtigpwhlfa	hojhjptvwczhnjmrtoq
+1	10	luwklnucd	ptgijzicsocsyquyglp
+1	1	swotbb	ogsxoekiohenrovqcr
+\.
+delete from openGauss5555555_tbl;
+alter table openGauss5555555_tbl add column d11 decimal(32,10) not null;
+drop table openGauss5555555_tbl;

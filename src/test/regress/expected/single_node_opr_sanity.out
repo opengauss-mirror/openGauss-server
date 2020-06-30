@@ -1,0 +1,3777 @@
+--
+-- OPR_SANITY
+-- Sanity checks for common errors in making operator/procedure system tables:
+-- pg_operator, pg_proc, pg_cast, pg_aggregate, pg_am,
+-- pg_amop, pg_amproc, pg_opclass, pg_opfamily.
+--
+-- None of the SELECTs here should ever find any matching entries,
+-- so the expected output is easy to maintain ;-).
+-- A test failure indicates someone messed up an entry in the system tables.
+--
+-- NB: we assume the oidjoins test will have caught any dangling links,
+-- that is OID or REGPROC fields that are not zero and do not match some
+-- row in the linked-to table.  However, if we want to enforce that a link
+-- field can't be 0, we have to check it here.
+--
+-- NB: run this test earlier than the create_operator test, because
+-- that test creates some bogus operators...
+-- Helper functions to deal with cases where binary-coercible matches are
+-- allowed.
+-- This should match IsBinaryCoercible() in parse_coerce.c.
+create function binary_coercible(oid, oid) returns bool as $$
+SELECT ($1 = $2) OR
+ EXISTS(select 1 from pg_catalog.pg_cast where
+        castsource = $1 and casttarget = $2 and
+        castmethod = 'b' and castcontext = 'i') OR
+ ($2 = 'pg_catalog.anyarray'::pg_catalog.regtype AND
+  EXISTS(select 1 from pg_catalog.pg_type where
+         oid = $1 and typelem != 0 and typlen = -1))
+$$ language sql strict stable;
+create function binary_coercible_3(oid, oid) returns bool as $$
+SELECT ($1 = $2) OR
+ EXISTS(select 1 from pg_catalog.pg_cast where
+        castsource = $1 and casttarget = $2 and
+        castmethod = 'b' and castcontext = 'i') OR
+ ($2 = 'pg_catalog.any'::pg_catalog.regtype) OR
+ ($2 = 'pg_catalog.anyarray'::pg_catalog.regtype AND
+  EXISTS(select 1 from pg_catalog.pg_type where
+         oid = $1 and typelem != 0 and typlen = -1)) OR
+ ($2 = 'pg_catalog.anyrange'::pg_catalog.regtype AND
+  (select typtype from pg_catalog.pg_type where oid = $1) = 'r')
+$$ language sql strict stable;
+-- This one ignores castcontext, so it considers only physical equivalence
+-- and not whether the coercion can be invoked implicitly.
+create function physically_coercible(oid, oid) returns bool as $$
+SELECT ($1 = $2) OR
+ EXISTS(select 1 from pg_catalog.pg_cast where
+        castsource = $1 and casttarget = $2 and
+        castmethod = 'b') OR
+ ($2 = 'pg_catalog.anyarray'::pg_catalog.regtype AND
+  EXISTS(select 1 from pg_catalog.pg_type where
+         oid = $1 and typelem != 0 and typlen = -1))
+$$ language sql strict stable;
+create function physically_coercible_2(oid, oid) returns bool as $$
+SELECT ($1 = $2) OR
+ EXISTS(select 1 from pg_catalog.pg_cast where
+        castsource = $1 and casttarget = $2 and
+        castmethod = 'b') OR
+ ($2 = 'pg_catalog.any'::pg_catalog.regtype) OR
+ ($2 = 'pg_catalog.anyarray'::pg_catalog.regtype AND
+  EXISTS(select 1 from pg_catalog.pg_type where
+         oid = $1 and typelem != 0 and typlen = -1)) OR
+ ($2 = 'pg_catalog.anyrange'::pg_catalog.regtype AND
+  (select typtype from pg_catalog.pg_type where oid = $1) = 'r')
+$$ language sql strict stable;
+-- **************** pg_proc ****************
+-- Look for illegal values in pg_proc fields.
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE p1.prolang = 0 OR p1.prorettype = 0 OR
+       p1.pronargs < 0 OR
+       p1.pronargdefaults < 0 OR
+       p1.pronargdefaults > p1.pronargs OR
+       array_lower(p1.proargtypes, 1) != 0 OR
+       array_upper(p1.proargtypes, 1) != p1.pronargs-1 OR
+       0::oid = ANY (p1.proargtypes) OR
+       procost <= 0 OR
+       CASE WHEN proretset THEN prorows <= 0 ELSE prorows != 0 END
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+-- prosrc should never be null or empty
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE prosrc IS NULL OR prosrc = '' OR prosrc = '-'
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+-- proiswindow shouldn't be set together with proisagg or proretset
+SELECT p1.oid, p1.proname
+FROM pg_proc AS p1
+WHERE proiswindow AND (proisagg OR proretset)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+-- pronargdefaults should be 0 iff proargdefaults is null
+SELECT p1.oid, p1.proname
+FROM pg_proc AS p1
+WHERE (pronargdefaults <> 0) != (proargdefaults IS NOT NULL)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+-- probin should be non-empty for C functions, null everywhere else
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE prolang = 13 AND (probin IS NULL OR probin = '' OR probin = '-')
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE prolang != 13 AND probin IS NOT NULL
+ORDER BY p1.oid;
+ oid  |     proname     
+------+-----------------
+ 3167 | instr
+ 3168 | instr
+ 3169 | instr
+ 3172 | numtodsinterval
+ 3189 | numtoday
+ 3190 | numtoday
+ 3191 | numtoday
+ 3205 | substrb
+ 3206 | substrb
+ 3842 | numtoday
+(10 rows)
+
+-- Look for conflicting proc definitions (same names and input datatypes).
+-- (This test should be dead code now that we have the unique index
+-- pg_proc_proname_args_nsp_index, but I'll leave it in anyway.)
+SELECT p1.oid, p1.proname, p2.oid, p2.proname
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.proname = p2.proname AND
+    p1.pronargs = p2.pronargs AND
+    p1.proargtypes = p2.proargtypes
+ORDER by 1, 2, 3;
+ oid | proname | oid | proname 
+-----+---------+-----+---------
+(0 rows)
+
+-- Considering only built-in procs (prolang = 12), look for multiple uses
+-- of the same internal function (ie, matching prosrc fields).  It's OK to
+-- have several entries with different pronames for the same internal function,
+-- but conflicts in the number of arguments and other critical items should
+-- be complained of.  (We don't check data types here; see next query.)
+-- Note: ignore aggregate functions here, since they all point to the same
+-- dummy built-in function.
+SELECT p1.oid, p1.proname, p2.oid, p2.proname
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid < p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    (p1.proisagg = false OR p2.proisagg = false) AND
+    (p1.prolang != p2.prolang OR
+     p1.proisagg != p2.proisagg OR
+     p1.prosecdef != p2.prosecdef OR
+     p1.proisstrict != p2.proisstrict OR
+     p1.proretset != p2.proretset OR
+     p1.provolatile != p2.provolatile OR
+     p1.pronargs != p2.pronargs)
+ORDER by 1, 2, 3;
+ oid  |    proname     | oid  |    proname     
+------+----------------+------+----------------
+ 3780 | pg_query_audit | 3782 | pg_query_audit
+(1 row)
+
+-- Look for uses of different type OIDs in the argument/result type fields
+-- for different aliases of the same built-in function.
+-- This indicates that the types are being presumed to be binary-equivalent,
+-- or that the built-in function is prepared to deal with different types.
+-- That's not wrong, necessarily, but we make lists of all the types being
+-- so treated.  Note that the expected output of this part of the test will
+-- need to be modified whenever new pairs of types are made binary-equivalent,
+-- or when new polymorphic built-in functions are added!
+-- Note: ignore aggregate functions here, since they all point to the same
+-- dummy built-in function.  Likewise, ignore range constructor functions.
+SELECT DISTINCT p1.prorettype, p2.prorettype
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    p1.prosrc NOT LIKE E'range\\_constructor_' AND
+    p2.prosrc NOT LIKE E'range\\_constructor_' AND
+    (p1.prorettype < p2.prorettype)
+ORDER BY 1, 2;
+ prorettype | prorettype 
+------------+------------
+         17 |         86
+         25 |       1043
+       1114 |       1184
+(3 rows)
+
+SELECT DISTINCT p1.proargtypes[0], p2.proargtypes[0]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    p1.prosrc NOT LIKE E'range\\_constructor_' AND
+    p2.prosrc NOT LIKE E'range\\_constructor_' AND
+    (p1.proargtypes[0] < p2.proargtypes[0])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+          17 |          86
+          25 |        1042
+          25 |        1043
+        1114 |        1184
+        1560 |        1562
+        2277 |        2283
+(6 rows)
+
+SELECT DISTINCT p1.proargtypes[1], p2.proargtypes[1]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    p1.prosrc NOT LIKE E'range\\_constructor_' AND
+    p2.prosrc NOT LIKE E'range\\_constructor_' AND
+    (p1.proargtypes[1] < p2.proargtypes[1])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+          20 |          28
+          23 |          31
+        1114 |        1184
+        1560 |        1562
+        2277 |        2283
+(5 rows)
+
+SELECT DISTINCT p1.proargtypes[2], p2.proargtypes[2]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    (p1.proargtypes[2] < p2.proargtypes[2])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+        1114 |        1184
+(1 row)
+
+SELECT DISTINCT p1.proargtypes[3], p2.proargtypes[3]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    (p1.proargtypes[3] < p2.proargtypes[3])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+        1114 |        1184
+(1 row)
+
+SELECT DISTINCT p1.proargtypes[4], p2.proargtypes[4]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    (p1.proargtypes[4] < p2.proargtypes[4])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+(0 rows)
+
+SELECT DISTINCT p1.proargtypes[5], p2.proargtypes[5]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    (p1.proargtypes[5] < p2.proargtypes[5])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+(0 rows)
+
+SELECT DISTINCT p1.proargtypes[6], p2.proargtypes[6]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    (p1.proargtypes[6] < p2.proargtypes[6])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+(0 rows)
+
+SELECT DISTINCT p1.proargtypes[7], p2.proargtypes[7]
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid != p2.oid AND
+    p1.prosrc = p2.prosrc AND
+    p1.prolang = 12 AND p2.prolang = 12 AND
+    NOT p1.proisagg AND NOT p2.proisagg AND
+    (p1.proargtypes[7] < p2.proargtypes[7])
+ORDER BY 1, 2;
+ proargtypes | proargtypes 
+-------------+-------------
+(0 rows)
+
+-- Look for functions that return type "internal" and do not have any
+-- "internal" argument.  Such a function would be a security hole since
+-- it might be used to call an internal function from an SQL command.
+-- As of 7.3 this query should find only internal_in.
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE p1.prorettype = 'internal'::regtype AND NOT
+    'internal'::regtype = ANY (p1.proargtypes)
+ORDER by 1, 2;
+ oid  |   proname   
+------+-------------
+ 2304 | internal_in
+(1 row)
+
+-- Check for length inconsistencies between the various argument-info arrays.
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE proallargtypes IS NOT NULL AND
+    array_length(proallargtypes,1) < array_length(proargtypes,1)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE proargmodes IS NOT NULL AND
+    array_length(proargmodes,1) < array_length(proargtypes,1)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE proargnames IS NOT NULL AND
+    array_length(proargnames,1) < array_length(proargtypes,1)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE proallargtypes IS NOT NULL AND proargmodes IS NOT NULL AND
+    array_length(proallargtypes,1) <> array_length(proargmodes,1)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE proallargtypes IS NOT NULL AND proargnames IS NOT NULL AND
+    array_length(proallargtypes,1) <> array_length(proargnames,1)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1
+WHERE proargmodes IS NOT NULL AND proargnames IS NOT NULL AND
+    array_length(proargmodes,1) <> array_length(proargnames,1)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+-- Check for protransform functions with the wrong signature
+SELECT p1.oid, p1.proname, p2.oid, p2.proname
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p2.oid = p1.protransform AND
+    (p2.prorettype != 'internal'::regtype OR p2.proretset OR p2.pronargs != 1
+     OR p2.proargtypes[0] != 'internal'::regtype)
+ORDER by 1, 2, 3;
+ oid | proname | oid | proname 
+-----+---------+-----+---------
+(0 rows)
+
+-- Insist that all built-in pg_proc entries have descriptions
+SELECT p1.oid, p1.proname
+FROM pg_proc as p1 LEFT JOIN pg_description as d
+     ON p1.tableoid = d.classoid and p1.oid = d.objoid and d.objsubid = 0
+WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
+ oid  |                    proname                    
+------+-----------------------------------------------
+   31 | byteaout
+   33 | charout
+   34 | namein
+   35 | nameout
+   38 | int2in
+   39 | int2out
+   40 | int2vectorin
+   41 | int2vectorout
+   42 | int4in
+   43 | int4out
+   44 | regprocin
+   45 | regprocout
+   46 | textin
+   47 | textout
+   48 | tidin
+   49 | tidout
+   50 | xidin
+   51 | xidout
+   52 | cidin
+   53 | cidout
+   54 | oidvectorin
+   55 | oidvectorout
+   58 | xidin4
+   59 | xidout4
+   77 | int4
+   78 | char
+   89 | version
+   90 | pgxc_version
+   91 | oidvectorin_extend
+   92 | oidvectorout_extend
+  101 | eqsel
+  102 | neqsel
+  103 | scalarltsel
+  104 | scalargtsel
+  105 | eqjoinsel
+  106 | neqjoinsel
+  107 | scalarltjoinsel
+  108 | scalargtjoinsel
+  109 | unknownin
+  110 | unknownout
+  117 | point_in
+  118 | point_out
+  119 | lseg_in
+  120 | lseg_out
+  121 | path_in
+  122 | path_out
+  123 | box_in
+  124 | box_out
+  139 | areasel
+  140 | areajoinsel
+  195 | pg_node_tree_in
+  196 | pg_node_tree_out
+  197 | pg_node_tree_recv
+  198 | pg_node_tree_send
+  200 | float4in
+  201 | float4out
+  208 | float4_accum
+  209 | float4larger
+  211 | float4smaller
+  214 | float8in
+  215 | float8out
+  222 | float8_accum
+  223 | float8larger
+  224 | float8smaller
+  228 | dround
+  229 | dtrunc
+  233 | dexp
+  234 | dlog1
+  235 | float8
+  236 | float4
+  237 | int2
+  238 | int2
+  240 | abstimein
+  241 | abstimeout
+  242 | reltimein
+  243 | reltimeout
+  246 | tintervalin
+  247 | tintervalout
+  249 | tintervalrel
+  250 | timenow
+  273 | tintervalend
+  274 | timeofday
+  275 | isfinite
+  276 | btcanreturn
+  311 | float8
+  312 | float4
+  313 | int4
+  314 | int2
+  316 | float8
+  317 | int4
+  318 | float4
+  319 | int4
+  320 | width_bucket
+  321 | json_in
+  322 | json_out
+  323 | json_recv
+  324 | json_send
+  325 | ginbuildempty
+  326 | gistbuildempty
+  327 | hashbuildempty
+  328 | btbuildempty
+  329 | hash_aclitem
+  330 | btgettuple
+  331 | btinsert
+  332 | btbulkdelete
+  333 | btbeginscan
+  334 | btrescan
+  335 | btendscan
+  336 | btmarkpos
+  337 | btrestrpos
+  338 | btbuild
+  347 | poly_in
+  348 | poly_out
+  350 | btint2cmp
+  351 | btint4cmp
+  354 | btfloat4cmp
+  355 | btfloat8cmp
+  356 | btoidcmp
+  357 | btabstimecmp
+  358 | btcharcmp
+  359 | btnamecmp
+  360 | bttextcmp
+  376 | string_to_array
+  377 | cash_cmp
+  380 | btreltimecmp
+  381 | bttintervalcmp
+  382 | btarraycmp
+  384 | array_to_string
+  394 | string_to_array
+  395 | array_to_string
+  398 | hashint2vector
+  399 | hashmacaddr
+  400 | hashtext
+  401 | text
+  404 | btoidvectorcmp
+  406 | text
+  407 | name
+  408 | bpchar
+  409 | name
+  422 | hashinet
+  425 | hashvacuumcleanup
+  432 | hash_numeric
+  436 | macaddr_in
+  437 | macaddr_out
+  438 | hashcostestimate
+  440 | hashgettuple
+  441 | hashinsert
+  442 | hashbulkdelete
+  443 | hashbeginscan
+  444 | hashrescan
+  445 | hashendscan
+  446 | hashmarkpos
+  447 | hashrestrpos
+  448 | hashbuild
+  449 | hashint2
+  450 | hashint4
+  451 | hashfloat4
+  452 | hashfloat8
+  453 | hashoid
+  454 | hashchar
+  455 | hashname
+  456 | hashvarlena
+  457 | hashoidvector
+  458 | text_larger
+  459 | text_smaller
+  460 | int8in
+  461 | int8out
+  480 | int4
+  481 | int8
+  482 | float8
+  483 | int8
+  515 | array_larger
+  516 | array_smaller
+  598 | abbrev
+  599 | abbrev
+  605 | set_masklen
+  626 | hash_array
+  635 | set_masklen
+  636 | btgetbitmap
+  637 | hashgetbitmap
+  638 | gistgetbitmap
+  652 | float4
+  653 | int8
+  668 | bpchar
+  669 | varchar
+  683 | network
+  696 | netmask
+  697 | masklen
+  698 | broadcast
+  699 | host
+  710 | getpgusername
+  711 | family
+  714 | int2
+  715 | lo_create
+  720 | octet_length
+  721 | get_byte
+  722 | set_byte
+  723 | get_bit
+  724 | set_bit
+  730 | text
+  745 | current_user
+  746 | session_user
+  747 | array_dims
+  748 | array_ndims
+  749 | overlay
+  750 | array_in
+  751 | array_out
+  752 | overlay
+  753 | trunc
+  754 | int8
+  756 | complex_array_in
+  760 | smgrin
+  761 | smgrout
+  762 | smgreq
+  763 | smgrne
+  764 | lo_import
+  765 | lo_export
+  766 | int4inc
+  767 | lo_import
+  768 | int4larger
+  769 | int4smaller
+  770 | int2larger
+  771 | int2smaller
+  772 | gistcostestimate
+  774 | gistgettuple
+  775 | gistinsert
+  776 | gistbulkdelete
+  777 | gistbeginscan
+  778 | gistrescan
+  779 | gistendscan
+  780 | gistmarkpos
+  781 | gistrestrpos
+  782 | gistbuild
+  810 | pg_client_encoding
+  817 | current_query
+  836 | macaddr_cmp
+  842 | btint8cmp
+  849 | position
+  860 | bpchar
+  861 | current_database
+  868 | strpos
+  870 | lower
+  871 | upper
+  872 | initcap
+  873 | lpad
+  874 | rpad
+  875 | ltrim
+  876 | rtrim
+  877 | substr
+  878 | translate
+  879 | lpad
+  880 | rpad
+  881 | ltrim
+  882 | rtrim
+  883 | substr
+  884 | btrim
+  885 | btrim
+  886 | cash_in
+  887 | cash_out
+  898 | cashlarger
+  899 | cashsmaller
+  910 | inet_in
+  911 | inet_out
+  926 | network_cmp
+  935 | cash_words
+  936 | substring
+  937 | substring
+  938 | generate_series
+  939 | generate_series
+  940 | mod
+  941 | mod
+  944 | char
+  946 | text
+  947 | mod
+  949 | hashint8
+  952 | lo_open
+  953 | lo_close
+  954 | loread
+  955 | lowrite
+  956 | lo_lseek
+  957 | lo_creat
+  958 | lo_tell
+  964 | lo_unlink
+  972 | btvacuumcleanup
+  975 | area
+  976 | width
+  977 | height
+  979 | area
+  981 | diagonal
+  992 | slope
+  993 | lseg
+ 1004 | lo_truncate
+ 1026 | timezone
+ 1030 | gist_point_compress
+ 1031 | aclitemin
+ 1032 | aclitemout
+ 1039 | getdatabaseencoding
+ 1044 | bpcharin
+ 1045 | bpcharout
+ 1046 | varcharin
+ 1047 | varcharout
+ 1063 | bpchar_larger
+ 1064 | bpchar_smaller
+ 1065 | pg_prepared_xact
+ 1066 | generate_series
+ 1067 | generate_series
+ 1068 | generate_series
+ 1069 | generate_series
+ 1070 | generate_series
+ 1071 | generate_series
+ 1078 | bpcharcmp
+ 1079 | regclass
+ 1080 | hashbpchar
+ 1081 | format_type
+ 1084 | date_in
+ 1085 | date_out
+ 1092 | date_cmp
+ 1107 | time_cmp
+ 1138 | date_larger
+ 1139 | date_smaller
+ 1143 | time_in
+ 1144 | time_out
+ 1150 | timestamptz_in
+ 1151 | timestamptz_out
+ 1158 | to_timestamp
+ 1159 | timezone
+ 1160 | interval_in
+ 1161 | interval_out
+ 1171 | date_part
+ 1172 | date_part
+ 1173 | timestamptz
+ 1174 | timestamptz
+ 1175 | justify_hours
+ 1176 | timestamptz
+ 1177 | interval
+ 1178 | date
+ 1179 | date
+ 1180 | abstime
+ 1181 | age
+ 1191 | generate_subscripts
+ 1192 | generate_subscripts
+ 1193 | array_fill
+ 1194 | reltime
+ 1195 | timestamptz_smaller
+ 1196 | timestamptz_larger
+ 1197 | interval_smaller
+ 1198 | interval_larger
+ 1199 | age
+ 1200 | interval
+ 1215 | obj_description
+ 1216 | col_description
+ 1217 | date_trunc
+ 1218 | date_trunc
+ 1219 | int8inc
+ 1236 | int8larger
+ 1237 | int8smaller
+ 1242 | boolin
+ 1243 | boolout
+ 1244 | byteain
+ 1245 | charin
+ 1250 | unique_key_recheck
+ 1257 | textlen
+ 1264 | pg_char_to_encoding
+ 1267 | cidr_in
+ 1268 | btcostestimate
+ 1269 | pg_column_size
+ 1271 | overlaps
+ 1273 | date_part
+ 1282 | quote_ident
+ 1283 | quote_literal
+ 1285 | quote_literal
+ 1286 | array_fill
+ 1287 | oid
+ 1288 | int8
+ 1289 | quote_nullable
+ 1290 | quote_nullable
+ 1291 | suppress_redundant_updates_trigger
+ 1293 | currtid
+ 1294 | currtid2
+ 1295 | justify_days
+ 1299 | now
+ 1300 | positionsel
+ 1301 | positionjoinsel
+ 1302 | contsel
+ 1303 | contjoinsel
+ 1304 | overlaps
+ 1305 | overlaps
+ 1306 | overlaps
+ 1307 | overlaps
+ 1308 | overlaps
+ 1309 | overlaps
+ 1310 | overlaps
+ 1311 | overlaps
+ 1312 | timestamp_in
+ 1313 | timestamp_out
+ 1314 | timestamptz_cmp
+ 1315 | interval_cmp
+ 1316 | time
+ 1317 | length
+ 1318 | length
+ 1339 | dlog10
+ 1340 | log
+ 1341 | ln
+ 1342 | round
+ 1343 | trunc
+ 1344 | sqrt
+ 1345 | cbrt
+ 1346 | pow
+ 1347 | exp
+ 1348 | obj_description
+ 1349 | oidvectortypes
+ 1350 | timetz_in
+ 1351 | timetz_out
+ 1358 | timetz_cmp
+ 1359 | timestamptz
+ 1362 | hostmask
+ 1364 | time
+ 1365 | makeaclitem
+ 1367 | character_length
+ 1368 | power
+ 1369 | character_length
+ 1370 | interval
+ 1371 | pg_lock_status
+ 1372 | char_length
+ 1373 | isfinite
+ 1374 | octet_length
+ 1375 | octet_length
+ 1376 | factorial
+ 1377 | time_larger
+ 1378 | time_smaller
+ 1379 | timetz_larger
+ 1380 | timetz_smaller
+ 1381 | char_length
+ 1382 | date_part
+ 1383 | date_part
+ 1384 | date_part
+ 1385 | date_part
+ 1386 | age
+ 1387 | pg_get_constraintdef
+ 1388 | timetz
+ 1389 | isfinite
+ 1390 | isfinite
+ 1391 | pg_stat_get_backend_start
+ 1392 | pg_stat_get_backend_client_addr
+ 1393 | pg_stat_get_backend_client_port
+ 1394 | abs
+ 1395 | abs
+ 1396 | abs
+ 1397 | abs
+ 1398 | abs
+ 1400 | name
+ 1401 | varchar
+ 1402 | current_schema
+ 1403 | current_schemas
+ 1404 | overlay
+ 1405 | overlay
+ 1406 | isvertical
+ 1407 | ishorizontal
+ 1408 | isparallel
+ 1409 | isperp
+ 1410 | isvertical
+ 1411 | ishorizontal
+ 1412 | isparallel
+ 1413 | isperp
+ 1414 | isvertical
+ 1415 | ishorizontal
+ 1416 | point
+ 1419 | time
+ 1421 | box
+ 1427 | cidr_out
+ 1430 | isclosed
+ 1431 | isopen
+ 1433 | pclose
+ 1434 | popen
+ 1440 | point
+ 1446 | box
+ 1447 | path
+ 1448 | polygon
+ 1449 | polygon
+ 1450 | circle_in
+ 1451 | circle_out
+ 1468 | area
+ 1469 | diameter
+ 1470 | radius
+ 1473 | circle
+ 1474 | circle
+ 1475 | polygon
+ 1479 | circle
+ 1480 | box
+ 1481 | tinterval
+ 1490 | line_in
+ 1491 | line_out
+ 1493 | line
+ 1530 | length
+ 1531 | length
+ 1532 | point
+ 1533 | point
+ 1534 | point
+ 1540 | point
+ 1541 | lseg
+ 1542 | center
+ 1543 | center
+ 1544 | polygon
+ 1545 | npoints
+ 1556 | npoints
+ 1564 | bit_in
+ 1565 | bit_out
+ 1569 | like
+ 1570 | notlike
+ 1571 | like
+ 1572 | notlike
+ 1573 | pg_get_ruledef
+ 1574 | nextval
+ 1575 | currval
+ 1576 | setval
+ 1579 | varbit_in
+ 1580 | varbit_out
+ 1596 | bitcmp
+ 1597 | pg_encoding_to_char
+ 1598 | random
+ 1599 | setseed
+ 1600 | asin
+ 1601 | acos
+ 1602 | atan
+ 1603 | atan2
+ 1604 | sin
+ 1605 | cos
+ 1606 | tan
+ 1607 | cot
+ 1608 | degrees
+ 1609 | radians
+ 1610 | pi
+ 1619 | pg_typeof
+ 1620 | ascii
+ 1621 | chr
+ 1622 | repeat
+ 1623 | similar_escape
+ 1637 | like_escape
+ 1640 | pg_get_viewdef
+ 1641 | pg_get_viewdef
+ 1642 | pg_get_userbyid
+ 1643 | pg_get_indexdef
+ 1644 | RI_FKey_check_ins
+ 1645 | RI_FKey_check_upd
+ 1646 | RI_FKey_cascade_del
+ 1647 | RI_FKey_cascade_upd
+ 1648 | RI_FKey_restrict_del
+ 1649 | RI_FKey_restrict_upd
+ 1650 | RI_FKey_setnull_del
+ 1651 | RI_FKey_setnull_upd
+ 1652 | RI_FKey_setdefault_del
+ 1653 | RI_FKey_setdefault_upd
+ 1654 | RI_FKey_noaction_del
+ 1655 | RI_FKey_noaction_upd
+ 1662 | pg_get_triggerdef
+ 1665 | pg_get_serial_sequence
+ 1672 | varbitcmp
+ 1680 | substring
+ 1681 | length
+ 1682 | octet_length
+ 1683 | bit
+ 1684 | int4
+ 1685 | bit
+ 1686 | pg_get_keywords
+ 1687 | varbit
+ 1688 | time_hash
+ 1689 | aclexplode
+ 1693 | btboolcmp
+ 1696 | timetz_hash
+ 1697 | interval_hash
+ 1698 | position
+ 1699 | substring
+ 1701 | numeric_in
+ 1702 | numeric_out
+ 1703 | numeric
+ 1705 | abs
+ 1706 | sign
+ 1707 | round
+ 1708 | round
+ 1709 | trunc
+ 1710 | trunc
+ 1711 | ceil
+ 1712 | floor
+ 1713 | length
+ 1714 | convert_from
+ 1715 | cidr
+ 1716 | pg_get_expr
+ 1717 | convert_to
+ 1728 | mod
+ 1730 | sqrt
+ 1731 | numeric_sqrt
+ 1732 | exp
+ 1733 | numeric_exp
+ 1734 | ln
+ 1735 | numeric_ln
+ 1736 | log
+ 1737 | numeric_log
+ 1738 | pow
+ 1740 | numeric
+ 1741 | log
+ 1742 | numeric
+ 1743 | numeric
+ 1744 | int4
+ 1745 | float4
+ 1746 | float8
+ 1764 | numeric_inc
+ 1765 | setval
+ 1766 | numeric_smaller
+ 1767 | numeric_larger
+ 1768 | to_char
+ 1769 | numeric_cmp
+ 1770 | to_char
+ 1772 | to_char
+ 1773 | to_char
+ 1774 | to_char
+ 1775 | to_char
+ 1776 | to_char
+ 1777 | to_number
+ 1778 | to_timestamp
+ 1779 | int8
+ 1780 | to_date
+ 1781 | numeric
+ 1782 | numeric
+ 1783 | int2
+ 1798 | oidin
+ 1799 | oidout
+ 1810 | bit_length
+ 1811 | bit_length
+ 1812 | bit_length
+ 1813 | convert
+ 1814 | iclikesel
+ 1815 | icnlikesel
+ 1816 | iclikejoinsel
+ 1817 | icnlikejoinsel
+ 1818 | regexeqsel
+ 1819 | likesel
+ 1820 | icregexeqsel
+ 1821 | regexnesel
+ 1822 | nlikesel
+ 1823 | icregexnesel
+ 1824 | regexeqjoinsel
+ 1825 | likejoinsel
+ 1826 | icregexeqjoinsel
+ 1827 | regexnejoinsel
+ 1828 | nlikejoinsel
+ 1829 | icregexnejoinsel
+ 1830 | float8_avg
+ 1831 | float8_var_samp
+ 1832 | float8_stddev_samp
+ 1833 | numeric_accum
+ 1834 | int2_accum
+ 1835 | int4_accum
+ 1836 | int8_accum
+ 1837 | numeric_avg
+ 1838 | numeric_var_samp
+ 1839 | numeric_stddev_samp
+ 1840 | int2_sum
+ 1841 | int4_sum
+ 1842 | int8_sum
+ 1843 | interval_accum
+ 1844 | interval_avg
+ 1845 | to_ascii
+ 1846 | to_ascii
+ 1847 | to_ascii
+ 1922 | has_table_privilege
+ 1923 | has_table_privilege
+ 1924 | has_table_privilege
+ 1925 | has_table_privilege
+ 1926 | has_table_privilege
+ 1927 | has_table_privilege
+ 1928 | pg_stat_get_numscans
+ 1929 | pg_stat_get_tuples_returned
+ 1930 | pg_stat_get_tuples_fetched
+ 1931 | pg_stat_get_tuples_inserted
+ 1932 | pg_stat_get_tuples_updated
+ 1933 | pg_stat_get_tuples_deleted
+ 1934 | pg_stat_get_blocks_fetched
+ 1935 | pg_stat_get_blocks_hit
+ 1936 | pg_stat_get_backend_idset
+ 1937 | pg_stat_get_backend_pid
+ 1938 | pg_stat_get_backend_dbid
+ 1939 | pg_stat_get_backend_userid
+ 1940 | pg_stat_get_backend_activity
+ 1941 | pg_stat_get_db_numbackends
+ 1942 | pg_stat_get_db_xact_commit
+ 1943 | pg_stat_get_db_xact_rollback
+ 1944 | pg_stat_get_db_blocks_fetched
+ 1945 | pg_stat_get_db_blocks_hit
+ 1946 | encode
+ 1947 | decode
+ 1954 | byteacmp
+ 1961 | timestamp
+ 1962 | int2_avg_accum
+ 1963 | int4_avg_accum
+ 1964 | int8_avg
+ 1965 | oidlarger
+ 1966 | oidsmaller
+ 1967 | timestamptz
+ 1968 | time
+ 1969 | timetz
+ 1972 | pg_stat_get_tuples_hot_updated
+ 1973 | div
+ 1980 | numeric_div_trunc
+ 1983 | pg_log_comm_status
+ 1984 | pg_comm_recv_stream
+ 1985 | pg_comm_send_stream
+ 1986 | pg_comm_status
+ 1987 | pg_comm_delay
+ 1988 | global_comm_get_recv_stream
+ 1989 | global_comm_get_send_stream
+ 1990 | global_comm_get_status
+ 1991 | comm_client_info
+ 1992 | global_comm_get_client_info
+ 1993 | shobj_description
+ 1998 | pg_get_running_xacts
+ 1999 | pg_check_xidlimit
+ 2000 | pg_get_xidlimit
+ 2007 | like
+ 2008 | notlike
+ 2009 | like_escape
+ 2010 | length
+ 2012 | substring
+ 2013 | substring
+ 2014 | position
+ 2015 | btrim
+ 2019 | time
+ 2020 | date_trunc
+ 2021 | date_part
+ 2022 | pg_stat_get_activity
+ 2023 | timestamp
+ 2024 | timestamp
+ 2025 | timestamp
+ 2026 | pg_backend_pid
+ 2027 | timestamp
+ 2028 | timestamptz
+ 2029 | date
+ 2030 | abstime
+ 2034 | pg_conf_load_time
+ 2035 | timestamp_smaller
+ 2036 | timestamp_larger
+ 2037 | timezone
+ 2038 | timezone
+ 2039 | timestamp_hash
+ 2041 | overlaps
+ 2042 | overlaps
+ 2043 | overlaps
+ 2044 | overlaps
+ 2045 | timestamp_cmp
+ 2046 | time
+ 2047 | timetz
+ 2048 | isfinite
+ 2049 | to_char
+ 2050 | max
+ 2051 | min
+ 2058 | age
+ 2059 | age
+ 2069 | timezone
+ 2070 | timezone
+ 2073 | substring
+ 2074 | substring
+ 2075 | bit
+ 2076 | int8
+ 2077 | current_setting
+ 2078 | set_config
+ 2079 | pg_table_is_visible
+ 2080 | pg_type_is_visible
+ 2081 | pg_function_is_visible
+ 2082 | pg_operator_is_visible
+ 2083 | pg_opclass_is_visible
+ 2084 | pg_show_all_settings
+ 2085 | substr
+ 2086 | substr
+ 2087 | replace
+ 2088 | split_part
+ 2089 | to_hex
+ 2090 | to_hex
+ 2091 | array_lower
+ 2092 | array_upper
+ 2093 | pg_conversion_is_visible
+ 2094 | pg_stat_get_backend_activity_start
+ 2095 | pgxc_gtm_snapshot_status
+ 2096 | pg_terminate_backend
+ 2097 | pg_get_variable_info
+ 2098 | pg_get_functiondef
+ 2100 | avg
+ 2101 | avg
+ 2102 | avg
+ 2103 | avg
+ 2104 | avg
+ 2105 | avg
+ 2106 | avg
+ 2107 | sum
+ 2108 | sum
+ 2109 | sum
+ 2110 | sum
+ 2111 | sum
+ 2112 | sum
+ 2113 | sum
+ 2114 | sum
+ 2115 | max
+ 2116 | max
+ 2117 | max
+ 2118 | max
+ 2119 | max
+ 2120 | max
+ 2121 | max
+ 2122 | max
+ 2123 | max
+ 2124 | max
+ 2125 | max
+ 2126 | max
+ 2127 | max
+ 2128 | max
+ 2129 | max
+ 2130 | max
+ 2131 | min
+ 2132 | min
+ 2133 | min
+ 2134 | min
+ 2135 | min
+ 2136 | min
+ 2137 | min
+ 2138 | min
+ 2139 | min
+ 2140 | min
+ 2141 | min
+ 2142 | min
+ 2143 | min
+ 2144 | min
+ 2145 | min
+ 2146 | min
+ 2147 | count
+ 2148 | variance
+ 2149 | variance
+ 2150 | variance
+ 2151 | variance
+ 2152 | variance
+ 2153 | variance
+ 2154 | stddev
+ 2155 | stddev
+ 2156 | stddev
+ 2157 | stddev
+ 2158 | stddev
+ 2159 | stddev
+ 2162 | pg_get_function_arguments
+ 2165 | pg_get_function_result
+ 2166 | bttext_pattern_cmp
+ 2167 | ceiling
+ 2168 | pg_database_size
+ 2169 | power
+ 2170 | width_bucket
+ 2171 | pg_cancel_backend
+ 2172 | pg_start_backup
+ 2173 | pg_stop_backup
+ 2176 | array_length
+ 2179 | gist_point_consistent
+ 2180 | btbpchar_pattern_cmp
+ 2181 | has_sequence_privilege
+ 2182 | has_sequence_privilege
+ 2183 | has_sequence_privilege
+ 2184 | has_sequence_privilege
+ 2185 | has_sequence_privilege
+ 2186 | has_sequence_privilege
+ 2188 | btint48cmp
+ 2189 | btint84cmp
+ 2190 | btint24cmp
+ 2191 | btint42cmp
+ 2192 | btint28cmp
+ 2193 | btint82cmp
+ 2194 | btfloat48cmp
+ 2195 | btfloat84cmp
+ 2196 | inet_client_addr
+ 2197 | inet_client_port
+ 2198 | inet_server_addr
+ 2199 | inet_server_port
+ 2212 | regprocedurein
+ 2213 | regprocedureout
+ 2214 | regoperin
+ 2215 | regoperout
+ 2216 | regoperatorin
+ 2217 | regoperatorout
+ 2218 | regclassin
+ 2219 | regclassout
+ 2220 | regtypein
+ 2221 | regtypeout
+ 2230 | pg_stat_clear_snapshot
+ 2232 | pg_get_function_identity_arguments
+ 2236 | bit_and
+ 2237 | bit_or
+ 2238 | bit_and
+ 2239 | bit_or
+ 2240 | bit_and
+ 2241 | bit_or
+ 2242 | bit_and
+ 2243 | bit_or
+ 2244 | max
+ 2245 | min
+ 2246 | fmgr_internal_validator
+ 2247 | fmgr_c_validator
+ 2248 | fmgr_sql_validator
+ 2250 | has_database_privilege
+ 2251 | has_database_privilege
+ 2252 | has_database_privilege
+ 2253 | has_database_privilege
+ 2254 | has_database_privilege
+ 2255 | has_database_privilege
+ 2256 | has_function_privilege
+ 2257 | has_function_privilege
+ 2258 | has_function_privilege
+ 2259 | has_function_privilege
+ 2260 | has_function_privilege
+ 2261 | has_function_privilege
+ 2262 | has_language_privilege
+ 2263 | has_language_privilege
+ 2264 | has_language_privilege
+ 2265 | has_language_privilege
+ 2266 | has_language_privilege
+ 2267 | has_language_privilege
+ 2268 | has_schema_privilege
+ 2269 | has_schema_privilege
+ 2270 | has_schema_privilege
+ 2271 | has_schema_privilege
+ 2272 | has_schema_privilege
+ 2273 | has_schema_privilege
+ 2274 | pg_stat_reset
+ 2284 | regexp_replace
+ 2285 | regexp_replace
+ 2286 | pg_total_relation_size
+ 2288 | pg_size_pretty
+ 2289 | pg_options_to_table
+ 2290 | record_in
+ 2291 | record_out
+ 2292 | cstring_in
+ 2293 | cstring_out
+ 2294 | any_in
+ 2295 | any_out
+ 2296 | anyarray_in
+ 2297 | anyarray_out
+ 2298 | void_in
+ 2299 | void_out
+ 2300 | trigger_in
+ 2301 | trigger_out
+ 2302 | language_handler_in
+ 2303 | language_handler_out
+ 2304 | internal_in
+ 2305 | internal_out
+ 2306 | opaque_in
+ 2307 | opaque_out
+ 2308 | ceil
+ 2309 | floor
+ 2310 | sign
+ 2311 | md5
+ 2312 | anyelement_in
+ 2313 | anyelement_out
+ 2316 | postgresql_fdw_validator
+ 2319 | pg_encoding_max_length
+ 2320 | ceiling
+ 2321 | md5
+ 2322 | pg_tablespace_size
+ 2323 | pg_tablespace_size
+ 2324 | pg_database_size
+ 2325 | pg_relation_size
+ 2331 | unnest
+ 2332 | pg_relation_size
+ 2333 | array_agg_transfn
+ 2334 | array_agg_finalfn
+ 2335 | array_agg
+ 2344 | date_cmp_timestamp
+ 2357 | date_cmp_timestamptz
+ 2370 | timestamp_cmp_date
+ 2383 | timestamptz_cmp_date
+ 2390 | has_tablespace_privilege
+ 2391 | has_tablespace_privilege
+ 2392 | has_tablespace_privilege
+ 2393 | has_tablespace_privilege
+ 2394 | has_tablespace_privilege
+ 2395 | has_tablespace_privilege
+ 2398 | shell_in
+ 2399 | shell_out
+ 2400 | array_recv
+ 2401 | array_send
+ 2402 | record_recv
+ 2403 | record_send
+ 2404 | int2recv
+ 2405 | int2send
+ 2406 | int4recv
+ 2407 | int4send
+ 2408 | int8recv
+ 2409 | int8send
+ 2410 | int2vectorrecv
+ 2411 | int2vectorsend
+ 2412 | bytearecv
+ 2413 | byteasend
+ 2414 | textrecv
+ 2415 | textsend
+ 2416 | unknownrecv
+ 2417 | unknownsend
+ 2418 | oidrecv
+ 2419 | oidsend
+ 2420 | oidvectorrecv
+ 2421 | oidvectorsend
+ 2422 | namerecv
+ 2423 | namesend
+ 2424 | float4recv
+ 2425 | float4send
+ 2426 | float8recv
+ 2427 | float8send
+ 2428 | point_recv
+ 2429 | point_send
+ 2430 | bpcharrecv
+ 2431 | bpcharsend
+ 2432 | varcharrecv
+ 2433 | varcharsend
+ 2434 | charrecv
+ 2435 | charsend
+ 2436 | boolrecv
+ 2437 | boolsend
+ 2438 | tidrecv
+ 2439 | tidsend
+ 2440 | xidrecv
+ 2441 | xidsend
+ 2442 | cidrecv
+ 2443 | cidsend
+ 2444 | regprocrecv
+ 2445 | regprocsend
+ 2446 | regprocedurerecv
+ 2447 | regproceduresend
+ 2448 | regoperrecv
+ 2449 | regopersend
+ 2450 | regoperatorrecv
+ 2451 | regoperatorsend
+ 2452 | regclassrecv
+ 2453 | regclasssend
+ 2454 | regtyperecv
+ 2455 | regtypesend
+ 2456 | bit_recv
+ 2457 | bit_send
+ 2458 | varbit_recv
+ 2459 | varbit_send
+ 2460 | numeric_recv
+ 2461 | numeric_send
+ 2462 | abstimerecv
+ 2463 | abstimesend
+ 2464 | reltimerecv
+ 2465 | reltimesend
+ 2466 | tintervalrecv
+ 2467 | tintervalsend
+ 2468 | date_recv
+ 2469 | date_send
+ 2470 | time_recv
+ 2471 | time_send
+ 2472 | timetz_recv
+ 2473 | timetz_send
+ 2474 | timestamp_recv
+ 2475 | timestamp_send
+ 2476 | timestamptz_recv
+ 2477 | timestamptz_send
+ 2478 | interval_recv
+ 2479 | interval_send
+ 2480 | lseg_recv
+ 2481 | lseg_send
+ 2482 | path_recv
+ 2483 | path_send
+ 2484 | box_recv
+ 2485 | box_send
+ 2486 | poly_recv
+ 2487 | poly_send
+ 2488 | line_recv
+ 2489 | line_send
+ 2490 | circle_recv
+ 2491 | circle_send
+ 2492 | cash_recv
+ 2493 | cash_send
+ 2494 | macaddr_recv
+ 2495 | macaddr_send
+ 2496 | inet_recv
+ 2497 | inet_send
+ 2498 | cidr_recv
+ 2499 | cidr_send
+ 2500 | cstring_recv
+ 2501 | cstring_send
+ 2502 | anyarray_recv
+ 2503 | anyarray_send
+ 2504 | pg_get_ruledef
+ 2505 | pg_get_viewdef
+ 2506 | pg_get_viewdef
+ 2507 | pg_get_indexdef
+ 2508 | pg_get_constraintdef
+ 2509 | pg_get_expr
+ 2510 | pg_prepared_statement
+ 2511 | pg_cursor
+ 2512 | float8_var_pop
+ 2513 | float8_stddev_pop
+ 2514 | numeric_var_pop
+ 2515 | booland_statefunc
+ 2516 | boolor_statefunc
+ 2517 | bool_and
+ 2518 | bool_or
+ 2519 | every
+ 2526 | timestamp_cmp_timestamptz
+ 2533 | timestamptz_cmp_timestamp
+ 2537 | report_fatal
+ 2539 | signal_backend
+ 2556 | pg_tablespace_databases
+ 2557 | bool
+ 2558 | int4
+ 2559 | lastval
+ 2560 | pg_postmaster_start_time
+ 2561 | gistvacuumcleanup
+ 2578 | gist_box_consistent
+ 2579 | gist_box_compress
+ 2580 | gist_box_decompress
+ 2581 | gist_box_penalty
+ 2582 | gist_box_picksplit
+ 2583 | gist_box_union
+ 2584 | gist_box_same
+ 2585 | gist_poly_consistent
+ 2586 | gist_poly_compress
+ 2591 | gist_circle_consistent
+ 2592 | gist_circle_compress
+ 2596 | numeric_stddev_pop
+ 2597 | domain_in
+ 2598 | domain_recv
+ 2599 | pg_timezone_abbrevs
+ 2614 | xmlexists
+ 2621 | pg_reload_conf
+ 2622 | pg_rotate_logfile
+ 2623 | pg_stat_file
+ 2624 | pg_read_file
+ 2625 | pg_ls_dir
+ 2626 | pg_sleep
+ 2641 | var_samp
+ 2642 | var_samp
+ 2643 | var_samp
+ 2644 | var_samp
+ 2645 | var_samp
+ 2646 | var_samp
+ 2647 | transaction_timestamp
+ 2648 | statement_timestamp
+ 2649 | clock_timestamp
+ 2700 | gin_cmp_prefix
+ 2705 | pg_has_role
+ 2706 | pg_has_role
+ 2707 | pg_has_role
+ 2708 | pg_has_role
+ 2709 | pg_has_role
+ 2710 | pg_has_role
+ 2711 | justify_interval
+ 2712 | stddev_samp
+ 2713 | stddev_samp
+ 2714 | stddev_samp
+ 2715 | stddev_samp
+ 2716 | stddev_samp
+ 2717 | stddev_samp
+ 2718 | var_pop
+ 2719 | var_pop
+ 2720 | var_pop
+ 2721 | var_pop
+ 2722 | var_pop
+ 2723 | var_pop
+ 2724 | stddev_pop
+ 2725 | stddev_pop
+ 2726 | stddev_pop
+ 2727 | stddev_pop
+ 2728 | stddev_pop
+ 2729 | stddev_pop
+ 2730 | pg_get_triggerdef
+ 2731 | gingetbitmap
+ 2732 | gininsert
+ 2733 | ginbeginscan
+ 2734 | ginrescan
+ 2735 | ginendscan
+ 2736 | ginmarkpos
+ 2737 | ginrestrpos
+ 2738 | ginbuild
+ 2739 | ginbulkdelete
+ 2740 | ginvacuumcleanup
+ 2741 | gincostestimate
+ 2743 | ginarrayextract
+ 2744 | ginarrayconsistent
+ 2746 | int8_avg_accum
+ 2758 | pg_stat_get_db_tuples_returned
+ 2759 | pg_stat_get_db_tuples_fetched
+ 2760 | pg_stat_get_db_tuples_inserted
+ 2761 | pg_stat_get_db_tuples_updated
+ 2762 | pg_stat_get_db_tuples_deleted
+ 2763 | regexp_matches
+ 2764 | regexp_matches
+ 2765 | regexp_split_to_table
+ 2766 | regexp_split_to_table
+ 2767 | regexp_split_to_array
+ 2768 | regexp_split_to_array
+ 2769 | pg_stat_get_bgwriter_timed_checkpoints
+ 2770 | pg_stat_get_bgwriter_requested_checkpoints
+ 2771 | pg_stat_get_bgwriter_buf_written_checkpoints
+ 2772 | pg_stat_get_bgwriter_buf_written_clean
+ 2773 | pg_stat_get_bgwriter_maxwritten_clean
+ 2774 | ginqueryarrayextract
+ 2775 | pg_stat_get_buf_written_backend
+ 2777 | anynonarray_in
+ 2778 | anynonarray_out
+ 2779 | xidrecv4
+ 2780 | xidsend4
+ 2781 | pg_stat_get_last_vacuum_time
+ 2782 | pg_stat_get_last_autovacuum_time
+ 2783 | pg_stat_get_last_analyze_time
+ 2784 | pg_stat_get_last_autoanalyze_time
+ 2785 | btoptions
+ 2786 | hashoptions
+ 2787 | gistoptions
+ 2788 | ginoptions
+ 2794 | bttidcmp
+ 2795 | tidlarger
+ 2796 | tidsmaller
+ 2797 | max
+ 2798 | min
+ 2803 | count
+ 2804 | int8inc_any
+ 2805 | int8inc_float8_float8
+ 2806 | float8_regr_accum
+ 2807 | float8_regr_sxx
+ 2808 | float8_regr_syy
+ 2809 | float8_regr_sxy
+ 2810 | float8_regr_avgx
+ 2811 | float8_regr_avgy
+ 2812 | float8_regr_r2
+ 2813 | float8_regr_slope
+ 2814 | float8_regr_intercept
+ 2815 | float8_covar_pop
+ 2816 | float8_covar_samp
+ 2817 | float8_corr
+ 2818 | regr_count
+ 2819 | regr_sxx
+ 2820 | regr_syy
+ 2821 | regr_sxy
+ 2822 | regr_avgx
+ 2823 | regr_avgy
+ 2824 | regr_r2
+ 2825 | regr_slope
+ 2826 | regr_intercept
+ 2827 | covar_pop
+ 2828 | covar_samp
+ 2829 | corr
+ 2844 | pg_stat_get_db_blk_read_time
+ 2845 | pg_stat_get_db_blk_write_time
+ 2846 | pg_stat_get_mem_mbytes_reserved
+ 2847 | gs_total_nodegroup_memory_detail
+ 2848 | pg_switch_xlog
+ 2849 | pg_current_xlog_location
+ 2850 | pg_xlogfile_name_offset
+ 2851 | pg_xlogfile_name
+ 2852 | pg_current_xlog_insert_location
+ 2853 | pg_stat_get_backend_waiting
+ 2854 | pg_my_temp_schema
+ 2855 | pg_is_other_temp_schema
+ 2856 | pg_timezone_names
+ 2857 | pg_stat_get_backend_xact_start
+ 2858 | numeric_avg_accum
+ 2859 | pg_stat_get_buf_alloc
+ 2878 | pg_stat_get_live_tuples
+ 2879 | pg_stat_get_dead_tuples
+ 2880 | pg_advisory_lock
+ 2881 | pg_advisory_lock_shared
+ 2882 | pg_try_advisory_lock
+ 2883 | pg_try_advisory_lock_shared
+ 2884 | pg_advisory_unlock
+ 2885 | pg_advisory_unlock_shared
+ 2886 | pg_advisory_lock
+ 2887 | pg_advisory_lock_shared
+ 2888 | pg_try_advisory_lock
+ 2889 | pg_try_advisory_lock_shared
+ 2890 | pg_advisory_unlock
+ 2891 | pg_advisory_unlock_shared
+ 2892 | pg_advisory_unlock_all
+ 2893 | xml_in
+ 2894 | xml_out
+ 2895 | xmlcomment
+ 2896 | xml
+ 2897 | xmlvalidate
+ 2898 | xml_recv
+ 2899 | xml_send
+ 2900 | xmlconcat2
+ 2901 | xmlagg
+ 2902 | varbittypmodin
+ 2903 | intervaltypmodin
+ 2904 | intervaltypmodout
+ 2905 | timestamptypmodin
+ 2906 | timestamptypmodout
+ 2907 | timestamptztypmodin
+ 2908 | timestamptztypmodout
+ 2909 | timetypmodin
+ 2910 | timetypmodout
+ 2911 | timetztypmodin
+ 2912 | timetztypmodout
+ 2913 | bpchartypmodin
+ 2914 | bpchartypmodout
+ 2915 | varchartypmodin
+ 2916 | varchartypmodout
+ 2917 | numerictypmodin
+ 2918 | numerictypmodout
+ 2919 | bittypmodin
+ 2920 | bittypmodout
+ 2921 | varbittypmodout
+ 2922 | text
+ 2923 | table_to_xml
+ 2924 | query_to_xml
+ 2925 | cursor_to_xml
+ 2926 | table_to_xmlschema
+ 2927 | query_to_xmlschema
+ 2928 | cursor_to_xmlschema
+ 2929 | table_to_xml_and_xmlschema
+ 2930 | query_to_xml_and_xmlschema
+ 2931 | xpath
+ 2932 | xpath
+ 2933 | schema_to_xml
+ 2934 | schema_to_xmlschema
+ 2935 | schema_to_xml_and_xmlschema
+ 2936 | database_to_xml
+ 2937 | database_to_xmlschema
+ 2938 | database_to_xml_and_xmlschema
+ 2939 | txid_snapshot_in
+ 2940 | txid_snapshot_out
+ 2941 | txid_snapshot_recv
+ 2942 | txid_snapshot_send
+ 2943 | txid_current
+ 2944 | txid_current_snapshot
+ 2945 | txid_snapshot_xmin
+ 2946 | txid_snapshot_xmax
+ 2947 | txid_snapshot_xip
+ 2948 | txid_visible_in_snapshot
+ 2949 | pgxc_snapshot_status
+ 2952 | uuid_in
+ 2953 | uuid_out
+ 2960 | uuid_cmp
+ 2961 | uuid_recv
+ 2962 | uuid_send
+ 2963 | uuid_hash
+ 2964 | numeric_avg_collect
+ 2965 | int8_avg_collect
+ 2966 | float8_collect
+ 2967 | interval_collect
+ 2968 | numeric_collect
+ 2971 | text
+ 2978 | pg_stat_get_function_calls
+ 2979 | pg_stat_get_function_total_time
+ 2980 | pg_stat_get_function_self_time
+ 2987 | btrecordcmp
+ 2995 | float8_regr_collect
+ 2996 | int8_sum_to_int8
+ 2997 | pg_table_size
+ 2998 | pg_indexes_size
+ 2999 | pg_relation_filenode
+ 3000 | has_foreign_data_wrapper_privilege
+ 3001 | has_foreign_data_wrapper_privilege
+ 3002 | has_foreign_data_wrapper_privilege
+ 3003 | has_foreign_data_wrapper_privilege
+ 3004 | has_foreign_data_wrapper_privilege
+ 3005 | has_foreign_data_wrapper_privilege
+ 3006 | has_server_privilege
+ 3007 | has_server_privilege
+ 3008 | has_server_privilege
+ 3009 | has_server_privilege
+ 3010 | has_server_privilege
+ 3011 | has_server_privilege
+ 3012 | has_column_privilege
+ 3013 | has_column_privilege
+ 3014 | has_column_privilege
+ 3015 | has_column_privilege
+ 3016 | has_column_privilege
+ 3017 | has_column_privilege
+ 3018 | has_column_privilege
+ 3019 | has_column_privilege
+ 3020 | has_column_privilege
+ 3021 | has_column_privilege
+ 3022 | has_column_privilege
+ 3023 | has_column_privilege
+ 3024 | has_any_column_privilege
+ 3025 | has_any_column_privilege
+ 3026 | has_any_column_privilege
+ 3027 | has_any_column_privilege
+ 3028 | has_any_column_privilege
+ 3029 | has_any_column_privilege
+ 3030 | overlay
+ 3031 | overlay
+ 3032 | get_bit
+ 3033 | set_bit
+ 3034 | pg_relation_filepath
+ 3035 | pg_listening_channels
+ 3036 | pg_notify
+ 3037 | pg_stat_get_xact_numscans
+ 3038 | pg_stat_get_xact_tuples_returned
+ 3039 | pg_stat_get_xact_tuples_fetched
+ 3040 | pg_stat_get_xact_tuples_inserted
+ 3041 | pg_stat_get_xact_tuples_updated
+ 3042 | pg_stat_get_xact_tuples_deleted
+ 3043 | pg_stat_get_xact_tuples_hot_updated
+ 3044 | pg_stat_get_xact_blocks_fetched
+ 3045 | pg_stat_get_xact_blocks_hit
+ 3046 | pg_stat_get_xact_function_calls
+ 3047 | pg_stat_get_xact_function_total_time
+ 3048 | pg_stat_get_xact_function_self_time
+ 3049 | xpath_exists
+ 3050 | xpath_exists
+ 3051 | xml_is_well_formed
+ 3052 | xml_is_well_formed_document
+ 3053 | xml_is_well_formed_content
+ 3054 | pg_stat_get_vacuum_count
+ 3055 | pg_stat_get_autovacuum_count
+ 3056 | pg_stat_get_analyze_count
+ 3057 | pg_stat_get_autoanalyze_count
+ 3058 | concat
+ 3059 | concat_ws
+ 3060 | left
+ 3061 | right
+ 3062 | reverse
+ 3063 | pg_stat_get_buf_fsync_backend
+ 3064 | gist_point_distance
+ 3065 | pg_stat_get_db_conflict_tablespace
+ 3066 | pg_stat_get_db_conflict_lock
+ 3067 | pg_stat_get_db_conflict_snapshot
+ 3068 | pg_stat_get_db_conflict_bufferpin
+ 3069 | pg_stat_get_db_conflict_startup_deadlock
+ 3070 | pg_stat_get_db_conflict_all
+ 3071 | pg_xlog_replay_pause
+ 3072 | pg_xlog_replay_resume
+ 3073 | pg_is_xlog_replay_paused
+ 3074 | pg_stat_get_db_stat_reset_time
+ 3075 | pg_stat_get_bgwriter_stat_reset_time
+ 3076 | ginarrayextract
+ 3077 | gin_extract_tsvector
+ 3078 | pg_sequence_parameters
+ 3082 | pg_available_extensions
+ 3083 | pg_available_extension_versions
+ 3084 | pg_extension_update_paths
+ 3086 | pg_extension_config_dump
+ 3087 | gin_extract_tsquery
+ 3088 | gin_tsquery_consistent
+ 3089 | pg_advisory_xact_lock
+ 3090 | pg_advisory_xact_lock_shared
+ 3091 | pg_try_advisory_xact_lock
+ 3092 | pg_try_advisory_xact_lock_shared
+ 3093 | pg_advisory_xact_lock
+ 3094 | pg_advisory_xact_lock_shared
+ 3095 | pg_try_advisory_xact_lock
+ 3096 | pg_try_advisory_xact_lock_shared
+ 3097 | varchar_transform
+ 3098 | pg_create_restore_point
+ 3099 | pg_stat_get_wal_senders
+ 3100 | row_number
+ 3101 | rank
+ 3102 | dense_rank
+ 3103 | percent_rank
+ 3104 | cume_dist
+ 3105 | ntile
+ 3106 | lag
+ 3107 | lag
+ 3108 | lag
+ 3109 | lead
+ 3110 | lead
+ 3111 | lead
+ 3112 | first_value
+ 3113 | last_value
+ 3114 | nth_value
+ 3116 | fdw_handler_in
+ 3117 | fdw_handler_out
+ 3120 | void_recv
+ 3121 | void_send
+ 3122 | oidvectorrecv_extend
+ 3123 | oidvectorsend_extend
+ 3129 | btint2sortsupport
+ 3130 | btint4sortsupport
+ 3131 | btint8sortsupport
+ 3132 | btfloat4sortsupport
+ 3133 | btfloat8sortsupport
+ 3134 | btoidsortsupport
+ 3135 | btnamesortsupport
+ 3136 | date_sortsupport
+ 3137 | timestamp_sortsupport
+ 3138 | has_type_privilege
+ 3139 | has_type_privilege
+ 3140 | has_type_privilege
+ 3141 | has_type_privilege
+ 3142 | has_type_privilege
+ 3143 | has_type_privilege
+ 3150 | pg_stat_get_db_temp_files
+ 3151 | pg_stat_get_db_temp_bytes
+ 3152 | pg_stat_get_db_deadlocks
+ 3153 | array_to_json
+ 3154 | array_to_json
+ 3155 | row_to_json
+ 3156 | row_to_json
+ 3157 | numeric_transform
+ 3158 | varbit_transform
+ 3159 | pg_get_viewdef
+ 3160 | pg_stat_get_checkpoint_write_time
+ 3161 | pg_stat_get_checkpoint_sync_time
+ 3162 | pg_collation_for
+ 3163 | pg_trigger_depth
+ 3164 | pg_sync_cstore_delta
+ 3165 | pg_xlog_location_diff
+ 3166 | pg_size_pretty
+ 3167 | instr
+ 3168 | instr
+ 3169 | instr
+ 3170 | multiply
+ 3171 | multiply
+ 3172 | numtodsinterval
+ 3175 | lengthb
+ 3176 | lengthb
+ 3177 | int8_bool
+ 3178 | bool_int8
+ 3179 | array_extend
+ 3180 | int2_bool
+ 3181 | bool_int2
+ 3182 | substring_inner
+ 3183 | substring_inner
+ 3184 | btmerge
+ 3185 | hashmerge
+ 3186 | ginmerge
+ 3187 | gistmerge
+ 3188 | spgmerge
+ 3189 | numtoday
+ 3190 | numtoday
+ 3191 | numtoday
+ 3192 | int4_bpchar
+ 3193 | pg_partition_size
+ 3194 | pg_partition_size
+ 3195 | pg_partition_indexes_size
+ 3196 | pg_partition_indexes_size
+ 3197 | pg_partition_filenode
+ 3198 | convert_to_nocase
+ 3199 | get_prepared_pending_xid
+ 3200 | pgxc_pool_check
+ 3201 | pgxc_pool_reload
+ 3202 | pgxc_node_str
+ 3203 | pgxc_is_committed
+ 3204 | pgxc_lock_for_backup
+ 3205 | substrb
+ 3206 | substrb
+ 3207 | to_timestamp
+ 3208 | to_tsvector_for_batch
+ 3209 | to_tsvector_for_batch
+ 3210 | pg_relation_with_compression
+ 3211 | pg_relation_compression_ratio
+ 3212 | pg_parse_clog
+ 3213 | pg_cancel_invalid_query
+ 3214 | bigint_tid
+ 3215 | cstore_tid_out
+ 3216 | definer_current_user
+ 3217 | cupointer_bigint
+ 3218 | pg_stat_bad_block
+ 3219 | pg_stat_bad_block_clear
+ 3221 | pg_stat_get_tuples_changed
+ 3222 | pg_total_autovac_tuples
+ 3223 | pg_autovac_status
+ 3226 | timestamp_diff
+ 3227 | timestamp_diff
+ 3228 | pg_check_authid
+ 3250 | local_recovery_status
+ 3255 | bttextsortsupport
+ 3256 | bpchar_sortsupport
+ 3265 | pg_current_userid
+ 3266 | pg_current_sessionid
+ 3267 | pg_current_sessid
+ 3283 | numeric_sortsupport
+ 3299 | local_rto_stat
+ 3332 | get_local_prepared_xact
+ 3333 | get_remote_prepared_xacts
+ 3334 | global_clean_prepared_xacts
+ 3452 | bytea_sortsupport
+ 3454 | pg_filenode_relation
+ 3464 | gs_encrypt_aes128
+ 3465 | gs_decrypt_aes128
+ 3466 | check_engine_status
+ 3467 | encode_plan_node
+ 3468 | track_model_train_opt
+ 3469 | gs_password_deadline
+ 3470 | gs_password_notifytime
+ 3471 | pg_pool_validate
+ 3472 | pg_pool_ping
+ 3475 | rawcmp
+ 3478 | rawcat
+ 3480 | pg_stat_get_cu_mem_hit
+ 3481 | model_train_opt
+ 3483 | pg_stat_get_cu_hdd_sync
+ 3484 | pg_stat_get_cu_hdd_asyn
+ 3485 | pg_stat_get_db_cu_mem_hit
+ 3488 | pg_stat_get_db_cu_hdd_sync
+ 3489 | pg_stat_get_db_cu_hdd_asyn
+ 3499 | pg_stat_get_stream_replications
+ 3500 | pg_stat_get_realtime_info_internal
+ 3501 | pg_stat_get_wlm_statistics
+ 3502 | pg_stat_get_session_wlmstat
+ 3503 | pg_wlm_jump_queue
+ 3504 | anyenum_in
+ 3505 | anyenum_out
+ 3506 | enum_in
+ 3507 | enum_out
+ 3514 | enum_cmp
+ 3515 | hashenum
+ 3524 | enum_smaller
+ 3525 | enum_larger
+ 3526 | max
+ 3527 | min
+ 3528 | enum_first
+ 3529 | enum_last
+ 3530 | enum_range
+ 3531 | enum_range
+ 3532 | enum_recv
+ 3533 | enum_send
+ 3534 | pg_sync_cstore_delta
+ 3535 | string_agg_transfn
+ 3536 | string_agg_finalfn
+ 3537 | pg_describe_object
+ 3538 | string_agg
+ 3539 | format
+ 3540 | format
+ 3543 | bytea_string_agg_transfn
+ 3544 | bytea_string_agg_finalfn
+ 3545 | string_agg
+ 3550 | list_agg_transfn
+ 3551 | list_agg_finalfn
+ 3552 | listagg
+ 3553 | list_agg_noarg2_transfn
+ 3554 | listagg
+ 3555 | int2_list_agg_transfn
+ 3556 | listagg
+ 3557 | int2_list_agg_noarg2_transfn
+ 3558 | listagg
+ 3559 | int4_list_agg_transfn
+ 3560 | listagg
+ 3561 | int4_list_agg_noarg2_transfn
+ 3562 | listagg
+ 3563 | int8_list_agg_transfn
+ 3564 | listagg
+ 3565 | int8_list_agg_noarg2_transfn
+ 3566 | listagg
+ 3567 | float4_list_agg_transfn
+ 3568 | listagg
+ 3569 | float4_list_agg_noarg2_transfn
+ 3570 | listagg
+ 3571 | float8_list_agg_transfn
+ 3572 | listagg
+ 3573 | float8_list_agg_noarg2_transfn
+ 3574 | listagg
+ 3575 | numeric_list_agg_transfn
+ 3576 | listagg
+ 3577 | numeric_list_agg_noarg2_transfn
+ 3578 | listagg
+ 3579 | date_list_agg_transfn
+ 3580 | listagg
+ 3581 | date_list_agg_noarg2_transfn
+ 3582 | listagg
+ 3583 | timestamp_list_agg_transfn
+ 3584 | listagg
+ 3585 | timestamp_list_agg_noarg2_transfn
+ 3586 | listagg
+ 3587 | timestamptz_list_agg_transfn
+ 3588 | listagg
+ 3589 | timestamptz_list_agg_noarg2_transfn
+ 3590 | listagg
+ 3591 | pgxc_get_thread_wait_status
+ 3610 | tsvectorin
+ 3611 | tsvectorout
+ 3612 | tsqueryin
+ 3613 | tsqueryout
+ 3622 | tsvector_cmp
+ 3623 | strip
+ 3624 | setweight
+ 3638 | tsvectorsend
+ 3639 | tsvectorrecv
+ 3640 | tsquerysend
+ 3641 | tsqueryrecv
+ 3646 | gtsvectorin
+ 3647 | gtsvectorout
+ 3648 | gtsvector_compress
+ 3649 | gtsvector_decompress
+ 3650 | gtsvector_picksplit
+ 3651 | gtsvector_union
+ 3652 | gtsvector_same
+ 3653 | gtsvector_penalty
+ 3654 | gtsvector_consistent
+ 3656 | gin_extract_tsvector
+ 3657 | gin_extract_tsquery
+ 3658 | gin_tsquery_consistent
+ 3668 | tsquery_cmp
+ 3672 | numnode
+ 3673 | querytree
+ 3684 | ts_rewrite
+ 3685 | ts_rewrite
+ 3686 | tsmatchsel
+ 3687 | tsmatchjoinsel
+ 3688 | ts_typanalyze
+ 3689 | ts_stat
+ 3690 | ts_stat
+ 3695 | gtsquery_compress
+ 3696 | gtsquery_decompress
+ 3697 | gtsquery_picksplit
+ 3698 | gtsquery_union
+ 3699 | gtsquery_same
+ 3700 | gtsquery_penalty
+ 3701 | gtsquery_consistent
+ 3703 | ts_rank
+ 3704 | ts_rank
+ 3705 | ts_rank
+ 3706 | ts_rank
+ 3707 | ts_rank_cd
+ 3708 | ts_rank_cd
+ 3709 | ts_rank_cd
+ 3710 | ts_rank_cd
+ 3711 | length
+ 3713 | ts_token_type
+ 3714 | ts_token_type
+ 3715 | ts_parse
+ 3716 | ts_parse
+ 3717 | prsd_start
+ 3718 | prsd_nexttoken
+ 3719 | prsd_end
+ 3720 | prsd_headline
+ 3721 | prsd_lextype
+ 3723 | ts_lexize
+ 3724 | gin_cmp_tslexeme
+ 3725 | dsimple_init
+ 3726 | dsimple_lexize
+ 3728 | dsynonym_init
+ 3729 | dsynonym_lexize
+ 3731 | dispell_init
+ 3732 | dispell_lexize
+ 3736 | regconfigin
+ 3737 | regconfigout
+ 3738 | regconfigrecv
+ 3739 | regconfigsend
+ 3740 | thesaurus_init
+ 3741 | thesaurus_lexize
+ 3743 | ts_headline
+ 3744 | ts_headline
+ 3745 | to_tsvector
+ 3746 | to_tsquery
+ 3747 | plainto_tsquery
+ 3749 | to_tsvector
+ 3750 | to_tsquery
+ 3751 | plainto_tsquery
+ 3752 | tsvector_update_trigger
+ 3753 | tsvector_update_trigger_column
+ 3754 | ts_headline
+ 3755 | ts_headline
+ 3756 | pg_ts_parser_is_visible
+ 3757 | pg_ts_dict_is_visible
+ 3758 | pg_ts_config_is_visible
+ 3759 | get_current_ts_config
+ 3768 | pg_ts_template_is_visible
+ 3771 | regdictionaryin
+ 3772 | regdictionaryout
+ 3773 | regdictionaryrecv
+ 3774 | regdictionarysend
+ 3775 | pg_stat_reset_shared
+ 3776 | pg_stat_reset_single_table_counters
+ 3777 | pg_stat_reset_single_function_counters
+ 3778 | pg_tablespace_location
+ 3779 | pg_create_physical_replication_slot
+ 3780 | pg_query_audit
+ 3781 | pg_delete_audit
+ 3782 | pg_query_audit
+ 3783 | pg_drop_replication_slot
+ 3784 | pg_get_replication_slots
+ 3785 | pg_stat_get_data_senders
+ 3786 | ngram_start
+ 3787 | ngram_nexttoken
+ 3788 | ngram_end
+ 3789 | ngram_lextype
+ 3792 | zhprs_start
+ 3793 | zhprs_getlexeme
+ 3794 | zhprs_end
+ 3795 | zhprs_lextype
+ 3798 | pound_start
+ 3799 | pound_nexttoken
+ 3800 | pound_end
+ 3801 | pound_lextype
+ 3808 | to_char
+ 3809 | pg_export_snapshot
+ 3810 | pg_is_in_recovery
+ 3811 | money
+ 3812 | money
+ 3813 | to_char
+ 3814 | empty_blob
+ 3815 | pg_collation_is_visible
+ 3816 | array_typanalyze
+ 3817 | arraycontsel
+ 3818 | arraycontjoinsel
+ 3819 | pg_stat_get_wal_receiver
+ 3820 | pg_last_xlog_receive_location
+ 3821 | pg_last_xlog_replay_location
+ 3823 | numeric
+ 3824 | money
+ 3826 | pg_read_file
+ 3827 | pg_read_binary_file
+ 3828 | pg_read_binary_file
+ 3829 | pg_opfamily_is_visible
+ 3830 | pg_last_xact_replay_timestamp
+ 3832 | anyrange_in
+ 3833 | anyrange_out
+ 3834 | range_in
+ 3835 | range_out
+ 3836 | range_recv
+ 3837 | range_send
+ 3840 | int4range
+ 3841 | int4range
+ 3842 | numtoday
+ 3843 | pg_control_group_config
+ 3844 | numrange
+ 3845 | numrange
+ 3848 | lower
+ 3849 | upper
+ 3850 | isempty
+ 3851 | lower_inc
+ 3852 | upper_inc
+ 3853 | lower_inf
+ 3854 | upper_inf
+ 3870 | range_cmp
+ 3875 | range_gist_consistent
+ 3876 | range_gist_union
+ 3877 | range_gist_compress
+ 3878 | range_gist_decompress
+ 3879 | range_gist_penalty
+ 3880 | range_gist_picksplit
+ 3881 | range_gist_same
+ 3902 | hash_range
+ 3914 | int4range_canonical
+ 3915 | daterange_canonical
+ 3916 | range_typanalyze
+ 3917 | timestamp_transform
+ 3918 | interval_transform
+ 3920 | ginarraytriconsistent
+ 3921 | gin_tsquery_triconsistent
+ 3922 | int4range_subdiff
+ 3923 | int8range_subdiff
+ 3924 | numrange_subdiff
+ 3925 | daterange_subdiff
+ 3928 | int8range_canonical
+ 3929 | tsrange_subdiff
+ 3930 | tstzrange_subdiff
+ 3933 | tsrange
+ 3934 | tsrange
+ 3937 | tstzrange
+ 3938 | tstzrange
+ 3941 | daterange
+ 3942 | daterange
+ 3943 | acldefault
+ 3944 | time_transform
+ 3945 | int8range
+ 3946 | int8range
+ 3947 | pg_stat_get_sql_count
+ 3950 | node_oid_name
+ 3951 | pg_systimestamp
+ 3952 | tablespace_oid_name
+ 3953 | get_schema_oid
+ 3954 | pgxc_pool_connection_status
+ 3955 | pg_stat_get_pooler_status
+ 3956 | threadpool_status
+ 3957 | plancache_status
+ 3958 | plancache_clean
+ 3959 | prepare_statement_status
+ 3960 | pgxc_get_csn
+ 3961 | nvarchar2
+ 3962 | nvarchar2in
+ 3963 | nvarchar2out
+ 3964 | nvarchar2typmodin
+ 3965 | nvarchar2typmodout
+ 3966 | nvarchar2recv
+ 3967 | nvarchar2send
+ 3968 | pv_thread_memory_detail
+ 3969 | pv_instance_time
+ 3970 | pv_os_run_info
+ 3971 | pv_session_memory_detail
+ 3972 | pv_session_time
+ 3973 | pg_stat_get_redo_stat
+ 3974 | pv_session_stat
+ 3975 | pg_stat_get_file_stat
+ 3976 | total_cpu
+ 3977 | get_hostname
+ 3978 | sessionid2pid
+ 3979 | total_memory
+ 3980 | pg_stat_get_status
+ 3981 | pg_stat_get_thread
+ 3982 | pg_stat_get_env
+ 3983 | pv_session_memctx_detail
+ 3984 | pv_session_memory
+ 3985 | pv_total_memory_detail
+ 3986 | pg_shared_memory_detail
+ 3987 | pg_shared_memctx_detail
+ 3989 | gin_clean_pending_list
+ 3998 | update_pgjob
+ 3999 | pg_tde_info
+ 4000 | gs_fault_inject
+ 4001 | spggettuple
+ 4002 | spggetbitmap
+ 4003 | spginsert
+ 4004 | spgbeginscan
+ 4005 | spgrescan
+ 4006 | spgendscan
+ 4007 | spgmarkpos
+ 4008 | spgrestrpos
+ 4009 | spgbuild
+ 4010 | spgbuildempty
+ 4011 | spgbulkdelete
+ 4012 | spgvacuumcleanup
+ 4013 | spgcostestimate
+ 4014 | spgoptions
+ 4018 | spg_quad_config
+ 4019 | spg_quad_choose
+ 4020 | spg_quad_picksplit
+ 4021 | spg_quad_inner_consistent
+ 4022 | spg_quad_leaf_consistent
+ 4023 | spg_kd_config
+ 4024 | spg_kd_choose
+ 4025 | spg_kd_picksplit
+ 4026 | spg_kd_inner_consistent
+ 4027 | spg_text_config
+ 4028 | spg_text_choose
+ 4029 | spg_text_picksplit
+ 4030 | spg_text_inner_consistent
+ 4031 | spg_text_leaf_consistent
+ 4032 | spgcanreturn
+ 4033 | rawrecv
+ 4034 | rawsend
+ 4035 | rawin
+ 4036 | rawout
+ 4037 | rawtohex
+ 4038 | hextoraw
+ 4040 | psortbuild
+ 4041 | psortoptions
+ 4042 | psortgettuple
+ 4043 | psortgetbitmap
+ 4044 | psortcostestimate
+ 4045 | psortcanreturn
+ 4046 | getbucket
+ 4047 | getdistributekey
+ 4048 | table_data_skewness
+ 4049 | gs_switch_relfilenode
+ 4065 | int1_varchar
+ 4066 | int1_nvarchar2
+ 4067 | int1_bpchar
+ 4068 | int2_bpchar
+ 4069 | int8_bpchar
+ 4070 | float4_bpchar
+ 4071 | float8_bpchar
+ 4072 | numeric_bpchar
+ 4073 | text_timestamp
+ 4074 | add_months
+ 4075 | last_day
+ 4076 | next_day
+ 4077 | next_day
+ 4080 | pg_autovac_timeout
+ 4081 | pg_autovac_coordinator
+ 4086 | pg_stat_get_partition_tuples_changed
+ 4087 | pg_stat_get_partition_dead_tuples
+ 4088 | pg_stat_get_partition_tuples_inserted
+ 4089 | pg_stat_get_partition_tuples_updated
+ 4090 | pg_stat_get_partition_tuples_deleted
+ 4091 | pg_stat_get_partition_tuples_hot_updated
+ 4092 | pg_stat_get_partition_live_tuples
+ 4093 | pg_stat_get_xact_partition_tuples_deleted
+ 4094 | pg_stat_get_xact_partition_tuples_inserted
+ 4095 | pg_stat_get_xact_partition_tuples_updated
+ 4096 | pg_stat_get_xact_partition_tuples_hot_updated
+ 4100 | getbucket
+ 4101 | bucketint4
+ 4102 | getbucket
+ 4103 | bucketint2
+ 4104 | getbucket
+ 4105 | bucketint8
+ 4106 | getbucket
+ 4107 | bucketbpchar
+ 4108 | getbucket
+ 4109 | bucketchar
+ 4110 | getbucket
+ 4111 | bucketvarchar
+ 4112 | getbucket
+ 4113 | bucketdate
+ 4114 | getbucket
+ 4115 | buckettime
+ 4116 | getbucket
+ 4117 | buckettimestamp
+ 4118 | getbucket
+ 4119 | buckettimetz
+ 4120 | getbucket
+ 4121 | bucketinterval
+ 4122 | getbucket
+ 4123 | buckettimestamptz
+ 4124 | getbucket
+ 4125 | bucketint1
+ 4126 | getbucket
+ 4127 | bucketsmalldatetime
+ 4128 | getbucket
+ 4129 | bucketnvarchar2
+ 4130 | pg_buffercache_pages
+ 4131 | getbucket
+ 4132 | bucketnumeric
+ 4133 | getbucket
+ 4134 | bucketoid
+ 4135 | getbucket
+ 4136 | bucketabstime
+ 4137 | getbucket
+ 4138 | bucketreltime
+ 4139 | getbucket
+ 4140 | bucketcash
+ 4141 | getbucket
+ 4142 | bucketbytea
+ 4143 | getbucket
+ 4144 | bucketraw
+ 4145 | getbucket
+ 4146 | bucketbool
+ 4147 | getbucket
+ 4148 | bucketname
+ 4149 | getbucket
+ 4150 | bucketint2vector
+ 4151 | getbucket
+ 4152 | buckettext
+ 4153 | getbucket
+ 4154 | bucketoidvector
+ 4155 | getbucket
+ 4156 | bucketfloat4
+ 4157 | getbucket
+ 4158 | bucketfloat8
+ 4159 | date_text
+ 4160 | date_bpchar
+ 4161 | date_varchar
+ 4162 | varchar_date
+ 4163 | bpchar_date
+ 4164 | text_date
+ 4165 | int1_text
+ 4166 | int2_text
+ 4167 | int4_text
+ 4168 | int8_text
+ 4169 | float4_text
+ 4170 | float8_text
+ 4171 | numeric_text
+ 4172 | bpchar_numeric
+ 4173 | varchar_numeric
+ 4174 | varchar_int4
+ 4175 | bpchar_int4
+ 4176 | varchar_int8
+ 4177 | timestampzone_text
+ 4178 | timestamp_text
+ 4179 | timestamp_varchar
+ 4180 | int2_varchar
+ 4181 | int4_varchar
+ 4182 | int8_varchar
+ 4183 | numeric_varchar
+ 4184 | float4_varchar
+ 4185 | float8_varchar
+ 4186 | varchar_timestamp
+ 4187 | bpchar_timestamp
+ 4188 | text_int1
+ 4189 | text_int2
+ 4190 | text_int4
+ 4191 | text_int8
+ 4192 | text_float4
+ 4193 | text_float8
+ 4194 | text_numeric
+ 4195 | bpchar_int8
+ 4196 | bpchar_float4
+ 4197 | bpchar_float8
+ 4198 | varchar_float4
+ 4199 | varchar_float8
+ 4200 | plan_seed
+ 4201 | has_nodegroup_privilege
+ 4202 | has_nodegroup_privilege
+ 4203 | has_nodegroup_privilege
+ 4204 | has_nodegroup_privilege
+ 4205 | has_nodegroup_privilege
+ 4206 | has_nodegroup_privilege
+ 4208 | get_db_source_datasize
+ 4209 | pg_clean_region_info
+ 4210 | gs_extend_library
+ 4212 | pg_stat_get_activity_with_conninfo
+ 4213 | pg_stat_get_activity_for_temptable
+ 4215 | pg_create_logical_replication_slot
+ 4216 | pg_logical_slot_get_changes
+ 4217 | pg_logical_slot_get_binary_changes
+ 4218 | pg_logical_slot_peek_changes
+ 4219 | pg_logical_slot_peek_binary_changes
+ 4220 | pg_replication_slot_advance
+ 4221 | disable_conn
+ 4222 | read_disable_conn_file
+ 4229 | float8_interval
+ 4240 | cbtreebuild
+ 4241 | cbtreeoptions
+ 4242 | cbtreegettuple
+ 4243 | cbtreecostestimate
+ 4244 | exec_on_extension
+ 4245 | cbtreecanreturn
+ 4246 | cbtreegetbitmap
+ 4255 | exec_hadoop_sql
+ 4300 | pv_compute_pool_workload
+ 4361 | local_pagewriter_stat
+ 4368 | remote_pagewriter_stat
+ 4371 | local_ckpt_stat
+ 4372 | remote_ckpt_stat
+ 4384 | local_double_write_stat
+ 4385 | remote_double_write_stat
+ 4388 | local_redo_stat
+ 4389 | remote_redo_stat
+ 4396 | pg_export_snapshot_and_csn
+ 4400 | cginbuild
+ 4401 | cgingetbitmap
+ 4410 | pgxc_stat_dirty_tables
+ 4411 | pgxc_stat_dirty_tables
+ 4441 | table_distribution
+ 4442 | table_distribution
+ 4443 | pg_get_tabledef
+ 4445 | pg_resume_bkp_flag
+ 4448 | ordered_set_transition
+ 4452 | percentile_cont
+ 4453 | percentile_cont_float8_final
+ 4454 | percentile_cont
+ 4455 | percentile_cont_interval_final
+ 4500 | gs_control_group_info
+ 4501 | gs_respool_exception_info
+ 4502 | gs_all_control_group_info
+ 4503 | gs_cgroup_map_ng_conf
+ 4504 | gs_all_nodegroup_control_group_info
+ 4505 | interval_list_agg_transfn
+ 4506 | listagg
+ 4507 | interval_list_agg_noarg2_transfn
+ 4508 | listagg
+ 4600 | checksum
+ 4601 | checksumtext_agg_transfn
+ 4651 | pg_cbm_tracked_location
+ 4652 | pg_cbm_get_merged_file
+ 4653 | pg_cbm_get_changed_block
+ 4654 | pg_cbm_recycle_file
+ 4655 | pg_cbm_force_track
+ 4656 | pg_enable_delay_ddl_recycle
+ 4657 | pg_disable_delay_ddl_recycle
+ 4658 | pg_enable_delay_xlog_recycle
+ 4659 | pg_disable_delay_xlog_recycle
+ 4700 | has_directory_privilege
+ 4701 | has_directory_privilege
+ 4702 | has_directory_privilege
+ 4703 | has_directory_privilege
+ 4704 | has_directory_privilege
+ 4705 | has_directory_privilege
+ 4789 | remote_rto_stat
+ 4999 | remote_recovery_status
+ 5000 | get_instr_workload_info
+ 5001 | pg_stat_get_wlm_session_info_internal
+ 5002 | pg_stat_get_wlm_session_info
+ 5003 | pg_stat_get_wlm_realtime_session_info
+ 5004 | gs_wlm_get_resource_pool_info
+ 5005 | gs_wlm_switch_cgroup
+ 5006 | gs_wlm_rebuild_user_resource_pool
+ 5007 | gs_wlm_get_user_info
+ 5008 | pg_stat_get_cgroup_info
+ 5009 | gs_wlm_get_session_info
+ 5010 | pg_stat_get_role_name
+ 5011 | gs_wlm_readjust_user_space
+ 5012 | gs_wlm_user_resource_info
+ 5013 | pg_user_iostat
+ 5014 | pg_stat_get_wlm_session_iostat_info
+ 5015 | get_nodename
+ 5016 | gs_wlm_node_clean
+ 5017 | gs_wlm_node_recover
+ 5018 | gs_wlm_get_workload_records
+ 5019 | pg_stat_get_wlm_node_resource_info
+ 5020 | gs_wlm_get_user_session_info
+ 5021 | gs_wlm_session_respool
+ 5022 | pg_stat_get_wlm_realtime_operator_info
+ 5023 | pg_stat_get_wlm_operator_info
+ 5024 | pg_stat_get_wlm_ec_operator_info
+ 5025 | pg_stat_get_wlm_realtime_ec_operator_info
+ 5026 | pg_stat_get_workload_struct_info
+ 5027 | gs_get_nodegroup_tablecount
+ 5028 | pgxc_max_datanode_size
+ 5029 | gs_wlm_readjust_user_space_with_reset_flag
+ 5030 | gs_wlm_readjust_user_space_through_username
+ 5031 | pg_stat_get_wlm_instance_info
+ 5032 | pg_stat_get_wlm_instance_info_with_cleanup
+ 5033 | gs_stat_get_wlm_plan_operator_info
+ 5345 | pv_builtin_functions
+ 5519 | int1cmp
+ 5520 | hashint1
+ 5521 | int1_numeric
+ 5522 | numeric_int1
+ 5523 | i1toi2
+ 5524 | i2toi1
+ 5525 | i1toi4
+ 5526 | i4toi1
+ 5527 | i1toi8
+ 5528 | i8toi1
+ 5529 | i1tof4
+ 5530 | f4toi1
+ 5531 | i1tof8
+ 5532 | f8toi1
+ 5533 | int1_bool
+ 5534 | bool_int1
+ 5537 | avg
+ 5538 | max
+ 5539 | bit_and
+ 5540 | bit_or
+ 5541 | int1in
+ 5542 | int1out
+ 5543 | int1recv
+ 5544 | int1send
+ 5548 | int1_avg_accum
+ 5549 | pg_stat_get_activity_ng
+ 5560 | to_date
+ 5586 | smalldatetime_cmp
+ 5587 | smalldatetime_hash
+ 5600 | pg_stat_get_last_data_changed_time
+ 5601 | pg_stat_set_last_data_changed_time
+ 5702 | get_instr_unique_sql
+ 5703 | generate_wdr_report
+ 5705 | get_instr_wait_event
+ 5706 | get_instr_user_login
+ 5708 | get_local_rel_iostat
+ 5711 | create_wdr_snapshot
+ 5712 | get_instr_rt_percentile
+ 5713 | wdr_xdb_query
+ 5714 | kill_snapshot
+ 5716 | reset_unique_sql
+ 5720 | get_node_stat_reset_time
+ 5999 | get_gtm_lite_status
+ 6000 | getbucket
+ 6001 | bucketuuid
+ 6003 | pg_get_replication_slot_name
+ 6101 | int1and
+ 6102 | int1or
+ 6103 | int1xor
+ 6104 | int1not
+ 6105 | int1shl
+ 6106 | int1shr
+ 6107 | int1up
+ 6108 | int1um
+ 6109 | int1pl
+ 6110 | int1mi
+ 6111 | int1mul
+ 6112 | int1div
+ 6113 | int1abs
+ 6114 | int1mod
+ 6115 | int1larger
+ 6116 | int1smaller
+ 6117 | int1inc
+ 6118 | set_hashbucket_info
+ 6200 | mot_session_memory_detail
+ 6201 | mot_global_memory_detail
+ 6202 | mot_local_memory_detail
+ 6224 | gs_get_next_xid_csn
+ 6321 | pg_stat_file_recursive
+ 7777 | sysdate
+ 7998 | set_working_grand_version_num_manually
+ 8050 | datalength
+ 9004 | smalldatetime_in
+ 9006 | smalldatetime_out
+ 9007 | smalldatetime_recv
+ 9008 | smalldatetime_send
+ 9009 | min
+ 9010 | max
+ 9011 | smalldatetime_smaller
+ 9012 | smalldatetime_larger
+ 9014 | pgxc_lock_for_sp_database
+ 9015 | pg_advisory_unlock
+ 9016 | pg_advisory_lock
+ 9017 | pgxc_unlock_for_sp_database
+ 9999 | pg_test_err_contain_err
+(2265 rows)
+
+-- **************** pg_cast ****************
+-- Catch bogus values in pg_cast columns (other than cases detected by
+-- oidjoins test).
+SELECT *
+FROM pg_cast c
+WHERE castsource = 0 OR casttarget = 0 OR castcontext NOT IN ('e', 'a', 'i')
+    OR castmethod NOT IN ('f', 'b' ,'i')
+ORDER by 1, 2, 3;
+ castsource | casttarget | castfunc | castcontext | castmethod 
+------------+------------+----------+-------------+------------
+(0 rows)
+
+-- Check that castfunc is nonzero only for cast methods that need a function,
+-- and zero otherwise
+SELECT *
+FROM pg_cast c
+WHERE (castmethod = 'f' AND castfunc = 0)
+   OR (castmethod IN ('b', 'i') AND castfunc <> 0)
+ORDER by 1, 2, 3;
+ castsource | casttarget | castfunc | castcontext | castmethod 
+------------+------------+----------+-------------+------------
+(0 rows)
+
+-- Look for casts to/from the same type that aren't length coercion functions.
+-- (We assume they are length coercions if they take multiple arguments.)
+-- Such entries are not necessarily harmful, but they are useless.
+SELECT *
+FROM pg_cast c
+WHERE castsource = casttarget AND castfunc = 0
+ORDER by 1, 2, 3;
+ castsource | casttarget | castfunc | castcontext | castmethod 
+------------+------------+----------+-------------+------------
+(0 rows)
+
+SELECT c.*
+FROM pg_cast c, pg_proc p
+WHERE c.castfunc = p.oid AND p.pronargs < 2 AND castsource = casttarget
+ORDER by 1, 2, 3;
+ castsource | casttarget | castfunc | castcontext | castmethod 
+------------+------------+----------+-------------+------------
+(0 rows)
+
+-- Look for cast functions that don't have the right signature.  The
+-- argument and result types in pg_proc must be the same as, or binary
+-- compatible with, what it says in pg_cast.
+-- As a special case, we allow casts from CHAR(n) that use functions
+-- declared to take TEXT.  This does not pass the binary-coercibility test
+-- because CHAR(n)-to-TEXT normally invokes rtrim().  However, the results
+-- are the same, so long as the function is one that ignores trailing blanks.
+SELECT c.*
+FROM pg_cast c, pg_proc p
+WHERE c.castfunc = p.oid AND
+    (p.pronargs < 1 OR p.pronargs > 3
+     OR NOT (binary_coercible(c.castsource, p.proargtypes[0])
+             OR (c.castsource = 'character'::regtype AND
+                 p.proargtypes[0] = 'text'::regtype))
+     OR NOT binary_coercible(p.prorettype, c.casttarget))
+ORDER by 1, 2, 3;
+ castsource | casttarget | castfunc | castcontext | castmethod 
+------------+------------+----------+-------------+------------
+(0 rows)
+
+SELECT c.*
+FROM pg_cast c, pg_proc p
+WHERE c.castfunc = p.oid AND
+    ((p.pronargs > 1 AND p.proargtypes[1] != 'int4'::regtype) OR
+     (p.pronargs > 2 AND p.proargtypes[2] != 'bool'::regtype))
+ORDER by 1, 2, 3;
+ castsource | casttarget | castfunc | castcontext | castmethod 
+------------+------------+----------+-------------+------------
+(0 rows)
+
+-- Look for binary compatible casts that do not have the reverse
+-- direction registered as well, or where the reverse direction is not
+-- also binary compatible.  This is legal, but usually not intended.
+-- As of 7.4, this finds the casts from text and varchar to bpchar, because
+-- those are binary-compatible while the reverse way goes through rtrim().
+-- As of 8.2, this finds the cast from cidr to inet, because that is a
+-- trivial binary coercion while the other way goes through inet_to_cidr().
+-- As of 8.3, this finds the casts from xml to text, varchar, and bpchar,
+-- because those are binary-compatible while the reverse goes through
+-- texttoxml(), which does an XML syntax check.
+-- As of 9.1, this finds the cast from pg_node_tree to text, which we
+-- intentionally do not provide a reverse pathway for.
+-- **************** pg_operator ****************
+-- Look for illegal values in pg_operator fields.
+SELECT p1.oid, p1.oprname
+FROM pg_operator as p1
+WHERE (p1.oprkind != 'b' AND p1.oprkind != 'l' AND p1.oprkind != 'r') OR
+    p1.oprresult = 0 OR p1.oprcode = 0
+ORDER by 1, 2;
+ oid | oprname 
+-----+---------
+(0 rows)
+
+-- Look for missing or unwanted operand types
+SELECT p1.oid, p1.oprname
+FROM pg_operator as p1
+WHERE (p1.oprleft = 0 and p1.oprkind != 'l') OR
+    (p1.oprleft != 0 and p1.oprkind = 'l') OR
+    (p1.oprright = 0 and p1.oprkind != 'r') OR
+    (p1.oprright != 0 and p1.oprkind = 'r')
+ORDER by 1, 2;
+ oid | oprname 
+-----+---------
+(0 rows)
+
+-- Look for conflicting operator definitions (same names and input datatypes).
+SELECT p1.oid, p1.oprcode, p2.oid, p2.oprcode
+FROM pg_operator AS p1, pg_operator AS p2
+WHERE p1.oid != p2.oid AND
+    p1.oprname = p2.oprname AND
+    p1.oprkind = p2.oprkind AND
+    p1.oprleft = p2.oprleft AND
+    p1.oprright = p2.oprright
+ORDER by 1, 2, 3;
+ oid | oprcode | oid | oprcode 
+-----+---------+-----+---------
+(0 rows)
+
+-- Look for commutative operators that don't commute.
+-- DEFINITIONAL NOTE: If A.oprcom = B, then x A y has the same result as y B x.
+-- We expect that B will always say that B.oprcom = A as well; that's not
+-- inherently essential, but it would be inefficient not to mark it so.
+SELECT p1.oid, p1.oprcode, p2.oid, p2.oprcode
+FROM pg_operator AS p1, pg_operator AS p2
+WHERE p1.oprcom = p2.oid AND
+    (p1.oprkind != 'b' OR
+     p1.oprleft != p2.oprright OR
+     p1.oprright != p2.oprleft OR
+     p1.oprresult != p2.oprresult OR
+     p1.oid != p2.oprcom)
+ORDER by 1, 2, 3;
+ oid | oprcode | oid | oprcode 
+-----+---------+-----+---------
+(0 rows)
+
+-- Look for negatory operators that don't agree.
+-- DEFINITIONAL NOTE: If A.oprnegate = B, then both A and B must yield
+-- boolean results, and (x A y) == ! (x B y), or the equivalent for
+-- single-operand operators.
+-- We expect that B will always say that B.oprnegate = A as well; that's not
+-- inherently essential, but it would be inefficient not to mark it so.
+-- Also, A and B had better not be the same operator.
+SELECT p1.oid, p1.oprcode, p2.oid, p2.oprcode
+FROM pg_operator AS p1, pg_operator AS p2
+WHERE p1.oprnegate = p2.oid AND
+    (p1.oprkind != p2.oprkind OR
+     p1.oprleft != p2.oprleft OR
+     p1.oprright != p2.oprright OR
+     p1.oprresult != 'bool'::regtype OR
+     p2.oprresult != 'bool'::regtype OR
+     p1.oid != p2.oprnegate OR
+     p1.oid = p2.oid)
+ORDER by 1, 2, 3;
+ oid | oprcode | oid | oprcode 
+-----+---------+-----+---------
+(0 rows)
+
+-- A mergejoinable or hashjoinable operator must be binary, must return
+-- boolean, and must have a commutator (itself, unless it's a cross-type
+-- operator).
+SELECT p1.oid, p1.oprname FROM pg_operator AS p1
+WHERE (p1.oprcanmerge OR p1.oprcanhash) AND NOT
+    (p1.oprkind = 'b' AND p1.oprresult = 'bool'::regtype AND p1.oprcom != 0)
+ORDER by 1, 2;
+ oid | oprname 
+-----+---------
+(0 rows)
+
+-- What's more, the commutator had better be mergejoinable/hashjoinable too.
+SELECT p1.oid, p1.oprname, p2.oid, p2.oprname
+FROM pg_operator AS p1, pg_operator AS p2
+WHERE p1.oprcom = p2.oid AND
+    (p1.oprcanmerge != p2.oprcanmerge OR
+     p1.oprcanhash != p2.oprcanhash)
+ORDER by 1, 2, 3;
+ oid | oprname | oid | oprname 
+-----+---------+-----+---------
+(0 rows)
+
+-- Mergejoinable operators should appear as equality members of btree index
+-- opfamilies.
+SELECT p1.oid, p1.oprname
+FROM pg_operator AS p1
+WHERE p1.oprcanmerge AND NOT EXISTS
+  (SELECT 1 FROM pg_amop
+   WHERE amopmethod = (SELECT oid FROM pg_am WHERE amname = 'btree') AND
+         amopopr = p1.oid AND amopstrategy = 3)
+ORDER by 1, 2;
+ oid | oprname 
+-----+---------
+(0 rows)
+
+-- And the converse.
+SELECT p1.oid, p1.oprname, p.amopfamily
+FROM pg_operator AS p1, pg_amop p
+WHERE amopopr = p1.oid
+  AND amopmethod = (SELECT oid FROM pg_am WHERE amname = 'btree')
+  AND amopstrategy = 3
+  AND NOT p1.oprcanmerge
+ORDER by 1, 2, 3;
+ oid | oprname | amopfamily 
+-----+---------+------------
+(0 rows)
+
+-- Hashable operators should appear as members of hash index opfamilies.
+SELECT p1.oid, p1.oprname
+FROM pg_operator AS p1
+WHERE p1.oprcanhash AND NOT EXISTS
+  (SELECT 1 FROM pg_amop
+   WHERE amopmethod = (SELECT oid FROM pg_am WHERE amname = 'hash') AND
+         amopopr = p1.oid AND amopstrategy = 1)
+ORDER by 1, 2;
+ oid | oprname 
+-----+---------
+(0 rows)
+
+-- And the converse.
+SELECT p1.oid, p1.oprname, p.amopfamily
+FROM pg_operator AS p1, pg_amop p
+WHERE amopopr = p1.oid
+  AND amopmethod = (SELECT oid FROM pg_am WHERE amname = 'hash')
+  AND NOT p1.oprcanhash
+ORDER by 1, 2, 3;
+ oid | oprname | amopfamily 
+-----+---------+------------
+(0 rows)
+
+-- Check that each operator defined in pg_operator matches its oprcode entry
+-- in pg_proc.  Easiest to do this separately for each oprkind.
+SELECT p1.oid, p1.oprname, p2.oid, p2.proname
+FROM pg_operator AS p1, pg_proc AS p2
+WHERE p1.oprcode = p2.oid AND
+    p1.oprkind = 'b' AND
+    (p2.pronargs != 2
+     OR NOT binary_coercible(p2.prorettype, p1.oprresult)
+     OR NOT binary_coercible(p1.oprleft, p2.proargtypes[0])
+     OR NOT binary_coercible(p1.oprright, p2.proargtypes[1]))
+ORDER by 1, 2, 3;
+ oid | oprname | oid | proname 
+-----+---------+-----+---------
+(0 rows)
+
+SELECT p1.oid, p1.oprname, p2.oid, p2.proname
+FROM pg_operator AS p1, pg_proc AS p2
+WHERE p1.oprcode = p2.oid AND
+    p1.oprkind = 'l' AND
+    (p2.pronargs != 1
+     OR NOT binary_coercible(p2.prorettype, p1.oprresult)
+     OR NOT binary_coercible(p1.oprright, p2.proargtypes[0])
+     OR p1.oprleft != 0)
+ORDER by 1, 2, 3;
+ oid | oprname | oid | proname 
+-----+---------+-----+---------
+(0 rows)
+
+SELECT p1.oid, p1.oprname, p2.oid, p2.proname
+FROM pg_operator AS p1, pg_proc AS p2
+WHERE p1.oprcode = p2.oid AND
+    p1.oprkind = 'r' AND
+    (p2.pronargs != 1
+     OR NOT binary_coercible(p2.prorettype, p1.oprresult)
+     OR NOT binary_coercible(p1.oprleft, p2.proargtypes[0])
+     OR p1.oprright != 0)
+ORDER by 1, 2, 3;
+ oid | oprname | oid | proname 
+-----+---------+-----+---------
+(0 rows)
+
+-- If the operator is mergejoinable or hashjoinable, its underlying function
+-- should not be volatile.
+SELECT p1.oid, p1.oprname, p2.oid, p2.proname
+FROM pg_operator AS p1, pg_proc AS p2
+WHERE p1.oprcode = p2.oid AND
+    (p1.oprcanmerge OR p1.oprcanhash) AND
+    p2.provolatile = 'v'
+ORDER by 1, 2, 3;
+ oid | oprname | oid | proname 
+-----+---------+-----+---------
+(0 rows)
+
+-- If oprrest is set, the operator must return boolean,
+-- and it must link to a proc with the right signature
+-- to be a restriction selectivity estimator.
+-- The proc signature we want is: float8 proc(internal, oid, internal, int4)
+SELECT p1.oid, p1.oprname, p2.oid, p2.proname
+FROM pg_operator AS p1, pg_proc AS p2
+WHERE p1.oprrest = p2.oid AND
+    (p1.oprresult != 'bool'::regtype OR
+     p2.prorettype != 'float8'::regtype OR p2.proretset OR
+     p2.pronargs != 4 OR
+     p2.proargtypes[0] != 'internal'::regtype OR
+     p2.proargtypes[1] != 'oid'::regtype OR
+     p2.proargtypes[2] != 'internal'::regtype OR
+     p2.proargtypes[3] != 'int4'::regtype)
+ORDER by 1, 2, 3;
+ oid | oprname | oid | proname 
+-----+---------+-----+---------
+(0 rows)
+
+-- If oprjoin is set, the operator must be a binary boolean op,
+-- and it must link to a proc with the right signature
+-- to be a join selectivity estimator.
+-- The proc signature we want is: float8 proc(internal, oid, internal, int2, internal)
+-- (Note: the old signature with only 4 args is still allowed, but no core
+-- estimator should be using it.)
+SELECT p1.oid, p1.oprname, p2.oid, p2.proname
+FROM pg_operator AS p1, pg_proc AS p2
+WHERE p1.oprjoin = p2.oid AND
+    (p1.oprkind != 'b' OR p1.oprresult != 'bool'::regtype OR
+     p2.prorettype != 'float8'::regtype OR p2.proretset OR
+     p2.pronargs != 5 OR
+     p2.proargtypes[0] != 'internal'::regtype OR
+     p2.proargtypes[1] != 'oid'::regtype OR
+     p2.proargtypes[2] != 'internal'::regtype OR
+     p2.proargtypes[3] != 'int2'::regtype OR
+     p2.proargtypes[4] != 'internal'::regtype)
+ORDER by 1, 2, 3;
+ oid | oprname | oid | proname 
+-----+---------+-----+---------
+(0 rows)
+
+-- Insist that all built-in pg_operator entries have descriptions
+SELECT p1.oid, p1.oprname
+FROM pg_operator as p1 LEFT JOIN pg_description as d
+     ON p1.tableoid = d.classoid and p1.oid = d.objoid and d.objsubid = 0
+WHERE d.classoid IS NULL AND p1.oid <= 9999
+ORDER by 1, 2;
+ oid | oprname 
+-----+---------
+(0 rows)
+
+-- Check that operators' underlying functions have suitable comments,
+-- namely 'implementation of XXX operator'.  In some cases involving legacy
+-- names for operators, there are multiple operators referencing the same
+-- pg_proc entry, so ignore operators whose comments say they are deprecated.
+-- We also have a few functions that are both operator support and meant to
+-- be called directly; those should have comments matching their operator.
+WITH funcdescs AS (
+  SELECT p.oid as p_oid, proname, o.oid as o_oid,
+    obj_description(p.oid, 'pg_proc') as prodesc,
+    'implementation of ' || oprname || ' operator' as expecteddesc,
+    obj_description(o.oid, 'pg_operator') as oprdesc
+  FROM pg_proc p JOIN pg_operator o ON oprcode = p.oid
+  WHERE o.oid <= 9999
+)
+SELECT * FROM funcdescs
+  WHERE prodesc IS DISTINCT FROM expecteddesc
+    AND oprdesc NOT LIKE 'deprecated%'
+    AND prodesc IS DISTINCT FROM oprdesc
+  ORDER by 1, 2, 3;
+ p_oid | proname | o_oid | prodesc | expecteddesc | oprdesc 
+-------+---------+-------+---------+--------------+---------
+(0 rows)
+
+-- **************** pg_aggregate ****************
+-- Look for illegal values in pg_aggregate fields.
+SELECT ctid, aggfnoid::oid
+FROM pg_aggregate as p1
+WHERE aggfnoid = 0 OR aggtransfn = 0 OR aggtranstype = 0
+ORDER by 1, 2;
+ ctid | aggfnoid 
+------+----------
+(0 rows)
+
+-- Make sure the matching pg_proc entry is sensible, too.
+SELECT a.aggfnoid::oid, p.proname
+FROM pg_aggregate as a, pg_proc as p
+WHERE a.aggfnoid = p.oid AND
+    (NOT p.proisagg OR p.proretset)
+ORDER by 1, 2;
+ aggfnoid | proname 
+----------+---------
+(0 rows)
+
+-- Make sure there are no proisagg pg_proc entries without matches.
+SELECT oid, proname
+FROM pg_proc as p
+WHERE p.proisagg AND
+    NOT EXISTS (SELECT 1 FROM pg_aggregate a WHERE a.aggfnoid = p.oid)
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+-- If there is no finalfn then the output type must be the transtype.
+SELECT a.aggfnoid::oid, p.proname
+FROM pg_aggregate as a, pg_proc as p
+WHERE a.aggfnoid = p.oid AND
+    a.aggfinalfn = 0 AND p.prorettype != a.aggtranstype
+ORDER by 1, 2;
+ aggfnoid | proname 
+----------+---------
+(0 rows)
+
+-- Cross-check transfn against its entry in pg_proc.
+-- NOTE: use physically_coercible_2 here, not binary_coercible_2, because
+-- max and min on abstime are implemented using int4larger/int4smaller.
+SELECT a.aggfnoid::oid, p.proname, ptr.oid, ptr.proname
+FROM pg_aggregate AS a, pg_proc AS p, pg_proc AS ptr
+WHERE a.aggfnoid = p.oid AND
+    a.aggtransfn = ptr.oid AND
+    (ptr.proretset
+     OR NOT (ptr.pronargs = 
+             CASE WHEN a.aggkind = 'n' THEN p.pronargs + 1
+             ELSE greatest(p.pronargs - a.aggnumdirectargs, 1) + 1 END)
+     OR NOT physically_coercible_2(ptr.prorettype, a.aggtranstype)
+     OR NOT physically_coercible_2(a.aggtranstype, ptr.proargtypes[0])
+     OR (p.pronargs > 0 AND
+         NOT physically_coercible_2(p.proargtypes[0], ptr.proargtypes[1]))
+     OR (p.pronargs > 1 AND
+         NOT physically_coercible_2(p.proargtypes[1], ptr.proargtypes[2]))
+     OR (p.pronargs > 2 AND
+         NOT physically_coercible_2(p.proargtypes[2], ptr.proargtypes[3]))
+     -- we could carry the check further, but that's enough for now
+    )
+ORDER by 1, 2, 3;
+ aggfnoid | proname | oid | proname 
+----------+---------+-----+---------
+(0 rows)
+
+-- Cross-check finalfn (if present) against its entry in pg_proc.
+SELECT a.aggfnoid::oid, p.proname, pfn.oid, pfn.proname
+FROM pg_aggregate AS a, pg_proc AS p, pg_proc AS pfn
+WHERE a.aggfnoid = p.oid AND
+    a.aggfinalfn = pfn.oid AND
+    (pfn.proretset OR
+     NOT binary_coercible_3(pfn.prorettype, p.prorettype) OR
+     NOT binary_coercible_3(a.aggtranstype, pfn.proargtypes[0]) 
+     OR (pfn.pronargs > 1 AND
+         NOT binary_coercible_3(p.proargtypes[0], pfn.proargtypes[1]))
+     OR (pfn.pronargs > 2 AND
+         NOT binary_coercible_3(p.proargtypes[1], pfn.proargtypes[2]))
+     OR (pfn.pronargs > 3 AND
+         NOT binary_coercible_3(p.proargtypes[2], pfn.proargtypes[3]))
+     -- we could carry the check further, but 3 args is enough for now
+    )
+ORDER by 1, 2, 3;
+ aggfnoid | proname | oid | proname 
+----------+---------+-----+---------
+(0 rows)
+
+-- If transfn is strict then either initval should be non-NULL, or
+-- input type should match transtype so that the first non-null input
+-- can be assigned as the state value.
+SELECT a.aggfnoid::oid, p.proname, ptr.oid, ptr.proname
+FROM pg_aggregate AS a, pg_proc AS p, pg_proc AS ptr
+WHERE a.aggfnoid = p.oid AND
+    a.aggtransfn = ptr.oid AND ptr.proisstrict AND
+    a.agginitval IS NULL AND
+    NOT binary_coercible(p.proargtypes[0], a.aggtranstype)
+ORDER by 1, 2, 3;
+ aggfnoid | proname | oid | proname 
+----------+---------+-----+---------
+(0 rows)
+
+-- Cross-check aggsortop (if present) against pg_operator.
+-- We expect to find entries for bool_and, bool_or, every, max, and min.
+SELECT DISTINCT proname, oprname
+FROM pg_operator AS o, pg_aggregate AS a, pg_proc AS p
+WHERE a.aggfnoid = p.oid AND a.aggsortop = o.oid
+ORDER BY 1, 2;
+ proname  | oprname 
+----------+---------
+ bool_and | <
+ bool_or  | >
+ every    | <
+ max      | >
+ min      | <
+(5 rows)
+
+-- Check datatypes match
+SELECT a.aggfnoid::oid, o.oid
+FROM pg_operator AS o, pg_aggregate AS a, pg_proc AS p
+WHERE a.aggfnoid = p.oid AND a.aggsortop = o.oid AND
+    (oprkind != 'b' OR oprresult != 'boolean'::regtype
+     OR oprleft != p.proargtypes[0] OR oprright != p.proargtypes[0])
+ORDER by 1, 2;
+ aggfnoid | oid 
+----------+-----
+(0 rows)
+
+-- Check operator is a suitable btree opfamily member
+SELECT a.aggfnoid::oid, o.oid
+FROM pg_operator AS o, pg_aggregate AS a, pg_proc AS p
+WHERE a.aggfnoid = p.oid AND a.aggsortop = o.oid AND
+    NOT EXISTS(SELECT 1 FROM pg_amop
+               WHERE amopmethod = (SELECT oid FROM pg_am WHERE amname = 'btree')
+                     AND amopopr = o.oid
+                     AND amoplefttype = o.oprleft
+                     AND amoprighttype = o.oprright)
+ORDER by 1, 2;
+ aggfnoid | oid 
+----------+-----
+(0 rows)
+
+-- Check correspondence of btree strategies and names
+SELECT DISTINCT proname, oprname, amopstrategy
+FROM pg_operator AS o, pg_aggregate AS a, pg_proc AS p,
+     pg_amop as ao
+WHERE a.aggfnoid = p.oid AND a.aggsortop = o.oid AND
+    amopopr = o.oid AND
+    amopmethod = (SELECT oid FROM pg_am WHERE amname = 'btree')
+ORDER BY 1, 2;
+ proname  | oprname | amopstrategy 
+----------+---------+--------------
+ bool_and | <       |            1
+ bool_or  | >       |            5
+ every    | <       |            1
+ max      | >       |            5
+ min      | <       |            1
+(5 rows)
+
+-- Check that there are not aggregates with the same name and different
+-- numbers of arguments.  While not technically wrong, we have a project policy
+-- to avoid this because it opens the door for confusion in connection with
+-- ORDER BY: novices frequently put the ORDER BY in the wrong place.
+-- See the fate of the single-argument form of string_agg() for history.
+-- The only aggregates that should show up here are count(x) and count(*).
+SELECT p1.oid::regprocedure, p2.oid::regprocedure
+FROM pg_proc AS p1, pg_proc AS p2
+WHERE p1.oid < p2.oid AND p1.proname = p2.proname AND
+    p1.proisagg AND p2.proisagg AND
+    array_dims(p1.proargtypes) != array_dims(p2.proargtypes) AND
+    p1.proname != 'listagg'
+ORDER BY 1;
+     oid      |   oid   
+--------------+---------
+ count("any") | count()
+(1 row)
+
+-- For the same reason, aggregates with default arguments are no good.
+SELECT oid, proname
+FROM pg_proc AS p
+WHERE proisagg AND proargdefaults IS NOT NULL
+ORDER by 1, 2;
+ oid | proname 
+-----+---------
+(0 rows)
+
+-- **************** pg_opfamily ****************
+-- Look for illegal values in pg_opfamily fields
+SELECT p1.oid
+FROM pg_opfamily as p1
+WHERE p1.opfmethod = 0 OR p1.opfnamespace = 0
+ORDER by 1;
+ oid 
+-----
+(0 rows)
+
+-- **************** pg_opclass ****************
+-- Look for illegal values in pg_opclass fields
+SELECT p1.oid
+FROM pg_opclass AS p1
+WHERE p1.opcmethod = 0 OR p1.opcnamespace = 0 OR p1.opcfamily = 0
+    OR p1.opcintype = 0
+ORDER by 1;
+ oid 
+-----
+(0 rows)
+
+-- opcmethod must match owning opfamily's opfmethod
+SELECT p1.oid, p2.oid
+FROM pg_opclass AS p1, pg_opfamily AS p2
+WHERE p1.opcfamily = p2.oid AND p1.opcmethod != p2.opfmethod
+ORDER by 1, 2;
+ oid | oid 
+-----+-----
+(0 rows)
+
+-- There should not be multiple entries in pg_opclass with opcdefault true
+-- and the same opcmethod/opcintype combination.
+SELECT p1.oid, p2.oid
+FROM pg_opclass AS p1, pg_opclass AS p2
+WHERE p1.oid != p2.oid AND
+    p1.opcmethod = p2.opcmethod AND p1.opcintype = p2.opcintype AND
+    p1.opcdefault AND p2.opcdefault
+ORDER by 1, 2;
+ oid | oid 
+-----+-----
+(0 rows)
+
+-- **************** pg_amop ****************
+-- Look for illegal values in pg_amop fields
+SELECT p1.amopfamily, p1.amopstrategy
+FROM pg_amop as p1
+WHERE p1.amopfamily = 0 OR p1.amoplefttype = 0 OR p1.amoprighttype = 0
+    OR p1.amopopr = 0 OR p1.amopmethod = 0 OR p1.amopstrategy < 1
+ORDER by 1, 2;
+ amopfamily | amopstrategy 
+------------+--------------
+(0 rows)
+
+SELECT p1.amopfamily, p1.amopstrategy
+FROM pg_amop as p1
+WHERE NOT ((p1.amoppurpose = 's' AND p1.amopsortfamily = 0) OR
+           (p1.amoppurpose = 'o' AND p1.amopsortfamily <> 0))
+ORDER by 1, 2;
+ amopfamily | amopstrategy 
+------------+--------------
+(0 rows)
+
+-- amoplefttype/amoprighttype must match the operator
+SELECT p1.oid, p2.oid
+FROM pg_amop AS p1, pg_operator AS p2
+WHERE p1.amopopr = p2.oid AND NOT
+    (p1.amoplefttype = p2.oprleft AND p1.amoprighttype = p2.oprright)
+ORDER by 1, 2;
+ oid | oid 
+-----+-----
+(0 rows)
+
+-- amopmethod must match owning opfamily's opfmethod
+SELECT p1.oid, p2.oid
+FROM pg_amop AS p1, pg_opfamily AS p2
+WHERE p1.amopfamily = p2.oid AND p1.amopmethod != p2.opfmethod
+ORDER by 1, 2;
+ oid | oid 
+-----+-----
+(0 rows)
+
+-- amopsortfamily, if present, must reference a btree family
+SELECT p1.amopfamily, p1.amopstrategy
+FROM pg_amop AS p1
+WHERE p1.amopsortfamily <> 0 AND NOT EXISTS
+    (SELECT 1 from pg_opfamily op WHERE op.oid = p1.amopsortfamily
+     AND op.opfmethod = (SELECT oid FROM pg_am WHERE amname = 'btree'))
+ORDER by 1, 2;
+ amopfamily | amopstrategy 
+------------+--------------
+(0 rows)
+
+-- check for ordering operators not supported by parent AM
+SELECT p1.amopfamily, p1.amopopr, p2.oid, p2.amname
+FROM pg_amop AS p1, pg_am AS p2
+WHERE p1.amopmethod = p2.oid AND
+    p1.amoppurpose = 'o' AND NOT p2.amcanorderbyop
+ORDER by 1, 2, 3;
+ amopfamily | amopopr | oid | amname 
+------------+---------+-----+--------
+(0 rows)
+
+-- Cross-check amopstrategy index against parent AM
+SELECT p1.amopfamily, p1.amopopr, p2.oid, p2.amname
+FROM pg_amop AS p1, pg_am AS p2
+WHERE p1.amopmethod = p2.oid AND
+    p1.amopstrategy > p2.amstrategies AND p2.amstrategies <> 0
+ORDER by 1, 2, 3;
+ amopfamily | amopopr | oid | amname 
+------------+---------+-----+--------
+(0 rows)
+
+-- Detect missing pg_amop entries: should have as many strategy operators
+-- as AM expects for each datatype combination supported by the opfamily.
+-- We can't check this for AMs with variable strategy sets.
+SELECT p1.amname, p2.amoplefttype, p2.amoprighttype
+FROM pg_am AS p1, pg_amop AS p2
+WHERE p2.amopmethod = p1.oid AND
+    p1.amstrategies <> 0 AND
+    p1.amstrategies != (SELECT count(*) FROM pg_amop AS p3
+                        WHERE p3.amopfamily = p2.amopfamily AND
+                              p3.amoplefttype = p2.amoplefttype AND
+                              p3.amoprighttype = p2.amoprighttype AND
+                              p3.amoppurpose = 's')
+ORDER by 1, 2, 3;
+ amname | amoplefttype | amoprighttype 
+--------+--------------+---------------
+(0 rows)
+
+-- Currently, none of the AMs with fixed strategy sets support ordering ops.
+SELECT p1.amname, p2.amopfamily, p2.amopstrategy
+FROM pg_am AS p1, pg_amop AS p2
+WHERE p2.amopmethod = p1.oid AND
+    p1.amstrategies <> 0 AND p2.amoppurpose <> 's'
+ORDER by 1, 2, 3;
+ amname | amopfamily | amopstrategy 
+--------+------------+--------------
+(0 rows)
+
+-- Check that amopopr points at a reasonable-looking operator, ie a binary
+-- operator.  If it's a search operator it had better yield boolean,
+-- otherwise an input type of its sort opfamily.
+SELECT p1.amopfamily, p1.amopopr, p2.oid, p2.oprname
+FROM pg_amop AS p1, pg_operator AS p2
+WHERE p1.amopopr = p2.oid AND
+    p2.oprkind != 'b'
+ORDER by 1, 2, 3;
+ amopfamily | amopopr | oid | oprname 
+------------+---------+-----+---------
+(0 rows)
+
+SELECT p1.amopfamily, p1.amopopr, p2.oid, p2.oprname
+FROM pg_amop AS p1, pg_operator AS p2
+WHERE p1.amopopr = p2.oid AND p1.amoppurpose = 's' AND
+    p2.oprresult != 'bool'::regtype
+ORDER by 1, 2, 3;
+ amopfamily | amopopr | oid | oprname 
+------------+---------+-----+---------
+(0 rows)
+
+SELECT p1.amopfamily, p1.amopopr, p2.oid, p2.oprname
+FROM pg_amop AS p1, pg_operator AS p2
+WHERE p1.amopopr = p2.oid AND p1.amoppurpose = 'o' AND NOT EXISTS
+    (SELECT 1 FROM pg_opclass op
+     WHERE opcfamily = p1.amopsortfamily AND opcintype = p2.oprresult)
+ORDER by 1, 2, 3;
+ amopfamily | amopopr | oid | oprname 
+------------+---------+-----+---------
+(0 rows)
+
+-- Make a list of all the distinct operator names being used in particular
+-- strategy slots.  This is a bit hokey, since the list might need to change
+-- in future releases, but it's an effective way of spotting mistakes such as
+-- swapping two operators within a family.
+SELECT DISTINCT amopmethod, amopstrategy, oprname
+FROM pg_amop p1 LEFT JOIN pg_operator p2 ON amopopr = p2.oid
+ORDER BY 1, 2, 3;
+ amopmethod | amopstrategy | oprname 
+------------+--------------+---------
+        403 |            1 | <
+        403 |            1 | ~<~
+        403 |            2 | <=
+        403 |            2 | ~<=~
+        403 |            3 | =
+        403 |            4 | >=
+        403 |            4 | ~>=~
+        403 |            5 | >
+        403 |            5 | ~>~
+        405 |            1 | =
+        783 |            1 | <<
+        783 |            1 | @@
+        783 |            2 | &<
+        783 |            3 | &&
+        783 |            4 | &>
+        783 |            5 | >>
+        783 |            6 | -|-
+        783 |            6 | ~=
+        783 |            7 | @>
+        783 |            8 | <@
+        783 |            9 | &<|
+        783 |           10 | <<|
+        783 |           10 | <^
+        783 |           11 | >^
+        783 |           11 | |>>
+        783 |           12 | |&>
+        783 |           13 | ~
+        783 |           14 | @
+        783 |           15 | <->
+        783 |           16 | @>
+        783 |           18 | =
+        783 |           28 | <@
+        783 |           48 | <@
+        783 |           68 | <@
+       2742 |            1 | &&
+       2742 |            1 | @@
+       2742 |            2 | @>
+       2742 |            2 | @@@
+       2742 |            3 | <@
+       2742 |            4 | =
+       4000 |            1 | <<
+       4000 |            1 | ~<~
+       4000 |            2 | ~<=~
+       4000 |            3 | =
+       4000 |            4 | ~>=~
+       4000 |            5 | >>
+       4000 |            5 | ~>~
+       4000 |            6 | ~=
+       4000 |            8 | <@
+       4000 |           10 | <^
+       4000 |           11 | <
+       4000 |           11 | >^
+       4000 |           12 | <=
+       4000 |           14 | >=
+       4000 |           15 | >
+       4039 |            1 | <
+       4039 |            2 | <=
+       4039 |            3 | =
+       4039 |            4 | >=
+       4039 |            5 | >
+       4239 |            1 | <
+       4239 |            2 | <=
+       4239 |            3 | =
+       4239 |            4 | >=
+       4239 |            5 | >
+       4444 |            1 | @@
+       4444 |            2 | @@@
+(67 rows)
+
+-- Check that all opclass search operators have selectivity estimators.
+-- This is not absolutely required, but it seems a reasonable thing
+-- to insist on for all standard datatypes.
+SELECT p1.amopfamily, p1.amopopr, p2.oid, p2.oprname
+FROM pg_amop AS p1, pg_operator AS p2
+WHERE p1.amopopr = p2.oid AND p1.amoppurpose = 's' AND
+    (p2.oprrest = 0 OR p2.oprjoin = 0)
+ORDER by 1, 2, 3, 4;
+ amopfamily | amopopr | oid | oprname 
+------------+---------+-----+---------
+(0 rows)
+
+-- Check that each opclass in an opfamily has associated operators, that is
+-- ones whose oprleft matches opcintype (possibly by coercion).
+SELECT p1.opcname, p1.opcfamily
+FROM pg_opclass AS p1
+WHERE NOT EXISTS(SELECT 1 FROM pg_amop AS p2
+                 WHERE p2.amopfamily = p1.opcfamily
+                   AND binary_coercible(p1.opcintype, p2.amoplefttype))
+ORDER by 1, 2;
+ opcname | opcfamily 
+---------+-----------
+(0 rows)
+
+-- Check that each operator listed in pg_amop has an associated opclass,
+-- that is one whose opcintype matches oprleft (possibly by coercion).
+-- Otherwise the operator is useless because it cannot be matched to an index.
+-- (In principle it could be useful to list such operators in multiple-datatype
+-- btree opfamilies, but in practice you'd expect there to be an opclass for
+-- every datatype the family knows about.)
+SELECT p1.amopfamily, p1.amopstrategy, p1.amopopr
+FROM pg_amop AS p1
+WHERE NOT EXISTS(SELECT 1 FROM pg_opclass AS p2
+                 WHERE p2.opcfamily = p1.amopfamily
+                   AND binary_coercible(p2.opcintype, p1.amoplefttype))
+ORDER by 1, 2, 3;
+ amopfamily | amopstrategy | amopopr 
+------------+--------------+---------
+(0 rows)
+
+-- Operators that are primary members of opclasses must be immutable (else
+-- it suggests that the index ordering isn't fixed).  Operators that are
+-- cross-type members need only be stable, since they are just shorthands
+-- for index probe queries.
+SELECT p1.amopfamily, p1.amopopr, p2.oprname, p3.prosrc
+FROM pg_amop AS p1, pg_operator AS p2, pg_proc AS p3
+WHERE p1.amopopr = p2.oid AND p2.oprcode = p3.oid AND
+    p1.amoplefttype = p1.amoprighttype AND
+    p3.provolatile != 'i'
+ORDER by 1, 2, 3;
+ amopfamily | amopopr | oprname | prosrc 
+------------+---------+---------+--------
+(0 rows)
+
+SELECT p1.amopfamily, p1.amopopr, p2.oprname, p3.prosrc
+FROM pg_amop AS p1, pg_operator AS p2, pg_proc AS p3
+WHERE p1.amopopr = p2.oid AND p2.oprcode = p3.oid AND
+    p1.amoplefttype != p1.amoprighttype AND
+    p3.provolatile = 'v'
+ORDER by 1, 2, 3;
+ amopfamily | amopopr | oprname | prosrc 
+------------+---------+---------+--------
+(0 rows)
+
+-- Multiple-datatype btree opfamilies should provide closed sets of equality
+-- operators; that is if you provide int2 = int4 and int4 = int8 then you
+-- should also provide int2 = int8 (and commutators of all these).  This is
+-- important because the planner tries to deduce additional qual clauses from
+-- transitivity of mergejoinable operators.  If there are clauses
+-- int2var = int4var and int4var = int8var, the planner will want to deduce
+-- int2var = int8var ... so there should be a way to represent that.  While
+-- a missing cross-type operator is now only an efficiency loss rather than
+-- an error condition, it still seems reasonable to insist that all built-in
+-- opfamilies be complete.
+-- check commutative closure
+SELECT p1.amoplefttype, p1.amoprighttype
+FROM pg_amop AS p1
+WHERE p1.amopmethod = (SELECT oid FROM pg_am WHERE amname = 'btree') AND
+    p1.amopstrategy = 3 AND
+    p1.amoplefttype != p1.amoprighttype AND
+    NOT EXISTS(SELECT 1 FROM pg_amop p2 WHERE
+                 p2.amopfamily = p1.amopfamily AND
+                 p2.amoplefttype = p1.amoprighttype AND
+                 p2.amoprighttype = p1.amoplefttype AND
+                 p2.amopstrategy = 3)
+ORDER by 1, 2;
+ amoplefttype | amoprighttype 
+--------------+---------------
+(0 rows)
+
+-- check transitive closure
+SELECT p1.amoplefttype, p1.amoprighttype, p2.amoprighttype
+FROM pg_amop AS p1, pg_amop AS p2
+WHERE p1.amopfamily = p2.amopfamily AND
+    p1.amoprighttype = p2.amoplefttype AND
+    p1.amopmethod = (SELECT oid FROM pg_am WHERE amname = 'btree') AND
+    p2.amopmethod = (SELECT oid FROM pg_am WHERE amname = 'btree') AND
+    p1.amopstrategy = 3 AND p2.amopstrategy = 3 AND
+    p1.amoplefttype != p1.amoprighttype AND
+    p2.amoplefttype != p2.amoprighttype AND
+    NOT EXISTS(SELECT 1 FROM pg_amop p3 WHERE
+                 p3.amopfamily = p1.amopfamily AND
+                 p3.amoplefttype = p1.amoplefttype AND
+                 p3.amoprighttype = p2.amoprighttype AND
+                 p3.amopstrategy = 3)
+ORDER by 1, 2, 3;
+ amoplefttype | amoprighttype | amoprighttype 
+--------------+---------------+---------------
+(0 rows)
+
+-- We also expect that built-in multiple-datatype hash opfamilies provide
+-- complete sets of cross-type operators.  Again, this isn't required, but
+-- it is reasonable to expect it for built-in opfamilies.
+-- if same family has x=x and y=y, it should have x=y
+SELECT p1.amoplefttype, p2.amoplefttype
+FROM pg_amop AS p1, pg_amop AS p2
+WHERE p1.amopfamily = p2.amopfamily AND
+    p1.amoplefttype = p1.amoprighttype AND
+    p2.amoplefttype = p2.amoprighttype AND
+    p1.amopmethod = (SELECT oid FROM pg_am WHERE amname = 'hash') AND
+    p2.amopmethod = (SELECT oid FROM pg_am WHERE amname = 'hash') AND
+    p1.amopstrategy = 1 AND p2.amopstrategy = 1 AND
+    p1.amoplefttype != p2.amoplefttype AND
+    NOT EXISTS(SELECT 1 FROM pg_amop p3 WHERE
+                 p3.amopfamily = p1.amopfamily AND
+                 p3.amoplefttype = p1.amoplefttype AND
+                 p3.amoprighttype = p2.amoplefttype AND
+                 p3.amopstrategy = 1)
+ORDER by 1, 2;
+ amoplefttype | amoplefttype 
+--------------+--------------
+(0 rows)
+
+-- **************** pg_amproc ****************
+-- Look for illegal values in pg_amproc fields
+SELECT p1.amprocfamily, p1.amprocnum
+FROM pg_amproc as p1
+WHERE p1.amprocfamily = 0 OR p1.amproclefttype = 0 OR p1.amprocrighttype = 0
+    OR p1.amprocnum < 1 OR p1.amproc = 0
+ORDER by 1, 2;
+ amprocfamily | amprocnum 
+--------------+-----------
+(0 rows)
+
+-- Cross-check amprocnum index against parent AM
+SELECT p1.amprocfamily, p1.amprocnum, p2.oid, p2.amname
+FROM pg_amproc AS p1, pg_am AS p2, pg_opfamily AS p3
+WHERE p1.amprocfamily = p3.oid AND p3.opfmethod = p2.oid AND
+    p1.amprocnum > p2.amsupport
+ORDER by 1, 2, 3;
+ amprocfamily | amprocnum | oid | amname 
+--------------+-----------+-----+--------
+(0 rows)
+
+-- Detect missing pg_amproc entries: should have as many support functions
+-- as AM expects for each datatype combination supported by the opfamily.
+-- btree/GiST/GIN each allow one optional support function, though.
+SELECT p1.amname, p2.opfname, p3.amproclefttype, p3.amprocrighttype
+FROM pg_am AS p1, pg_opfamily AS p2, pg_amproc AS p3
+WHERE p2.opfmethod = p1.oid AND p3.amprocfamily = p2.oid AND
+    (SELECT count(*) FROM pg_amproc AS p4
+     WHERE p4.amprocfamily = p2.oid AND
+           p4.amproclefttype = p3.amproclefttype AND
+           p4.amprocrighttype = p3.amprocrighttype)
+    NOT BETWEEN
+      (CASE WHEN p1.amname IN ('btree', 'gist', 'gin') THEN p1.amsupport - 1
+            ELSE p1.amsupport END)
+      AND p1.amsupport
+ORDER by 1, 2, 3;
+ amname | opfname | amproclefttype | amprocrighttype 
+--------+---------+----------------+-----------------
+(0 rows)
+
+-- Also, check if there are any pg_opclass entries that don't seem to have
+-- pg_amproc support.  Again, opclasses with an optional support proc have
+-- to be checked specially.
+SELECT amname, opcname, count(*)
+FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
+     LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
+         amproclefttype = amprocrighttype AND amproclefttype = opcintype
+WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin'
+GROUP BY amname, amsupport, opcname, amprocfamily
+HAVING count(*) != amsupport OR amprocfamily IS NULL
+ORDER by 1, 2, 3;
+ amname | opcname | count 
+--------+---------+-------
+(0 rows)
+
+SELECT amname, opcname, count(*)
+FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
+     LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
+         amproclefttype = amprocrighttype AND amproclefttype = opcintype
+WHERE am.amname = 'btree' OR am.amname = 'gist' OR am.amname = 'gin'
+GROUP BY amname, amsupport, opcname, amprocfamily
+HAVING (count(*) != amsupport AND count(*) != amsupport - 1)
+    OR amprocfamily IS NULL
+ORDER by 1, 2, 3;
+ amname | opcname | count 
+--------+---------+-------
+(0 rows)
+
+-- Unfortunately, we can't check the amproc link very well because the
+-- signature of the function may be different for different support routines
+-- or different base data types.
+-- We can check that all the referenced instances of the same support
+-- routine number take the same number of parameters, but that's about it
+-- for a general check...
+SELECT p1.amprocfamily, p1.amprocnum,
+	p2.oid, p2.proname,
+	p3.opfname,
+	p4.amprocfamily, p4.amprocnum,
+	p5.oid, p5.proname,
+	p6.opfname
+FROM pg_amproc AS p1, pg_proc AS p2, pg_opfamily AS p3,
+     pg_amproc AS p4, pg_proc AS p5, pg_opfamily AS p6
+WHERE p1.amprocfamily = p3.oid AND p4.amprocfamily = p6.oid AND
+    p3.opfmethod = p6.opfmethod AND p1.amprocnum = p4.amprocnum AND
+    p1.amproc = p2.oid AND p4.amproc = p5.oid AND
+    (p2.proretset OR p5.proretset OR p2.pronargs != p5.pronargs)
+ORDER by 1, 2, 3;
+ amprocfamily | amprocnum | oid | proname | opfname | amprocfamily | amprocnum | oid | proname | opfname 
+--------------+-----------+-----+---------+---------+--------------+-----------+-----+---------+---------
+(0 rows)
+
+-- For btree, though, we can do better since we know the support routines
+-- must be of the form cmp(lefttype, righttype) returns int4
+-- or sortsupport(internal) returns void.
+SELECT p1.amprocfamily, p1.amprocnum,
+	p2.oid, p2.proname,
+	p3.opfname
+FROM pg_amproc AS p1, pg_proc AS p2, pg_opfamily AS p3
+WHERE p3.opfmethod = (SELECT oid FROM pg_am WHERE amname = 'btree')
+    AND p1.amprocfamily = p3.oid AND p1.amproc = p2.oid AND
+    (CASE WHEN amprocnum = 1
+          THEN prorettype != 'int4'::regtype OR proretset OR pronargs != 2
+               OR proargtypes[0] != amproclefttype
+               OR proargtypes[1] != amprocrighttype
+          WHEN amprocnum = 2
+          THEN prorettype != 'void'::regtype OR proretset OR pronargs != 1
+               OR proargtypes[0] != 'internal'::regtype
+          ELSE true END)
+ORDER by 1, 2, 3;
+ amprocfamily | amprocnum | oid | proname | opfname 
+--------------+-----------+-----+---------+---------
+(0 rows)
+
+-- For hash we can also do a little better: the support routines must be
+-- of the form hash(lefttype) returns int4.  There are several cases where
+-- we cheat and use a hash function that is physically compatible with the
+-- datatype even though there's no cast, so this check does find a small
+-- number of entries.
+SELECT p1.amprocfamily, p1.amprocnum, p2.proname, p3.opfname
+FROM pg_amproc AS p1, pg_proc AS p2, pg_opfamily AS p3
+WHERE p3.opfmethod = (SELECT oid FROM pg_am WHERE amname = 'hash')
+    AND p1.amprocfamily = p3.oid AND p1.amproc = p2.oid AND
+    (amprocnum != 1
+     OR proretset
+     OR prorettype != 'int4'::regtype
+     OR pronargs != 1
+     OR NOT physically_coercible(amproclefttype, proargtypes[0])
+     OR amproclefttype != amprocrighttype)
+ORDER BY 1, 2;
+ amprocfamily | amprocnum |    proname     |     opfname     
+--------------+-----------+----------------+-----------------
+          435 |         1 | hashint4       | date_ops
+         1999 |         1 | timestamp_hash | timestamptz_ops
+         2222 |         1 | hashchar       | bool_ops
+         2223 |         1 | hashvarlena    | bytea_ops
+         2225 |         1 | hashint8       | xid_ops
+         2226 |         1 | hashint4       | cid_ops
+         2232 |         1 | hashint4       | xid32_ops
+         3807 |         1 | hashvarlena    | raw_ops
+(8 rows)
+
+-- We can also check SP-GiST carefully, since the support routine signatures
+-- are independent of the datatype being indexed.
+SELECT p1.amprocfamily, p1.amprocnum,
+	p2.oid, p2.proname,
+	p3.opfname
+FROM pg_amproc AS p1, pg_proc AS p2, pg_opfamily AS p3
+WHERE p3.opfmethod = (SELECT oid FROM pg_am WHERE amname = 'spgist')
+    AND p1.amprocfamily = p3.oid AND p1.amproc = p2.oid AND
+    (CASE WHEN amprocnum = 1 OR amprocnum = 2 OR amprocnum = 3 OR amprocnum = 4
+          THEN prorettype != 'void'::regtype OR proretset OR pronargs != 2
+               OR proargtypes[0] != 'internal'::regtype
+               OR proargtypes[1] != 'internal'::regtype
+          WHEN amprocnum = 5
+          THEN prorettype != 'bool'::regtype OR proretset OR pronargs != 2
+               OR proargtypes[0] != 'internal'::regtype
+               OR proargtypes[1] != 'internal'::regtype
+          ELSE true END)
+ORDER by 1, 2, 3;
+ amprocfamily | amprocnum | oid | proname | opfname 
+--------------+-----------+-----+---------+---------
+(0 rows)
+
+-- Support routines that are primary members of opfamilies must be immutable
+-- (else it suggests that the index ordering isn't fixed).  But cross-type
+-- members need only be stable, since they are just shorthands
+-- for index probe queries.
+SELECT p1.amprocfamily, p1.amproc, p2.prosrc
+FROM pg_amproc AS p1, pg_proc AS p2
+WHERE p1.amproc = p2.oid AND
+    p1.amproclefttype = p1.amprocrighttype AND
+    p2.provolatile != 'i' order by 1, 2, 3;
+ amprocfamily | amproc | prosrc 
+--------------+--------+--------
+(0 rows)
+
+SELECT p1.amprocfamily, p1.amproc, p2.prosrc
+FROM pg_amproc AS p1, pg_proc AS p2
+WHERE p1.amproc = p2.oid AND
+    p1.amproclefttype != p1.amprocrighttype AND
+    p2.provolatile = 'v' order by 1, 2, 3;
+ amprocfamily | amproc | prosrc 
+--------------+--------+--------
+(0 rows)
+

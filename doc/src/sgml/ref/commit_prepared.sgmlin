@@ -1,0 +1,16 @@
+<refentry id="SQL-COMMIT_PREPARED">
+<refmeta>
+<refentrytitle>COMMIT PREPARED</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>COMMIT PREPARED</refname>
+<refpurpose>commit a transaction that was earlier prepared for two-phase commit</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+COMMIT PREPARED transaction_id;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

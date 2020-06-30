@@ -1,0 +1,227 @@
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * ---------------------------------------------------------------------------------------
+ *
+ * dispatcher.h
+ *
+ *
+ *
+ * IDENTIFICATION
+ *        src/include/access/extreme_rto/dispatcher.h
+ *
+ * ---------------------------------------------------------------------------------------
+ */
+
+#ifndef EXTREME_RTO_DISPATCHER_H
+#define EXTREME_RTO_DISPATCHER_H
+
+#include "gs_thread.h"
+#include "postgres.h"
+#include "knl/knl_variable.h"
+#include "access/xlog.h"
+#include "access/xlogreader.h"
+#include "nodes/pg_list.h"
+#include "storage/proc.h"
+
+#include "access/extreme_rto/redo_item.h"
+#include "access/extreme_rto/page_redo.h"
+#include "access/extreme_rto/txn_redo.h"
+
+namespace extreme_rto {
+
+typedef struct {
+    PageRedoWorker* batchThd;   /* BatchRedoThread */
+    PageRedoWorker* managerThd; /* PageRedoManager */
+    PageRedoWorker** redoThd;   /* RedoThreadPool */
+    uint32 redoThdNum;
+    uint32* chosedRTIds; /* chosedRedoThdIds */
+    uint32 chosedRTCnt;  /* chosedRedoThdCount */
+} PageRedoPipeline;
+
+typedef struct {
+    PageRedoWorker* managerThd; /* TrxnRedoManager */
+    PageRedoWorker* redoThd;    /* TrxnRedoWorker */
+} TrxnRedoPipeline;
+
+typedef struct ReadPipeline {
+	PageRedoWorker*  managerThd;     /* readthrd */
+    PageRedoWorker*  readThd;     /* readthrd */    
+} ReadPipeline;
+
+#define MAX_XLOG_READ_BUFFER  (0xFFFFF)  /* 8k uint*/
+
+#define MAX_ALLOC_SEGNUM (4)  /* 16* 4 */
+
+
+typedef enum {
+    READ_WORKER_STOP = 0,
+	READ_WORKER_RUN,
+	READ_WORKER_EXIT,
+	READ_NOTIFY_EXIT,
+}Enum_ReadWorkerState;
+
+
+typedef enum {
+	TRIGGER_NORMAL = 0,
+    TRIGGER_PRIMARY,
+	TRIGGER_STADNBY,
+	TRIGGER_FAILOVER,
+	TRIGGER_SWITCHOVER,
+}Enum_TriggeredState;
+
+typedef enum {
+    NONE,
+    APPLYING,
+	APPLIED,
+}ReadBufState;
+
+
+typedef struct RecordBufferAarray {	
+	XLogSegNo  segno;
+	XLogRecPtr segoffset;
+	uint32   readlen;
+	char *readsegbuf;
+	uint32 bufState;
+} RecordBufferAarray;
+
+typedef struct RecordBufferState {
+	XLogReaderState* initreader;
+	uint32 startreadworker;
+	uint32 applyindex;
+	uint32 readindex;	
+	RecordBufferAarray xlogsegarray[MAX_ALLOC_SEGNUM];
+	char *readsegbuf;
+	char *readBuf;
+	char *errormsg_buf;
+	void *readprivate;
+} RecordBufferState;
+
+
+typedef struct {
+    MemoryContext oldCtx;
+    PageRedoPipeline* pageLines;
+    uint32 pageLineNum;        /* PageLineNum */
+    uint32* chosedPageLineIds; /* chosedPageLineIds */
+    uint32 chosedPLCnt;        /* chosedPageLineCount */
+    TrxnRedoPipeline trxnLine;
+    ReadPipeline        readLine;
+    RecordBufferState   recordstate;
+    PageRedoWorker** allWorkers; /* Array of page redo workers. */
+    TxnRedoWorker* txnWorker;    /* Txn redo worker. */
+    uint32 allWorkersCnt;
+    RedoItem* freeHead; /* Head of freed-item list. */
+    RedoItem* freeStateHead;
+    RedoItem* allocatedRedoItem;
+    int32 pendingCount; /* Number of records pending. */
+    int32 pendingMax;   /* The max. pending count per batch. */
+    int exitCode;       /* Thread exit code. */
+    uint64 totalCostTime;
+    uint64 txnCostTime; /* txn cost time */
+    uint64 pprCostTime;
+    uint32 maxItemNum;
+    uint32 curItemNum;
+
+    uint32 syncEnterCount;
+    uint32 syncExitCount;
+
+    pg_atomic_uint32 standbyState; /* sync standbyState from trxn worker to startup */
+} LogDispatcher;
+
+typedef struct {
+    bool (*rm_dispatch)(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
+    bool (*rm_loginfovalid)(XLogReaderState* record, uint8 minInfo, uint8 maxInfo);
+    RmgrId rm_id;
+    uint8 rm_mininfo;
+    uint8 rm_maxinfo;
+} RmgrDispatchData;
+
+
+extern LogDispatcher* g_dispatcher;
+extern RedoItem g_GlobalLsnForwarder;
+extern THR_LOCAL RecordBufferState *g_recordbuffer;
+
+
+const static XLogRecPtr MAX_XLOG_REC_PTR = (XLogRecPtr)0xFFFFFFFFFFFFFFFF;
+
+const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
+const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
+extern RedoItem g_redoEndMark;
+extern uint32 g_triggeredstate;
+
+
+inline int get_batch_redo_num()
+{
+    return g_instance.attr.attr_storage.batch_redo_num;
+}
+
+inline int get_page_redo_worker_num_per_manager()
+{
+    return g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker;
+}
+
+inline int get_trxn_redo_manager_num()
+{
+    return TRXN_REDO_MANAGER_NUM;
+}
+
+inline int get_trxn_redo_worker_num()
+{
+    return TRXN_REDO_WORKER_NUM;
+}
+
+void StartRecoveryWorkers(XLogReaderState* xlogreader, uint32 privateLen);
+
+/* RedoItem lifecycle. */
+void DispatchRedoRecordToFile(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
+void ProcessPendingRecords(bool fullSync = false);
+void FreeRedoItem(RedoItem* item);
+
+/* Dispatcher phases. */
+void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code);
+
+/* Dispatcher states. */
+int GetDispatcherExitCode();
+bool DispatchPtrIsNull();
+uint32 GetBatchCount();
+uint32 GetAllWorkerCount();
+bool OnHotStandBy();
+PGPROC* StartupPidGetProc(ThreadId pid);
+extern void SetStartupBufferPinWaitBufId(int bufid);
+extern void GetStartupBufferPinWaitBufId(int *bufids, uint32 len);
+extern uint32 GetStartupBufferPinWaitBufLen();
+
+void UpdateStandbyState(HotStandbyState newState);
+
+/* Redo end state saved by each page worker. */
+void** GetXLogInvalidPagesFromWorkers();
+
+/* Other utility functions. */
+uint32 GetSlotId(const RelFileNode node, BlockNumber block, ForkNumber forkNum, uint32 workerCount);
+bool XactWillRemoveRelFiles(XLogReaderState* record);
+XLogReaderState* NewReaderState(XLogReaderState* readerState, bool bCopyState = false);
+void FreeAllocatedRedoItem();
+void DiagLogRedoRecord(XLogReaderState* record, const char* funcName);
+List* CheckImcompleteAction(List* imcompleteActionList);
+void SetPageWorkStateByThreadId(uint32 threadState);
+void UpdateDispatcherStandbyState(HotStandbyState* state);
+void GetReplayedRecPtr(XLogRecPtr *startPtr, XLogRecPtr *endPtr);
+void StartupSendLsnFowarder();
+
+}  // namespace extreme_rto
+
+extreme_rto::Enum_TriggeredState CheckForSatartupStatus(void );
+
+
+
+#endif

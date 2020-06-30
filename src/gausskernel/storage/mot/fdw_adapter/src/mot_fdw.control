@@ -1,0 +1,5 @@
+# file_fdw extension
+comment = 'foreign-data wrapper for MOT access'
+default_version = '1.0'
+module_pathname = '$libdir/mot_fdw'
+relocatable = true

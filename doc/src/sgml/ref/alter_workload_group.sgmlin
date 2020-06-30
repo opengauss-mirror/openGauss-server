@@ -1,0 +1,17 @@
+<refentry id="SQL-ALTER_WORKLOAD_GROUP">
+<refmeta>
+<refentrytitle>ALTER WORKLOAD GROUP</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER WORKLOAD GROUP</refname>
+<refpurpose>change the definition of a workload group</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER WORKLOAD GROUP wg_name
+     USING RESOURCE POOL pool_name [ WITH ( ACT_STATEMENTS = count ) ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

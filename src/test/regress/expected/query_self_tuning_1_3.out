@@ -1,0 +1,82 @@
+\c postgres
+set current_schema='sql_self_tuning';
+set resource_track_duration=0;
+set resource_track_cost=30;
+set resource_track_level=operator;
+/*
+ * SQL-Self Tuning scenario[5] data skew
+ */
+/* Test data skew */select count(*) from  t13 group by xc_node_id order by 1;
+ count  
+--------
+ 419840
+ 837632
+ 839680
+(3 rows)
+
+/* Test data skew */explain (analyze on ,verbose off ,costs off ,cpu off, detail off, nodes off, num_nodes off, buffers off, timing off) 
+select count(*), c1 from t13 group by 2 order by 2;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Streaming (type: GATHER) (actual rows=5 loops=1)
+   Merge Sort Key: c1
+   ->  Sort (actual rows=5)
+         Sort Key: c1
+--?.*
+         ->  HashAggregate (actual rows=5)
+               Group By Key: c1
+               ->  Seq Scan on t13 (actual rows=2097152)
+--?.*
+(9 rows)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%Test data skew%' order by 3,2,1;
+                                                                   query                                                                   |                                             query_plan                                             |                                warning                                 
+-------------------------------------------------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------+------------------------------------------------------------------------
+--? /\* Test data skew \*/explain (analyze on ,verbose off ,costs off ,cpu off, detail off, nodes off, num_nodes off, buffers off, timing off) +| 1 | Streaming (type: GATHER)  (.*)                            +| PlanNode[4] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:839680
+ select count(*), c1 from t13 group by 2 order by 2;                                                                                       |   |  Merge Sort Key: c1                                                                           +| 
+--?                                                                                                                                           | 2 |  ->  Sort  (.*)                                           +| 
+                                                                                                                                           |   |   Sort Key: c1                                                                                +| 
+--?                                                                                                                                           | 3 |   ->  HashAggregate  (.*)                                 +| 
+                                                                                                                                           |   |    Group By Key: c1                                                                           +| 
+--?                                                                                                                                           | 4 |    ->  Seq Scan on t13  (.*)                              | 
+--? /\*                                                                                                                                       +| 1 | Streaming (type: GATHER)  (.*)                             +| PlanNode[7] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:839680
+  * SQL-Self Tuning scenario[5] data skew                                                                                                 +|   |  Merge Sort Key: (pg_catalog.count(*))                                                        +| 
+--?  \*/                                                                                                                                      +| 2 |  ->  Sort  (.*)                                            +| 
+ /* Test data skew */select count(*) from  t13 group by xc_node_id order by 1;                                                             |   |   Sort Key: (pg_catalog.count(*))                                                             +| 
+--?                                                                                                                                           | 3 |   ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)         +| 
+--?                                                                                                                                           | 4 |    ->  HashAggregate  (.*)                                 +| 
+                                                                                                                                           |   |     Group By Key: xc_node_id                                                                  +| 
+--?                                                                                                                                           | 5 |     ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (.*)+| 
+--?                                                                                                                                           | 6 |      ->  HashAggregate  (.*)                              +| 
+                                                                                                                                           |   |       Group By Key: xc_node_id                                                                +| 
+--?                                                                                                                                           | 7 |       ->  Seq Scan on t13  (.*)                           | 
+(2 rows)
+
+/*
+ * table in different node group can not treat as data skew
+ */
+select/*+hashjoin(t14 t15)leading((t15 t14))*/ count(*) table_different_node_group_01 from t14, t15 where t14.c2 = t15.c4 and t15.c1 < 10 and t14.c2 < 1000;
+ table_different_node_group_01 
+-------------------------------
+                             0
+(1 row)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%table_different_node_group_01%' order by 3,2,1;
+                                                                            query                                                                             |                                                                       query_plan                                                                       |                                    warning                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------
+--? /\*                                                                                                                                                          +|  1 | Aggregate  (.*)                                                                                            +| PlanNode[7] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:524288        +
+--?  \* table in different node group can not treat as data skew                                                                                                 +|  2 |  ->  Streaming (type: GATHER)  (.*)                                                                        +| PlanNode[5] Inaccurate Estimation-Rows: "Hash Join" A-Rows:0, E-Rows:.*
+--?  \*/                                                                                                                                                         +|  3 |   ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)                                                         +| 
+--? select/\*+hashjoin(t14 t15)leading((t15 t14))\*/ count(\*) table_different_node_group_01 from t14, t15 where t14.c2 = t15.c4 and t15.c1 < 10 and t14.c2 < 1000; |  4 |    ->  Aggregate  (.*)                                                                                     +| 
+--?                                                                                                                                                              |  5 |     ->  Hash Join  (.*)                                                                              +| 
+                                                                                                                                                              |    |      Hash Cond: (t15.c4 = t14.c2)                                                                                                                +| 
+--?                                                                                                                                                              |  6 |      ->  Streaming(type: PART REDISTRIBUTE PART ROUNDROBIN dop: 2/2 ng: sql_self_tuning_02->GenGroup)  (.*)+| 
+--?                                                                                                                                                              |  7 |       ->  Seq Scan on t15  (.*)                                                                             +| 
+                                                                                                                                                              |    |        Filter: ((c1 < 10) AND (c4 < 1000))                                                                                                       +| 
+--?                                                                                                                                                              |  8 |      ->  Hash  (.*)                                                                                       +| 
+--?                                                                                                                                                              |  9 |       ->  Streaming(type: PART REDISTRIBUTE PART BROADCAST dop: 2/2 ng: sql_self_tuning_01->GenGroup)  (.*)  +| 
+--?                                                                                                                                                              | 10 |        ->  Seq Scan on t14  (.*)                                                                             +| 
+                                                                                                                                                              |    |         Filter: (c2 < 1000)                                                                                                                       | 
+(1 row)
+
+\c regression

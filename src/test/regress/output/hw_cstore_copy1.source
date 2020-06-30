@@ -1,0 +1,161 @@
+---
+--case 5:
+---
+set client_min_messages = 'ERROR';
+drop table if exists lineitem;
+reset client_min_messages;
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+with (orientation = column)
+;
+COPY LINEITEM FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+DELETE FROM LINEITEM;
+COPY LINEITEM FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/lineitem.data' DELIMITER '|';
+drop table lineitem;
+-------
+--case 6:
+------
+CREATE TABLE OOrder ( 
+                        o_id int NOT NULL, 
+                        o_d_id int NOT NULL, 
+                        o_w_id int NOT NULL, 
+                        o_c_id int NOT NULL, 
+                        o_entry_d timestamp NOT NULL, 
+                        o_carrier_id int NULL, 
+                        o_ol_cnt int NOT NULL, 
+                        o_all_local int NOT NULL)  with (orientation=column)
+                        ;   
+copy oorder  from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/oorder.data' with csv null ''; 
+copy oorder  from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/oorder1_0' with csv null ''; 
+copy oorder  from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/oorder2_0' with csv null ''; 
+select * from oorder where o_d_id=1 and o_c_id=1 order by 1,2,3;
+ o_id | o_d_id | o_w_id | o_c_id |        o_entry_d         | o_carrier_id | o_ol_cnt | o_all_local 
+------+--------+--------+--------+--------------------------+--------------+----------+-------------
+  203 |      1 |      3 |      1 | Thu Oct 24 11:17:35 2013 |            3 |        9 |           1
+ 1395 |      1 |      1 |      1 | Thu Oct 24 11:17:41 2013 |            2 |       14 |           1
+ 2313 |      1 |      2 |      1 | Thu Oct 24 11:17:37 2013 |              |       10 |           1
+(3 rows)
+
+select count('ABC') from oorder;
+ count 
+-------
+ 90000
+(1 row)
+
+delete from oorder where o_d_id = 1 and o_c_id = 1;
+select count('ABC') from oorder;
+ count 
+-------
+ 89997
+(1 row)
+
+-----
+--case 6
+---
+copy oorder to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/oorder.data' with csv null '';
+--
+-- fix bug
+--
+CREATE TABLE hw_cstore_copy_batchrows
+(
+	c_int1 int,
+	c_int2 int,
+	PARTIAL CLUSTER KEY(c_int2)
+) WITH (ORIENTATION=COLUMN, MAX_BATCHROW=10000) 
+partition by range (c_int2)
+(
+	partition p1 values less than (50),
+	partition p2 values less than (100)
+);
+CREATE TABLE hw_row_copy_batchrows
+(
+	c_int1 int,
+	c_int2 int,
+	c_int3 int
+) 
+partition by range (c_int2)
+(
+	partition p1 values less than (50),
+	partition p2 values less than (100)
+);
+-- make sure that the loops number is equal to MAX_BATCHROW defined by hw_cstore_copy_batchrows
+INSERT INTO hw_row_copy_batchrows VALUES(1, 2, generate_series(1, 10000));
+INSERT INTO hw_cstore_copy_batchrows SELECT c_int1, c_int2 FROM hw_row_copy_batchrows;
+-- 10000 expected, but the result is 0
+SELECT COUNT(*) FROM hw_cstore_copy_batchrows;
+ count 
+-------
+ 10000
+(1 row)
+
+----
+--COPY FROM/TO DATA WITH MULTIPLE BYTES DELIMITER
+----
+COPY tmp_nation TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter ',,,,,]]]]]]';
+ERROR:  relation "tmp_nation" does not exist
+COPY tmp_nation TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter ',,,[]';
+ERROR:  relation "tmp_nation" does not exist
+truncate tmp_nation;
+ERROR:  relation "tmp_nation" does not exist
+COPY tmp_nation FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter ',,,[]';
+ERROR:  relation "tmp_nation" does not exist
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ERROR:  relation "tmp_nation" does not exist on datanode1
+LINE 1: SELECT * FROM tmp_nation ORDER BY n_nationkey;
+                      ^
+COPY tmp_nation TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter '(),,,' csv;
+ERROR:  relation "tmp_nation" does not exist
+truncate tmp_nation;
+ERROR:  relation "tmp_nation" does not exist
+COPY tmp_nation FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/nation.mult' delimiter '(),,,' csv;
+ERROR:  relation "tmp_nation" does not exist
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+ERROR:  relation "tmp_nation" does not exist on datanode1
+LINE 1: SELECT * FROM tmp_nation ORDER BY n_nationkey;
+                      ^
+create table tmp_mult_delim
+(c1 int, c2 varchar)with (orientation = column)
+;
+insert into tmp_mult_delim 
+values(1, '"fewf"sttt'),
+(2, '"fewf"sttt'),
+(3, 'fstes\\fwt');
+select * from tmp_mult_delim order by c1;
+ c1 |     c2     
+----+------------
+  1 | "fewf"sttt
+  2 | "fewf"sttt
+  3 | fstes\\fwt
+(3 rows)
+
+COPY tmp_mult_delim TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/mult_delim.mult' delimiter 'few^fw"' csv;
+ERROR:  delimiter cannot contain quote character
+COPY tmp_mult_delim TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/mult_delim.mult' delimiter 'few^fw/' csv;
+truncate tmp_mult_delim;
+COPY tmp_mult_delim FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/mult_delim.mult' delimiter 'few^fw/' csv;
+select * from tmp_mult_delim order by c1;
+ c1 |     c2     
+----+------------
+  1 | "fewf"sttt
+  2 | "fewf"sttt
+  3 | fstes\\fwt
+(3 rows)
+
+drop table tmp_mult_delim;

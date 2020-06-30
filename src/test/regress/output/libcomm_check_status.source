@@ -1,0 +1,7 @@
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pgxc_comm_send_stream limit 10;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pgxc_comm_recv_stream limit 10;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pgxc_comm_status;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pgxc_comm_send_stream limit 10;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pgxc_comm_recv_stream limit 10;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pgxc_comm_status;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from pgxc_comm_delay;" > /dev/null 2>&1 &

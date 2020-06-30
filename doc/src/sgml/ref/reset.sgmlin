@@ -1,0 +1,16 @@
+<refentry id="SQL-RESET">
+<refmeta>
+<refentrytitle>RESET</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>RESET</refname>
+<refpurpose>restore the value of a run-time parameter to the default value</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+RESET {configuration_parameter | CURRENT_SCHEMA | TIME ZONE | TRANSACTION ISOLATION LEVEL | SESSION AUTHORIZATION | ALL };
+</synopsis>
+</refsynopsisdiv>
+</refentry>
