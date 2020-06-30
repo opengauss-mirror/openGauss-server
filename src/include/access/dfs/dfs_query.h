@@ -1024,7 +1024,7 @@ DfsPrivateItem *MakeDfsPrivateItem(List *columnList, List *targetList, List *res
 /*
  * Parse the fileNames string from the split List.
  * @_in_out param splitList: point to the original split List, which may contain multiple files.
- * @_in param currentFileName: point to the first file or the only file '/user/demai/file1.orc' (new buffer).
+ * @_in param currentFileName: point to the first file.
  * @return Return the split parsed from the list.
  */
 SplitInfo *ParseFileSplitList(List **splitList, char **currentFileName);
