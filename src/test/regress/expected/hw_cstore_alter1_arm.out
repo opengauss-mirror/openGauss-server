@@ -1,0 +1,410 @@
+-- OWNER TO
+CREATE TABLE hw_cstore_alter_t1(a int, b text) WITH(orientation=column);
+CREATE INDEX ON hw_cstore_alter_t1(a);
+CREATE ROLE cstore_role PASSWORD 'ttest@123';
+ALTER TABLE hw_cstore_alter_t1 OWNER TO cstore_role;
+DROP TABLE hw_cstore_alter_t1;
+--  unsupported feature
+CREATE TABLE hw_cstore_alter_t3  ( a int , b int ) with ( orientation = column ) ;
+CREATE TABLE hw_cstore_alter_t4  ( c int, d int ) inherits ( hw_cstore_alter_t3 )  with ( orientation = column ) ; -- failed, not supported
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+DROP TABLE IF EXISTS hw_cstore_alter_t3;
+DROP TABLE IF EXISTS hw_cstore_alter_t4;
+NOTICE:  table "hw_cstore_alter_t4" does not exist, skipping
+-- rename column
+-- 5. column ordinary table
+CREATE TABLE hw_cstore_alter_t2(a int , b bigint, c char(10), d decimal(20,2) ) with (orientation = column);
+INSERT INTO hw_cstore_alter_t2 VALUES(1, 2, 'text', 3);
+ALTER TABLE hw_cstore_alter_t2 RENAME a TO a1; -- ok
+SELECT a1 FROM hw_cstore_alter_t2;
+ a1 
+----
+  1
+(1 row)
+
+ALTER TABLE hw_cstore_alter_t2 RENAME COLUMN b TO b1; -- ok
+SELECT b1 FROM hw_cstore_alter_t2;
+ b1 
+----
+  2
+(1 row)
+
+ALTER TABLE IF EXISTS hw_cstore_alter_t2 RENAME c TO c1; -- ok
+SELECT c1 FROM hw_cstore_alter_t2;
+     c1     
+------------
+ text      
+(1 row)
+
+ALTER TABLE hw_cstore_alter_t2 RENAME d TO a1; -- failed, name conflicts
+ERROR:  column "a1" of relation "hw_cstore_alter_t2" already exists
+SELECT d FROM hw_cstore_alter_t2;
+  d   
+------
+ 3.00
+(1 row)
+
+ALTER TABLE hw_cstore_alter_t3 RENAME a TO a1; -- failed, table doesn't exist
+ERROR:  relation "hw_cstore_alter_t3" does not exist
+ALTER TABLE hw_cstore_alter_t2 RENAME d TO xmin; -- failed, conflict with system column name
+ERROR:  column name "xmin" conflicts with a system column name
+ALTER TABLE hw_cstore_alter_t2 RENAME d TO abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234; -- ok , but truncate
+NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123"
+SELECT abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234 FROM hw_cstore_alter_t2; -- ok, attribute name will be truncated
+NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123"
+ abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123 
+-----------------------------------------------------------------
+                                                            3.00
+(1 row)
+
+SELECT abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123 FROM hw_cstore_alter_t2; -- ok
+ abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123 
+-----------------------------------------------------------------
+                                                            3.00
+(1 row)
+
+ALTER TABLE hw_cstore_alter_t2 RENAME abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234 
+TO abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123; -- failed, truncate but name conflicts
+NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123"
+ERROR:  column "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123" of relation "hw_cstore_alter_t2" already exists
+-- 5.1 column ordinary index
+CREATE INDEX idx_hw_cstore_alter_t2 ON hw_cstore_alter_t2(c1);
+ALTER INDEX idx_hw_cstore_alter_t2 RENAME TO idx1_hw_cstore_alter_t2; -- ok
+select count(1) from pg_class where relname = 'idx1_hw_cstore_alter_t2';
+ count 
+-------
+     1
+(1 row)
+
+ALTER INDEX IF EXISTS idx1_hw_cstore_alter_t2 RENAME TO idx2_hw_cstore_alter_t2; -- ok
+select count(1) from pg_class where relname = 'idx2_hw_cstore_alter_t2';
+ count 
+-------
+     1
+(1 row)
+
+ALTER INDEX idx2_hw_cstore_alter_t2 RENAME TO hw_cstore_alter_t2; -- failed, name conflicts
+ERROR:  relation "hw_cstore_alter_t2" already exists
+ALTER INDEX idx2_hw_cstore_alter_t2 RENAME TO idx3_abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234; -- ok, but truncate
+NOTICE:  identifier "idx3_abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "idx3_abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefgh"
+ALTER INDEX idx3_abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234 RENAME TO idx2_hw_cstore_alter_t2; -- ok
+NOTICE:  identifier "idx3_abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "idx3_abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefgh"
+select count(1) from pg_class where relname = 'idx2_hw_cstore_alter_t2';
+ count 
+-------
+     1
+(1 row)
+
+DROP TABLE hw_cstore_alter_t2;
+-- 6 temp table
+-- 6.1 rename column
+CREATE TEMP TABLE hw_cstore_alter_t10 (a int , b int , c int ) with (orientation = column);
+ALTER TABLE hw_cstore_alter_t10 RENAME a to b; -- failed, name conflict
+ERROR:  column "b" of relation "hw_cstore_alter_t10" already exists
+ALTER TABLE hw_cstore_alter_t10 RENAME a to xmin; -- failed, system column name
+ERROR:  column name "xmin" conflicts with a system column name
+ALTER TABLE hw_cstore_alter_t10 RENAME a to a1; -- ok
+SELECT a1 FROM hw_cstore_alter_t10; -- ok
+ a1 
+----
+(0 rows)
+
+ALTER TABLE hw_cstore_alter_t10 RENAME a1 TO abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234;
+NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123"
+SELECT abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234 FROM hw_cstore_alter_t10;
+NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123"
+ abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123 
+-----------------------------------------------------------------
+(0 rows)
+
+SELECT abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123 FROM hw_cstore_alter_t10;
+ abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123 
+-----------------------------------------------------------------
+(0 rows)
+
+ALTER TABLE hw_cstore_alter_t10 RENAME abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234 
+TO abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123; -- failed, truncate but name conflicts
+NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123"
+ERROR:  column "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123" of relation "hw_cstore_alter_t10" already exists
+CREATE INDEX idx1_hw_cstore_alter_t10 ON hw_cstore_alter_t10(b);
+\d+ idx1_hw_cstore_alter_t10
+--?Index "pg_temp_datanod_1_1.*.idx1_hw_cstore_alter_t10"
+ Column |  Type   | Definition | Storage 
+--------+---------+------------+---------
+ b      | integer | b          | plain
+--?psort, for table "pg_temp_datanod_1_1.*.hw_cstore_alter_t10"
+
+ALTER INDEX idx1_hw_cstore_alter_t10 RENAME TO idx2_hw_cstore_alter_t10; -- ok
+DROP TABLE hw_cstore_alter_t10;
+-- 6.2 rename partition
+CREATE TEMP TABLE hw_cstore_alter_t11 (a int, b int, c decimal(20, 0) ) with (orientation = column)
+PARTITION BY RANGE(a)(
+PARTITION p1 values less than (10),
+PARTITION p2 values less than (20),
+PARTITION p3 values less than (30)
+); -- failed, unsupported feature
+ERROR:  unsupported feature with temporary/unlogged table for partitioned table
+-- 6.3 temp row table options
+CREATE TEMP TABLE hw_cstore_alter_t12(a int , b int , c int ) with (compression = 'high'); -- failed
+ERROR:  Value "high" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+CREATE TEMP TABLE hw_cstore_alter_t12(a int , b int , c int ) with (max_batchrow = 60000); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "max_batchrow" for row relation
+CREATE TEMP TABLE hw_cstore_alter_t12(a int , b int , c int ) with (deltarow_threshold = 9999); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "deltarow_threshold" for row relation
+CREATE TEMP TABLE hw_cstore_alter_t12(a int , b int , c int ) with (partial_cluster_rows = 600000); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "partial_cluster_rows" for row relation
+CREATE TEMP TABLE hw_cstore_alter_t12(a int , b int , c int ) with (internal_mask = 1024); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+CREATE TEMP TABLE hw_cstore_alter_t12(a int , b int , c int ) with (compression = 'yes', fillfactor=70); -- ok
+ALTER TABLE hw_cstore_alter_t12 SET (compression = 'yes'); -- ok
+ALTER TABLE hw_cstore_alter_t12 SET (compression = 'no'); -- ok
+ALTER TABLE hw_cstore_alter_t12 SET (compression = 'low'); -- failed
+ERROR:  Value "low" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+ALTER TABLE hw_cstore_alter_t12 SET (compression = 'middle'); -- failed
+ERROR:  Value "middle" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+ALTER TABLE hw_cstore_alter_t12 SET (compression = 'high'); -- failed
+ERROR:  Value "high" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+-- \d+ hw_cstore_alter_t12
+ALTER TABLE hw_cstore_alter_t12 RESET (compression); -- ok
+-- \d+ hw_cstore_alter_t12
+ALTER TABLE hw_cstore_alter_t12 SET (max_batchrow = 10000); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "max_batchrow" for row relation
+ALTER TABLE hw_cstore_alter_t12 RESET (max_batchrow); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "max_batchrow" for row relation
+ALTER TABLE hw_cstore_alter_t12 SET (deltarow_threshold = 9999); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "deltarow_threshold" for row relation
+ALTER TABLE hw_cstore_alter_t12 RESET (deltarow_threshold); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "deltarow_threshold" for row relation
+ALTER TABLE hw_cstore_alter_t12 SET (partial_cluster_rows = 600000); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "partial_cluster_rows" for row relation
+ALTER TABLE hw_cstore_alter_t12 RESET (partial_cluster_rows); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "partial_cluster_rows" for row relation
+ALTER TABLE hw_cstore_alter_t12 SET (ORIENTATION = COLUMN); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t12 SET (ORIENTATION = ROW); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t12 RESET (ORIENTATION); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t12 SET (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER TABLE hw_cstore_alter_t12 RESET (internal_mask); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+DROP TABLE hw_cstore_alter_t12;
+CREATE TEMP TABLE hw_cstore_alter_t13(a int , b int , c int ); -- ok
+DROP TABLE hw_cstore_alter_t13;
+CREATE TEMP TABLE hw_cstore_alter_t14(a int , b int , c int ) with ( orientation = row ); -- ok
+-- 5.3.3.1 bree index
+CREATE INDEX idx1_hw_cstore_alter_t14 ON hw_cstore_alter_t14(b); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (fillfactor = 70); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (fillfactor); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (compression = 'yes'); -- failed, unsupported
+ERROR:  unrecognized parameter "compression"
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (compression); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (autovacuum_enabled = true); -- failed, unsupported
+ERROR:  unrecognized parameter "autovacuum_enabled"
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (autovacuum_enabled); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (security_barrier = true); -- failed, unsupported
+ERROR:  unrecognized parameter "security_barrier"
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (security_barrier); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (max_batchrow=10000); -- failed
+ERROR:  unrecognized parameter "max_batchrow"
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (max_batchrow); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (orientation = column); -- failed
+ERROR:  unrecognized parameter "orientation"
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (orientation); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (internal_mask); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (partial_cluster_rows = 600000); -- failed
+ERROR:  unrecognized parameter "partial_cluster_rows"
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (partial_cluster_rows); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t14 SET (deltarow_threshold = 5000); -- failed
+ERROR:  unrecognized parameter "deltarow_threshold"
+ALTER INDEX idx1_hw_cstore_alter_t14 RESET (deltarow_threshold); -- ok, ignore it
+-- \d+ idx1_hw_cstore_alter_t14
+DROP INDEX idx1_hw_cstore_alter_t14;
+drop TABLE hw_cstore_alter_t14;
+-- 6.4 temp column table options
+-- 6.4.1 alter table column set/reset attribute_option
+CREATE TEMP TABLE hw_cstore_alter_t15 (a int, b int, c int);
+ALTER TABLE hw_cstore_alter_t15 ALTER COLUMN a SET (n_distinct_inherited = 7); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+ALTER TABLE hw_cstore_alter_t15 ALTER COLUMN a RESET (n_distinct_inherited); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+ALTER TABLE hw_cstore_alter_t15 ALTER COLUMN a SET (n_distinct = 7);  -- ok
+ALTER TABLE hw_cstore_alter_t15 ALTER COLUMN a RESET (n_distinct); -- ok
+ALTER TABLE hw_cstore_alter_t15 ALTER COLUMN a RESET (n_distinct, n_distinct_inherited); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+DROP TABLE hw_cstore_alter_t15;
+CREATE TEMP TABLE hw_cstore_alter_t16 (a int, b int, c int) with (internal_mask = 1024); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+CREATE TEMP TABLE hw_cstore_alter_t16 (a int, b int, c int) WITH (orientation = column);
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a SET (n_distinct_inherited = 7); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a RESET (n_distinct_inherited); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a SET (n_distinct = 7);
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a RESET (n_distinct);
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a RESET (n_distinct, n_distinct_inherited); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+-- \d+ hw_cstore_alter_t16
+-- 6.4.2 change storage type
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a SET STORAGE PLAIN; -- failed
+ERROR:  Storage type "plain" is meaningless for column relation
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a SET STORAGE EXTERNAL; -- failed
+ERROR:  Storage type "external" is meaningless for column relation
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a SET STORAGE EXTENDED; -- failed
+ERROR:  Storage type "extended" is meaningless for column relation
+ALTER TABLE hw_cstore_alter_t16 ALTER COLUMN a SET STORAGE MAIN; -- failed
+ERROR:  Storage type "main" is meaningless for column relation
+-- 6.4.3 set with/without oids
+ALTER TABLE hw_cstore_alter_t16 SET WITH OIDS; -- failed
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITH OIDS is not yet supported.
+ALTER TABLE hw_cstore_alter_t16 SET WITHOUT OIDS; -- failed
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITHOUT OIDS is not yet supported.
+-- 6.4.4 SET/RESET relation options
+-- 6.4.4.1 column table
+ALTER TABLE hw_cstore_alter_t16 SET (ORIENTATION = ROW); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t16 RESET (ORIENTATION); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t16 SET (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER TABLE hw_cstore_alter_t16 RESET (internal_mask); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER TABLE hw_cstore_alter_t16 SET (FILLFACTOR = 70); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "fillfactor" for column/timeseries relation
+ALTER TABLE hw_cstore_alter_t16 RESET (FILLFACTOR); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "fillfactor" for column/timeseries relation
+ALTER TABLE hw_cstore_alter_t16 SET (autovacuum_enabled = true); -- ok
+ALTER TABLE hw_cstore_alter_t16 RESET (autovacuum_enabled); -- ok
+ALTER TABLE hw_cstore_alter_t16 SET (security_barrier); -- failed
+ERROR:  unrecognized parameter "security_barrier"
+ALTER TABLE hw_cstore_alter_t16 RESET (security_barrier); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "security_barrier" for column/timeseries relation
+\d+ hw_cstore_alter_t16
+--?        Table "pg_temp_datanod_1_1.*.hw_cstore_alter_t16"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- 6.4.4.1.2 psort table
+CREATE INDEX idx1_hw_cstore_alter_t16 ON hw_cstore_alter_t16(b) with (compression = 'low'); -- failed
+ERROR:  unrecognized parameter "compression"
+CREATE INDEX idx1_hw_cstore_alter_t16 ON hw_cstore_alter_t16(b) with (fillfactor = 100); -- failed
+ERROR:  unrecognized parameter "fillfactor"
+CREATE INDEX idx1_hw_cstore_alter_t16 ON hw_cstore_alter_t16(b) with (autovacuum_enabled = true); -- failed
+ERROR:  unrecognized parameter "autovacuum_enabled"
+CREATE INDEX idx1_hw_cstore_alter_t16 ON hw_cstore_alter_t16(b) with (security_barrier = on); -- failed
+ERROR:  unrecognized parameter "security_barrier"
+CREATE INDEX idx1_hw_cstore_alter_t16 ON hw_cstore_alter_t16(b) with (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+CREATE INDEX idx1_hw_cstore_alter_t16 ON hw_cstore_alter_t16(b) with (orientation = column); -- failed
+ERROR:  unrecognized parameter "orientation"
+CREATE INDEX idx1_hw_cstore_alter_t16 ON hw_cstore_alter_t16(b) with (max_batchrow = 60000, deltarow_threshold = 9999, partial_cluster_rows = 600000); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t16 SET (ORIENTATION = ROW); -- failed
+ERROR:  unrecognized parameter "orientation"
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (ORIENTATION); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER INDEX idx1_hw_cstore_alter_t16 SET (compression = 'yes'); -- failed
+ERROR:  unrecognized parameter "compression"
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (compression); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "compression" for psort index
+ALTER INDEX idx1_hw_cstore_alter_t16 SET (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (internal_mask); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER INDEX idx1_hw_cstore_alter_t16 SET (max_batchrow = 60000); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (max_batchrow); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t16 SET (deltarow_threshold = 5000); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (deltarow_threshold); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t16 SET (partial_cluster_rows = 700000); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (partial_cluster_rows); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t16 SET (security_barrier = false); -- failed
+ERROR:  unrecognized parameter "security_barrier"
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (security_barrier); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "security_barrier" for psort index
+ALTER INDEX idx1_hw_cstore_alter_t16 SET (FILLFACTOR = 70); -- failed
+ERROR:  unrecognized parameter "fillfactor"
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (FILLFACTOR); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "fillfactor" for psort index
+ALTER TABLE idx1_hw_cstore_alter_t16 SET (autovacuum_enabled = true); -- failed
+ERROR:  unrecognized parameter "autovacuum_enabled"
+ALTER INDEX idx1_hw_cstore_alter_t16 RESET (autovacuum_enabled); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "autovacuum_enabled" for psort index
+DROP INDEX idx1_hw_cstore_alter_t16;
+DROP TABLE hw_cstore_alter_t16;
+-- 6.5 alter cstore partition table owner
+CREATE USER hw_user_u1 password 'TTEST@123';
+CREATE TABLE hw_cstore_alter_t17 (a int, b int, c int) with (orientation = column) 
+partition by range (a)
+(
+    partition p1  values less than (1000),
+    partition p2  values less than (2000),
+    partition p3  values less than (maxvalue)
+);
+CREATE INDEX idx1_hw_cstore_alter_t17 on hw_cstore_alter_t17 using PSORT (a) local;
+ALTER TABLE hw_cstore_alter_t17 owner to hw_user_u1;
+DROP TABLE hw_cstore_alter_t17;
+DROP USER hw_user_u1;
+CREATE USER hw_user_u2 password 'TTEST@123';
+CREATE TABLE hw_cstore_alter_t18 (a int, b int, c int) with (orientation = column) 
+partition by range (a)
+(
+    partition p1  values less than (1000),
+    partition p2  values less than (2000),
+    partition p3  values less than (maxvalue)
+);
+CREATE INDEX idx1_hw_cstore_alter_t18 on hw_cstore_alter_t18 using PSORT (a) local;
+ALTER TABLE hw_cstore_alter_t18 owner to hw_user_u2;
+DROP USER hw_user_u2 cascade;

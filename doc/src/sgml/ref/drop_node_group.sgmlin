@@ -1,0 +1,18 @@
+<refentry id="SQL-DROP_NODE_GROUP">
+<refmeta>
+<refentrytitle>DROP NODE GROUP</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP NODE GROUP</refname>
+<refpurpose>drop a group of cluster nodes</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP NODE GROUP groupname 
+    [DISTRIBUTE FROM src_nodegroup_name]
+    [TO ELASTIC GROUP];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

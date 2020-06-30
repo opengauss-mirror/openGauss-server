@@ -1,0 +1,185 @@
+set enable_nestloop=off;
+set enable_mergejoin=off;
+create schema tablesample_schema_3;
+set current_schema = tablesample_schema_3;
+-- test for null/distinct and other data characteristic
+create table test_tablesample_01(c1 int, c2 numeric) ;
+create table test_tablesample_02(c1 bigint, c2 int) ;
+create table test_tablesample_target(c1 int, c2 int) ;
+insert into test_tablesample_01 select generate_series(1,1000)%8, generate_series(1,1000)%7;
+insert into test_tablesample_02 select generate_series(1,1000)%10, generate_series(1,1000)%12;
+update test_tablesample_02 set c1 = null where c1 between 4 and 7;
+analyze test_tablesample_01;
+analyze test_tablesample_02;
+select distinct c1 from test_tablesample_01 tablesample system (100) repeatable (100) order by 1;
+ c1 
+----
+  0
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+(8 rows)
+
+update test_tablesample_01 set c2 = null where c1 between 4 and 7;
+select distinct c1 from (select * from test_tablesample_01 tablesample bernoulli (100)) order by 1;
+ c1 
+----
+  0
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+(8 rows)
+
+explain (verbose on, costs off, nodes off) 
+with query_select_01 as (select * from test_tablesample_01 tablesample bernoulli (100) where c1 > 5),
+     query_select_02 as (select * from test_tablesample_02 tablesample bernoulli (100) where c1 > 5)
+select q1.c1, q2.c2 from query_select_01 q1, query_select_02 q2 where q1.c1 = q2.c1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Hash Join
+   Output: q1.c1, q2.c2
+   Hash Cond: (q1.c1 = q2.c1)
+   CTE query_select_01
+     ->  Sample Scan on tablesample_schema_3.test_tablesample_01
+           Output: test_tablesample_01.c1, test_tablesample_01.c2
+           Sampling: bernoulli (100::real)
+           Filter: (test_tablesample_01.c1 > 5)
+   CTE query_select_02
+     ->  Sample Scan on tablesample_schema_3.test_tablesample_02
+           Output: test_tablesample_02.c1, test_tablesample_02.c2
+           Sampling: bernoulli (100::real)
+           Filter: (test_tablesample_02.c1 > 5)
+   ->  CTE Scan on query_select_01 q1
+         Output: q1.c1, q1.c2
+   ->  Hash
+         Output: q2.c2, q2.c1
+         ->  CTE Scan on query_select_02 q2
+               Output: q2.c2, q2.c1
+(19 rows)
+
+explain (verbose on, costs off, nodes off) 
+with query_select_01 as (select * from test_tablesample_01 tablesample bernoulli (100) where c1 > 2),
+     query_select_02 as (select * from test_tablesample_02 tablesample bernoulli (100) where c1 < 7)
+select q1.c1, q2.c2 from query_select_01 q1 left join query_select_02 q2 on q1.c1 = q2.c1 and q1.c2 = q2.c2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Hash Left Join
+   Output: q1.c1, q2.c2
+   Hash Cond: ((q1.c1 = q2.c1) AND (q1.c2 = (q2.c2)::numeric))
+   CTE query_select_01
+     ->  Sample Scan on tablesample_schema_3.test_tablesample_01
+           Output: test_tablesample_01.c1, test_tablesample_01.c2
+           Sampling: bernoulli (100::real)
+           Filter: (test_tablesample_01.c1 > 2)
+   CTE query_select_02
+     ->  Sample Scan on tablesample_schema_3.test_tablesample_02
+           Output: test_tablesample_02.c1, test_tablesample_02.c2
+           Sampling: bernoulli (100::real)
+           Filter: (test_tablesample_02.c1 < 7)
+   ->  CTE Scan on query_select_01 q1
+         Output: q1.c1, q1.c2
+   ->  Hash
+         Output: q2.c2, q2.c1
+         ->  CTE Scan on query_select_02 q2
+               Output: q2.c2, q2.c1
+(19 rows)
+
+explain (verbose on, costs off, nodes off)
+with query_select_01 as (select * from test_tablesample_01 tablesample bernoulli (100) where c1 > 2),
+     query_select_02 as (select * from test_tablesample_02 tablesample bernoulli (100) where c1 < 7)
+insert into test_tablesample_target select q1.c1, q2.c2 from query_select_01 q1 join query_select_02 q2 on q1.c1 = q2.c1 and q1.c2 = q2.c2
+ union all select q1.c1, q2.c2 from query_select_01 q1 join query_select_02 q2 on q1.c1 = q2.c2 and q1.c2 = q2.c1;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Insert on tablesample_schema_3.test_tablesample_target
+   CTE query_select_01
+     ->  Sample Scan on tablesample_schema_3.test_tablesample_01
+           Output: test_tablesample_01.c1, test_tablesample_01.c2
+           Sampling: bernoulli (100::real)
+           Filter: (test_tablesample_01.c1 > 2)
+   CTE query_select_02
+     ->  Sample Scan on tablesample_schema_3.test_tablesample_02
+           Output: test_tablesample_02.c1, test_tablesample_02.c2
+           Sampling: bernoulli (100::real)
+           Filter: (test_tablesample_02.c1 < 7)
+   ->  Result
+         Output: q1.c1, q2.c2
+         ->  Append
+               ->  Hash Join
+                     Output: q1.c1, q2.c2
+                     Hash Cond: ((q1.c1 = q2.c1) AND (q1.c2 = (q2.c2)::numeric))
+                     ->  CTE Scan on query_select_01 q1
+                           Output: q1.c1, q1.c2
+                     ->  Hash
+                           Output: q2.c2, q2.c1
+                           ->  CTE Scan on query_select_02 q2
+                                 Output: q2.c2, q2.c1
+               ->  Hash Join
+                     Output: q1.c1, q2.c2
+                     Hash Cond: ((q1.c1 = q2.c2) AND (q1.c2 = (q2.c1)::numeric))
+                     ->  CTE Scan on query_select_01 q1
+                           Output: q1.c1, q1.c2
+                     ->  Hash
+                           Output: q2.c2, q2.c1
+                           ->  CTE Scan on query_select_02 q2
+                                 Output: q2.c2, q2.c1
+(32 rows)
+
+with query_select_01 as (select * from test_tablesample_01 tablesample bernoulli (100) where c1 > 2),
+     query_select_02 as (select * from test_tablesample_02 tablesample bernoulli (100) where c1 < 7)
+insert into test_tablesample_target select q1.c1, q2.c2 from query_select_01 q1 join query_select_02 q2 on q1.c1 = q2.c1 and q1.c2 = q2.c2
+ union all select q1.c1, q2.c2 from query_select_01 q1 join query_select_02 q2 on q1.c1 = q2.c2 and q1.c2 = q2.c1;
+explain (verbose on, costs off, nodes on)
+update test_tablesample_target t1 set c1 = c2+1 where exists (select 1 from test_tablesample_01 t2 tablesample bernoulli (100) where t2.c1<10 and t1.c1=t2.c1 and t1.c2=t2.c2);
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Update on tablesample_schema_3.test_tablesample_target t1
+   ->  Hash Join
+         Output: (t1.c2 + 1), t1.c2, t1.ctid, t2.ctid
+         Hash Cond: ((t1.c1 = t2.c1) AND ((t1.c2)::numeric = t2.c2))
+         ->  Seq Scan on tablesample_schema_3.test_tablesample_target t1
+               Output: t1.c2, t1.ctid, t1.c1
+               Filter: (t1.c1 < 10)
+         ->  Hash
+               Output: t2.ctid, t2.c1, t2.c2
+               ->  HashAggregate
+                     Output: t2.ctid, t2.c1, t2.c2
+                     Group By Key: t2.c1, t2.c2
+                     ->  Sample Scan on tablesample_schema_3.test_tablesample_01 t2
+                           Output: t2.ctid, t2.c1, t2.c2
+                           Sampling: bernoulli (100::real)
+                           Filter: (t2.c1 < 10)
+(16 rows)
+
+explain (verbose on, costs off, nodes off)
+select c1, c2, count(*), sum(c1), count(c2), max(c1), c2 from
+(select c1, c2 from test_tablesample_01 tablesample bernoulli (100) group by c1, c2 limit 10) group by c1, c2;
+                                                                                     QUERY PLAN                                                                                      
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: test_tablesample_01.c1, test_tablesample_01.c2, count(*), sum(test_tablesample_01.c1), count(test_tablesample_01.c2), max(test_tablesample_01.c1), test_tablesample_01.c2
+   Group By Key: test_tablesample_01.c1, test_tablesample_01.c2
+   ->  Limit
+         Output: test_tablesample_01.c1, test_tablesample_01.c2
+         ->  HashAggregate
+               Output: test_tablesample_01.c1, test_tablesample_01.c2
+               Group By Key: test_tablesample_01.c1, test_tablesample_01.c2
+               ->  Sample Scan on tablesample_schema_3.test_tablesample_01
+                     Output: test_tablesample_01.c1, test_tablesample_01.c2
+                     Sampling: bernoulli (100::real)
+(11 rows)
+
+reset search_path;
+drop schema  tablesample_schema_3 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table tablesample_schema_3.test_tablesample_01
+drop cascades to table tablesample_schema_3.test_tablesample_02
+drop cascades to table tablesample_schema_3.test_tablesample_target

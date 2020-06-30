@@ -1,0 +1,115 @@
+-- Test regexp_matches
+select regexp_matches('abb', '(?<=a)b*');
+ regexp_matches 
+----------------
+ {bb}
+(1 row)
+
+select regexp_matches('a', 'a(?<=a)b*');
+ regexp_matches 
+----------------
+ {a}
+(1 row)
+
+select regexp_matches('abc', 'a(?<=a)b*(?<=b)c*');
+ regexp_matches 
+----------------
+ {abc}
+(1 row)
+
+select regexp_matches('ab', 'a(?<=a)b*(?<=b)c*');
+ regexp_matches 
+----------------
+ {ab}
+(1 row)
+
+select regexp_matches('ab', 'a*(?<!a)b*');
+ regexp_matches 
+----------------
+ {""}
+(1 row)
+
+select regexp_matches('ab', 'a*(?<!a)b+');
+ regexp_matches 
+----------------
+(0 rows)
+
+select regexp_matches('b', 'a*(?<!a)b+');
+ regexp_matches 
+----------------
+ {b}
+(1 row)
+
+select regexp_matches('a', 'a(?<!a)b*');
+ regexp_matches 
+----------------
+(0 rows)
+
+select regexp_matches('b', '(?<=b)b');
+ regexp_matches 
+----------------
+(0 rows)
+
+select regexp_matches('foobar', '(?<=f)b+');
+ regexp_matches 
+----------------
+(0 rows)
+
+select regexp_matches('foobar', '(?<=foo)b+');
+ regexp_matches 
+----------------
+ {b}
+(1 row)
+
+select regexp_matches('foobar', '(?<=oo)b+');
+ regexp_matches 
+----------------
+ {b}
+(1 row)
+
+select regexp_matches('Programmer', '(\w)(.*?\1)', 'g');
+ regexp_matches 
+----------------
+ {r,ogr}
+ {m,m}
+(2 rows)
+
+SELECT regexp_matches('foo' || chr(10) || 'bar' || chr(10) || 'bequq' || chr(10) || 'baz', '^', 'mg');
+ regexp_matches 
+----------------
+ {""}
+ {""}
+ {""}
+ {""}
+(4 rows)
+
+SELECT regexp_matches('foo' || chr(10) || 'bar' || chr(10) || 'bequq' || chr(10) || 'baz', '$', 'mg');
+ regexp_matches 
+----------------
+ {""}
+ {""}
+ {""}
+ {""}
+(4 rows)
+
+SELECT regexp_matches('1' || chr(10) || '2' || chr(10) || '3' || chr(10) || '4' || chr(10), '^.?', 'mg');
+ regexp_matches 
+----------------
+ {1}
+ {2}
+ {3}
+ {4}
+ {""}
+(5 rows)
+
+create database tpcds dbcompatibility 'c';
+\c tpcds
+select regexp_matches('foo/bar/baz',
+                      '^([^/]+?)(?:/([^/]+?))(?:/([^/]+?))?$', '');
+ regexp_matches 
+----------------
+ {foo,bar,baz}
+(1 row)
+
+\c regression
+drop database tpcds;

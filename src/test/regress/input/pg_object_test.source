@@ -1,0 +1,335 @@
+create schema results;
+CREATE SEQUENCE serial_tables START 1;
+CREATE SEQUENCE serial_objects START 1;
+
+create table results.result_tables(id int default nextval('serial_tables'), last_ddl_time timestamptz, object_type text, object_name text);
+create table results.result_objects(id int default nextval('serial_objects'), last_ddl_time timestamptz, object_type text, object_name text);
+truncate table results.result_tables,results.result_objects;
+
+\! rm -rf @testtablespace@/new_tablespace_1
+drop tablespace if exists new_tablespace_1;
+CREATE TABLESPACE new_tablespace_1 LOGGING DATAFILE '@testtablespace@/new_tablespace_1';
+create user user1 WITH ENCRYPTED PASSWORD 'ttest@123';
+
+CREATE OR REPLACE PROCEDURE save_time(object_type_in IN text, object_name_in IN text)
+AS
+BEGIN
+	if object_type_in = 'TABLE' then
+		insert into results.result_tables(last_ddl_time, object_type, object_name) select pg.last_ddl_time, object_type_in, object_name_in from pg_tables pg where pg.tablename = object_name_in;
+	end if;
+	insert into results.result_objects(last_ddl_time, object_type, object_name) select dba.last_ddl_time, object_type_in, object_name_in from dba_objects dba where dba.object_name=object_name_in and dba.object_type=object_type_in;
+END;
+/
+
+-- CREATE TABLE
+create table tab_x1(a int, b int);
+create UNIQUE index index_tab_x1_1 on tab_x1(a);
+create UNIQUE index index_tab_x1_2 on tab_x1(a);
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+	$$
+	DECLARE
+	BEGIN
+	RETURN NEW;
+	END
+	$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger
+	BEFORE INSERT ON tab_x1
+	FOR EACH ROW
+	EXECUTE PROCEDURE tri_insert_func();
+create index index_tab_x1_a on tab_x1(b);
+
+-- CREATE VIEW CASE
+create table tab_x2(a int, b int);
+create view view_tab_x2 as select a as ia from tab_x1;
+
+-- CREATE INDEX CASE
+create table tab_x3(a int, b int);
+CREATE INDEX index_tab_x3_b ON tab_x3(b);
+create table tab_x4(a int, b int)
+PARTITION BY RANGE(b)
+(
+PARTITION p1 VALUES LESS THAN (3000),
+PARTITION p2 VALUES LESS THAN (5000),
+PARTITION p3 VALUES LESS THAN (10000)
+);
+CREATE INDEX index_tab_x4 ON tab_x4(b) LOCAL
+(
+PARTITION b_index1,
+PARTITION b_index2,
+PARTITION b_index3
+);
+
+-- CREATE SEQUENCE 
+create sequence serial start 101;
+create table tab_x5(a int default nextval('serial'));
+
+-- CREATE FOREIGN TABLE 
+
+-- CREATE FUNCTION 
+CREATE FUNCTION test_fun(integer, integer) RETURNS integer
+    AS 'select $1 + $2;'
+    LANGUAGE SQL
+    IMMUTABLE
+    RETURNS NULL ON NULL INPUT;
+
+-- check delete creator
+create user test_object_user_2 identified by 'AAAaaa123';
+create user test_object_user_3 identified by 'AAAaaa123';
+grant test_object_user_3 to test_object_user_2;
+grant all on schema test_object_user_2 to test_object_user_3;
+set ROLE test_object_user_2 PASSWORD 'AAAaaa123'; 
+create table tab_xc(a int);
+select schemaname,tablename,tableowner,tablecreator from pg_tables where tablename='tab_xc';
+grant all on tab_xc to test_object_user_3;
+alter table tab_xc set schema test_object_user_3;
+select schemaname,tablename,tableowner,tablecreator from pg_tables where tablename='tab_xc';
+alter table test_object_user_3.tab_xc owner to test_object_user_3;
+select schemaname,tablename,tableowner,tablecreator from pg_tables where tablename='tab_xc';
+\c regression
+drop user test_object_user_2 cascade;
+select schemaname,tablename,tableowner,tablecreator from pg_tables where tablename='tab_xc';
+drop user test_object_user_3 cascade;
+
+-- ALTER TABLE
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 add constraint constraint_1 primary key (a);
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 drop constraint constraint_1;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 add constraint constraint_2 check(a<100000);
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 rename constraint constraint_2 to constraint_2_r;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 rename constraint constraint_2_r to constraint_2;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ADD CONSTRAINT constraint_3 PRIMARY KEY USING INDEX index_tab_x1_1;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 VALIDATE CONSTRAINT constraint_2;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 drop constraint constraint_2;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 CLUSTER ON index_tab_x1_2;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 set WITHOUT CLUSTER;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 set (fillfactor=70);
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 reset (fillfactor);
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 owner to user1;
+call save_time('TABLE', 'tab_x1');
+-- SET TABLESPACE new_tablespace
+alter table tab_x1 SET TABLESPACE new_tablespace_1;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 SET COMPRESS;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 DISABLE trigger insert_trigger;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 enable trigger insert_trigger;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 enable REPLICA trigger insert_trigger;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 enable ALWAYS trigger insert_trigger;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 DISABLE ROW LEVEL SECURITY;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 ENABLE ROW LEVEL SECURITY;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 FORCE ROW LEVEL SECURITY;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 NO FORCE ROW LEVEL SECURITY;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 add c varchar(10);
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 MODIFY c int;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 drop IF EXISTS c;
+call save_time('TABLE', 'tab_x1');
+alter table tab_x1 add c int;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ALTER COLUMN c TYPE int;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ALTER COLUMN c SET DEFAULT 1;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ALTER COLUMN c SET not null;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ALTER COLUMN c drop not null;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ALTER COLUMN c SET STATISTICS -1;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ADD STATISTICS ((b,c));
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 DELETE STATISTICS ((b,c));
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ALTER COLUMN c SET (n_distinct = 7);
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ALTER COLUMN c reset (n_distinct);
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 ALTER COLUMN c SET STORAGE PLAIN;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 RENAME TO tab_x1_t;
+call save_time('TABLE', 'tab_x1_t');
+ALTER TABLE tab_x1_t RENAME TO tab_x1;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 RENAME a TO a_t;
+call save_time('TABLE', 'tab_x1');
+ALTER TABLE tab_x1 RENAME a_t TO a;
+call save_time('TABLE', 'tab_x1');
+truncate table tab_x1;
+call save_time('TABLE', 'tab_x1');
+comment on table tab_x1 is 'test table comment';
+call save_time('TABLE', 'tab_x1');
+revoke select on table tab_x1 from user1;
+call save_time('TABLE', 'tab_x1');
+grant all on table tab_x1 to user1;
+call save_time('TABLE', 'tab_x1');
+
+-- ALTER VIEW CASE
+call save_time('VIEW', 'view_tab_x2');
+alter view view_tab_x2 alter ia set DEFAULT 3;
+call save_time('VIEW', 'view_tab_x2');
+alter view view_tab_x2 alter ia DROP DEFAULT;
+call save_time('VIEW', 'view_tab_x2');
+alter view view_tab_x2 owner to user1;
+call save_time('VIEW', 'view_tab_x2');
+alter view view_tab_x2 SET SCHEMA user1;
+call save_time('VIEW', 'view_tab_x2');
+alter view user1.view_tab_x2 SET SCHEMA public;
+call save_time('VIEW', 'view_tab_x2');
+alter view view_tab_x2 SET (security_barrier=true);
+call save_time('VIEW', 'view_tab_x2');
+alter view view_tab_x2 RESET (security_barrier);
+call save_time('VIEW', 'view_tab_x2');
+alter view view_tab_x2 rename to view_tab_x2_t;
+call save_time('VIEW', 'view_tab_x2_t');
+alter view view_tab_x2_t rename to view_tab_x2;
+call save_time('VIEW', 'view_tab_x2');
+comment on view view_tab_x2 is 'test view comment';
+call save_time('VIEW', 'view_tab_x2');
+
+-- ALTER INDEX CASE
+call save_time('INDEX', 'index_tab_x4');
+alter index index_tab_x4 rename to index_tab_x4_t;
+call save_time('INDEX', 'index_tab_x4_t');
+alter index index_tab_x4_t rename to index_tab_x4;
+call save_time('INDEX', 'index_tab_x4');
+alter index index_tab_x3_b SET TABLESPACE new_tablespace_1;
+call save_time('INDEX', 'index_tab_x3_b');
+alter index index_tab_x4 set (fillfactor=70);
+call save_time('INDEX', 'index_tab_x4');
+alter index index_tab_x4 reset (fillfactor);
+call save_time('INDEX', 'index_tab_x4');
+alter index index_tab_x4 REBUILD;
+call save_time('INDEX', 'index_tab_x4');
+alter index index_tab_x4 MOVE PARTITION b_index1 TABLESPACE new_tablespace_1;
+call save_time('INDEX', 'index_tab_x4');
+alter index index_tab_x4 UNUSABLE;
+call save_time('INDEX', 'index_tab_x4');
+comment on index index_tab_x4 is 'test index comment';
+call save_time('INDEX', 'index_tab_x4');
+
+-- ALTER SEQUENCE CASE
+call save_time('SEQUENCE', 'serial');
+alter sequence serial owned BY tab_x5.a;
+call save_time('SEQUENCE', 'serial');
+comment on sequence serial is 'test sequence comment';
+call save_time('SEQUENCE', 'serial');
+
+-- ALTER FOREIGN TABLE CASE
+
+-- ALTER FUNCTION CASE
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) called on null input;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) returns null on null input;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) strict;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) IMMUTABLE;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) STABLE;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) VOLATILE;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) SHIPPABLE;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) NOT SHIPPABLE;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) NOT FENCED;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) FENCED;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) LEAKPROOF;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) NOT LEAKPROOF;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) SECURITY INVOKER;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) SECURITY DEFINER;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) AUTHID DEFINER;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) AUTHID CURRENT_USER;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) COST 10;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) RESET all;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) rename to test_fun_t;
+call save_time('PROCEDURE', 'test_fun_t');
+alter function test_fun_t(integer,integer) rename to test_fun;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) owner to user1;
+call save_time('PROCEDURE', 'test_fun');
+alter function test_fun(integer,integer) set schema user1;
+call save_time('PROCEDURE', 'test_fun');
+alter function user1.test_fun(integer,integer) set schema public;
+call save_time('PROCEDURE', 'test_fun');
+comment on function test_fun(integer,integer) is 'test function comment';
+call save_time('PROCEDURE', 'test_fun');
+
+-- FIND RESULTS
+select count(*) from results.result_tables;
+select count(*) from results.result_objects;
+select *, t1.last_ddl_time-t2.last_ddl_time tdelta from results.result_tables t1 inner join results.result_tables t2 on t1.id = t2.id + 1 and t1.object_type = t2.object_type where tdelta <= 0 order by t1.id;
+select *, t1.last_ddl_time-t2.last_ddl_time tdelta from results.result_objects t1 inner join results.result_objects t2 on t1.id = t2.id + 1 and t1.object_type = t2.object_type where tdelta <= 0 order by t1.id;
+
+-- TEST UPDATE OLDER BY CREATE
+start transaction;
+create  table tab_tuc (a int,b text,c hll); -- to group group_modify;
+select last_ddl_time >= created from pg_tables where tablename='tab_tuc';
+insert into tab_tuc values(generate_series(1,100),'时间测试',hll_empty(11));
+select last_ddl_time >= created from pg_tables where tablename='tab_tuc';
+savepoint s1;
+alter table tab_tuc alter b set not null,modify c text;
+select last_ddl_time >= created from pg_tables where tablename='tab_tuc';
+COMMIT;
+DROP TABLE IF EXISTS tab_tuc;
+
+-- END TEST TABLE
+drop trigger insert_trigger on tab_x1;
+drop function tri_insert_func;
+drop table tab_x1 cascade;
+
+-- END VIEW CASE
+drop table tab_x2 cascade;
+
+-- START INDEX CASE
+drop table tab_x3, tab_x4 cascade;
+
+-- START SEQUENCE CASE
+drop sequence serial cascade;
+drop table tab_x5 cascade;
+
+-- END FUNCTION
+drop function test_fun;
+
+-- END CASE
+drop TABLESPACE new_tablespace_1;
+drop SEQUENCE serial_tables cascade;
+drop SEQUENCE serial_objects cascade;
+drop table results.result_tables cascade;
+drop table results.result_objects cascade;
+drop user user1;
+drop function save_time;
+

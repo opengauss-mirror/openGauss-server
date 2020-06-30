@@ -1,0 +1,173 @@
+------------------------ TESTS FOR PGUSER ------------------------------------------- 
+/* These cases are for pguser option test in CreateUserStmt.
+ * A user created with pguser option will have a password stored in MD5 format.
+ */
+create user md5user_default		 with pguser password 'ttest@123';
+create user md5user_superuser 	 with pguser sysadmin password 'ttest@123';
+create user md5user_createdb 	 with pguser createdb password 'ttest@123';
+create user md5user_login 		 with pguser login password 'ttest@123';
+create user md5user_inherit 	 with pguser inherit password 'ttest@123';
+create user md5user_replication	 with pguser replication password 'ttest@123';
+create user md5user_auditadmin 	 with pguser auditadmin password 'ttest@123';
+create role md5role_default		 with pguser password 'ttest@123';
+create role md5role_superuser 	 with pguser sysadmin password 'ttest@123';
+create role md5role_createdb 	 with pguser createdb password 'ttest@123';
+create role md5role_login 		 with pguser login password 'ttest@123';
+create role md5role_inherit 	 with pguser inherit password 'ttest@123';
+create role md5role_replication	 with pguser replication password 'ttest@123';
+create role md5role_auditadmin	 with pguser auditadmin password 'ttest@123';
+
+-- Incorrect statements.
+create user md5error with pguser pguser password 'ttest@123';
+create role md5error with pguser pguser password 'ttest@123';
+
+-- some check.
+select usename, 
+	usecreatedb,
+	usesuper,
+	usecatupd,
+	userepl,
+	left(passwd, 3) = 'md5' as ismd5passwd,
+	valbegin, 
+	valuntil, 
+	respool from pg_user where usename ilike 'md5%' order by usename;
+
+select usename, 
+	usecreatedb, 
+	usesuper, 
+	usecatupd, 
+	userepl, 
+	left(passwd, 3) = 'md5' as ismd5passwd,
+	valbegin, 
+	valuntil, 
+	respool from pg_shadow where usename ilike 'md5%' order by usename;
+
+select rolname, 
+	rolsuper, 
+	rolinherit, 
+	rolcreaterole, 
+	rolcreatedb, 
+	rolcatupdate, 
+	rolcanlogin, 
+	rolreplication,
+	rolauditadmin, 
+	rolsystemadmin, 
+	rolconnlimit, 
+	rolpassword, 
+	rolvalidbegin, 
+	rolvaliduntil, 
+	rolrespool, 
+	rolconfig
+	from pg_roles where rolname ilike 'md5%' order by rolname;
+	
+select rolname    ,
+	rolsuper,
+	rolinherit,
+	rolcreaterole,
+	rolcreatedb,
+	rolcatupdate,
+	rolcanlogin,
+	rolreplication,
+	rolauditadmin,
+	rolsystemadmin,
+	rolconnlimit,
+	left(rolpassword, 3) = 'md5' as ismd5passwd,
+	rolvalidbegin,
+	rolvaliduntil,
+	rolrespool    
+	from pg_authid where rolname ilike 'md5%' order by rolname;
+
+
+-- Password can be changed by "PGUSER" itself.
+set role md5user_default password 'ttest@123';
+alter role md5user_default identified by 'ttest@123456' replace 'ttest@123';
+
+-- Reset the connection to user postgres
+\c
+-- Invalid password
+set role md5user_default password 'ttest@123';
+\c
+
+-- Login normal 
+set role md5user_default password 'ttest@123456';
+\c
+
+-- The password format of md5user_default should be "md5" still.
+select usename, 
+	usecreatedb,
+	usesuper,
+	usecatupd,
+	userepl,
+	left(passwd, 3) = 'md5' as ismd5passwd,
+	valbegin, 
+	valuntil, 
+	respool from pg_user where usename ilike 'md5%' order by usename;
+
+select usename, 
+	usecreatedb, 
+	usesuper, 
+	usecatupd, 
+	userepl, 
+	left(passwd, 3) = 'md5' as ismd5passwd,
+	valbegin, 
+	valuntil, 
+	respool from pg_shadow where usename ilike 'md5%' order by usename;
+
+select rolname, 
+	rolsuper, 
+	rolinherit, 
+	rolcreaterole, 
+	rolcreatedb, 
+	rolcatupdate, 
+	rolcanlogin, 
+	rolreplication,
+	rolauditadmin, 
+	rolsystemadmin, 
+	rolconnlimit, 
+	rolpassword, 
+	rolvalidbegin, 
+	rolvaliduntil, 
+	rolrespool, 
+	rolconfig
+	from pg_roles where rolname ilike 'md5%' order by rolname;
+	
+select rolname    ,
+	rolsuper,
+	rolinherit,
+	rolcreaterole,
+	rolcreatedb,
+	rolcatupdate,
+	rolcanlogin,
+	rolreplication,
+	rolauditadmin,
+	rolsystemadmin,
+	rolconnlimit,
+	left(rolpassword, 3) = 'md5' as ismd5passwd,
+	rolvalidbegin,
+	rolvaliduntil,
+	rolrespool    
+	from pg_authid where rolname ilike 'md5%' order by rolname;
+
+-- Clean
+drop user md5user_default cascade;
+drop user md5user_superuser cascade;
+drop user md5user_createdb cascade;
+drop user md5user_login cascade;
+drop user md5user_inherit cascade;
+drop user md5user_replication cascade;
+drop user md5user_auditadmin cascade;
+drop role md5role_default ;
+drop role md5role_superuser ;
+drop role md5role_createdb ;
+drop role md5role_login ;
+drop role md5role_inherit ;
+drop role md5role_replication ;
+drop role md5role_auditadmin ;
+--audit for set parameter operator.
+select * from pg_delete_audit('1111-1-1','2222-2-2');
+create user set_role_user password 'ttest@123';
+set role set_role_user password 'ttest@123';
+reset role;
+drop user set_role_user;
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%set_role_user%';
+select * from pg_delete_audit('1111-1-1','2222-2-2');

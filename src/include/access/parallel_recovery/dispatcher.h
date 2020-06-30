@@ -1,0 +1,120 @@
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * ---------------------------------------------------------------------------------------
+ * 
+ * dispatcher.h
+ * 
+ * 
+ * 
+ * IDENTIFICATION
+ *        src/include/access/parallel_recovery/dispatcher.h
+ *
+ * ---------------------------------------------------------------------------------------
+ */
+#ifndef PARALLEL_RECOVERY_DISPATCHER_H
+#define PARALLEL_RECOVERY_DISPATCHER_H
+
+#include "gs_thread.h"
+#include "postgres.h"
+#include "knl/knl_variable.h"
+#include "access/xlog.h"
+#include "access/xlogreader.h"
+#include "nodes/pg_list.h"
+#include "storage/proc.h"
+
+#include "access/parallel_recovery/redo_item.h"
+#include "access/parallel_recovery/page_redo.h"
+#include "access/parallel_recovery/txn_redo.h"
+#include "access/redo_statistic.h"
+
+
+namespace parallel_recovery {
+
+
+typedef struct LogDispatcher {
+    MemoryContext oldCtx;
+    PageRedoWorker** pageWorkers; /* Array of page redo workers. */
+    uint32 pageWorkerCount;       /* Number of page redo workers that are ready to work. */
+    uint32 totalWorkerCount;      /* Number of page redo workers started. */
+    TxnRedoWorker* txnWorker;     /* Txn redo worker. */
+    RedoItem* freeHead;           /* Head of freed-item list. */
+    RedoItem* freeStateHead;
+    RedoItem* allocatedRedoItem;
+    int32 pendingCount; /* Number of records pending. */
+    int32 pendingMax;   /* The max. pending count per batch. */
+    int exitCode;       /* Thread exit code. */
+    uint64 totalCostTime;
+    uint64 txnCostTime; /* txn cost time */
+    uint64 pprCostTime;
+    uint32 maxItemNum;
+    uint32 curItemNum;
+
+    uint32* chosedWorkerIds;
+    uint32 chosedWorkerCount;
+    uint32 readyWorkerCnt;
+} LogDispatcher;
+
+extern LogDispatcher* g_dispatcher;
+
+const static XLogRecPtr MAX_XLOG_REC_PTR = (XLogRecPtr)0xFFFFFFFFFFFFFFFF;
+
+const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
+const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
+
+
+void StartRecoveryWorkers();
+
+/* RedoItem lifecycle. */
+void DispatchRedoRecordToFile(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
+void ProcessPendingRecords(bool fullSync = false);
+void ProcessTrxnRecords(bool fullSync = false);
+void FreeRedoItem(RedoItem* item);
+
+/* Dispatcher phases. */
+void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code);
+
+/* Dispatcher states. */
+int GetDispatcherExitCode();
+bool DispatchPtrIsNull();
+uint32 GetPageWorkerCount();
+bool OnHotStandBy();
+PGPROC* StartupPidGetProc(ThreadId pid);
+
+/* Run-time aggregated page worker states. */
+bool IsRecoveryRestartPointSafeForWorkers(XLogRecPtr restartPoint);
+
+void UpdateStandbyState(HotStandbyState newState);
+
+/* Redo end state saved by each page worker. */
+void** GetXLogInvalidPagesFromWorkers();
+
+/* Other utility functions. */
+uint32 GetWorkerId(const RelFileNode& node, BlockNumber block, ForkNumber forkNum);
+bool XactWillRemoveRelFiles(XLogReaderState* record);
+XLogReaderState* NewReaderState(XLogReaderState* readerState, bool bCopyState = false);
+void FreeAllocatedRedoItem();
+void GetReplayedRecPtrFromWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr);
+void DiagLogRedoRecord(XLogReaderState* record, const char* funcName);
+List* CheckImcompleteAction(List* imcompleteActionList);
+void SetPageWorkStateByThreadId(uint32 threadState);
+RedoWaitInfo redo_get_io_event(int32 event_id);
+void redo_get_wroker_statistic(uint32* realNum, RedoWorkerStatsData* worker, uint32 workerLen);
+extern void redo_dump_all_stats();
+
+extern void SetStartupBufferPinWaitBufId(int bufid);
+extern void GetStartupBufferPinWaitBufId(int *bufids, uint32 len);
+extern uint32 GetStartupBufferPinWaitBufLen();
+}
+
+#endif

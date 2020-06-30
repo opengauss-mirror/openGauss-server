@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<scene name="binary_upgrade" desc="check cluster parameters before binary upgrade.">
+    <configuration/>
+
+    <allowitems>
+        <item name="CheckSysTabSize"/>
+        <item name="CheckXid"/>
+    </allowitems>
+</scene>

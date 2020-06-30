@@ -1,0 +1,35 @@
+<refentry id="SQL-ALTER_FUNCTION">
+<refmeta>
+<refentrytitle>ALTER FUNCTION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER FUNCTION</refname>
+<refpurpose>change the definition of a function</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER FUNCTION function_name ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    action [ ... ] [ RESTRICT ];
+ALTER FUNCTION funname ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    RENAME TO new_name;
+ALTER FUNCTION funname ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    OWNER TO new_owner;
+ALTER FUNCTION funname ( [ {[ argmode ] [ argname ] argtype} [, ...] ] )
+    SET SCHEMA new_schema;
+
+where action can be:
+{CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT}
+|    {IMMUTABLE | STABLE | VOLATILE}
+|    {NOT FENCED | FENCED}
+|    [ NOT ] LEAKPROOF
+|    {[ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER}
+|    AUTHID { DEFINER | CURRENT_USER }
+|    COST execution_cost
+|    ROWS result_rows
+|    SET configuration_parameter {{ TO | = } { value | DEFAULT }| FROM CURRENT}
+|    RESET {configuration_parameter| ALL}
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,246 @@
+--create table
+DROP TABLE IF EXISTS unsable_index_1;
+NOTICE:  table "unsable_index_1" does not exist, skipping
+CREATE TABLE unsable_index_1 (c1 int, c2 int, c3 int, c4 int, c5 text);
+CREATE INDEX idx1_unsable_index_1 on unsable_index_1(c1);
+DROP TABLE IF EXISTS partition_unsable_index_1;
+NOTICE:  table "partition_unsable_index_1" does not exist, skipping
+CREATE TABLE partition_unsable_index_1 (c1 int, c2 int, c3 int, c4 int, c5 text)
+partition by range (c2)
+(
+	partition p1_partition_unsable_index_1 values less than (1000),
+	partition p2_partition_unsable_index_1 values less than (2000),
+	partition p3_partition_unsable_index_1 values less than (3000),
+	partition p4_partition_unsable_index_1 values less than (4000),
+	partition p5_partition_unsable_index_1 values less than (5000),
+	partition p6_partition_unsable_index_1 values less than (6000),
+	partition p7_partition_unsable_index_1 values less than (7000),
+	partition p8_partition_unsable_index_1 values less than (8000),
+	partition p9_partition_unsable_index_1 values less than (9000),
+	partition p10_partition_unsable_index_1 values less than (10000)
+);
+--insert data
+insert into partition_unsable_index_1 select v, v, v, v, 'xxx' from generate_series(1, 9999) as v;
+-- create 3 indexes, and specify it's partition name 
+CREATE INDEX idx1_partition_unsable_index_1 on partition_unsable_index_1(c1) local 
+(
+	partition idx1_partition_unsable_index_1_p1,
+	partition idx1_partition_unsable_index_1_p2,
+	partition idx1_partition_unsable_index_1_p3,
+	partition idx1_partition_unsable_index_1_p4,
+	partition idx1_partition_unsable_index_1_p5,
+	partition idx1_partition_unsable_index_1_p6,
+	partition idx1_partition_unsable_index_1_p7,
+	partition idx1_partition_unsable_index_1_p8,
+	partition idx1_partition_unsable_index_1_p9,
+	partition idx1_partition_unsable_index_1_p10
+);
+CREATE INDEX idx2_partition_unsable_index_1 on partition_unsable_index_1(c1, c2) local
+(
+	partition idx2_partition_unsable_index_1_p1,
+	partition idx2_partition_unsable_index_1_p2,
+	partition idx2_partition_unsable_index_1_p3,
+	partition idx2_partition_unsable_index_1_p4,
+	partition idx2_partition_unsable_index_1_p5,
+	partition idx2_partition_unsable_index_1_p6,
+	partition idx2_partition_unsable_index_1_p7,
+	partition idx2_partition_unsable_index_1_p8,
+	partition idx2_partition_unsable_index_1_p9,
+	partition idx2_partition_unsable_index_1_p10
+);
+CREATE INDEX idx3_partition_unsable_index_1 on partition_unsable_index_1(c1, c2, c3) local
+(
+	partition idx3_partition_unsable_index_1_p1,
+	partition idx3_partition_unsable_index_1_p2,
+	partition idx3_partition_unsable_index_1_p3,
+	partition idx3_partition_unsable_index_1_p4,
+	partition idx3_partition_unsable_index_1_p5,
+	partition idx3_partition_unsable_index_1_p6,
+	partition idx3_partition_unsable_index_1_p7,
+	partition idx3_partition_unsable_index_1_p8,
+	partition idx3_partition_unsable_index_1_p9,
+	partition idx3_partition_unsable_index_1_p10
+);
+-- 1. alter index, modify one of it's partition to unusable state
+ALTER INDEX idx1_partition_unsable_index_1 MODIFY PARTITION idx1_partition_unsable_index_1_p1 UNUSABLE;
+-- check indunusable info
+select relname, indisusable from pg_partition 
+	where  relname = 'idx1_partition_unsable_index_1_p1' 
+		or relname = 'idx2_partition_unsable_index_1_p1' 
+		or relname = 'idx3_partition_unsable_index_1_p1'
+		order by 1;
+              relname              | indisusable 
+-----------------------------------+-------------
+ idx1_partition_unsable_index_1_p1 | f
+ idx2_partition_unsable_index_1_p1 | t
+ idx3_partition_unsable_index_1_p1 | t
+(3 rows)
+
+-- rebuild index partition
+ALTER INDEX idx1_partition_unsable_index_1 REBUILD PARTITION idx1_partition_unsable_index_1_p1;
+-- check indunusable info
+select relname, indisusable from pg_partition 
+	where  relname = 'idx1_partition_unsable_index_1_p1' 
+		or relname = 'idx2_partition_unsable_index_1_p1' 
+		or relname = 'idx3_partition_unsable_index_1_p1'
+		order by 1;
+              relname              | indisusable 
+-----------------------------------+-------------
+ idx1_partition_unsable_index_1_p1 | t
+ idx2_partition_unsable_index_1_p1 | t
+ idx3_partition_unsable_index_1_p1 | t
+(3 rows)
+
+--2.ALTER INDEX unusable
+select c.relname, i.indisusable from pg_class as c, pg_index as i  
+	WHERE  c.oid = i.indexrelid and c.relname = 'idx1_unsable_index_1';
+       relname        | indisusable 
+----------------------+-------------
+ idx1_unsable_index_1 | t
+(1 row)
+
+select relname, indisusable from pg_partition 
+	WHERE  parentid = (select oid from pg_class where relname = 'idx1_partition_unsable_index_1')
+	ORDER BY 1;
+              relname               | indisusable 
+------------------------------------+-------------
+ idx1_partition_unsable_index_1_p1  | t
+ idx1_partition_unsable_index_1_p10 | t
+ idx1_partition_unsable_index_1_p2  | t
+ idx1_partition_unsable_index_1_p3  | t
+ idx1_partition_unsable_index_1_p4  | t
+ idx1_partition_unsable_index_1_p5  | t
+ idx1_partition_unsable_index_1_p6  | t
+ idx1_partition_unsable_index_1_p7  | t
+ idx1_partition_unsable_index_1_p8  | t
+ idx1_partition_unsable_index_1_p9  | t
+(10 rows)
+
+ALTER INDEX idx1_unsable_index_1 UNUSABLE;
+ALTER INDEX idx1_partition_unsable_index_1 UNUSABLE;
+select c.relname, i.indisusable from pg_class as c, pg_index as i  
+	WHERE  c.oid = i.indexrelid and c.relname = 'idx1_unsable_index_1';
+       relname        | indisusable 
+----------------------+-------------
+ idx1_unsable_index_1 | f
+(1 row)
+
+select relname, indisusable from pg_partition 
+	WHERE  parentid = (select oid from pg_class where relname = 'idx1_partition_unsable_index_1')
+	ORDER BY 1;
+              relname               | indisusable 
+------------------------------------+-------------
+ idx1_partition_unsable_index_1_p1  | f
+ idx1_partition_unsable_index_1_p10 | f
+ idx1_partition_unsable_index_1_p2  | f
+ idx1_partition_unsable_index_1_p3  | f
+ idx1_partition_unsable_index_1_p4  | f
+ idx1_partition_unsable_index_1_p5  | f
+ idx1_partition_unsable_index_1_p6  | f
+ idx1_partition_unsable_index_1_p7  | f
+ idx1_partition_unsable_index_1_p8  | f
+ idx1_partition_unsable_index_1_p9  | f
+(10 rows)
+
+ALTER INDEX idx1_unsable_index_1 REBUILD;
+ALTER INDEX idx1_partition_unsable_index_1 REBUILD;
+select c.relname, i.indisusable from pg_class as c, pg_index as i  
+	WHERE  c.oid = i.indexrelid and c.relname = 'idx1_unsable_index_1';
+       relname        | indisusable 
+----------------------+-------------
+ idx1_unsable_index_1 | t
+(1 row)
+
+select relname, indisusable from pg_partition 
+	WHERE  parentid = (select oid from pg_class where relname = 'idx1_partition_unsable_index_1')
+	ORDER BY 1;
+              relname               | indisusable 
+------------------------------------+-------------
+ idx1_partition_unsable_index_1_p1  | t
+ idx1_partition_unsable_index_1_p10 | t
+ idx1_partition_unsable_index_1_p2  | t
+ idx1_partition_unsable_index_1_p3  | t
+ idx1_partition_unsable_index_1_p4  | t
+ idx1_partition_unsable_index_1_p5  | t
+ idx1_partition_unsable_index_1_p6  | t
+ idx1_partition_unsable_index_1_p7  | t
+ idx1_partition_unsable_index_1_p8  | t
+ idx1_partition_unsable_index_1_p9  | t
+(10 rows)
+
+--test for reindex partition
+ALTER INDEX idx1_partition_unsable_index_1 UNUSABLE;
+select relname, indisusable from pg_partition 
+	WHERE  parentid = (select oid from pg_class where relname = 'idx1_partition_unsable_index_1')
+	ORDER BY 1;
+              relname               | indisusable 
+------------------------------------+-------------
+ idx1_partition_unsable_index_1_p1  | f
+ idx1_partition_unsable_index_1_p10 | f
+ idx1_partition_unsable_index_1_p2  | f
+ idx1_partition_unsable_index_1_p3  | f
+ idx1_partition_unsable_index_1_p4  | f
+ idx1_partition_unsable_index_1_p5  | f
+ idx1_partition_unsable_index_1_p6  | f
+ idx1_partition_unsable_index_1_p7  | f
+ idx1_partition_unsable_index_1_p8  | f
+ idx1_partition_unsable_index_1_p9  | f
+(10 rows)
+
+REINDEX INDEX idx1_partition_unsable_index_1 PARTITION idx1_partition_unsable_index_1_p1;
+select relname, indisusable from pg_partition 
+	WHERE  parentid = (select oid from pg_class where relname = 'idx1_partition_unsable_index_1')
+	ORDER BY 1;
+              relname               | indisusable 
+------------------------------------+-------------
+ idx1_partition_unsable_index_1_p1  | t
+ idx1_partition_unsable_index_1_p10 | f
+ idx1_partition_unsable_index_1_p2  | f
+ idx1_partition_unsable_index_1_p3  | f
+ idx1_partition_unsable_index_1_p4  | f
+ idx1_partition_unsable_index_1_p5  | f
+ idx1_partition_unsable_index_1_p6  | f
+ idx1_partition_unsable_index_1_p7  | f
+ idx1_partition_unsable_index_1_p8  | f
+ idx1_partition_unsable_index_1_p9  | f
+(10 rows)
+
+ALTER INDEX idx1_partition_unsable_index_1 REBUILD;
+select relname, indisusable from pg_partition 
+	WHERE  parentid = (select oid from pg_class where relname = 'idx1_partition_unsable_index_1')
+	ORDER BY 1;
+              relname               | indisusable 
+------------------------------------+-------------
+ idx1_partition_unsable_index_1_p1  | t
+ idx1_partition_unsable_index_1_p10 | t
+ idx1_partition_unsable_index_1_p2  | t
+ idx1_partition_unsable_index_1_p3  | t
+ idx1_partition_unsable_index_1_p4  | t
+ idx1_partition_unsable_index_1_p5  | t
+ idx1_partition_unsable_index_1_p6  | t
+ idx1_partition_unsable_index_1_p7  | t
+ idx1_partition_unsable_index_1_p8  | t
+ idx1_partition_unsable_index_1_p9  | t
+(10 rows)
+
+		
+-- 3. alter table, modify one of it's partition's all indexes to unusable state
+ALTER TABLE partition_unsable_index_1 MODIFY PARTITION p1_partition_unsable_index_1 UNUSABLE LOCAL INDEXES;
+-- check indunusable info
+select relname, indisusable from pg_partition 
+	where  relname = 'idx1_partition_unsable_index_1_p1' 
+		or relname = 'idx2_partition_unsable_index_1_p1' 
+		or relname = 'idx3_partition_unsable_index_1_p1'
+		or relname = 'p1_partition_unsable_index_1'
+		order by 1;
+              relname              | indisusable 
+-----------------------------------+-------------
+ idx1_partition_unsable_index_1_p1 | f
+ idx2_partition_unsable_index_1_p1 | f
+ idx3_partition_unsable_index_1_p1 | f
+ p1_partition_unsable_index_1      | f
+(4 rows)
+
+--cleanup
+DROP TABLE unsable_index_1;
+DROP TABLE partition_unsable_index_1;

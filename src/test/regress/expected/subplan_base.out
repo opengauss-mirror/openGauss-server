@@ -1,0 +1,2486 @@
+/*
+ * This file is used to test pull down of subplan expressions
+ */
+create schema distribute_subplan_base;
+set current_schema = distribute_subplan_base;
+-- Create Table and Insert Data
+create table t_subplan1(a1 int, b1 int, c1 int, d1 int) with (autovacuum_enabled= false)  ;
+create table t_subplan2(a2 int, b2 int, c2 int, d2 int) with (autovacuum_enabled= false)  ;
+insert into t_subplan1 select generate_series(1, 100)%98, generate_series(1, 100)%20, generate_series(1, 100)%13, generate_series(1, 100)%6;
+insert into t_subplan2 select generate_series(1, 50)%48, generate_series(1, 50)%28, generate_series(1, 50)%12, generate_series(1, 50)%9;
+--subplan correlation limit clause, correlation having clause
+explain (costs off) select a1 from t_subplan1 as t1 where t1.a1 = (select t2.a2 from t_subplan2 as t2 limit t1.b1);
+               QUERY PLAN                
+-----------------------------------------
+ Seq Scan on t_subplan1 t1
+   Filter: (a1 = (SubPlan 1))
+   SubPlan 1
+     ->  Limit
+           ->  Seq Scan on t_subplan2 t2
+(5 rows)
+
+explain (costs off) select a1 from t_subplan1 as t1 where t1.a1 = (select t2.a2 from t_subplan2 as t2 group by t2.a2 having t1.b1 > 10);
+                  QUERY PLAN                   
+-----------------------------------------------
+ Seq Scan on t_subplan1 t1
+   Filter: (a1 = (SubPlan 1))
+   SubPlan 1
+     ->  HashAggregate
+           Group By Key: t2.a2
+           ->  Result
+                 One-Time Filter: (t1.b1 > 10)
+                 ->  Seq Scan on t_subplan2 t2
+(8 rows)
+
+-- 1. initplan
+explain (costs off, nodes off)
+select case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 15
+            then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket1 ,
+       case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 25
+             then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket2
+from t_subplan1
+where a1 = 5 or a1 = 6
+;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on t_subplan1
+   Filter: ((a1 = 5) OR (a1 = 6))
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+                 Filter: ((a2 >= 1) AND (a2 <= 20))
+   InitPlan 2 (returns $1)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+                 Filter: ((a2 >= 1) AND (a2 <= 20))
+   InitPlan 3 (returns $2)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+                 Filter: ((a2 >= 1) AND (a2 <= 20))
+   InitPlan 4 (returns $3)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+                 Filter: ((a2 >= 1) AND (a2 <= 20))
+   InitPlan 5 (returns $4)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+                 Filter: ((a2 >= 1) AND (a2 <= 20))
+   InitPlan 6 (returns $5)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+                 Filter: ((a2 >= 1) AND (a2 <= 20))
+(26 rows)
+
+select case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 15
+            then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket1 ,
+       case when (select count(*)
+                  from t_subplan2
+                  where a2 between 1 and 20) > 25
+             then (select avg(b2)
+                  from t_subplan2
+                  where a2 between 1 and 20)
+            else (select avg(c2)
+                  from t_subplan2
+                  where a2 between 1 and 20) end bucket2
+from t_subplan1
+where a1 = 5 or a1 = 6
+;
+       bucket1       |      bucket2       
+---------------------+--------------------
+ 11.5000000000000000 | 4.7727272727272727
+ 11.5000000000000000 | 4.7727272727272727
+(2 rows)
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Limit
+   InitPlan 2 (returns $1)
+     ->  Aggregate
+           InitPlan 1 (returns $0)
+             ->  Aggregate
+                   ->  Seq Scan on t_subplan2 t2
+           ->  Seq Scan on t_subplan1 t1
+                 Filter: ((a1)::numeric > $0)
+   ->  Sort
+         Sort Key: t_subplan1.a1, (count(*))
+         ->  HashAggregate
+               Group By Key: t_subplan1.a1
+               ->  Hash Join
+                     Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                     ->  Seq Scan on t_subplan1
+                     ->  Hash
+                           ->  Seq Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $1)
+(18 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+  3 |   1
+  4 |   1
+  5 |   1
+  6 |   1
+  7 |   1
+  8 |   1
+  9 |   1
+ 10 |   1
+ 11 |   1
+ 15 |   1
+(10 rows)
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ offset (select avg(d2) from t_subplan2);
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Limit
+   InitPlan 2 (returns $1)
+     ->  Aggregate
+           InitPlan 1 (returns $0)
+             ->  Aggregate
+                   ->  Seq Scan on t_subplan2 t2
+           ->  Seq Scan on t_subplan1 t1
+                 Filter: ((a1)::numeric > $0)
+   InitPlan 3 (returns $2)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+   ->  Sort
+         Sort Key: t_subplan1.a1, (count(*))
+         ->  HashAggregate
+               Group By Key: t_subplan1.a1
+               ->  Hash Join
+                     Hash Cond: (t_subplan1.a1 = distribute_subplan_base.t_subplan2.a2)
+                     ->  Seq Scan on t_subplan1
+                     ->  Hash
+                           ->  Seq Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $1)
+(21 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2))
+ group by a1
+ order by a1, cnt
+ offset (select avg(d2) from t_subplan2);
+ a1 | cnt 
+----+-----
+  7 |   1
+  8 |   1
+  9 |   1
+ 10 |   1
+ 11 |   1
+ 15 |   1
+ 16 |   1
+ 17 |   1
+ 18 |   1
+ 19 |   1
+ 20 |   1
+ 21 |   1
+ 22 |   1
+ 23 |   1
+ 27 |   1
+ 28 |   1
+ 29 |   1
+ 30 |   1
+ 31 |   1
+ 32 |   1
+ 33 |   1
+ 34 |   1
+ 35 |   1
+ 39 |   1
+ 40 |   1
+ 41 |   1
+ 42 |   1
+ 43 |   1
+ 44 |   1
+ 45 |   1
+ 46 |   1
+ 47 |   1
+(32 rows)
+
+-- 2. subplan
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2)
+order by 1
+limit 10;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Limit
+   CTE t
+     ->  HashAggregate
+           Group By Key: t_subplan1.d1, t_subplan2.d2
+           ->  Hash Join
+                 Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                 ->  Seq Scan on t_subplan1
+                 ->  Hash
+                       ->  Seq Scan on t_subplan2
+   ->  Sort
+         Sort Key: ctr1.total
+         ->  Hash Join
+               Hash Cond: (ctr1.d2 = ctr2.d2)
+               Join Filter: ((ctr1.total)::numeric > ((avg(ctr2.total) * 1.2)))
+               ->  CTE Scan on t ctr1
+               ->  Hash
+                     ->  HashAggregate
+                           Group By Key: ctr2.d2
+                           ->  CTE Scan on t ctr2
+(19 rows)
+
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2)
+order by 1
+limit 10;
+ total 
+-------
+    22
+    26
+    32
+    32
+    37
+    38
+    38
+    43
+    49
+(9 rows)
+
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2))
+order by 1
+limit 10;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Limit
+   CTE t
+     ->  HashAggregate
+           Group By Key: t_subplan1.d1, t_subplan2.d2
+           ->  Hash Join
+                 Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                 ->  Seq Scan on t_subplan1
+                 ->  Hash
+                       ->  Seq Scan on t_subplan2
+   ->  Sort
+         Sort Key: ctr1.total
+         ->  CTE Scan on t ctr1
+               Filter: ((total)::numeric > (SubPlan 2))
+               SubPlan 2
+                 ->  Aggregate
+                       ->  Nested Loop
+                             Join Filter: (((ctr1.d2 + ctr2.d2))::numeric < ((avg(ctr3.total) * 3::numeric)))
+                             ->  CTE Scan on t ctr2
+                                   Filter: (d2 = ctr1.d2)
+                             ->  Materialize
+                                   ->  GroupAggregate
+                                         Group By Key: ctr3.d2
+                                         ->  CTE Scan on t ctr3
+                                               Filter: (d2 = ctr1.d2)
+(24 rows)
+
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2))
+order by 1
+limit 10;
+ total 
+-------
+    22
+    26
+    32
+    32
+    37
+    38
+    38
+    43
+    49
+(9 rows)
+
+explain (costs off, nodes off)
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2
+and ctr1.d1 = ctr3.d1))
+order by 1
+limit 10;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Limit
+   CTE t
+     ->  HashAggregate
+           Group By Key: t_subplan1.d1, t_subplan2.d2
+           ->  Hash Join
+                 Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                 ->  Seq Scan on t_subplan1
+                 ->  Hash
+                       ->  Seq Scan on t_subplan2
+   ->  Sort
+         Sort Key: ctr1.total
+         ->  CTE Scan on t ctr1
+               Filter: ((total)::numeric > (SubPlan 3))
+               SubPlan 3
+                 ->  Aggregate
+                       ->  CTE Scan on t ctr2
+                             Filter: ((ctr1.d2 = d2) AND (((ctr1.d2 + d2))::numeric < (SubPlan 2)))
+                             SubPlan 2
+                               ->  Aggregate
+                                     ->  CTE Scan on t ctr3
+                                           Filter: ((ctr2.d2 = d2) AND (ctr1.d1 = d1))
+(21 rows)
+
+with t as
+(select d1
+,d2
+,sum(c1+c2) as total
+from t_subplan1
+,t_subplan2
+where a1 = a2
+group by d1
+,d2)
+ select  total
+from t ctr1
+where ctr1.total > (select avg(total)*1.2
+from t ctr2
+where ctr1.d2 = ctr2.d2
+and ctr1.d2+ctr2.d2 < (select avg(total)*3
+from t ctr3
+where ctr2.d2=ctr3.d2
+and ctr1.d1 = ctr3.d1))
+order by 1
+limit 10;
+ total 
+-------
+    22
+    26
+    32
+    32
+    37
+    38
+    38
+    43
+    49
+(9 rows)
+
+explain (costs off, nodes off)
+select * from t_subplan1 t1
+where
+ exists (select * from t_subplan2 t2
+	where t1.a1=t2.a2) and
+ (exists (select * from t_subplan2 t2
+	where t1.b1+20=t2.b2) or
+  exists (select * from t_subplan2 t2
+	where t1.c1 = t2.c2))
+order by 1,2,3,4;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: t1.a1, t1.b1, t1.c1, t1.d1
+   ->  Hash Left Join
+         Hash Cond: (t1.c1 = t2.c2)
+         Filter: ((t2.b2 IS NOT NULL) OR (t2.c2 IS NOT NULL))
+         ->  Hash Left Join
+               Hash Cond: ((t1.b1 + 20) = t2.b2)
+               ->  Hash Join
+                     Hash Cond: (t1.a1 = t2.a2)
+                     ->  Seq Scan on t_subplan1 t1
+                     ->  Hash
+                           ->  HashAggregate
+                                 Group By Key: t2.a2
+                                 ->  Seq Scan on t_subplan2 t2
+               ->  Hash
+                     ->  HashAggregate
+                           Group By Key: t2.b2
+                           ->  Seq Scan on t_subplan2 t2
+         ->  Hash
+               ->  HashAggregate
+                     Group By Key: t2.c2
+                     ->  Seq Scan on t_subplan2 t2
+(22 rows)
+
+;
+select * from t_subplan1 t1
+where
+ exists (select * from t_subplan2 t2
+	where t1.a1=t2.a2) and
+ (exists (select * from t_subplan2 t2
+	where t1.b1+20=t2.b2) or
+  exists (select * from t_subplan2 t2
+	where t1.c1 = t2.c2))
+order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  0 | 18 |  7 |  2
+  1 |  1 |  1 |  1
+  1 | 19 |  8 |  3
+  2 |  0 |  9 |  4
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  0
+  7 |  7 |  7 |  1
+  8 |  8 |  8 |  2
+  9 |  9 |  9 |  3
+ 10 | 10 | 10 |  4
+ 11 | 11 | 11 |  5
+ 13 | 13 |  0 |  1
+ 14 | 14 |  1 |  2
+ 15 | 15 |  2 |  3
+ 16 | 16 |  3 |  4
+ 17 | 17 |  4 |  5
+ 18 | 18 |  5 |  0
+ 19 | 19 |  6 |  1
+ 20 |  0 |  7 |  2
+ 21 |  1 |  8 |  3
+ 22 |  2 |  9 |  4
+ 23 |  3 | 10 |  5
+ 24 |  4 | 11 |  0
+ 25 |  5 | 12 |  1
+ 26 |  6 |  0 |  2
+ 27 |  7 |  1 |  3
+ 28 |  8 |  2 |  4
+ 29 |  9 |  3 |  5
+ 30 | 10 |  4 |  0
+ 31 | 11 |  5 |  1
+ 32 | 12 |  6 |  2
+ 33 | 13 |  7 |  3
+ 34 | 14 |  8 |  4
+ 35 | 15 |  9 |  5
+ 36 | 16 | 10 |  0
+ 37 | 17 | 11 |  1
+ 39 | 19 |  0 |  3
+ 40 |  0 |  1 |  4
+ 41 |  1 |  2 |  5
+ 42 |  2 |  3 |  0
+ 43 |  3 |  4 |  1
+ 44 |  4 |  5 |  2
+ 45 |  5 |  6 |  3
+ 46 |  6 |  7 |  4
+ 47 |  7 |  8 |  5
+(48 rows)
+
+;
+-- 3. initplan & subplan
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1)
+ group by a1
+ order by a1, cnt
+ limit 10;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Limit
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan1
+                 Filter: ((a1 + b1) < 200)
+   ->  Sort
+         Sort Key: distribute_subplan_base.t_subplan1.a1, (count(*))
+         ->  HashAggregate
+               Group By Key: distribute_subplan_base.t_subplan1.a1
+               ->  Hash Join
+                     Hash Cond: (distribute_subplan_base.t_subplan1.a1 = t_subplan2.a2)
+                     ->  Hash Join
+                           Hash Cond: (distribute_subplan_base.t_subplan1.c1 = t2.c2)
+                           Join Filter: ((distribute_subplan_base.t_subplan1.b1)::numeric > (1.2 * (avg(t2.b2))))
+                           ->  Seq Scan on t_subplan1
+                           ->  Hash
+                                 ->  HashAggregate
+                                       Group By Key: t2.c2
+                                       ->  Seq Scan on t_subplan2 t2
+                     ->  Hash
+                           ->  Seq Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $0)
+(22 rows)
+
+ 
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1)
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+ 17 |   1
+ 18 |   1
+ 19 |   1
+ 30 |   1
+ 31 |   1
+(5 rows)
+
+ 
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t_subplan1.d1 < (select max(d2) from t_subplan2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Limit
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan1
+                 Filter: ((a1 + b1) < 200)
+   ->  Sort
+         Sort Key: distribute_subplan_base.t_subplan1.a1, (count(*))
+         ->  HashAggregate
+               Group By Key: distribute_subplan_base.t_subplan1.a1
+               ->  Hash Join
+                     Hash Cond: (distribute_subplan_base.t_subplan1.a1 = distribute_subplan_base.t_subplan2.a2)
+                     ->  Seq Scan on t_subplan1
+                           Filter: ((b1)::numeric > (1.2 * (SubPlan 3)))
+                           SubPlan 3
+                             ->  Aggregate
+                                   InitPlan 2 (returns $1)
+                                     ->  Aggregate
+                                           ->  Seq Scan on t_subplan2
+                                   ->  Result
+                                         One-Time Filter: (distribute_subplan_base.t_subplan1.d1 < $1)
+                                         ->  Seq Scan on t_subplan2 t2
+                                               Filter: (c2 = distribute_subplan_base.t_subplan1.c1)
+                     ->  Hash
+                           ->  Seq Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $0)
+(25 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t_subplan1.d1 < (select max(d2) from t_subplan2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+ 17 |   1
+ 18 |   1
+ 19 |   1
+ 30 |   1
+ 31 |   1
+(5 rows)
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t2.d2 > (select min(d1) from t_subplan1))
+ group by a1
+ order by a1, cnt
+ limit 10;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Limit
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan1
+                 Filter: ((a1 + b1) < 200)
+   ->  Sort
+         Sort Key: distribute_subplan_base.t_subplan1.a1, (count(*))
+         ->  HashAggregate
+               Group By Key: distribute_subplan_base.t_subplan1.a1
+               ->  Hash Join
+                     Hash Cond: (t_subplan2.a2 = distribute_subplan_base.t_subplan1.a1)
+                     ->  Seq Scan on t_subplan2
+                           Filter: ((c2)::numeric > $0)
+                     ->  Hash
+                           ->  Hash Join
+                                 Hash Cond: (distribute_subplan_base.t_subplan1.c1 = t2.c2)
+                                 Join Filter: ((distribute_subplan_base.t_subplan1.b1)::numeric > (1.2 * (avg(t2.b2))))
+                                 ->  Seq Scan on t_subplan1
+                                 ->  Hash
+                                       ->  HashAggregate
+                                             Group By Key: t2.c2
+                                             InitPlan 2 (returns $1)
+                                               ->  Aggregate
+                                                     ->  Seq Scan on t_subplan1
+                                             ->  Seq Scan on t_subplan2 t2
+                                                   Filter: (d2 > $1)
+(26 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select avg (d1)
+              from t_subplan1
+               where a1+b1<200 )
+        and b1 > 1.2 *
+             (select avg(b2)
+             from t_subplan2 t2
+             where t2.c2=t_subplan1.c1 and
+			 t2.d2 > (select min(d1) from t_subplan1))
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+ 16 |   1
+ 17 |   1
+ 18 |   1
+ 19 |   1
+ 30 |   1
+ 31 |   1
+ 32 |   1
+(7 rows)
+
+explain (costs off, nodes off)
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2
+					where t1.d1=t2.d2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Limit
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Hash Join
+                 Hash Cond: (t1.d1 = t2.d2)
+                 Join Filter: ((t1.a1)::numeric > (avg(t2.a2)))
+                 ->  Seq Scan on t_subplan1 t1
+                 ->  Hash
+                       ->  HashAggregate
+                             Group By Key: t2.d2
+                             ->  Seq Scan on t_subplan2 t2
+   ->  Sort
+         Sort Key: t_subplan1.a1, (count(*))
+         ->  HashAggregate
+               Group By Key: t_subplan1.a1
+               ->  Hash Join
+                     Hash Cond: (t_subplan1.a1 = t_subplan2.a2)
+                     ->  Seq Scan on t_subplan1
+                     ->  Hash
+                           ->  Seq Scan on t_subplan2
+                                 Filter: ((c2)::numeric > $0)
+(21 rows)
+
+select  a1, count(*) cnt
+ from t_subplan1
+ ,t_subplan2
+ where a1 = a2
+		and c2 >
+             (select (avg (d1))
+              from t_subplan1 t1
+               where a1 > 
+					(select avg(a2)
+					from t_subplan2 t2
+					where t1.d1=t2.d2))
+ group by a1
+ order by a1, cnt
+ limit 10;
+ a1 | cnt 
+----+-----
+  3 |   1
+  4 |   1
+  5 |   1
+  6 |   1
+  7 |   1
+  8 |   1
+  9 |   1
+ 10 |   1
+ 11 |   1
+ 15 |   1
+(10 rows)
+
+-- setop
+explain (costs off, nodes off)
+select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 intersect select c2 from t_subplan2) order by 1, 2 limit 5;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: t_subplan1.a1, t_subplan1.b1
+         ->  Seq Scan on t_subplan1
+               Filter: (SubPlan 1)
+               SubPlan 1
+                 ->  HashSetOp Intersect
+                       ->  Append
+                             ->  Subquery Scan on "*SELECT* 1"
+                                   ->  Seq Scan on t_subplan2
+                                         Filter: (b2 = t_subplan1.b1)
+                             ->  Subquery Scan on "*SELECT* 2"
+                                   ->  Seq Scan on t_subplan2
+(13 rows)
+
+select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 intersect select c2 from t_subplan2) order by 1, 2 limit 5;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off, nodes off)
+select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 union all select c2 from t_subplan2) order by 1, 2 limit 5;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: t_subplan1.a1, t_subplan1.b1
+         ->  Seq Scan on t_subplan1
+               Filter: (SubPlan 1)
+               SubPlan 1
+                 ->  Result
+                       ->  Append
+                             ->  Seq Scan on t_subplan2
+                                   Filter: (b2 = t_subplan1.b1)
+                             ->  Seq Scan on t_subplan2
+(11 rows)
+
+select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 union all select c2 from t_subplan2) order by 1, 2 limit 5;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  0 | 18 |  7 |  2
+  1 |  1 |  1 |  1
+  1 | 19 |  8 |  3
+  2 |  0 |  9 |  4
+  2 |  2 |  2 |  2
+(5 rows)
+
+explain (costs off, nodes off)
+select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 union all select c2 from t_subplan2 where d2=c1) order by 1, 2 limit 5;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: t_subplan1.a1, t_subplan1.b1
+         ->  Seq Scan on t_subplan1
+               Filter: (SubPlan 1)
+               SubPlan 1
+                 ->  Result
+                       ->  Append
+                             ->  Seq Scan on t_subplan2
+                                   Filter: (b2 = t_subplan1.b1)
+                             ->  Seq Scan on t_subplan2
+                                   Filter: (d2 = t_subplan1.c1)
+(12 rows)
+
+select * from t_subplan1 where a1 in (select a2 from t_subplan2 where b2=b1 union all select c2 from t_subplan2 where d2=c1) order by 1, 2 limit 5;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+-- other sdv failed case
+create table t_subplan3(a3 int, b3 int, primary key(a3))   partition by range(a3) (partition p1 values less than (25), partition p2 values less than (maxvalue));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_subplan3_pkey" for table "t_subplan3"
+create table t_subplan4(a4 int, b4 int)  ;
+insert into t_subplan3 values(1, 20);
+insert into t_subplan3 values(27, 27);
+insert into t_subplan4 values(1, 20);
+insert into t_subplan4 values(27, 27);
+explain (costs off, nodes off)
+delete t_subplan3 where b3=(select max(b2) from t_subplan2);
+                   QUERY PLAN                   
+------------------------------------------------
+ Delete on t_subplan3
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Seq Scan on t_subplan3
+               Filter: (b3 = $0)
+               Selected Partitions:  1..2
+(9 rows)
+
+delete t_subplan3 where b3=(select max(b2) from t_subplan2);
+select * from t_subplan3;
+ a3 | b3 
+----+----
+  1 | 20
+(1 row)
+
+explain (costs off, nodes off)
+update t_subplan4 set b4=(select a2 from t_subplan2 where a2=40);
+           QUERY PLAN           
+--------------------------------
+ Update on t_subplan4
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on t_subplan2
+           Filter: (a2 = 40)
+   ->  Seq Scan on t_subplan4
+(5 rows)
+
+update t_subplan4 set b4=(select a2 from t_subplan2 where a2=40);
+select * from t_subplan4;
+ a4 | b4 
+----+----
+  1 | 40
+ 27 | 40
+(2 rows)
+
+explain (costs off, nodes off)
+select max(a3) from t_subplan3 where (a3, b3)=(select a3, b3 from t_subplan3) and a3=1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Result
+   InitPlan 1 (returns $1,$2)
+     ->  Partition Iterator
+           Iterations: 2
+           ->  Partitioned Seq Scan on t_subplan3
+                 Selected Partitions:  1..2
+   InitPlan 2 (returns $4)
+     ->  Limit
+           ->  Result
+                 One-Time Filter: ($1 = 1)
+                 ->  Partition Iterator
+                       Iterations: 1
+                       ->  Partitioned Index Scan using t_subplan3_pkey on t_subplan3
+                             Index Cond: ((a3 IS NOT NULL) AND (a3 = 1))
+                             Filter: (b3 = $2)
+                             Selected Partitions:  1
+(16 rows)
+
+select max(a3) from t_subplan3 where (a3, b3)=(select a3, b3 from t_subplan3) and a3=1;
+ max 
+-----
+   1
+(1 row)
+
+delete from t_subplan4 where a4=27;
+explain (costs off, nodes off)
+select max(a4) from t_subplan4 where (a4, b4)=(select a4, b4 from t_subplan4) and a4=1;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Result
+   InitPlan 1 (returns $0,$1)
+     ->  Seq Scan on t_subplan4
+   InitPlan 2 (returns $2)
+     ->  Limit
+           ->  Result
+                 One-Time Filter: ($0 = 1)
+                 ->  Seq Scan on t_subplan4
+                       Filter: ((a4 IS NOT NULL) AND (a4 = 1) AND (b4 = $1))
+(9 rows)
+
+select max(a4) from t_subplan4 where (a4, b4)=(select a4, b4 from t_subplan4) and a4=1;
+ max 
+-----
+   1
+(1 row)
+
+explain (costs off, nodes off)
+select * from t_subplan2 where (b2, c2) = (select b3, a3+7 from t_subplan3) or (b2, d2) = (select b4/2, a4+2 from t_subplan4) order by 1, 2, 3, 4;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   InitPlan 1 (returns $1,$2)
+     ->  Partition Iterator
+           Iterations: 2
+           ->  Partitioned Seq Scan on t_subplan3
+                 Selected Partitions:  1..2
+   InitPlan 2 (returns $3,$4)
+     ->  Seq Scan on t_subplan4
+   ->  Seq Scan on t_subplan2
+         Filter: (((b2 = $1) AND (c2 = $2)) OR (((b2)::double precision = $3) AND (d2 = $4)))
+(11 rows)
+
+select * from t_subplan2 where (b2, c2) = (select b3, a3+7 from t_subplan3) or (b2, d2) = (select b4/2, a4+2 from t_subplan4) order by 1, 2, 3, 4;
+ a2 | b2 | c2 | d2 
+----+----+----+----
+  0 | 20 |  0 |  3
+ 20 | 20 |  8 |  2
+(2 rows)
+
+explain (costs off, nodes off)
+with recursive abc as (select * from t_subplan2)
+update t_subplan3 set b3=(select max(b2) from t_subplan2) from abc where abc.b2=b3;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Update on t_subplan3
+   CTE abc
+     ->  Seq Scan on t_subplan2
+   InitPlan 2 (returns $1)
+     ->  Aggregate
+           ->  Seq Scan on t_subplan2
+   ->  Hash Join
+         Hash Cond: (t_subplan3.b3 = abc.b2)
+         ->  Partition Iterator
+               Iterations: 2
+               ->  Partitioned Seq Scan on t_subplan3
+                     Selected Partitions:  1..2
+         ->  Hash
+               ->  CTE Scan on abc
+(14 rows)
+
+with recursive abc as (select * from t_subplan2)
+update t_subplan3 set b3=(select max(b2) from t_subplan2) from abc where abc.b2=b3;
+explain (costs off, nodes off)
+SELECT ((SELECT PG_DATABASE_SIZE((SELECT OID FROM PG_DATABASE WHERE upper(DATNAME)='POSTGRES'))) = (SELECT PG_DATABASE_SIZE((SELECT OID FROM PG_DATABASE WHERE upper(DATNAME)='REGRESSION'))));
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Result
+   InitPlan 2 (returns $1)
+     ->  Result
+           InitPlan 1 (returns $0)
+             ->  Seq Scan on pg_database
+                   Filter: (upper((datname)::text) = 'POSTGRES'::text)
+   InitPlan 4 (returns $3)
+     ->  Result
+           InitPlan 3 (returns $2)
+             ->  Seq Scan on pg_database
+                   Filter: (upper((datname)::text) = 'REGRESSION'::text)
+(11 rows)
+
+SELECT ((SELECT PG_DATABASE_SIZE((SELECT OID FROM PG_DATABASE WHERE upper(DATNAME)='POSTGRES'))) = (SELECT PG_DATABASE_SIZE((SELECT OID FROM PG_DATABASE WHERE upper(DATNAME)='REGRESSION'))));
+ ?column? 
+----------
+ f
+(1 row)
+
+create table t1(a int, b int, primary key(a, b))  ;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+create table t2(a int, b int);
+insert into t1 select generate_series(1, 10), generate_series(1, 10);
+insert into t2 values(1, 5), (2, 15);
+explain (costs off, nodes off)
+with abc as (select a, b from t2)
+update t1 set b=(select b from t2 where a=2) from abc where abc.a=1 and abc.a=t1.a;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Update on t1
+   CTE abc
+     ->  Seq Scan on t2
+   InitPlan 2 (returns $1)
+     ->  Seq Scan on t2
+           Filter: (a = 2)
+   ->  Nested Loop
+         ->  CTE Scan on abc
+               Filter: (a = 1)
+         ->  Materialize
+               ->  Bitmap Heap Scan on t1
+                     Recheck Cond: (a = 1)
+                     ->  Bitmap Index Scan on t1_pkey
+                           Index Cond: (a = 1)
+(14 rows)
+
+with abc as (select a, b from t2)
+update t1 set b=(select b from t2 where a=2) from abc where abc.a=1 and abc.a=t1.a;
+select * from t1 order by 1,2;
+ a  | b  
+----+----
+  1 | 15
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+(10 rows)
+
+explain (costs off, nodes off)
+select * from t2 where a <= all (select a from t2);
+          QUERY PLAN          
+------------------------------
+ Seq Scan on t2
+   Filter: (SubPlan 1)
+   SubPlan 1
+     ->  Materialize
+           ->  Seq Scan on t2
+(5 rows)
+
+select * from t2 where a <= all (select a from t2);
+ a | b 
+---+---
+ 1 | 5
+(1 row)
+
+explain (costs off, nodes off, verbose on)
+select c1, d1 from t_subplan1
+where exists(select b from t2 where a>=2)
+group by c1, d1 order by c1+1 desc, 2 desc limit 5;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Limit
+   Output: t_subplan1.c1, t_subplan1.d1, ((t_subplan1.c1 + 1))
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on distribute_subplan_base.t2
+           Filter: (t2.a >= 2)
+   ->  Sort
+         Output: t_subplan1.c1, t_subplan1.d1, ((t_subplan1.c1 + 1))
+         Sort Key: ((t_subplan1.c1 + 1)) DESC, t_subplan1.d1 DESC
+         ->  HashAggregate
+               Output: t_subplan1.c1, t_subplan1.d1, (t_subplan1.c1 + 1)
+               Group By Key: t_subplan1.c1, t_subplan1.d1
+               ->  Result
+                     Output: t_subplan1.c1, t_subplan1.d1
+                     One-Time Filter: $0
+                     ->  Seq Scan on distribute_subplan_base.t_subplan1
+                           Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+(16 rows)
+
+select c1, d1 from t_subplan1
+where exists(select b from t2 where a>=2)
+group by c1, d1 order by c1+1 desc, 2 desc limit 5;
+ c1 | d1 
+----+----
+ 12 |  5
+ 12 |  4
+ 12 |  3
+ 12 |  2
+ 12 |  1
+(5 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan2 where
+ exists (select d1 from t_subplan1 where d1<8 and
+  exists (select b1 from t_subplan1 where c1<20 and
+   exists (select * from t_subplan1 where d1<9 and d1 >1 order by d1 limit 7) order by c1,b1 limit 10))
+and exists( select max(a1),count(b1),c2 from t_subplan1 group by c2 having c2>2 or c2 is null)
+order by a2, b2, c2, d2 limit 10;
+                                                                                                 QUERY PLAN                                                                                                 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   InitPlan 3 (returns $2)
+     ->  Result
+           One-Time Filter: $1
+           InitPlan 2 (returns $1)
+             ->  Limit
+                   Output: distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1
+                   InitPlan 1 (returns $0)
+                     ->  Limit
+                           Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1
+                           ->  Sort
+                                 Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1
+                                 Sort Key: distribute_subplan_base.t_subplan1.d1
+                                 ->  Seq Scan on distribute_subplan_base.t_subplan1
+                                       Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1
+                                       Filter: ((distribute_subplan_base.t_subplan1.d1 < 9) AND (distribute_subplan_base.t_subplan1.d1 > 1))
+                   ->  Sort
+                         Output: distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1
+                         Sort Key: distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.b1
+                         ->  Result
+                               Output: distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1
+                               One-Time Filter: $0
+                               ->  Seq Scan on distribute_subplan_base.t_subplan1
+                                     Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1
+                                     Filter: (distribute_subplan_base.t_subplan1.c1 < 20)
+           ->  Seq Scan on distribute_subplan_base.t_subplan1
+                 Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1
+                 Filter: (distribute_subplan_base.t_subplan1.d1 < 8)
+   ->  Sort
+         Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         Sort Key: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         ->  Result
+               Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               One-Time Filter: $2
+               ->  Seq Scan on distribute_subplan_base.t_subplan2
+                     Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+                     Filter: (SubPlan 4)
+                     SubPlan 4
+                       ->  GroupAggregate
+                             Output: max(distribute_subplan_base.t_subplan1.a1), count(distribute_subplan_base.t_subplan1.b1), ($3)
+                             Group By Key: t_subplan2.c2
+                             ->  Result
+                                   Output: t_subplan2.c2, distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1
+                                   One-Time Filter: ((t_subplan2.c2 > 2) OR (t_subplan2.c2 IS NULL))
+                                   ->  Seq Scan on distribute_subplan_base.t_subplan1
+                                         Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1
+(47 rows)
+
+select * from t_subplan2 where
+ exists (select d1 from t_subplan1 where d1<8 and
+  exists (select b1 from t_subplan1 where c1<20 and
+   exists (select * from t_subplan1 where d1<9 and d1 >1 order by d1 limit 7) order by c1,b1 limit 10))
+and exists( select max(a1),count(b1),c2 from t_subplan1 group by c2 having c2>2 or c2 is null)
+order by a2, b2, c2, d2 limit 10;
+ a2 | b2 | c2 | d2 
+----+----+----+----
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  0
+ 10 | 10 | 10 |  1
+ 11 | 11 | 11 |  2
+ 15 | 15 |  3 |  6
+(10 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan2 where
+ exists( select max(a1),count(b1),c2 from t_subplan1 group by rollup(c2,c2) having c2>2 and c2 is not null)
+order by a2,b2,c2,d2 limit 10;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Limit
+   Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   ->  Sort
+         Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         Sort Key: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         ->  Seq Scan on distribute_subplan_base.t_subplan2
+               Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               Filter: (SubPlan 1)
+               SubPlan 1
+                 ->  GroupAggregate
+                       Output: max(t_subplan1.a1), count(t_subplan1.b1), ($0)
+                       Group By Key: t_subplan2.c2
+                       Group By Key: t_subplan2.c2
+                       Group By Key: ()
+                       Filter: ((($0) > 2) AND (($0) IS NOT NULL))
+                       ->  Seq Scan on distribute_subplan_base.t_subplan1
+                             Output: t_subplan2.c2, t_subplan1.a1, t_subplan1.b1
+(17 rows)
+
+select * from t_subplan2 where
+ exists( select max(a1),count(b1),c2 from t_subplan1 group by rollup(c2,c2) having c2>2 and c2 is not null)
+order by a2,b2,c2,d2 limit 10;
+ a2 | b2 | c2 | d2 
+----+----+----+----
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  0
+ 10 | 10 | 10 |  1
+ 11 | 11 | 11 |  2
+ 15 | 15 |  3 |  6
+(10 rows)
+
+-- test any, all, rowcompare, array sublink
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2) or d1=0 order by 1,2,3,4;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Sort
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: ((hashed SubPlan 1) OR (t_subplan1.d1 = 0))
+         SubPlan 1
+           ->  Aggregate
+                 Output: count(t_subplan2.c2)
+                 ->  Seq Scan on distribute_subplan_base.t_subplan2
+                       Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+(11 rows)
+
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2) or d1=0 order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  6 |  6 |  6 |  0
+ 12 | 12 | 12 |  0
+ 18 | 18 |  5 |  0
+ 24 |  4 | 11 |  0
+ 30 | 10 |  4 |  0
+ 36 | 16 | 10 |  0
+ 42 |  2 |  3 |  0
+ 48 |  8 |  9 |  0
+ 50 | 10 | 11 |  2
+ 54 | 14 |  2 |  0
+ 60 |  0 |  8 |  0
+ 66 |  6 |  1 |  0
+ 72 | 12 |  7 |  0
+ 78 | 18 |  0 |  0
+ 84 |  4 |  6 |  0
+ 90 | 10 | 12 |  0
+ 96 | 16 |  5 |  0
+(17 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2 where c1>d2 minus all select d1 from t_subplan2) or d1=0 order by 1,2,3,4;
+                                                                                                 QUERY PLAN                                                                                                 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: ((SubPlan 1) OR (t_subplan1.d1 = 0))
+         SubPlan 1
+           ->  HashSetOp Except All
+                 Output: "*SELECT* 1".count, (0)
+                 ->  Append
+                       ->  Subquery Scan on "*SELECT* 1"
+                             Output: "*SELECT* 1".count, 0
+                             ->  Aggregate
+                                   Output: count(distribute_subplan_base.t_subplan2.c2)
+                                   ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                         Output: distribute_subplan_base.t_subplan2.a2, distribute_subplan_base.t_subplan2.b2, distribute_subplan_base.t_subplan2.c2, distribute_subplan_base.t_subplan2.d2
+                                         Filter: (t_subplan1.c1 > distribute_subplan_base.t_subplan2.d2)
+                       ->  Subquery Scan on "*SELECT* 2"
+                             Output: "*SELECT* 2".d1, 1
+                             ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                   Output: t_subplan1.d1
+(21 rows)
+
+select * from t_subplan1 where a1 in (select count(c2) from t_subplan2 where c1>d2 minus all select d1 from t_subplan2) or d1=0 order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  6 |  6 |  6 |  0
+ 12 | 12 | 12 |  0
+ 18 | 18 |  5 |  0
+ 24 |  4 | 11 |  0
+ 30 | 10 |  4 |  0
+ 36 | 16 | 10 |  0
+ 42 |  2 |  3 |  0
+ 48 |  8 |  9 |  0
+ 50 | 10 | 11 |  2
+ 54 | 14 |  2 |  0
+ 60 |  0 |  8 |  0
+ 66 |  6 |  1 |  0
+ 72 | 12 |  7 |  0
+ 78 | 18 |  0 |  0
+ 84 |  4 |  6 |  0
+ 90 | 10 | 12 |  0
+ 96 | 16 |  5 |  0
+(17 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 in (select count(c2)::int from t_subplan2 where c1>d2 union all select d1 from t_subplan2) or d1=0 order by 1,2,3,4 limit 5;
+                                                                                                 QUERY PLAN                                                                                                 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Sort
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+               Filter: ((SubPlan 1) OR (t_subplan1.d1 = 0))
+               SubPlan 1
+                 ->  Result
+                       Output: ((count(distribute_subplan_base.t_subplan2.c2))::integer)
+                       ->  Append
+                             ->  Aggregate
+                                   Output: (count(distribute_subplan_base.t_subplan2.c2))::integer
+                                   ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                         Output: distribute_subplan_base.t_subplan2.a2, distribute_subplan_base.t_subplan2.b2, distribute_subplan_base.t_subplan2.c2, distribute_subplan_base.t_subplan2.d2
+                                         Filter: (t_subplan1.c1 > distribute_subplan_base.t_subplan2.d2)
+                             ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                   Output: t_subplan1.d1
+(19 rows)
+
+select * from t_subplan1 where a1 in (select count(c2)::int from t_subplan2 where c1>d2 union all select d1 from t_subplan2) or d1=0 order by 1,2,3,4 limit 5;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+(5 rows)
+
+explain (costs off, nodes off, verbose on)
+select b1, count(*) from t_subplan1
+where c1 = all (select b2 from t_subplan2 where b2>4)
+or d1 != all (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Limit
+   Output: t_subplan1.b1, (count(*))
+   ->  Sort
+         Output: t_subplan1.b1, (count(*))
+         Sort Key: t_subplan1.b1, (count(*))
+         ->  HashAggregate
+               Output: t_subplan1.b1, count(*)
+               Group By Key: t_subplan1.b1
+               ->  Seq Scan on distribute_subplan_base.t_subplan1
+                     Output: t_subplan1.b1
+                     Filter: ((SubPlan 1) OR (SubPlan 2))
+                     SubPlan 1
+                       ->  Materialize
+                             Output: distribute_subplan_base.t_subplan2.b2
+                             ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                   Output: distribute_subplan_base.t_subplan2.b2
+                                   Filter: (distribute_subplan_base.t_subplan2.b2 > 4)
+                     SubPlan 2
+                       ->  Materialize
+                             Output: distribute_subplan_base.t_subplan2.c2
+                             ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                   Output: distribute_subplan_base.t_subplan2.c2
+                                   Filter: (distribute_subplan_base.t_subplan2.c2 > 10)
+(23 rows)
+
+select b1, count(*) from t_subplan1
+where c1 = all (select b2 from t_subplan2 where b2>4)
+or d1 != all (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+ b1 | count 
+----+-------
+  0 |     5
+  1 |     5
+  2 |     5
+  3 |     5
+  4 |     5
+(5 rows)
+
+ 
+explain (costs off, nodes off, verbose on)
+select b1, count(*) from t_subplan1
+where c1 = any (select b2 from t_subplan2 where b2>4)
+or d1 != any (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Limit
+   Output: t_subplan1.b1, (count(*))
+   ->  Sort
+         Output: t_subplan1.b1, (count(*))
+         Sort Key: t_subplan1.b1, (count(*))
+         ->  HashAggregate
+               Output: t_subplan1.b1, count(*)
+               Group By Key: t_subplan1.b1
+               ->  Hash Left Join
+                     Output: t_subplan1.b1
+                     Hash Cond: (t_subplan1.c1 = distribute_subplan_base.t_subplan2.b2)
+                     Filter: ((distribute_subplan_base.t_subplan2.b2 IS NOT NULL) OR (SubPlan 1))
+                     ->  Seq Scan on distribute_subplan_base.t_subplan1
+                           Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+                     ->  Hash
+                           Output: distribute_subplan_base.t_subplan2.b2
+                           ->  HashAggregate
+                                 Output: distribute_subplan_base.t_subplan2.b2
+                                 Group By Key: distribute_subplan_base.t_subplan2.b2
+                                 ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                       Output: distribute_subplan_base.t_subplan2.b2
+                                       Filter: (distribute_subplan_base.t_subplan2.b2 > 4)
+                     SubPlan 1
+                       ->  Materialize
+                             Output: distribute_subplan_base.t_subplan2.c2
+                             ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                   Output: distribute_subplan_base.t_subplan2.c2
+                                   Filter: (distribute_subplan_base.t_subplan2.c2 > 10)
+(28 rows)
+
+select b1, count(*) from t_subplan1
+where c1 = any (select b2 from t_subplan2 where b2>4)
+or d1 != any (select c2 from t_subplan2 where c2>10)
+group by b1 order by 1, 2 limit 5;
+ b1 | count 
+----+-------
+  0 |     5
+  1 |     5
+  2 |     5
+  3 |     5
+  4 |     5
+(5 rows)
+
+ 
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where (10,15)<=(select b1, min(b2) from t_subplan2 group by b1) order by a1, b1, c1, d1;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Sort
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  GroupAggregate
+                 Output: ($0), min(t_subplan2.b2)
+                 Group By Key: t_subplan1.b1
+                 ->  Seq Scan on distribute_subplan_base.t_subplan2
+                       Output: t_subplan1.b1, t_subplan2.b2
+(12 rows)
+
+select * from t_subplan1 where (10,15)<=(select b1, min(b2) from t_subplan2 group by b1) order by a1, b1, c1, d1;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  0 | 18 |  7 |  2
+  1 | 19 |  8 |  3
+ 11 | 11 | 11 |  5
+ 12 | 12 | 12 |  0
+ 13 | 13 |  0 |  1
+ 14 | 14 |  1 |  2
+ 15 | 15 |  2 |  3
+ 16 | 16 |  3 |  4
+ 17 | 17 |  4 |  5
+ 18 | 18 |  5 |  0
+ 19 | 19 |  6 |  1
+ 31 | 11 |  5 |  1
+ 32 | 12 |  6 |  2
+ 33 | 13 |  7 |  3
+ 34 | 14 |  8 |  4
+ 35 | 15 |  9 |  5
+ 36 | 16 | 10 |  0
+ 37 | 17 | 11 |  1
+ 38 | 18 | 12 |  2
+ 39 | 19 |  0 |  3
+ 51 | 11 | 12 |  3
+ 52 | 12 |  0 |  4
+ 53 | 13 |  1 |  5
+ 54 | 14 |  2 |  0
+ 55 | 15 |  3 |  1
+ 56 | 16 |  4 |  2
+ 57 | 17 |  5 |  3
+ 58 | 18 |  6 |  4
+ 59 | 19 |  7 |  5
+ 71 | 11 |  6 |  5
+ 72 | 12 |  7 |  0
+ 73 | 13 |  8 |  1
+ 74 | 14 |  9 |  2
+ 75 | 15 | 10 |  3
+ 76 | 16 | 11 |  4
+ 77 | 17 | 12 |  5
+ 78 | 18 |  0 |  0
+ 79 | 19 |  1 |  1
+ 91 | 11 |  0 |  1
+ 92 | 12 |  1 |  2
+ 93 | 13 |  2 |  3
+ 94 | 14 |  3 |  4
+ 95 | 15 |  4 |  5
+ 96 | 16 |  5 |  0
+ 97 | 17 |  6 |  1
+(45 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where (b1,c1) < (select a2, b2 from t_subplan2 where b2=4 and a2=4) order by a1, b1, c1, d1;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Sort
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   InitPlan 1 (returns $0,$1)
+     ->  Seq Scan on distribute_subplan_base.t_subplan2
+           Output: t_subplan2.a2, t_subplan2.b2
+           Filter: ((t_subplan2.b2 = 4) AND (t_subplan2.a2 = 4))
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: (ROW(t_subplan1.b1, t_subplan1.c1) < ROW($0, $1))
+(10 rows)
+
+select * from t_subplan1 where (b1,c1) < (select a2, b2 from t_subplan2 where b2=4 and a2=4) order by a1, b1, c1, d1;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  0 |  9 |  4
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+ 20 |  0 |  7 |  2
+ 21 |  1 |  8 |  3
+ 22 |  2 |  9 |  4
+ 23 |  3 | 10 |  5
+ 40 |  0 |  1 |  4
+ 41 |  1 |  2 |  5
+ 42 |  2 |  3 |  0
+ 43 |  3 |  4 |  1
+ 60 |  0 |  8 |  0
+ 61 |  1 |  9 |  1
+ 62 |  2 | 10 |  2
+ 63 |  3 | 11 |  3
+ 80 |  0 |  2 |  2
+ 81 |  1 |  3 |  3
+ 82 |  2 |  4 |  4
+ 83 |  3 |  5 |  5
+(20 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where array(select max(b2) from t_subplan2 group by b1)=array(select min(b2) from t_subplan2 group by b1);
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Seq Scan on distribute_subplan_base.t_subplan1
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Filter: ((SubPlan 1) = (SubPlan 2))
+   SubPlan 1
+     ->  GroupAggregate
+           Output: max(distribute_subplan_base.t_subplan2.b2), ($0)
+           Group By Key: t_subplan1.b1
+           ->  Seq Scan on distribute_subplan_base.t_subplan2
+                 Output: t_subplan1.b1, distribute_subplan_base.t_subplan2.b2
+   SubPlan 2
+     ->  GroupAggregate
+           Output: min(distribute_subplan_base.t_subplan2.b2), ($1)
+           Group By Key: t_subplan1.b1
+           ->  Seq Scan on distribute_subplan_base.t_subplan2
+                 Output: t_subplan1.b1, distribute_subplan_base.t_subplan2.b2
+(15 rows)
+
+select * from t_subplan1 where array(select max(b2) from t_subplan2 group by b1)=array(select min(b2) from t_subplan2 group by b1);
+ a1 | b1 | c1 | d1 
+----+----+----+----
+(0 rows)
+
+explain (costs off, nodes off, verbose on)
+select array(select max(b2) from t_subplan2 group by b1) from t_subplan1 order by a1, b1, c1, d1;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Output: ((SubPlan 1)), t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: (SubPlan 1), t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         SubPlan 1
+           ->  GroupAggregate
+                 Output: max(t_subplan2.b2), ($0)
+                 Group By Key: t_subplan1.b1
+                 ->  Seq Scan on distribute_subplan_base.t_subplan2
+                       Output: t_subplan1.b1, t_subplan2.b2
+(11 rows)
+
+select array(select max(b2) from t_subplan2 group by b1) from t_subplan1 order by a1, b1, c1, d1;
+ array 
+-------
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+ {27}
+(100 rows)
+
+explain (costs off, nodes off, verbose on)
+select array(select a1 from t_subplan1 where t_subplan1.b1=t_subplan2.b2 order by 1) from t_subplan2 order by a2, b2, c2, d2;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Output: ((SubPlan 1)), t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   Sort Key: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   ->  Seq Scan on distribute_subplan_base.t_subplan2
+         Output: (SubPlan 1), t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         SubPlan 1
+           ->  Sort
+                 Output: t_subplan1.a1
+                 Sort Key: t_subplan1.a1
+                 ->  Seq Scan on distribute_subplan_base.t_subplan1
+                       Output: t_subplan1.a1
+                       Filter: (t_subplan1.b1 = t_subplan2.b2)
+(12 rows)
+
+select array(select a1 from t_subplan1 where t_subplan1.b1=t_subplan2.b2 order by 1) from t_subplan2 order by a2, b2, c2, d2;
+      array       
+------------------
+ {}
+ {1,21,41,61,81}
+ {}
+ {2,22,42,62,82}
+ {}
+ {3,23,43,63,83}
+ {4,24,44,64,84}
+ {5,25,45,65,85}
+ {6,26,46,66,86}
+ {7,27,47,67,87}
+ {8,28,48,68,88}
+ {9,29,49,69,89}
+ {10,30,50,70,90}
+ {11,31,51,71,91}
+ {12,32,52,72,92}
+ {13,33,53,73,93}
+ {14,34,54,74,94}
+ {15,35,55,75,95}
+ {16,36,56,76,96}
+ {17,37,57,77,97}
+ {0,18,38,58,78}
+ {1,19,39,59,79}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {}
+ {2,20,40,60,80}
+ {1,21,41,61,81}
+ {2,22,42,62,82}
+ {3,23,43,63,83}
+ {4,24,44,64,84}
+ {5,25,45,65,85}
+ {6,26,46,66,86}
+ {7,27,47,67,87}
+ {8,28,48,68,88}
+ {9,29,49,69,89}
+ {10,30,50,70,90}
+ {11,31,51,71,91}
+ {12,32,52,72,92}
+ {13,33,53,73,93}
+ {14,34,54,74,94}
+ {15,35,55,75,95}
+ {16,36,56,76,96}
+ {17,37,57,77,97}
+ {0,18,38,58,78}
+ {1,19,39,59,79}
+(50 rows)
+
+-- test cte sublink
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select a1) select foo from cte) from t_subplan1 order by 1 limit 3;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   Output: ((SubPlan 2))
+   ->  Sort
+         Output: ((SubPlan 2))
+         Sort Key: ((SubPlan 2))
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: (SubPlan 2)
+               SubPlan 2
+                 ->  CTE Scan on cte
+                       Output: cte.foo
+                       CTE cte
+                         ->  Result
+                               Output: t_subplan1.a1
+(13 rows)
+
+select (with cte(foo) as (select a1) select foo from cte) from t_subplan1 order by 1 limit 3;
+ foo 
+-----
+   0
+   1
+   1
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select a1 from dual) select foo from cte) from t_subplan1 order by 1 limit 3;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   Output: ((SubPlan 2))
+   ->  Sort
+         Output: ((SubPlan 2))
+         Sort Key: ((SubPlan 2))
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: (SubPlan 2)
+               SubPlan 2
+                 ->  CTE Scan on cte
+                       Output: cte.foo
+                       CTE cte
+                         ->  Subquery Scan on dual
+                               Output: t_subplan1.a1
+                               ->  Result
+                                     Output: 'X'::text
+(15 rows)
+
+select (with cte(foo) as (select a1 from dual) select foo from cte) from t_subplan1 order by 1 limit 3;
+ foo 
+-----
+   0
+   1
+   1
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (values(b1)) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   Output: ((SubPlan 3))
+   ->  Sort
+         Output: ((SubPlan 3))
+         Sort Key: ((SubPlan 3))
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: (SubPlan 3)
+               SubPlan 3
+                 ->  Values Scan on "*VALUES*"
+                       Output: "*VALUES*".column1
+                       CTE cte
+                         ->  Values Scan on "*VALUES*"
+                               Output: "*VALUES*".column1
+                       InitPlan 2 (returns $2)
+                         ->  CTE Scan on cte
+                               Output: cte.foo
+(16 rows)
+
+select (with cte(foo) as (values(b1)) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+ column1 
+---------
+       0
+       0
+       0
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select avg(a1) from t_subplan1) select foo from cte) from t_subplan1 order by 1 limit 3;
+                                                                                         QUERY PLAN                                                                                         
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: ($1)
+   InitPlan 2 (returns $1)
+     ->  CTE Scan on cte
+           Output: cte.foo
+           CTE cte
+             ->  Aggregate
+                   Output: avg(distribute_subplan_base.t_subplan1.a1)
+                   ->  Seq Scan on distribute_subplan_base.t_subplan1
+                         Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: $1
+(12 rows)
+
+select (with cte(foo) as (select avg(a1) from t_subplan1) select foo from cte) from t_subplan1 order by 1 limit 3;
+         foo         
+---------------------
+ 47.5600000000000000
+ 47.5600000000000000
+ 47.5600000000000000
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo from cte) from t_subplan1 order by 1 limit 3;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Limit
+   Output: ((SubPlan 2))
+   ->  Sort
+         Output: ((SubPlan 2))
+         Sort Key: ((SubPlan 2))
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: (SubPlan 2)
+               SubPlan 2
+                 ->  CTE Scan on cte
+                       Output: cte.foo
+                       CTE cte
+                         ->  Limit
+                               Output: (t_subplan1.b1)
+                               ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                     Output: t_subplan1.b1
+(15 rows)
+
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo from cte) from t_subplan1 order by 1 limit 3;
+ foo 
+-----
+   0
+   0
+   0
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo+t_subplan1.c1 from cte) from t_subplan1 order by 1 limit 3; 
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Limit
+   Output: ((SubPlan 2))
+   ->  Sort
+         Output: ((SubPlan 2))
+         Sort Key: ((SubPlan 2))
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: (SubPlan 2)
+               SubPlan 2
+                 ->  CTE Scan on cte
+                       Output: (cte.foo + t_subplan1.c1)
+                       CTE cte
+                         ->  Limit
+                               Output: (t_subplan1.b1)
+                               ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                     Output: t_subplan1.b1
+(15 rows)
+
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) select foo+t_subplan1.c1 from cte) from t_subplan1 order by 1 limit 3; 
+ ?column? 
+----------
+        1
+        2
+        2
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Limit
+   Output: ((SubPlan 3))
+   ->  Sort
+         Output: ((SubPlan 3))
+         Sort Key: ((SubPlan 3))
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: (SubPlan 3)
+               SubPlan 3
+                 ->  Values Scan on "*VALUES*"
+                       Output: "*VALUES*".column1
+                       CTE cte
+                         ->  Limit
+                               Output: (t_subplan1.b1)
+                               ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                     Output: t_subplan1.b1
+                       InitPlan 2 (returns $2)
+                         ->  CTE Scan on cte
+                               Output: cte.foo
+(18 rows)
+
+select (with cte(foo) as (select t_subplan1.b1 from t_subplan2 limit 1) values((select foo from cte))) from t_subplan1 order by 1 limit 3;
+ column1 
+---------
+       0
+       0
+       0
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (with cte(foo) as (values(b1)) select foo from cte) from t_subplan1 order by 1 limit 3;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   Output: ((SubPlan 2))
+   ->  Sort
+         Output: ((SubPlan 2))
+         Sort Key: ((SubPlan 2))
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: (SubPlan 2)
+               SubPlan 2
+                 ->  CTE Scan on cte
+                       Output: cte.foo
+                       CTE cte
+                         ->  Values Scan on "*VALUES*"
+                               Output: "*VALUES*".column1
+(13 rows)
+
+select (with cte(foo) as (values(b1)) select foo from cte) from t_subplan1 order by 1 limit 3;
+ foo 
+-----
+   0
+   0
+   0
+(3 rows)
+
+explain (costs off, nodes off, verbose on)
+select (select b1 from (values((select b1 from t_subplan2 limit 1), (select a1 from t_subplan2 limit 1))) as t(c,d)) from t_subplan1 order by 1 limit 3; 
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Limit
+   Output: ((SubPlan 3))
+   ->  Sort
+         Output: ((SubPlan 3))
+         Sort Key: ((SubPlan 3))
+         ->  Seq Scan on distribute_subplan_base.t_subplan1
+               Output: (SubPlan 3)
+               SubPlan 3
+                 ->  Values Scan on "*VALUES*"
+                       Output: t_subplan1.b1
+                       InitPlan 1 (returns $1)
+                         ->  Limit
+                               Output: (t_subplan1.b1)
+                               ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                     Output: t_subplan1.b1
+                       InitPlan 2 (returns $3)
+                         ->  Limit
+                               Output: (t_subplan1.a1)
+                               ->  Seq Scan on distribute_subplan_base.t_subplan2
+                                     Output: t_subplan1.a1
+(20 rows)
+
+select (select b1 from (values((select b1 from t_subplan2 limit 1), (select a1 from t_subplan2 limit 1))) as t(c,d)) from t_subplan1 order by 1 limit 3; 
+ b1 
+----
+  0
+  0
+  0
+(3 rows)
+
+-- test cte sublink applied in different subquery level
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp))
+ order by 1,2,3,4;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Sort
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: (t_subplan1.c1 = (SubPlan 2))
+         SubPlan 2
+           ->  Aggregate
+                 Output: count(*)
+                 CTE tmp
+                   ->  Seq Scan on distribute_subplan_base.t_subplan2
+                         Output: t_subplan2.d2
+                         Filter: (t_subplan2.b2 = t_subplan1.a1)
+                 ->  Aggregate
+                       Output: 'abc'::text, count(tmp.d2)
+                       ->  CTE Scan on tmp
+                             Output: tmp.d2
+(17 rows)
+
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp))
+ order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+ 14 | 14 |  1 |  2
+ 27 |  7 |  1 |  3
+ 40 |  0 |  1 |  4
+ 53 | 13 |  1 |  5
+ 66 |  6 |  1 |  0
+ 79 | 19 |  1 |  1
+ 92 | 12 |  1 |  2
+(8 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where a1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp))
+ order by 1,2,3,4;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Sort
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: (t_subplan1.a1 = (SubPlan 2))
+         SubPlan 2
+           ->  Aggregate
+                 Output: count(*)
+                 CTE tmp
+                   ->  Seq Scan on distribute_subplan_base.t_subplan2
+                         Output: t_subplan2.d2
+                         Filter: (t_subplan2.b2 = t_subplan1.a1)
+                 ->  CTE Scan on tmp
+                       Output: tmp.d2
+(15 rows)
+
+select * from t_subplan1 where a1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp))
+ order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  2 |  0 |  9 |  4
+  2 |  2 |  2 |  2
+(2 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Sort
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: (t_subplan1.c1 = (SubPlan 3))
+         SubPlan 3
+           ->  Aggregate
+                 Output: count(*)
+                 CTE tmp
+                   ->  Seq Scan on distribute_subplan_base.t_subplan2
+                         Output: t_subplan2.d2
+                         Filter: (t_subplan2.b2 = t_subplan1.a1)
+                 ->  Aggregate
+                       Output: 'abc'::text, count(tmp1.d2)
+                       ->  CTE Scan on tmp tmp1
+                             Output: tmp1.d2
+                             Filter: (tmp1.d2 > (SubPlan 2))
+                             SubPlan 2
+                               ->  Aggregate
+                                     Output: count(*)
+                                     ->  CTE Scan on tmp tmp2
+                                           Output: tmp2.d2
+                                           Filter: (tmp2.d2 = tmp1.d2)
+(24 rows)
+
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', count(d2) from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+ 14 | 14 |  1 |  2
+ 27 |  7 |  1 |  3
+ 40 |  0 |  1 |  4
+ 53 | 13 |  1 |  5
+ 66 |  6 |  1 |  0
+ 79 | 19 |  1 |  1
+ 92 | 12 |  1 |  2
+(8 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Sort
+   Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   Sort Key: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+   ->  Seq Scan on distribute_subplan_base.t_subplan1
+         Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+         Filter: (t_subplan1.c1 = (SubPlan 3))
+         SubPlan 3
+           ->  Aggregate
+                 Output: count(*)
+                 CTE tmp
+                   ->  Seq Scan on distribute_subplan_base.t_subplan2
+                         Output: t_subplan2.d2
+                         Filter: (t_subplan2.b2 = t_subplan1.a1)
+                 ->  CTE Scan on tmp tmp1
+                       Output: tmp1.d2
+                       Filter: (tmp1.d2 > (SubPlan 2))
+                       SubPlan 2
+                         ->  Aggregate
+                               Output: count(*)
+                               ->  CTE Scan on tmp tmp2
+                                     Output: tmp2.d2
+                                     Filter: (tmp2.d2 = tmp1.d2)
+(22 rows)
+
+select * from t_subplan1 where c1 = (with tmp as (select d2 from t_subplan2 where b2=a1)
+ select count(*) from (select 'abc', d2 from tmp tmp1
+ where d2>(select count(*) from tmp tmp2 where tmp2.d2=tmp1.d2)))
+ order by 1,2,3,4;
+ a1 | b1 | c1 | d1 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+ 15 | 15 |  2 |  3
+ 39 | 19 |  0 |  3
+ 52 | 12 |  0 |  4
+ 65 |  5 |  0 |  5
+ 78 | 18 |  0 |  0
+ 91 | 11 |  0 |  1
+(8 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan1 left join
+(select a2, b2, (select b1 from t_subplan1 limit 1) c2 from t_subplan2)
+on b2=b1 and a1 not in (null)
+inner join t_subplan1 t3 on t3.a1=t_subplan1.c1 where t3.a1=0 order by 1,2,3,4 limit 5;
+                                                                                                                    QUERY PLAN                                                                                                                    
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit
+   Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0), t3.a1, t3.b1, t3.c1, t3.d1
+   InitPlan 1 (returns $0)
+     ->  Limit
+           Output: distribute_subplan_base.t_subplan1.b1
+           ->  Seq Scan on distribute_subplan_base.t_subplan1
+                 Output: distribute_subplan_base.t_subplan1.b1
+   ->  Sort
+         Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0), t3.a1, t3.b1, t3.c1, t3.d1
+         Sort Key: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.d1
+         ->  Nested Loop
+               Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0), t3.a1, t3.b1, t3.c1, t3.d1
+               ->  Nested Loop Left Join
+                     Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0)
+                     Join Filter: (NULL::boolean AND (t_subplan2.b2 = distribute_subplan_base.t_subplan1.b1))
+                     ->  Seq Scan on distribute_subplan_base.t_subplan1
+                           Output: distribute_subplan_base.t_subplan1.a1, distribute_subplan_base.t_subplan1.b1, distribute_subplan_base.t_subplan1.c1, distribute_subplan_base.t_subplan1.d1
+                           Filter: (distribute_subplan_base.t_subplan1.c1 = 0)
+                     ->  Result
+                           Output: t_subplan2.a2, t_subplan2.b2, $0
+                           One-Time Filter: false
+               ->  Materialize
+                     Output: t3.a1, t3.b1, t3.c1, t3.d1
+                     ->  Seq Scan on distribute_subplan_base.t_subplan1 t3
+                           Output: t3.a1, t3.b1, t3.c1, t3.d1
+                           Filter: (t3.a1 = 0)
+(26 rows)
+
+select * from t_subplan1 left join
+(select a2, b2, (select b1 from t_subplan1 limit 1) c2 from t_subplan2)
+on b2=b1 and a1 not in (null)
+inner join t_subplan1 t3 on t3.a1=t_subplan1.c1 where t3.a1=0 order by 1,2,3,4 limit 5;
+ a1 | b1 | c1 | d1 | a2 | b2 | c2 | a1 | b1 | c1 | d1 
+----+----+----+----+----+----+----+----+----+----+----
+ 13 | 13 |  0 |  1 |    |    |    |  0 | 18 |  7 |  2
+ 26 |  6 |  0 |  2 |    |    |    |  0 | 18 |  7 |  2
+ 39 | 19 |  0 |  3 |    |    |    |  0 | 18 |  7 |  2
+ 52 | 12 |  0 |  4 |    |    |    |  0 | 18 |  7 |  2
+ 65 |  5 |  0 |  5 |    |    |    |  0 | 18 |  7 |  2
+(5 rows)
+
+explain (costs off, nodes off, verbose on)
+select count(*) from t_subplan2 group by a2,b2 order by (a2,b2) > some(select min(a1), length(trim(b2)) from t_subplan1), 1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Sort
+   Output: (count(*)), ((SubPlan 1)), t_subplan2.a2, t_subplan2.b2
+   Sort Key: ((SubPlan 1)), (count(*))
+   ->  HashAggregate
+         Output: count(*), (SubPlan 1), t_subplan2.a2, t_subplan2.b2
+         Group By Key: t_subplan2.a2, t_subplan2.b2
+         ->  Seq Scan on distribute_subplan_base.t_subplan2
+               Output: t_subplan2.a2, t_subplan2.b2
+         SubPlan 1
+           ->  Aggregate
+                 Output: min(t_subplan1.a1), length(btrim((t_subplan2.b2)::text))
+                 ->  Seq Scan on distribute_subplan_base.t_subplan1
+                       Output: t_subplan1.a1, t_subplan1.b1, t_subplan1.c1, t_subplan1.d1
+(13 rows)
+
+select count(*) from t_subplan2 group by a2,b2 order by (a2,b2) > some(select min(a1), length(trim(b2)) from t_subplan1), 1 limit 10;
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+(10 rows)
+
+explain (costs off, nodes off, verbose on)
+select * from t_subplan2 where (select 200 from t_subplan1 group by 1 limit 1) not in (select a1 from t_subplan1 order by 1)
+order by 1,2,3,4 limit 5;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Limit
+   Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+   InitPlan 1 (returns $0)
+     ->  Limit
+           Output: (200)
+           ->  Group
+                 Output: (200)
+                 Group By Key: 200
+                 ->  Seq Scan on distribute_subplan_base.t_subplan1
+                       Output: 200
+   ->  Sort
+         Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         Sort Key: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+         ->  Result
+               Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               One-Time Filter: (NOT (hashed SubPlan 2))
+               ->  Seq Scan on distribute_subplan_base.t_subplan2
+                     Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.d2
+               SubPlan 2
+                 ->  Sort
+                       Output: distribute_subplan_base.t_subplan1.a1
+                       Sort Key: distribute_subplan_base.t_subplan1.a1
+                       ->  Seq Scan on distribute_subplan_base.t_subplan1
+                             Output: distribute_subplan_base.t_subplan1.a1
+(24 rows)
+
+select * from t_subplan2 where (select 200 from t_subplan1 group by 1 limit 1) not in (select a1 from t_subplan1 order by 1)
+order by 1,2,3,4 limit 5;
+ a2 | b2 | c2 | d2 
+----+----+----+----
+  0 | 20 |  0 |  3
+  1 |  1 |  1 |  1
+  1 | 21 |  1 |  4
+  2 |  2 |  2 |  2
+  2 | 22 |  2 |  5
+(5 rows)
+
+-- update
+explain (costs off, nodes off, verbose on)
+update t_subplan2 set d2 = t1.b from (select max(a1) b from t_subplan1 group by c1 not in (select a1*0-1 from t_subplan1)) t1;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Update on distribute_subplan_base.t_subplan2
+   ->  Nested Loop
+         Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t1.b, t_subplan2.ctid, t1.b
+         ->  Seq Scan on distribute_subplan_base.t_subplan2
+               Output: t_subplan2.a2, t_subplan2.b2, t_subplan2.c2, t_subplan2.ctid
+         ->  Materialize
+               Output: t1.b
+               ->  Subquery Scan on t1
+                     Output: t1.b
+                     ->  HashAggregate
+                           Output: max(distribute_subplan_base.t_subplan1.a1), ((NOT (hashed SubPlan 1)))
+                           Group By Key: (NOT (hashed SubPlan 1))
+                           ->  Seq Scan on distribute_subplan_base.t_subplan1
+                                 Output: (NOT (hashed SubPlan 1)), distribute_subplan_base.t_subplan1.a1
+                                 SubPlan 1
+                                   ->  Seq Scan on distribute_subplan_base.t_subplan1
+                                         Output: ((distribute_subplan_base.t_subplan1.a1 * 0) - 1)
+(17 rows)
+
+update t_subplan2 set d2 = t1.b from (select max(a1) b from t_subplan1 group by c1 not in (select a1*0-1 from t_subplan1)) t1;
+drop schema distribute_subplan_base cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table t_subplan1
+drop cascades to table t_subplan2
+drop cascades to table t_subplan3
+drop cascades to table t_subplan4
+drop cascades to table t1
+drop cascades to table t2

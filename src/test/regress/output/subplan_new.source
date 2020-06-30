@@ -1,0 +1,733 @@
+create schema subplan_new;
+set search_path=subplan_new;
+CREATE TABLE ROW_COMPARISON_018(INT1 INTEGER,INT2 INTEGER,BOL3 BOOLEAN)  ;
+CREATE TABLE ROW_COMPARISON_018_1(INT1 INTEGER,INT2 INTEGER,BOL3 BOOLEAN)  ;
+CREATE TABLE ROW_COMPARISON_018_2(INT1 INTEGER,INT2 INTEGER,BOL3 BOOLEAN)  ;
+INSERT INTO ROW_COMPARISON_018 VALUES(3,2,'TRUE');
+INSERT INTO ROW_COMPARISON_018 VALUES(1,4,'0');
+INSERT INTO ROW_COMPARISON_018 VALUES(2,1,'F');
+INSERT INTO ROW_COMPARISON_018 VALUES(4,1,'F');
+INSERT INTO ROW_COMPARISON_018_1 VALUES(3,2,'TRUE');
+INSERT INTO ROW_COMPARISON_018_2 VALUES(1,4,'0');
+explain (costs off, nodes off, verbose on)
+SELECT INT1 AS RESULT1,BOOL_AND(BOL3)AS RESULT2 FROM ROW_COMPARISON_018 WHERE (INT1,INT2,BOL3) = (SELECT INT1,INT2,BOL3 FROM ROW_COMPARISON_018_1)OR (INT1,INT2,BOL3) = (SELECT INT1,
+INT2,BOL3 FROM ROW_COMPARISON_018_2) GROUP BY INT1,BOL3 ORDER BY INT1,BOL3;
+                                                                                                                QUERY PLAN                                                                                                                
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: row_comparison_018.int1, bool_and(row_comparison_018.bol3), row_comparison_018.bol3
+   Group By Key: row_comparison_018.int1, row_comparison_018.bol3
+   InitPlan 1 (returns $0,$1,$2)
+     ->  Seq Scan on subplan_new.row_comparison_018_1
+           Output: row_comparison_018_1.int1, row_comparison_018_1.int2, row_comparison_018_1.bol3
+   InitPlan 2 (returns $3,$4,$5)
+     ->  Seq Scan on subplan_new.row_comparison_018_2
+           Output: row_comparison_018_2.int1, row_comparison_018_2.int2, row_comparison_018_2.bol3
+   ->  Sort
+         Output: row_comparison_018.int1, row_comparison_018.bol3
+         Sort Key: row_comparison_018.int1, row_comparison_018.bol3
+         ->  Seq Scan on subplan_new.row_comparison_018
+               Output: row_comparison_018.int1, row_comparison_018.bol3
+               Filter: (((row_comparison_018.int1 = $0) AND (row_comparison_018.int2 = $1) AND (row_comparison_018.bol3 = $2)) OR ((row_comparison_018.int1 = $3) AND (row_comparison_018.int2 = $4) AND (row_comparison_018.bol3 = $5)))
+(15 rows)
+
+SELECT INT1 AS RESULT1,BOOL_AND(BOL3)AS RESULT2 FROM ROW_COMPARISON_018 WHERE (INT1,INT2,BOL3) = (SELECT INT1,INT2,BOL3 FROM ROW_COMPARISON_018_1)OR (INT1,INT2,BOL3) = (SELECT INT1,
+INT2,BOL3 FROM ROW_COMPARISON_018_2) GROUP BY INT1,BOL3 ORDER BY INT1,BOL3;
+ result1 | result2 
+---------+---------
+       1 | f
+       3 | t
+(2 rows)
+
+create table BOOLOR_006(COL_BOOLOR boolean primary key)  ;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "boolor_006_pkey" for table "boolor_006"
+insert into BOOLOR_006 values(false),(true);
+explain (costs off, nodes off, verbose on)
+update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = (select bool_or(COL_BOOLOR) from BOOLOR_006);
+--?.*
+--?.*
+ Update on subplan_new.boolor_006
+   InitPlan 2 (returns $1)
+     ->  Result
+           Output: $0
+           InitPlan 1 (returns $0)
+             ->  Limit
+                   Output: subplan_new.boolor_006.col_boolor
+                   ->  Index Only Scan Backward using boolor_006_pkey on subplan_new.boolor_006
+                         Output: subplan_new.boolor_006.col_boolor
+                         Index Cond: (subplan_new.boolor_006.col_boolor IS NOT NULL)
+   ->  Index Scan using boolor_006_pkey on subplan_new.boolor_006
+         Output: false, subplan_new.boolor_006.ctid
+         Index Cond: (subplan_new.boolor_006.col_boolor = $1)
+(13 rows)
+
+update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = (select bool_or(COL_BOOLOR) from BOOLOR_006);
+ERROR:  duplicate key value violates unique constraint "boolor_006_pkey"
+DETAIL:  Key (col_boolor)=(f) already exists.
+update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = not (select bool_or(COL_BOOLOR) from BOOLOR_006);
+select bool_or(COL_BOOLOR) as RESULT from BOOLOR_006;
+ result 
+--------
+ t
+(1 row)
+
+create table sub1(a int,b varchar(10));
+create table sub2(a int,b varchar(10));
+insert into sub1 values (generate_series(1, 20),'a');
+insert into sub2 values (generate_series(20, 30),'sub2-b');
+explain (costs off)
+select a,b
+from sub1 t1
+group by a,b
+having EXISTS (SELECT MIN(t1.a) ,count(t2.b) ,t2.a from sub2 t2 group by 3)
+order by 1,2;
+               QUERY PLAN                
+-----------------------------------------
+ Sort
+   Sort Key: t1.a, t1.b
+   ->  HashAggregate
+         Group By Key: t1.a, t1.b
+         Filter: (SubPlan 1)
+         ->  Seq Scan on sub1 t1
+         SubPlan 1
+           ->  HashAggregate
+                 Group By Key: t2.a
+                 ->  Seq Scan on sub2 t2
+(10 rows)
+
+select a,b
+from sub1 t1
+group by a,b
+having EXISTS (SELECT MIN(t1.a) ,count(t2.b) ,t2.a from sub2 t2 group by 3)
+order by 1,2;
+ a  | b 
+----+---
+  1 | a
+  2 | a
+  3 | a
+  4 | a
+  5 | a
+  6 | a
+  7 | a
+  8 | a
+  9 | a
+ 10 | a
+ 11 | a
+ 12 | a
+ 13 | a
+ 14 | a
+ 15 | a
+ 16 | a
+ 17 | a
+ 18 | a
+ 19 | a
+ 20 | a
+(20 rows)
+
+explain (costs off)
+select a, b
+from sub1 t1
+where (a, b) in 
+(SELECT count(t2.b), t2.b from sub2 t2 where t1.a < t2.a group by 2)
+order by 1,2;
+                QUERY PLAN                
+------------------------------------------
+ Sort
+   Sort Key: t1.a, t1.b
+   ->  Seq Scan on sub1 t1
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  HashAggregate
+                 Group By Key: t2.b
+                 ->  Seq Scan on sub2 t2
+                       Filter: (t1.a < a)
+(9 rows)
+
+select a, b
+from sub1 t1
+where (a, b) in 
+(SELECT count(t2.b), t2.b from sub2 t2 where t1.a < t2.a group by 2)
+order by 1,2;
+ a | b 
+---+---
+(0 rows)
+
+create table customer_demographics
+(
+    cd_demo_sk                integer               not null,
+    cd_gender                 char(1)                       ,
+    cd_marital_status         char(1)                       ,
+    cd_education_status       char(20)                      ,
+    cd_purchase_estimate      integer                       ,
+    cd_credit_rating          char(10)                      ,
+    cd_dep_count              integer                       ,
+    cd_dep_employed_count     integer                       ,
+    cd_dep_college_count      integer                       
+) 
+   
+partition by range (cd_demo_sk)
+(
+partition customer_demographics_1 values less than (1000),
+partition customer_demographics_2 values less than (7700),
+partition customer_demographics_3 values less than (33700),
+partition customer_demographics_4 values less than (57300),
+partition customer_demographics_5 values less than (135700),
+partition customer_demographics_6 values less than (203300),
+partition customer_demographics_7 values less than (208700),
+partition customer_demographics_8 values less than (238700),
+partition customer_demographics_9 values less than (268700),
+partition customer_demographics_10 values less than (298700),
+partition customer_demographics_11 values less than (338700),
+partition customer_demographics_12 values less than (368700),
+partition customer_demographics_13 values less than (398700),
+partition customer_demographics_14 values less than (438700),
+partition customer_demographics_15 values less than (maxvalue)
+);
+create table customer
+(
+    c_customer_sk             integer               not null,
+    c_customer_id             char(16)              not null,
+    c_current_cdemo_sk        integer                       ,
+    c_current_hdemo_sk        integer                       ,
+    c_current_addr_sk         integer                       ,
+    c_first_shipto_date_sk    integer                       ,
+    c_first_sales_date_sk     integer                       ,
+    c_salutation              char(10)                      ,
+    c_first_name              char(20)                      ,
+    c_last_name               char(30)                      ,
+    c_preferred_cust_flag     char(1)                       ,
+    c_birth_day               integer                       ,
+    c_birth_month             integer                       ,
+    c_birth_year              integer                       ,
+    c_birth_country           varchar(20)                   ,
+    c_login                   char(13)                      ,
+    c_email_address           char(50)                      ,
+    c_last_review_date        char(10)                      
+) 
+  ;
+ 
+ create table web_site
+(
+    web_site_sk               integer               not null,
+    web_site_id               char(16)              not null,
+    web_rec_start_date        date                          ,
+    web_rec_end_date          date                          ,
+    web_name                  varchar(50)                   ,
+    web_open_date_sk          varchar(50)                       ,
+    web_close_date_sk         varchar(50)                       ,
+    web_class                 varchar(50)                   ,
+    web_manager               varchar(40)                   ,
+    web_mkt_id                integer                       ,
+    web_mkt_class             varchar(50)                   ,
+    web_mkt_desc              varchar(100)                  ,
+    web_market_manager        varchar(40)                   ,
+    web_company_id            integer                       ,
+    web_company_name          char(50)                      ,
+    web_street_number         char(10)                      ,
+    web_street_name           varchar(60)                   ,
+    web_street_type           char(15)                      ,
+    web_suite_number          char(10)                      ,
+    web_city                  varchar(60)                   ,
+    web_county                varchar(30)                   ,
+    web_state                 char(2)                       ,
+    web_zip                   char(10)                      ,
+    web_country               varchar(20)                   ,
+    web_gmt_offset            decimal(5,2)                  ,
+    web_tax_percentage        decimal(5,2)                  
+) 
+   
+ partition by range(web_rec_start_date)
+(
+	partition p1 values less than('1990-01-01'),
+	partition p2 values less than('1995-01-01'),
+	partition p3 values less than('2000-01-01'),
+	partition p4 values less than('2005-01-01'),
+	partition p5 values less than('2010-01-01'),
+	partition p6 values less than('2015-01-01'),
+	partition p7 values less than(maxvalue)
+)
+;
+create table customer_address
+(
+    ca_address_sk             integer               not null,
+    ca_address_id             char(16)              not null,
+    ca_street_number          char(10)                      ,
+    ca_street_name            varchar(60)                   ,
+    ca_street_type            char(15)                      ,
+    ca_suite_number           char(10)                      ,
+    ca_city                   varchar(60)                   ,
+    ca_county                 varchar(30)                   ,
+    ca_state                  char(2)                       ,
+    ca_zip                    char(10)                      ,
+    ca_country                varchar(20)                   ,
+    ca_gmt_offset             decimal(5,2)                  ,
+    ca_location_type          char(20)                     
+) 
+   ;
+explain (verbose off, costs off, nodes off)
+select sum(cd_demo_sk),count(distinct cd_dep_count),max(cd_dep_employed_count) 
+from 
+ customer_demographics
+ intersect 
+ select sum(distinct(c_customer_sk)), count(distinct(c_birth_year)),(select max(distinct c_birth_month)
+             from customer
+             left join web_site
+               on c_birth_month = web_mkt_id
+              and c_birth_day - web_site_sk = 0
+            where c_birth_year < 2000)
+  from customer_address
+ inner join customer
+  on c_customer_sk = ca_address_sk
+ order by 1, 2;
+--?.*
+--?.*
+ Sort
+   Sort Key: "*SELECT* 1".sum, "*SELECT* 1".count
+   ->  HashSetOp Intersect
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     ->  Aggregate
+                           ->  Partition Iterator
+                                 Iterations: 15
+                                 ->  Partitioned Seq Scan on customer_demographics
+                                       Selected Partitions:  1..15
+               ->  Subquery Scan on "*SELECT* 2"
+                     ->  Aggregate
+                           InitPlan 1 (returns $2)
+                             ->  Aggregate
+                                   ->  Hash Left Join
+                                         Hash Cond: (subplan_new.customer.c_birth_month = web_site.web_mkt_id)
+                                         Join Filter: ((subplan_new.customer.c_birth_day - web_site.web_site_sk) = 0)
+                                         ->  Seq Scan on customer
+                                               Filter: (c_birth_year < 2000)
+                                         ->  Hash
+                                               ->  Partition Iterator
+                                                     Iterations: 7
+                                                     ->  Partitioned Seq Scan on web_site
+                                                           Selected Partitions:  1..7
+                           ->  Hash Join
+                                 Hash Cond: (subplan_new.customer.c_customer_sk = customer_address.ca_address_sk)
+                                 ->  Seq Scan on customer
+                                 ->  Hash
+                                       ->  Seq Scan on customer_address
+(29 rows)
+
+-- Skip early free consumer
+drop table if exists store;
+NOTICE:  table "store" does not exist, skipping
+drop table if exists call_center;
+NOTICE:  table "call_center" does not exist, skipping
+drop table if exists customer;
+drop table if exists web_site;
+drop table if exists web_page;
+NOTICE:  table "web_page" does not exist, skipping
+create table store
+(
+    s_store_sk                integer               not null,
+    s_store_id                char(16)              not null,
+    s_rec_start_date          date                          ,
+    s_rec_end_date            date                          ,
+    s_closed_date_sk          integer                       ,
+    s_store_name              varchar(50)                   ,
+    s_number_employees        integer                       ,
+    s_floor_space             integer                       ,
+    s_hours                   char(20)                      ,
+    s_manager                 varchar(40)                   ,
+    s_market_id               integer                       ,
+    s_geography_class         varchar(100)                  ,
+    s_market_desc             varchar(100)                  ,
+    s_market_manager          varchar(40)                   ,
+    s_division_id             integer                       ,
+    s_division_name           varchar(50)                   ,
+    s_company_id              integer                       ,
+    s_company_name            varchar(50)                   ,
+    s_street_number           varchar(10)                   ,
+    s_street_name             varchar(60)                   ,
+    s_street_type             char(15)                      ,
+    s_suite_number            char(10)                      ,
+    s_city                    varchar(60)                   ,
+    s_county                  varchar(30)                   ,
+    s_state                   char(2)                       ,
+    s_zip                     char(10)                      ,
+    s_country                 varchar(20)                   ,
+    s_gmt_offset              decimal(5,2)                  ,
+    s_tax_precentage          decimal(5,2)                  
+) ;
+create table call_center
+(
+    cc_call_center_sk         integer               not null,
+    cc_call_center_id         char(16)              not null,
+    cc_rec_start_date         date                          ,
+    cc_rec_end_date           date                          ,
+    cc_closed_date_sk         integer                       ,
+    cc_open_date_sk           integer                       ,
+    cc_name                   varchar(50)                   ,
+    cc_class                  varchar(50)                   ,
+    cc_employees              integer                       ,
+    cc_sq_ft                  integer                       ,
+    cc_hours                  char(20)                      ,
+    cc_manager                varchar(40)                   ,
+    cc_mkt_id                 integer                       ,
+    cc_mkt_class              char(50)                      ,
+    cc_mkt_desc               varchar(100)                  ,
+    cc_market_manager         varchar(40)                   ,
+    cc_division               integer                       ,
+    cc_division_name          varchar(50)                   ,
+    cc_company                integer                       ,
+    cc_company_name           char(50)                      ,
+    cc_street_number          char(10)                      ,
+    cc_street_name            varchar(60)                   ,
+    cc_street_type            char(15)                      ,
+    cc_suite_number           char(10)                      ,
+    cc_city                   varchar(60)                   ,
+    cc_county                 varchar(30)                   ,
+    cc_state                  char(2)                       ,
+    cc_zip                    char(10)                      ,
+    cc_country                varchar(20)                   ,
+    cc_gmt_offset             decimal(5,2)                  ,
+    cc_tax_percentage         decimal(5,2)                  
+) ; 
+create table customer
+(
+    c_customer_sk             integer               not null,
+    c_customer_id             char(16)              not null,
+    c_current_cdemo_sk        integer                       ,
+    c_current_hdemo_sk        integer                       ,
+    c_current_addr_sk         integer                       ,
+    c_first_shipto_date_sk    integer                       ,
+    c_first_sales_date_sk     integer                       ,
+    c_salutation              char(10)                      ,
+    c_first_name              char(20)                      ,
+    c_last_name               char(30)                      ,
+    c_preferred_cust_flag     char(1)                       ,
+    c_birth_day               integer                       ,
+    c_birth_month             integer                       ,
+    c_birth_year              integer                       ,
+    c_birth_country           varchar(20)                   ,
+    c_login                   char(13)                      ,
+    c_email_address           char(50)                      ,
+    c_last_review_date        char(10)                      
+) ; 
+ 
+create table web_site
+(
+    web_site_sk               integer               not null,
+    web_site_id               char(16)              not null,
+    web_rec_start_date        date                          ,
+    web_rec_end_date          date                          ,
+    web_name                  varchar(50)                   ,
+    web_open_date_sk          integer                       ,
+    web_close_date_sk         integer                       ,
+    web_class                 varchar(50)                   ,
+    web_manager               varchar(40)                   ,
+    web_mkt_id                integer                       ,
+    web_mkt_class             varchar(50)                   ,
+    web_mkt_desc              varchar(100)                  ,
+    web_market_manager        varchar(40)                   ,
+    web_company_id            integer                       ,
+    web_company_name          char(50)                      ,
+    web_street_number         char(10)                      ,
+    web_street_name           varchar(60)                   ,
+    web_street_type           char(15)                      ,
+    web_suite_number          char(10)                      ,
+    web_city                  varchar(60)                   ,
+    web_county                varchar(30)                   ,
+    web_state                 char(2)                       ,
+    web_zip                   char(10)                      ,
+    web_country               varchar(20)                   ,
+    web_gmt_offset            decimal(5,2)                  ,
+    web_tax_percentage        decimal(5,2)                  
+) 
+partition by range(web_rec_start_date)
+(
+	partition p1 values less than('1990-01-01'),
+	partition p2 values less than('1995-01-01'),
+	partition p3 values less than('2000-01-01'),
+	partition p4 values less than('2005-01-01'),
+	partition p5 values less than('2010-01-01'),
+	partition p6 values less than('2015-01-01'),
+	partition p7 values less than(maxvalue)
+)
+;
+create table web_page
+(
+    wp_web_page_sk            integer               not null,
+    wp_web_page_id            char(16)              not null,
+    wp_rec_start_date         date                          ,
+    wp_rec_end_date           date                          ,
+    wp_creation_date_sk       integer                       ,
+    wp_access_date_sk         integer                       ,
+    wp_autogen_flag           char(1)                       ,
+    wp_customer_sk            integer                       ,
+    wp_url                    varchar(100)                  ,
+    wp_type                   char(50)                      ,
+    wp_char_count             integer                       ,
+    wp_link_count             integer                       ,
+    wp_image_count            integer                       ,
+    wp_max_ad_count           integer                       
+) 
+partition by range(wp_rec_start_date)
+(
+	partition p1 values less than('1990-01-01'),
+	partition p2 values less than('1995-01-01'),
+	partition p3 values less than('2000-01-01'),
+	partition p4 values less than('2005-01-01'),
+	partition p5 values less than('2010-01-01'),
+	partition p6 values less than('2015-01-01'),
+	partition p7 values less than(maxvalue)
+)
+; 
+explain (verbose off, costs off, nodes off)
+select distinct *  
+from ( 
+select max(s_manager), sum(c_birth_day%2), avg(s_tax_precentage) 
+  from store 
+ inner join customer 
+    on c_birth_day = s_market_id 
+        and s_manager like '%e%' 
+group by c_birth_day, c_birth_month,s_market_id ,s_company_id,c_birth_country 
+having (c_birth_day, c_birth_month) <> all 
+       (select web_rec_start_date, wp_customer_sk 
+          from web_page 
+         inner join web_site 
+            on extract(month from web_rec_end_date) = 
+               date_part('month', wp_rec_end_date) - 1 
+           and c_birth_month = web_mkt_id 
+           and (web_company_id + 2, s_company_id + 5) in 
+               (select s_market_id - 1, max(distinct cc_mkt_id) 
+                  from call_center 
+                 where s_company_id < 1000 
+                 group by 1) 
+         where c_birth_country like '%J%')) 
+order by 1,2,3;
+                                                                                      QUERY PLAN                                                                                       
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Unique
+   ->  Sort
+         Sort Key: __unnamed_subquery__.max, __unnamed_subquery__.sum, __unnamed_subquery__.avg
+         ->  Subquery Scan on __unnamed_subquery__
+               ->  HashAggregate
+                     Group By Key: customer.c_birth_day, customer.c_birth_month, store.s_market_id, store.s_company_id, customer.c_birth_country
+                     Filter: (SubPlan 1)
+                     ->  Hash Join
+                           Hash Cond: (customer.c_birth_day = store.s_market_id)
+                           ->  Seq Scan on customer
+                           ->  Hash
+                                 ->  Seq Scan on store
+                                       Filter: ((s_manager)::text ~~ '%e%'::text)
+                     SubPlan 1
+                       ->  Result
+                             One-Time Filter: ((customer.c_birth_country)::text ~~ '%J%'::text)
+                             ->  Nested Loop
+                                   Join Filter: ((web_site.web_company_id + 2) = ((store.s_market_id - 1)))
+                                   ->  Hash Join
+                                         Hash Cond: ((date_part('month'::text, web_page.wp_rec_end_date) - 1::double precision) = date_part('month'::text, web_site.web_rec_end_date))
+                                         ->  Partition Iterator
+                                               Iterations: 7
+                                               ->  Partitioned Seq Scan on web_page
+                                                     Selected Partitions:  1..7
+                                         ->  Hash
+                                               ->  Partition Iterator
+                                                     Iterations: 7
+                                                     ->  Partitioned Seq Scan on web_site
+                                                           Filter: (customer.c_birth_month = web_mkt_id)
+                                                           Selected Partitions:  1..7
+                                   ->  GroupAggregate
+                                         Group By Key: (store.s_market_id - 1)
+                                         Filter: ((store.s_company_id + 5) = max(DISTINCT call_center.cc_mkt_id))
+                                         ->  Result
+                                               One-Time Filter: (store.s_company_id < 1000)
+                                               ->  Seq Scan on call_center
+(36 rows)
+
+select distinct *  
+from ( 
+select max(s_manager), sum(c_birth_day%2), avg(s_tax_precentage) 
+  from store 
+ inner join customer 
+    on c_birth_day = s_market_id 
+        and s_manager like '%e%' 
+group by c_birth_day, c_birth_month,s_market_id ,s_company_id,c_birth_country 
+having (c_birth_day, c_birth_month) <> all 
+       (select web_rec_start_date, wp_customer_sk 
+          from web_page 
+         inner join web_site 
+            on extract(month from web_rec_end_date) = 
+               date_part('month', wp_rec_end_date) - 1 
+           and c_birth_month = web_mkt_id 
+           and (web_company_id + 2, s_company_id + 5) in 
+               (select s_market_id - 1, max(distinct cc_mkt_id) 
+                  from call_center 
+                 where s_company_id < 1000 
+                 group by 1) 
+         where c_birth_country like '%J%')) 
+order by 1,2,3;
+ max | sum | avg 
+-----+-----+-----
+(0 rows)
+
+-- Tow or more combiners, one combiner finish early and handles are not reset properly
+DROP TABLE IF EXISTS work_shift CASCADE;
+NOTICE:  table "work_shift" does not exist, skipping
+CREATE TABLE work_shift
+(
+    work_shift_cd varchar(50) not null 
+) ;
+INSERT INTO work_shift VALUES ('a');
+INSERT INTO work_shift VALUES ('b');
+ANALYZE work_shift;
+EXPLAIN (COSTS OFF) SELECT (CASE WHEN (EXISTS( SELECT 1 FROM work_shift )) THEN ('W')  END) c1,
+       wos.work_shift_cd c2,lead(c1) OVER( PARTITION BY c1 ORDER BY c2) 
+FROM work_shift wos;
+               QUERY PLAN               
+----------------------------------------
+ WindowAgg
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on work_shift
+   InitPlan 2 (returns $1)
+     ->  Seq Scan on work_shift
+   ->  Sort
+         Sort Key: wos.work_shift_cd
+         ->  Seq Scan on work_shift wos
+(8 rows)
+
+SELECT (CASE WHEN (EXISTS( SELECT 1 FROM work_shift )) THEN ('W')  END) c1,
+       wos.work_shift_cd c2,lead(c1) OVER( PARTITION BY c1 ORDER BY c2) 
+FROM work_shift wos;
+ c1 | c2 | lead 
+----+----+------
+ W  | a  | W
+ W  | b  | 
+(2 rows)
+
+create table web_site_1
+(
+    web_site_sk               integer               not null,
+    web_site_id               char(16)              not null,
+    web_rec_start_date        date                          ,
+    web_rec_end_date          date                          ,
+    web_name                  varchar(50)                   ,
+    web_open_date_sk          integer                       ,
+    web_close_date_sk         integer                       ,
+    web_class                 varchar(50)                   ,
+    web_manager               varchar(40)                   ,
+    web_mkt_id                integer                       ,
+    web_mkt_class             varchar(50)                   ,
+    web_mkt_desc              varchar(100)                  ,
+    web_market_manager        varchar(40)                   ,
+    web_company_id            integer                       ,
+    web_company_name          char(50)                      ,
+    web_street_number         char(10)                      ,
+    web_street_name           varchar(60)                   ,
+    web_street_type           char(15)                      ,
+    web_suite_number          char(10)                      ,
+    web_city                  varchar(60)                   ,
+    web_county                varchar(30)                   ,
+    web_state                 char(2)                       ,
+    web_zip                   char(10)                      ,
+    web_country               varchar(20)                   ,
+    web_gmt_offset            decimal(5,2)                  ,
+    web_tax_percentage        decimal(5,2)
+ )  
+ partition by range(web_rec_start_date)
+(
+        partition p1 values less than('1990-01-01'),
+        partition p2 values less than('1995-01-01'),
+        partition p3 values less than('2000-01-01'),
+        partition p4 values less than('2005-01-01'),
+        partition p5 values less than('2010-01-01'),
+        partition p6 values less than('2015-01-01'),
+        partition p7 values less than(maxvalue)
+);
+explain (verbose on, costs off, nodes off)
+select count(*) from customer where c_birth_day in (
+select max(web_mkt_id)
+from web_site_1
+where c_birth_day = web_mkt_id and web_site_sk = length(trim(c_birth_country))
+);
+                                                                                                                                                                                                                                            QUERY PLAN                                                                                                                                                                                                                                             
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Seq Scan on subplan_new.customer
+         Output: customer.c_customer_sk, customer.c_customer_id, customer.c_current_cdemo_sk, customer.c_current_hdemo_sk, customer.c_current_addr_sk, customer.c_first_shipto_date_sk, customer.c_first_sales_date_sk, customer.c_salutation, customer.c_first_name, customer.c_last_name, customer.c_preferred_cust_flag, customer.c_birth_day, customer.c_birth_month, customer.c_birth_year, customer.c_birth_country, customer.c_login, customer.c_email_address, customer.c_last_review_date
+         Filter: (SubPlan 2)
+         SubPlan 2
+           ->  Result
+                 Output: $3
+                 InitPlan 1 (returns $3)
+                   ->  Limit
+                         Output: subplan_new.web_site_1.web_mkt_id
+                         ->  Partition Iterator
+                               Output: subplan_new.web_site_1.web_mkt_id
+                               Iterations: 7
+                               ->  Partitioned Seq Scan on subplan_new.web_site_1
+                                     Output: subplan_new.web_site_1.web_mkt_id
+                                     Filter: ((subplan_new.web_site_1.web_mkt_id IS NOT NULL) AND (customer.c_birth_day = subplan_new.web_site_1.web_mkt_id) AND (subplan_new.web_site_1.web_site_sk = length(btrim((customer.c_birth_country)::text))))
+                                     Selected Partitions:  1..7
+(18 rows)
+
+-- test empty tuplestorestate in materialize
+with tmp1 as (select s_street_number, s_market_id, s_store_sk from store)
+select s_market_id, rank() over(partition by s_market_id, s_street_number < some (select sum(distinct cc_mkt_id - 1)
+from call_center full join store on cc_call_center_sk = s_store_sk + 1 where s_market_id < 10) order by s_market_id, s_store_sk)
+from tmp1 join customer on c_customer_sk = s_store_sk where s_market_id < 3 group by 1, s_store_sk, s_street_number
+order by 1,2;
+ s_market_id | rank 
+-------------+------
+(0 rows)
+
+-- rebuild hashtable of hashjoin if hashkey has paramters
+create table a (c1 int, c2 int) with (orientation=column);
+create table b (c1 int, c2 int) with (orientation=column);
+create table c (c1 int, c2 int) with (orientation=column); 
+insert into a values (generate_series(998,1001), generate_series(998,1001));
+insert into b values (generate_series(999, 1000), generate_series(999, 1000));
+insert into c values (generate_series(9, 10), generate_series(9, 10));
+analyze c;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+explain (costs off) select count(*) from a where a.c1 in (select b.c1 from b where b.c2 in (select nullif(a.c2, c.c2+990) from c));
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  CStore Scan on a
+               Filter: (SubPlan 1)
+               SubPlan 1
+                 ->  Row Adapter
+                       ->  Vector Sonic Hash Join
+                             Hash Cond: (b.c2 = (NULLIF(a.c2, (c.c2 + 990))))
+                             ->  CStore Scan on b
+                             ->  Vector Unique
+                                   ->  Vector Sort
+                                         Sort Key: (NULLIF(a.c2, (c.c2 + 990)))
+                                         ->  CStore Scan on c
+(13 rows)
+
+select count(*) from a where a.c1 in (select b.c1 from b where b.c2 in (select nullif(a.c2, c.c2+990) from c));
+ count 
+-------
+     2
+(1 row)
+
+drop schema subplan_new cascade;
+NOTICE:  drop cascades to 18 other objects
+DETAIL:  drop cascades to table row_comparison_018
+drop cascades to table row_comparison_018_1
+drop cascades to table row_comparison_018_2
+drop cascades to table boolor_006
+drop cascades to table sub1
+drop cascades to table sub2
+drop cascades to table customer_demographics
+drop cascades to table customer_address
+drop cascades to table store
+drop cascades to table call_center
+drop cascades to table customer
+drop cascades to table web_site
+drop cascades to table web_page
+drop cascades to table work_shift
+drop cascades to table web_site_1
+drop cascades to table a
+drop cascades to table b
+drop cascades to table c

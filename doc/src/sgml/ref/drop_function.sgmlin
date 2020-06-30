@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_FUNCTION">
+<refmeta>
+<refentrytitle>DROP FUNCTION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP FUNCTION</refname>
+<refpurpose>remove a function</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP FUNCTION [ IF EXISTS ] function_name [ ( [ {[ argmode ] [ argname ] argtype} [, ...] ] ) [ CASCADE | RESTRICT ] ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,45 @@
+<refentry id="SQL-CREATE_ROLE">
+<refmeta>
+<refentrytitle>CREATE ROLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE ROLE</refname>
+<refpurpose>define a new database role</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE ROLE role_name [ [ WITH ] option [ ... ] ] [ ENCRYPTED | UNENCRYPTED ] { PASSWORD | IDENTIFIED BY } { 'password' | DISABLE };
+
+where option can be:
+{SYSADMIN | NOSYSADMIN}
+    | {AUDITADMIN | NOAUDITADMIN}
+    | {CREATEDB | NOCREATEDB}
+    | {USEFT | NOUSEFT}
+    | {CREATEROLE | NOCREATEROLE}
+    | {INHERIT | NOINHERIT}
+    | {LOGIN | NOLOGIN}
+    | {REPLICATION | NOREPLICATION}
+    | {INDEPENDENT | NOINDEPENDENT}
+    | {VCADMIN | NOVCADMIN}
+    | CONNECTION LIMIT connlimit
+    | VALID BEGIN 'timestamp'
+    | VALID UNTIL 'timestamp'
+    | RESOURCE POOL 'respool'
+    | USER GROUP 'groupuser'
+    | PERM SPACE 'spacelimit'
+    | NODE GROUP logic_cluster_name
+    | IN ROLE role_name [, ...]
+    | IN GROUP role_name [, ...]
+    | ROLE role_name [, ...]
+    | ADMIN role_name [, ...]
+    | USER role_name [, ...]
+    | SYSID uid
+    | DEFAULT TABLESPACE tablespace_name
+    | PROFILE DEFAULT
+    | PROFILE profile_name
+    | PGUSER
+</synopsis>
+</refsynopsisdiv>
+</refentry>

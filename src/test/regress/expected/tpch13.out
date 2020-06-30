@@ -1,0 +1,61 @@
+-- $ID$
+-- TPC-H/TPC-R Customer Distribution Query (Q13)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	c_count,
+	count(*) as custdist
+from
+	(
+		select
+			c_custkey,
+			count(o_orderkey)
+		from
+			customer left outer join orders on
+				c_custkey = o_custkey
+				and o_comment not like '%special%request%'
+		group by
+			c_custkey
+	) as c_orders (c_custkey, c_count)
+group by
+	c_count
+order by
+	custdist desc,
+	c_count desc;
+ c_count | custdist 
+---------+----------
+       0 |      500
+      11 |       68
+      10 |       64
+      12 |       62
+       9 |       62
+       8 |       61
+      14 |       53
+      13 |       53
+      20 |       48
+       7 |       48
+      21 |       47
+      16 |       46
+      15 |       45
+      19 |       43
+      17 |       41
+      18 |       39
+       6 |       34
+      22 |       33
+      24 |       29
+      23 |       28
+      25 |       21
+      27 |       17
+      26 |       15
+       5 |       14
+      28 |        6
+       4 |        6
+      32 |        5
+      29 |        5
+      30 |        2
+       3 |        2
+      31 |        1
+       2 |        1
+       1 |        1
+(33 rows)
+

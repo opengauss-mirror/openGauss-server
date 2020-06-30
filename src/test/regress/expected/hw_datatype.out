@@ -1,0 +1,2038 @@
+/*
+ * 1) testing compatibility of data type with A DB
+ * 2) testing implicit conversion between some data types
+ */
+/* 1) compatibility of data type */
+/* a.Date type */
+CREATE TABLE testdate(
+        d date
+        );
+--insert values
+--insert with ISO style
+insert into testdate values('2012-7-15 12:59:32');
+--insert with Postgres style
+insert into testdate values('14-AUG-2012 12:55:18');
+--insert with SQL style
+insert into testdate values('1/8/1999 12:38:24');
+--insert without time
+insert into testdate values(to_date('20110505','yyyymmdd'));
+--insert with invalid value
+insert into testdate values('201200000-7-15 12:59:31');
+ERROR:  timestamp out of range: "201200000-7-15 12:59:31"
+LINE 1: insert into testdate values('201200000-7-15 12:59:31');
+                                    ^
+CONTEXT:  referenced column: d
+insert into testdate values('2012-15-16 12:59:32');
+ERROR:  date/time field value out of range: "2012-15-16 12:59:32"
+LINE 1: insert into testdate values('2012-15-16 12:59:32');
+                                    ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: d
+insert into testdate values('2012-7-35 12:35:32');
+ERROR:  date/time field value out of range: "2012-7-35 12:35:32"
+LINE 1: insert into testdate values('2012-7-35 12:35:32');
+                                    ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: d
+insert into testdate values('2012-7-15 25:30:31');
+ERROR:  date/time field value out of range: "2012-7-15 25:30:31"
+LINE 1: insert into testdate values('2012-7-15 25:30:31');
+                                    ^
+CONTEXT:  referenced column: d
+insert into testdate values('2012-7-15 25:30:31');
+ERROR:  date/time field value out of range: "2012-7-15 25:30:31"
+LINE 1: insert into testdate values('2012-7-15 25:30:31');
+                                    ^
+CONTEXT:  referenced column: d
+insert into testdate values('2012-7-15 23:67:30');
+ERROR:  date/time field value out of range: "2012-7-15 23:67:30"
+LINE 1: insert into testdate values('2012-7-15 23:67:30');
+                                    ^
+CONTEXT:  referenced column: d
+--show all dates
+select * from testdate d order by d;
+            d             
+--------------------------
+ Fri Jan 08 12:38:24 1999
+ Thu May 05 00:00:00 2011
+ Sun Jul 15 12:59:32 2012
+ Tue Aug 14 12:55:18 2012
+(4 rows)
+
+--change datestyle to Postgres
+SET Datestyle = 'Postgres,DMY';
+insert into testdate values('1/8/1999 12:38:24');
+--See the change
+select * from testdate order by d;
+            d             
+--------------------------
+ Fri 08 Jan 12:38:24 1999
+ Sun 01 Aug 12:38:24 1999
+ Thu 05 May 00:00:00 2011
+ Sun 15 Jul 12:59:32 2012
+ Tue 14 Aug 12:55:18 2012
+(5 rows)
+
+--change datestyle to ISO mode which is default output style of GaussDB
+set datestyle = iso,ymd;
+--See the change
+select * from testdate ORDER BY d;
+          d          
+---------------------
+ 1999-01-08 12:38:24
+ 1999-08-01 12:38:24
+ 2011-05-05 00:00:00
+ 2012-07-15 12:59:32
+ 2012-08-14 12:55:18
+(5 rows)
+
+--Formatted Output
+select to_char(d,'dd/mm/yy hh24:mi:ss') from testdate order by to_char;
+      to_char      
+-------------------
+ 01/08/99 12:38:24
+ 05/05/11 00:00:00
+ 08/01/99 12:38:24
+ 14/08/12 12:55:18
+ 15/07/12 12:59:32
+(5 rows)
+
+select to_char(d,'mm/dd/yyyy hh24:mi:ss') from testdate order by to_char;
+       to_char       
+---------------------
+ 01/08/1999 12:38:24
+ 05/05/2011 00:00:00
+ 07/15/2012 12:59:32
+ 08/01/1999 12:38:24
+ 08/14/2012 12:55:18
+(5 rows)
+
+select to_date('2009-8-1 19:01:01','YYYY-MM-DD HH24:MI:SS') order by to_date;
+       to_date       
+---------------------
+ 2009-08-01 19:01:01
+(1 row)
+
+select to_date('July 31,09,21 09:01:01','Month DD,YY,CC HH:MI:SS') order by to_date;
+       to_date       
+---------------------
+ 2009-07-31 09:01:01
+(1 row)
+
+--To see if the Date type can execute comparison operation
+select * from testdate where d>to_date('20120501','yyyymmdd') order by d;
+          d          
+---------------------
+ 2012-07-15 12:59:32
+ 2012-08-14 12:55:18
+(2 rows)
+
+drop table testdate;
+/* b.Interval type */
+CREATE TABLE testinterval(
+        i interval
+        );
+insert into testinterval values(interval '2 12:59:34.5678' day to second(3));
+insert into testinterval values(interval '2 12:59:34.5678' day(3) to second(3));
+insert into testinterval values(interval '15-9' year to month);
+insert into testinterval values(interval '15-9' year(3) to month);
+insert into testinterval values(interval '15-9' year(3) to month(3));
+ERROR:  syntax error at or near "("
+LINE 1: ...to testinterval values(interval '15-9' year(3) to month(3));
+                                                                  ^
+insert into testinterval values(interval '1 year 2 months 3 days 4 hours 5 minutes 6 seconds');
+insert into testinterval values(interval '1-9 3 4:4:6');
+select * from testinterval order by i;
+                      i                       
+----------------------------------------------
+ @ 2 days 12 hours 59 mins 34.568 secs
+ @ 2 days 12 hours 59 mins 34.568 secs
+ @ 1 year 2 mons 3 days 4 hours 5 mins 6 secs
+ @ 1 year 9 mons 3 days 4 hours 4 mins 6 secs
+ @ 15 years 9 mons
+ @ 15 years 9 mons
+(6 rows)
+
+drop table testinterval;
+/* c.LOB and Raw type*/
+CREATE TABLE test_lob(b1 blob,c1 clob,r1 raw);
+INSERT INTO test_lob values('Insert a blob-type data','Huawei Gauss DB version 1.0','Hello World!');
+ERROR:  invalid hexadecimal digit: "I"
+LINE 1: INSERT INTO test_lob values('Insert a blob-type data','Huawe...
+                                    ^
+CONTEXT:  referenced column: b1
+INSERT INTO test_lob values('20120711','test for delete','Hello World!');
+ERROR:  invalid hexadecimal digit: "H"
+LINE 1: ...INTO test_lob values('20120711','test for delete','Hello Wor...
+                                                             ^
+CONTEXT:  referenced column: r1
+SELECT * FROM test_lob;
+ b1 | c1 | r1 
+----+----+----
+(0 rows)
+
+SELECT * FROM test_lob;
+ b1 | c1 | r1 
+----+----+----
+(0 rows)
+
+DROP TABLE test_lob;
+/* d.Varchar,char and Varchar2 type*/
+CREATE TABLE char_t(c1 varchar2(12), c2 char(10), c3 varchar(12));
+insert into char_t values('varchar2test','chartest','varchartest');
+insert into char_t values('the regress test is boring','chartest','varchartest');
+ERROR:  value too long for type character varying(12)
+CONTEXT:  referenced column: c1
+insert into char_t values('varchar2test','the regress test is boring','varchartest');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c2
+insert into char_t values('the regress test is boring','chartest','the regress test is boring');
+ERROR:  value too long for type character varying(12)
+CONTEXT:  referenced column: c1
+DROP TABLE char_t;
+/* e.Number type*/
+create table number_test(
+  c1 number,
+  c2 number(8),
+  c3 number(13,5),
+  c4 number(38,10)
+);
+insert into number_test values(10,9,12.3,666666666666666666666.22222);
+insert into number_test values(10.22,9,12.3,666666666666666666666.22222);
+insert into number_test values(10,9.99,12.3,666666666666666666666.22222);
+insert into number_test values(10,9,12.3777777777,666666666666666666666.22222);
+insert into number_test values(10,9,12.3,666666666666666666666666666666666666666666666666.22222);
+ERROR:  numeric field overflow
+DETAIL:  A field with precision 38, scale 10 must round to an absolute value less than 10^28.
+CONTEXT:  referenced column: c4
+select * from number_test order by 1, 2, 3, 4;
+  c1   | c2 |    c3    |                c4                
+-------+----+----------+----------------------------------
+    10 |  9 | 12.30000 | 666666666666666666666.2222200000
+    10 |  9 | 12.37778 | 666666666666666666666.2222200000
+    10 | 10 | 12.30000 | 666666666666666666666.2222200000
+ 10.22 |  9 | 12.30000 | 666666666666666666666.2222200000
+(4 rows)
+
+drop table number_test;
+/* f.BINARY_DOUBLE type */
+CREATE TABLE test_type(
+	my_double BINARY_DOUBLE
+	);
+INSERT INTO test_type VALUES(15.23448);
+INSERT INTO test_type VALUES(1E-323);
+INSERT INTO test_type VALUES(1E-324);
+--?ERROR.*
+CONTEXT:  referenced column: my_double
+INSERT INTO test_type VALUES(1E+308);
+INSERT INTO test_type VALUES(1E+309);
+ERROR:  "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
+CONTEXT:  referenced column: my_double
+SELECT * FROM test_type order by 1;
+       my_double       
+-----------------------
+ 9.88131291682493e-324
+              15.23448
+                1e+308
+(3 rows)
+
+DROP TABLE test_type;
+/* g.Type BINARY_INTEGER */
+CREATE TABLE test_type(
+	my_double BINARY_INTEGER
+	);
+INSERT INTO test_type values(0);
+INSERT INTO test_type values(-2147483648);
+INSERT INTO test_type values(2147483647);
+INSERT INTO test_type values(2147483648);
+ERROR:  integer out of range
+CONTEXT:  referenced column: my_double
+INSERT INTO test_type values(-2147483649);
+ERROR:  integer out of range
+CONTEXT:  referenced column: my_double
+SELECT * FROM test_type order by 1;
+  my_double  
+-------------
+ -2147483648
+           0
+  2147483647
+(3 rows)
+
+DROP TABLE test_type;
+/* h.Integer(p,s) format */
+CREATE TABLE test_type(
+	my_integer INTEGER(10,4)
+	);
+INSERT INTO test_type values(99999.9);
+INSERT INTO test_type values(999999.9);
+INSERT INTO test_type values(9999999.9);
+ERROR:  numeric field overflow
+DETAIL:  A field with precision 10, scale 4 must round to an absolute value less than 10^6.
+CONTEXT:  referenced column: my_integer
+SELECT * FROM test_type order by 1;
+ my_integer  
+-------------
+  99999.9000
+ 999999.9000
+(2 rows)
+
+DROP TABLE test_type;
+/* 2)tests for implicit conversion between some data types */
+/* a.test implicit conversion between int2 and int4 */
+create table i4ti2(
+	a int2,
+	b int4
+);
+insert into i4ti2 values(9,10);
+select a&b from i4ti2;
+ ?column? 
+----------
+        8
+(1 row)
+
+drop table i4ti2;
+/* b.test implicit conversion between number(including 
+     int2,int4,int8,float4,float8,number) and text */
+select substr('123',1,2)*12;
+ ?column? 
+----------
+      144
+(1 row)
+
+select 123::int2||1;
+ ?column? 
+----------
+ 1231
+(1 row)
+
+select 123::int4||1;
+ ?column? 
+----------
+ 1231
+(1 row)
+
+select 123::int8||1;
+ ?column? 
+----------
+ 1231
+(1 row)
+
+select 123.1::float4||1;
+ ?column? 
+----------
+ 123.11
+(1 row)
+
+select 123.1::float8||1;
+ ?column? 
+----------
+ 123.11
+(1 row)
+
+/* 3)test the other implicit conversion*/
+--CHAR
+CREATE OR REPLACE FUNCTION TEST_FUNC(tempdata char) RETURNS VOID AS $$
+BEGIN
+	raise info'TEST CHAR VALUE IS %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+select TEST_FUNC('abc'::clob) from dual;
+INFO:  TEST CHAR VALUE IS abc
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('abc'::varchar2) from dual;
+INFO:  TEST CHAR VALUE IS abc
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+drop function test_func(char);
+--VARCHAR2
+CREATE OR REPLACE FUNCTION TEST_FUNC(tempdata varchar2(50)) RETURNS VOID AS $$
+BEGIN
+	raise info'TEST VARCHAR VALUE IS %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+select TEST_FUNC('abc'::clob) from dual;
+INFO:  TEST VARCHAR VALUE IS abc
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC(123) from dual;
+INFO:  TEST VARCHAR VALUE IS 123
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('123'::integer) from dual;
+INFO:  TEST VARCHAR VALUE IS 123
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('abc'::raw) from dual;
+INFO:  TEST VARCHAR VALUE IS 0ABC
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('abc'::char) from dual;
+INFO:  TEST VARCHAR VALUE IS a
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('2012-08-01 11:23:45'::timestamp) from dual; --with timezone?
+INFO:  TEST VARCHAR VALUE IS 2012-08-01 11:23:45
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC(interval '1 18:00:00' day to second) from dual;
+INFO:  TEST VARCHAR VALUE IS @ 1 day 18 hours
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('1 day 18:00:00') from dual;
+INFO:  TEST VARCHAR VALUE IS 1 day 18:00:00
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+drop function test_func(varchar2);
+--CLOB
+CREATE OR REPLACE FUNCTION TEST_FUNC(tempdata CLOB) RETURNS VOID AS $$
+BEGIN
+	raise info'TEST CLOB VALUE IS %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+select TEST_FUNC('abc'::char) from dual;
+INFO:  TEST CLOB VALUE IS a
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('abc'::varchar2) from dual;
+INFO:  TEST CLOB VALUE IS abc
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+drop function test_func(clob);
+--INTEGER
+CREATE OR REPLACE FUNCTION TEST_FUNC(tempdata INTEGER) RETURNS VOID AS $$
+BEGIN
+	raise info'TEST INTEGER VALUE IS %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+select TEST_FUNC('123'::char(3)) from dual;
+INFO:  TEST INTEGER VALUE IS 123
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('123'::varchar2) from dual;
+INFO:  TEST INTEGER VALUE IS 123
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+drop function test_func(integer);
+--TIMESTAMP
+CREATE OR REPLACE FUNCTION TEST_FUNC(tempdata TIMESTAMP) RETURNS VOID AS $$
+BEGIN
+	raise info'TEST TIMESTAMP VALUE IS %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+select TEST_FUNC('2012-08-01 11:23:45'::char(20)) from dual;
+INFO:  TEST TIMESTAMP VALUE IS 2012-08-01 11:23:45
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('2012-08-01 11:23:45'::varchar2) from dual;
+INFO:  TEST TIMESTAMP VALUE IS 2012-08-01 11:23:45
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+drop function test_func(timestamp);
+--INTERVAL
+CREATE OR REPLACE FUNCTION TEST_FUNC(tempdata INTERVAL) RETURNS VOID AS $$
+BEGIN
+	raise info'TEST INTERVAL VALUE IS %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+select TEST_FUNC('1 day 18:00:00'::char(20)) from dual;
+INFO:  TEST INTERVAL VALUE IS @ 1 day 18 hours
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+select TEST_FUNC('1 day 18:00:00'::varchar2) from dual;
+INFO:  TEST INTERVAL VALUE IS @ 1 day 18 hours
+CONTEXT:  referenced column: test_func
+ test_func 
+-----------
+ 
+(1 row)
+
+drop function test_func(INTERVAL);
+create function ftime(a abstime)returns int
+as $$
+begin
+return 1;
+end;
+$$ language plpgsql;
+create function ftime(a timetz)returns int
+as $$
+begin
+return 1;
+end;
+$$ language plpgsql;
+select ftime('2012-11-14');
+ ftime 
+-------
+     1
+(1 row)
+
+create function funtime(a reltime) returns int
+as $$
+begin
+return 0;   
+end;                    
+$$ language plpgsql;
+create function funTime(a timestamptz)returns int
+as $$
+begin
+return 1;
+end;
+$$ language plpgsql;
+select funtime('2012-11-14');
+ERROR:  invalid input syntax for type reltime: "2012-11-14"
+LINE 1: select funtime('2012-11-14');
+                       ^
+CONTEXT:  referenced column: funtime
+values(1,1),(2,2.2);
+ column1 | column2 
+---------+---------
+       1 |       1
+       2 |     2.2
+(2 rows)
+
+SELECT 1 AS one UNION SELECT 1.1::float8;
+ one 
+-----
+   1
+ 1.1
+(2 rows)
+
+select greatest(1, 1.1);
+ greatest 
+----------
+      1.1
+(1 row)
+
+select greatest(1.1, 1);
+ greatest 
+----------
+      1.1
+(1 row)
+
+select least(1, 0.9);
+ least 
+-------
+    .9
+(1 row)
+
+select least(0.9, 1);
+ least 
+-------
+    .9
+(1 row)
+
+create or replace function test_cast(a numeric)
+returns int as
+$$
+declare
+
+begin
+	case a
+		when 1.1 then
+			raise info '%', '1.1';
+		when 1 then
+			raise info '%', '1';
+	end case;
+	return 1;
+end;
+$$ language plpgsql;
+select test_cast(1);
+INFO:  1
+CONTEXT:  referenced column: test_cast
+ test_cast 
+-----------
+         1
+(1 row)
+
+select test_cast(1.1);
+INFO:  1.1
+CONTEXT:  referenced column: test_cast
+ test_cast 
+-----------
+         1
+(1 row)
+
+create table test_cast( a numeric[]);
+insert into test_cast values(array[1,2,1.1,4]);
+select * from test_cast;
+      a      
+-------------
+ {1,2,1.1,4}
+(1 row)
+
+drop table test_cast;
+create table test_cast (a int);
+create table test_cast1 (a numeric);
+insert into test_cast values(1);
+insert into test_cast1 values(1.1);
+select * from test_cast join test_cast1 using (a);
+ a 
+---
+(0 rows)
+
+select * from test_cast where a in (1.1,2,3);
+ a 
+---
+(0 rows)
+
+CREATE TABLE test_cast2 (a INTEGER, b NUMERIC);
+INSERT INTO  test_cast2  VALUES(1.8,3.01);
+INSERT INTO  test_cast2  VALUES(1,2.0);
+INSERT INTO  test_cast2  VALUES(6,5.99);
+INSERT INTO  test_cast2  VALUES(0,-0.00);
+INSERT INTO  test_cast2  VALUES(3,1);
+INSERT INTO  test_cast2  VALUES(7,8);
+SELECT a FROM test_cast2 except SELECT  b FROM test_cast2 ORDER BY 1;
+ a 
+---
+ 3
+ 6
+ 7
+(3 rows)
+
+SELECT b FROM test_cast2 except SELECT  a FROM test_cast2 ORDER BY b;
+  b   
+------
+ 3.01
+ 5.99
+    8
+(3 rows)
+
+SELECT b FROM test_cast2 except SELECT  a FROM test_cast2 ORDER BY 1;
+  b   
+------
+ 3.01
+ 5.99
+    8
+(3 rows)
+
+SELECT a FROM test_cast2 except SELECT  b FROM test_cast2 ORDER BY a;
+ a 
+---
+ 3
+ 6
+ 7
+(3 rows)
+
+create table test_cast3(a char(10),b varchar(10));
+insert into test_cast3 values('  ','9');
+select nvl(a ,b) as RESULT from test_cast3;
+   result   
+------------
+           
+(1 row)
+
+select coalesce(a, b) as RESULT from test_cast3;
+   result   
+------------
+           
+(1 row)
+
+drop table test_cast;
+drop table test_cast1;
+drop table test_cast2;
+drop table test_cast3;
+drop function test_cast;
+create table test_raw(r raw);
+insert into test_raw values ('a');
+select r from test_raw order by r;
+ r  
+----
+ 0A
+(1 row)
+
+drop table test_raw;
+create table test_raw (r raw);
+insert into test_raw values ('a');
+insert into test_raw values ('b');
+insert into test_raw values ('s');
+ERROR:  invalid hexadecimal digit: "s"
+LINE 1: insert into test_raw values ('s');
+                                     ^
+CONTEXT:  referenced column: r
+insert into test_raw values ('as');
+ERROR:  invalid hexadecimal digit: "s"
+LINE 1: insert into test_raw values ('as');
+                                     ^
+CONTEXT:  referenced column: r
+insert into test_raw values ('c');
+insert into test_raw values ('f');
+insert into test_raw values ('dd');
+insert into test_raw values ('d');
+insert into test_raw values ('e');
+insert into test_raw values ('12');
+select r from test_raw order by r desc;
+ r  
+----
+ DD
+ 12
+ 0F
+ 0E
+ 0D
+ 0C
+ 0B
+ 0A
+(8 rows)
+
+select r from test_raw order by r asc;
+ r  
+----
+ 0A
+ 0B
+ 0C
+ 0D
+ 0E
+ 0F
+ 12
+ DD
+(8 rows)
+
+drop table test_raw;
+create table test_raw (a raw(1), b raw(1));
+insert into test_raw values ('a', 'a');
+insert into test_raw values ('b', 'c');
+insert into test_raw values ('d', '9');
+insert into test_raw values ('6', '6');
+insert into test_raw values ('5', 'f');
+select * from test_raw where a < b order by a desc;
+ a  | b  
+----+----
+ 0B | 0C
+ 05 | 0F
+(2 rows)
+
+select * from test_raw where a > b order by b asc;
+ a  | b  
+----+----
+ 0D | 09
+(1 row)
+
+select * from test_raw where a < b or a > b order by a desc;
+ a  | b  
+----+----
+ 0D | 09
+ 0B | 0C
+ 05 | 0F
+(3 rows)
+
+select * from test_raw where a < b or a > b order by a asc;
+ a  | b  
+----+----
+ 05 | 0F
+ 0B | 0C
+ 0D | 09
+(3 rows)
+
+select * from test_raw where a = b order by a desc;
+ a  | b  
+----+----
+ 0A | 0A
+ 06 | 06
+(2 rows)
+
+select * from test_raw where a = b order by a asc;
+ a  | b  
+----+----
+ 06 | 06
+ 0A | 0A
+(2 rows)
+
+select * from test_raw where a >= b order by a desc;
+ a  | b  
+----+----
+ 0D | 09
+ 0A | 0A
+ 06 | 06
+(3 rows)
+
+select * from test_raw where a >= b order by a asc;
+ a  | b  
+----+----
+ 06 | 06
+ 0A | 0A
+ 0D | 09
+(3 rows)
+
+select * from test_raw where a <= b order by a desc;
+ a  | b  
+----+----
+ 0B | 0C
+ 0A | 0A
+ 06 | 06
+ 05 | 0F
+(4 rows)
+
+select * from test_raw where a <= b order by a asc;
+ a  | b  
+----+----
+ 05 | 0F
+ 06 | 06
+ 0A | 0A
+ 0B | 0C
+(4 rows)
+
+drop table test_raw;
+create table test_raw1 (a raw(1), b raw(1));
+create table test_raw2 (a raw(1), b raw(1));
+insert into test_raw1 values ('a', 'a');
+insert into test_raw1 values ('b', '4');
+insert into test_raw1 values ('2', '9');
+insert into test_raw1 values ('6', '6');
+insert into test_raw1 values ('5', 'e');
+insert into test_raw2 values ('a', 'a');
+insert into test_raw2 values ('d', 'c');
+insert into test_raw2 values ('d', '9');
+insert into test_raw2 values ('2', '6');
+insert into test_raw2 values ('1', 'f');
+select * from test_raw1 where a like 'd';
+ a | b 
+---+---
+(0 rows)
+
+select * from test_raw1 test1 cross join test_raw2 test2 where test1.a = test2.b order by 1,2,3;
+ a  | b  | a  | b  
+----+----+----+----
+ 06 | 06 | 02 | 06
+ 0A | 0A | 0A | 0A
+(2 rows)
+
+select * from test_raw1 test1 join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 02 | 09 | 06
+ 0A | 0A | 0A
+(2 rows)
+
+select * from test_raw1 test1 full join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 01 |    | 0F
+ 02 | 09 | 06
+ 05 | 0E | 
+ 06 | 06 | 
+ 0A | 0A | 0A
+ 0B | 04 | 
+ 0D |    | 09
+ 0D |    | 0C
+(8 rows)
+
+select * from test_raw1 test1 left join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 02 | 09 | 06
+ 05 | 0E | 
+ 06 | 06 | 
+ 0A | 0A | 0A
+ 0B | 04 | 
+(5 rows)
+
+select * from test_raw1 test1 right join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 01 |    | 0F
+ 02 | 09 | 06
+ 0A | 0A | 0A
+ 0D |    | 09
+ 0D |    | 0C
+(5 rows)
+
+select * from test_raw1 test1 inner join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 02 | 09 | 06
+ 0A | 0A | 0A
+(2 rows)
+
+select * from test_raw1 test1 inner join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 02 | 09 | 06
+ 0A | 0A | 0A
+(2 rows)
+
+select * from test_raw1 test1 natural join test_raw2 test2 order by 1,2;
+ a  | b  
+----+----
+ 0A | 0A
+(1 row)
+
+drop table test_raw1;
+drop table test_raw2;
+CREATE SCHEMA DATA_TYPE;
+CREATE TABLE DATA_TYPE.INPUT_OF_ARRAY_003 (COL_INTERVAL_1 INTERVAL, COL_INTERVAL_2  INTERVAL[]);
+INSERT INTO DATA_TYPE.INPUT_OF_ARRAY_003 VALUES (1,'{1}');
+SELECT  *  FROM DATA_TYPE.INPUT_OF_ARRAY_003;
+ col_interval_1 | col_interval_2 
+----------------+----------------
+ @ 1 day        | {"@ 1 day"}
+(1 row)
+
+INSERT INTO DATA_TYPE.INPUT_OF_ARRAY_003 VALUES (2, '{3}');
+INSERT INTO DATA_TYPE.INPUT_OF_ARRAY_003 VALUES (10, '{10}');
+select * from DATA_TYPE.INPUT_OF_ARRAY_003 VALUES order by 1,2;
+ col_interval_1 | col_interval_2 
+----------------+----------------
+ @ 1 day        | {"@ 1 day"}
+ @ 2 days       | {"@ 3 days"}
+ @ 10 days      | {"@ 10 days"}
+(3 rows)
+
+INSERT INTO DATA_TYPE.INPUT_OF_ARRAY_003 VALUES (60, '{60}');
+INSERT INTO DATA_TYPE.INPUT_OF_ARRAY_003 VALUES (120, '{120}');
+select * from DATA_TYPE.INPUT_OF_ARRAY_003 VALUES  order by 1,2;
+ col_interval_1 | col_interval_2 
+----------------+----------------
+ @ 1 day        | {"@ 1 day"}
+ @ 2 days       | {"@ 3 days"}
+ @ 10 days      | {"@ 10 days"}
+ @ 60 days      | {"@ 60 days"}
+ @ 120 days     | {"@ 120 days"}
+(5 rows)
+
+INSERT INTO DATA_TYPE.INPUT_OF_ARRAY_003 VALUES (120, '{120, 100, 15, 20}');
+select * from DATA_TYPE.INPUT_OF_ARRAY_003 VALUES  order by 1,2;
+ col_interval_1 |                   col_interval_2                    
+----------------+-----------------------------------------------------
+ @ 1 day        | {"@ 1 day"}
+ @ 2 days       | {"@ 3 days"}
+ @ 10 days      | {"@ 10 days"}
+ @ 60 days      | {"@ 60 days"}
+ @ 120 days     | {"@ 120 days"}
+ @ 120 days     | {"@ 120 days","@ 100 days","@ 15 days","@ 20 days"}
+(6 rows)
+
+drop TABLE DATA_TYPE.INPUT_OF_ARRAY_003;
+drop SCHEMA DATA_TYPE;
+--int to char
+CREATE OR REPLACE PROCEDURE SP_TEST_1(V_CHAR CHAR)
+AS
+BEGIN
+END;
+/
+CREATE OR REPLACE PROCEDURE SP_TEST_2
+AS
+    V_INT INTEGER;
+BEGIN
+    V_INT := 123456789;
+    SP_TEST_1(V_INT);
+END;
+/
+CALL SP_TEST_2();
+ sp_test_2 
+-----------
+ 
+(1 row)
+
+DROP PROCEDURE SP_TEST_2;
+DROP PROCEDURE SP_TEST_1;
+CREATE OR REPLACE PROCEDURE SP_TEST_1(V_CHAR BPCHAR)
+AS
+BEGIN
+END;
+/
+CREATE OR REPLACE PROCEDURE SP_TEST_2
+AS
+    V_INT INTEGER;
+BEGIN
+    V_INT := 123456789;
+    SP_TEST_1(V_INT);
+END;
+/
+CALL SP_TEST_2();
+ sp_test_2 
+-----------
+ 
+(1 row)
+
+DROP PROCEDURE SP_TEST_2;
+DROP PROCEDURE SP_TEST_1;
+CREATE OR REPLACE PROCEDURE SP_TEST_1(V_CHAR text)
+AS
+BEGIN
+END;
+/
+CREATE OR REPLACE PROCEDURE SP_TEST_2
+AS
+    V_INT INTEGER;
+BEGIN
+    V_INT := 123456789;
+    SP_TEST_1(V_INT);
+END;
+/
+CALL SP_TEST_2();
+ sp_test_2 
+-----------
+ 
+(1 row)
+
+DROP PROCEDURE SP_TEST_2;
+DROP PROCEDURE SP_TEST_1;
+--create schema
+CREATE SCHEMA FVT_GAUSSDB_ADAPT_1;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_055(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with bpchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_055(tempdata BPCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'BPCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select varchar function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_055(cast('abc' as CLOB));
+INFO:  VARCHAR type value is abc
+CONTEXT:  referenced column: implicit_conversion_055
+ implicit_conversion_055 
+-------------------------
+ 
+(1 row)
+
+--select bpchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_055(VARCHAR);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_055(cast('abc' as CLOB));
+INFO:  BPCHAR type value is abc
+CONTEXT:  referenced column: implicit_conversion_055
+ implicit_conversion_055 
+-------------------------
+ 
+(1 row)
+
+--create function with text parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(tempdata TEXT) RETURNS VOID AS $$
+BEGIN
+ raise info'TEXT type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with numeric parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(tempdata NUMERIC) RETURNS VOID AS $$
+BEGIN
+ raise info'NUMERIC type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int8 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(tempdata INT8) RETURNS VOID AS $$
+BEGIN
+ raise info'INT8 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int4 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(tempdata INT4) RETURNS VOID AS $$
+BEGIN
+ raise info'INT4 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int2 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(tempdata INT2) RETURNS VOID AS $$
+BEGIN
+ raise info'INT2 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select numeric function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(cast('123.456' as float4));
+INFO:  NUMERIC type value is 123.456
+CONTEXT:  referenced column: implicit_conversion_056
+ implicit_conversion_056 
+-------------------------
+ 
+(1 row)
+
+--select text function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(NUMERIC);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(cast('123.456' as float4));
+INFO:  INT8 type value is 123
+CONTEXT:  referenced column: implicit_conversion_056
+ implicit_conversion_056 
+-------------------------
+ 
+(1 row)
+
+--select varchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(TEXT);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(cast('123.456' as float4));
+INFO:  INT8 type value is 123
+CONTEXT:  referenced column: implicit_conversion_056
+ implicit_conversion_056 
+-------------------------
+ 
+(1 row)
+
+--select int8 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(VARCHAR);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(cast('123.456' as float4));
+INFO:  INT8 type value is 123
+CONTEXT:  referenced column: implicit_conversion_056
+ implicit_conversion_056 
+-------------------------
+ 
+(1 row)
+
+--select in4 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(INT8);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(cast('123.456' as float4));
+INFO:  INT4 type value is 123
+CONTEXT:  referenced column: implicit_conversion_056
+ implicit_conversion_056 
+-------------------------
+ 
+(1 row)
+
+--select int2 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(INT4);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_056(cast('123.456' as float4));
+INFO:  INT2 type value is 123
+CONTEXT:  referenced column: implicit_conversion_056
+ implicit_conversion_056 
+-------------------------
+ 
+(1 row)
+
+--create function with text parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(tempdata TEXT) RETURNS VOID AS $$
+BEGIN
+ raise info'TEXT type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with numeric parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(tempdata NUMERIC) RETURNS VOID AS $$
+BEGIN
+ raise info'NUMERIC type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with float4 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(tempdata FLOAT4) RETURNS VOID AS $$
+BEGIN
+ raise info'FLOAT4 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with in8 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(tempdata INT8) RETURNS VOID AS $$
+BEGIN
+ raise info'INT8 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int4 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(tempdata INT4) RETURNS VOID AS $$
+BEGIN
+ raise info'INT4 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int2 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(tempdata INT2) RETURNS VOID AS $$
+BEGIN
+ raise info'INT2 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select numeric function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(cast('123.456' as float8));
+INFO:  NUMERIC type value is 123.456
+CONTEXT:  referenced column: implicit_conversion_057
+ implicit_conversion_057 
+-------------------------
+ 
+(1 row)
+
+--select text function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(NUMERIC);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(cast('123.456' as float8));
+INFO:  FLOAT4 type value is 123.456
+CONTEXT:  referenced column: implicit_conversion_057
+ implicit_conversion_057 
+-------------------------
+ 
+(1 row)
+
+--select varchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(TEXT);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(cast('123.456' as float8));
+INFO:  FLOAT4 type value is 123.456
+CONTEXT:  referenced column: implicit_conversion_057
+ implicit_conversion_057 
+-------------------------
+ 
+(1 row)
+
+--select float4 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(VARCHAR);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(cast('123.456' as float8));
+INFO:  FLOAT4 type value is 123.456
+CONTEXT:  referenced column: implicit_conversion_057
+ implicit_conversion_057 
+-------------------------
+ 
+(1 row)
+
+--select int8 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(FLOAT4);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(cast('123.456' as float8));
+INFO:  INT8 type value is 123
+CONTEXT:  referenced column: implicit_conversion_057
+ implicit_conversion_057 
+-------------------------
+ 
+(1 row)
+
+--select int4 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(INT8);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(cast('123.456' as float8));
+INFO:  INT4 type value is 123
+CONTEXT:  referenced column: implicit_conversion_057
+ implicit_conversion_057 
+-------------------------
+ 
+(1 row)
+
+--select int2 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(INT4);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_057(cast('123.456' as float8));
+INFO:  INT2 type value is 123
+CONTEXT:  referenced column: implicit_conversion_057
+ implicit_conversion_057 
+-------------------------
+ 
+(1 row)
+
+--create function with text parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_058(tempdata TEXT) RETURNS VOID AS $$
+BEGIN
+ raise info'TEXT type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_058(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with interval parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_058(tempdata INTERVAL) RETURNS VOID AS $$
+BEGIN
+ raise info'INTERVAL type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select text function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_058(cast('123' as int2));
+INFO:  INTERVAL type value is @ 123 days
+CONTEXT:  referenced column: implicit_conversion_058
+ implicit_conversion_058 
+-------------------------
+ 
+(1 row)
+
+--select varchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_058(TEXT);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_058(cast('123' as int2));
+INFO:  INTERVAL type value is @ 123 days
+CONTEXT:  referenced column: implicit_conversion_058
+ implicit_conversion_058 
+-------------------------
+ 
+(1 row)
+
+--select interval function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_058(VARCHAR);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_058(cast('123' as int2));
+INFO:  INTERVAL type value is @ 123 days
+CONTEXT:  referenced column: implicit_conversion_058
+ implicit_conversion_058 
+-------------------------
+ 
+(1 row)
+
+--create function with text parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(tempdata TEXT) RETURNS VOID AS $$
+BEGIN
+ raise info'TEXT type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int2 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(tempdata INT2) RETURNS VOID AS $$
+BEGIN
+ raise info'INT2 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with interval parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(tempdata INTERVAL) RETURNS VOID AS $$
+BEGIN
+ raise info'INTERVAL type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select text function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(cast('123' as int4));
+INFO:  INT2 type value is 123
+CONTEXT:  referenced column: implicit_conversion_059
+ implicit_conversion_059 
+-------------------------
+ 
+(1 row)
+
+--select varchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(TEXT);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(cast('123' as int4));
+INFO:  INT2 type value is 123
+CONTEXT:  referenced column: implicit_conversion_059
+ implicit_conversion_059 
+-------------------------
+ 
+(1 row)
+
+--select int2 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(VARCHAR);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(cast('123' as int4));
+INFO:  INT2 type value is 123
+CONTEXT:  referenced column: implicit_conversion_059
+ implicit_conversion_059 
+-------------------------
+ 
+(1 row)
+
+--select interval function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(INT2);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_059(cast('123' as int4));
+INFO:  INTERVAL type value is @ 123 days
+CONTEXT:  referenced column: implicit_conversion_059
+ implicit_conversion_059 
+-------------------------
+ 
+(1 row)
+
+--create function with text parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_060(tempdata TEXT) RETURNS VOID AS $$
+BEGIN
+ raise info'TEXT type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_060(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select text function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_060(cast('123' as int8));
+INFO:  TEXT type value is 123
+CONTEXT:  referenced column: implicit_conversion_060
+ implicit_conversion_060 
+-------------------------
+ 
+(1 row)
+
+--select varchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_060(TEXT);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_060(cast('123' as int8));
+INFO:  VARCHAR type value is 123
+CONTEXT:  referenced column: implicit_conversion_060
+ implicit_conversion_060 
+-------------------------
+ 
+(1 row)
+
+--create function with text parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(tempdata TEXT) RETURNS VOID AS $$
+BEGIN
+ raise info'TEXT type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int8 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(tempdata INT8) RETURNS VOID AS $$
+BEGIN
+ raise info'INT8 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int4 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(tempdata INT4) RETURNS VOID AS $$
+BEGIN
+ raise info'INT4 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int2 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(tempdata INT2) RETURNS VOID AS $$
+BEGIN
+ raise info'INT2 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with interval parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(tempdata INTERVAL) RETURNS VOID AS $$
+BEGIN
+ raise info'INTERVAL type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select text function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(cast('123.456' as numeric));
+INFO:  INT8 type value is 123
+CONTEXT:  referenced column: implicit_conversion_061
+ implicit_conversion_061 
+-------------------------
+ 
+(1 row)
+
+--select varchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(TEXT);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(cast('123.456' as numeric));
+INFO:  INT8 type value is 123
+CONTEXT:  referenced column: implicit_conversion_061
+ implicit_conversion_061 
+-------------------------
+ 
+(1 row)
+
+--select int8 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(VARCHAR);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(cast('123.456' as numeric));
+INFO:  INT8 type value is 123
+CONTEXT:  referenced column: implicit_conversion_061
+ implicit_conversion_061 
+-------------------------
+ 
+(1 row)
+
+--select in4 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(INT8);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(cast('123.456' as numeric));
+INFO:  INT4 type value is 123
+CONTEXT:  referenced column: implicit_conversion_061
+ implicit_conversion_061 
+-------------------------
+ 
+(1 row)
+
+--select int2 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(INT4);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(cast('123.456' as numeric));
+INFO:  INT2 type value is 123
+CONTEXT:  referenced column: implicit_conversion_061
+ implicit_conversion_061 
+-------------------------
+ 
+(1 row)
+
+--select interval function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(INT2);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_061(cast('12.345' as numeric));
+INFO:  INTERVAL type value is @ 12 days 8 hours 16 mins 48 secs
+CONTEXT:  referenced column: implicit_conversion_061
+ implicit_conversion_061 
+-------------------------
+ 
+(1 row)
+
+--create function with text parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_062(tempdata TEXT) RETURNS VOID AS $$
+BEGIN
+ raise info'TEXT type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_062(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select text function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_062(cast('0100ABC' as raw));
+INFO:  TEXT type value is 00100ABC
+CONTEXT:  referenced column: implicit_conversion_062
+ implicit_conversion_062 
+-------------------------
+ 
+(1 row)
+
+--select varchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_062(TEXT);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_062(cast('0100ABC' as raw));
+INFO:  VARCHAR type value is 00100ABC
+CONTEXT:  referenced column: implicit_conversion_062
+ implicit_conversion_062 
+-------------------------
+ 
+(1 row)
+
+--create function with numeric parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(tempdata NUMERIC) RETURNS VOID AS $$
+BEGIN
+ raise info'NUMERIC type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with float8 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(tempdata FLOAT8) RETURNS VOID AS $$
+BEGIN
+ raise info'FLOAT8 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with float4 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(tempdata FLOAT4) RETURNS VOID AS $$
+BEGIN
+ raise info'FLOAT4 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int8 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(tempdata INT8) RETURNS VOID AS $$
+BEGIN
+ raise info'INT8 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int4 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(tempdata INT4) RETURNS VOID AS $$
+BEGIN
+ raise info'INT4 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with int2 parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(tempdata INT2) RETURNS VOID AS $$
+BEGIN
+ raise info'INT2 type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with raw parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(tempdata RAW) RETURNS VOID AS $$
+BEGIN
+ raise info'RAW type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select numeric function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(cast('123.456' as text));
+INFO:  NUMERIC type value is 123.456
+CONTEXT:  referenced column: implicit_conversion_063
+ implicit_conversion_063 
+-------------------------
+ 
+(1 row)
+
+--select float8 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(NUMERIC);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(cast('123.456' as text));
+INFO:  FLOAT8 type value is 123.456
+CONTEXT:  referenced column: implicit_conversion_063
+ implicit_conversion_063 
+-------------------------
+ 
+(1 row)
+
+--select float4 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(FLOAT8);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(cast('123.456' as text));
+INFO:  FLOAT4 type value is 123.456
+CONTEXT:  referenced column: implicit_conversion_063
+ implicit_conversion_063 
+-------------------------
+ 
+(1 row)
+
+--select int8 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(FLOAT4);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(cast('123.456' as text));
+ERROR:  invalid input syntax for type bigint: "123.456"
+CONTEXT:  referenced column: implicit_conversion_063
+--select int4 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(INT8);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(cast('123.56' as text));
+ERROR:  invalid input syntax for integer: "123.56"
+CONTEXT:  referenced column: implicit_conversion_063
+--select int2 function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(INT4);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(cast('123.456' as text));
+ERROR:  invalid input syntax for integer: "123.456"
+CONTEXT:  referenced column: implicit_conversion_063
+--select raw function, failed! donot have text to raw implicit cast
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(INT2);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(cast('123' as text));
+ERROR:  function fvt_gaussdb_adapt_1.implicit_conversion_063(text) does not exist
+LINE 1: select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_063(cast('123...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: implicit_conversion_063
+--create function with text parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_064(tempdata TEXT) RETURNS VOID AS $$
+BEGIN
+ raise info'TEXT type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--create function with varchar parameter
+CREATE OR REPLACE FUNCTION FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_064(tempdata VARCHAR) RETURNS VOID AS $$
+BEGIN
+ raise info'VARCHAR type value is %',tempdata;  
+END;
+$$ LANGUAGE plpgsql;
+--select text function
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_064(cast('2004-10-19 10:23:54' as timestamp));
+INFO:  TEXT type value is 2004-10-19 10:23:54
+CONTEXT:  referenced column: implicit_conversion_064
+ implicit_conversion_064 
+-------------------------
+ 
+(1 row)
+
+--select varchar function
+drop function FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_064(TEXT);
+select FVT_GAUSSDB_ADAPT_1.IMPLICIT_CONVERSION_064(cast('2004-10-19 10:23:54' as timestamp));
+INFO:  VARCHAR type value is 2004-10-19 10:23:54
+CONTEXT:  referenced column: implicit_conversion_064
+ implicit_conversion_064 
+-------------------------
+ 
+(1 row)
+
+--drop schema
+DROP SCHEMA FVT_GAUSSDB_ADAPT_1;
+ERROR:  cannot drop schema fvt_gaussdb_adapt_1 because other objects depend on it
+DETAIL:  function fvt_gaussdb_adapt_1.implicit_conversion_055(character) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_056(smallint) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_057(smallint) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_058(interval) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_059(interval) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_060(character varying) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_061(interval) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_062(character varying) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_063(raw) depends on schema fvt_gaussdb_adapt_1
+function fvt_gaussdb_adapt_1.implicit_conversion_064(character varying) depends on schema fvt_gaussdb_adapt_1
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+--
+-- INT1
+--
+CREATE TABLE TINYINT_TBL(f1 tinyint);
+INSERT INTO TINYINT_TBL(f1) VALUES (123.5     );
+INSERT INTO TINYINT_TBL(f1) VALUES ('20     ');
+INSERT INTO TINYINT_TBL(f1) VALUES ('');
+INSERT INTO TINYINT_TBL(f1) VALUES (null);
+-- largest and smallest values
+INSERT INTO TINYINT_TBL(f1) VALUES ('255');
+INSERT INTO TINYINT_TBL(f1) VALUES ('0'); 
+-- bad input values -- should give errors
+INSERT INTO TINYINT_TBL(f1) VALUES ('    -1');
+ERROR:  value "    -1" is out of range for 8-bit integer
+LINE 1: INSERT INTO TINYINT_TBL(f1) VALUES ('    -1');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO TINYINT_TBL(f1) VALUES ('256');
+ERROR:  value "256" is out of range for 8-bit integer
+LINE 1: INSERT INTO TINYINT_TBL(f1) VALUES ('256');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO TINYINT_TBL(f1) VALUES ('asdf');
+ERROR:  invalid input syntax for integer: "asdf"
+LINE 1: INSERT INTO TINYINT_TBL(f1) VALUES ('asdf');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO TINYINT_TBL(f1) VALUES ('     ');
+ERROR:  invalid input syntax for integer: "     "
+LINE 1: INSERT INTO TINYINT_TBL(f1) VALUES ('     ');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO TINYINT_TBL(f1) VALUES ('   asdf   ');
+ERROR:  invalid input syntax for integer: "   asdf   "
+LINE 1: INSERT INTO TINYINT_TBL(f1) VALUES ('   asdf   ');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO TINYINT_TBL(f1) VALUES ('- 1234');
+ERROR:  invalid input syntax for integer: "- 1234"
+LINE 1: INSERT INTO TINYINT_TBL(f1) VALUES ('- 1234');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO TINYINT_TBL(f1) VALUES ('123       5');
+ERROR:  invalid input syntax for integer: "123       5"
+LINE 1: INSERT INTO TINYINT_TBL(f1) VALUES ('123       5');
+                                            ^
+CONTEXT:  referenced column: f1
+INSERT INTO TINYINT_TBL(f1) VALUES ('34.5');
+ERROR:  invalid input syntax for integer: "34.5"
+LINE 1: INSERT INTO TINYINT_TBL(f1) VALUES ('34.5');
+                                            ^
+CONTEXT:  referenced column: f1
+SELECT '' AS six, * FROM TINYINT_TBL ORDER BY 1,2;
+ six | f1  
+-----+-----
+     | 0
+     | 20
+     | 124
+     | 255
+     | 
+     | 
+(6 rows)
+
+SELECT '' AS three, i.* FROM TINYINT_TBL i WHERE i.f1 <> int2 '0' ORDER BY 1,2;
+ three | f1  
+-------+-----
+       | 20
+       | 124
+       | 255
+(3 rows)
+
+SELECT '' AS three, i.* FROM TINYINT_TBL i WHERE i.f1 <> tinyint '0' ORDER BY 1,2;
+ three | f1  
+-------+-----
+       | 20
+       | 124
+       | 255
+(3 rows)
+
+SELECT '' AS one, i.* FROM TINYINT_TBL i WHERE i.f1 = int2 '0' ORDER BY 1,2;
+ one | f1 
+-----+----
+     | 0
+(1 row)
+
+SELECT '' AS one, i.* FROM TINYINT_TBL i WHERE i.f1 = tinyint '0' ORDER BY 1,2;
+ one | f1 
+-----+----
+     | 0
+(1 row)
+
+SELECT '' AS is_zone, i.* FROM TINYINT_TBL i WHERE i.f1 < int2 '0' ORDER BY 1,2;
+ is_zone | f1 
+---------+----
+(0 rows)
+
+SELECT '' AS is_zone, i.* FROM TINYINT_TBL i WHERE i.f1 < tinyint '0' ORDER BY 1,2;
+ is_zone | f1 
+---------+----
+(0 rows)
+
+SELECT '' AS one, i.* FROM TINYINT_TBL i WHERE i.f1 <= int2 '0' ORDER BY 1,2;
+ one | f1 
+-----+----
+     | 0
+(1 row)
+
+SELECT '' AS one, i.* FROM TINYINT_TBL i WHERE i.f1 <= tinyint '0' ORDER BY 1,2;
+ one | f1 
+-----+----
+     | 0
+(1 row)
+
+SELECT '' AS three, i.* FROM TINYINT_TBL i WHERE i.f1 > int2 '0' ORDER BY 1,2;
+ three | f1  
+-------+-----
+       | 20
+       | 124
+       | 255
+(3 rows)
+
+SELECT '' AS three, i.* FROM TINYINT_TBL i WHERE i.f1 > tinyint '0' ORDER BY 1,2;
+ three | f1  
+-------+-----
+       | 20
+       | 124
+       | 255
+(3 rows)
+
+SELECT '' AS four, i.* FROM TINYINT_TBL i WHERE i.f1 >= int2 '0' ORDER BY 1,2;
+ four | f1  
+------+-----
+      | 0
+      | 20
+      | 124
+      | 255
+(4 rows)
+
+SELECT '' AS four, i.* FROM TINYINT_TBL i WHERE i.f1 >= tinyint '0' ORDER BY 1,2;
+ four | f1  
+------+-----
+      | 0
+      | 20
+      | 124
+      | 255
+(4 rows)
+
+-- positive odds
+SELECT '' AS one, i.* FROM TINYINT_TBL i WHERE (i.f1 % int2 '2') = int2 '1' ORDER BY 1,2;
+ one | f1  
+-----+-----
+     | 255
+(1 row)
+
+-- any evens
+SELECT '' AS three, i.* FROM TINYINT_TBL i WHERE (i.f1 % int4 '2') = int2 '0' ORDER BY 1,2;
+ three | f1  
+-------+-----
+       | 0
+       | 20
+       | 124
+(3 rows)
+
+SELECT '' AS out_limit, i.f1, i.f1 * tinyint '2' AS x FROM TINYINT_TBL i ORDER BY 1,2;
+ out_limit | f1  |  x  
+-----------+-----+-----
+           | 0   |   0
+           | 20  |  40
+           | 124 | 248
+           | 255 | 510
+           |     |    
+           |     |    
+(6 rows)
+
+SELECT '' AS three, i.f1, i.f1 * tinyint '2' AS x FROM TINYINT_TBL i
+WHERE abs(f1) < 128 ORDER BY 1,2;
+ three | f1  |  x  
+-------+-----+-----
+       | 0   |   0
+       | 20  |  40
+       | 124 | 248
+(3 rows)
+
+SELECT '' AS out_limit, i.f1, i.f1 + tinyint '1' AS x FROM TINYINT_TBL i ORDER BY 1,2;
+ out_limit | f1  |  x  
+-----------+-----+-----
+           | 0   |   1
+           | 20  |  21
+           | 124 | 125
+           | 255 | 256
+           |     |    
+           |     |    
+(6 rows)
+
+SELECT '' AS three, i.f1, i.f1 + tinyint '1' AS x FROM TINYINT_TBL i
+WHERE f1 < 255 ORDER BY 1,2;
+ three | f1  |  x  
+-------+-----+-----
+       | 0   |   1
+       | 20  |  21
+       | 124 | 125
+(3 rows)
+
+SELECT '' AS out_limit, i.f1, i.f1 - tinyint '1' AS x FROM TINYINT_TBL i ORDER BY 1,2;
+ out_limit | f1  |  x  
+-----------+-----+-----
+           | 0   |  -1
+           | 20  |  19
+           | 124 | 123
+           | 255 | 254
+           |     |    
+           |     |    
+(6 rows)
+
+SELECT '' AS three, i.f1, i.f1 - tinyint '1' AS x FROM TINYINT_TBL ORDER BY 1,2i
+WHERE f1 > 0;
+ERROR:  syntax error at or near "i"
+LINE 1: ...i.f1, i.f1 - tinyint '1' AS x FROM TINYINT_TBL ORDER BY 1,2i
+                                                                      ^
+SELECT '' AS two, i.f1, i.f1 - int4 '1' AS x FROM TINYINT_TBL i ORDER BY 1,2;
+ two | f1  |  x  
+-----+-----+-----
+     | 0   |  -1
+     | 20  |  19
+     | 124 | 123
+     | 255 | 254
+     |     |    
+     |     |    
+(6 rows)
+
+SELECT '' AS six, i.f1, i.f1 / int2 '2' AS x FROM TINYINT_TBL i ORDER BY 1,2;
+ six | f1  |   x   
+-----+-----+-------
+     | 0   |     0
+     | 20  |    10
+     | 124 |    62
+     | 255 | 127.5
+     |     |      
+     |     |      
+(6 rows)
+
+SELECT '' AS six, i.f1, i.f1 / int4 '2' AS x FROM TINYINT_TBL i ORDER BY 1,2;
+ six | f1  |   x   
+-----+-----+-------
+     | 0   |     0
+     | 20  |    10
+     | 124 |    62
+     | 255 | 127.5
+     |     |      
+     |     |      
+(6 rows)
+
+SELECT ''AS two, * FROM TINYINT_TBL WHERE f1 is null ORDER BY 1,2;
+ two | f1 
+-----+----
+     | 
+     | 
+(2 rows)
+
+SELECT ''AS zero, * FROM TINYINT_TBL WHERE f1='' ORDER BY 1,2;
+ zero | f1 
+------+----
+(0 rows)
+
+--
+-- more complex expressions
+--
+update TINYINT_TBL set f1=f1+1 ; 
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: f1
+drop table TINYINT_TBL;
+-- variations on unary minus parsing
+SELECT tinyint '2' * int2 '2' = int2 '16' / int2 '4' AS true;
+ true 
+------
+ t
+(1 row)
+
+SELECT tinyint '2' * int2 '2' = int2 '16' / int4 '4' AS true;
+ true 
+------
+ t
+(1 row)
+
+SELECT tinyint '2' * int4 '2' = int4 '16' / int2 '4' AS true;
+ true 
+------
+ t
+(1 row)
+
+SELECT tinyint '100' < tinyint '99' AS false;
+ false 
+-------
+ f
+(1 row)
+
+-- corner case
+SELECT (1::tinyint<<8)::text;       
+ text 
+------
+ 256
+(1 row)
+
+SELECT ((1::tinyint<<8)-1)::text;
+ text 
+------
+ 255
+(1 row)
+
+show convert_string_to_digit;
+ convert_string_to_digit 
+-------------------------
+ on
+(1 row)
+
+select 2 > '15'::text;
+ ?column? 
+----------
+ f
+(1 row)
+
+set convert_string_to_digit = off;
+select 2 > '15'::text;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT pg_catalog.array_dims(' '::anyarray) AS a
+,LENGTH(pg_catalog.array_dims(' '::anyarray)) AS b
+FROM dual;
+ERROR:  array value must start with "{" or dimension information
+LINE 1: SELECT pg_catalog.array_dims(' '::anyarray) AS a
+                                     ^
+CONTEXT:  referenced column: a
+SELECT pg_catalog.array_to_string(' '::anyarray,' '::text) AS a
+,LENGTH(pg_catalog.array_to_string(' '::anyarray,' '::text)) AS b
+FROM dual;
+ERROR:  array value must start with "{" or dimension information
+LINE 1: SELECT pg_catalog.array_to_string(' '::anyarray,' '::text) A...
+                                          ^
+CONTEXT:  referenced column: a
+SELECT pg_catalog.array_to_string(' '::anyarray,' '::text,''::text) AS a
+,LENGTH(pg_catalog.array_to_string(' '::anyarray,' '::text,' '::text)) AS b
+FROM dual;
+ERROR:  array value must start with "{" or dimension information
+LINE 1: SELECT pg_catalog.array_to_string(' '::anyarray,' '::text,''...
+                                          ^
+CONTEXT:  referenced column: a
+SELECT pg_catalog.array_dims('{1,2,3}'::anyarray) AS a
+,LENGTH(pg_catalog.array_dims('{1,2,3}'::anyarray)) AS b
+FROM dual;
+ERROR:  array value must start with "{" or dimension information
+LINE 1: SELECT pg_catalog.array_dims('{1,2,3}'::anyarray) AS a
+                                     ^
+CONTEXT:  referenced column: a

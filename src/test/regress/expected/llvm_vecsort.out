@@ -1,0 +1,1196 @@
+/*
+ * This file is used to test the function of sort & sortagg with LLVM Optimization
+ */
+----
+--- Create Table and Insert Data
+----
+drop schema if exists llvm_vecsort_engine cascade;
+NOTICE:  schema "llvm_vecsort_engine" does not exist, skipping
+create schema llvm_vecsort_engine;
+set current_schema = llvm_vecsort_engine;
+set codegen_cost_threshold=0;
+CREATE TABLE llvm_vecsort_engine.LLVM_VECSORT_TABLE_01(
+    col_int1	int,
+    col_int2	int,
+    col_bint	bigint,
+    coL_char1	char(1),
+    col_bpchar1	bpchar(3),
+    col_bpchar2	bpchar(7),
+    col_bpchar3	bpchar(15),
+    col_bpchar4	bpchar(24),
+    col_varchar1	varchar(8),
+    col_varchar2	varchar(11),
+    col_varchar3	varchar(23),
+    col_varchar4	varchar(40)
+)with(orientation=column);
+copy llvm_vecsort_table_01 from stdin;
+CREATE TABLE llvm_vecsort_engine.LLVM_VECSORT_TABLE_02(
+    col_int	int,
+    col_bint	bigint,
+    col_num1	numeric(9,2),
+    col_num2	numeric(15,4),
+    col_num3	numeric(18,0),
+    col_num4	numeric(18,4),
+    col_num5	numeric(22,18),
+    col_num6	numeric(40,19),
+    col_num7	numeric(40,24),
+    col_text	text,
+    col_vchar	varchar(15)
+)with(orientation=column);
+copy llvm_vecsort_table_02 from stdin;
+create table llvm_vecsort_engine.LLVM_VECSORT_TABLE_03
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+) with (orientation = column);
+insert into llvm_vecsort_table_03 select * from vector_engine.lineitem_vec where L_ORDERKEY < 4962;
+analyze llvm_vecsort_table_01;
+analyze llvm_vecsort_table_02;
+analyze llvm_vecsort_table_03;
+----
+--- test1 : test comparemulticolumns with different data type in sort node
+----
+-- test with char, varchar type
+select col_int1, col_int2 from llvm_vecsort_table_01 order by col_int1, col_int2;
+ col_int1 | col_int2 
+----------+----------
+      -21 |       -1
+        0 |        0
+        1 |        1
+        1 |        1
+        2 |        2
+        3 |       89
+        7 |      -72
+        7 |      -72
+        7 |      123
+        7 |      123
+        9 |         
+        9 |         
+       15 |      890
+       17 |       58
+       21 |        1
+       90 |       34
+       90 |       34
+          |         
+(18 rows)
+
+select col_bint from llvm_vecsort_table_01 order by col_bint;
+     col_bint     
+------------------
+     -89008987776
+           -58795
+               -1
+                0
+               26
+              126
+              256
+              458
+             9856
+            11116
+            11116
+            45896
+            75896
+         12587487
+        145872599
+ 2158744521187556
+                 
+                 
+(18 rows)
+
+select col_char1 from llvm_vecsort_table_01 order by col_char1, col_bint;
+ col_char1 
+-----------
+ A
+ A
+ A
+ A
+ A
+ B
+ B
+ B
+ B
+ B
+ C
+ C
+ D
+ D
+ N
+ 
+ 
+ 
+(18 rows)
+
+select col_bpchar1, col_bpchar2 from llvm_vecsort_table_01 order by col_bpchar1, col_bpchar2;
+ col_bpchar1 | col_bpchar2 
+-------------+-------------
+ AMX         | aMX    
+ AMX         | AMX    
+ AMX         | KUL    
+ CJ          | LIKEA  
+ KUX         | XJPUIO 
+ NO          | THH    
+ tea         | beauty 
+ TI          | ZUKK6  
+ TMT         | likehim
+ TMT         | likehim
+ TUI         | ZUK    
+ TUI         | ZUKK   
+ TUI         | 
+ UIL         | be     
+ ZUI         | JUK    
+ ZUX         | XJPUIO 
+             | XJPUIOT
+             | 
+(18 rows)
+
+select col_bpchar1, col_bpchar3 from llvm_vecsort_table_01 order by col_bpchar1, col_bpchar3; 
+ col_bpchar1 |   col_bpchar3   
+-------------+-----------------
+ AMX         | 
+ AMX         | 
+ AMX         | 
+ CJ          | 
+ KUX         | shijiazhu      
+ NO          | akindleissogood
+ tea         | while          
+ TI          | shijiazhu      
+ TMT         | beagoodguy     
+ TMT         | beagoodguy     
+ TUI         | shanghai       
+ TUI         | tianjing       
+ TUI         | tianjing       
+ UIL         | akindleissogood
+ ZUI         | beijing        
+ ZUX         | shijiazhu      
+             | tianjing       
+             | 
+(18 rows)
+
+select col_bpchar3, col_bpchar4 from llvm_vecsort_table_01 order by col_bpchar3, col_bpchar4;
+   col_bpchar3   |       col_bpchar4        
+-----------------+--------------------------
+ akindleissogood | AJ                      
+ akindleissogood | Zo                      
+ beagoodguy      | justforfunandjustforfuna
+ beagoodguy      | justforfunandjustforfuna
+ beijing         | bookisfriend            
+ shanghai        | c                       
+ shijiazhu       | j00142589678            
+ shijiazhu       | kehlssince1985          
+ shijiazhu       | kehlssince1985          
+ tianjing        | j00142589678            
+ tianjing        | kehlssince              
+ tianjing        | z25687459               
+ while           | ZooK                    
+                 | dayisdayisday           
+                 | dayisdayisday           
+                 | dayisdayisday           
+                 | u                       
+                 | 
+(18 rows)
+
+select col_varchar1, col_varchar2 from llvm_vecsort_table_01 order by col_varchar1, col_varchar2;
+ col_varchar1 | col_varchar2 
+--------------+--------------
+ be           | P
+ far          | bottle
+ great        | uuuuuuuuuuu
+ greatest     | greate
+ how          | 
+ how          | 
+ LK           | outputlink
+ LK           | outputlink
+ P            | outputlink
+ test         | bottle
+ u            | u
+ ugg          | ugg
+ uuc          | testa
+ zara         | 
+ ZK           | TINK
+              | uuuuuuuuuuu
+              | uuuuuuuuuuu
+              | 
+(18 rows)
+
+select col_varchar3, col_varchar4 from llvm_vecsort_table_01 order by col_varchar3, col_varchar4;
+      col_varchar3       |             col_varchar4              
+-------------------------+---------------------------------------
+ awa                     | ABT
+ awayfromhome            | whataboutwhat
+ begreater               | formulatedwithsqualanceandantioxidant
+ begreater               | formulatedwithsqualanceandantioxidant
+ begreater               | formulatedwithsqualanceandantioxidant
+ begreater               | 
+ far                     | farha
+ ki                      | u
+ mergesort               | hereissheandbeau
+ mergesort               | letusmakeupajokefortea
+ mergesortinternal       | likehere
+ u                       | faraway
+ uoooooooooou            | formulatedwithsqualanceandantioxidant
+ whatisgoodfortodaysfood | begreat
+ zooisforchildren        | letusmakeupajokeforteacher
+                         | hereisshe
+                         | hereisshe
+                         | 
+(18 rows)
+
+select col_varchar1, col_varchar3, col_varchar4 from llvm_vecsort_table_01 order by col_varchar1, col_varchar3, col_varchar4;
+ col_varchar1 |      col_varchar3       |             col_varchar4              
+--------------+-------------------------+---------------------------------------
+ be           | mergesortinternal       | likehere
+ far          | zooisforchildren        | letusmakeupajokeforteacher
+ great        | begreater               | formulatedwithsqualanceandantioxidant
+ greatest     | uoooooooooou            | formulatedwithsqualanceandantioxidant
+ how          | awa                     | ABT
+ how          | awayfromhome            | whataboutwhat
+ LK           | mergesort               | hereissheandbeau
+ LK           |                         | hereisshe
+ P            |                         | hereisshe
+ test         | whatisgoodfortodaysfood | begreat
+ u            | u                       | faraway
+ ugg          | ki                      | u
+ uuc          | far                     | farha
+ zara         | mergesort               | letusmakeupajokefortea
+ ZK           | begreater               | 
+              | begreater               | formulatedwithsqualanceandantioxidant
+              | begreater               | formulatedwithsqualanceandantioxidant
+              |                         | 
+(18 rows)
+
+select col_int1, col_bint, col_varchar3, col_varchar4 from llvm_vecsort_table_01 order by col_int1, col_bint, col_varchar1, col_varchar3, col_varchar4;
+ col_int1 |     col_bint     |      col_varchar3       |             col_varchar4              
+----------+------------------+-------------------------+---------------------------------------
+      -21 |           -58795 | mergesort               | letusmakeupajokefortea
+        0 |         12587487 | mergesortinternal       | likehere
+        1 |              126 | whatisgoodfortodaysfood | begreat
+        1 |              458 | begreater               | formulatedwithsqualanceandantioxidant
+        2 |              256 | zooisforchildren        | letusmakeupajokeforteacher
+        3 | 2158744521187556 | uoooooooooou            | formulatedwithsqualanceandantioxidant
+        7 |             9856 |                         | hereisshe
+        7 |            11116 |                         | hereisshe
+        7 |            45896 | awayfromhome            | whataboutwhat
+        7 |            75896 | awa                     | ABT
+        9 |               -1 | begreater               | 
+        9 |            11116 | mergesort               | hereissheandbeau
+       15 |                  | ki                      | u
+       17 |               26 | far                     | farha
+       21 |        145872599 | u                       | faraway
+       90 |     -89008987776 | begreater               | formulatedwithsqualanceandantioxidant
+       90 |                0 | begreater               | formulatedwithsqualanceandantioxidant
+          |                  |                         | 
+(18 rows)
+
+select col_varchar1, col_varchar4 from (select * from llvm_vecsort_table_01 order by col_bpchar2, col_bpchar3) order by col_varchar1, col_varchar4;
+ col_varchar1 |             col_varchar4              
+--------------+---------------------------------------
+ be           | likehere
+ far          | letusmakeupajokeforteacher
+ great        | formulatedwithsqualanceandantioxidant
+ greatest     | formulatedwithsqualanceandantioxidant
+ how          | ABT
+ how          | whataboutwhat
+ LK           | hereisshe
+ LK           | hereissheandbeau
+ P            | hereisshe
+ test         | begreat
+ u            | faraway
+ ugg          | u
+ uuc          | farha
+ zara         | letusmakeupajokefortea
+ ZK           | 
+              | formulatedwithsqualanceandantioxidant
+              | formulatedwithsqualanceandantioxidant
+              | 
+(18 rows)
+
+-- test with numric type
+select col_int, col_num1 from llvm_vecsort_table_02 order by col_int, col_num1;
+ col_int | col_num1  
+---------+-----------
+      -1 |     25.36
+      -1 |     45.00
+       0 |       .01
+       1 |     -3.56
+       1 |      2.56
+       1 |     45.00
+       1 |     65.00
+       1 |     65.00
+       2 | 986580.21
+       2 |          
+       2 |          
+       2 |          
+       9 |    125.80
+      27 |   -256.00
+      27 |          
+      90 |   3657.25
+     688 |    -65.35
+   12587 |      -.60
+         | 986580.21
+         | 986580.21
+(20 rows)
+
+select col_num3, col_int from llvm_vecsort_table_02 order by col_num3, col_int;
+    col_num3     | col_int 
+-----------------+---------
+ -14587952546710 |       2
+        -9865472 |       1
+             -24 |      -1
+               0 |      27
+               6 |      27
+               7 |       1
+              96 |     688
+             125 |      90
+             867 |       1
+             875 |   12587
+           12584 |        
+           12584 |        
+          789568 |       2
+         7854956 |       2
+        58325587 |       1
+        89657852 |       9
+   9865878588888 |       0
+  14587952546710 |      -1
+  14587952546710 |       1
+                 |       2
+(20 rows)
+
+select col_num2, col_num4 from llvm_vecsort_table_02 order by col_num2, col_num4;
+    col_num2    |   col_num4   
+----------------+--------------
+      -124.2360 |    -458.2580
+       -20.5000 |       0.0000
+       -12.3657 |     698.2500
+          .0001 |      95.8600
+         3.3000 |      -6.8900
+         3.3000 |       6.5000
+         3.3000 |             
+         6.3000 |      45.6800
+         9.3000 |       6.2100
+         9.3000 |       6.8900
+        45.5400 |   14587.2582
+        65.2540 |     125.0000
+        98.0000 |     568.3600
+       145.2456 | 1587795.2500
+       698.2580 |             
+       963.3689 |   -3457.2580
+      5686.0000 |      12.2580
+ 123456789.3600 |    1457.2580
+ 123456789.3600 |    1457.2580
+                |     589.0000
+(20 rows)
+
+select col_num3, col_num5 from llvm_vecsort_table_02 order by col_num3, col_num5;
+    col_num3     |        col_num5         
+-----------------+-------------------------
+ -14587952546710 |    9.860000000000000000
+        -9865472 | 1254.254630000000000000
+             -24 |  201.021111111000000000
+               0 |    0.000000000000000000
+               6 |   56.300000000000000000
+               7 |   58.325856587496852478
+              96 |                        
+             125 |     .250000000000000000
+             867 |   58.300000000000000000
+             875 |    -.000000100000000000
+           12584 |   98.689324756870000000
+           12584 |   98.689324756890000000
+          789568 |    -.250000000000000000
+         7854956 |  -98.689324756870000000
+        58325587 |   15.125895648568984580
+        89657852 |    1.000000000000000000
+   9865878588888 | 1250.125800000000000001
+  14587952546710 |    9.860000000000000000
+  14587952546710 |                        
+                 |                        
+(20 rows)
+
+select col_num6 from llvm_vecsort_table_02 order by col_num6;
+               col_num6                
+---------------------------------------
+         -78955877.2568752000000000000
+           -458697.1258000000000000000
+              -125.2525252525252524000
+                -3.6980000000000000000
+                 0.0000000000000000000
+                  .0100000000000000000
+                  .3560000000000000000
+                69.3333333333333320000
+                69.3333333333333330000
+                69.3333333333333330000
+               125.2525252525252524000
+               125.2525252525252525000
+               145.2000000040000000000
+               193.0000000000000000000
+               293.0000000000000000000
+               693.0000000000000000000
+              1452.2587800000000000000
+ 12547825478288752.2500000000000000000
+                                      
+                                      
+(20 rows)
+
+select col_num7, col_text from llvm_vecsort_table_02 order by col_num7, col_text;
+              col_num7              |      col_text       
+------------------------------------+---------------------
+  -1458772.125458000000000000000000 | likeherebutthere
+      -546.256478954268425634880000 | begreateZUKI
+         -.258965870000000000000000 | begreater
+         0.000000000000000000000000 | KUI
+         1.256890000000000000000000 | TUI
+         2.365878965478951258700000 | input
+         2.365878965478951258725478 | input
+         2.365878965478951258725478 | input
+         2.368000000000000000000000 | begoodandissolikeag
+         2.368000000000000000000000 | 
+         9.368000000000000000000000 | begoodandissolikeah
+         9.658700000000000000000000 | begreatet
+       254.365489879933333253000000 | justforyou
+       256.365450000000000000000000 | likeherebutthere
+       546.256478954268425634880000 | begreateh
+       546.256478954268425634890000 | begoodandissolikeat
+     45687.125874900000000000000000 | goanywhere
+ 478587878.222222222222222222254800 | likehere
+                                    | YUI
+                                    | 
+(20 rows)
+
+select col_text, col_vchar from llvm_vecsort_table_02 order by col_text, col_vchar;
+      col_text       |    col_vchar    
+---------------------+-----------------
+ begoodandissolikeag | gofarawaye
+ begoodandissolikeah | gofaraway
+ begoodandissolikeat | justforfun
+ begreateh           | likehereb
+ begreater           | likeherea
+ begreatet           | dg
+ begreateZUKI        | likeherec
+ goanywhere          | likeare
+ input               | jump
+ input               | 
+ input               | 
+ justforyou          | are
+ KUI                 | PORT
+ likehere            | a
+ likeherebutthere    | likeareb
+ likeherebutthere    | uggui
+ TUI                 | KIND
+ YUI                 | portportportway
+                     | gofaraway
+                     | gofarawaye
+(20 rows)
+
+select col_num1, col_num7, col_text from llvm_vecsort_table_02 order by col_num1, col_num7, col_text;
+ col_num1  |              col_num7              |      col_text       
+-----------+------------------------------------+---------------------
+   -256.00 |         0.000000000000000000000000 | KUI
+    -65.35 |         9.658700000000000000000000 | begreatet
+     -3.56 |     45687.125874900000000000000000 | goanywhere
+      -.60 |         -.258965870000000000000000 | begreater
+       .01 |       256.365450000000000000000000 | likeherebutthere
+      2.56 | 478587878.222222222222222222254800 | likehere
+     25.36 |       254.365489879933333253000000 | justforyou
+     45.00 |         2.365878965478951258725478 | input
+     45.00 |                                    | 
+     65.00 |         2.365878965478951258700000 | input
+     65.00 |         2.365878965478951258725478 | input
+    125.80 |  -1458772.125458000000000000000000 | likeherebutthere
+   3657.25 |         1.256890000000000000000000 | TUI
+ 986580.21 |      -546.256478954268425634880000 | begreateZUKI
+ 986580.21 |       546.256478954268425634880000 | begreateh
+ 986580.21 |       546.256478954268425634890000 | begoodandissolikeat
+           |         2.368000000000000000000000 | begoodandissolikeag
+           |         2.368000000000000000000000 | 
+           |         9.368000000000000000000000 | begoodandissolikeah
+           |                                    | YUI
+(20 rows)
+
+select col_num2 from (select col_num2, col_num7 from llvm_vecsort_table_02 order by col_num7) order by col_num2;
+    col_num2    
+----------------
+      -124.2360
+       -20.5000
+       -12.3657
+          .0001
+         3.3000
+         3.3000
+         3.3000
+         6.3000
+         9.3000
+         9.3000
+        45.5400
+        65.2540
+        98.0000
+       145.2456
+       698.2580
+       963.3689
+      5686.0000
+ 123456789.3600
+ 123456789.3600
+               
+(20 rows)
+
+select col_text, col_num3 from (select * from llvm_vecsort_table_02 order by col_num5, col_num6) order by col_text, col_num3;
+      col_text       |    col_num3     
+---------------------+-----------------
+ begoodandissolikeag |                
+ begoodandissolikeah | -14587952546710
+ begoodandissolikeat |           12584
+ begreateh           |           12584
+ begreater           |             875
+ begreatet           |              96
+ begreateZUKI        |         7854956
+ goanywhere          |        -9865472
+ input               |               7
+ input               |             867
+ input               |  14587952546710
+ justforyou          |             -24
+ KUI                 |               0
+ likehere            |        58325587
+ likeherebutthere    |        89657852
+ likeherebutthere    |   9865878588888
+ TUI                 |             125
+ YUI                 |          789568
+                     |               6
+                     |  14587952546710
+(20 rows)
+
+-- test with desc order
+select col_int1, col_bpchar2, col_bpchar4 from llvm_vecsort_table_01 order by col_int1, col_bpchar2, col_bpchar4 desc;
+ col_int1 | col_bpchar2 |       col_bpchar4        
+----------+-------------+--------------------------
+      -21 |             | c                       
+        0 | beauty      | ZooK                    
+        1 | ZUK         | z25687459               
+        1 | ZUKK        | j00142589678            
+        2 | JUK         | bookisfriend            
+        3 | ZUKK6       | j00142589678            
+        7 | likehim     | justforfunandjustforfuna
+        7 | likehim     | justforfunandjustforfuna
+        7 | XJPUIO      | kehlssince1985          
+        7 | XJPUIO      | kehlssince1985          
+        9 | KUL         | dayisdayisday           
+        9 | XJPUIOT     | kehlssince              
+       15 | be          | Zo                      
+       17 | THH         | AJ                      
+       21 | LIKEA       | u                       
+       90 | aMX         | dayisdayisday           
+       90 | AMX         | dayisdayisday           
+          |             | 
+(18 rows)
+
+select col_bint, col_bpchar3, col_varchar3 from llvm_vecsort_table_01 order by col_bint, col_bpchar3 nulls first, col_varchar3 desc;
+     col_bint     |   col_bpchar3   |      col_varchar3       
+------------------+-----------------+-------------------------
+     -89008987776 |                 | begreater
+           -58795 | shanghai        | mergesort
+               -1 |                 | begreater
+                0 |                 | begreater
+               26 | akindleissogood | far
+              126 | tianjing        | whatisgoodfortodaysfood
+              256 | beijing         | zooisforchildren
+              458 | tianjing        | begreater
+             9856 | shijiazhu       | 
+            11116 | shijiazhu       | 
+            11116 | tianjing        | mergesort
+            45896 | beagoodguy      | awayfromhome
+            75896 | beagoodguy      | awa
+         12587487 | while           | mergesortinternal
+        145872599 |                 | u
+ 2158744521187556 | shijiazhu       | uoooooooooou
+                  |                 | 
+                  | akindleissogood | ki
+(18 rows)
+
+select col_int, col_num1, col_num3, col_num7 from llvm_vecsort_table_02 order by col_int, col_num3 desc, col_num7 desc;
+ col_int | col_num1  |    col_num3     |              col_num7              
+---------+-----------+-----------------+------------------------------------
+      -1 |     45.00 |  14587952546710 |                                   
+      -1 |     25.36 |             -24 |       254.365489879933333253000000
+       0 |       .01 |   9865878588888 |       256.365450000000000000000000
+       1 |     45.00 |  14587952546710 |         2.365878965478951258725478
+       1 |      2.56 |        58325587 | 478587878.222222222222222222254800
+       1 |     65.00 |             867 |         2.365878965478951258700000
+       1 |     65.00 |               7 |         2.365878965478951258725478
+       1 |     -3.56 |        -9865472 |     45687.125874900000000000000000
+       2 |           |                 |         2.368000000000000000000000
+       2 | 986580.21 |         7854956 |      -546.256478954268425634880000
+       2 |           |          789568 |                                   
+       2 |           | -14587952546710 |         9.368000000000000000000000
+       9 |    125.80 |        89657852 |  -1458772.125458000000000000000000
+      27 |           |               6 |         2.368000000000000000000000
+      27 |   -256.00 |               0 |         0.000000000000000000000000
+      90 |   3657.25 |             125 |         1.256890000000000000000000
+     688 |    -65.35 |              96 |         9.658700000000000000000000
+   12587 |      -.60 |             875 |         -.258965870000000000000000
+         | 986580.21 |           12584 |       546.256478954268425634890000
+         | 986580.21 |           12584 |       546.256478954268425634880000
+(20 rows)
+
+select col_int, col_num2, col_num4, col_num6 from llvm_vecsort_table_02 order by col_num2 nulls first, col_num4 desc, col_num6;
+ col_int |    col_num2    |   col_num4   |               col_num6                
+---------+----------------+--------------+---------------------------------------
+       1 |                |     589.0000 |                69.3333333333333330000
+       1 |      -124.2360 |    -458.2580 | 12547825478288752.2500000000000000000
+      27 |       -20.5000 |       0.0000 |                 0.0000000000000000000
+      -1 |       -12.3657 |     698.2500 |              1452.2587800000000000000
+      90 |          .0001 |      95.8600 |                  .3560000000000000000
+       1 |         3.3000 |              |                69.3333333333333320000
+      -1 |         3.3000 |       6.5000 |                                      
+       2 |         3.3000 |      -6.8900 |               693.0000000000000000000
+       1 |         6.3000 |      45.6800 |                69.3333333333333330000
+       2 |         9.3000 |       6.8900 |               293.0000000000000000000
+      27 |         9.3000 |       6.2100 |               193.0000000000000000000
+       9 |        45.5400 |   14587.2582 |         -78955877.2568752000000000000
+       0 |        65.2540 |     125.0000 |                  .0100000000000000000
+       2 |        98.0000 |     568.3600 |                -3.6980000000000000000
+       1 |       145.2456 | 1587795.2500 |               145.2000000040000000000
+     688 |       698.2580 |              |                                      
+       2 |       963.3689 |   -3457.2580 |              -125.2525252525252524000
+   12587 |      5686.0000 |      12.2580 |           -458697.1258000000000000000
+         | 123456789.3600 |    1457.2580 |               125.2525252525252524000
+         | 123456789.3600 |    1457.2580 |               125.2525252525252525000
+(20 rows)
+
+----
+--- test2 : test comparemulticolumns with limit node
+----
+select col_int1, col_bpchar1, col_varchar2 from llvm_vecsort_table_01 order by col_int1, col_bpchar1, col_varchar2 limit 5;
+ col_int1 | col_bpchar1 | col_varchar2 
+----------+-------------+--------------
+      -21 | TUI         | 
+        0 | tea         | P
+        1 | TUI         | bottle
+        1 | TUI         | uuuuuuuuuuu
+        2 | ZUI         | bottle
+(5 rows)
+
+select col_int2, col_bpchar3, col_varchar3 from llvm_vecsort_table_01 order by col_int2, col_bpchar3, col_bpchar4, col_varchar4 limit 5;
+ col_int2 |   col_bpchar3   |   col_varchar3    
+----------+-----------------+-------------------
+      -72 | beagoodguy      | awa
+      -72 | beagoodguy      | awayfromhome
+       -1 | shanghai        | mergesort
+        0 | while           | mergesortinternal
+        1 | tianjing        | begreater
+(5 rows)
+
+select col_bint, col_bpchar4, col_varchar4 from llvm_vecsort_table_01 order by col_bint, col_bpchar4, col_varchar4 limit 5;
+   col_bint   |       col_bpchar4        |             col_varchar4              
+--------------+--------------------------+---------------------------------------
+ -89008987776 | dayisdayisday            | formulatedwithsqualanceandantioxidant
+       -58795 | c                        | letusmakeupajokefortea
+           -1 | dayisdayisday            | 
+            0 | dayisdayisday            | formulatedwithsqualanceandantioxidant
+           26 | AJ                       | farha
+(5 rows)
+
+select col_bint, col_num2, col_num7 from llvm_vecsort_table_02 order by col_num2, col_num7 limit 5;
+ col_bint | col_num2  |            col_num7            
+----------+-----------+--------------------------------
+      124 | -124.2360 | 45687.125874900000000000000000
+       -1 |  -20.5000 |     0.000000000000000000000000
+    25879 |  -12.3657 |   254.365489879933333253000000
+        7 |     .0001 |     1.256890000000000000000000
+      986 |    3.3000 |     2.365878965478951258725478
+(5 rows)
+
+select col_bint, col_num2, col_num6 from llvm_vecsort_table_02 order by col_num2, col_num6 limit 5 offset 3;
+ col_bint | col_num2 |        col_num6         
+----------+----------+-------------------------
+        7 |    .0001 |    .3560000000000000000
+      986 |   3.3000 |  69.3333333333333320000
+     -186 |   3.3000 | 693.0000000000000000000
+      286 |   3.3000 |                        
+       92 |   6.3000 |  69.3333333333333330000
+(5 rows)
+
+select col_varchar1, col_varchar4 from (select * from llvm_vecsort_table_01 order by col_bpchar2, col_bpchar3) order by col_varchar1, col_varchar4 limit 5;
+ col_varchar1 |             col_varchar4              
+--------------+---------------------------------------
+ be           | likehere
+ far          | letusmakeupajokeforteacher
+ great        | formulatedwithsqualanceandantioxidant
+ greatest     | formulatedwithsqualanceandantioxidant
+ how          | ABT
+(5 rows)
+
+select col_text from (select col_text, col_num7 from llvm_vecsort_table_02 order by col_num7) order by col_text limit 5;
+      col_text       
+---------------------
+ begoodandissolikeag
+ begoodandissolikeah
+ begoodandissolikeat
+ begreateh
+ begreater
+(5 rows)
+
+----
+--- test3 : test sortagg with only group by rollup(...) case
+----
+explain (verbose on, costs off) select 'store' channel, col_int1, col_bint, sum(col_int2) from llvm_vecsort_table_01 group by rollup(channel, col_int1, col_bint) order by 1, 2, 3, 4;
+                                                                QUERY PLAN                                                                
+------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: ('store'::text), col_int1, col_bint, (sum(col_int2))
+   ->  Vector Sort
+         Output: ('store'::text), col_int1, col_bint, (sum(col_int2))
+         Sort Key: ('store'::text), llvm_vecsort_table_01.col_int1, llvm_vecsort_table_01.col_bint, (sum(llvm_vecsort_table_01.col_int2))
+         ->  Vector Sort Aggregate
+               Output: ('store'::text), col_int1, col_bint, sum(col_int2)
+               Group By Key: ('store'::text), llvm_vecsort_table_01.col_int1, llvm_vecsort_table_01.col_bint
+               Group By Key: ('store'::text), llvm_vecsort_table_01.col_int1
+               Group By Key: ('store'::text)
+               Group By Key: ()
+               ->  Vector Sort
+                     Output: ('store'::text), col_int1, col_bint, col_int2
+                     Sort Key: ('store'::text), llvm_vecsort_table_01.col_int1, llvm_vecsort_table_01.col_bint
+                     ->  CStore Scan on llvm_vecsort_engine.llvm_vecsort_table_01
+                           Output: 'store'::text, col_int1, col_bint, col_int2
+(16 rows)
+
+select 'store' channel, col_int1, col_bint, sum(col_int2) from llvm_vecsort_table_01 group by rollup(channel, col_int1, col_bint) order by 1, 2, 3, 4;
+ channel | col_int1 |     col_bint     | sum  
+---------+----------+------------------+------
+ store   |      -21 |           -58795 |   -1
+ store   |      -21 |                  |   -1
+ store   |        0 |         12587487 |    0
+ store   |        0 |                  |    0
+ store   |        1 |              126 |    1
+ store   |        1 |              458 |    1
+ store   |        1 |                  |    2
+ store   |        2 |              256 |    2
+ store   |        2 |                  |    2
+ store   |        3 | 2158744521187556 |   89
+ store   |        3 |                  |   89
+ store   |        7 |             9856 |  123
+ store   |        7 |            11116 |  123
+ store   |        7 |            45896 |  -72
+ store   |        7 |            75896 |  -72
+ store   |        7 |                  |  102
+ store   |        9 |               -1 |     
+ store   |        9 |            11116 |     
+ store   |        9 |                  |     
+ store   |       15 |                  |  890
+ store   |       15 |                  |  890
+ store   |       17 |               26 |   58
+ store   |       17 |                  |   58
+ store   |       21 |        145872599 |    1
+ store   |       21 |                  |    1
+ store   |       90 |     -89008987776 |   34
+ store   |       90 |                0 |   34
+ store   |       90 |                  |   68
+ store   |          |                  | 1211
+ store   |          |                  |     
+ store   |          |                  |     
+         |          |                  | 1211
+(32 rows)
+
+select avg(col_int1), col_bpchar1, col_bpchar2 from llvm_vecsort_table_01 group by rollup(col_bpchar1, col_bpchar2) order by 1, 2, 3;
+          avg           | col_bpchar1 | col_bpchar2 
+------------------------+-------------+-------------
+   -21.0000000000000000 | TUI         | 
+    -6.3333333333333333 | TUI         | 
+ 0.00000000000000000000 | tea         | beauty 
+ 0.00000000000000000000 | tea         | 
+ 1.00000000000000000000 | TUI         | ZUK    
+ 1.00000000000000000000 | TUI         | ZUKK   
+     2.0000000000000000 | ZUI         | JUK    
+     2.0000000000000000 | ZUI         | 
+     3.0000000000000000 | TI          | ZUKK6  
+     3.0000000000000000 | TI          | 
+     7.0000000000000000 | KUX         | XJPUIO 
+     7.0000000000000000 | KUX         | 
+     7.0000000000000000 | TMT         | likehim
+     7.0000000000000000 | TMT         | 
+     7.0000000000000000 | ZUX         | XJPUIO 
+     7.0000000000000000 | ZUX         | 
+     9.0000000000000000 | AMX         | KUL    
+     9.0000000000000000 |             | XJPUIOT
+     9.0000000000000000 |             | 
+    15.0000000000000000 | UIL         | be     
+    15.0000000000000000 | UIL         | 
+    15.5882352941176471 |             | 
+    17.0000000000000000 | NO          | THH    
+    17.0000000000000000 | NO          | 
+    21.0000000000000000 | CJ          | LIKEA  
+    21.0000000000000000 | CJ          | 
+    63.0000000000000000 | AMX         | 
+    90.0000000000000000 | AMX         | aMX    
+    90.0000000000000000 | AMX         | AMX    
+                        |             | 
+(30 rows)
+
+select avg(col_int1), col_bpchar3, col_bpchar4 from llvm_vecsort_table_01 group by rollup(col_bpchar3, col_bpchar4) order by 1, 2, 3;
+          avg           |   col_bpchar3   |       col_bpchar4        
+------------------------+-----------------+--------------------------
+   -21.0000000000000000 | shanghai        | c                       
+   -21.0000000000000000 | shanghai        | 
+ 0.00000000000000000000 | while           | ZooK                    
+ 0.00000000000000000000 | while           | 
+ 1.00000000000000000000 | tianjing        | j00142589678            
+ 1.00000000000000000000 | tianjing        | z25687459               
+     2.0000000000000000 | beijing         | bookisfriend            
+     2.0000000000000000 | beijing         | 
+     3.0000000000000000 | shijiazhu       | j00142589678            
+     3.6666666666666667 | tianjing        | 
+     5.6666666666666667 | shijiazhu       | 
+     7.0000000000000000 | beagoodguy      | justforfunandjustforfuna
+     7.0000000000000000 | beagoodguy      | 
+     7.0000000000000000 | shijiazhu       | kehlssince1985          
+     9.0000000000000000 | tianjing        | kehlssince              
+    15.0000000000000000 | akindleissogood | Zo                      
+    15.5882352941176471 |                 | 
+    16.0000000000000000 | akindleissogood | 
+    17.0000000000000000 | akindleissogood | AJ                      
+    21.0000000000000000 |                 | u                       
+    52.5000000000000000 |                 | 
+    63.0000000000000000 |                 | dayisdayisday           
+                        |                 | 
+(23 rows)
+
+select sum(col_num1), col_text, col_vchar from llvm_vecsort_table_02 group by rollup(col_text, col_vchar) order by 1, 2, 3;
+    sum     |      col_text       |    col_vchar    
+------------+---------------------+-----------------
+    -256.00 | KUI                 | PORT
+    -256.00 | KUI                 | 
+     -65.35 | begreatet           | dg
+     -65.35 | begreatet           | 
+      -3.56 | goanywhere          | likeare
+      -3.56 | goanywhere          | 
+       -.60 | begreater           | likeherea
+       -.60 | begreater           | 
+        .01 | likeherebutthere    | uggui
+       2.56 | likehere            | a
+       2.56 | likehere            | 
+      25.36 | justforyou          | are
+      25.36 | justforyou          | 
+      45.00 |                     | gofaraway
+      45.00 |                     | 
+      65.00 | input               | jump
+     110.00 | input               | 
+     125.80 | likeherebutthere    | likeareb
+     125.81 | likeherebutthere    | 
+     175.00 | input               | 
+    3657.25 | TUI                 | KIND
+    3657.25 | TUI                 | 
+  986580.21 | begoodandissolikeat | justforfun
+  986580.21 | begoodandissolikeat | 
+  986580.21 | begreateh           | likehereb
+  986580.21 | begreateh           | 
+  986580.21 | begreateZUKI        | likeherec
+  986580.21 | begreateZUKI        | 
+ 2963446.10 |                     | 
+            | begoodandissolikeag | gofarawaye
+            | begoodandissolikeag | 
+            | begoodandissolikeah | gofaraway
+            | begoodandissolikeah | 
+            | YUI                 | portportportway
+            | YUI                 | 
+            |                     | gofarawaye
+(36 rows)
+
+select sum(col_num1), col_num2, col_vchar from llvm_vecsort_table_02 group by rollup(col_num2, col_vchar) order by 1, 2, 3;
+    sum     |    col_num2    |    col_vchar    
+------------+----------------+-----------------
+    -256.00 |       -20.5000 | PORT
+    -256.00 |       -20.5000 | 
+     -65.35 |       698.2580 | dg
+     -65.35 |       698.2580 | 
+      -3.56 |      -124.2360 | likeare
+      -3.56 |      -124.2360 | 
+       -.60 |      5686.0000 | likeherea
+       -.60 |      5686.0000 | 
+        .01 |        65.2540 | uggui
+        .01 |        65.2540 | 
+       2.56 |       145.2456 | a
+       2.56 |       145.2456 | 
+      25.36 |       -12.3657 | are
+      25.36 |       -12.3657 | 
+      45.00 |         3.3000 | gofaraway
+      45.00 |         3.3000 | 
+      65.00 |         6.3000 | 
+      65.00 |         6.3000 | 
+      65.00 |                | jump
+      65.00 |                | 
+      90.00 |         3.3000 | 
+     125.80 |        45.5400 | likeareb
+     125.80 |        45.5400 | 
+    3657.25 |          .0001 | KIND
+    3657.25 |          .0001 | 
+  986580.21 |       963.3689 | likeherec
+  986580.21 |       963.3689 | 
+  986580.21 | 123456789.3600 | justforfun
+  986580.21 | 123456789.3600 | likehereb
+ 1973160.42 | 123456789.3600 | 
+ 2963446.10 |                | 
+            |         9.3000 | gofarawaye
+            |         9.3000 | 
+            |        98.0000 | portportportway
+            |        98.0000 | 
+(35 rows)
+
+set enable_hashagg = off;
+explain (verbose on, costs off) select sum(col_int1), avg(col_bint), col_char1 from llvm_vecsort_table_01 group by col_char1 order by 1, 2, 3;
+                                                           QUERY PLAN                                                            
+---------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (sum(col_int1)), (avg(col_bint)), col_char1
+   ->  Vector Sort
+         Output: (sum(col_int1)), (avg(col_bint)), col_char1
+         Sort Key: (sum(llvm_vecsort_table_01.col_int1)), (avg(llvm_vecsort_table_01.col_bint)), llvm_vecsort_table_01.col_char1
+         ->  Vector Sort Aggregate
+               Output: sum(col_int1), avg(col_bint), col_char1
+               Group By Key: llvm_vecsort_table_01.col_char1
+               ->  Vector Sort
+                     Output: col_char1, col_int1, col_bint
+                     Sort Key: llvm_vecsort_table_01.col_char1
+                     ->  CStore Scan on llvm_vecsort_engine.llvm_vecsort_table_01
+                           Output: col_char1, col_int1, col_bint
+(13 rows)
+
+select sum(col_int1), avg(col_bint), col_char1 from llvm_vecsort_table_01 group by col_char1 order by 1, 2, 3;
+ sum |          avg           | col_char1 
+-----+------------------------+-----------
+ -14 |    -24469.500000000000 | C
+  21 | 145872599.000000000000 | N
+  21 |   431748906759506.2000 | B
+  25 |     24475.000000000000 | A
+  32 |    26.0000000000000000 | D
+ 180 |  -44504493888.00000000 | 
+(6 rows)
+
+select avg(col_num1), col_text from llvm_vecsort_table_02 group by col_text order by 1, 2;
+          avg           |      col_text       
+------------------------+---------------------
+  -256.0000000000000000 | KUI
+   -65.3500000000000000 | begreatet
+    -3.5600000000000000 | goanywhere
+ -.60000000000000000000 | begreater
+     2.5600000000000000 | likehere
+    25.3600000000000000 | justforyou
+    45.0000000000000000 | 
+    58.3333333333333333 | input
+    62.9050000000000000 | likeherebutthere
+  3657.2500000000000000 | TUI
+    986580.210000000000 | begoodandissolikeat
+    986580.210000000000 | begreateh
+    986580.210000000000 | begreateZUKI
+                        | begoodandissolikeag
+                        | begoodandissolikeah
+                        | YUI
+(16 rows)
+
+reset enable_hashagg;
+----
+--- test4 : test mergejoin with sort node
+----
+set enable_nestloop = off;
+set enable_hashjoin = off;
+explain (verbose on, costs off) select count(*) from llvm_vecsort_table_01 A inner join llvm_vecsort_table_02 B on A.col_int1 = B.col_int;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*))
+   ->  Vector Aggregate
+         Output: count(*)
+         ->  Vector Merge Join
+               Output: 'Dummy'
+               Merge Cond: (a.col_int1 = b.col_int)
+               ->  Vector Sort
+                     Output: a.col_int1
+                     Sort Key: a.col_int1
+                     ->  CStore Scan on llvm_vecsort_engine.llvm_vecsort_table_01 a
+                           Output: a.col_int1
+               ->  Vector Sort
+                     Output: b.col_int
+                     Sort Key: b.col_int
+                     ->  CStore Scan on llvm_vecsort_engine.llvm_vecsort_table_02 b
+                           Output: b.col_int
+(17 rows)
+
+select A.col_int1, B.col_int from llvm_vecsort_table_01 A inner join llvm_vecsort_table_02 B on A.col_int1 = B.col_int order by 1, 2;
+ col_int1 | col_int 
+----------+---------
+        0 |       0
+        1 |       1
+        1 |       1
+        1 |       1
+        1 |       1
+        1 |       1
+        1 |       1
+        1 |       1
+        1 |       1
+        1 |       1
+        1 |       1
+        2 |       2
+        2 |       2
+        2 |       2
+        2 |       2
+        9 |       9
+        9 |       9
+       90 |      90
+       90 |      90
+(19 rows)
+
+select A.col_char1, B.L_LINESTATUS from llvm_vecsort_table_01 A inner join  llvm_vecsort_table_03 B on A.col_char1 = B.L_LINESTATUS order by 1, 2;
+ col_char1 | l_linestatus 
+-----------+--------------
+(0 rows)
+
+select count(*) from llvm_vecsort_table_01 A inner join llvm_vecsort_table_02 B on A.col_bpchar3 = B.col_vchar;
+ count 
+-------
+     0
+(1 row)
+
+reset enable_nestloop;
+reset enable_hashjoin;
+----
+--- test5 : test window func with sort operation
+----
+select col_int2, col_bint, col_varchar2, rank() over(order by col_bint, col_varchar2) from llvm_vecsort_table_01 order by 1, 2, 3;
+ col_int2 |     col_bint     | col_varchar2 | rank 
+----------+------------------+--------------+------
+      -72 |            45896 |              |   12
+      -72 |            75896 |              |   13
+       -1 |           -58795 |              |    2
+        0 |         12587487 | P            |   14
+        1 |              126 | bottle       |    6
+        1 |              458 | uuuuuuuuuuu  |    8
+        1 |        145872599 | u            |   15
+        2 |              256 | bottle       |    7
+       34 |     -89008987776 | uuuuuuuuuuu  |    1
+       34 |                0 | uuuuuuuuuuu  |    4
+       58 |               26 | testa        |    5
+       89 | 2158744521187556 | greate       |   16
+      123 |             9856 | outputlink   |    9
+      123 |            11116 | outputlink   |   10
+      890 |                  | ugg          |   17
+          |               -1 | TINK         |    3
+          |            11116 | outputlink   |   10
+          |                  |              |   18
+(18 rows)
+
+select col_bpchar1, col_bpchar4, rank() over(order by col_bpchar1, col_bpchar2) from llvm_vecsort_table_01 order by 1, 2, 3;
+ col_bpchar1 |       col_bpchar4        | rank 
+-------------+--------------------------+------
+ AMX         | dayisdayisday            |    1
+ AMX         | dayisdayisday            |    2
+ AMX         | dayisdayisday            |    3
+ CJ          | u                        |    4
+ KUX         | kehlssince1985           |    5
+ NO          | AJ                       |    6
+ tea         | ZooK                     |    7
+ TI          | j00142589678             |    8
+ TMT         | justforfunandjustforfuna |    9
+ TMT         | justforfunandjustforfuna |    9
+ TUI         | c                        |   13
+ TUI         | j00142589678             |   12
+ TUI         | z25687459                |   11
+ UIL         | Zo                       |   14
+ ZUI         | bookisfriend             |   15
+ ZUX         | kehlssince1985           |   16
+             | kehlssince               |   17
+             |                          |   18
+(18 rows)
+
+select col_bint, col_num2, col_num6, row_number() over(partition by col_bint order by col_num6) from llvm_vecsort_table_02 order by 1, 2, 3;
+     col_bint     |    col_num2    |               col_num6                | row_number 
+------------------+----------------+---------------------------------------+------------
+  -12547882214583 |        65.2540 |                  .0100000000000000000 |          1
+           -45879 |       698.2580 |                                       |          1
+             -186 |         3.3000 |               693.0000000000000000000 |          1
+               -1 |       -20.5000 |                 0.0000000000000000000 |          1
+                1 |      5686.0000 |           -458697.1258000000000000000 |          1
+                7 |          .0001 |                  .3560000000000000000 |          1
+               76 | 123456789.3600 |               125.2525252525252524000 |          1
+               76 | 123456789.3600 |               125.2525252525252525000 |          2
+               86 |         9.3000 |               293.0000000000000000000 |          1
+               90 |        98.0000 |                -3.6980000000000000000 |          1
+               90 |                |                69.3333333333333330000 |          2
+               92 |         6.3000 |                69.3333333333333330000 |          1
+              124 |      -124.2360 | 12547825478288752.2500000000000000000 |          1
+              125 |       145.2456 |               145.2000000040000000000 |          1
+              286 |         3.3000 |                                       |          1
+              986 |         3.3000 |                69.3333333333333320000 |          1
+             4587 |         9.3000 |               193.0000000000000000000 |          1
+            25879 |       -12.3657 |              1452.2587800000000000000 |          1
+ 1258795442145878 |        45.5400 |         -78955877.2568752000000000000 |          1
+                  |       963.3689 |              -125.2525252525252524000 |          1
+(20 rows)
+
+select col_num1, col_num4, col_num5, col_num7, count(*) over (order by col_num4), sum(col_int) over (order by col_num5, col_num7) from llvm_vecsort_table_02 order by 1, 2, 3;
+ col_num1  |   col_num4   |        col_num5         |              col_num7              | count |  sum  
+-----------+--------------+-------------------------+------------------------------------+-------+-------
+   -256.00 |       0.0000 |    0.000000000000000000 |         0.000000000000000000000000 |     4 | 12618
+    -65.35 |              |                         |         9.658700000000000000000000 |    20 | 13439
+     -3.56 |    -458.2580 | 1254.254630000000000000 |     45687.125874900000000000000000 |     2 | 12748
+      -.60 |      12.2580 |    -.000000100000000000 |         -.258965870000000000000000 |     8 | 12591
+       .01 |     125.0000 | 1250.125800000000000001 |       256.365450000000000000000000 |    11 | 12747
+      2.56 | 1587795.2500 |   15.125895648568984580 | 478587878.222222222222222222254800 |    18 | 12719
+     25.36 |     698.2500 |  201.021111111000000000 |       254.365489879933333253000000 |    14 | 12747
+     45.00 |       6.5000 |    9.860000000000000000 |                                    |     6 | 12718
+     45.00 |              |                         |         2.365878965478951258725478 |    20 | 12749
+     65.00 |      45.6800 |   58.325856587496852478 |         2.365878965478951258725478 |     9 | 12748
+     65.00 |     589.0000 |   58.300000000000000000 |         2.365878965478951258700000 |    13 | 12747
+    125.80 |   14587.2582 |    1.000000000000000000 |  -1458772.125458000000000000000000 |    17 | 12717
+   3657.25 |      95.8600 |     .250000000000000000 |         1.256890000000000000000000 |    10 | 12708
+ 986580.21 |   -3457.2580 |  -98.689324756870000000 |      -546.256478954268425634880000 |     1 |     2
+ 986580.21 |    1457.2580 |   98.689324756870000000 |       546.256478954268425634880000 |    16 | 12748
+ 986580.21 |    1457.2580 |   98.689324756890000000 |       546.256478954268425634890000 |    16 | 12748
+           |      -6.8900 |    9.860000000000000000 |         9.368000000000000000000000 |     3 | 12719
+           |       6.2100 |   56.300000000000000000 |         2.368000000000000000000000 |     5 | 12746
+           |       6.8900 |                         |         2.368000000000000000000000 |     7 | 12751
+           |     568.3600 |    -.250000000000000000 |                                    |    12 |     4
+(20 rows)
+
+----
+--- test6 : test direct on datanode
+----
+select col_int2, col_bint from llvm_vecsort_table_01 order by 1, 2 limit 2;
+ col_int2 | col_bint 
+----------+----------
+      -72 |    45896
+      -72 |    75896
+(2 rows)
+
+select col_bint, col_bpchar2 from llvm_vecsort_table_01 order by col_bint desc, col_bpchar2 nulls first limit 3;
+     col_bint     | col_bpchar2 
+------------------+-------------
+                  | 
+                  | be     
+ 2158744521187556 | ZUKK6  
+(3 rows)
+
+select col_bint, col_num2 from llvm_vecsort_table_02 order by col_bint, col_num2 desc limit 4;
+    col_bint     | col_num2 
+-----------------+----------
+ -12547882214583 |  65.2540
+          -45879 | 698.2580
+            -186 |   3.3000
+              -1 | -20.5000
+(4 rows)
+
+----
+--- clean table and resource
+----
+drop schema llvm_vecsort_engine cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table llvm_vecsort_table_01
+drop cascades to table llvm_vecsort_table_02
+drop cascades to table llvm_vecsort_table_03

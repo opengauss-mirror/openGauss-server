@@ -1,0 +1,431 @@
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "audit_system_object=45063" >/dev/null
+DROP SCHEMA IF EXISTS create_enum CASCADE;
+NOTICE:  schema "create_enum" does not exist, skipping
+CREATE SCHEMA create_enum;
+SET search_path TO create_enum;
+GRANT ALL ON SCHEMA create_enum TO public;
+/*CREATE TYPE*/
+CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
+/*Verify type name*/
+CREATE TYPE "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitoooeiajfofeoiwurouyy" AS ENUM ('sad', 'ok', 'happy');
+NOTICE:  identifier "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitoooeiajfofeoiwurouyy" will be truncated to "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitooo"
+DROP TYPE  "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitoooeiajfo";
+NOTICE:  identifier "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitoooeiajfo" will be truncated to "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitooo"
+CREATE TYPE pg_clASs AS enum ('name', 'table');
+DROP TYPE create_enum.pg_clASs;
+CREATE TYPE enumtyp1 AS enum (1,2,3);
+ERROR:  syntax error at or near "1"
+LINE 1: CREATE TYPE enumtyp1 AS enum (1,2,3);
+                                      ^
+CREATE TABLE person (name text, current_mood mood);
+INSERT INTO person VALUES ('Moe','happy');
+INSERT INTO person VALUES ('Bob','sad');
+INSERT INTO person VALUES ('Simon','ok');
+SELECT * FROM person WHERE current_mood = 'happy' ORDER BY 1;
+ name | current_mood 
+------+--------------
+ Moe  | happy
+(1 row)
+
+SELECT * FROM person ORDER BY current_mood;
+ name  | current_mood 
+-------+--------------
+ Bob   | sad
+ Simon | ok
+ Moe   | happy
+(3 rows)
+
+/*enum type support sort,comparison operators and aggregate functions*/
+INSERT INTO person VALUES ('Larry', 'sad');
+INSERT INTO person VALUES ('Curly', 'ok');
+SELECT * FROM person WHERE current_mood > 'sad'ORDER BY 1;
+ name  | current_mood 
+-------+--------------
+ Curly | ok
+ Moe   | happy
+ Simon | ok
+(3 rows)
+
+SELECT * FROM person WHERE current_mood > 'sad' ORDER BY 1,2;
+ name  | current_mood 
+-------+--------------
+ Curly | ok
+ Moe   | happy
+ Simon | ok
+(3 rows)
+
+SELECT count(*) FROM person WHERE current_mood > 'sad';
+ count 
+-------
+     3
+(1 row)
+
+SELECT name FROM person WHERE current_mood = (SELECT MIN(current_mood) FROM person) ORDER BY 1;
+ name  
+-------
+ Bob
+ Larry
+(2 rows)
+
+/*Verify the enum type AS function input parameter or function return VALUE*/
+CREATE FUNCTION enumtype_func1(mood) RETURNS mood
+AS 'SELECT current_mood FROM person where current_mood = $1;'
+LANGUAGE SQL;
+call enumtype_func1('sad');
+ enumtype_func1 
+----------------
+ sad
+(1 row)
+
+CREATE FUNCTION enumtype_func2() RETURNS mood
+AS 'SELECT current_mood FROM person ORDER BY 1;'
+LANGUAGE SQL;
+call enumtype_func2();
+ enumtype_func2 
+----------------
+ sad
+(1 row)
+
+CREATE TABLE t_func1 (c int, b mood);
+CREATE FUNCTION enumtype_func3(c int, v mood) RETURNS void AS $$
+INSERT INTO t_func1 VALUES (c, v);
+$$ language sql;
+CREATE OR REPLACE FUNCTION enumtype_func4(c int, v mood) RETURNS void AS $$
+SELECT enumtype_func3(c, v);
+$$ language sql;
+SELECT enumtype_func3(1,'happy');
+ enumtype_func3 
+----------------
+ 
+(1 row)
+
+SELECT enumtype_func4(2,'sad');
+ enumtype_func4 
+----------------
+ 
+(1 row)
+
+SELECT * FROM t_func1 ORDER BY 1,2;
+ c |   b   
+---+-------
+ 1 | happy
+ 2 | sad
+(2 rows)
+
+DROP FUNCTION IF EXISTS enumtype_func1;
+DROP FUNCTION IF EXISTS enumtype_func2;
+DROP FUNCTION IF EXISTS enumtype_func3;
+DROP FUNCTION IF EXISTS enumtype_func4;
+DROP FUNCTION IF EXISTS enumtype_func5;
+NOTICE:  function enumtype_func5() does not exist, skipping
+DROP FUNCTION IF EXISTS enumtype_func6;
+NOTICE:  function enumtype_func6() does not exist, skipping
+DROP TABLE IF EXISTS t_func1;
+DROP TABLE IF EXISTS t_func2;
+NOTICE:  table "t_func2" does not exist, skipping
+/*Verify supported table types:row table, column table(not supported), temp table, replication table, partition table, foreign table*/
+CREATE temp TABLE t_type1(a int, b mood);
+INSERT INTO t_type1 VALUES (1, 'sad');
+SELECT * FROM t_type1;
+ a |  b  
+---+-----
+ 1 | sad
+(1 row)
+
+CREATE TABLE t_type2(a int, b mood, c date)  partition by range(c)(partition p1 VALUES less than('2020-01-01'),partition p2 VALUES less than(maxvalue));
+INSERT INTO t_type2 VALUES (1, 'happy', '2019-05-07');
+SELECT * FROM t_type2;
+ a |   b   |            c             
+---+-------+--------------------------
+ 1 | happy | Tue May 07 00:00:00 2019
+(1 row)
+
+CREATE TABLE t_type3 (a int, b mood) with (orientation = column); 
+ERROR:  type "mood" is not supported in column store
+CREATE TABLE t_type4 (a mood);
+DROP TABLE IF EXISTS t_type1;
+DROP TABLE IF EXISTS t_type2;
+DROP TABLE IF EXISTS t_type3;
+NOTICE:  table "t_type3" does not exist, skipping
+DROP TABLE IF EXISTS t_type4;
+/*enum array type*/
+CREATE TABLE array_tab (a int, b mood[], c int[]) PARTITION BY RANGE (a) (partition p1 VALUES less than(100),partition p2 VALUES less than(maxvalue));
+INSERT INTO array_tab(b[0],c[0]) VALUES('happy',1);
+INSERT INTO array_tab(b[1], c[1]) VALUES('sad',2);
+ANALYZE array_tab;
+SELECT * FROM array_tab ORDER BY 1,2,3;
+ a |       b       |     c     
+---+---------------+-----------
+   | {sad}         | {2}
+   | [0:0]={happy} | [0:0]={1}
+(2 rows)
+
+UPDATE array_tab set b[1]='ok' where b[1]='sad';
+SELECT * FROM array_tab ORDER BY 1,2,3;
+ a |       b       |     c     
+---+---------------+-----------
+   | {ok}          | {2}
+   | [0:0]={happy} | [0:0]={1}
+(2 rows)
+
+SELECT * FROM array_tab where b>array[cASt('sad' AS mood),cASt('ok' AS mood)] ORDER BY 1,2,3;
+ a |       b       |     c     
+---+---------------+-----------
+   | {ok}          | {2}
+   | [0:0]={happy} | [0:0]={1}
+(2 rows)
+
+CREATE TABLE array_tab1(a serial, b mood[]);
+NOTICE:  CREATE TABLE will create implicit sequence "array_tab1_a_seq" for serial column "array_tab1.a"
+INSERT INTO array_tab1(b[0]) VALUES('happy');
+INSERT INTO array_tab1(b[1]) VALUES('sad');
+SELECT * FROM array_tab1 where b>array[cASt('sad' AS mood),cASt('ok' AS mood)] ORDER BY 1,2;
+ a |       b       
+---+---------------
+ 1 | [0:0]={happy}
+(1 row)
+
+DROP TABLE array_tab;
+DROP TABLE array_tab1;
+/*Verify constraints:unique (not supported), partition key (not supported), check*/
+CREATE TABLE trecord1(a int, record mood unique); 
+ERROR:  Column record is not a hash distributable data type
+CREATE TABLE trecord2 (a int, record mood)PARTITION BY RANGE(record)(partition p1 VALUES less than('ok'),partition p2 VALUES less than(maxvalue));  
+ERROR:  column record cannot serve as a range partitioning column because of its datatype
+CREATE TABLE trecord3 (a int, record mood check(record > 'sad')); 
+INSERT INTO trecord3 VALUES (1,'sad');
+ERROR:  new row for relation "trecord3" violates check constraint "trecord3_record_check"
+DETAIL:  Failing row contains (1, sad).
+INSERT INTO trecord3 VALUES (2, 'happy');
+INSERT INTO trecord3 VALUES (3,'ok');
+INSERT INTO trecord3 VALUES (2,'ok');
+SELECT * FROM trecord3 ORDER BY 1,2;
+ a | record 
+---+--------
+ 2 | ok
+ 2 | happy
+ 3 | ok
+(3 rows)
+
+UPDATE trecord3 set record = (SELECT MIN(record) FROM trecord3);
+UPDATE trecord3 set record = 'happy' where a = 2;
+DELETE FROM trecord3 where record < 'ok';
+DELETE FROM trecord3 where record < 'happy';
+DROP TABLE IF EXISTS trecord1;
+NOTICE:  table "trecord1" does not exist, skipping
+DROP TABLE IF EXISTS trecord2;
+NOTICE:  table "trecord2" does not exist, skipping
+DROP TABLE IF EXISTS trecord3;
+/*The enum type cannot be compared TO other enum type*/
+CREATE TYPE happiness AS ENUM ('happy', 'very happy', 'ecstatic');
+CREATE TABLE holidays (
+    num_weeks integer,
+    happiness happiness
+);
+INSERT INTO holidays(num_weeks,happiness) VALUES (4, 'happy');
+INSERT INTO holidays(num_weeks,happiness) VALUES (6, 'very happy');
+INSERT INTO holidays(num_weeks,happiness) VALUES (8, 'ecstatic');
+INSERT INTO holidays(num_weeks,happiness) VALUES (2, 'sad');
+ERROR:  invalid input value for enum happiness: "sad"
+LINE 1: INSERT INTO holidays(num_weeks,happiness) VALUES (2, 'sad');
+                                                             ^
+CONTEXT:  referenced column: happiness
+SELECT person.name, holidays.num_weeks FROM person, holidays WHERE person.current_mood = holidays.happiness;
+ERROR:  operator does not exist: mood = happiness
+LINE 1: ...s FROM person, holidays WHERE person.current_mood = holidays...
+                                                             ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+DROP TYPE happiness CASCADE;
+NOTICE:  drop cascades to table holidays column happiness
+DROP TABLE IF EXISTS holidays;
+DROP TABLE IF EXISTS person;
+/*ALTER TYPE*/
+ALTER TYPE mood RENAME TO mood1;
+ALTER TYPE mood1 RENAME TO mood;
+CREATE USER usr1 pASsword 'Ttest_234';
+CREATE USER usr2 pASsword 'Ttest_234';
+ALTER TYPE mood OWNER TO usr1;
+SET role usr2 pASsword 'Ttest_234';
+CREATE TABLE t1_user_test1 (sk int,a mood)WITH (orientation=row);
+ALTER TYPE mood ADD VALUE 'very happy' AFTER 'happy';
+ERROR:  must be owner of type mood
+SET role usr1 pASsword 'Ttest_234';
+CREATE TABLE t1_user_test2 (sk int,a mood)WITH (orientation=row);
+ALTER TYPE mood ADD VALUE 'very happy' AFTER 'happy';
+reset role;
+CREATE TABLE t1_user_test3 (sk int,a mood)
+WITH (orientation=row);
+ALTER TYPE mood ADD VALUE 'very sad' BEFORE 'sad';
+CREATE SCHEMA schema1;
+ALTER TYPE mood SET SCHEMA schema1;
+CREATE TABLE t1_schema_test1 (sk int,a mood)WITH (orientation=row);
+ERROR:  type "mood" does not exist
+LINE 1: CREATE TABLE t1_schema_test1 (sk int,a mood)WITH (orientatio...
+                                               ^
+SET current_schema = schema1;
+CREATE TABLE t1_schema_test2 (sk int,a mood)WITH (orientation=row);
+ALTER TYPE mood SET schema public;
+RESET current_schema;
+ALTER TYPE mood ADD VALUE IF NOT EXISTS 'very happy' AFTER 'happy';
+NOTICE:  enum label "very happy" already exists, skipping
+ALTER TYPE mood ADD VALUE IF NOT EXISTS 'very sad' BEFORE 'sad';
+NOTICE:  enum label "very sad" already exists, skipping
+ALTER TYPE mood RENAME VALUE 'happy' TO 'delightful';
+ALTER TYPE mood RENAME VALUE 'happy' TO 'delightful';
+ERROR:  "happy" is not an existing enum label
+DROP TYPE mood CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table create_enum.t1_user_test1 column a
+drop cascades to table create_enum.t1_user_test2 column a
+drop cascades to table create_enum.t1_user_test3 column a
+drop cascades to table schema1.t1_schema_test2 column a
+DROP USER IF EXISTS usr1 CASCADE;
+DROP USER IF EXISTS usr2 CASCADE;
+DROP TABLE IF EXISTS t1_user_test3;
+NOTICE:  table "t1_user_test3" does not exist, skipping
+DROP SCHEMA schema1 CASCADE;
+NOTICE:  drop cascades to table schema1.t1_schema_test2
+/*type is record*/
+CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
+DECLARE
+TYPE type_rec_008 IS RECORD(firstname varchar,current_mood mood);
+type_rec_008_1 type_rec_008;
+BEGIN
+type_rec_008_1.firstname:='Simon';
+type_rec_008_1.current_mood:= 'ok';
+end;
+/
+firstname:Simon
+current_mood:ok
+DECLARE
+TYPE DeptRecTyp IS RECORD (dept_id NUMBER(4) NOT NULL := 10,dept_name VARCHAR2(30) NOT NULL := 'Administration',mgr_id NUMBER(6) := 200,current_mood mood := 'ok');
+dept_rec DeptRecTyp;
+BEGIN
+END;
+/
+dept_id: 10
+dept_name: Administration
+mgr_id: 200
+current_mood: ok
+/*Array_type*/
+CREATE TABLE array_tab2(a serial, b mood[]);
+NOTICE:  CREATE TABLE will create implicit sequence "array_tab2_a_seq" for serial column "array_tab2.a"
+INSERT INTO array_tab2(b[0]) VALUES('happy');
+INSERT INTO array_tab2(b[1]) VALUES('happy');
+INSERT INTO array_tab2(b[0]) VALUES('sad');
+INSERT INTO array_tab2(b[0]) VALUES('ok');
+SELECT * FROM array_tab2 where b>array[cASt('sad' AS mood),cASt('ok' AS mood)] ORDER BY 1,2;
+ a |       b       
+---+---------------
+ 1 | [0:0]={happy}
+ 2 | {happy}
+ 4 | [0:0]={ok}
+(3 rows)
+
+SELECT * FROM array_tab2 where b>array[cASt('ok' AS mood)] ORDER BY 1,2;
+ a |       b       
+---+---------------
+ 1 | [0:0]={happy}
+ 2 | {happy}
+(2 rows)
+
+SELECT * FROM array_tab2 where b>array[cASt('sad' AS mood)] ORDER BY 1,2;
+ a |       b       
+---+---------------
+ 1 | [0:0]={happy}
+ 2 | {happy}
+ 4 | [0:0]={ok}
+(3 rows)
+
+SELECT * FROM array_tab2 where b>array[cASt('happy' AS mood)] ORDER BY 1,2;
+ a | b 
+---+---
+(0 rows)
+
+DROP TABLE array_tab2;
+/*empty enumtype*/
+CREATE TYPE empty_type AS enum ();
+CREATE TABLE empty_t (a int, b empty_type);
+INSERT INTO empty_t VALUES (1,'');
+SELECT * FROM empty_t where b = '';
+ a | b 
+---+---
+(0 rows)
+
+DROP TABLE empty_t;
+DROP TYPE empty_type CASCADE;
+DROP TYPE mood CASCADE;
+-- RENAME
+CREATE TYPE bug_status AS ENUM ('new','open', 'close', ''); --ERROR
+ERROR:  invalid enum label ""
+DETAIL:  Labels must contain 1 to 63 characters.
+CREATE TYPE bug_status AS ENUM ('new','open', 'close'); --SUCESS
+ALTER TYPE bug_status RENAME VALUE 'closed' TO 'closed'; --ERROR
+ERROR:  "closed" is not an existing enum label
+ALTER TYPE bug_status RENAME VALUE 'close' TO 'closed'; --SUCESS
+ALTER TYPE bug_status RENAME VALUE 'closed' TO 'closed'; --ERROR
+ERROR:  enum label "closed" already exists
+ALTER TYPE bug_status RENAME VALUE 'closed' TO ''; --ERROR
+ERROR:  invalid enum label ""
+DETAIL:  Labels must contain 1 to 63 characters.
+ALTER TYPE bug_status RENAME VALUE '' TO 'closed'; --ERROR
+ERROR:  invalid enum label ""
+DETAIL:  Labels must contain 1 to 63 characters.
+ALTER TYPE bug_status ADD VALUE '' AFTER 'open'; --ERROR
+ERROR:  invalid enum label ""
+DETAIL:  Labels must contain 1 to 63 characters.
+ALTER TYPE bug_status ADD VALUE 'verify' AFTER 'check'; --ERROR
+ERROR:  "check" is not an existing enum label
+ALTER TYPE bug_status ADD VALUE 'verify' AFTER ''; --ERROR
+ERROR:  "" is not an existing enum label
+ALTER TYPE bug_status ADD VALUE 'check' AFTER 'open'; --SUCESS
+SELECT
+    typname, 
+    enumsortorder,
+    enumlabel 
+FROM pg_enum e 
+INNER JOIN pg_type t ON t.oid = e.enumtypid
+WHERE typname = 'bug_status'
+ORDER BY enumsortorder;
+  typname   | enumsortorder | enumlabel 
+------------+---------------+-----------
+ bug_status |             1 | new
+ bug_status |             2 | open
+ bug_status |           2.5 | check
+ bug_status |             3 | closed
+(4 rows)
+
+DROP TYPE bug_status;
+SET search_path to create_enum;
+create type enum_oth1 as enum('test1','test2');
+create table enum_tbloth1 (c1 numeric, c2 enum_oth1);
+insert into enum_tbloth1 values(1,'test1'),(2,'test2');
+create or replace procedure fun_oth( para1 in enum_oth1)as
+declare
+cnum numeric;
+begin
+select c1 into cnum from enum_tbloth1 where c2=para1;
+raise info '%', cnum;
+end;
+/
+-- deparse namespace name for PBE mode
+set search_path=public;
+call create_enum.fun_oth('test1');
+INFO:  1
+ fun_oth 
+---------
+ 
+(1 row)
+
+RESET search_path;
+DROP SCHEMA create_enum CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table create_enum.t1_user_test3
+drop cascades to type create_enum.enum_oth1
+drop cascades to table create_enum.enum_tbloth1
+drop cascades to function create_enum.fun_oth(create_enum.enum_oth1)
+--SELECT 
+--    type,result,database,object_name,detail_info 
+--FROM pg_query_audit('2000-01-01 00:00:00', '4000-01-01 00:00:00') 
+--WHERE type='ddl_type' AND split_part(thread_id, '@' ,1) = pg_backend_pid();
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/coordinator1 -Z coordinator -c "audit_system_object" >/dev/null

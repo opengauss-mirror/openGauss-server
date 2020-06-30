@@ -1,0 +1,175 @@
+# ----------
+# src/test/regress/parallel_schedule
+#
+# By convention, we put no more than twenty tests in any one parallel group;
+# this limits the number of connections needed to run the tests.
+# ----------
+
+test: analyze_commands
+#test: single_node_job
+test: single_node_ddl
+test: single_node_sqlbypass
+
+# run tablespace by itself, and first, because it forces a checkpoint;
+# we'd prefer not to have checkpoints later in the tests because that
+# interferes with crash-recovery testing.
+test: single_node_tablespace
+
+# ----------
+# The first group of parallel tests
+# ----------
+test: single_node_boolean single_node_char single_node_name single_node_varchar single_node_text single_node_int2 single_node_int4 single_node_int8 single_node_oid single_node_float4 single_node_float8 single_node_bit single_node_numeric single_node_txid single_node_uuid single_node_enum single_node_money single_node_rangetypes
+
+# Depends on things setup during char, varchar and text
+#test: single_node_strings
+# Depends on int2, int4, int8, float4, float8
+test: single_node_numerology
+
+# ----------
+# The second group of parallel tests
+# ----------
+test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz 
+#test: single_node_interval 
+test: single_node_abstime single_node_reltime 
+#test: single_node_tinterval 
+test: single_node_inet single_node_macaddr single_node_tstypes single_node_comments
+
+# ----------
+# Another group of parallel tests
+# geometry depends on point, lseg, box, path, polygon and circle
+# horology depends on interval, timetz, timestamp, timestamptz, reltime and abstime
+# ----------
+#test: single_node_geometry single_node_horology 
+#test: single_node_regex
+test: single_node_regex_temp 
+test: single_node_oidjoins single_node_type_sanity single_node_opr_sanity
+
+# ----------
+# These four each depend on the previous one
+# ----------
+test: single_node_insert
+test: single_node_temple
+test: single_node_create_function_1
+test: single_node_create_table_1
+#test: single_node_create_type
+#test: single_node_create_table
+#test: single_node_create_function_2
+
+# ----------
+# Load huge amounts of data
+# We should split the data files into single files and then
+# execute two copy tests parallel, to check that copy itself
+# is concurrent safe.
+# ----------
+#test: single_node_copy single_node_copyselect
+test: single_node_copy3
+
+# ----------
+# More groups of parallel tests
+# ----------
+#test: single_node_create_misc 
+#test: single_node_create_operator
+# These depend on the above two
+#test: single_node_create_index 
+#test: single_node_create_view
+
+# ----------
+# Another group of parallel tests
+# ----------
+#test: single_node_create_aggregate 
+#test: single_node_create_function_3 single_node_create_cast
+#test: single_node_constraints single_node_triggers single_node_inherit single_node_create_table_like single_node_typed_table
+test: single_node_vacuum
+#test: single_node_drop_if_exists
+
+# ----------
+# sanity_check does a vacuum, affecting the sort order of SELECT *
+# results. So it should not run parallel to other tests.
+# ----------
+#test: single_node_sanity_check
+
+# ----------
+# Believe it or not, select creates a table, subsequent
+# tests need.
+# ----------
+test: single_node_errors
+#test: single_node_select
+ignore: single_node_random
+
+# ----------
+# Another group of parallel tests
+# ----------
+#test: single_node_select_into single_node_select_distinct 
+#test: single_node_select_distinct_on single_node_select_implicit single_node_select_having 
+test: single_node_select_implicit single_node_select_having 
+#test: single_node_subselect
+test: single_node_union
+#test: single_node_case single_node_join single_node_aggregates 
+#test: single_node_transactions 
+test: single_node_random 
+#test: single_node_portals
+#test: single_node_arrays 
+#test: single_node_btree_index single_node_hash_index single_node_update 
+test: single_node_update 
+#test single_node_namespace
+#test: single_node_prepared_xacts 
+#test: single_node_delete
+
+# ----------
+# Another group of parallel tests
+# ----------
+#test: single_node_privileges
+test: single_node_privileges2
+#test: single_node_security_label single_node_collate
+
+#test: single_node_misc
+# rules cannot run concurrently with any test that creates a view
+#test: single_node_rules
+
+# ----------
+# Another group of parallel tests
+# ----------
+#test: single_node_select_views 
+#test: single_node_portals_p2 
+#test: single_node_foreign_key single_node_cluster single_node_dependency
+#test: single_node_guc
+test: single_node_guc2
+test: single_node_bitmapops single_node_combocid 
+#test: single_node_tsearch
+test: single_node_tsdicts 
+#test: single_node_foreign_data 
+#single_node_window
+#test: single_node_xmlmap 
+#test: single_node_functional_deps single_node_advisory_lock single_node_json single_node_equivclass
+
+# ----------
+# Another group of parallel tests
+# NB: temp.sql does a reconnect which transiently uses 2 connections,
+# so keep this parallel group to at most 19 tests
+# ----------
+test: single_node_sequence
+#test: single_node_plancache single_node_limit single_node_plpgsql single_node_copy2 single_node_temp single_node_domain single_node_rangefuncs single_node_prepare single_node_without_oid single_node_conversion single_node_truncate single_node_alter_table single_node_sequence single_node_polymorphism
+#test: single_node_rowtypes 
+#test: single_node_returning single_node_largeobject single_node_with single_node_xml
+
+# run stats by itself because its delay may be insufficient under heavy load
+#test: single_node_stats
+
+# run and check forbidden functions are still forbidden to use in single node
+test: single_node_forbidden
+test: single_node_mergeinto
+
+# Trigger tests
+#test: single_node_triggers
+#test: single_node_xc_trigship
+
+# Synonym tests
+#test: single_node_synonym
+
+# func/view tests
+test: single_node_unsupported_view 
+#test: single_node_builtin_funcs
+
+#test: hw_cstore
+
+test: instr_unique_sql

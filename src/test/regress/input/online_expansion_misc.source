@@ -1,0 +1,77 @@
+/*
+ * ---OnlineExpansion regression test suits---
+ * Unit tests catch up issues that we found in online expansion development
+ */
+ /* #1. Issue validation for delete-delta not exists */
+CREATE SCHEMA data_redis;
+create table t1(c1 int, c2 int);
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);   
+create table t1c(c1 int, c2 int) with (orientation=column);
+ALTER TABLE t1c SET(append_mode=on, rel_cn_oid=54321);   
+
+insert into t1 select v,v from generate_series(1,100) as v;
+insert into t1c select * from t1;
+
+update t1 set c2 = 10;
+delete from t1;
+
+update t1c set c2 = 10;
+delete from t1c;
+
+drop table t1;
+drop table t1c;
+
+/* #2. test create table on old installation group while in cluster resizing. */
+CREATE OR REPLACE FUNCTION pg_enable_redis_proc_cancelable() RETURNS bool AS
+'@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@',
+'pg_enable_redis_proc_cancelable' LANGUAGE C IMMUTABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_disable_redis_proc_cancelable() RETURNS bool AS
+'@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@',
+'pg_disable_redis_proc_cancelable' LANGUAGE C IMMUTABLE not fenced;
+
+create node group ng1 with(datanode2);
+create table t1(x int) to group ng1;
+
+set xc_maintenance_mode = on;
+execute direct on (coordinator1) 'update pgxc_group set in_redistribution=''y'' where group_name=''ng1''';
+reset xc_maintenance_mode;
+-- fail
+create table t2(x int) to group ng1;
+
+select pg_enable_redis_proc_cancelable();
+create table t2(x int) to group ng1;
+select pg_disable_redis_proc_cancelable();
+\d+ t2
+execute direct on (datanode1) 'select relname from pg_class where relname=''t2''';
+execute direct on (datanode2) 'select relname from pg_class where relname=''t2''';
+drop table t2;
+
+set xc_maintenance_mode = on;
+execute direct on (coordinator1) 'update pgxc_group set in_redistribution=''n'' where group_name=''ng1''';
+reset xc_maintenance_mode;
+
+drop table t1;
+drop node group ng1;
+
+drop function pg_enable_redis_proc_cancelable;
+drop function pg_disable_redis_proc_cancelable;
+
+/* #3 test use delete_delta table in different schema */
+create schema test1;
+create schema test2;
+create table test1.t1(x int);
+ALTER TABLE test1.t1 SET(append_mode=on, rel_cn_oid=12345);
+create unlogged table data_redis.pg_delete_delta_12345
+(
+    xcnodeid int,
+    dnrelid int,
+    block_number bigint,
+    block_offset int
+)
+ ;
+
+set current_schema=test2;
+delete from test1.t1;
+DROP SCHEMA data_redis CASCADE;
+drop schema test1 cascade;
+drop schema test2 cascade;

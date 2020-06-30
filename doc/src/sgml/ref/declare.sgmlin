@@ -1,0 +1,26 @@
+<refentry id="SQL-DECLARE">
+<refmeta>
+<refentrytitle>DECLARE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DECLARE</refname>
+<refpurpose>1. declare a cursor. 2. start an anonymous block.</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+
+1. declare a cursor:
+DECLARE cursor_name [ BINARY ] [ NO SCROLL ]
+    CURSOR [ { WITH | WITHOUT } HOLD ] FOR query ;
+
+2. start an anonymous block:
+[DECLARE [declare_statements]] 
+BEGIN
+execution_statements
+END;
+/
+</synopsis>
+</refsynopsisdiv>
+</refentry>

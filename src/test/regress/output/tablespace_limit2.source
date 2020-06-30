@@ -1,0 +1,154 @@
+-- test MAXSIZE
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '';
+ERROR:  Invalid value for tablespace maxsize: ""
+HINT:  Unknown tablespace size
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000';
+ERROR:  Invalid value for tablespace maxsize: "10000000000000000000000000000000000000000000000000000000"
+HINT:  lost valid unit
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000K';
+ERROR:  Invalid value for tablespace maxsize: "10000000000000000000000000000000000000000000000000000000K"
+HINT:  Value exceeds max size 9007199254740991 with unit KB
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000M';
+ERROR:  Invalid value for tablespace maxsize: "10000000000000000000000000000000000000000000000000000000M"
+HINT:  Value exceeds max size 8796093022207 with unit MB
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000G';
+ERROR:  Invalid value for tablespace maxsize: "10000000000000000000000000000000000000000000000000000000G"
+HINT:  Value exceeds max size 8589934591 with unit GB
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000T';
+ERROR:  Invalid value for tablespace maxsize: "10000000000000000000000000000000000000000000000000000000T"
+HINT:  Value exceeds max size 8388607 with unit TB
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000P';
+ERROR:  Invalid value for tablespace maxsize: "10000000000000000000000000000000000000000000000000000000P"
+HINT:  Value exceeds max size 8191 with unit PB
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize' maxsize '10000000000000000000000000000000000000000000000000000000J';
+ERROR:  Invalid value for tablespace maxsize: "10000000000000000000000000000000000000000000000000000000J"
+HINT:  Valid units are "k/K", "m/M", "g/G", "t/T", and "p/P".
+create tablespace test_spc location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_a' maxsize '3000';
+ERROR:  Invalid value for tablespace maxsize: "3000"
+HINT:  lost valid unit
+create tablespace test_spc1 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_b' maxsize '3000K';
+create tablespace test_spc2 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_c' maxsize '3000M';
+create tablespace test_spc3 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_d' maxsize '3000G';
+create tablespace test_spc4 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_e' maxsize '3000T';
+create tablespace test_spc5 location '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_f' maxsize '3000P';
+DROP TABLESPACE IF EXISTS test_spc1;
+DROP TABLESPACE IF EXISTS test_spc2;
+DROP TABLESPACE IF EXISTS test_spc3;
+DROP TABLESPACE IF EXISTS test_spc4;
+DROP TABLESPACE IF EXISTS test_spc5;
+\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_a
+\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_b
+\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_c
+\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_d
+\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_e
+\! rmdir @abs_srcdir@/tmp_check/datanode1/pg_copydir/test_maxsize_f
+-- problem: quota is disable when small uint64 - big uint64
+create tablespace test_tblspc_10 location '@abs_srcdir@/tmp_check/test_tblspc_10' MAXSIZE '20 M';
+CREATE TABLE test_case_10
+(
+  c_hashid int,
+  c_tinyint  tinyint,
+  c_smallint smallint,
+  c_int integer,
+  c_bigint   bigint,
+  c_money    money,
+  c_numeric   numeric,
+  c_real      real,
+  c_double    double precision,
+  c_decimal   decimal,
+  c_varchar   varchar,
+  c_char   char(30),
+  c_nvarchar2  nvarchar2,
+  c_text text,
+  c_timestamp   timestamp with time zone,
+  c_timestamptz timestamp without time zone,
+  c_date     date,
+  c_time     time without time zone,
+  c_timetz   time with time zone,
+  c_interval  interval,
+  c_tinterval   tinterval,
+  c_smalldatetime   smalldatetime,
+  c_bytea   bytea,
+  c_boolean  boolean,
+  c_inet inet,
+  c_cidr cidr,
+  c_bit bit(10),
+  c_varbit varbit(10),
+  c_oid oid
+)
+tablespace test_tblspc_10  ;
+CREATE TABLE test_case_11
+(
+  c_hashid int,
+  c_tinyint  tinyint,
+  c_smallint smallint,
+  c_int integer,
+  c_bigint   bigint,
+  c_money    money,
+  c_numeric   numeric,
+  c_real      real,
+  c_double    double precision,
+  c_decimal   decimal,
+  c_varchar   varchar,
+  c_char   char(30),
+  c_nvarchar2  nvarchar2,
+  c_text text,
+  c_timestamp   timestamp with time zone,
+  c_timestamptz timestamp without time zone,
+  c_date     date,
+  c_time     time without time zone,
+  c_timetz   time with time zone,
+  c_interval  interval,
+  c_tinterval   tinterval,
+  c_smalldatetime   smalldatetime,
+  c_bytea   bytea,
+  c_boolean  boolean,
+  c_inet inet,
+  c_cidr cidr,
+  c_bit bit(10),
+  c_varbit varbit(10),
+  c_oid oid
+);
+COPY test_case_11 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_alter_change_plus_update.dat';
+INSERT INTO test_case_10 SELECT * FROM test_case_11;
+ERROR:  Insufficient storage space for tablespace "test_tblspc_10"
+--?.*
+DROP TABLE test_case_10;
+DROP TABLE test_case_11;
+DROP TABLESPACE test_tblspc_10;
+---
+-- check pg_tablespace with different privilege
+---
+create tablespace tblspc_privilege location '@abs_srcdir@/tmp_check/test_tblspc_privilege';
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\db";
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+create user user_tablespc_normal password 'Ttest@123';
+\! @abs_bindir@/gsql -d postgres -U user_tablespc_normal -W 'Ttest@123' -p @portstring@ -c "\db";
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+create user user_tablespc_sysadmin sysadmin password 'Ttest@123';
+\! @abs_bindir@/gsql -d postgres -U user_tablespc_sysadmin -W 'Ttest@123' -p @portstring@ -c "\db";
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+drop user user_tablespc_normal;
+drop user user_tablespc_sysadmin;
+drop tablespace tblspc_privilege;

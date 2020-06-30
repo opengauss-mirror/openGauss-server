@@ -1,0 +1,104 @@
+set current_schema=vector_engine;
+set enable_nestloop=off;
+set enable_vector_engine=off;
+explain (costs off)  select
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice,
+	sum(l_quantity)
+from
+	customer,
+	orders,
+	lineitem
+where
+	o_orderkey in (
+		select
+			l_orderkey
+		from
+			lineitem
+		group by
+			l_orderkey having
+				sum(l_quantity) > 300
+	)
+	and c_custkey = o_custkey
+	and o_orderkey = l_orderkey
+group by
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice
+order by
+	o_totalprice desc,
+	o_orderdate
+limit 100;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: orders.o_totalprice DESC, orders.o_orderdate
+         ->  HashAggregate
+               Group By Key: orders.o_totalprice, orders.o_orderdate, customer.c_name, customer.c_custkey, orders.o_orderkey
+               ->  Hash Join
+                     Hash Cond: (vector_engine.lineitem.l_orderkey = orders.o_orderkey)
+                     ->  Row Adapter
+                           ->  CStore Scan on lineitem
+                     ->  Hash
+                           ->  Hash Join
+                                 Hash Cond: (orders.o_custkey = customer.c_custkey)
+                                 ->  Hash Join
+                                       Hash Cond: (orders.o_orderkey = vector_engine.lineitem.l_orderkey)
+                                       ->  Row Adapter
+                                             ->  CStore Scan on orders
+                                       ->  Hash
+                                             ->  HashAggregate
+                                                   Group By Key: vector_engine.lineitem.l_orderkey
+                                                   Filter: (sum(vector_engine.lineitem.l_quantity) > 300::numeric)
+                                                   ->  Row Adapter
+                                                         ->  CStore Scan on lineitem
+                                 ->  Hash
+                                       ->  Row Adapter
+                                             ->  CStore Scan on customer
+(25 rows)
+
+select
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice,
+	sum(l_quantity)
+from
+	customer,
+	orders,
+	lineitem
+where
+	o_orderkey in (
+		select
+			l_orderkey
+		from
+			lineitem
+		group by
+			l_orderkey having
+				sum(l_quantity) > 300
+	)
+	and c_custkey = o_custkey
+	and o_orderkey = l_orderkey
+group by
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice
+order by
+	o_totalprice desc,
+	o_orderdate
+limit 100;
+       c_name       | c_custkey | o_orderkey |       o_orderdate        | o_totalprice |  sum   
+--------------------+-----------+------------+--------------------------+--------------+--------
+ Customer#000000667 |       667 |      29158 | Sat Oct 21 00:00:00 1995 |    439687.23 | 305.00
+ Customer#000000178 |       178 |       6882 | Wed Apr 09 00:00:00 1997 |    422359.65 | 303.00
+(2 rows)
+

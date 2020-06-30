@@ -1,0 +1,86 @@
+-- query before/after drop some column
+--
+-- case 1: drop/add column in 
+CREATE TABLE cmpr_drop_column_raw(
+        c_int_1 integer NOT NULL,
+        c_int_2 integer NOT NULL,
+        c_int_3 integer NOT NULL,
+        c_int_4 integer NOT NULL,
+        c_int_5 integer NOT NULL,
+        c_int_6 integer NOT NULL,
+        c_int_7 integer NOT NULL,
+        c_int_8 integer NOT NULL,
+        c_int_9 integer NOT NULL,
+        c_int_10 integer NOT NULL,
+        c_int_11 integer NOT NULL,
+        c_int_12 integer NOT NULL);
+INSERT INTO cmpr_drop_column_raw VALUES (1,MOD(generate_series(1,10000,10),300),1,MOD(generate_series(2,10000,10),300),1,generate_series(3,10000,10),1,generate_series(1,10000,10),1,generate_series(2,10000,10),1,generate_series(3,10000,10));
+CREATE TABLE cmpr_drop_column(
+        c_int_1 integer NOT NULL,
+        c_int_2 integer NOT NULL,
+        c_int_3 integer NOT NULL,
+        c_int_4 integer NOT NULL,
+        c_int_5 integer NOT NULL,
+        c_int_6 integer NOT NULL,
+        c_int_7 integer NOT NULL,
+        c_int_8 integer NOT NULL,
+        c_int_9 integer NOT NULL,
+        c_int_10 integer NOT NULL,
+        c_int_11 integer NOT NULL,
+        c_int_12 integer NOT NULL
+) COMPRESS;
+COPY cmpr_drop_column_raw TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column.data';
+COPY cmpr_drop_column FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column.data';
+
+ALTER TABLE cmpr_drop_column DROP COLUMN C_INT_6;
+ALTER TABLE cmpr_drop_column ADD COLUMN C_INT_6 INTEGER;
+ALTER TABLE cmpr_drop_column_raw DROP COLUMN C_INT_6;
+ALTER TABLE cmpr_drop_column_raw ADD COLUMN C_INT_6 INTEGER;
+(SELECT * FROM cmpr_drop_column_raw WHERE C_INT_12=23) MINUS ALL (SELECT * FROM cmpr_drop_column WHERE C_INT_12=23);
+
+SELECT (SELECT COUNT(*) FROM  cmpr_drop_column_raw) - (SELECT COUNT(*) FROM cmpr_drop_column);
+(SELECT * FROM cmpr_drop_column_raw) MINUS ALL (SELECT * FROM cmpr_drop_column);
+(SELECT * FROM cmpr_drop_column) MINUS ALL (SELECT * FROM cmpr_drop_column_raw);
+DROP TABLE cmpr_drop_column;
+DROP TABLE cmpr_drop_column_raw;
+
+-- Test Case:  inherits
+CREATE TABLE cmpr_drop_column_parent(
+        c_int_1 integer NOT NULL,
+        c_int_2 integer NOT NULL,
+        c_int_3 integer NOT NULL,
+        c_int_4 integer NOT NULL,
+        c_int_5 integer NOT NULL,
+        c_int_6 integer NOT NULL,
+        c_int_7 integer NOT NULL,
+        c_int_8 integer NOT NULL,
+        c_int_9 integer NOT NULL,
+        c_int_10 integer NOT NULL,
+        c_int_11 integer NOT NULL
+) COMPRESS;
+CREATE TABLE cmpr_drop_column_child(
+        c_int_1 integer NOT NULL,
+        c_int_2 integer NOT NULL,
+        c_int_3 integer NOT NULL,
+        c_int_4 integer NOT NULL,
+        c_int_5 integer NOT NULL,
+        c_int_6 integer NOT NULL,
+        c_int_7 integer NOT NULL,
+        c_int_8 integer NOT NULL,
+        c_int_9 integer NOT NULL,
+        c_int_10 integer NOT NULL,
+        c_int_11 integer NOT NULL,
+        c_int_12 integer NOT NULL
+) COMPRESS;
+COPY cmpr_drop_column_child FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column.data';
+SELECT (SELECT COUNT(*) FROM  cmpr_drop_column_child) - (SELECT COUNT(*) FROM cmpr_drop_column_parent);
+ALTER TABLE cmpr_drop_column_parent DROP COLUMN C_INT_6;
+ALTER TABLE cmpr_drop_column_parent ADD COLUMN C_INT_6 INTEGER;
+ALTER TABLE cmpr_drop_column_child DROP COLUMN c_int_12;
+SELECT (SELECT COUNT(*) FROM  cmpr_drop_column_parent) - (SELECT COUNT(*) FROM cmpr_drop_column_child);
+(SELECT * FROM cmpr_drop_column_child) MINUS ALL (SELECT * FROM cmpr_drop_column_parent) order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+(SELECT * FROM cmpr_drop_column_parent) MINUS ALL (SELECT * FROM cmpr_drop_column_child);
+DROP TABLE cmpr_drop_column_child;
+DROP TABLE cmpr_drop_column_parent;
+
+\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column.data

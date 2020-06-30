@@ -1,0 +1,52 @@
+<!--
+doc/src/sgml/ref/create_app_workload_group.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-CREATEAPPWORKLOADGROUP">
+ <refmeta>
+  <refentrytitle>CREATE APP WORKLOAD GROUP</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+ <refname>CREATE APP WORKLOAD GROUP</refname>
+  <refpurpose>create the definition of a app workload group</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-createappworkloadgroup">
+  <primary>CREATE APP WORKLOAD GROUP</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+CREATE APP WORKLOAD GROUP MAPPING app_name [ WITH ( WORKLOAD_GPNAME  = workload_gpname ) ]
+</synopsis>
+ </refsynopsisdiv>
+<!--
+doc/src/sgml/ref/create_app_workload_group.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-CREATEAPPWORKLOADGROUP">
+ <refmeta>
+  <refentrytitle>CREATE APP WORKLOAD GROUP</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+ <refname>CREATE APP WORKLOAD GROUP</refname>
+  <refpurpose>create the definition of a app workload group</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-createappworkloadgroup">
+  <primary>CREATE APP WORKLOAD GROUP</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+CREATE APP WORKLOAD GROUP MAPPING app_name WITH ([ WORKLOAD_GPNAME  = workload_gpname, ])
+</synopsis>
+ </refsynopsisdiv>

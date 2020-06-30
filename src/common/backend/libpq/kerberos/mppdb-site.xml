@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+<property>
+<name>mppdb.kerberos.principal</name>
+<value>#mppdb.kerberos.principal#</value>
+</property>
+<property>
+<name>KRB_HOME</name>
+<value>#KRB_HOME#</value>
+</property>
+<property>
+<name>mppdb_inner_kerberos_enable</name>
+<value>true</value>
+</property>
+<property>
+<name>KRB_CONFIG</name>
+<value>#KRB_CONFIG#</value>
+</property>
+<property>
+<name>mppdb.kerberos.keytab</name>
+<value>#mppdb.kerberos.keytab#</value>
+</property>
+</configuration>

@@ -1,0 +1,12 @@
+[Unit]
+Description=OS Optimize Service
+After=local-fs.target
+
+[Service]
+Type=idle
+ExecStart=/usr/local/gauss/script/gauss-OS-set.sh
+Delegate=yes
+
+[Install]
+WantedBy=multi-user.target
+

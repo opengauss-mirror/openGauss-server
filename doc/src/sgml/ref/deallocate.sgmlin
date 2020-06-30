@@ -1,0 +1,16 @@
+<refentry id="SQL-DEALLOCATE">
+<refmeta>
+<refentrytitle>DEALLOCATE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DEALLOCATE</refname>
+<refpurpose>deallocate a prepared statement</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DEALLOCATE [ PREPARE ] { name | ALL };
+</synopsis>
+</refsynopsisdiv>
+</refentry>

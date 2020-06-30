@@ -1,0 +1,2974 @@
+create schema recursive_ref_recursive;
+set search_path to recursive_ref_recursive;
+drop table if exists rec_tb1;
+NOTICE:  table "rec_tb1" does not exist, skipping
+create table rec_tb1 (id int ,parentID int ,name varchar(100));
+insert into rec_tb1 values(1,0,'河南省');
+insert into rec_tb1 values(2,1,'信阳市');
+insert into rec_tb1 values(3,2,'淮滨县');
+insert into rec_tb1 values(4,3,'芦集乡');
+insert into rec_tb1 values(12,3,'邓湾乡');
+insert into rec_tb1 values(13,3,'台头乡');
+insert into rec_tb1 values(14,3,'谷堆乡');
+insert into rec_tb1 values(8,2,'固始县');
+insert into rec_tb1 values(9,8,'李店乡');
+insert into rec_tb1 values(10,2,'息县');
+insert into rec_tb1 values(11,10,'关店乡');
+insert into rec_tb1 values(5,1,'安阳市');
+insert into rec_tb1 values(6,5,'滑县');
+insert into rec_tb1 values(7,6,'老庙乡');
+insert into rec_tb1 values(15,1,'南阳市');
+insert into rec_tb1 values(16,15,'方城县');
+insert into rec_tb1 values(17,1,'驻马店市');
+insert into rec_tb1 values(18,17,'正阳县');
+drop table if exists rec_tb2;
+NOTICE:  table "rec_tb2" does not exist, skipping
+create table rec_tb2 (id int ,parentID int ,name varchar(100)) ;
+insert into rec_tb2 values(1,0,'河南省');
+insert into rec_tb2 values(2,1,'信阳市');
+insert into rec_tb2 values(3,2,'淮滨县');
+insert into rec_tb2 values(4,3,'芦集乡');
+insert into rec_tb2 values(12,3,'邓湾乡');
+insert into rec_tb2 values(13,3,'台头乡');
+insert into rec_tb2 values(14,3,'谷堆乡');
+insert into rec_tb2 values(8,2,'固始县');
+insert into rec_tb2 values(9,8,'李店乡');
+insert into rec_tb2 values(10,2,'息县');
+insert into rec_tb2 values(11,10,'关店乡');
+insert into rec_tb2 values(5,1,'安阳市');
+insert into rec_tb2 values(6,5,'滑县');
+insert into rec_tb2 values(7,6,'老庙乡');
+insert into rec_tb2 values(15,1,'南阳市');
+insert into rec_tb2 values(16,15,'方城县');
+insert into rec_tb2 values(17,1,'驻马店市');
+insert into rec_tb2 values(18,17,'正阳县');
+drop table if exists rec_tb3;
+NOTICE:  table "rec_tb3" does not exist, skipping
+create table rec_tb3 (id int ,parentID int ,name varchar(100)) ;
+insert into rec_tb3 values(1,0,'河南省');
+insert into rec_tb3 values(2,1,'信阳市');
+insert into rec_tb3 values(3,2,'淮滨县');
+insert into rec_tb3 values(4,3,'芦集乡');
+insert into rec_tb3 values(12,3,'邓湾乡');
+insert into rec_tb3 values(13,3,'台头乡');
+insert into rec_tb3 values(14,3,'谷堆乡');
+insert into rec_tb3 values(8,2,'固始县');
+insert into rec_tb3 values(9,8,'李店乡');
+insert into rec_tb3 values(10,2,'息县');
+insert into rec_tb3 values(11,10,'关店乡');
+insert into rec_tb3 values(5,1,'安阳市');
+insert into rec_tb3 values(6,5,'滑县');
+insert into rec_tb3 values(7,6,'老庙乡');
+insert into rec_tb3 values(15,1,'南阳市');
+insert into rec_tb3 values(16,15,'方城县');
+insert into rec_tb3 values(17,1,'驻马店市');
+insert into rec_tb3 values(18,17,'正阳县');
+drop table if exists rec_tb4;
+NOTICE:  table "rec_tb4" does not exist, skipping
+create table rec_tb4 (id int ,parentID int ,name varchar(100))
+partition by range(parentID)
+(
+    PARTITION P1 VALUES LESS THAN(2),
+    PARTITION P2 VALUES LESS THAN(8),
+    PARTITION P3 VALUES LESS THAN(16),
+    PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+insert into rec_tb4 values(1,0,'河南省');
+insert into rec_tb4 values(2,1,'信阳市');
+insert into rec_tb4 values(3,2,'淮滨县');
+insert into rec_tb4 values(4,3,'芦集乡');
+insert into rec_tb4 values(12,3,'邓湾乡');
+insert into rec_tb4 values(13,3,'台头乡');
+insert into rec_tb4 values(14,3,'谷堆乡');
+insert into rec_tb4 values(8,2,'固始县');
+insert into rec_tb4 values(9,8,'李店乡');
+insert into rec_tb4 values(10,2,'息县');
+insert into rec_tb4 values(11,10,'关店乡');
+insert into rec_tb4 values(5,1,'安阳市');
+insert into rec_tb4 values(6,5,'滑县');
+insert into rec_tb4 values(7,6,'老庙乡');
+insert into rec_tb4 values(15,1,'南阳市');
+insert into rec_tb4 values(16,15,'方城县');
+insert into rec_tb4 values(17,1,'驻马店市');
+insert into rec_tb4 values(18,17,'正阳县');
+--
+----case: 1
+--
+explain(costs off, nodes off)
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join (
+    with recursive cte as 
+    (
+        select * from cte1
+        union all 
+        select distinct h.*  from rec_tb1 h inner join cte c on h.parentID = c.col1
+    )
+    select * from cte
+) m
+on e.col2 = m.col1 join cte n on n.id =m.col2
+order by 1, 2;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: e.col1, e.col2
+   CTE cte
+     ->  Recursive Union
+           ->  Append
+                 ->  Result
+                       ->  HashSetOp Intersect All
+                             ->  Append
+                                   ->  Subquery Scan on "*SELECT* 1"
+                                         ->  Subquery Scan on __unnamed_subquery__
+                                               ->  CTE Scan on tmp
+                                                     CTE tmp
+                                                       ->  Seq Scan on rec_tb1
+                                                             Filter: (id < 4)
+                                   ->  Subquery Scan on "*SELECT* 2"
+                                         ->  CTE Scan on tmp
+                                               CTE tmp
+                                                 ->  Partition Iterator
+                                                       Iterations: 4
+                                                       ->  Partitioned Seq Scan on rec_tb4
+                                                             Filter: (id < 4)
+                                                             Selected Partitions:  1..4
+                 ->  Subquery Scan on "*SELECT* 3"
+                       ->  CTE Scan on tmp
+                             CTE tmp
+                               ->  Seq Scan on rec_tb3
+                                     Filter: (id < 4)
+           ->  Subquery Scan on "*SELECT* 4"
+                 ->  Hash Join
+                       Hash Cond: (b.parentid = a.id)
+                       ->  Hash Join
+                             Hash Cond: (b.id = c.parentid)
+                             ->  WorkTable Scan on cte b
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb3 c
+                                         Filter: (id < 4)
+                       ->  Hash
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+   CTE cte1
+     ->  Recursive Union
+           ->  HashAggregate
+                 Group By Key: b.id, b.parentid, b.name
+                 ->  HashAggregate
+                       Group By Key: b.id, b.parentid, b.name
+                       ->  Hash Join
+                             Hash Cond: (a.id = b.id)
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb2 b
+           ->  HashAggregate
+                 Group By Key: c.id, d.col2, d.name
+                 ->  Hash Join
+                       Hash Cond: (((substr((d.col2)::text, 1))::bigint + 1) = ((substr((c.parentid)::text, 1))::bigint + 1))
+                       ->  Hash Join
+                             Hash Cond: (d.col1 = cte.id)
+                             ->  WorkTable Scan on cte1 d
+                             ->  Hash
+                                   ->  HashAggregate
+                                         Group By Key: cte.id
+                                         ->  CTE Scan on cte
+                       ->  Hash
+                             ->  Seq Scan on rec_tb1 c
+   ->  Hash Join
+         Hash Cond: (cte.col2 = n.id)
+         ->  Hash Join
+               Hash Cond: (cte.col1 = e.col2)
+               ->  CTE Scan on cte
+                     CTE cte
+                       ->  Recursive Union
+                             ->  CTE Scan on cte1
+                             ->  HashAggregate
+                                   Group By Key: h.id, h.parentid, h.name
+                                   ->  Hash Join
+                                         Hash Cond: (c.col1 = h.parentid)
+                                         ->  WorkTable Scan on cte c
+                                         ->  Hash
+                                               ->  Seq Scan on rec_tb1 h
+               ->  Hash
+                     ->  CTE Scan on cte1 e
+         ->  Hash
+               ->  CTE Scan on cte n
+(87 rows)
+
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join (
+    with recursive cte as 
+    (
+        select * from cte1
+        union all 
+        select distinct h.*  from rec_tb1 h inner join cte c on h.parentID = c.col1
+    )
+    select * from cte
+) m
+on e.col2 = m.col1 join cte n on n.id =m.col2
+order by 1, 2;
+ col1 | col2 |   name   
+------+------+----------
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    1 |    0 | 河南省
+    1 |    0 | 河南省
+    1 |    0 | 河南省
+    1 |    0 | 河南省
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 信阳市
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 信阳市
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+(326 rows)
+
+--
+----case: 2
+--
+explain(costs off, nodes off)
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join (
+    with recursive cte2 as 
+    (
+        select * from cte1
+        union all 
+        select distinct h.*  from rec_tb1 h inner join cte2 c on h.parentID = c.col1
+    )
+    select * from cte2
+) m
+on e.col2 = m.col1 join cte n on n.id =m.col2
+order by 1, 2;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: e.col1, e.col2
+   CTE cte
+     ->  Recursive Union
+           ->  Append
+                 ->  Result
+                       ->  HashSetOp Intersect All
+                             ->  Append
+                                   ->  Subquery Scan on "*SELECT* 1"
+                                         ->  Subquery Scan on __unnamed_subquery__
+                                               ->  CTE Scan on tmp
+                                                     CTE tmp
+                                                       ->  Seq Scan on rec_tb1
+                                                             Filter: (id < 4)
+                                   ->  Subquery Scan on "*SELECT* 2"
+                                         ->  CTE Scan on tmp
+                                               CTE tmp
+                                                 ->  Partition Iterator
+                                                       Iterations: 4
+                                                       ->  Partitioned Seq Scan on rec_tb4
+                                                             Filter: (id < 4)
+                                                             Selected Partitions:  1..4
+                 ->  Subquery Scan on "*SELECT* 3"
+                       ->  CTE Scan on tmp
+                             CTE tmp
+                               ->  Seq Scan on rec_tb3
+                                     Filter: (id < 4)
+           ->  Subquery Scan on "*SELECT* 4"
+                 ->  Hash Join
+                       Hash Cond: (b.parentid = a.id)
+                       ->  Hash Join
+                             Hash Cond: (b.id = c.parentid)
+                             ->  WorkTable Scan on cte b
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb3 c
+                                         Filter: (id < 4)
+                       ->  Hash
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+   CTE cte1
+     ->  Recursive Union
+           ->  HashAggregate
+                 Group By Key: b.id, b.parentid, b.name
+                 ->  HashAggregate
+                       Group By Key: b.id, b.parentid, b.name
+                       ->  Hash Join
+                             Hash Cond: (a.id = b.id)
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb2 b
+           ->  HashAggregate
+                 Group By Key: c.id, d.col2, d.name
+                 ->  Hash Join
+                       Hash Cond: (((substr((d.col2)::text, 1))::bigint + 1) = ((substr((c.parentid)::text, 1))::bigint + 1))
+                       ->  Hash Join
+                             Hash Cond: (d.col1 = cte.id)
+                             ->  WorkTable Scan on cte1 d
+                             ->  Hash
+                                   ->  HashAggregate
+                                         Group By Key: cte.id
+                                         ->  CTE Scan on cte
+                       ->  Hash
+                             ->  Seq Scan on rec_tb1 c
+   ->  Hash Join
+         Hash Cond: (cte2.col2 = n.id)
+         ->  Hash Join
+               Hash Cond: (cte2.col1 = e.col2)
+               ->  CTE Scan on cte2
+                     CTE cte2
+                       ->  Recursive Union
+                             ->  CTE Scan on cte1
+                             ->  HashAggregate
+                                   Group By Key: h.id, h.parentid, h.name
+                                   ->  Hash Join
+                                         Hash Cond: (c.col1 = h.parentid)
+                                         ->  WorkTable Scan on cte2 c
+                                         ->  Hash
+                                               ->  Seq Scan on rec_tb1 h
+               ->  Hash
+                     ->  CTE Scan on cte1 e
+         ->  Hash
+               ->  CTE Scan on cte n
+(87 rows)
+
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join (
+    with recursive cte2 as 
+    (
+        select * from cte1
+        union all 
+        select distinct h.*  from rec_tb1 h inner join cte2 c on h.parentID = c.col1
+    )
+    select * from cte2
+) m
+on e.col2 = m.col1 join cte n on n.id =m.col2
+order by 1, 2;
+ col1 | col2 |   name   
+------+------+----------
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    1 |    0 | 河南省
+    1 |    0 | 河南省
+    1 |    0 | 河南省
+    1 |    0 | 河南省
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 信阳市
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 信阳市
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |    4 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   12 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   13 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    3 |   14 | 信阳市
+    3 |   14 | 淮滨县
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+(326 rows)
+
+--
+---- case:3
+--
+explain(costs off, nodes off)
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join cte1 m on e.col2 = m.col1 
+join cte n on n.id =e.col2
+order by 1, 2;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: e.col1, e.col2
+   CTE cte
+     ->  Recursive Union
+           ->  Append
+                 ->  Result
+                       ->  HashSetOp Intersect All
+                             ->  Append
+                                   ->  Subquery Scan on "*SELECT* 1"
+                                         ->  Subquery Scan on __unnamed_subquery__
+                                               ->  CTE Scan on tmp
+                                                     CTE tmp
+                                                       ->  Seq Scan on rec_tb1
+                                                             Filter: (id < 4)
+                                   ->  Subquery Scan on "*SELECT* 2"
+                                         ->  CTE Scan on tmp
+                                               CTE tmp
+                                                 ->  Partition Iterator
+                                                       Iterations: 4
+                                                       ->  Partitioned Seq Scan on rec_tb4
+                                                             Filter: (id < 4)
+                                                             Selected Partitions:  1..4
+                 ->  Subquery Scan on "*SELECT* 3"
+                       ->  CTE Scan on tmp
+                             CTE tmp
+                               ->  Seq Scan on rec_tb3
+                                     Filter: (id < 4)
+           ->  Subquery Scan on "*SELECT* 4"
+                 ->  Hash Join
+                       Hash Cond: (b.parentid = a.id)
+                       ->  Hash Join
+                             Hash Cond: (b.id = c.parentid)
+                             ->  WorkTable Scan on cte b
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb3 c
+                                         Filter: (id < 4)
+                       ->  Hash
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+   CTE cte1
+     ->  Recursive Union
+           ->  HashAggregate
+                 Group By Key: b.id, b.parentid, b.name
+                 ->  HashAggregate
+                       Group By Key: b.id, b.parentid, b.name
+                       ->  Hash Join
+                             Hash Cond: (a.id = b.id)
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb2 b
+           ->  HashAggregate
+                 Group By Key: c.id, d.col2, d.name
+                 ->  Hash Join
+                       Hash Cond: (((substr((d.col2)::text, 1))::bigint + 1) = ((substr((c.parentid)::text, 1))::bigint + 1))
+                       ->  Hash Join
+                             Hash Cond: (d.col1 = cte.id)
+                             ->  WorkTable Scan on cte1 d
+                             ->  Hash
+                                   ->  HashAggregate
+                                         Group By Key: cte.id
+                                         ->  CTE Scan on cte
+                       ->  Hash
+                             ->  Seq Scan on rec_tb1 c
+   ->  Hash Join
+         Hash Cond: (e.col2 = m.col1)
+         ->  Hash Join
+               Hash Cond: (n.id = e.col2)
+               ->  CTE Scan on cte n
+               ->  Hash
+                     ->  CTE Scan on cte1 e
+         ->  Hash
+               ->  CTE Scan on cte1 m
+(77 rows)
+
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join cte1 m on e.col2 = m.col1 
+join cte n on n.id =e.col2
+order by 1, 2;
+ col1 | col2 |   name   
+------+------+----------
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+(264 rows)
+
+--
+---- case:4
+--
+explain(costs off, nodes off)
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join cte1 m on e.col2 = m.col1 
+order by 1, 2;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: e.col1, e.col2
+   CTE cte
+     ->  Recursive Union
+           ->  Append
+                 ->  Result
+                       ->  HashSetOp Intersect All
+                             ->  Append
+                                   ->  Subquery Scan on "*SELECT* 1"
+                                         ->  Subquery Scan on __unnamed_subquery__
+                                               ->  CTE Scan on tmp
+                                                     CTE tmp
+                                                       ->  Seq Scan on rec_tb1
+                                                             Filter: (id < 4)
+                                   ->  Subquery Scan on "*SELECT* 2"
+                                         ->  CTE Scan on tmp
+                                               CTE tmp
+                                                 ->  Partition Iterator
+                                                       Iterations: 4
+                                                       ->  Partitioned Seq Scan on rec_tb4
+                                                             Filter: (id < 4)
+                                                             Selected Partitions:  1..4
+                 ->  Subquery Scan on "*SELECT* 3"
+                       ->  CTE Scan on tmp
+                             CTE tmp
+                               ->  Seq Scan on rec_tb3
+                                     Filter: (id < 4)
+           ->  Subquery Scan on "*SELECT* 4"
+                 ->  Hash Join
+                       Hash Cond: (b.parentid = a.id)
+                       ->  Hash Join
+                             Hash Cond: (b.id = c.parentid)
+                             ->  WorkTable Scan on cte b
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb3 c
+                                         Filter: (id < 4)
+                       ->  Hash
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+   CTE cte1
+     ->  Recursive Union
+           ->  HashAggregate
+                 Group By Key: b.id, b.parentid, b.name
+                 ->  HashAggregate
+                       Group By Key: b.id, b.parentid, b.name
+                       ->  Hash Join
+                             Hash Cond: (a.id = b.id)
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb2 b
+           ->  HashAggregate
+                 Group By Key: c.id, d.col2, d.name
+                 ->  Hash Join
+                       Hash Cond: (((substr((d.col2)::text, 1))::bigint + 1) = ((substr((c.parentid)::text, 1))::bigint + 1))
+                       ->  Hash Join
+                             Hash Cond: (d.col1 = cte.id)
+                             ->  WorkTable Scan on cte1 d
+                             ->  Hash
+                                   ->  HashAggregate
+                                         Group By Key: cte.id
+                                         ->  CTE Scan on cte
+                       ->  Hash
+                             ->  Seq Scan on rec_tb1 c
+   ->  Hash Join
+         Hash Cond: (e.col2 = m.col1)
+         ->  CTE Scan on cte1 e
+         ->  Hash
+               ->  CTE Scan on cte1 m
+(73 rows)
+
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join cte1 m on e.col2 = m.col1 
+order by 1, 2;
+ col1 | col2 |   name   
+------+------+----------
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    1 |    0 | 河南省
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    5 | 信阳市
+    1 |    5 | 信阳市
+    1 |   15 | 信阳市
+    1 |   15 | 信阳市
+    1 |   17 | 信阳市
+    1 |   17 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 淮滨县
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |    8 | 信阳市
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 淮滨县
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    2 |   10 | 信阳市
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    4 | 信阳市
+    3 |    4 | 淮滨县
+    3 |   12 | 淮滨县
+    3 |   12 | 信阳市
+    3 |   13 | 淮滨县
+    3 |   13 | 信阳市
+    3 |   14 | 淮滨县
+    3 |   14 | 信阳市
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    6 | 信阳市
+    6 |    5 | 滑县
+    6 |    5 | 滑县
+    7 |    6 | 老庙乡
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    9 | 淮滨县
+    8 |    9 | 信阳市
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+    9 |    8 | 李店乡
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |   11 | 淮滨县
+   10 |   11 | 信阳市
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   11 |   10 | 关店乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |   16 | 信阳市
+   16 |   15 | 方城县
+   16 |   15 | 方城县
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |   18 | 信阳市
+   18 |   17 | 正阳县
+   18 |   17 | 正阳县
+(154 rows)
+
+--
+---- case:5
+--
+explain(costs off, nodes off)
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join cte1 m on e.col2 = m.col1 
+join cte n on n.id =e.col2
+order by 1, 2;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: e.col1, e.col2
+   CTE cte
+     ->  Recursive Union
+           ->  Append
+                 ->  Result
+                       ->  HashSetOp Intersect All
+                             ->  Append
+                                   ->  Subquery Scan on "*SELECT* 1"
+                                         ->  Subquery Scan on __unnamed_subquery__
+                                               ->  CTE Scan on tmp
+                                                     CTE tmp
+                                                       ->  Seq Scan on rec_tb1
+                                                             Filter: (id < 4)
+                                   ->  Subquery Scan on "*SELECT* 2"
+                                         ->  CTE Scan on tmp
+                                               CTE tmp
+                                                 ->  Partition Iterator
+                                                       Iterations: 4
+                                                       ->  Partitioned Seq Scan on rec_tb4
+                                                             Filter: (id < 4)
+                                                             Selected Partitions:  1..4
+                 ->  Subquery Scan on "*SELECT* 3"
+                       ->  CTE Scan on tmp
+                             CTE tmp
+                               ->  Seq Scan on rec_tb3
+                                     Filter: (id < 4)
+           ->  Subquery Scan on "*SELECT* 4"
+                 ->  Hash Join
+                       Hash Cond: (b.parentid = a.id)
+                       ->  Hash Join
+                             Hash Cond: (b.id = c.parentid)
+                             ->  WorkTable Scan on cte b
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb3 c
+                                         Filter: (id < 4)
+                       ->  Hash
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+   CTE cte1
+     ->  Recursive Union
+           ->  HashAggregate
+                 Group By Key: b.id, b.parentid, b.name
+                 ->  HashAggregate
+                       Group By Key: b.id, b.parentid, b.name
+                       ->  Hash Join
+                             Hash Cond: (a.id = b.id)
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb2 b
+           ->  HashAggregate
+                 Group By Key: c.id, d.col2, d.name
+                 ->  Hash Join
+                       Hash Cond: (((substr((d.col2)::text, 1))::bigint + 1) = ((substr((c.parentid)::text, 1))::bigint + 1))
+                       ->  Hash Join
+                             Hash Cond: (d.col1 = cte.id)
+                             ->  WorkTable Scan on cte1 d
+                             ->  Hash
+                                   ->  HashAggregate
+                                         Group By Key: cte.id
+                                         ->  CTE Scan on cte
+                       ->  Hash
+                             ->  Seq Scan on rec_tb1 c
+   ->  Hash Join
+         Hash Cond: (e.col2 = m.col1)
+         ->  Hash Join
+               Hash Cond: (n.id = e.col2)
+               ->  CTE Scan on cte n
+               ->  Hash
+                     ->  CTE Scan on cte1 e
+         ->  Hash
+               ->  CTE Scan on cte1 m
+(77 rows)
+
+with recursive cte as
+(
+    select id, parentID, substr(name, 1) as name from (with tmp as (select * from rec_tb1 where id<4) select *from tmp)
+    intersect all
+    select id, parentID, name from (with tmp as (select * from rec_tb4 where id<4) select * from tmp)
+    union all
+    select id, parentID, name from (with tmp as (select * from rec_tb3 where id<4) select * from tmp)   
+    union all
+    select a.* from rec_tb4 a join cte b on a.id = b.parentID join rec_tb3 c on c.parentid=b.id where c.id<4
+),
+cte1 as
+(
+    select distinct b.id col1, b.parentID col2, b.name from rec_tb4 a join rec_tb2 b on a.id = b.id group by col1, col2, b.name
+    union all
+    select d.col2, c.id, d.name from rec_tb1 c join cte1 d on substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 where d.col1 in (select id from cte)group by c.id, d.col2, d.name
+)
+select 
+    e.*
+from cte1 e
+join cte1 m on e.col2 = m.col1 
+join cte n on n.id =e.col2
+order by 1, 2;
+ col1 | col2 |   name   
+------+------+----------
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+(264 rows)
+
+--
+---- case6
+--
+explain(costs off, nodes off)
+WITH RECURSIVE cte AS
+(
+    SELECT id, parentID, substr(name, 1) AS name 
+    FROM rec_tb1 
+    WHERE id<4
+    UNION ALL
+    SELECT a.* 
+    FROM rec_tb4 a 
+    JOIN cte b ON a.id = b.parentID 
+    JOIN rec_tb3 c ON c.parentid=b.id 
+    WHERE c.id<4
+)
+select * from cte t1 join cte t2 on t1.id = t2.id order by 1, 2;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Sort
+   Sort Key: t1.id, t1.parentid
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on rec_tb1
+                 Filter: (id < 4)
+           ->  Subquery Scan on "*SELECT* 2"
+                 ->  Hash Join
+                       Hash Cond: (b.parentid = a.id)
+                       ->  Hash Join
+                             Hash Cond: (b.id = c.parentid)
+                             ->  WorkTable Scan on cte b
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb3 c
+                                         Filter: (id < 4)
+                       ->  Hash
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+   ->  Hash Join
+         Hash Cond: (t1.id = t2.id)
+         ->  CTE Scan on cte t1
+         ->  Hash
+               ->  CTE Scan on cte t2
+(25 rows)
+
+WITH RECURSIVE cte AS
+(
+    SELECT id, parentID, substr(name, 1) AS name 
+    FROM rec_tb1 
+    WHERE id<4
+    UNION ALL
+    SELECT a.* 
+    FROM rec_tb4 a 
+    JOIN cte b ON a.id = b.parentID 
+    JOIN rec_tb3 c ON c.parentid=b.id 
+    WHERE c.id<4
+)
+select * from cte t1 join cte t2 on t1.id = t2.id order by 1, 2;
+ id | parentid |  name  | id | parentid |  name  
+----+----------+--------+----+----------+--------
+  1 |        0 | 河南省 |  1 |        0 | 河南省
+  1 |        0 | 河南省 |  1 |        0 | 河南省
+  1 |        0 | 河南省 |  1 |        0 | 河南省
+  1 |        0 | 河南省 |  1 |        0 | 河南省
+  2 |        1 | 信阳市 |  2 |        1 | 信阳市
+  3 |        2 | 淮滨县 |  3 |        2 | 淮滨县
+(6 rows)
+
+--
+---- case6
+--
+explain(costs off, nodes off)
+WITH RECURSIVE cte AS
+(
+    SELECT id, parentID, substr(name, 1) AS name 
+    FROM rec_tb1 
+    WHERE id<4
+    UNION ALL
+    SELECT a.* 
+    FROM rec_tb4 a 
+    JOIN cte b ON a.id = b.parentID 
+    JOIN rec_tb3 c ON c.parentid=b.id 
+    WHERE c.id<4
+),
+cte1 AS
+(
+    select * from cte
+),
+cte2 AS
+(
+    SELECT distinct b.id col1, b.parentID col2, b.name 
+    FROM rec_tb4 a JOIN rec_tb2 b ON a.id = b.id 
+    GROUP BY col1, col2, b.name
+    UNION ALL
+    SELECT d.col2, c.id, d.name FROM rec_tb1 c 
+    JOIN cte2 d ON substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 
+    WHERE d.col1 in (SELECT id FROM cte1) 
+    GROUP BY c.id, d.col2, d.name
+)
+SELECT 
+    e.*
+FROM cte2 e
+JOIN cte2 m ON e.col2 = m.col1 
+JOIN cte n ON n.id =e.col2
+ORDER BY 1, 2;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: e.col1, e.col2
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on rec_tb1
+                 Filter: (id < 4)
+           ->  Subquery Scan on "*SELECT* 2"
+                 ->  Hash Join
+                       Hash Cond: (b.parentid = a.id)
+                       ->  Hash Join
+                             Hash Cond: (b.id = c.parentid)
+                             ->  WorkTable Scan on cte b
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb3 c
+                                         Filter: (id < 4)
+                       ->  Hash
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+   CTE cte1
+     ->  CTE Scan on cte
+   CTE cte2
+     ->  Recursive Union
+           ->  HashAggregate
+                 Group By Key: b.id, b.parentid, b.name
+                 ->  HashAggregate
+                       Group By Key: b.id, b.parentid, b.name
+                       ->  Hash Join
+                             Hash Cond: (a.id = b.id)
+                             ->  Partition Iterator
+                                   Iterations: 4
+                                   ->  Partitioned Seq Scan on rec_tb4 a
+                                         Selected Partitions:  1..4
+                             ->  Hash
+                                   ->  Seq Scan on rec_tb2 b
+           ->  HashAggregate
+                 Group By Key: c.id, d.col2, d.name
+                 ->  Hash Join
+                       Hash Cond: (((substr((d.col2)::text, 1))::bigint + 1) = ((substr((c.parentid)::text, 1))::bigint + 1))
+                       ->  Hash Join
+                             Hash Cond: (d.col1 = cte1.id)
+                             ->  WorkTable Scan on cte2 d
+                             ->  Hash
+                                   ->  HashAggregate
+                                         Group By Key: cte1.id
+                                         ->  CTE Scan on cte1
+                       ->  Hash
+                             ->  Seq Scan on rec_tb1 c
+   ->  Hash Join
+         Hash Cond: (e.col2 = m.col1)
+         ->  Hash Join
+               Hash Cond: (e.col2 = n.id)
+               ->  CTE Scan on cte2 e
+               ->  Hash
+                     ->  CTE Scan on cte n
+         ->  Hash
+               ->  CTE Scan on cte2 m
+(58 rows)
+
+WITH RECURSIVE cte AS
+(
+    SELECT id, parentID, substr(name, 1) AS name 
+    FROM rec_tb1 
+    WHERE id<4
+    UNION ALL
+    SELECT a.* 
+    FROM rec_tb4 a 
+    JOIN cte b ON a.id = b.parentID 
+    JOIN rec_tb3 c ON c.parentid=b.id 
+    WHERE c.id<4
+),
+cte1 AS
+(
+    select * from cte
+),
+cte2 AS
+(
+    SELECT distinct b.id col1, b.parentID col2, b.name 
+    FROM rec_tb4 a JOIN rec_tb2 b ON a.id = b.id 
+    GROUP BY col1, col2, b.name
+    UNION ALL
+    SELECT d.col2, c.id, d.name FROM rec_tb1 c 
+    JOIN cte2 d ON substr(c.parentID, 1) + 1 = substr(d.col2, 1) + 1 
+    WHERE d.col1 in (SELECT id FROM cte1) 
+    GROUP BY c.id, d.col2, d.name
+)
+SELECT 
+    e.*
+FROM cte2 e
+JOIN cte2 m ON e.col2 = m.col1 
+JOIN cte n ON n.id =e.col2
+ORDER BY 1, 2;
+ col1 | col2 |   name   
+------+------+----------
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    0 |    1 | 河南省
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    1 |    2 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    1 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 信阳市
+    2 |    3 | 淮滨县
+    2 |    3 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    3 |    2 | 淮滨县
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    4 |    3 | 芦集乡
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    5 |    1 | 安阳市
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+    8 |    2 | 固始县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   10 |    2 | 息县
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   12 |    3 | 邓湾乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   13 |    3 | 台头乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   14 |    3 | 谷堆乡
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   15 |    1 | 南阳市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+   17 |    1 | 驻马店市
+(132 rows)
+
+--
+---- case7
+--
+explain(costs off, nodes off)
+WITH RECURSIVE cte as (
+     SELECT distinct a.* FROM rec_tb1 a  JOIN rec_tb2 b ON a.id=b.parentID AND b.name not in (SELECT name FROM rec_tb3 c WHERE c.id=a.parentID AND 
+     c.name is not null  ) AND a.id<4
+     UNION ALL
+     SELECT d.* FROM cte e JOIN rec_tb3 d ON d.id=e.parentID AND d.parentID in (SELECT id FROM rec_tb1 WHERE e.id=rec_tb1.id)  AND e.name like '%市%'
+ ) SELECT * FROM cte ORDER BY 1,2,3;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Sort Key: cte.id, cte.parentid, cte.name
+   CTE cte
+     ->  Recursive Union
+           ->  HashAggregate
+                 Group By Key: a.id, a.parentid, a.name
+                 ->  Hash Join
+                       Hash Cond: (a.id = b.parentid)
+                       Join Filter: (NOT (SubPlan 1))
+                       ->  Seq Scan on rec_tb1 a
+                             Filter: (id < 4)
+                       ->  Hash
+                             ->  Seq Scan on rec_tb2 b
+                                   Filter: (parentid < 4)
+                       SubPlan 1
+                         ->  Seq Scan on rec_tb3 c
+                               Filter: ((name IS NOT NULL) AND (id = a.parentid))
+           ->  Hash Join
+                 Hash Cond: (d.id = e.parentid)
+                 Join Filter: (SubPlan 2)
+                 ->  Seq Scan on rec_tb3 d
+                 ->  Hash
+                       ->  WorkTable Scan on cte e
+                             Filter: ((name)::text ~~ '%市%'::text)
+                 SubPlan 2
+                   ->  Seq Scan on rec_tb1
+                         Filter: (e.id = id)
+   ->  CTE Scan on cte
+(28 rows)
+
+ 
+WITH RECURSIVE cte as (
+     SELECT distinct a.* FROM rec_tb1 a  JOIN rec_tb2 b ON a.id=b.parentID AND b.name not in (SELECT name FROM rec_tb3 c WHERE c.id=a.parentID AND 
+     c.name is not null  ) AND a.id<4
+     UNION ALL
+     SELECT d.* FROM cte e JOIN rec_tb3 d ON d.id=e.parentID AND d.parentID in (SELECT id FROM rec_tb1 WHERE e.id=rec_tb1.id)  AND e.name like '%市%'
+ ) SELECT * FROM cte ORDER BY 1,2,3;
+ id | parentid |  name  
+----+----------+--------
+  1 |        0 | 河南省
+  2 |        1 | 信阳市
+  3 |        2 | 淮滨县
+(3 rows)
+
+ 
+explain(costs off, nodes off)
+WITH RECURSIVE tmp as                                                                                               
+(
+	SELECT id, parentid, name, substr(name, 5) FROM (SELECT id,parentid ,name FROM rec_tb1)                                                                    
+	UNION ALL                                                                                                         
+	SELECT tmp.id, rec_tb3.parentid, tmp.name, substr(tmp.name, 5) FROM rec_tb3 JOIN tmp ON tmp.parentid = rec_tb3.id where (1,3,1) in 
+	(SELECT id, parentid, ( (SELECT id FROM rec_tb2 where rec_tb4.id = rec_tb2.parentid   ORDER BY 1 limit 1)) i_name FROM rec_tb4)
+ ) SELECT * FROM tmp  JOIN tmp tmp2 ON tmp.parentid=tmp2.id WHERE tmp.id in (1,2,3,4,5,6,7,8) ORDER BY 1,2,3,4,5,6,7,8;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.parentid, tmp2.name, tmp2.substr
+   CTE tmp
+     ->  Recursive Union
+           ->  Seq Scan on rec_tb1
+           ->  Result
+                 One-Time Filter: (hashed SubPlan 2)
+                 ->  Hash Join
+                       Hash Cond: (tmp.parentid = rec_tb3.id)
+                       ->  WorkTable Scan on tmp
+                       ->  Hash
+                             ->  Seq Scan on rec_tb3
+                 SubPlan 2
+                   ->  Partition Iterator
+                         Iterations: 4
+                         ->  Partitioned Seq Scan on rec_tb4
+                               Selected Partitions:  1..4
+                               SubPlan 1
+                                 ->  Limit
+                                       ->  Sort
+                                             Sort Key: rec_tb2.id
+                                             ->  Seq Scan on rec_tb2
+                                                   Filter: (rec_tb4.id = parentid)
+   ->  Hash Join
+         Hash Cond: (tmp2.id = tmp.parentid)
+         ->  CTE Scan on tmp tmp2
+         ->  Hash
+               ->  CTE Scan on tmp
+                     Filter: (id = ANY ('{1,2,3,4,5,6,7,8}'::integer[]))
+(29 rows)
+
+ 
+WITH RECURSIVE tmp as                                                                                               
+(
+	SELECT id, parentid, name, substr(name, 5) FROM (SELECT id,parentid ,name FROM rec_tb1)                                                                    
+	UNION ALL                                                                                                         
+	SELECT tmp.id, rec_tb3.parentid, tmp.name, substr(tmp.name, 5) FROM rec_tb3 JOIN tmp ON tmp.parentid = rec_tb3.id where (1,3,1) in 
+	(SELECT id, parentid, ( (SELECT id FROM rec_tb2 where rec_tb4.id = rec_tb2.parentid   ORDER BY 1 limit 1)) i_name FROM rec_tb4)
+ ) SELECT * FROM tmp  JOIN tmp tmp2 ON tmp.parentid=tmp2.id WHERE tmp.id in (1,2,3,4,5,6,7,8) ORDER BY 1,2,3,4,5,6,7,8;
+ id | parentid |  name  | substr | id | parentid |  name  | substr 
+----+----------+--------+--------+----+----------+--------+--------
+  2 |        1 | 信阳市 |        |  1 |        0 | 河南省 | 
+  3 |        2 | 淮滨县 |        |  2 |        1 | 信阳市 | 
+  4 |        3 | 芦集乡 |        |  3 |        2 | 淮滨县 | 
+  5 |        1 | 安阳市 |        |  1 |        0 | 河南省 | 
+  6 |        5 | 滑县   |        |  5 |        1 | 安阳市 | 
+  7 |        6 | 老庙乡 |        |  6 |        5 | 滑县   | 
+  8 |        2 | 固始县 |        |  2 |        1 | 信阳市 | 
+(7 rows)
+
+ 
+--
+--
+drop table if exists rec_tb1;
+create table rec_tb1 (id int ,parentID int ,name varchar(100))  partition by range(parentID)
+(
+PARTITION P1 VALUES LESS THAN(2),
+PARTITION P2 VALUES LESS THAN(8),
+PARTITION P3 VALUES LESS THAN(16),
+PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+insert into rec_tb1 values(1,0,'河南省');
+insert into rec_tb1 values(2,1,'信阳市');
+insert into rec_tb1 values(3,2,'淮滨县');
+insert into rec_tb1 values(4,3,'芦集乡');
+insert into rec_tb1 values(12,3,'邓湾乡');
+insert into rec_tb1 values(13,3,'台头乡');
+insert into rec_tb1 values(14,3,'谷堆乡');
+insert into rec_tb1 values(8,2,'固始县');
+insert into rec_tb1 values(9,8,'李店乡');
+insert into rec_tb1 values(10,2,'息县');
+insert into rec_tb1 values(11,10,'关店乡');
+insert into rec_tb1 values(5,1,'安阳市');
+insert into rec_tb1 values(6,5,'滑县');
+insert into rec_tb1 values(7,6,'老庙乡');
+insert into rec_tb1 values(15,1,'南阳市');
+insert into rec_tb1 values(16,15,'方城县');
+insert into rec_tb1 values(17,1,'驻马店市');
+insert into rec_tb1 values(18,17,'正阳县');
+drop table if exists rec_tb2;
+create table rec_tb2 (id int ,parentID int ,name varchar(100))  partition by range(parentID)
+(
+PARTITION P1 VALUES LESS THAN(2),
+PARTITION P2 VALUES LESS THAN(8),
+PARTITION P3 VALUES LESS THAN(16),
+PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+insert into rec_tb2 values(1,0,'河南省');
+insert into rec_tb2 values(2,1,'信阳市');
+insert into rec_tb2 values(3,2,'淮滨县');
+insert into rec_tb2 values(4,3,'芦集乡');
+insert into rec_tb2 values(12,3,'邓湾乡');
+insert into rec_tb2 values(13,3,'台头乡');
+insert into rec_tb2 values(14,3,'谷堆乡');
+insert into rec_tb2 values(8,2,'固始县');
+insert into rec_tb2 values(9,8,'李店乡');
+insert into rec_tb2 values(10,2,'息县');
+insert into rec_tb2 values(11,10,'关店乡');
+insert into rec_tb2 values(5,1,'安阳市');
+insert into rec_tb2 values(6,5,'滑县');
+insert into rec_tb2 values(7,6,'老庙乡');
+insert into rec_tb2 values(15,1,'南阳市');
+insert into rec_tb2 values(16,15,'方城县');
+insert into rec_tb2 values(17,1,'驻马店市');
+insert into rec_tb2 values(18,17,'正阳县');
+explain(verbose on, costs off, nodes off)
+with recursive tmp as  (
+	select id, parentid, name, substr(name, 5) 
+		from rec_tb1 where id>4   
+	union ALL   
+	select tmp.id, rec_tb2.parentid, tmp.name, substr(tmp.name, 5)
+		from rec_tb2  
+		inner join 
+		tmp 
+		on tmp.parentid = rec_tb2.id ), tmp2 
+			AS (select id, parentid, name, substr(name, 5) name1     from tmp) 
+	select * from tmp,tmp2 where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2)  order by tmp.parentid,1,2,3,4,5,6,7,8;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Sort
+   Output: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+   Sort Key: tmp.parentid, tmp.id, tmp.name, tmp.substr, tmp2.id, tmp2.name, tmp2.name1
+   CTE tmp
+     ->  Recursive Union
+           ->  Partition Iterator
+                 Output: rec_tb1.id, rec_tb1.parentid, rec_tb1.name, substr((rec_tb1.name)::text, 5)
+                 Iterations: 4
+                 ->  Partitioned Seq Scan on recursive_ref_recursive.rec_tb1
+                       Output: rec_tb1.id, rec_tb1.parentid, rec_tb1.name, substr((rec_tb1.name)::text, 5)
+                       Filter: (rec_tb1.id > 4)
+                       Selected Partitions:  1..4
+           ->  Hash Join
+                 Output: tmp.id, rec_tb2.parentid, tmp.name, substr((tmp.name)::text, 5)
+                 Hash Cond: (tmp.parentid = rec_tb2.id)
+                 ->  WorkTable Scan on tmp
+                       Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+                 ->  Hash
+                       Output: rec_tb2.parentid, rec_tb2.id
+                       ->  Partition Iterator
+                             Output: rec_tb2.parentid, rec_tb2.id
+                             Iterations: 4
+                             ->  Partitioned Seq Scan on recursive_ref_recursive.rec_tb2
+                                   Output: rec_tb2.parentid, rec_tb2.id
+                                   Selected Partitions:  1..4
+   CTE tmp2
+     ->  CTE Scan on tmp
+           Output: tmp.id, tmp.parentid, tmp.name, substr((tmp.name)::text, 5)
+   ->  Hash Join
+         Output: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+         Hash Cond: (tmp2.parentid = tmp.parentid)
+         ->  Nested Loop Anti Join
+               Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+               Join Filter: ((tmp2.id = tmp2.parentid) OR (tmp2.id IS NULL) OR (tmp2.parentid IS NULL))
+               ->  CTE Scan on tmp2
+                     Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+               ->  CTE Scan on tmp2
+                     Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+         ->  Hash
+               Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+               ->  CTE Scan on tmp
+                     Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+(42 rows)
+
+with recursive tmp as  (
+        select id, parentid, name, substr(name, 5)
+                from rec_tb1 where id>4
+        union ALL
+        select tmp.id, rec_tb2.parentid, tmp.name, substr(tmp.name, 5)
+                from rec_tb2
+                inner join
+                tmp
+                on tmp.parentid = rec_tb2.id ), tmp2
+                        AS (select id, parentid, name, substr(name, 5) name1     from tmp)
+        select count(*) from tmp,tmp2     where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2);
+ count 
+-------
+   275
+(1 row)
+
+explain(verbose on, costs off, nodes off)
+with recursive tmp as  (
+        select id, parentid, name, substr(name, 5)
+                from rec_tb1 where id>4
+        union ALL
+        select tmp.id, rec_tb2.parentid, tmp.name, substr(tmp.name, 5)
+                from rec_tb2
+                inner join
+                tmp
+                on tmp.parentid = rec_tb2.id ), tmp2
+                        AS (select id, parentid, name, substr(name, 5) name1     from tmp)
+        select * from tmp,tmp2 where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2)  order by tmp.parentid,1,2,3,4,5,6,7,8;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Sort
+   Output: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+   Sort Key: tmp.parentid, tmp.id, tmp.name, tmp.substr, tmp2.id, tmp2.name, tmp2.name1
+   CTE tmp
+     ->  Recursive Union
+           ->  Partition Iterator
+                 Output: rec_tb1.id, rec_tb1.parentid, rec_tb1.name, substr((rec_tb1.name)::text, 5)
+                 Iterations: 4
+                 ->  Partitioned Seq Scan on recursive_ref_recursive.rec_tb1
+                       Output: rec_tb1.id, rec_tb1.parentid, rec_tb1.name, substr((rec_tb1.name)::text, 5)
+                       Filter: (rec_tb1.id > 4)
+                       Selected Partitions:  1..4
+           ->  Hash Join
+                 Output: tmp.id, rec_tb2.parentid, tmp.name, substr((tmp.name)::text, 5)
+                 Hash Cond: (tmp.parentid = rec_tb2.id)
+                 ->  WorkTable Scan on tmp
+                       Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+                 ->  Hash
+                       Output: rec_tb2.parentid, rec_tb2.id
+                       ->  Partition Iterator
+                             Output: rec_tb2.parentid, rec_tb2.id
+                             Iterations: 4
+                             ->  Partitioned Seq Scan on recursive_ref_recursive.rec_tb2
+                                   Output: rec_tb2.parentid, rec_tb2.id
+                                   Selected Partitions:  1..4
+   CTE tmp2
+     ->  CTE Scan on tmp
+           Output: tmp.id, tmp.parentid, tmp.name, substr((tmp.name)::text, 5)
+   ->  Hash Join
+         Output: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+         Hash Cond: (tmp2.parentid = tmp.parentid)
+         ->  Nested Loop Anti Join
+               Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+               Join Filter: ((tmp2.id = tmp2.parentid) OR (tmp2.id IS NULL) OR (tmp2.parentid IS NULL))
+               ->  CTE Scan on tmp2
+                     Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+               ->  CTE Scan on tmp2
+                     Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+         ->  Hash
+               Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+               ->  CTE Scan on tmp
+                     Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+(42 rows)
+
+with recursive tmp as  (
+        select id, parentid, name, substr(name, 5)
+                from rec_tb1 where id>4
+        union ALL
+        select tmp.id, rec_tb2.parentid, tmp.name, substr(tmp.name, 5)
+                from rec_tb2
+                inner join
+                tmp
+                on tmp.parentid = rec_tb2.id ), tmp2
+                        AS (select id, parentid, name, substr(name, 5) name1     from tmp)
+        select count(*) from tmp,tmp2     where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2);
+ count 
+-------
+   275
+(1 row)
+
+drop table if exists rec_tb1;
+create table rec_tb1 (id int ,parentID int ,name varchar(100)) ;
+insert into rec_tb1 values(1,0,'河南省');
+insert into rec_tb1 values(2,1,'信阳市');
+insert into rec_tb1 values(3,2,'淮滨县');
+insert into rec_tb1 values(4,3,'芦集乡');
+insert into rec_tb1 values(12,3,'邓湾乡');
+insert into rec_tb1 values(13,3,'台头乡');
+insert into rec_tb1 values(14,3,'谷堆乡');
+insert into rec_tb1 values(8,2,'固始县');
+insert into rec_tb1 values(9,8,'李店乡');
+insert into rec_tb1 values(10,2,'息县');
+insert into rec_tb1 values(11,10,'关店乡');
+insert into rec_tb1 values(5,1,'安阳市');
+insert into rec_tb1 values(6,5,'滑县');
+insert into rec_tb1 values(7,6,'老庙乡');
+insert into rec_tb1 values(15,1,'南阳市');
+insert into rec_tb1 values(16,15,'方城县');
+insert into rec_tb1 values(17,1,'驻马店市');
+insert into rec_tb1 values(18,17,'正阳县');
+drop table if exists rec_tb2;
+create table rec_tb2 (id int ,parentID int ,name varchar(100)) ;
+insert into rec_tb2 values(1,0,'河南省');
+insert into rec_tb2 values(2,1,'信阳市');
+insert into rec_tb2 values(3,2,'淮滨县');
+insert into rec_tb2 values(4,3,'芦集乡');
+insert into rec_tb2 values(12,3,'邓湾乡');
+insert into rec_tb2 values(13,3,'台头乡');
+insert into rec_tb2 values(14,3,'谷堆乡');
+insert into rec_tb2 values(8,2,'固始县');
+insert into rec_tb2 values(9,8,'李店乡');
+insert into rec_tb2 values(10,2,'息县');
+insert into rec_tb2 values(11,10,'关店乡');
+insert into rec_tb2 values(5,1,'安阳市');
+insert into rec_tb2 values(6,5,'滑县');
+insert into rec_tb2 values(7,6,'老庙乡');
+insert into rec_tb2 values(15,1,'南阳市');
+insert into rec_tb2 values(16,15,'方城县');
+insert into rec_tb2 values(17,1,'驻马店市');
+insert into rec_tb2 values(18,17,'正阳县');
+explain(verbose on, costs off, nodes off)
+with recursive tmp as  (
+        select id, parentid, name, substr(name, 5)
+                from rec_tb1 where id>4
+        union ALL
+        select tmp.id, rec_tb2.parentid, tmp.name, substr(tmp.name, 5)
+                from rec_tb2
+                inner join
+                tmp
+                on tmp.parentid = rec_tb2.id ), tmp2
+                        AS (select id, parentid, name, substr(name, 5) name1     from tmp)
+        select * from tmp,tmp2 where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2)  order by tmp.parentid,1,2,3,4,5,6,7,8;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Sort
+   Output: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+   Sort Key: tmp.parentid, tmp.id, tmp.name, tmp.substr, tmp2.id, tmp2.name, tmp2.name1
+   CTE tmp
+     ->  Recursive Union
+           ->  Seq Scan on recursive_ref_recursive.rec_tb1
+                 Output: rec_tb1.id, rec_tb1.parentid, rec_tb1.name, substr((rec_tb1.name)::text, 5)
+                 Filter: (rec_tb1.id > 4)
+           ->  Hash Join
+                 Output: tmp.id, rec_tb2.parentid, tmp.name, substr((tmp.name)::text, 5)
+                 Hash Cond: (tmp.parentid = rec_tb2.id)
+                 ->  WorkTable Scan on tmp
+                       Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+                 ->  Hash
+                       Output: rec_tb2.parentid, rec_tb2.id
+                       ->  Seq Scan on recursive_ref_recursive.rec_tb2
+                             Output: rec_tb2.parentid, rec_tb2.id
+   CTE tmp2
+     ->  CTE Scan on tmp
+           Output: tmp.id, tmp.parentid, tmp.name, substr((tmp.name)::text, 5)
+   ->  Hash Join
+         Output: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+         Hash Cond: (tmp2.parentid = tmp.parentid)
+         ->  Nested Loop Anti Join
+               Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+               Join Filter: ((tmp2.id = tmp2.parentid) OR (tmp2.id IS NULL) OR (tmp2.parentid IS NULL))
+               ->  CTE Scan on tmp2
+                     Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+               ->  CTE Scan on tmp2
+                     Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+         ->  Hash
+               Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+               ->  CTE Scan on tmp
+                     Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+(34 rows)
+
+with recursive tmp as  (
+        select id, parentid, name, substr(name, 5)
+                from rec_tb1 where id>4
+        union ALL
+        select tmp.id, rec_tb2.parentid, tmp.name, substr(tmp.name, 5)
+                from rec_tb2
+                inner join
+                tmp
+                on tmp.parentid = rec_tb2.id ), tmp2
+                        AS (select id, parentid, name, substr(name, 5) name1     from tmp)
+        select count(*) from tmp,tmp2     where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2);
+ count 
+-------
+   275
+(1 row)
+
+explain(verbose on, costs off, nodes off)
+with recursive tmp as  (
+        select id, parentid, name, substr(name, 5)
+                from rec_tb1 where id>4
+        union ALL
+        select tmp.id, rec_tb2.parentid, tmp.name, substr(tmp.name, 5)
+                from rec_tb2
+                inner join
+                tmp
+                on tmp.parentid = rec_tb2.id ), tmp2
+                        AS (select id, parentid, name, substr(name, 5) name1     from tmp)
+        select * from tmp,tmp2 where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2)  order by tmp.parentid,1,2,3,4,5,6,7,8;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Sort
+   Output: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+   Sort Key: tmp.parentid, tmp.id, tmp.name, tmp.substr, tmp2.id, tmp2.name, tmp2.name1
+   CTE tmp
+     ->  Recursive Union
+           ->  Seq Scan on recursive_ref_recursive.rec_tb1
+                 Output: rec_tb1.id, rec_tb1.parentid, rec_tb1.name, substr((rec_tb1.name)::text, 5)
+                 Filter: (rec_tb1.id > 4)
+           ->  Hash Join
+                 Output: tmp.id, rec_tb2.parentid, tmp.name, substr((tmp.name)::text, 5)
+                 Hash Cond: (tmp.parentid = rec_tb2.id)
+                 ->  WorkTable Scan on tmp
+                       Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+                 ->  Hash
+                       Output: rec_tb2.parentid, rec_tb2.id
+                       ->  Seq Scan on recursive_ref_recursive.rec_tb2
+                             Output: rec_tb2.parentid, rec_tb2.id
+   CTE tmp2
+     ->  CTE Scan on tmp
+           Output: tmp.id, tmp.parentid, tmp.name, substr((tmp.name)::text, 5)
+   ->  Hash Join
+         Output: tmp.id, tmp.parentid, tmp.name, tmp.substr, tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+         Hash Cond: (tmp2.parentid = tmp.parentid)
+         ->  Nested Loop Anti Join
+               Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+               Join Filter: ((tmp2.id = tmp2.parentid) OR (tmp2.id IS NULL) OR (tmp2.parentid IS NULL))
+               ->  CTE Scan on tmp2
+                     Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+               ->  CTE Scan on tmp2
+                     Output: tmp2.id, tmp2.parentid, tmp2.name, tmp2.name1
+         ->  Hash
+               Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+               ->  CTE Scan on tmp
+                     Output: tmp.id, tmp.parentid, tmp.name, tmp.substr
+(34 rows)
+
+with recursive tmp as  (
+        select id, parentid, name, substr(name, 5)
+                from rec_tb1 where id>4
+        union ALL
+        select tmp.id, rec_tb2.parentid, tmp.name, substr(tmp.name, 5)
+                from rec_tb2
+                inner join
+                tmp
+                on tmp.parentid = rec_tb2.id ), tmp2
+                        AS (select id, parentid, name, substr(name, 5) name1     from tmp)
+        select count(*) from tmp,tmp2     where  tmp.parentid = tmp2.parentid  and tmp2.id not in (select parentid from tmp2);
+ count 
+-------
+   275
+(1 row)
+
+reset search_path;
+drop schema recursive_ref_recursive cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table recursive_ref_recursive.rec_tb3
+drop cascades to table recursive_ref_recursive.rec_tb4
+drop cascades to table recursive_ref_recursive.rec_tb1
+drop cascades to table recursive_ref_recursive.rec_tb2

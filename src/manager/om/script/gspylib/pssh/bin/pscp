@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+# ############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : Parallel scp to the set of nodes.
+#                 For each node, do a scp [-r] local ip:remote. Note that
+#                 remote must be an absolute path.
+# ############################################################################
+try:
+    import optparse
+    import os
+    import shlex
+    import sys
+    import xml.etree.cElementTree as ETree
+    from TaskPool import TaskPool
+    from TaskPool import read_host_file
+except ImportError as e:
+    sys.exit("[GAUSS-52200] : Unable to import module: %s." % str(e))
+
+TIME_OUT = 0
+PARALLEL_NUM = 32
+
+
+def parse_command():
+    """
+    :return: parser
+    """
+    parser = optparse.OptionParser(conflict_handler='resolve')
+    parser.disable_interspersed_args()
+    parser.usage = "%prog [OPTIONS] localPath remote"
+    parser.epilog = "Example: pscp -H hostname test.txt /home/omm/test.txt"
+    parser.add_option('-H', dest='hostname', action='append',
+                      help='Nodes to be connected')
+    parser.add_option('-h', dest='hostfile',
+                      help='Host file with each line per node')
+    parser.add_option('-t', dest='timeout', type='int',
+                      help='Timeouts in seconds')
+    parser.add_option('-p', dest='parallel', type='int',
+                      help='Maximum number of parallel')
+    parser.add_option('-o', dest='outdir', help='Output results folder')
+    parser.add_option('-e', dest='errdir', help='Error results folder')
+    parser.add_option('-r', dest='recursive', action='store_true',
+                      help='recusively copy directories')
+    parser.add_option('-v', dest='verbose', action='store_true',
+                      help='turn on diagnostic messages')
+    parser.add_option('-s', dest='shellmode', action='store_true',
+                      help='Output only execution results')
+    parser.add_option('-x', dest='extra',
+                      help='Additional scp parameters')
+    parser.add_option('-i', dest='inline', action='store_true',
+                      help='aggregated output and error for each server')
+    parser.add_option('-O', dest='opt', action='append',
+                      help='Additional scp parameters')
+
+    return parser
+
+
+def check_parse(parser_info):
+    """
+    :param parser_info: Parameter key-value pairs
+    :return: opts_info: Parameter key-value pairs
+             args_info: file list
+    """
+    # set defaults parallel and timeout value
+    defaults = dict(parallel=PARALLEL_NUM, timeout=TIME_OUT)
+    parser_info.set_defaults(**defaults)
+    opts_info, args_info = parser_info.parse_args()
+
+    if len(args_info) < 2:
+        parser_info.error('path not specified.')
+
+    if not opts_info.hostname and not opts_info.hostfile:
+        parser_info.error('Hosts not specified.')
+
+    return opts_info, args_info
+
+
+def run(hosts, opts, args):
+    """
+    function: do run process
+    input : hosts, opts, args
+    output: NA
+    """
+    local_path = args[0:-1]
+    remote_path = args[-1]
+    if not os.path.isabs(remote_path):
+        print("Remote path %s must be an absolute path." % remote_path)
+        sys.exit(3)
+    dir_permission = 0o700
+    if opts.outdir and not os.path.exists(opts.outdir):
+        os.makedirs(opts.outdir, mode=dir_permission)
+
+    if opts.errdir and not os.path.exists(opts.errdir):
+        os.makedirs(opts.errdir, mode=dir_permission)
+
+    manager = TaskPool(opts)
+    for host in hosts:
+        env_dist = os.environ
+        if "HOST_IP" in env_dist.keys():
+            tool_path = os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(
+                        os.path.dirname(
+                            os.path.dirname(os.path.realpath(sys.argv[0]))))))
+            uploader_path = os.path.join(tool_path, 'script/uploader.py')
+            if not os.path.exists(uploader_path):
+                sys.exit(2)
+
+            xml_path = os.path.join(tool_path, "cluster_default_agent.xml")
+            agent_port = 0
+            try:
+                dom_tree = ETree.parse(xml_path)
+                root_node = dom_tree.getroot()
+                element = root_node.findall('CLUSTER')[0]
+                elem_array = element.findall('PARAM')
+                for elem in elem_array:
+                    name = elem.attrib['name']
+                    if name == "agentPort":
+                        agent_port = int(elem.attrib['value'])
+            except Exception as ex:
+                raise Exception("Failed to parsing xml. Error: \n%s." %
+                                str(ex))
+            for path in local_path:
+                cmd = ['python3', uploader_path, '-H', host, '-p',
+                       str(agent_port), path, remote_path]
+                manager.add_task(host, cmd)
+        else:
+            cmd = ['scp', '-qCr']
+            if opts.extra:
+                cmd.extend(shlex.split(opts.extra))
+            if opts.opt:
+                for i in opts.opt:
+                    cmd.append("-o")
+                    cmd.append(i)
+            cmd.extend(local_path)
+            cmd.append('%s:%s' % (host, remote_path))
+            manager.add_task(host, cmd)
+    try:
+        statuses = manager.start()
+        if min(statuses) < 0:
+            # At least one process was killed
+            sys.exit(3)
+        for status in statuses:
+            if status != 0:
+                sys.exit(4)
+    except Exception as ex:
+        print(str(ex))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    """
+    main
+    """
+    try:
+        parsers = parse_command()
+        opts, args = check_parse(parsers)
+        if opts.hostfile:
+            host_list = read_host_file(opts.hostfile)
+        else:
+            host_list = opts.hostname
+        host_list = list(set(host_list))
+        run(host_list, opts, args)
+    except Exception as e:
+        print(str(e))
+        sys.exit(1)

@@ -1,0 +1,173 @@
+--
+-- INSTR_UNIQUE_SQL
+--
+-- set role
+select reset_unique_sql('GLOBAL','ALL',0);
+ reset_unique_sql 
+------------------
+ t
+(1 row)
+
+CREATE USER instr_other_user1 password 'Bigdata@123';
+SET ROLE instr_other_user1 password 'Bigdata@123';
+SET ROLE instr_other_user1 password 'Bigdata@123';
+RESET ROLE;
+SET SESSION ROLE instr_other_user1 password 'Bigdata@123';
+SET SESSION ROLE instr_other_user1 password 'Bigdata@123';
+RESET ROLE;
+begin;
+SET LOCAL ROLE instr_other_user1 password 'Bigdata@123';
+SET LOCAL ROLE instr_other_user1 password 'Bigdata@123';
+commit;
+SELECT query, n_calls FROM DBE_PERF.statement where query like '%ROLE%' order by 1;
+                          query                          | n_calls 
+---------------------------------------------------------+---------
+ RESET ROLE;                                             |       2
+ SET LOCAL ROLE instr_other_user1 password '********';   |       1
+ SET LOCAL ROLE instr_other_user1 password '********';   |       1
+ SET ROLE instr_other_user1 password '********';         |       1
+ SET ROLE instr_other_user1 password '********';         |       1
+ SET SESSION ROLE instr_other_user1 password '********'; |       1
+ SET SESSION ROLE instr_other_user1 password '********'; |       1
+(7 rows)
+
+drop user instr_other_user1;
+-- execute n_calls
+prepare execute_test as select relname from pg_class where oid=$1;
+execute execute_test(1259);
+ relname  
+----------
+ pg_class
+(1 row)
+
+SELECT query, n_calls, n_returned_rows FROM DBE_PERF.statement where query like 'execute execute_test%' order by 1;
+            query            | n_calls | n_returned_rows 
+-----------------------------+---------+-----------------
+ execute execute_test(1259); |       1 |               0
+(1 row)
+
+-- partition clause
+CREATE TABLE reason_p (
+r_reason_sk integer,
+r_reason_id character(16),
+r_reason_desc character(100)
+) PARTITION BY RANGE (r_reason_sk) (
+partition P_05_BEFORE values less than (05),
+partition P_15 values less than (15),
+partition P_25 values less than (25),
+partition P_35 values less than (35),
+partition P_45_AFTER values less than (MAXVALUE)
+);
+INSERT INTO reason_p values(3,'AAAAAAAABAAAAAAA','reason 1'),
+(10,'AAAAAAAABAAAAAAA','reason 2'),(4,'AAAAAAAABAAAAAAA','reason 3'),
+(10,'AAAAAAAABAAAAAAA','reason 4'),(10,'AAAAAAAABAAAAAAA','reason 5'),
+(20,'AAAAAAAACAAAAAAA','reason 6'),(30,'AAAAAAAACAAAAAAA','reason 7');
+SELECT * FROM reason_p PARTITION (P_05_BEFORE) order by 3;
+ r_reason_sk |   r_reason_id    |                                            r_reason_desc                                             
+-------------+------------------+------------------------------------------------------------------------------------------------------
+           3 | AAAAAAAABAAAAAAA | reason 1                                                                                            
+           4 | AAAAAAAABAAAAAAA | reason 3                                                                                            
+(2 rows)
+
+SELECT * FROM reason_p PARTITION (P_45_AFTER) order by 3;
+ r_reason_sk | r_reason_id | r_reason_desc 
+-------------+-------------+---------------
+(0 rows)
+
+SELECT * FROM reason_p PARTITION (P_35) order by 3;
+ r_reason_sk |   r_reason_id    |                                            r_reason_desc                                             
+-------------+------------------+------------------------------------------------------------------------------------------------------
+          30 | AAAAAAAACAAAAAAA | reason 7                                                                                            
+(1 row)
+
+SELECT * FROM reason_p PARTITION FOR (24) order by 3;
+ r_reason_sk |   r_reason_id    |                                            r_reason_desc                                             
+-------------+------------------+------------------------------------------------------------------------------------------------------
+          20 | AAAAAAAACAAAAAAA | reason 6                                                                                            
+(1 row)
+
+SELECT query, n_calls FROM DBE_PERF.statement where query like 'SELECT%PARTITION%' order by 1;
+                           query                            | n_calls 
+------------------------------------------------------------+---------
+ SELECT * FROM reason_p PARTITION FOR (24) order by 3;      |       1
+ SELECT * FROM reason_p PARTITION (P_05_BEFORE) order by 3; |       1
+ SELECT * FROM reason_p PARTITION (P_35) order by 3;        |       1
+ SELECT * FROM reason_p PARTITION (P_45_AFTER) order by 3;  |       1
+(4 rows)
+
+SELECT * FROM reason_p PARTITION FOR (4) order by 3;
+ r_reason_sk |   r_reason_id    |                                            r_reason_desc                                             
+-------------+------------------+------------------------------------------------------------------------------------------------------
+           3 | AAAAAAAABAAAAAAA | reason 1                                                                                            
+           4 | AAAAAAAABAAAAAAA | reason 3                                                                                            
+(2 rows)
+
+SELECT * FROM reason_p PARTITION FOR (35) order by 3;
+ r_reason_sk | r_reason_id | r_reason_desc 
+-------------+-------------+---------------
+(0 rows)
+
+SELECT * FROM reason_p PARTITION FOR (34) order by 3;
+ r_reason_sk |   r_reason_id    |                                            r_reason_desc                                             
+-------------+------------------+------------------------------------------------------------------------------------------------------
+          30 | AAAAAAAACAAAAAAA | reason 7                                                                                            
+(1 row)
+
+SELECT * FROM reason_p PARTITION (P_25) order by 3;
+ r_reason_sk |   r_reason_id    |                                            r_reason_desc                                             
+-------------+------------------+------------------------------------------------------------------------------------------------------
+          20 | AAAAAAAACAAAAAAA | reason 6                                                                                            
+(1 row)
+
+SELECT query, n_calls FROM DBE_PERF.statement where query like 'SELECT%PARTITION%' order by 1;
+                           query                            | n_calls 
+------------------------------------------------------------+---------
+ SELECT * FROM reason_p PARTITION FOR (24) order by 3;      |       2
+ SELECT * FROM reason_p PARTITION (P_05_BEFORE) order by 3; |       2
+ SELECT * FROM reason_p PARTITION (P_35) order by 3;        |       2
+ SELECT * FROM reason_p PARTITION (P_45_AFTER) order by 3;  |       2
+(4 rows)
+
+drop table reason_p;
+-- reset_unique_sql
+select reset_unique_sql('GLOBAL','ALL',0);
+ reset_unique_sql 
+------------------
+ t
+(1 row)
+
+SELECT query, n_calls FROM DBE_PERF.statement where query like 'SELECT%PARTITION%';
+ query | n_calls 
+-------+---------
+(0 rows)
+
+SELECT pg_catalog.reset_unique_sql('local', 'BY_USERID', -10);
+WARNING:  [UniqueSQL] third parameter of reset unique sql is out of range with BY_USERID
+CONTEXT:  referenced column: reset_unique_sql
+ reset_unique_sql 
+------------------
+ f
+(1 row)
+
+SELECT pg_catalog.reset_unique_sql('local', 'BY_USERID', 4294967296);
+WARNING:  [UniqueSQL] third parameter of reset unique sql is out of range with BY_USERID
+CONTEXT:  referenced column: reset_unique_sql
+ reset_unique_sql 
+------------------
+ f
+(1 row)
+
+SELECT pg_catalog.reset_unique_sql('local', 'BY_cnID', -2147483649);
+WARNING:  [UniqueSQL] third parameter of reset unique sql is out of range with BY_CNID
+CONTEXT:  referenced column: reset_unique_sql
+ reset_unique_sql 
+------------------
+ f
+(1 row)
+
+SELECT pg_catalog.reset_unique_sql('local', 'BY_cnID', 2147483648);
+ reset_unique_sql 
+------------------
+ t
+(1 row)
+

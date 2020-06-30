@@ -1,0 +1,800 @@
+--
+-- prepare
+--
+\! mkdir '@testtablespace@/hw_partition_insert_tsp1'
+\! mkdir '@testtablespace@/hw_partition_insert_tsp2'
+\! mkdir '@testtablespace@/hw_partition_insert_tsp3'
+set timezone = 'PRC';
+create tablespace hw_partition_insert_tsp1 location '@testtablespace@/hw_partition_insert_tsp1';
+create tablespace hw_partition_insert_tsp2 location '@testtablespace@/hw_partition_insert_tsp2';
+create tablespace hw_partition_insert_tsp3 location '@testtablespace@/hw_partition_insert_tsp3';
+--
+---- without index, without interval, without maxvalue, int2
+--
+-- create table
+create table insert_without_index_without_interval_without_maxvalue_int2(col_smallint int2)
+partition by range(col_smallint)
+(
+	partition insert_without_index_without_interval_without_maxvalue_int2_p1 values less than (-30) tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_without_maxvalue_int2_p2 values less than (-20) tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_without_maxvalue_int2_p3 values less than (-10)
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) 
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_int2') 
+	order by p.relname;
+                            relname                             | boundaries |         spcname          
+----------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_int2    |            | 
+ insert_without_index_without_interval_without_maxvalue_int2_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_int2_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_int2_p3 | {-10}      | 
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_without_maxvalue_int2 values (-40);
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_without_maxvalue_int2 values (-30);
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_int2 values (-25);
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_without_maxvalue_int2 values (-20);
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_int2 values (-10); -- fail
+ERROR:  inserted partition key does not map to any table partition
+insert into insert_without_index_without_interval_without_maxvalue_int2 values (maxvalue);--fail
+ERROR:  syntax error at or near "maxvalue"
+LINE 1: ...ex_without_interval_without_maxvalue_int2 values (maxvalue);
+                                                             ^
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_without_maxvalue_int2 order by col_smallint;
+ col_smallint 
+--------------
+          -40
+          -30
+          -25
+          -20
+(4 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_int2 partition (insert_without_index_without_interval_without_maxvalue_int2_p1) order by 1;
+ col_smallint 
+--------------
+          -40
+(1 row)
+
+select * from insert_without_index_without_interval_without_maxvalue_int2 partition (insert_without_index_without_interval_without_maxvalue_int2_p2) order by 1;
+ col_smallint 
+--------------
+          -30
+          -25
+(2 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_int2 partition (insert_without_index_without_interval_without_maxvalue_int2_p3) order by 1;
+ col_smallint 
+--------------
+          -20
+(1 row)
+
+-- clean up
+drop table insert_without_index_without_interval_without_maxvalue_int2;
+--
+---- without index, without interval, with maxvalue int2
+--
+-- create table
+create table insert_without_index_without_interval_with_maxvalue_int2(col_smallint int2)
+partition by range(col_smallint)
+(
+	partition insert_without_index_without_interval_with_maxvalue_int2_p1 values less than (-30) tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_with_maxvalue_int2_p2 values less than (-20) tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_with_maxvalue_int2_p3 values less than (maxvalue)
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) 
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_int2') 
+	order by p.relname;
+                           relname                           | boundaries |         spcname          
+-------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_int2    |            | 
+ insert_without_index_without_interval_with_maxvalue_int2_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_int2_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_int2_p3 | {NULL}     | 
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_with_maxvalue_int2 values (-40);
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_with_maxvalue_int2 values (-30);
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_int2 values (-25);
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_with_maxvalue_int2 values (-20);
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_int2 values (-10);
+insert into insert_without_index_without_interval_with_maxvalue_int2 values (maxvalue);--fail
+ERROR:  syntax error at or near "maxvalue"
+LINE 1: ...index_without_interval_with_maxvalue_int2 values (maxvalue);
+                                                             ^
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_with_maxvalue_int2 order by col_smallint;
+ col_smallint 
+--------------
+          -40
+          -30
+          -25
+          -20
+          -10
+(5 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_int2 partition (insert_without_index_without_interval_with_maxvalue_int2_p1) order by 1;
+ col_smallint 
+--------------
+          -40
+(1 row)
+
+select * from insert_without_index_without_interval_with_maxvalue_int2 partition (insert_without_index_without_interval_with_maxvalue_int2_p2) order by 1;
+ col_smallint 
+--------------
+          -30
+          -25
+(2 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_int2 partition (insert_without_index_without_interval_with_maxvalue_int2_p3) order by 1;
+ col_smallint 
+--------------
+          -20
+          -10
+(2 rows)
+
+-- clean up
+drop table insert_without_index_without_interval_with_maxvalue_int2;
+--
+---- without index, without interval, without maxvalue , int4
+--
+-- create table
+create table insert_without_index_without_interval_without_maxvalue_int4(col_int int4)
+partition by range(col_int)
+(
+	partition insert_without_index_without_interval_without_maxvalue_int4_p1 values less than (-30) tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_without_maxvalue_int4_p2 values less than (-20) tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_without_maxvalue_int4_p3 values less than (-10) tablespace hw_partition_insert_tsp3
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) 
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_int4')
+	order by p.relname;
+                            relname                             | boundaries |         spcname          
+----------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_int4    |            | 
+ insert_without_index_without_interval_without_maxvalue_int4_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_int4_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_int4_p3 | {-10}      | hw_partition_insert_tsp3
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_without_maxvalue_int4 values (-40);
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_without_maxvalue_int4 values (-30);
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_int4 values (-25);
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_without_maxvalue_int4 values (-20);
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_int4 values (-10);--fail
+ERROR:  inserted partition key does not map to any table partition
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_int4')
+	order by p.relname;
+                            relname                             | boundaries |         spcname          
+----------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_int4    |            | 
+ insert_without_index_without_interval_without_maxvalue_int4_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_int4_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_int4_p3 | {-10}      | hw_partition_insert_tsp3
+(4 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_without_maxvalue_int4 order by col_int;
+ col_int 
+---------
+     -40
+     -30
+     -25
+     -20
+(4 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_int4 partition (insert_without_index_without_interval_without_maxvalue_int4_p1) order by 1;
+ col_int 
+---------
+     -40
+(1 row)
+
+select * from insert_without_index_without_interval_without_maxvalue_int4 partition (insert_without_index_without_interval_without_maxvalue_int4_p2) order by 1;
+ col_int 
+---------
+     -30
+     -25
+(2 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_int4 partition (insert_without_index_without_interval_without_maxvalue_int4_p3) order by 1;
+ col_int 
+---------
+     -20
+(1 row)
+
+-- clean up
+drop table insert_without_index_without_interval_without_maxvalue_int4;
+--
+---- without index, without interval, with maxvalue , int4
+--
+-- create table
+create table insert_without_index_without_interval_with_maxvalue_int4(col_int int4)
+partition by range(col_int)
+(
+	partition insert_without_index_without_interval_with_maxvalue_int4_p1 values less than (-30) tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_with_maxvalue_int4_p2 values less than (-20) tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_with_maxvalue_int4_p3 values less than (maxvalue) tablespace hw_partition_insert_tsp3
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_int4')
+	order by p.relname;
+                           relname                           | boundaries |         spcname          
+-------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_int4    |            | 
+ insert_without_index_without_interval_with_maxvalue_int4_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_int4_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_int4_p3 | {NULL}     | hw_partition_insert_tsp3
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_with_maxvalue_int4 values (-40);
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_with_maxvalue_int4 values (-30);
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_int4 values (-25);
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_with_maxvalue_int4 values (-20);
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_int4 values (-10);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_int4')
+	order by p.relname;
+                           relname                           | boundaries |         spcname          
+-------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_int4    |            | 
+ insert_without_index_without_interval_with_maxvalue_int4_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_int4_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_int4_p3 | {NULL}     | hw_partition_insert_tsp3
+(4 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_with_maxvalue_int4 order by col_int;
+ col_int 
+---------
+     -40
+     -30
+     -25
+     -20
+     -10
+(5 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_int4 partition (insert_without_index_without_interval_with_maxvalue_int4_p1) order by 1;
+ col_int 
+---------
+     -40
+(1 row)
+
+select * from insert_without_index_without_interval_with_maxvalue_int4 partition (insert_without_index_without_interval_with_maxvalue_int4_p2) order by 1;
+ col_int 
+---------
+     -30
+     -25
+(2 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_int4 partition (insert_without_index_without_interval_with_maxvalue_int4_p3) order by 1;
+ col_int 
+---------
+     -20
+     -10
+(2 rows)
+
+-- clean up
+drop table insert_without_index_without_interval_with_maxvalue_int4;
+--
+---- without index, without interval, without maxvalue, int8
+--
+-- create table
+create table insert_without_index_without_interval_without_maxvalue_int8(col_bigint int8)
+partition by range(col_bigint)
+(
+	partition insert_without_index_without_interval_without_maxvalue_int8_p1 values less than (-30) tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_without_maxvalue_int8_p2 values less than (-20) tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_without_maxvalue_int8_p3 values less than (-10) tablespace hw_partition_insert_tsp3
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_int8')
+	order by p.relname;
+                            relname                             | boundaries |         spcname          
+----------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_int8    |            | 
+ insert_without_index_without_interval_without_maxvalue_int8_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_int8_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_int8_p3 | {-10}      | hw_partition_insert_tsp3
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_without_maxvalue_int8 values (-40);
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_without_maxvalue_int8 values (-30);
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_int8 values (-25);
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_without_maxvalue_int8 values (-20);
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_int8 values (-10);--fail
+ERROR:  inserted partition key does not map to any table partition
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_int8')
+	order by p.relname;
+                            relname                             | boundaries |         spcname          
+----------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_int8    |            | 
+ insert_without_index_without_interval_without_maxvalue_int8_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_int8_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_int8_p3 | {-10}      | hw_partition_insert_tsp3
+(4 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_without_maxvalue_int8 order by col_bigint;
+ col_bigint 
+------------
+        -40
+        -30
+        -25
+        -20
+(4 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_int8 partition (insert_without_index_without_interval_without_maxvalue_int8_p1) order by 1;
+ col_bigint 
+------------
+        -40
+(1 row)
+
+select * from insert_without_index_without_interval_without_maxvalue_int8 partition (insert_without_index_without_interval_without_maxvalue_int8_p2) order by 1;
+ col_bigint 
+------------
+        -30
+        -25
+(2 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_int8 partition (insert_without_index_without_interval_without_maxvalue_int8_p3) order by 1;
+ col_bigint 
+------------
+        -20
+(1 row)
+
+-- clean up
+drop table insert_without_index_without_interval_without_maxvalue_int8;
+--
+---- without index, without interval, with maxvalue, int8
+--
+-- create table
+create table insert_without_index_without_interval_with_maxvalue_int8(col_bigint int8)
+partition by range(col_bigint)
+(
+	partition insert_without_index_without_interval_with_maxvalue_int8_p1 values less than (-30) tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_with_maxvalue_int8_p2 values less than (-20) tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_with_maxvalue_int8_p3 values less than (maxvalue) tablespace hw_partition_insert_tsp3
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_int8')
+	order by p.relname;
+                           relname                           | boundaries |         spcname          
+-------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_int8    |            | 
+ insert_without_index_without_interval_with_maxvalue_int8_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_int8_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_int8_p3 | {NULL}     | hw_partition_insert_tsp3
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_with_maxvalue_int8 values (-40);
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_with_maxvalue_int8 values (-30);
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_int8 values (-25);
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_with_maxvalue_int8 values (-20);
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_int8 values (-10);
+insert into insert_without_index_without_interval_with_maxvalue_int8 values (99999999);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_int8')
+	order by p.relname;
+                           relname                           | boundaries |         spcname          
+-------------------------------------------------------------+------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_int8    |            | 
+ insert_without_index_without_interval_with_maxvalue_int8_p1 | {-30}      | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_int8_p2 | {-20}      | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_int8_p3 | {NULL}     | hw_partition_insert_tsp3
+(4 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_with_maxvalue_int8 order by col_bigint;
+ col_bigint 
+------------
+        -40
+        -30
+        -25
+        -20
+        -10
+   99999999
+(6 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_int8 partition (insert_without_index_without_interval_with_maxvalue_int8_p1) order by 1;
+ col_bigint 
+------------
+        -40
+(1 row)
+
+select * from insert_without_index_without_interval_with_maxvalue_int8 partition (insert_without_index_without_interval_with_maxvalue_int8_p2) order by 1;
+ col_bigint 
+------------
+        -30
+        -25
+(2 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_int8 partition (insert_without_index_without_interval_with_maxvalue_int8_p3) order by 1;
+ col_bigint 
+------------
+        -20
+        -10
+   99999999
+(3 rows)
+
+-- clean up
+drop table insert_without_index_without_interval_with_maxvalue_int8;
+--
+---- without index, without interval, without maxvalue, date(timestamp)
+--
+-- create table
+create table insert_without_index_without_interval_without_maxvalue_date(col_date date)
+partition by range(col_date)
+(
+	partition insert_without_index_without_interval_without_maxvalue_date_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_without_maxvalue_date_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_without_maxvalue_date_p3 values less than ('2012-3-25') tablespace hw_partition_insert_tsp3
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_date')
+	order by p.relname;
+                            relname                             | boundaries  |         spcname          
+----------------------------------------------------------------+-------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_date    |             | 
+ insert_without_index_without_interval_without_maxvalue_date_p1 | {2012-1-25} | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_date_p2 | {2012-2-25} | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_date_p3 | {2012-3-25} | hw_partition_insert_tsp3
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_without_maxvalue_date values ('2011-2-26');
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_without_maxvalue_date values ('2012-1-25');
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_date values ('2012-2-20');
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_without_maxvalue_date values ('2012-2-25');
+insert into insert_without_index_without_interval_without_maxvalue_date values ('2012-2-25');
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_date values ('2012-3-25');
+ERROR:  inserted partition key does not map to any table partition
+insert into insert_without_index_without_interval_without_maxvalue_date values ('2013-3-25');
+ERROR:  inserted partition key does not map to any table partition
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_date')
+	order by p.relname;
+                            relname                             | boundaries  |         spcname          
+----------------------------------------------------------------+-------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_date    |             | 
+ insert_without_index_without_interval_without_maxvalue_date_p1 | {2012-1-25} | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_date_p2 | {2012-2-25} | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_date_p3 | {2012-3-25} | hw_partition_insert_tsp3
+(4 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_without_maxvalue_date order by col_date;
+         col_date         
+--------------------------
+ Sat Feb 26 00:00:00 2011
+ Wed Jan 25 00:00:00 2012
+ Mon Feb 20 00:00:00 2012
+ Sat Feb 25 00:00:00 2012
+ Sat Feb 25 00:00:00 2012
+(5 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_date partition (insert_without_index_without_interval_without_maxvalue_date_p1) order by 1;
+         col_date         
+--------------------------
+ Sat Feb 26 00:00:00 2011
+(1 row)
+
+select * from insert_without_index_without_interval_without_maxvalue_date partition (insert_without_index_without_interval_without_maxvalue_date_p2) order by 1;
+         col_date         
+--------------------------
+ Wed Jan 25 00:00:00 2012
+ Mon Feb 20 00:00:00 2012
+(2 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_date partition (insert_without_index_without_interval_without_maxvalue_date_p3) order by 1;
+         col_date         
+--------------------------
+ Sat Feb 25 00:00:00 2012
+ Sat Feb 25 00:00:00 2012
+(2 rows)
+
+--clean up
+drop table insert_without_index_without_interval_without_maxvalue_date;
+--
+---- without index, without interval, with maxvalue, date(timestamp)
+--
+-- create table
+create table insert_without_index_without_interval_with_maxvalue_date(col_date date)
+partition by range(col_date)
+(
+	partition insert_without_index_without_interval_with_maxvalue_date_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_with_maxvalue_date_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_with_maxvalue_date_p3 values less than (maxvalue) tablespace hw_partition_insert_tsp3
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_date')
+	order by p.relname;
+                           relname                           | boundaries  |         spcname          
+-------------------------------------------------------------+-------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_date    |             | 
+ insert_without_index_without_interval_with_maxvalue_date_p1 | {2012-1-25} | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_date_p2 | {2012-2-25} | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_date_p3 | {NULL}      | hw_partition_insert_tsp3
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_with_maxvalue_date values ('2011-2-26');
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_with_maxvalue_date values ('2012-1-25');
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_date values ('2012-2-20');
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_with_maxvalue_date values ('2012-2-25');
+insert into insert_without_index_without_interval_with_maxvalue_date values ('2012-2-25');
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_date values ('2012-3-25');
+insert into insert_without_index_without_interval_with_maxvalue_date values ('2013-3-25');
+insert into insert_without_index_without_interval_with_maxvalue_date values ('9999-3-25');
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_date')
+	order by p.relname;
+                           relname                           | boundaries  |         spcname          
+-------------------------------------------------------------+-------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_date    |             | 
+ insert_without_index_without_interval_with_maxvalue_date_p1 | {2012-1-25} | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_date_p2 | {2012-2-25} | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_date_p3 | {NULL}      | hw_partition_insert_tsp3
+(4 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_with_maxvalue_date order by col_date;
+         col_date         
+--------------------------
+ Sat Feb 26 00:00:00 2011
+ Wed Jan 25 00:00:00 2012
+ Mon Feb 20 00:00:00 2012
+ Sat Feb 25 00:00:00 2012
+ Sat Feb 25 00:00:00 2012
+ Sun Mar 25 00:00:00 2012
+ Mon Mar 25 00:00:00 2013
+ Thu Mar 25 00:00:00 9999
+(8 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_date partition (insert_without_index_without_interval_with_maxvalue_date_p1) order by 1;
+         col_date         
+--------------------------
+ Sat Feb 26 00:00:00 2011
+(1 row)
+
+select * from insert_without_index_without_interval_with_maxvalue_date partition (insert_without_index_without_interval_with_maxvalue_date_p2) order by 1;
+         col_date         
+--------------------------
+ Wed Jan 25 00:00:00 2012
+ Mon Feb 20 00:00:00 2012
+(2 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_date partition (insert_without_index_without_interval_with_maxvalue_date_p3) order by 1;
+         col_date         
+--------------------------
+ Sat Feb 25 00:00:00 2012
+ Sat Feb 25 00:00:00 2012
+ Sun Mar 25 00:00:00 2012
+ Mon Mar 25 00:00:00 2013
+ Thu Mar 25 00:00:00 9999
+(5 rows)
+
+--clean up
+drop table insert_without_index_without_interval_with_maxvalue_date;
+--
+---- without index, without interval, without maxvalue,timestamp
+--
+-- create table
+create table insert_without_index_without_interval_without_maxvalue_ts(col_timestamp timestamp)
+partition by range(col_timestamp)
+(
+	partition insert_without_index_without_interval_without_maxvalue_ts_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_without_maxvalue_ts_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_without_maxvalue_ts_p3 values less than ('2012-3-25') tablespace hw_partition_insert_tsp3
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_ts')
+	order by p.relname;
+                           relname                            | boundaries  |         spcname          
+--------------------------------------------------------------+-------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_ts    |             | 
+ insert_without_index_without_interval_without_maxvalue_ts_p1 | {2012-1-25} | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_ts_p2 | {2012-2-25} | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_ts_p3 | {2012-3-25} | hw_partition_insert_tsp3
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_without_maxvalue_ts values ('2011-2-26');
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_without_maxvalue_ts values ('2012-1-25');
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_ts values ('2012-2-20');
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_without_maxvalue_ts values ('2012-2-25');
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_without_maxvalue_ts values ('2012-3-25');
+ERROR:  inserted partition key does not map to any table partition
+insert into insert_without_index_without_interval_without_maxvalue_ts values ('2013-3-25');
+ERROR:  inserted partition key does not map to any table partition
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_without_maxvalue_ts')
+	order by p.relname;
+                           relname                            | boundaries  |         spcname          
+--------------------------------------------------------------+-------------+--------------------------
+ insert_without_index_without_interval_without_maxvalue_ts    |             | 
+ insert_without_index_without_interval_without_maxvalue_ts_p1 | {2012-1-25} | hw_partition_insert_tsp1
+ insert_without_index_without_interval_without_maxvalue_ts_p2 | {2012-2-25} | hw_partition_insert_tsp2
+ insert_without_index_without_interval_without_maxvalue_ts_p3 | {2012-3-25} | hw_partition_insert_tsp3
+(4 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_without_maxvalue_ts order by col_timestamp;
+      col_timestamp       
+--------------------------
+ Sat Feb 26 00:00:00 2011
+ Wed Jan 25 00:00:00 2012
+ Mon Feb 20 00:00:00 2012
+ Sat Feb 25 00:00:00 2012
+(4 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_ts partition (insert_without_index_without_interval_without_maxvalue_ts_p1) order by 1;
+      col_timestamp       
+--------------------------
+ Sat Feb 26 00:00:00 2011
+(1 row)
+
+select * from insert_without_index_without_interval_without_maxvalue_ts partition (insert_without_index_without_interval_without_maxvalue_ts_p2) order by 1;
+      col_timestamp       
+--------------------------
+ Wed Jan 25 00:00:00 2012
+ Mon Feb 20 00:00:00 2012
+(2 rows)
+
+select * from insert_without_index_without_interval_without_maxvalue_ts partition (insert_without_index_without_interval_without_maxvalue_ts_p3) order by 1;
+      col_timestamp       
+--------------------------
+ Sat Feb 25 00:00:00 2012
+(1 row)
+
+--clean up
+drop table insert_without_index_without_interval_without_maxvalue_ts;
+--
+---- without index, without interval, without maxvalue,timestamp
+--
+-- create table
+create table insert_without_index_without_interval_with_maxvalue_ts(col_timestamp timestamp)
+partition by range(col_timestamp)
+(
+	partition insert_without_index_without_interval_with_maxvalue_ts_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp1,
+	partition insert_without_index_without_interval_with_maxvalue_ts_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp2,
+	partition insert_without_index_without_interval_with_maxvalue_ts_p3 values less than (maxvalue) tablespace hw_partition_insert_tsp3
+);
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_ts')
+	order by p.relname;
+                          relname                          | boundaries  |         spcname          
+-----------------------------------------------------------+-------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_ts    |             | 
+ insert_without_index_without_interval_with_maxvalue_ts_p1 | {2012-1-25} | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_ts_p2 | {2012-2-25} | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_ts_p3 | {NULL}      | hw_partition_insert_tsp3
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into insert_without_index_without_interval_with_maxvalue_ts values ('2011-2-26');
+-- insert the record that is equal to the lower boundar
+insert into insert_without_index_without_interval_with_maxvalue_ts values ('2012-1-25');
+-- insert the record that is between the lower boundary and upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_ts values ('2012-2-20');
+-- insert the record that is equal to the upper boundar
+insert into insert_without_index_without_interval_with_maxvalue_ts values ('2012-2-25');
+-- insert the record that is bigger than the upper boundary
+insert into insert_without_index_without_interval_with_maxvalue_ts values ('2012-3-25');
+insert into insert_without_index_without_interval_with_maxvalue_ts values ('2013-3-25');
+-- see about the info of the partitioned table in pg_partition
+select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid)
+	where p.parentid = (select oid from pg_class where relname = 'insert_without_index_without_interval_with_maxvalue_ts')
+	order by p.relname;
+                          relname                          | boundaries  |         spcname          
+-----------------------------------------------------------+-------------+--------------------------
+ insert_without_index_without_interval_with_maxvalue_ts    |             | 
+ insert_without_index_without_interval_with_maxvalue_ts_p1 | {2012-1-25} | hw_partition_insert_tsp1
+ insert_without_index_without_interval_with_maxvalue_ts_p2 | {2012-2-25} | hw_partition_insert_tsp2
+ insert_without_index_without_interval_with_maxvalue_ts_p3 | {NULL}      | hw_partition_insert_tsp3
+(4 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from insert_without_index_without_interval_with_maxvalue_ts order by col_timestamp;
+      col_timestamp       
+--------------------------
+ Sat Feb 26 00:00:00 2011
+ Wed Jan 25 00:00:00 2012
+ Mon Feb 20 00:00:00 2012
+ Sat Feb 25 00:00:00 2012
+ Sun Mar 25 00:00:00 2012
+ Mon Mar 25 00:00:00 2013
+(6 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_ts partition (insert_without_index_without_interval_with_maxvalue_ts_p1) order by 1;
+      col_timestamp       
+--------------------------
+ Sat Feb 26 00:00:00 2011
+(1 row)
+
+select * from insert_without_index_without_interval_with_maxvalue_ts partition (insert_without_index_without_interval_with_maxvalue_ts_p2) order by 1;
+      col_timestamp       
+--------------------------
+ Wed Jan 25 00:00:00 2012
+ Mon Feb 20 00:00:00 2012
+(2 rows)
+
+select * from insert_without_index_without_interval_with_maxvalue_ts partition (insert_without_index_without_interval_with_maxvalue_ts_p3) order by 1;
+      col_timestamp       
+--------------------------
+ Sat Feb 25 00:00:00 2012
+ Sun Mar 25 00:00:00 2012
+ Mon Mar 25 00:00:00 2013
+(3 rows)
+
+--clean up
+drop table insert_without_index_without_interval_with_maxvalue_ts;
+--
+-- clean up
+--
+drop tablespace hw_partition_insert_tsp1;
+drop tablespace hw_partition_insert_tsp2;
+drop tablespace hw_partition_insert_tsp3;
+\! rm -fr '@testtablespace@/hw_partition_insert_tsp1'
+\! rm -fr '@testtablespace@/hw_partition_insert_tsp2'
+\! rm -fr '@testtablespace@/hw_partition_insert_tsp3'

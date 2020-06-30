@@ -1,0 +1,16 @@
+<refentry id="SQL-SHOW">
+<refmeta>
+<refentrytitle>SHOW</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SHOW</refname>
+<refpurpose>show the value of a run-time parameter</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+SHOW { configuration_parameter | CURRENT_SCHEMA | TIME ZONE | TRANSACTION ISOLATION LEVEL | SESSION AUTHORIZATION | ALL };
+</synopsis>
+</refsynopsisdiv>
+</refentry>

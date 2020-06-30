@@ -1,0 +1,480 @@
+CREATE SCHEMA cstore_alter_table;
+SET SEARCH_PATH TO cstore_alter_table;
+SET INTERVALsTYLE = POSTGRES;
+-- test empty normal table
+DROP TABLE IF EXISTS alter_addcols_00;
+NOTICE:  table "alter_addcols_00" does not exist, skipping
+CREATE TABLE alter_addcols_00( a int , b int ) with ( orientation = column ) ;
+ALTER TABLE alter_addcols_00 ADD COLUMN b int;
+ERROR:  column "b" of relation "alter_addcols_00" already exists
+ALTER TABLE alter_addcols_00 ADD COLUMN c int NULL;
+SELECT c FROM alter_addcols_00 WHERE c =  1;
+ c 
+---
+(0 rows)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN d int NOT NULL;
+SELECT d FROM alter_addcols_00 WHERE d >=  1;
+ d 
+---
+(0 rows)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN e int default 5;
+SELECT e FROM alter_addcols_00 WHERE e =  5;
+ e 
+---
+(0 rows)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN f int NULL default 10;
+SELECT f FROM alter_addcols_00 WHERE f =  10;
+ f 
+---
+(0 rows)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN g int check(g > 2);
+ERROR:  column store unsupport constraint "CHECK"
+ALTER TABLE alter_addcols_00 ADD COLUMN g int default f + 11;
+ERROR:  cannot use column references in default expression
+ALTER TABLE alter_addcols_00 ADD COLUMN g varchar(100) default 'chars less than 31 size';
+INSERT INTO alter_addcols_00(a) VALUES(1);
+ERROR:  null value in column "d" violates not-null constraint
+DETAIL:  Failing row contains (1, null, null, null, 5, 10, chars less than 31 size).
+SELECT COUNT(*) FROM alter_addcols_00;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_00;
+ a | b | c | d | e | f | g 
+---+---+---+---+---+---+---
+(0 rows)
+
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 4);
+SELECT * FROM alter_addcols_00;
+ a | b | c | d | e | f  |            g            
+---+---+---+---+---+----+-------------------------
+ 1 |   |   | 4 | 5 | 10 | chars less than 31 size
+(1 row)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN h varchar(100) default 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_00;
+ a | b | c | d | e | f  |            g            |                             h                             
+---+---+---+---+---+----+-------------------------+-----------------------------------------------------------
+ 1 |   |   | 4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31.
+(1 row)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN i varchar(100) NOT NULL DEFAULT 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_00;
+ a | b | c | d | e | f  |            g            |                             h                             |                             i                             
+---+---+---+---+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------
+ 1 |   |   | 4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+(1 row)
+
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 7);
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 11);
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 13);
+ALTER TABLE alter_addcols_00 ADD COLUMN j varchar(100) NOT NULL DEFAULT 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_00;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+(4 rows)
+
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 17);
+ALTER TABLE alter_addcols_00 ADD COLUMN k time with time zone DEFAULT '2015-04-02 20:26:53 PST';
+SELECT * FROM alter_addcols_00;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             |      k      
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-------------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 17 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+(5 rows)
+
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 19);
+SELECT * FROM alter_addcols_00;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             |      k      
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-------------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 17 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 19 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+(6 rows)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN p interval DEFAULT 1100;
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 23);
+SELECT * FROM alter_addcols_00;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             |      k      |     p     
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-------------+-----------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 17 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 19 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 23 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+(7 rows)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN q interval DEFAULT '1 12:59:10';
+INSERT INTO alter_addcols_00(a, d) VALUES(1, 29);
+SELECT * FROM alter_addcols_00;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             |      k      |     p     |       q        
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-------------+-----------+----------------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 17 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 19 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 23 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 29 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+(8 rows)
+
+ALTER TABLE alter_addcols_00 ADD COLUMN l name DEFAULT 'Gauss MPPDB';
+ERROR:  type "name" is not supported in column store
+-- TODO: forbid SMALLSERIAL && SERIAL && BIGSERIA
+ALTER TABLE alter_addcols_00 ADD COLUMN l smallserial;
+ERROR:  It's not supported to alter table add serial column
+ALTER TABLE alter_addcols_00 ADD COLUMN l serial;
+ERROR:  It's not supported to alter table add serial column
+ALTER TABLE alter_addcols_00 ADD COLUMN l bigserial;
+ERROR:  It's not supported to alter table add serial column
+ALTER TABLE alter_addcols_00 ADD COLUMN m clob;
+ALTER TABLE alter_addcols_00 ADD COLUMN n blob;
+ERROR:  type "blob" is not supported in column store
+ALTER TABLE alter_addcols_00 ADD COLUMN o macaddr;
+ERROR:  type "macaddr" is not supported in column store
+-- test noempty normal table holding 1 tuple
+DROP TABLE IF EXISTS alter_addcols_01;
+NOTICE:  table "alter_addcols_01" does not exist, skipping
+CREATE TABLE alter_addcols_01(a int) with ( orientation = column ) ;
+INSERT INTO alter_addcols_01 VALUES (1);
+ALTER TABLE alter_addcols_01 ADD COLUMN b int;
+SELECT * FROM alter_addcols_01;
+ a | b 
+---+---
+ 1 |  
+(1 row)
+
+INSERT INTO alter_addcols_01 VALUES (1, 2);
+SELECT * FROM alter_addcols_01;
+ a | b 
+---+---
+ 1 |  
+ 1 | 2
+(2 rows)
+
+ALTER TABLE alter_addcols_01 ADD COLUMN c int NULL;
+SELECT * FROM alter_addcols_01;
+ a | b | c 
+---+---+---
+ 1 |   |  
+ 1 | 2 |  
+(2 rows)
+
+INSERT INTO alter_addcols_01 VALUES (1, 3);
+SELECT * FROM alter_addcols_01;
+ a | b | c 
+---+---+---
+ 1 |   |  
+ 1 | 2 |  
+ 1 | 3 |  
+(3 rows)
+
+INSERT INTO alter_addcols_01 VALUES (1, 4, 1);
+SELECT * FROM alter_addcols_01;
+ a | b | c 
+---+---+---
+ 1 |   |  
+ 1 | 2 |  
+ 1 | 3 |  
+ 1 | 4 | 1
+(4 rows)
+
+ALTER TABLE alter_addcols_01 ADD COLUMN d int NOT NULL;
+ERROR:  column "d" contains null values
+DETAIL:  existing data violate the NOT NULL constraint of new column.
+HINT:  define DEFAULT constraint also.
+ALTER TABLE alter_addcols_01 ADD COLUMN d int NOT NULL DEFAULT 55;
+SELECT * FROM alter_addcols_01;
+ a | b | c | d  
+---+---+---+----
+ 1 |   |   | 55
+ 1 | 2 |   | 55
+ 1 | 3 |   | 55
+ 1 | 4 | 1 | 55
+(4 rows)
+
+INSERT INTO alter_addcols_01 VALUES (1, 5, 2);
+SELECT * FROM alter_addcols_01;
+ a | b | c | d  
+---+---+---+----
+ 1 |   |   | 55
+ 1 | 2 |   | 55
+ 1 | 3 |   | 55
+ 1 | 4 | 1 | 55
+ 1 | 5 | 2 | 55
+(5 rows)
+
+INSERT INTO alter_addcols_01 VALUES (1, 6, 3, 0);
+SELECT * FROM alter_addcols_01;
+ a | b | c | d  
+---+---+---+----
+ 1 |   |   | 55
+ 1 | 2 |   | 55
+ 1 | 3 |   | 55
+ 1 | 4 | 1 | 55
+ 1 | 5 | 2 | 55
+ 1 | 6 | 3 |  0
+(6 rows)
+
+ALTER TABLE alter_addcols_01 ADD COLUMN e int NOT NULL DEFAULT 5+5;
+SELECT * FROM alter_addcols_01;
+ a | b | c | d  | e  
+---+---+---+----+----
+ 1 |   |   | 55 | 10
+ 1 | 2 |   | 55 | 10
+ 1 | 3 |   | 55 | 10
+ 1 | 4 | 1 | 55 | 10
+ 1 | 5 | 2 | 55 | 10
+ 1 | 6 | 3 |  0 | 10
+(6 rows)
+
+-- some cu whose tuples has been deleted must be skipped.
+DROP TABLE IF EXISTS alter_addcols_02;
+NOTICE:  table "alter_addcols_02" does not exist, skipping
+CREATE TABLE alter_addcols_02(a int, b int) with ( orientation = column ) ;
+INSERT INTO alter_addcols_02 VALUES (1, 2);
+INSERT INTO alter_addcols_02 VALUES (1, 3);
+INSERT INTO alter_addcols_02 VALUES (1, 4);
+DELETE FROM alter_addcols_02 WHERE b = 2;
+ALTER TABLE alter_addcols_02 ADD COLUMN c int NOT NULL DEFAULT 9*9;
+SELECT * FROM alter_addcols_02;
+ a | b | c  
+---+---+----
+ 1 | 3 | 81
+ 1 | 4 | 81
+(2 rows)
+
+START TRANSACTION;
+INSERT INTO alter_addcols_02 VALUES (1, 5);
+\! @gsqldir@/gsql -d regression -p @portstring@ -c "INSERT INTO cstore_alter_table.alter_addcols_02 VALUES (1, 6);"
+INSERT 0 1
+\! @gsqldir@/gsql -d regression -p @portstring@ -c "SELECT * FROM cstore_alter_table.alter_addcols_02"
+ a | b | c  
+---+---+----
+ 1 | 3 | 81
+ 1 | 4 | 81
+ 1 | 6 | 81
+(3 rows)
+
+ROLLBACK;
+ALTER TABLE alter_addcols_02 ADD COLUMN d int NOT NULL DEFAULT 9*99;
+SELECT * FROM alter_addcols_02;
+ a | b | c  |  d  
+---+---+----+-----
+ 1 | 3 | 81 | 891
+ 1 | 4 | 81 | 891
+ 1 | 6 | 81 | 891
+(3 rows)
+
+ALTER TABLE alter_addcols_02 ADD COLUMN e int DEFAULT 100*100, ADD COLUMN f char(31) DEFAULT 'hello world, i am from China!!', ADD COLUMN g char(32) DEFAULT 'hello world, i am from China!!!', ADD COLUMN h char(33) DEFAULT 'hello world, i am from China!!!!', ADD COLUMN i char(130) DEFAULT 'hello world, i am from China!!!!hello world, i am from China!!!!';
+INSERT INTO alter_addcols_02 VALUES (1, 5);
+SELECT * FROM alter_addcols_02;
+ a | b | c  |  d  |   e   |                f                |                g                 |                 h                 |                                                                 i                                                                  
+---+---+----+-----+-------+---------------------------------+----------------------------------+-----------------------------------+------------------------------------------------------------------------------------------------------------------------------------
+ 1 | 3 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                  
+ 1 | 4 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                  
+ 1 | 6 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                  
+ 1 | 5 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                  
+(4 rows)
+
+UPDATE alter_addcols_02 SET b = 7 WHERE b > 4;
+SELECT * FROM alter_addcols_02;
+ a | b | c  |  d  |   e   |                f                |                g                 |                 h                 |                                                                 i                                                                  
+---+---+----+-----+-------+---------------------------------+----------------------------------+-----------------------------------+------------------------------------------------------------------------------------------------------------------------------------
+ 1 | 3 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                  
+ 1 | 4 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                  
+ 1 | 7 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                  
+ 1 | 7 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                  
+(4 rows)
+
+ALTER TABLE alter_addcols_02 ADD COLUMN j varchar(100) NOT NULL DEFAULT 'DEFAULT hello world, i am from China!!!!hello world, i am from DEFAULT hello world, i am !!!!';
+SELECT * FROM alter_addcols_02;
+ a | b | c  |  d  |   e   |                f                |                g                 |                 h                 |                                                                 i                                                                  |                                               j                                               
+---+---+----+-----+-------+---------------------------------+----------------------------------+-----------------------------------+------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------
+ 1 | 3 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                   | DEFAULT hello world, i am from China!!!!hello world, i am from DEFAULT hello world, i am !!!!
+ 1 | 4 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                   | DEFAULT hello world, i am from China!!!!hello world, i am from DEFAULT hello world, i am !!!!
+ 1 | 7 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                   | DEFAULT hello world, i am from China!!!!hello world, i am from DEFAULT hello world, i am !!!!
+ 1 | 7 | 81 | 891 | 10000 | hello world, i am from China!!  | hello world, i am from China!!!  | hello world, i am from China!!!!  | hello world, i am from China!!!!hello world, i am from China!!!!                                                                   | DEFAULT hello world, i am from China!!!!hello world, i am from DEFAULT hello world, i am !!!!
+(4 rows)
+
+-----------  partition table -----------
+-- test empty partition table
+DROP TABLE IF EXISTS alter_addcols_50;
+NOTICE:  table "alter_addcols_50" does not exist, skipping
+CREATE TABLE alter_addcols_50( a int , b int ) with ( orientation = column )  partition by range(b)
+(
+    partition p1 values less than (3),
+	partition p2 values less than (6),
+	partition p3 values less than (maxvalue)
+);
+ALTER TABLE alter_addcols_50 ADD COLUMN b int;
+ERROR:  column "b" of relation "alter_addcols_50" already exists
+ALTER TABLE alter_addcols_50 ADD COLUMN c int NULL;
+SELECT c FROM alter_addcols_50 WHERE c =  1;
+ c 
+---
+(0 rows)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN d int NOT NULL;
+SELECT d FROM alter_addcols_50 WHERE d >=  1;
+ d 
+---
+(0 rows)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN e int default 5;
+SELECT e FROM alter_addcols_50 WHERE e =  5;
+ e 
+---
+(0 rows)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN f int NULL default 10;
+SELECT f FROM alter_addcols_50 WHERE f =  10;
+ f 
+---
+(0 rows)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN g int check(g > 2);
+ERROR:  column store unsupport constraint "CHECK"
+ALTER TABLE alter_addcols_50 ADD COLUMN g int default f + 11;
+ERROR:  cannot use column references in default expression
+ALTER TABLE alter_addcols_50 ADD COLUMN g varchar(100) default 'chars less than 31 size';
+INSERT INTO alter_addcols_50(a) VALUES(1);
+ERROR:  null value in column "d" violates not-null constraint
+DETAIL:  Failing row contains (1, null, null, null, 5, 10, chars less than 31 size).
+SELECT COUNT(*) FROM alter_addcols_50;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM alter_addcols_50;
+ a | b | c | d | e | f | g 
+---+---+---+---+---+---+---
+(0 rows)
+
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 4);
+SELECT * FROM alter_addcols_50;
+ a | b | c | d | e | f  |            g            
+---+---+---+---+---+----+-------------------------
+ 1 |   |   | 4 | 5 | 10 | chars less than 31 size
+(1 row)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN h varchar(100) default 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_50;
+ a | b | c | d | e | f  |            g            |                             h                             
+---+---+---+---+---+----+-------------------------+-----------------------------------------------------------
+ 1 |   |   | 4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31.
+(1 row)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN i varchar(100) NOT NULL DEFAULT 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_50;
+ a | b | c | d | e | f  |            g            |                             h                             |                             i                             
+---+---+---+---+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------
+ 1 |   |   | 4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+(1 row)
+
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 7);
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 11);
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 13);
+ALTER TABLE alter_addcols_50 ADD COLUMN j varchar(100) NOT NULL DEFAULT 'i think this is a string whose length is greater than 31.';
+SELECT * FROM alter_addcols_50;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31.
+(4 rows)
+
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 17);
+ALTER TABLE alter_addcols_50 ADD COLUMN k time with time zone DEFAULT '2015-04-02 20:26:53 PST';
+SELECT * FROM alter_addcols_50;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             |      k      
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-------------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 17 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+(5 rows)
+
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 19);
+SELECT * FROM alter_addcols_50;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             |      k      
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-------------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 17 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+ 1 |   |   | 19 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08
+(6 rows)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN p interval DEFAULT 1100;
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 23);
+SELECT * FROM alter_addcols_50;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             |      k      |     p     
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-------------+-----------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 17 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 19 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+ 1 |   |   | 23 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days
+(7 rows)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN q interval DEFAULT '1 12:59:10';
+INSERT INTO alter_addcols_50(a, d) VALUES(1, 29);
+SELECT * FROM alter_addcols_50;
+ a | b | c | d  | e | f  |            g            |                             h                             |                             i                             |                             j                             |      k      |     p     |       q        
+---+---+---+----+---+----+-------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-----------------------------------------------------------+-------------+-----------+----------------
+ 1 |   |   |  4 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   |  7 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 11 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 13 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 17 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 19 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 23 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+ 1 |   |   | 29 | 5 | 10 | chars less than 31 size | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | i think this is a string whose length is greater than 31. | 20:26:53-08 | 1100 days | 1 day 12:59:10
+(8 rows)
+
+ALTER TABLE alter_addcols_50 ADD COLUMN l name DEFAULT 'Gauss MPPDB';
+ERROR:  type "name" is not supported in column store
+-- TODO: forbid SMALLSERIAL && SERIAL && BIGSERIA
+ALTER TABLE alter_addcols_50 ADD COLUMN l smallserial;
+ERROR:  It's not supported to alter table add serial column
+ALTER TABLE alter_addcols_50 ADD COLUMN l serial;
+ERROR:  It's not supported to alter table add serial column
+ALTER TABLE alter_addcols_50 ADD COLUMN l bigserial;
+ERROR:  It's not supported to alter table add serial column
+ALTER TABLE alter_addcols_50 ADD COLUMN m clob;
+ALTER TABLE alter_addcols_50 ADD COLUMN n blob;
+ERROR:  type "blob" is not supported in column store
+ALTER TABLE alter_addcols_50 ADD COLUMN o macaddr;
+ERROR:  type "macaddr" is not supported in column store
+drop schema cstore_alter_table cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table alter_addcols_00
+drop cascades to table alter_addcols_01
+drop cascades to table alter_addcols_02
+drop cascades to table alter_addcols_50

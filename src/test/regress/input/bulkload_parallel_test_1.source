@@ -1,0 +1,58 @@
+--
+-- BULK LOAD PARALLEL TEST 1
+--
+----
+-- 1. Load data in normal mode wiht CSV format
+----
+CREATE TABLE LINEITEM
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+);
+
+SELECT COUNT(*) FROM LINEITEM;
+
+TRUNCATE LINEITEM;
+
+
+SELECT COUNT(*) FROM LINEITEM;
+
+TRUNCATE LINEITEM;
+
+
+----
+---- Load data in normal mode with pipe source
+----
+\! rm -f @abs_srcdir@/data/datanode1/gds.pipe
+\! mkfifo @abs_srcdir@/data/datanode1/gds.pipe
+
+\! sh -c "sleep 3;cat @abs_srcdir@/data/datanode1/lineitem.data >@abs_srcdir@/data/datanode1/gds.pipe" &
+
+SELECT COUNT(*) FROM LINEITEM;
+
+TRUNCATE LINEITEM;
+
+\! rm -f @abs_srcdir@/data/datanode1/gds.pipe
+
+
+
+\! @abs_bindir@/gsql -r -p 0 -d regression -f @abs_srcdir@/data/create_oversize_row_table.sql > /dev/null 2>&1
+\! @abs_bindir@/gsql -r -p 0 -d regression -f @abs_srcdir@/data/insert_select_large_row.sql > /dev/null 2>insert_err
+\! cat insert_err | awk '{split($0, a, ":");print a[4],":", a[5], a[6]}'
+\! rm -f insert_err
+
+

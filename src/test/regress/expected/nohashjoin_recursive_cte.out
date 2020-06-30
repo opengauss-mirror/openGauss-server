@@ -1,0 +1,1794 @@
+set current_schema=public;
+set enable_hashjoin=off;
+/* 测试不下推场景下计划显示正确 */
+explain (costs false, nodes off) with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: rq.id
+   CTE rq
+     ->  Recursive Union
+           ->  Seq Scan on chinamap
+                 Filter: (id = 11)
+           ->  Merge Join
+                 Merge Cond: (rq.id = origin.pid)
+                 ->  Sort
+                       Sort Key: rq.id
+                       ->  WorkTable Scan on rq
+                 ->  Sort
+                       Sort Key: origin.pid
+                       ->  Seq Scan on chinamap origin
+   ->  CTE Scan on rq
+(15 rows)
+
+with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+ id  |           name           
+-----+--------------------------
+  11 | 湖北省
+ 110 | 湖北省 > 武汉市
+ 111 | 湖北省 > 武汉市 > 武昌区
+ 112 | 湖北省 > 武汉市 > 下城区
+ 113 | 湖北省 > 武汉市 > 江岸区
+ 114 | 湖北省 > 武汉市 > 江汉区
+ 115 | 湖北省 > 武汉市 > 汉阳区
+ 116 | 湖北省 > 武汉市 > 洪山区
+ 117 | 湖北省 > 武汉市 > 青山区
+ 120 | 湖北省 > 孝感市
+ 130 | 湖北省 > 宜昌市
+ 140 | 湖北省 > 随州市
+ 150 | 湖北省 > 仙桃市
+ 160 | 湖北省 > 荆门市
+ 170 | 湖北省 > 枝江市
+ 180 | 湖北省 > 神农架市
+(16 rows)
+
+set explain_perf_mode=pretty;
+explain (costs false, nodes off) with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: rq.id
+   CTE rq
+     ->  Recursive Union
+           ->  Seq Scan on chinamap
+                 Filter: (id = 11)
+           ->  Merge Join
+                 Merge Cond: (rq.id = origin.pid)
+                 ->  Sort
+                       Sort Key: rq.id
+                       ->  WorkTable Scan on rq
+                 ->  Sort
+                       Sort Key: origin.pid
+                       ->  Seq Scan on chinamap origin
+   ->  CTE Scan on rq
+(15 rows)
+
+with recursive rq as
+(
+  select id, name from  chinamap where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+ id  |           name           
+-----+--------------------------
+  11 | 湖北省
+ 110 | 湖北省 > 武汉市
+ 111 | 湖北省 > 武汉市 > 武昌区
+ 112 | 湖北省 > 武汉市 > 下城区
+ 113 | 湖北省 > 武汉市 > 江岸区
+ 114 | 湖北省 > 武汉市 > 江汉区
+ 115 | 湖北省 > 武汉市 > 汉阳区
+ 116 | 湖北省 > 武汉市 > 洪山区
+ 117 | 湖北省 > 武汉市 > 青山区
+ 120 | 湖北省 > 孝感市
+ 130 | 湖北省 > 宜昌市
+ 140 | 湖北省 > 随州市
+ 150 | 湖北省 > 仙桃市
+ 160 | 湖北省 > 荆门市
+ 170 | 湖北省 > 枝江市
+ 180 | 湖北省 > 神农架市
+(16 rows)
+
+explain (costs false, nodes off) 
+with recursive rq as
+(
+  select id, name from  chinamap2 where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap2 origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Sort
+   Sort Key: rq.id
+   CTE rq
+     ->  Recursive Union
+           ->  Seq Scan on chinamap2
+                 Filter: (id = 11)
+           ->  Merge Join
+                 Merge Cond: (rq.id = origin.pid)
+                 ->  Sort
+                       Sort Key: rq.id
+                       ->  WorkTable Scan on rq
+                 ->  Sort
+                       Sort Key: origin.pid
+                       ->  Seq Scan on chinamap2 origin
+   ->  CTE Scan on rq
+(15 rows)
+
+with recursive rq as
+(
+  select id, name from  chinamap2 where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap2 origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+ id  |           name           
+-----+--------------------------
+  11 | 湖北省
+ 110 | 湖北省 > 武汉市
+ 111 | 湖北省 > 武汉市 > 武昌区
+ 112 | 湖北省 > 武汉市 > 下城区
+ 113 | 湖北省 > 武汉市 > 江岸区
+ 114 | 湖北省 > 武汉市 > 江汉区
+ 115 | 湖北省 > 武汉市 > 汉阳区
+ 116 | 湖北省 > 武汉市 > 洪山区
+ 117 | 湖北省 > 武汉市 > 青山区
+ 120 | 湖北省 > 孝感市
+ 130 | 湖北省 > 宜昌市
+ 140 | 湖北省 > 随州市
+ 150 | 湖北省 > 仙桃市
+ 160 | 湖北省 > 荆门市
+ 170 | 湖北省 > 枝江市
+ 180 | 湖北省 > 神农架市
+(16 rows)
+
+explain (costs false, nodes off) 
+with recursive rq as
+(
+  select id, name from  chinamap join t1 on id = t1.c2 where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: rq.id
+   CTE rq
+     ->  Recursive Union
+           ->  Nested Loop
+                 ->  Seq Scan on t1
+                       Filter: (c2 = 11)
+                 ->  Materialize
+                       ->  Seq Scan on chinamap
+                             Filter: (id = 11)
+           ->  Merge Join
+                 Merge Cond: (rq.id = origin.pid)
+                 ->  Sort
+                       Sort Key: rq.id
+                       ->  WorkTable Scan on rq
+                 ->  Sort
+                       Sort Key: origin.pid
+                       ->  Seq Scan on chinamap origin
+   ->  CTE Scan on rq
+(19 rows)
+
+with recursive rq as
+(
+  select id, name from  chinamap join t1 on id = t1.c2 where id = 11
+  union all
+  select origin.id, rq.name || ' > ' || origin.name
+  from rq join chinamap origin on origin.pid = rq.id
+)
+select id, name from rq order by 1;
+ id  |           name           
+-----+--------------------------
+  11 | 湖北省
+ 110 | 湖北省 > 武汉市
+ 111 | 湖北省 > 武汉市 > 武昌区
+ 112 | 湖北省 > 武汉市 > 下城区
+ 113 | 湖北省 > 武汉市 > 江岸区
+ 114 | 湖北省 > 武汉市 > 江汉区
+ 115 | 湖北省 > 武汉市 > 汉阳区
+ 116 | 湖北省 > 武汉市 > 洪山区
+ 117 | 湖北省 > 武汉市 > 青山区
+ 120 | 湖北省 > 孝感市
+ 130 | 湖北省 > 宜昌市
+ 140 | 湖北省 > 随州市
+ 150 | 湖北省 > 仙桃市
+ 160 | 湖北省 > 荆门市
+ 170 | 湖北省 > 枝江市
+ 180 | 湖北省 > 神农架市
+(16 rows)
+
+explain (costs false, nodes off) 
+with recursive cte as (  
+	select  ID,  PID,  NAME 
+	from a
+	where a.NAME = 'm'
+	union all  
+	select parent.ID, parent.PID, parent.NAME 
+	from cte as child join  a as parent 
+	on child.pid=parent.id
+)
+select * from cte order by ID;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: cte.id
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on a
+                 Filter: (name = 'm'::text)
+           ->  Merge Join
+                 Merge Cond: (child.pid = parent.id)
+                 ->  Sort
+                       Sort Key: child.pid
+                       ->  WorkTable Scan on cte child
+                 ->  Sort
+                       Sort Key: parent.id
+                       ->  Seq Scan on a parent
+   ->  CTE Scan on cte
+(15 rows)
+
+with recursive cte as (
+    select  ID,  PID,  NAME
+    from a
+    where a.NAME = 'm'
+    union all
+    select parent.ID, parent.PID, parent.NAME
+    from cte as child join  a as parent
+    on child.pid=parent.id
+)
+select * from cte order by ID;
+ id | pid | name 
+----+-----+------
+  1 |   0 | a
+  3 |   1 | c
+  7 |   3 | g
+  9 |   7 | i
+ 11 |   9 | k
+ 12 |  11 | l
+ 13 |  12 | m
+(7 rows)
+
+explain (costs false, nodes off) 
+with recursive cte as (  
+	select ID,PID,NAME
+	from a
+	where a.NAME = 'b'
+	union all  
+	select child.ID, child.PID, child.NAME
+	from cte as parent join a as child 
+	on child.pid=parent.id  
+)  
+select * from cte order by ID;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Sort
+   Sort Key: cte.id
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on a
+                 Filter: (name = 'b'::text)
+           ->  Merge Join
+                 Merge Cond: (parent.id = child.pid)
+                 ->  Sort
+                       Sort Key: parent.id
+                       ->  WorkTable Scan on cte parent
+                 ->  Sort
+                       Sort Key: child.pid
+                       ->  Seq Scan on a child
+   ->  CTE Scan on cte
+(15 rows)
+
+with recursive cte as (
+    select ID,PID,NAME
+    from a
+    where a.NAME = 'b'
+    union all
+    select child.ID, child.PID, child.NAME
+    from cte as parent join a as child
+    on child.pid=parent.id
+)
+select * from cte order by ID;
+ id | pid | name 
+----+-----+------
+  2 |   1 | b
+  4 |   2 | d
+  5 |   2 | e
+  8 |   4 | h
+ 10 |   8 | j
+(5 rows)
+
+explain (costs false, nodes off) 
+with recursive cte as (  
+	select 
+		ID,
+		PID,
+		NAME,
+		1 as level 
+	from
+		a
+	where
+		a.NAME = 'm'
+	union all  
+	select
+		parent.ID,
+		parent.PID,
+		parent.NAME,
+		child.level+1
+	from 
+		cte as child 
+	join
+		a as parent
+	on
+		child.pid=parent.id and child.level < 3 
+)  
+select * from cte order by ID;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: cte.id
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on a
+                 Filter: (name = 'm'::text)
+           ->  Merge Join
+                 Merge Cond: (child.pid = parent.id)
+                 ->  Sort
+                       Sort Key: child.pid
+                       ->  WorkTable Scan on cte child
+                             Filter: (level < 3)
+                 ->  Sort
+                       Sort Key: parent.id
+                       ->  Seq Scan on a parent
+   ->  CTE Scan on cte
+(16 rows)
+
+with recursive cte as (
+    select
+        ID,
+        PID,
+        NAME,
+        1 as level
+    from
+        a
+    where
+        a.NAME = 'm'
+    union all
+    select
+        parent.ID,
+        parent.PID,
+        parent.NAME,
+        child.level+1
+    from
+        cte as child
+    join
+        a as parent
+    on
+        child.pid=parent.id and child.level < 3
+)
+select * from cte order by ID;
+ id | pid | name | level 
+----+-----+------+-------
+ 11 |   9 | k    |     3
+ 12 |  11 | l    |     2
+ 13 |  12 | m    |     1
+(3 rows)
+
+-----------
+explain (costs false, nodes off) 
+with recursive cte as (  
+select
+	ID,
+	PID,
+	NAME,
+	1 as level
+from
+	a
+where
+	a.NAME = 'b'
+union all  
+select
+	child.ID,
+	child.PID,
+	child.NAME,
+	parent.level+1
+from
+	cte as parent 
+join
+	a as child
+on 
+	child.pid=parent.id and parent.level < 3 
+)  
+select * from cte order by ID;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Sort
+   Sort Key: cte.id
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on a
+                 Filter: (name = 'b'::text)
+           ->  Merge Join
+                 Merge Cond: (parent.id = child.pid)
+                 ->  Sort
+                       Sort Key: parent.id
+                       ->  WorkTable Scan on cte parent
+                             Filter: (level < 3)
+                 ->  Sort
+                       Sort Key: child.pid
+                       ->  Seq Scan on a child
+   ->  CTE Scan on cte
+(16 rows)
+
+with recursive cte as (
+select
+    ID,
+    PID,
+    NAME,
+    1 as level
+from
+    a
+where
+    a.NAME = 'b'
+union all
+select
+    child.ID,
+    child.PID,
+    child.NAME,
+    parent.level+1
+from
+    cte as parent
+join
+    a as child
+on
+    child.pid=parent.id and parent.level < 3
+)
+select * from cte order by ID;
+ id | pid | name | level 
+----+-----+------+-------
+  2 |   1 | b    |     1
+  4 |   2 | d    |     2
+  5 |   2 | e    |     2
+  8 |   4 | h    |     3
+(4 rows)
+
+--------------
+explain (costs false, nodes off) 
+select
+	b.NAME
+from 
+	b
+where 
+	b.ID in
+	(
+		with recursive cte as 
+		(
+			select 
+							ID,
+							PID,
+							NAME
+			from 
+							a
+			where 
+							a.NAME = 'g'
+			union all
+			select 
+							child.ID, 
+							child.PID, 
+							child.NAME 
+			from 
+							cte as parent 
+			join 
+							a as child
+			on child.pid=parent.id 
+		)
+		select ID from cte
+	) order by 1;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Sort Key: b.name
+   ->  Merge Join
+         Merge Cond: (cte.id = b.id)
+         ->  Sort
+               Sort Key: cte.id
+               ->  HashAggregate
+                     Group By Key: cte.id
+                     ->  CTE Scan on cte
+                           CTE cte
+                             ->  Recursive Union
+                                   ->  Seq Scan on a
+                                         Filter: (name = 'g'::text)
+                                   ->  Merge Join
+                                         Merge Cond: (parent.id = child.pid)
+                                         ->  Sort
+                                               Sort Key: parent.id
+                                               ->  WorkTable Scan on cte parent
+                                         ->  Sort
+                                               Sort Key: child.pid
+                                               ->  Seq Scan on a child
+         ->  Sort
+               Sort Key: b.id
+               ->  Seq Scan on b
+(24 rows)
+
+select
+    b.NAME
+from
+    b
+where
+    b.ID in
+    (
+        with recursive cte as
+        (
+            select
+                            ID,
+                            PID,
+                            NAME
+            from
+                            a
+            where
+                            a.NAME = 'g'
+            union all
+            select
+                            child.ID,
+                            child.PID,
+                            child.NAME
+            from
+                            cte as parent
+            join
+                            a as child
+            on child.pid=parent.id
+        )
+        select ID from cte
+    ) order by 1;
+ name 
+------
+ G
+ I
+ K
+ L
+ M
+(5 rows)
+
+------------
+explain (costs false, nodes off) 
+WITH RECURSIVE  TABLE_COLUMN(T,B,C,D)
+AS
+(
+	SELECT   area_code,belong_area_code,name,rnk
+    FROM   area
+    UNION ALL
+    SELECT   area_code,b.T||'|'||a.area_code,b.C||a.name,rnk
+    FROM   area a JOIN   TABLE_COLUMN b ON   a.belong_area_code=b.T
+)
+SELECT  T,B,C FROM  Table_Column
+ORDER BY 1,2,3;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
+   Sort Key: table_column.t, table_column.b, table_column.c
+   CTE table_column
+     ->  Recursive Union
+           ->  Seq Scan on area
+           ->  Merge Join
+                 Merge Cond: (a.belong_area_code = b.t)
+                 ->  Sort
+                       Sort Key: a.belong_area_code
+                       ->  Seq Scan on area a
+                 ->  Sort
+                       Sort Key: b.t
+                       ->  WorkTable Scan on table_column b
+   ->  CTE Scan on table_column
+(14 rows)
+
+WITH RECURSIVE  TABLE_COLUMN(T,B,C,D)
+AS
+(
+    SELECT   area_code,belong_area_code,name,rnk
+    FROM   area
+    UNION ALL
+    SELECT   area_code,b.T||'|'||a.area_code,b.C||a.name,rnk
+    FROM   area a JOIN   TABLE_COLUMN b ON   a.belong_area_code=b.T
+)
+SELECT  T,B,C FROM  Table_Column
+ORDER BY 1,2,3;
+    t    |        b        |                c                 
+---------+-----------------+----------------------------------
+ 1000000 | 0000000         | 总行
+ 1100000 | 1000000         | 北京分行
+ 1100000 | 1000000|1100000 | 总行北京分行
+ 1110000 | 1100000         | 朝阳区支行
+ 1110000 | 1100000|1110000 | 北京分行朝阳区支行
+ 1110000 | 1100000|1110000 | 总行北京分行朝阳区支行
+ 1111000 | 1110000         | 三里屯支行
+ 1111000 | 1110000|1111000 | 北京分行朝阳区支行三里屯支行
+ 1111000 | 1110000|1111000 | 总行北京分行朝阳区支行三里屯支行
+ 1111000 | 1110000|1111000 | 朝阳区支行三里屯支行
+ 1112000 | 1110000         | 酒仙桥支行
+ 1112000 | 1110000|1112000 | 北京分行朝阳区支行酒仙桥支行
+ 1112000 | 1110000|1112000 | 总行北京分行朝阳区支行酒仙桥支行
+ 1112000 | 1110000|1112000 | 朝阳区支行酒仙桥支行
+ 1120000 | 1100000         | 海淀区支行
+ 1120000 | 1100000|1120000 | 北京分行海淀区支行
+ 1120000 | 1100000|1120000 | 总行北京分行海淀区支行
+ 1121000 | 1120000         | 西三旗支行
+ 1121000 | 1120000|1121000 | 北京分行海淀区支行西三旗支行
+ 1121000 | 1120000|1121000 | 总行北京分行海淀区支行西三旗支行
+ 1121000 | 1120000|1121000 | 海淀区支行西三旗支行
+ 1200000 | 1000000         | 上海分行
+ 1200000 | 1000000|1200000 | 总行上海分行
+ 1210000 | 1200000         | 虹桥区支行
+ 1210000 | 1200000|1210000 | 上海分行虹桥区支行
+ 1210000 | 1200000|1210000 | 总行上海分行虹桥区支行
+ 1220000 | 1200000         | 浦东区支行
+ 1220000 | 1200000|1220000 | 上海分行浦东区支行
+ 1220000 | 1200000|1220000 | 总行上海分行浦东区支行
+ 1300000 | 1000000         | 深圳分行
+ 1300000 | 1000000|1300000 | 总行深圳分行
+(31 rows)
+
+/* recursive-cte关联外层 */
+explain (costs false, nodes off) select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME
+        from b
+        where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent
+        on child.pid=parent.id
+    )
+    select NAME from cte
+    where cte.ID % 2 = 0
+    limit 1
+) cName
+from a
+order by 1,2;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, a.name
+   ->  Seq Scan on a
+         SubPlan 2
+           ->  Limit
+                 CTE cte
+                   ->  Recursive Union
+                         ->  Seq Scan on b
+                               Filter: (id = a.id)
+                         ->  Merge Join
+                               Merge Cond: (child.pid = parent.id)
+                               ->  Sort
+                                     Sort Key: child.pid
+                                     ->  WorkTable Scan on cte child
+                               ->  Sort
+                                     Sort Key: parent.id
+                                     ->  Seq Scan on b parent
+                 ->  CTE Scan on cte
+                       Filter: ((id % 2::numeric) = 0::numeric)
+(19 rows)
+
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME
+        from b
+        where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent
+        on child.pid=parent.id
+    )
+    select NAME from cte
+    where cte.ID % 2 = 0
+    limit 1
+) cName
+from a
+order by 1,2;
+ id | name | cname 
+----+------+-------
+  1 | a    | 
+  2 | b    | B
+  3 | c    | 
+  4 | d    | D
+  5 | e    | B
+  6 | f    | F
+  7 | g    | F
+  8 | h    | H
+  9 | i    | H
+ 10 | j    | J
+ 11 | k    | J
+ 12 | l    | L
+ 13 | m    | L
+(13 rows)
+
+/*
+ * 多层stream
+ * --------------------------------------------------------
+ *   ->RecursiveUnion
+ *      ->Scan
+ *      ->Join
+ *          ->Scan
+ *          ->Streaming <<<
+ *              ->Join
+ *                  ->Streaming
+ *                      ->Scan
+ *                  ->WorkTableScan
+ * --------------------------------------------------------
+ */
+explain (costs false, nodes off) with recursive rq as
+(
+    select id, name from  chinamap where id = 11
+    union all
+    select origin.id, rq.name || ' > ' || origin.name
+    from rq join chinamap origin on origin.pid = rq.id, t2
+	where t2.c2 = rq.id
+)
+select * from rq order by 1;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Sort
+   Sort Key: rq.id
+   CTE rq
+     ->  Recursive Union
+           ->  Seq Scan on chinamap
+                 Filter: (id = 11)
+           ->  Merge Join
+                 Merge Cond: (origin.pid = t2.c2)
+                 ->  Merge Join
+                       Merge Cond: (rq.id = origin.pid)
+                       ->  Sort
+                             Sort Key: rq.id
+                             ->  WorkTable Scan on rq
+                       ->  Sort
+                             Sort Key: origin.pid
+                             ->  Seq Scan on chinamap origin
+                 ->  Sort
+                       Sort Key: t2.c2
+                       ->  Seq Scan on t2
+   ->  CTE Scan on rq
+(20 rows)
+
+with recursive rq as
+(
+    select id, name from  chinamap where id = 11
+    union all
+    select origin.id, rq.name || ' > ' || origin.name
+    from rq join chinamap origin on origin.pid = rq.id, t2
+	where t2.c2 = rq.id
+)
+select * from rq order by 1;
+ id  |       name        
+-----+-------------------
+  11 | 湖北省
+ 110 | 湖北省 > 武汉市
+ 120 | 湖北省 > 孝感市
+ 130 | 湖北省 > 宜昌市
+ 140 | 湖北省 > 随州市
+ 150 | 湖北省 > 仙桃市
+ 160 | 湖北省 > 荆门市
+ 170 | 湖北省 > 枝江市
+ 180 | 湖北省 > 神农架市
+(9 rows)
+
+explain (costs false, nodes off) select * from chinamap where pid = 11
+union
+select * from chinamap where id in
+(
+    with recursive rq as
+    (   
+        select * from chinamap where id = 110 
+        union all 
+        select origin.* from chinamap origin join rq on origin.pid = rq.id
+    )   
+     select id from rq
+) order by id; 
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: public.chinamap.id
+   ->  HashAggregate
+         Group By Key: public.chinamap.id, public.chinamap.pid, public.chinamap.name
+         ->  Append
+               ->  Seq Scan on chinamap
+                     Filter: (pid = 11)
+               ->  Merge Join
+                     Merge Cond: (rq.id = public.chinamap.id)
+                     ->  Sort
+                           Sort Key: rq.id
+                           ->  HashAggregate
+                                 Group By Key: rq.id
+                                 ->  CTE Scan on rq
+                                       CTE rq
+                                         ->  Recursive Union
+                                               ->  Seq Scan on chinamap
+                                                     Filter: (id = 110)
+                                               ->  Merge Join
+                                                     Merge Cond: (rq.id = origin.pid)
+                                                     ->  Sort
+                                                           Sort Key: rq.id
+                                                           ->  WorkTable Scan on rq
+                                                     ->  Sort
+                                                           Sort Key: origin.pid
+                                                           ->  Seq Scan on chinamap origin
+                     ->  Sort
+                           Sort Key: public.chinamap.id
+                           ->  Seq Scan on chinamap
+(29 rows)
+
+select * from chinamap where pid = 11
+union
+select * from chinamap where id in
+(
+    with recursive rq as
+    (   
+        select * from chinamap where id = 110 
+        union all 
+        select origin.* from chinamap origin join rq on origin.pid = rq.id
+    )   
+     select id from rq
+) order by id; 
+ id  | pid |   name   
+-----+-----+----------
+ 110 |  11 | 武汉市
+ 111 | 110 | 武昌区
+ 112 | 110 | 下城区
+ 113 | 110 | 江岸区
+ 114 | 110 | 江汉区
+ 115 | 110 | 汉阳区
+ 116 | 110 | 洪山区
+ 117 | 110 | 青山区
+ 120 |  11 | 孝感市
+ 130 |  11 | 宜昌市
+ 140 |  11 | 随州市
+ 150 |  11 | 仙桃市
+ 160 |  11 | 荆门市
+ 170 |  11 | 枝江市
+ 180 |  11 | 神农架市
+(15 rows)
+
+explain (costs false, nodes off) select * from 
+(
+    with recursive cte1 as
+    (
+        select  ID,  PID,  NAME
+        from a
+        where a.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME
+        from cte1 as child join  a as parent
+        on child.pid=parent.id
+    )select * from cte1
+)
+union all
+(
+    with recursive cte2 as
+    (
+        select  ID,  PID,  NAME
+        from a
+        where a.NAME = 'b'
+        union all
+        select parent.ID, parent.PID, parent.NAME
+        from cte2 as child join  a as parent
+        on child.pid=parent.id
+    ) select * from cte2
+) order by id;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: cte1.id
+   ->  Result
+         ->  Append
+               ->  CTE Scan on cte1
+                     CTE cte1
+                       ->  Recursive Union
+                             ->  Seq Scan on a
+                                   Filter: (name = 'm'::text)
+                             ->  Merge Join
+                                   Merge Cond: (child.pid = parent.id)
+                                   ->  Sort
+                                         Sort Key: child.pid
+                                         ->  WorkTable Scan on cte1 child
+                                   ->  Sort
+                                         Sort Key: parent.id
+                                         ->  Seq Scan on a parent
+               ->  CTE Scan on cte2
+                     CTE cte2
+                       ->  Recursive Union
+                             ->  Seq Scan on a
+                                   Filter: (name = 'b'::text)
+                             ->  Merge Join
+                                   Merge Cond: (child.pid = parent.id)
+                                   ->  Sort
+                                         Sort Key: child.pid
+                                         ->  WorkTable Scan on cte2 child
+                                   ->  Sort
+                                         Sort Key: parent.id
+                                         ->  Seq Scan on a parent
+(30 rows)
+
+select * from 
+(
+    with recursive cte1 as
+    (
+        select  ID,  PID,  NAME
+        from a
+        where a.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME
+        from cte1 as child join  a as parent
+        on child.pid=parent.id
+    )select * from cte1
+)
+union all
+(
+    with recursive cte2 as
+    (
+        select  ID,  PID,  NAME
+        from a
+        where a.NAME = 'b'
+        union all
+        select parent.ID, parent.PID, parent.NAME
+        from cte2 as child join  a as parent
+        on child.pid=parent.id
+    ) select * from cte2
+) order by id;
+ id | pid | name 
+----+-----+------
+  1 |   0 | a
+  1 |   0 | a
+  2 |   1 | b
+  3 |   1 | c
+  7 |   3 | g
+  9 |   7 | i
+ 11 |   9 | k
+ 12 |  11 | l
+ 13 |  12 | m
+(9 rows)
+
+/*
+ * 测试复制表replicate-plan场景
+ */
+/* a:b H:H */
+explain (costs false, nodes off)
+with recursive cte as (
+        select  ID,  PID,  NAME from a where a.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME from cte as child join  b as parent on child.pid=parent.id
+)
+select * from cte order by ID;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: cte.id
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on a
+                 Filter: (name = 'm'::text)
+           ->  Merge Join
+                 Merge Cond: (child.pid = parent.id)
+                 ->  Sort
+                       Sort Key: child.pid
+                       ->  WorkTable Scan on cte child
+                 ->  Sort
+                       Sort Key: parent.id
+                       ->  Seq Scan on b parent
+   ->  CTE Scan on cte
+(15 rows)
+
+with recursive cte as (
+        select  ID,  PID,  NAME from a where a.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME from cte as child join  b as parent on child.pid=parent.id
+)
+select * from cte order by ID;
+ id | pid | name 
+----+-----+------
+  1 |   0 | A
+  3 |   1 | C
+  6 |   3 | F
+  7 |   6 | G
+  8 |   7 | H
+  9 |   8 | I
+ 10 |   9 | J
+ 11 |  10 | K
+ 12 |  11 | L
+ 13 |  12 | m
+(10 rows)
+
+/* a:b R:H */
+explain (costs false, nodes off)
+with recursive cte as (
+        select  ID,  PID,  NAME from a_rep where a_rep.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME from cte as child join  b as parent on child.pid=parent.id
+)
+select * from cte order by ID;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: cte.id
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on a_rep
+                 Filter: (name = 'm'::text)
+           ->  Merge Join
+                 Merge Cond: (child.pid = parent.id)
+                 ->  Sort
+                       Sort Key: child.pid
+                       ->  WorkTable Scan on cte child
+                 ->  Sort
+                       Sort Key: parent.id
+                       ->  Seq Scan on b parent
+   ->  CTE Scan on cte
+(15 rows)
+
+with recursive cte as (
+        select  ID,  PID,  NAME from a_rep where a_rep.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME from cte as child join  b as parent on child.pid=parent.id
+)
+select * from cte order by ID;
+ id | pid | name 
+----+-----+------
+  1 |   0 | A
+  3 |   1 | C
+  6 |   3 | F
+  7 |   6 | G
+  8 |   7 | H
+  9 |   8 | I
+ 10 |   9 | J
+ 11 |  10 | K
+ 12 |  11 | L
+ 13 |  12 | m
+(10 rows)
+
+/* a:b H:R */
+explain (costs false, nodes off)
+with recursive cte as (
+        select  ID,  PID,  NAME from a where a.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME from cte as child join  b_rep as parent on child.pid=parent.id
+)
+select * from cte order by ID;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: cte.id
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on a
+                 Filter: (name = 'm'::text)
+           ->  Merge Join
+                 Merge Cond: (child.pid = parent.id)
+                 ->  Sort
+                       Sort Key: child.pid
+                       ->  WorkTable Scan on cte child
+                 ->  Sort
+                       Sort Key: parent.id
+                       ->  Seq Scan on b_rep parent
+   ->  CTE Scan on cte
+(15 rows)
+
+with recursive cte as (
+        select  ID,  PID,  NAME from a where a.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME from cte as child join  b_rep as parent on child.pid=parent.id
+)
+select * from cte order by ID;
+ id | pid | name 
+----+-----+------
+  1 |   0 | A
+  3 |   1 | C
+  6 |   3 | F
+  7 |   6 | G
+  8 |   7 | H
+  9 |   8 | I
+ 10 |   9 | J
+ 11 |  10 | K
+ 12 |  11 | L
+ 13 |  12 | m
+(10 rows)
+
+/* a:b R:R */
+explain (costs false, nodes off)
+with recursive cte as (
+        select  ID,  PID,  NAME from a_rep where a_rep.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME from cte as child join  b_rep as parent on child.pid=parent.id
+)
+select * from cte order by ID;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Sort
+   Sort Key: cte.id
+   CTE cte
+     ->  Recursive Union
+           ->  Seq Scan on a_rep
+                 Filter: (name = 'm'::text)
+           ->  Merge Join
+                 Merge Cond: (child.pid = parent.id)
+                 ->  Sort
+                       Sort Key: child.pid
+                       ->  WorkTable Scan on cte child
+                 ->  Sort
+                       Sort Key: parent.id
+                       ->  Seq Scan on b_rep parent
+   ->  CTE Scan on cte
+(15 rows)
+
+with recursive cte as (
+        select  ID,  PID,  NAME from a_rep where a_rep.NAME = 'm'
+        union all
+        select parent.ID, parent.PID, parent.NAME from cte as child join  b_rep as parent on child.pid=parent.id
+)
+select * from cte order by ID;
+ id | pid | name 
+----+-----+------
+  1 |   0 | A
+  3 |   1 | C
+  6 |   3 | F
+  7 |   6 | G
+  8 |   7 | H
+  9 |   8 | I
+ 10 |   9 | J
+ 11 |  10 | K
+ 12 |  11 | L
+ 13 |  12 | m
+(10 rows)
+
+explain (costs false, nodes off)
+with recursive rq as
+(
+    select a.name address, b.name, a.id,a.pid
+    from chinamap a,
+    (
+        with recursive rq as
+        (
+            select pid,id, name, mapid from  chinamap3
+            union all
+            select rq.pid,origin.id, rq.name || ' > ' || origin.name, origin.mapid
+            from rq join chinamap3 origin on origin.pid = rq.id
+        )select * from rq where pid is null
+    ) b
+    where a.id = b.mapid
+    union all
+    select chinamap.name, rq.name, rq.pid, chinamap.pid
+    from rq ,chinamap
+    where rq.pid=chinamap.id
+)select address,name from rq order by address,name;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: rq.address, rq.name
+   CTE rq
+     ->  Recursive Union
+           ->  Merge Join
+                 Merge Cond: (a.id = b.mapid)
+                 ->  Sort
+                       Sort Key: a.id
+                       ->  Seq Scan on chinamap a
+                 ->  Sort
+                       Sort Key: b.mapid
+                       ->  Subquery Scan on b
+                             ->  CTE Scan on rq
+                                   Filter: (pid IS NULL)
+                                   CTE rq
+                                     ->  Recursive Union
+                                           ->  Seq Scan on chinamap3
+                                           ->  Merge Join
+                                                 Merge Cond: (origin.pid = rq.id)
+                                                 ->  Sort
+                                                       Sort Key: origin.pid
+                                                       ->  Seq Scan on chinamap3 origin
+                                                 ->  Sort
+                                                       Sort Key: rq.id
+                                                       ->  WorkTable Scan on rq
+           ->  Merge Join
+                 Merge Cond: (chinamap.id = rq.pid)
+                 ->  Sort
+                       Sort Key: chinamap.id
+                       ->  Seq Scan on chinamap
+                 ->  Materialize
+                       ->  Sort
+                             Sort Key: rq.pid
+                             ->  WorkTable Scan on rq
+   ->  CTE Scan on rq
+(35 rows)
+
+with recursive rq as
+(
+    select a.name address, b.name, a.id,a.pid
+    from chinamap a,
+    (
+        with recursive rq as
+        (
+            select pid,id, name, mapid from  chinamap3
+            union all
+            select rq.pid,origin.id, rq.name || ' > ' || origin.name, origin.mapid
+            from rq join chinamap3 origin on origin.pid = rq.id
+        )select * from rq where pid is null
+    ) b
+    where a.id = b.mapid
+    union all
+    select chinamap.name, rq.name, rq.pid, chinamap.pid
+    from rq ,chinamap
+    where rq.pid=chinamap.id
+)select address,name from rq order by address,name;
+ address |                    name                    
+---------+--------------------------------------------
+ 武昌区  | 教育 > 武汉大学
+ 武昌区  | 景点 > 黄鹤楼
+ 武汉市  | 教育 > 武汉大学
+ 武汉市  | 教育 > 武汉科技大学 > 武汉科技大学洪山校区
+ 武汉市  | 教育 > 武汉科技大学 > 武汉科技大学青山校区
+ 武汉市  | 景点 > 黄鹤楼
+ 洪山区  | 教育 > 武汉科技大学 > 武汉科技大学洪山校区
+ 湖北省  | 教育 > 武汉大学
+ 湖北省  | 教育 > 武汉科技大学 > 武汉科技大学洪山校区
+ 湖北省  | 教育 > 武汉科技大学 > 武汉科技大学青山校区
+ 湖北省  | 景点 > 黄鹤楼
+ 湖北省  | 美食 > 热干面
+ 青山区  | 教育 > 武汉科技大学 > 武汉科技大学青山校区
+(13 rows)
+
+explain (costs false, nodes off)
+with recursive rq as
+(
+    select a.name address, b.name, a.id,a.pid
+    from chinamap a,
+    (
+        with recursive rq as
+        (
+            select pid,id, name, mapid from  chinamap4
+            union all
+            select rq.pid,origin.id, rq.name || ' > ' || origin.name, origin.mapid
+            from rq join chinamap4 origin on origin.pid = rq.id
+        )select * from rq where pid is null
+    ) b
+    where a.id = b.mapid
+    union all
+    select chinamap.name, rq.name, rq.pid, chinamap.pid
+    from rq ,chinamap
+    where rq.pid=chinamap.id
+)select address,name from rq order by address,name;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: rq.address, rq.name
+   CTE rq
+     ->  Recursive Union
+           ->  Merge Join
+                 Merge Cond: (a.id = b.mapid)
+                 ->  Sort
+                       Sort Key: a.id
+                       ->  Seq Scan on chinamap a
+                 ->  Sort
+                       Sort Key: b.mapid
+                       ->  Subquery Scan on b
+                             ->  CTE Scan on rq
+                                   Filter: (pid IS NULL)
+                                   CTE rq
+                                     ->  Recursive Union
+                                           ->  Seq Scan on chinamap4
+                                           ->  Merge Join
+                                                 Merge Cond: (origin.pid = rq.id)
+                                                 ->  Sort
+                                                       Sort Key: origin.pid
+                                                       ->  Seq Scan on chinamap4 origin
+                                                 ->  Sort
+                                                       Sort Key: rq.id
+                                                       ->  WorkTable Scan on rq
+           ->  Merge Join
+                 Merge Cond: (chinamap.id = rq.pid)
+                 ->  Sort
+                       Sort Key: chinamap.id
+                       ->  Seq Scan on chinamap
+                 ->  Materialize
+                       ->  Sort
+                             Sort Key: rq.pid
+                             ->  WorkTable Scan on rq
+   ->  CTE Scan on rq
+(35 rows)
+
+with recursive rq as
+(
+    select a.name address, b.name, a.id,a.pid
+    from chinamap a,
+    (
+        with recursive rq as
+        (
+            select pid,id, name, mapid from  chinamap4
+            union all
+            select rq.pid,origin.id, rq.name || ' > ' || origin.name, origin.mapid
+            from rq join chinamap4 origin on origin.pid = rq.id
+        )select * from rq where pid is null
+    ) b
+    where a.id = b.mapid
+    union all
+    select chinamap.name, rq.name, rq.pid, chinamap.pid
+    from rq ,chinamap
+    where rq.pid=chinamap.id
+)select address,name from rq order by address,name;
+ address |                    name                    
+---------+--------------------------------------------
+ 武昌区  | 教育 > 武汉大学
+ 武昌区  | 景点 > 黄鹤楼
+ 武汉市  | 教育 > 武汉大学
+ 武汉市  | 教育 > 武汉科技大学 > 武汉科技大学洪山校区
+ 武汉市  | 教育 > 武汉科技大学 > 武汉科技大学青山校区
+ 武汉市  | 景点 > 黄鹤楼
+ 洪山区  | 教育 > 武汉科技大学 > 武汉科技大学洪山校区
+ 湖北省  | 教育 > 武汉大学
+ 湖北省  | 教育 > 武汉科技大学 > 武汉科技大学洪山校区
+ 湖北省  | 教育 > 武汉科技大学 > 武汉科技大学青山校区
+ 湖北省  | 景点 > 黄鹤楼
+ 湖北省  | 美食 > 热干面
+ 青山区  | 教育 > 武汉科技大学 > 武汉科技大学青山校区
+(13 rows)
+
+/* correlated subquery */
+explain (costs false, nodes off)
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, a.name
+   ->  Subquery Scan on a
+         ->  HashAggregate
+               Group By Key: public.a.id, public.a.name
+               ->  Seq Scan on a
+         SubPlan 2
+           ->  Limit
+                 CTE cte
+                   ->  Recursive Union
+                         ->  Seq Scan on b
+                               Filter: (id = a.id)
+                         ->  Merge Join
+                               Merge Cond: (child.pid = parent.id)
+                               ->  Sort
+                                     Sort Key: child.pid
+                                     ->  WorkTable Scan on cte child
+                               ->  Sort
+                                     Sort Key: parent.id
+                                     ->  Seq Scan on b parent
+                 ->  CTE Scan on cte
+(21 rows)
+
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+ id | name | cname 
+----+------+-------
+  1 | a    | A
+  2 | b    | B
+  3 | c    | C
+  4 | d    | D
+  5 | e    | E
+  6 | f    | F
+  7 | g    | G
+  8 | h    | H
+  9 | i    | I
+ 10 | j    | J
+ 11 | k    | K
+ 12 | l    | L
+ 13 | m    | M
+(13 rows)
+
+explain (costs false, nodes off)
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+        where parent.id = a.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: a.id, a.name
+   ->  Subquery Scan on a
+         ->  HashAggregate
+               Group By Key: public.a.id, public.a.name
+               ->  Seq Scan on a
+         SubPlan 2
+           ->  Limit
+                 CTE cte
+                   ->  Recursive Union
+                         ->  Seq Scan on b
+                               Filter: (id = a.id)
+                         ->  Nested Loop
+                               ->  WorkTable Scan on cte child
+                                     Filter: (pid = a.id)
+                               ->  Seq Scan on b parent
+                                     Filter: (id = a.id)
+                 ->  CTE Scan on cte
+(18 rows)
+
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+        where parent.id = a.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+ id | name | cname 
+----+------+-------
+  1 | a    | A
+  2 | b    | B
+  3 | c    | C
+  4 | d    | D
+  5 | e    | E
+  6 | f    | F
+  7 | g    | G
+  8 | h    | H
+  9 | i    | I
+ 10 | j    | J
+ 11 | k    | K
+ 12 | l    | L
+ 13 | m    | M
+(13 rows)
+
+/* verify conflict dop lead to unshippable recursive plan */
+/* correlated subquery */
+explain (costs false, nodes off)
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Sort Key: a.id, a.name
+   ->  Subquery Scan on a
+         ->  HashAggregate
+               Group By Key: public.a.id, public.a.name
+               ->  Seq Scan on a
+         SubPlan 2
+           ->  Limit
+                 CTE cte
+                   ->  Recursive Union
+                         ->  Seq Scan on b
+                               Filter: (id = a.id)
+                         ->  Merge Join
+                               Merge Cond: (child.pid = parent.id)
+                               ->  Sort
+                                     Sort Key: child.pid
+                                     ->  WorkTable Scan on cte child
+                               ->  Sort
+                                     Sort Key: parent.id
+                                     ->  Seq Scan on b parent
+                 ->  CTE Scan on cte
+(21 rows)
+
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+ id | name | cname 
+----+------+-------
+  1 | a    | A
+  2 | b    | B
+  3 | c    | C
+  4 | d    | D
+  5 | e    | E
+  6 | f    | F
+  7 | g    | G
+  8 | h    | H
+  9 | i    | I
+ 10 | j    | J
+ 11 | k    | K
+ 12 | l    | L
+ 13 | m    | M
+(13 rows)
+
+explain (costs false, nodes off)
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+        where parent.id = a.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: a.id, a.name
+   ->  Subquery Scan on a
+         ->  HashAggregate
+               Group By Key: public.a.id, public.a.name
+               ->  Seq Scan on a
+         SubPlan 2
+           ->  Limit
+                 CTE cte
+                   ->  Recursive Union
+                         ->  Seq Scan on b
+                               Filter: (id = a.id)
+                         ->  Nested Loop
+                               ->  WorkTable Scan on cte child
+                                     Filter: (pid = a.id)
+                               ->  Seq Scan on b parent
+                                     Filter: (id = a.id)
+                 ->  CTE Scan on cte
+(18 rows)
+
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+        where parent.id = a.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+ id | name | cname 
+----+------+-------
+  1 | a    | A
+  2 | b    | B
+  3 | c    | C
+  4 | d    | D
+  5 | e    | E
+  6 | f    | F
+  7 | g    | G
+  8 | h    | H
+  9 | i    | I
+ 10 | j    | J
+ 11 | k    | K
+ 12 | l    | L
+ 13 | m    | M
+(13 rows)
+
+explain (costs false, nodes off)
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+        where parent.id = a.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: a.id, a.name
+   ->  Subquery Scan on a
+         ->  HashAggregate
+               Group By Key: public.a.id, public.a.name
+               ->  Seq Scan on a
+         SubPlan 2
+           ->  Limit
+                 CTE cte
+                   ->  Recursive Union
+                         ->  Seq Scan on b
+                               Filter: (id = a.id)
+                         ->  Nested Loop
+                               ->  WorkTable Scan on cte child
+                                     Filter: (pid = a.id)
+                               ->  Seq Scan on b parent
+                                     Filter: (id = a.id)
+                 ->  CTE Scan on cte
+(18 rows)
+
+select  a.ID,a.Name,
+(
+    with recursive cte as (
+        select ID, PID, NAME from b where b.ID = a.ID
+        union all
+        select parent.ID,parent.PID,parent.NAME
+        from cte as child join b as parent on child.pid=parent.id
+        where parent.id = a.id
+    )
+    select NAME from cte limit 1
+) cName
+from
+(
+    select id, name, count(*) as cnt
+    from a group by id,name
+) a order by 1,2;
+ id | name | cname 
+----+------+-------
+  1 | a    | A
+  2 | b    | B
+  3 | c    | C
+  4 | d    | D
+  5 | e    | E
+  6 | f    | F
+  7 | g    | G
+  8 | h    | H
+  9 | i    | I
+ 10 | j    | J
+ 11 | k    | K
+ 12 | l    | L
+ 13 | m    | M
+(13 rows)
+
+set enable_mergejoin to off;
+explain (costs false, nodes off)
+select  generate_series(1, 2),regexp_split_to_table(a.name, E',') from test_rec a where (dm,sj_dm,name) in
+(
+    WITH recursive t_result AS (
+        SELECT *
+        FROM test_rec
+        WHERE dm = '3'
+        UNION ALL
+        SELECT t2.*
+        FROM t_result t1
+        JOIN test_rec t2 ON t2.dm = t1.sj_dm
+    )
+    SELECT * FROM t_result
+) order by 1,2;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: (generate_series(1, 2)), (regexp_split_to_table(a.name, ','::text))
+   ->  Nested Loop
+         Join Filter: ((a.dm = t_result.dm) AND (a.sj_dm = t_result.sj_dm) AND (a.name = t_result.name))
+         ->  HashAggregate
+               Group By Key: t_result.dm, t_result.sj_dm, t_result.name
+               ->  CTE Scan on t_result
+                     CTE t_result
+                       ->  Recursive Union
+                             ->  Row Adapter
+                                   ->  CStore Scan on test_rec
+                                         Filter: (dm = 3)
+                             ->  Nested Loop
+                                   Join Filter: (t1.sj_dm = t2.dm)
+                                   ->  WorkTable Scan on t_result t1
+                                   ->  Materialize
+                                         ->  Row Adapter
+                                               ->  CStore Scan on test_rec t2
+         ->  Materialize
+               ->  Row Adapter
+                     ->  CStore Scan on test_rec a
+(21 rows)
+
+select  generate_series(1, 2),regexp_split_to_table(a.name, E',') from test_rec a where (dm,sj_dm,name) in
+(
+    WITH recursive t_result AS (
+        SELECT *
+        FROM test_rec
+        WHERE dm = '3'
+        UNION ALL
+        SELECT t2.*
+        FROM t_result t1
+        JOIN test_rec t2 ON t2.dm = t1.sj_dm
+    )
+    SELECT * FROM t_result
+) order by 1,2;
+ generate_series | regexp_split_to_table 
+-----------------+-----------------------
+               1 | 2012 soft
+               1 | China huawei
+               1 | huawei 2012
+               1 | world China
+               2 | 2012 soft
+               2 | China huawei
+               2 | huawei 2012
+               2 | world China
+(8 rows)
+
+reset enable_mergejoin;
+reset explain_perf_mode;
+reset enable_hashjoin;
+reset current_schema;

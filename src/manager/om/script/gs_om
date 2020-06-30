@@ -1,0 +1,769 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_om is a utility to manage a Gauss200 cluster.
+#############################################################################
+
+import subprocess
+import os
+import sys
+import pwd
+
+from gspylib.common.DbClusterInfo import dbClusterInfo
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParameterParsecheck import Parameter
+from gspylib.common.Common import DefaultValue
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.os.gsOSlib import g_OSlib
+from gspylib.threads.SshTool import SshTool
+from impl.om.OLAP.OmImplOLAP import OmImplOLAP
+from gspylib.common.VersionInfo import VersionInfo
+
+# action type
+ACTION_START = "start"
+ACTION_STOP = "stop"
+ACTION_STATUS = "status"
+ACTION_REBUID = "generateconf"
+ACTION_CERT = "cert"
+STOP_MODE_FAST = "fast"
+STOP_MODE_IMMEDIATE = "immediate"
+STOP_MODE_SMART = "smart"
+ACTION_VIEW = "view"
+ACTION_QUERY = "query"
+ACTION_KERBEROS = "kerberos"
+ACTION_REFRESHCONF = "refreshconf"
+
+# postgis
+ACTION_DEL_POSTGIs = "rmlib"
+
+
+class CmdOptions():
+    """
+    define option
+    """
+
+    def __init__(self):
+        self.action = ""
+        # if action is "express", use this parameter to store the list of
+        # cluster node names passed by the
+        # command line option "-h".
+        self.nodeName = ""
+        self.time_out = None
+        # if action is "express", use this parameter to store whether to
+        # show the detail message of cluster
+        # node state.
+        self.show_detail = False
+        self.showAll = False
+        self.dataDir = ""
+        self.outFile = ""
+        self.logFile = ""
+        self.localLog = ""
+        self.reset = False
+        self.distribute = False
+        self.certFile = ""
+        self.certRollback = False
+        self.NormalCNNode = []
+        self.mode = ""
+
+        self.user = ""
+        self.group = ""
+        self.userInfo = ""
+        self.mpprcFile = ""
+        self.confFile = ""
+        self.localMode = False
+        self.instanceName = ""
+        self.azName = ""
+        self.nodeId = -1
+        self.clusterInfo = None
+        self.security_mode = "off"
+
+        # kerberos
+        self.kerberosMode = ""
+        self.clusterUser = ""
+        self.kerberosType = ""
+        self.clusterToolPath = ""
+
+
+###########################################
+class OperationManager(ParallelBaseOM):
+
+    def __init__(self):
+        """
+        init the command options
+        save command line parameter values
+        """
+        ParallelBaseOM.__init__(self)
+        # command line parameter collection
+        self.g_opts = CmdOptions()
+        self.OM_PARAMETER_DIR = ""
+
+    def usage(self):
+        """
+gs_om is a utility to manage a cluster.
+
+Usage:
+  gs_om -? | --help
+  gs_om -V | --version
+  OLAP scene:
+    gs_om -t start [-h HOSTNAME] [-D dataDir] [--time-out=SECS]
+                   [--security-mode=MODE] [-l LOGFILE]
+    gs_om -t stop [-h HOSTNAME] [-D dataDir]  [--time-out=SECS] [-m MODE]
+                  [-l LOGFILE]
+    gs_om -t status [-h HOSTNAME] [-o OUTPUT] [--detail] [--all] [-l LOGFILE]
+    gs_om -t generateconf -X XMLFILE [--distribute] [-l LOGFILE]
+    gs_om -t cert [--cert-file=CERTFILE | --rollback] [-L] [-l LOGFILE]
+    gs_om -t kerberos -m [install|uninstall] -U USER [-l LOGFILE]
+                         [--krb-server|--krb-client]
+    gs_om -t view [-o OUTPUT]
+    gs_om -t query [-o OUTPUT]
+    gs_om -t refreshconf
+
+General options:
+  -t                              Type of the OM command.
+  -l                              Path of log file.
+  -?, --help                      Show help information for this utility,
+  and exit the command line mode.
+  -V, --version                   Show version information.
+
+Options for start
+  -h                              Name of the host to be started.
+  -D                              Path of dn
+      --time-out=SECS              Maximum waiting time when start the
+                                   cluster or node.
+      --security-mode=MODE        database start with security mode: on or off
+                                        on: start with security mode
+                                        off: start without security mode
+
+Options for stop
+  -h                              Name of the host to be shut down.
+  -m, --mode=MODE                 Shutdown mode. It can be f (fast),
+                                  i (immediate), or s (smart).
+  -D                              Path of dn
+    --time-out=SECS              Maximum waiting time when start the cluster
+                                 or node.
+Options for status
+  -h                              Name of the host whose status is to be
+                                  queried.
+  --az                            Name of the single az whose status is to
+                                  be queried.
+  -o                              Save the result to the specified file.
+      --detail                    Show detailed status information.
+      --all                       Show all database node status information.
+
+Options for generating configuration files
+  -X                              Path of the XML configuration file.
+      --distribute                Distribute the static configuration file
+                                  to installation directory of cluster nodes.
+
+Options for cert
+      --cert-file                 Path of cert file.
+      --rollback                  Perform rollback SSL cert files.
+      -L                          local mode.
+
+Options for kerberos
+  -m                              Kerberos management mode. It can be
+                                  install or uninstall.
+  -U                              %s cluster user.
+Install options:
+  --krb-server                    Execute install for server. This parameter
+  only work for install
+  --krb-client                    Execute install for client. This parameter
+  only work for install
+
+        """
+
+        print(self.usage.__doc__)
+
+    def initGlobal(self):
+        """
+        function:Init logger
+        input:NA
+        output:NA
+        """
+        try:
+            # Init logger
+            self.xmlFile = self.g_opts.confFile
+            self.logFile = self.g_opts.logFile
+            self.initLogger(self.g_opts.action)
+            if (os.getuid() != 0):
+                DefaultValue.modifyFileOwnerFromGPHOME(self.logger.logFile)
+
+            dirName = os.path.dirname(self.g_opts.logFile)
+            self.g_opts.localLog = os.path.join(dirName,
+                                                DefaultValue.LOCAL_LOG_FILE)
+
+            if (self.g_opts.action == ACTION_REBUID):
+                self.initClusterInfo()
+            else:
+                # Initialize the self.clusterInfo variable
+                if (self.g_opts.action == ACTION_STATUS):
+                    self.initClusterInfoFromStaticFile(self.g_opts.user, False)
+                else:
+                    self.initClusterInfoFromStaticFile(self.g_opts.user)
+
+            # Check --az with single-primary-multi-standby
+            if (self.g_opts.azName):
+                raise Exception(
+                    ErrorCode.GAUSS_500["GAUSS_50002"] % '-az' +
+                    ". This parameter is used in single primary multi "
+                    "standby.")
+
+            # Obtain the owner and group of the cluster installation directory
+            if self.g_opts.action != ACTION_KERBEROS:
+                (self.g_opts.user, self.g_opts.group) = g_OSlib.getPathOwner(
+                    self.clusterInfo.appPath)
+                if self.g_opts.user == "" or self.g_opts.group == "":
+                    raise Exception(ErrorCode.GAUSS_503["GAUSS_50308"])
+            # Init base member
+            self.user = self.g_opts.user
+            self.group = self.g_opts.group
+
+            # init components
+            if self.g_opts.action != ACTION_STATUS:
+                self.initComponent()
+        except Exception as e:
+            GaussLog.exitWithError(str(e))
+
+    def checkAction(self, ParaDict):
+        """
+        """
+        if (ParaDict.__contains__("action")):
+            self.g_opts.action = ParaDict.get("action")
+            if (len(self.g_opts.action) == 0):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                       % "t" + ".")
+
+    def parseNode(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_START or
+                self.g_opts.action == ACTION_STOP or
+                self.g_opts.action == ACTION_STATUS):
+            if (ParaDict.__contains__("nodename")):
+                nodename = ParaDict.get("nodename")
+                self.g_opts.estimateNodeName = nodename
+                # Only one -h parameter can be entered
+                if (len(nodename) != 1):
+                    GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50006"]
+                                           % nodename[0] + " Please check it.")
+                self.g_opts.nodeName = nodename[0]
+
+            if "nodeId" in ParaDict.keys():
+                nodeId = int(ParaDict.get("nodeId"))
+                if nodeId < 1:
+                    GaussLog.exitWithError(
+                        ErrorCode.GAUSS_500["GAUSS_50004"] %
+                        ParaDict.get("nodeId") + " Please check it.")
+                self.g_opts.nodeId = nodeId
+
+            if ("dataDir" in ParaDict.keys()):
+                self.g_opts.dataDir = ParaDict.get("dataDir")
+
+    def parseTimeOut(self, ParaDict):
+        """
+        """
+        if self.g_opts.action == ACTION_START or self.g_opts.action == \
+                ACTION_STOP:
+            if (ParaDict.__contains__("time_out")):
+                self.g_opts.time_out = ParaDict.get("time_out")
+
+    def parseMode(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_STOP):
+            if (ParaDict.__contains__("Mode")):
+                self.g_opts.mode = ParaDict.get("Mode")
+
+    def parseKerberosMode(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_KERBEROS):
+            if ("Mode" in ParaDict):
+                self.g_opts.kerberosMode = ParaDict.get("Mode")
+
+    def parseStatus(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_STATUS):
+            # A status query can specify an out file
+            if (ParaDict.__contains__("outFile")):
+                self.g_opts.outFile = ParaDict.get("outFile")
+            # The status query can display detailed information
+            if (ParaDict.__contains__("show_detail")):
+                self.g_opts.show_detail = ParaDict.get("show_detail")
+            if (ParaDict.__contains__("all")):
+                self.g_opts.showAll = ParaDict.get("all")
+
+    def parseView(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_VIEW):
+            # A view can specify an out file
+            if ("outFile" in ParaDict.keys()):
+                self.g_opts.outFile = ParaDict.get("outFile")
+
+    def parseQuery(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_QUERY):
+            # A view can specify an out file
+            if ("outFile" in ParaDict.keys()):
+                self.g_opts.outFile = ParaDict.get("outFile")
+
+    def parseStart(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_START):
+            # The start query can specify az name
+            if ParaDict.__contains__("az_name"):
+                self.g_opts.azName = ParaDict.get("az_name")
+            if ParaDict.__contains__("security_mode"):
+                self.g_opts.security_mode = ParaDict.get("security_mode")
+
+    def parseStop(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_STOP):
+            # The start query can specify az name for OLAP
+            if (ParaDict.__contains__("az_name")):
+                self.g_opts.azName = ParaDict.get("az_name")
+
+    def parseConFile(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_REBUID):
+            # Changeip, managecn, and generateconf require the -X parameter
+            if (ParaDict.__contains__("confFile")):
+                self.g_opts.confFile = ParaDict.get("confFile")
+
+    def parseGenerateconf(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_REBUID):
+            # Generateconf can specify the distribution file
+            if (ParaDict.__contains__("distribute")):
+                self.g_opts.distribute = ParaDict.get("distribute")
+
+    def parseCert(self, ParaDict):
+        """
+        """
+        if (self.g_opts.action == ACTION_CERT):
+            # cert can change cert file
+            if (ParaDict.__contains__("cert-file")):
+                self.g_opts.certFile = ParaDict.get("cert-file")
+            if (ParaDict.__contains__("rollback")):
+                self.g_opts.certRollback = ParaDict.get("rollback")
+            if (ParaDict.__contains__("localMode")):
+                self.g_opts.localMode = ParaDict.get("localMode")
+            if (ParaDict.__contains__("cert-file") and ParaDict.__contains__(
+                    "rollback")):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50005"]
+                                       % ("-cert-file", "-rollback"))
+
+    def parseKerberos(self, ParaDict):
+        """
+        """
+        if self.g_opts.action == ACTION_KERBEROS:
+            if "user" in ParaDict:
+                self.g_opts.clusterUser = ParaDict.get("user")
+            if self.g_opts.kerberosMode == "install":
+                if "krb-server" in ParaDict and "krb-client" in ParaDict:
+                    GaussLog.exitWithError(
+                        ErrorCode.GAUSS_500["GAUSS_50005"]
+                        % ("-krb-server", "-krb-client"))
+                if (("krb-server" not in ParaDict) and (
+                        "krb-client" not in ParaDict)):
+                    GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                           % "-krb-server' or '--krb-client")
+                if "krb-server" in ParaDict:
+                    self.g_opts.kerberosType = "krb-server"
+                if "krb-client" in ParaDict:
+                    self.g_opts.kerberosType = "krb-client"
+            if self.g_opts.kerberosMode == "uninstall":
+                if "krb-server" in ParaDict:
+                    GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50002"]
+                                           % "-krb-server")
+                if "krb-client" in ParaDict:
+                    GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50002"]
+                                           % "-krb-client")
+
+
+    def parseLog(self, ParaDict):
+        """
+        """
+        if (ParaDict.__contains__("logFile")):
+            self.g_opts.logFile = ParaDict.get("logFile")
+
+    def parseCommandLine(self):
+        """
+        function:Parse command line and save to global variable
+        input:NA
+        output:NA
+        """
+        # Parse command line
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("gs_om")
+        # If help is included in the parameter,
+        # the help message is printed and exited
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(0)
+        # The -t parameter is required
+        self.checkAction(ParaDict)
+        # Starting a cluster, stopping a cluster, querying a state,
+        # and switching between active and standby devices require obtaining
+        # node information
+        self.parseNode(ParaDict)
+        # Starting a Cluster and Stopping a Cluster
+        # can specify a timeout period
+        self.parseTimeOut(ParaDict)
+        # Stop the cluster and managecn to specify the mode
+        self.parseMode(ParaDict)
+        # Kerberos to specify the mode
+        self.parseKerberosMode(ParaDict)
+        # Parse start parameter
+        self.parseStart(ParaDict)
+        # Parse stop parameter
+        self.parseStop(ParaDict)
+        # Parse status parameter
+        self.parseStatus(ParaDict)
+        # Parse view parameter
+        self.parseView(ParaDict)
+        # Parse query parameter
+        self.parseQuery(ParaDict)
+        # Parse -X parameter
+        self.parseConFile(ParaDict)
+        # Parse generateconf parameter
+        self.parseGenerateconf(ParaDict)
+        # Parse cert parameter
+        self.parseCert(ParaDict)
+        # Parse kerberos parameter
+        self.parseKerberos(ParaDict)
+        # Parse log parameter
+        self.parseLog(ParaDict)
+
+    ###########################################################################
+    # Check parameters for all operations
+    ###########################################################################
+    def checkParameter(self):
+        """
+        function:Check parameter from command line
+        input:NA
+        output:NA
+        """
+        if (os.getuid() == 0):
+            GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50105"] + \
+                                   " When the parameter '-t' value is not "
+                                   "dailyAlarm or not estimate install "
+                                   "consume or not extension connector with "
+                                   "add, delete, restart, upgrade in -m "
+                                   "parameter.")
+
+        if (self.g_opts.action == ACTION_START):
+            self.checkStartParameter()
+        elif (self.g_opts.action == ACTION_STOP):
+            self.checkStopParameter()
+        elif (self.g_opts.action == ACTION_STATUS):
+            self.checkOutFileParameter()
+        elif (self.g_opts.action == ACTION_REBUID):
+            self.checkGenerateConfParameter()
+        elif (self.g_opts.action == ACTION_CERT):
+            self.checkCertParameter()
+        elif (self.g_opts.action == ACTION_KERBEROS):
+            self.checkKerberosParameter()
+        elif (self.g_opts.action == ACTION_VIEW):
+            self.checkOutFileParameter()
+        elif (self.g_opts.action == ACTION_QUERY):
+            self.checkOutFileParameter()
+        elif (self.g_opts.action == ACTION_REFRESHCONF):
+            pass
+        else:
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"] % "t")
+
+        # check mpprc file path
+        self.g_opts.mpprcFile = DefaultValue.getMpprcFile()
+
+        # check if user exist and is the right user
+        if (self.g_opts.user == ""):
+            self.g_opts.user = pwd.getpwuid(os.getuid()).pw_name
+            if (self.g_opts.user == ""):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"] %
+                                       "U" + ".")
+
+        # Check user on installed cluster
+        DefaultValue.checkUser(self.g_opts.user)
+        # Check whether the current user is consistent with -U if no root
+        if (os.getuid() != 0):
+            cmd = "id -un"
+            (status, output) = subprocess.getstatusoutput(cmd)
+            if (output != self.g_opts.user):
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_530["GAUSS_53033"] % self.g_opts.user)
+
+        self.OM_PARAMETER_DIR = "%s/om_parameter_dir" % \
+                                DefaultValue.getTmpDirFromEnv(self.g_opts.user)
+
+        # check log file
+        if (self.g_opts.logFile == ""):
+            self.g_opts.logFile = DefaultValue.getOMLogPath(
+                DefaultValue.OM_LOG_FILE, self.g_opts.user, "",
+                action=self.g_opts.action)
+        if (not os.path.isabs(self.g_opts.logFile)):
+            GaussLog.exitWithError(ErrorCode.GAUSS_502["GAUSS_50213"] % "log")
+
+    def checkStartParameter(self):
+        """
+        Check parameter for start the cluster and node
+        input : NA
+        output: NA
+        """
+        # if the parameter -I is exits, then the -h parameter is required.
+        if (self.g_opts.instanceName and (not self.g_opts.nodeName)):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"] % "h")
+        # If the cluster does not specify a time-out period, the default is
+        # 300 seconds
+        if (self.g_opts.time_out is None):
+            self.g_opts.time_out = DefaultValue.TIMEOUT_CLUSTER_START
+        else:
+            # The timeout parameter must be a pure number
+            if (not str(self.g_opts.time_out).isdigit()):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50003"]
+                                       % ("-time-out", "integer"))
+            self.g_opts.time_out = int(self.g_opts.time_out)
+            # The timeout parameter must be greater than 0
+            # The timeout parameter must be less than the integer maximum
+            if (self.g_opts.time_out <= 0 or self.g_opts.time_out
+                    >= 2147483647):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"]
+                                       % "-time-out")
+
+        if self.g_opts.security_mode != "off" and self.g_opts.security_mode \
+                != "on":
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"]
+                                   % "-security-mode")
+
+    def checkStopParameter(self):
+        """
+        Check parameter for stop clster and node
+        input : NA
+        output: NA
+        """
+        # if the parameter -I is exits, then the -h parameter is required.
+        if (self.g_opts.instanceName and (not self.g_opts.nodeName)):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"] % "h")
+            # If no stop type is specified, the default is fast
+        if (self.g_opts.mode == ""):
+            self.g_opts.mode = STOP_MODE_FAST
+        # Specifies that the stop type must be f, i or s
+        if (self.g_opts.mode not in [STOP_MODE_FAST, STOP_MODE_IMMEDIATE,
+                                     STOP_MODE_SMART, "f", "i", "s"]):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"] % "m")
+
+        # cm_ctl: can't stop one node or instance with -m smart.
+        if (self.g_opts.nodeName != "" and self.g_opts.mode ==
+                STOP_MODE_SMART):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50010"] % \
+                                   "-m" + "Can't stop one node with -m smart "
+                                          "mode.")
+
+    def checkOutFileParameter(self):
+        """
+        Check parameter for status
+        input : NA
+        output: NA
+        """
+        # Check the status query for the specified output file
+        if (self.g_opts.outFile != ''):
+            DefaultValue.checkOutputFile(self.g_opts.outFile)
+
+    def checkGenerateConfParameter(self):
+        """
+        Check parameter for generate config
+        input : NA
+        output: NA
+        """
+
+        # check xml file
+        if (self.g_opts.confFile == ""):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_500["GAUSS_50001"] % 'X' + ".")
+        if (not os.path.isfile(self.g_opts.confFile)):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_502["GAUSS_50210"] % self.g_opts.confFile)
+
+    def checkCertParameter(self):
+        """
+        Check parameter for cert
+        input : NA
+        output: NA
+        """
+        # add cert must specify the --cert-file parameter
+        if (self.g_opts.certFile == "" and not self.g_opts.certRollback):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"] %
+                                   '-cert-file or --rollback')
+        # certFile must be exist
+        if (self.g_opts.certFile != "" and self.g_opts.certFile[-4:]
+                != ".zip"):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                   % "-cert-file type is not 'zip'")
+        if (not os.path.isfile(self.g_opts.certFile)
+                and not self.g_opts.certRollback):
+            GaussLog.exitWithError(ErrorCode.GAUSS_502["GAUSS_50210"]
+                                   % self.g_opts.certFile)
+
+    def checkKerberosParameter(self):
+        """
+        Check parameter for kerberos
+        input : NA
+        output: NA
+        """
+        if (self.g_opts.kerberosMode != "install" and
+                self.g_opts.kerberosMode != "uninstall"):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"]
+                                   % 'm' + "Value: %s"
+                                   % self.g_opts.kerberosMode)
+
+        # get user info
+        self.user = g_OSlib.getUserInfo()['name']
+        if (self.g_opts.clusterUser == ""):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"] % 'U')
+        if self.g_opts.clusterUser != self.user:
+            GaussLog.exitWithError(ErrorCode.GAUSS_503["GAUSS_50323"]
+                                   % self.g_opts.clusterUser)
+
+        if (self.g_opts.kerberosMode == "install" and
+                self.g_opts.kerberosType == ""):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                   % "-krb-server' or '--krb-client")
+
+    def checkDSN(self, dsnName):
+        """
+        function: Check the path:
+                  the path must be composed of letters, numbers,
+                  underscores, slashes, hyphen, and spaces
+        input : path_type_in
+        output: NA
+        """
+        nameLen = len(dsnName)
+        if (nameLen > 64):
+            GaussLog.exitWithError(ErrorCode.GAUSS_502["GAUSS_50219"]
+                                   % dsnName
+                                   + "Error:\nThe DSN name is too long.")
+        wrongChar = None
+        i = 0
+        a_ascii = ord('a')
+        z_ascii = ord('z')
+        A_ascii = ord('A')
+        Z_ascii = ord('Z')
+        num0_ascii = ord('0')
+        num9_ascii = ord('9')
+        sep_ascii = ord('_')
+        for i in range(0, nameLen):
+            char_check = ord(dsnName[i])
+            if (not (a_ascii <= char_check <= z_ascii or A_ascii <=
+                    char_check <= Z_ascii or num0_ascii <= char_check <=
+                    num9_ascii or char_check == sep_ascii)):
+                wrongChar = dsnName[i]
+                break
+        if (wrongChar != None):
+            return wrongChar
+        else:
+            return True
+
+
+def main():
+    """
+    main function
+    """
+    try:
+        REPEAT = False
+        # Objectize class
+        manager = OperationManager()
+        # parse cmd lines
+        manager.parseCommandLine()
+        # check parameters
+        manager.checkParameter()
+
+        # init global variables
+        manager.initGlobal()
+        # set action flag file
+        DefaultValue.setActionFlagFile(manager.g_opts.action, manager.logger)
+    except Exception as e:
+        if (manager.g_opts.action in (ACTION_STATUS, ACTION_STOP,
+                                      ACTION_START)):
+            actionDict = {ACTION_STATUS: DefaultValue.TASK_QUERY_STATUS,
+                          ACTION_STOP: DefaultValue.TASK_STOP,
+                          ACTION_START: DefaultValue.TASK_START}
+            if REPEAT:
+                manager.sshTool = SshTool(
+                    manager.clusterInfo.getClusterNodeNames(), manager.logFile,
+                    timeout=DefaultValue.TIMEOUT_PSSH_COMMON)
+        manager.logger.logExit(str(e))
+
+    try:
+        impl = OmImplOLAP(manager)
+
+        if (manager.g_opts.action not in [ACTION_START,
+                                          ACTION_STOP,
+                                          ACTION_STATUS,
+                                          ACTION_REBUID,
+                                          ACTION_CERT,
+                                          ACTION_KERBEROS,
+                                          ACTION_VIEW,
+                                          ACTION_QUERY,
+                                          ACTION_REFRESHCONF
+                                          ]):
+            raise Exception(ErrorCode.GAUSS_531['GAUSS_53104']
+                            % ("gs_om -t " + manager.g_opts.action))
+        elif (manager.g_opts.action == ACTION_CERT and
+              manager.g_opts.certRollback):
+            impl.doDNSSLCertRollback()
+
+        # Depending on the function, different operations are performed
+        if (manager.g_opts.action == ACTION_START):
+            impl.doStart()
+        elif (manager.g_opts.action == ACTION_STOP):
+            impl.doStop()
+        elif (manager.g_opts.action == ACTION_STATUS):
+            impl.doStatus()
+        elif (manager.g_opts.action == ACTION_REBUID):
+            impl.doRebuildConf()
+        elif (manager.g_opts.action == ACTION_KERBEROS):
+            if DefaultValue.isUnderUpgrade(manager.user):
+                raise Exception(ErrorCode.GAUSS_529["GAUSS_52936"])
+            impl.doKerberos()
+        elif (manager.g_opts.action == ACTION_CERT
+              and not manager.g_opts.certRollback):
+            impl.doReplaceSSLCert()
+        elif (manager.g_opts.action == ACTION_VIEW):
+            impl.doView()
+        elif (manager.g_opts.action == ACTION_QUERY):
+            impl.doQuery()
+        elif (manager.g_opts.action == ACTION_REFRESHCONF):
+            impl.doRefreshConf()
+
+        manager.logger.closeLog()
+    except Exception as e:
+        manager.logger.logExit(str(e))
+    finally:
+        DefaultValue.setActionFlagFile("gs_om", None, False)
+
+
+if __name__ == '__main__':
+    main()

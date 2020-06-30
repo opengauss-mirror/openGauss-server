@@ -1,0 +1,27 @@
+select * from pg_create_physical_replication_slot('test_slot',true);
+ slotname  | xlog_position 
+-----------+---------------
+ test_slot | 
+(1 row)
+
+select * from pg_create_physical_replication_slot('test_slot',false);
+WARNING:  replication slot "test_slot" already exists
+ slotname  | xlog_position 
+-----------+---------------
+ test_slot | 
+(1 row)
+
+select * from pg_get_replication_slots();
+ slot_name | plugin | slot_type | datoid | active | xmin | catalog_xmin | restart_lsn | dummy_standby 
+-----------+--------+-----------+--------+--------+------+--------------+-------------+---------------
+ test_slot |        | physical  |      0 | f      |      |              |             | t
+(1 row)
+
+select * from pg_drop_replication_slot('test_slot');
+WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
+WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+

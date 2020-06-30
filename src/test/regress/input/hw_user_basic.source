@@ -1,0 +1,48 @@
+CREATE ROLE dfm PASSWORD 'Ttest@123';
+SELECT a.rolname, n.nspname FROM pg_authid a JOIN pg_namespace n ON (a.oid = n.nspowner AND a.rolname='dfm');
+DROP ROLE dfm;
+
+CREATE USER dfm PASSWORD 'Ttest@123';
+SELECT a.rolname, n.nspname FROM pg_authid a JOIN pg_namespace n ON (a.oid = n.nspowner AND a.rolname='dfm');
+CREATE TABLESPACE dfm LOCATION '@testtablespace@';
+SHOW search_path;
+SHOW default_tablespace;
+
+SET behavior_compat_options = 'bind_schema_tablespace';
+SHOW default_tablespace;
+SET search_path='dfm';
+SHOW search_path;
+SHOW default_tablespace;
+
+RESET behavior_compat_options;
+RESET search_path;
+RESET default_tablespace;
+SHOW search_path;
+SHOW default_tablespace;
+SET search_path='dfm';
+SHOW search_path;
+SHOW default_tablespace;
+
+DROP USER dfm;
+SHOW search_path;
+SHOW default_tablespace;
+SELECT nspname from pg_namespace where nspname='dfm';
+
+RESET search_path;
+RESET default_tablespace;
+
+CREATE USER dfm PASSWORD 'Ttest@123';
+
+SET SESSION AUTHORIZATION dfm PASSWORD 'Ttest@123';
+
+SHOW search_path;
+SHOW default_tablespace;
+
+DROP USER dfm;
+
+RESET SESSION AUTHORIZATION;
+SET search_path='dfm';
+--can not drop current schema
+DROP USER dfm CASCADE;
+SELECT nspname from pg_namespace where nspname='dfm';
+DROP TABLESPACE dfm;

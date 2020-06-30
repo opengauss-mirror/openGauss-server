@@ -1,0 +1,41 @@
+-- TEST CASE: define a table, then drop one column before copy, then copy and compress this table from data file. coredump happens.
+--
+SET DATESTYLE TO ISO;
+CREATE TABLE cmpr_drop_column_03(
+        c_int_1 integer NOT NULL,
+        c_int_2 integer NOT NULL,
+        c_int_3 integer NOT NULL,
+        c_int_4 integer NOT NULL,
+        c_int_5 integer NOT NULL,
+        c_int_6 integer NOT NULL,
+        c_int_7 integer NOT NULL,
+        c_int_8 integer NOT NULL,
+        c_int_9 integer NOT NULL,
+        c_int_10 integer NOT NULL,
+        c_int_11 integer NOT NULL,
+        c_int_12 integer NOT NULL);
+ALTER TABLE cmpr_drop_column_03 DROP COLUMN C_INT_4;
+ALTER TABLE cmpr_drop_column_03 ADD COLUMN C_INT_4 INTEGER;
+INSERT INTO cmpr_drop_column_03 VALUES (generate_series(1,13000,13),generate_series(2,13000,13),generate_series(3,13000,13),generate_series(4,13000,13),generate_series(1,13000,13),generate_series(2,13000,13),generate_series(3,13000,13),generate_series(4,13000,13),40,generate_series(2,13000,13),29,generate_series(4,13000,13));
+CREATE TABLE cmpr_drop_column_03_raw(
+        c_int_1 integer NOT NULL,
+        c_int_2 integer NOT NULL,
+        c_int_3 integer NOT NULL,
+        c_int_4 integer NOT NULL,
+        c_int_5 integer NOT NULL,
+        c_int_6 integer NOT NULL,
+        c_int_7 integer NOT NULL,
+        c_int_8 integer NOT NULL,
+        c_int_9 integer NOT NULL,
+        c_int_10 integer NOT NULL,
+        c_int_11 integer NOT NULL,
+        c_int_12 integer NOT NULL) COMPRESS;
+ALTER TABLE cmpr_drop_column_03_raw DROP COLUMN C_INT_4;
+ALTER TABLE cmpr_drop_column_03_raw ADD COLUMN C_INT_4 INTEGER;
+COPY cmpr_drop_column_03 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column_03.data';
+COPY cmpr_drop_column_03_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column_03.data';
+(SELECT * FROM cmpr_drop_column_03) MINUS ALL (SELECT * FROM cmpr_drop_column_03_raw);
+(SELECT * FROM cmpr_drop_column_03_raw) MINUS ALL (SELECT * FROM cmpr_drop_column_03);
+DROP TABLE cmpr_drop_column_03_raw;
+DROP TABLE cmpr_drop_column_03;
+\! rm -fr @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_drop_column_03.data

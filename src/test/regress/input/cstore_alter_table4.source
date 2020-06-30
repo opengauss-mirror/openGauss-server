@@ -1,0 +1,180 @@
+CREATE SCHEMA cstore_alter_table_4;
+SET SEARCH_PATH TO cstore_alter_table_4;
+SET INTERVALsTYLE = POSTGRES;
+-- test rollback
+drop table if exists base_alter_addcols;
+create table base_alter_addcols(a int, b int, c varchar(10));
+insert into base_alter_addcols values(1, generate_series(1,10), 'hello');
+insert into base_alter_addcols values(1,generate_series(1,10), 'love');
+insert into base_alter_addcols values(1, generate_series(1,10), 'pig');
+insert into base_alter_addcols values(1, generate_series(1,10), 'dog');
+insert into base_alter_addcols values(1, generate_series(1,10), 'kitty');
+
+CREATE TABLE alter_addcols_81(a int, b int, c varchar(10)) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_81 VALUES(1, 1, 'hello'), (1,2, 'love'), (1, 3, 'pig'), (1, 4, 'dog'), (1, 5, 'kitty');
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_81 VALUES(1, 6), (1, 7), (1, 8);
+INSERT INTO alter_addcols_81 SELECT * FROM alter_addcols_81;
+VACUUM FULL alter_addcols_81;
+DELETE FROM alter_addcols_81 WHERE b > 6;
+DELETE FROM alter_addcols_81 WHERE b = 2;
+START TRANSACTION;
+ALTER TABLE alter_addcols_81 ALTER COLUMN b SET DATA TYPE varchar(7) USING b::char || 'zcw', ALTER COLUMN c SET DATA TYPE varchar(8);
+SELECT COUNT(*) FROM alter_addcols_81;
+SELECT DISTINCT * FROM alter_addcols_81 ORDER BY b;
+\d+ alter_addcols_81
+ROLLBACK;
+\d+ alter_addcols_81
+SELECT COUNT(*) FROM alter_addcols_81;
+SELECT DISTINCT * FROM alter_addcols_81 ORDER BY b;
+
+-- test DEFAULT constraint value can be changed succssfully.
+CREATE TABLE alter_addcols_82(a int, b int, c varchar(10) DEFAULT 'abcd') WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_82 VALUES (1, 2, '12'), (1, 3, '13'), (1, 4, '14');
+VACUUM FULL alter_addcols_82;
+ALTER TABLE alter_addcols_82 ALTER COLUMN c SET DATA TYPE int;
+\d+ alter_addcols_82
+SELECT COUNT(*) FROM alter_addcols_82;
+SELECT DISTINCT * FROM alter_addcols_82 ORDER BY b;
+INSERT INTO alter_addcols_82 VALUES (1, 5);
+ALTER TABLE alter_addcols_82 ALTER COLUMN c DROP DEFAULT;
+
+
+-- test PARTIAL CLUSTER KEY constraint
+CREATE TABLE alter_addcols_83(a int, b int, c varchar(10), PARTIAL CLUSTER KEY(b)) WITH (ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_83 SELECT * FROM base_alter_addcols;
+VACUUM FULL alter_addcols_83;
+SELECT COUNT(*) FROM alter_addcols_83;
+SELECT DISTINCT * FROM alter_addcols_83 ORDER BY b;
+\d+ alter_addcols_83;
+ALTER TABLE alter_addcols_83 ALTER COLUMN b SET DATA TYPE varchar(5);
+\d+ alter_addcols_83;
+VACUUM FULL alter_addcols_83;
+SELECT COUNT(*) FROM alter_addcols_83;
+SELECT DISTINCT * FROM alter_addcols_83 ORDER BY b;
+
+--
+-- Alter type for patitioned table
+--
+CREATE TABLE alter_addcols_84(c1 int, c2 int, c3 char(10), c4 varchar(8)) with ( orientation = column )  partition by range(c2)
+(
+partition p1 values less than (3),
+partition p2 values less than (6),
+partition p3 values less than (10)
+);
+INSERT INTO alter_addcols_84 VALUES(1,1,'123','1234');
+INSERT INTO alter_addcols_84 VALUES(2,4,'1234','12345');
+INSERT INTO alter_addcols_84 VALUES(3,9,'1234','123456');
+INSERT INTO alter_addcols_84 VALUES(4,5,'abc','abcde');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+
+-- disallow alter partitioned key's type
+ALTER TABLE alter_addcols_84 ALTER c2 TYPE char;
+
+-- char(n)->int, varchar(n)->int
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int;  --failed
+ALTER TABLE alter_addcols_84 ALTER c4 type int;  --failed
+DELETE FROM alter_addcols_84 WHERE c1=4;
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int;  --succeed
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE int;  --succeed
+\d+ alter_addcols_84;
+
+INSERT INTO alter_addcols_84 VALUES(5,7,'a','ab');  --failed
+
+-- int->smallint, [set data]type
+ALTER TABLE alter_addcols_84 ALTER c3 SET DATA TYPE smallint;  --succeed
+ALTER TABLE alter_addcols_84 ALTER c4 SET DATA TYPE smallint;  --failed
+
+-- int->char(n)
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE char(10);
+INSERT INTO alter_addcols_84 VALUES(5,8,10,'abc');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+
+-- char(n) cut
+ALTER TABLE alter_addcols_84 ATLER c4 TYPE char(5);  --failed
+alter TABLE alter_addcols_84 ALTER c4 TYPE char(7);  --succeed
+\d+ alter_addcols_84;
+
+-- char(n) extended
+ALTER TABLE alter_addcols_84 ALTER c4 TYPE char(12);
+INSERT INTO alter_addcols_84 VALUES(6,5,23,'abcdefgh');
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+
+--multiple column altered
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE char(6), ALTER c4 TYPE char(10);  --succeed
+\d+ alter_addcols_84;
+
+ALTER TABLE alter_addcols_84 ALTER c3 TYPE int, ALTER c4 TYPE int;  --failed
+\d+ alter_addcols_84;
+
+-- add column mix alter type
+ALTER TABLE alter_addcols_84 ADD COLUMN c5 int DEFAULT 3, ALTER c4 TYPE varchar(10);
+\d+ alter_addcols_84;
+
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c6 TYPE int;
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c5 TYPE int;
+ALTER TABLE alter_addcols_84 ADD COLUMN c6 CHAR DEFAULT 'a', ALTER c5 TYPE char(2), ADD COLUMN c7 int, ALTER c4 TYPE varchar(12);
+\d+ alter_addcols_84;
+SELECT * FROM alter_addcols_84 ORDER BY c1;
+
+-- ALTER TABLE ALTER COLUMN DROP / SET DEFAULT constraint
+CREATE TABLE alter_addcols_85 ( a int , b int default '5') WITH ( ORIENTATION = COLUMN); 
+ALTER TABLE alter_addcols_85 ALTER COLUMN b DROP DEFAULT;
+\d+ alter_addcols_85
+-- testcase: cann't refer to any other column
+ALTER TABLE alter_addcols_85 ALTER COLUMN b SET DEFAULT 10 + a;
+ALTER TABLE alter_addcols_85 ALTER COLUMN b SET DEFAULT 15;
+\d+ alter_addcols_85
+INSERT INTO alter_addcols_85 VALUES(1), (2), (3), (4);
+SELECT * FROM alter_addcols_85 ORDER BY a;
+
+CREATE TABLE alter_addcols_86 ( a int , b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_86 VALUES(1), (2), (3), (4);
+ALTER TABLE alter_addcols_86 ALTER COLUMN b SET DEFAULT 25;
+INSERT INTO alter_addcols_86 VALUES(5), (6), (7), (8);
+SELECT * FROM alter_addcols_86 ORDER BY a;
+
+CREATE TABLE alter_addcols_87 ( a int , b varchar(10) default 'abcd') WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_87 VALUES(1, '1'), (2, '2'), (3, '3'), (4, '4');
+ALTER TABLE alter_addcols_87 ALTER COLUMN b SET DATA TYPE int;
+SELECT DISTINCT * FROM alter_addcols_87 ORDER BY a;
+-- error happens because the DEFAULT expression cannot be converted into INT datatype.
+INSERT INTO alter_addcols_87 VALUES (5);
+ALTER TABLE alter_addcols_87 ALTER COLUMN b DROP DEFAULT;
+ALTER TABLE alter_addcols_87 ALTER COLUMN b SET DEFAULT 5;
+INSERT INTO alter_addcols_87 VALUES (5);
+SELECT DISTINCT * FROM alter_addcols_87 ORDER BY a;
+
+-- testcase: change DEFAULT constraint directly, without DROP DEFAULT step.
+CREATE TABLE alter_addcols_88 ( a int , b varchar(10) default 'abcd') WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_88 VALUES(1, '1'), (2, '2'), (3, '3'), (4, '4');
+ALTER TABLE alter_addcols_88 ALTER COLUMN b SET DATA TYPE int;
+ALTER TABLE alter_addcols_88 ALTER COLUMN b SET DEFAULT 5;
+INSERT INTO alter_addcols_88 VALUES (5);
+SELECT DISTINCT * FROM alter_addcols_88 ORDER BY a;
+
+-- testcase: invalid cu cache
+CREATE TABLE alter_addcols_90 ( a int , b varchar(20) NOT NULL ) WITH ( ORIENTATION = COLUMN ) ;
+INSERT INTO alter_addcols_90 VALUES( 1, 'helloworld');
+INSERT INTO alter_addcols_90 VALUES( 1, 'heorlhelld');
+INSERT INTO alter_addcols_90 VALUES( 1, 'worlddheor');
+VACUUM FULL alter_addcols_90;
+START TRANSACTION ; 
+SELECT * FROM alter_addcols_90 ORDER BY b;
+ALTER TABLE alter_addcols_90 ALTER COLUMN  b SET  DATA TYPE varchar(19);
+SELECT * FROM alter_addcols_90 ORDER BY b;
+COMMIT;
+
+drop schema cstore_alter_table_4 cascade;

@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_install is a utility to deploy a Gauss200 server.
+#############################################################################
+
+import os
+import sys
+
+sys.path.append(sys.path[0])
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.Common import DefaultValue, ClusterCommand
+from gspylib.common.DbClusterInfo import dbClusterInfo
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParameterParsecheck import Parameter
+from gspylib.os.gsOSlib import g_OSlib
+from impl.install.OLAP.InstallImplOLAP import InstallImplOLAP
+
+# exit code
+EXEC_SUCCESS = 0
+ROLLBACK_FAILED = 3
+
+
+class Install(ParallelBaseOM):
+    """
+    The class is used to do perform installation
+    """
+
+    def __init__(self):
+        """
+        function: initialize the parameters
+        input : NA
+        output: NA
+        """
+        ParallelBaseOM.__init__(self)
+        self.time_out = None
+        self.alarm_component = ""
+        self.dbInitParam = []
+        self.dataGucParam = []
+        self.action = "gs_install"
+        self.initStep = "Init Install"
+
+    def usage(self):
+        """
+gs_install is a utility to deploy a cluster server.
+
+Usage:
+  gs_install -? | --help
+  gs_install -V | --version
+  gs_install -X XMLFILE [--gsinit-parameter="PARAMETER" [...]]
+        [--dn-guc="PARAMETER" [...]] [--alarm-component=ALARMCOMPONENT]
+        [--time-out=SECS] [-l LOGFILE]
+
+General options:
+  -X                                     Path of the XML configuration file.
+  -l                                     Path of log file.
+  -?, --help                             Show help information for this utility, and exit the command line mode.
+  -V, --version                          Show version information.
+
+  --gsinit-parameter="PARAMETER"         Parameters to initialize DN and CN.
+                                         For more information, see \"gs_initdb --help\".
+  --dn-guc="PARAMETER"                   Parameters to set the configuration of DN.
+                                         For more information, see \"gs_guc --help\".
+  --alarm-component=ALARMCOMPONENT       Path of the alarm component.
+  --time-out=SECS                        Maximum waiting time when start cluster.
+        """
+        print(self.usage.__doc__)
+
+    def initGlobals(self):
+        """
+        function: Init logger
+        input : NA
+        output: NA
+        """
+        try:
+            self.initLogger(self.action)
+            self.logger.debug(
+                "gs_install execution takes %s steps in total" % ClusterCommand.countTotalSteps(
+                    self.action, "", self.readOperateStep()))
+            self.logger.log("Parsing the configuration file.", "addStep")
+            # parsing the configuration file, Parameter [refreshCN] does not refresh the CN number
+            self.initClusterInfo(refreshCN=False)
+            self.initComponent()
+            # Initialize self.sshTool
+            self.initSshTool(self.clusterInfo.getClusterNodeNames(),
+                             DefaultValue.TIMEOUT_PSSH_INSTALL)
+            if (len(self.clusterInfo.getClusterNodeNames()) == 1 and
+                    self.clusterInfo.getClusterNodeNames()[0]
+                    == DefaultValue.GetHostIpOrName()):
+                self.isSingle = True
+                self.localMode = True
+        except Exception as e:
+            # failed to parse cluster config file
+            raise Exception(str(e))
+        # Successfully parsed the configuration file
+        self.logger.debug("Successfully parsed the configuration file.",
+                          "constant")
+
+    def checkParaList(self, specialStr):
+        """
+        function:
+        input:
+        output:
+        """
+        VALUE_CHECK_LIST = ["|", ";", "&", "$", "<", ">", "`", "\\", "{", "}",
+                            "(", ")", "[", "]", "~", "*", "?", "!", "\n"]
+        VALUE_CHECK_GUC_PARA_LIST = ["client_encoding", "--encoding"]
+        VALUE_CHECK_ENCODING_LIST = ["LATIN5", "ISO_8859_7", "KOI8U",
+                                     "LATIN7", "EUC_TW", "WIN1251", "LATIN8",
+                                     "KOI8R", "UTF8",
+                                     "ISO_8859_5", "ISO_8859_8", "LATIN9",
+                                     "LATIN6", "EUC_JP", "EUC_KR", "WIN1255",
+                                     "EUC_CN",
+                                     "LATIN3", "LATIN1", "ISO_8859_6", "GBK"]
+        gs_checkStr = specialStr[0]
+        if (gs_checkStr.strip() == ""):
+            return
+        for rac in VALUE_CHECK_LIST:
+            flag = gs_checkStr.find(rac)
+            if flag >= 0:
+                raise Exception(ErrorCode.GAUSS_502["GAUSS_50219"]
+                                % specialStr + " There are illegal "
+                                               "characters in the parameter.")
+        if (len(gs_checkStr.split("=")) != 2):
+            return
+        if (gs_checkStr.split("=")[1].strip().startswith("\'") is True and
+            gs_checkStr.split("=")[1].strip().endswith("\'") is False) or \
+                (gs_checkStr.split("=")[1].strip().startswith("\'") is False
+                 and gs_checkStr.split("=")[1].strip().endswith(
+                            "\'") is True):
+            raise Exception(
+                ErrorCode.GAUSS_502["GAUSS_50219"]
+                % specialStr + " Lack of Paired Single "
+                               "Quotation Marks.value %s" % gs_checkStr)
+        if (gs_checkStr.split("=")[1].strip().startswith("\"") is True and
+            gs_checkStr.split("=")[1].strip().endswith("\"") is False) \
+                or (
+                gs_checkStr.split("=")[1].strip().startswith("\"") is False
+                and gs_checkStr.split("=")[1].strip().endswith("\"") is True):
+            raise Exception(
+                ErrorCode.GAUSS_502["GAUSS_50219"] % specialStr
+                + " Lack of double quotation marks.value %s" % gs_checkStr)
+        if gs_checkStr.split("=")[0].strip() in VALUE_CHECK_GUC_PARA_LIST and \
+                (gs_checkStr.split("=")[1].strip().strip("\'").strip(
+                    "\"").strip() not in VALUE_CHECK_ENCODING_LIST):
+            raise Exception(
+                ErrorCode.GAUSS_500["GAUSS_50011"] % (
+                    gs_checkStr.split("=")[0],
+                    gs_checkStr.split("=")[1].strip("\'").strip("\"").strip())
+                + "Please cheak parameter '--dn-guc' or '--gsinit-parameter'.")
+
+    def parseCommandLine(self):
+        """
+        function: Parse command line and save to global variable
+        input : NA
+        output: NA
+        """
+        # init the ParaObj
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("install")
+        # parameter -h or -?
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(EXEC_SUCCESS)
+
+        # parameter -X
+        if (ParaDict.__contains__("confFile")):
+            self.xmlFile = ParaDict.get("confFile")
+        # parameter -l
+        if (ParaDict.__contains__("logFile")):
+            self.logFile = ParaDict.get("logFile")
+        # parameter --gsinit-parameter
+        if (ParaDict.__contains__("dbInitParams")):
+            self.dbInitParam = ParaDict.get("dbInitParams")
+            self.checkParaList(self.dbInitParam)
+        # parameter --dn-guc
+        if (ParaDict.__contains__("dataGucParams")):
+            self.dataGucParam = ParaDict.get("dataGucParams")
+            self.checkParaList(self.dataGucParam)
+        # parameter --alarm-component
+        if (ParaDict.__contains__("alarm_component")):
+            self.alarm_component = ParaDict.get("alarm_component")
+        # parameter --time-out
+        if (ParaDict.__contains__("time_out")):
+            self.time_out = ParaDict.get("time_out")
+
+    def checkUser(self):
+        """
+        """
+        # get user info
+        self.user = g_OSlib.getUserInfo()['name']
+        # get the group info
+        self.group = g_OSlib.getUserInfo()['g_name']
+        # check the user and group
+        if (self.user == "" or self.group == ""):
+            raise Exception(ErrorCode.GAUSS_503["GAUSS_50308"])
+        if (self.user == "root" or self.group == "root"):
+            raise Exception(ErrorCode.GAUSS_501["GAUSS_50105"])
+
+    def checkConfigFile(self):
+        """
+        """
+        if (self.xmlFile == ""):
+            # there is no -X parameter
+            raise Exception(ErrorCode.GAUSS_500["GAUSS_50001"] % 'X'
+                            + ' for the installation.')
+        if (not os.path.exists(self.xmlFile)):
+            # -X parameter value is not exists
+            raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"] % self.xmlFile)
+        if (not os.path.isabs(self.xmlFile)):
+            # -X parameter value is not absolute path
+            raise Exception(
+                ErrorCode.GAUSS_502["GAUSS_50213"] % "configuration file")
+
+    def checkDNPara(self):
+        """
+        """
+        dnUnsupportedParameters = DefaultValue.findUnsupportedParameters(
+            self.dataGucParam)
+        if (len(dnUnsupportedParameters) != 0):
+            GaussLog.printMessage("The following parameters set for database node will"
+                                  " not take effect:\n%s"
+                                  % str(dnUnsupportedParameters))
+            for param in dnUnsupportedParameters:
+                self.dataGucParam.remove(param)
+
+    def checkAlarm(self):
+        """
+        """
+        if (self.alarm_component == ""):
+            self.alarm_component = DefaultValue.ALARM_COMPONENT_PATH
+        if (not os.path.isabs(self.alarm_component)):
+            raise Exception(
+                ErrorCode.GAUSS_502["GAUSS_50213"] % "alarm component")
+
+    def checkLogFile(self):
+        """
+        """
+        if (self.logFile == ""):
+            # if -l parameter is null
+            self.logFile = DefaultValue.getOMLogPath(
+                DefaultValue.DEPLOY_LOG_FILE, self.user, "", self.xmlFile)
+        if (not os.path.isabs(self.logFile)):
+            raise Exception(ErrorCode.GAUSS_502["GAUSS_50213"] % "log")
+
+    def checkParameter(self):
+        """
+        function: Check parameter from command line 
+        input : NA
+        output: NA
+        """
+        # check required parameters
+        self.checkUser()
+        # check mpprc file path
+        self.mpprcFile = DefaultValue.getMpprcFile()
+        # check config file
+        self.checkConfigFile()
+        # check unsupported -D parameter
+        self.checkDNPara()
+        # check alarm component
+        self.checkAlarm()
+        # check logFile
+        self.checkLogFile()
+
+
+if __name__ == '__main__':
+    """
+    main function
+    """
+    # check if user is root
+    if (os.getuid() == 0):
+        GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50105"])
+    try:
+        REPEAT = False
+        # Objectize class
+        install = Install()
+        # Initialize self and Parse command line and save to global variable
+        install.parseCommandLine()
+        # check the parameters is not OK
+        install.checkParameter()
+        # Initialize globals parameters
+        install.initGlobals()
+        # set action flag file
+        DefaultValue.setActionFlagFile("gs_install")
+
+        impl = InstallImplOLAP(install)
+        # Perform the whole install process
+        impl.run()
+    except Exception as e:
+        GaussLog.exitWithError(str(e))
+    finally:
+        DefaultValue.setActionFlagFile("gs_install", None, False)

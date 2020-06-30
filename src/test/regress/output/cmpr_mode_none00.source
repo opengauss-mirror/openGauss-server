@@ -1,0 +1,51 @@
+--
+-- test case: the raw data cann't be compress by any methods.
+--
+CREATE TABLE cmpr_mode_none00
+(
+	RS_ID int,
+	R0_ID float NOT NULL,
+	R1_ID float NOT NULL,
+	R2_ID float NOT NULL,
+	R3_ID float NOT NULL,
+	R4_ID float NOT NULL,
+	R5_ID float NOT NULL,
+	R6_ID float NOT NULL,
+	R7_ID float NOT NULL,
+	R8_ID float NOT NULL,
+	R9_ID float NOT NULL
+) COMPRESS;
+COPY cmpr_mode_none00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_mode_none00.data';
+CREATE TABLE cmpr_mode_none00_raw
+(
+	RS_ID int,
+	R0_ID float NOT NULL,
+	R1_ID float NOT NULL,
+	R2_ID float NOT NULL,
+	R3_ID float NOT NULL,
+	R4_ID float NOT NULL,
+	R5_ID float NOT NULL,
+	R6_ID float NOT NULL,
+	R7_ID float NOT NULL,
+	R8_ID float NOT NULL,
+	R9_ID float NOT NULL
+);
+COPY cmpr_mode_none00_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_mode_none00.data';
+SELECT (SELECT COUNT(*) FROM cmpr_mode_none00_raw) - (SELECT COUNT(*) FROM cmpr_mode_none00);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_mode_none00_raw) MINUS ALL (SELECT * FROM cmpr_mode_none00);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_mode_none00) MINUS ALL (SELECT * FROM cmpr_mode_none00_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_mode_none00;
+DROP TABLE cmpr_mode_none00_raw;

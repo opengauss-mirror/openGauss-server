@@ -1,0 +1,587 @@
+create schema distribute_setop;
+set current_schema = distribute_setop;
+create table setop_hash_table_01( a int, b int ,c text) ;
+create table setop_hash_table_02( a int, b numeric ,c text) ;
+create table setop_hash_table_03( a int, b bigint ,c text) ;
+create table setop_hash_table_04( a smallint, b bigint ,c text) ;
+create table setop_replication_table_01( a int, b bigint ,c text) ;
+create table setop_replication_table_02( a bigint, b int ,c text) ;
+create table setop_replication_table_03( a smallint, b bigint ,c text) ;
+create view setop_view_table_12 as select setop_hash_table_01.a as ta1, setop_hash_table_01.b as tb1, setop_hash_table_02.a as ta2, setop_hash_table_02.b as tb2 from setop_hash_table_01 inner join setop_hash_table_02 on (setop_hash_table_01.a = setop_hash_table_02.a);
+create view setop_view_table_23 as select setop_hash_table_02.a as ta1, setop_hash_table_02.b as tb1, setop_hash_table_03.a as ta2, setop_hash_table_03.b as tb2 from setop_hash_table_02 inner join setop_hash_table_03 on (setop_hash_table_02.a = setop_hash_table_03.a);
+create view setop_view_table_31 as select setop_hash_table_03.a as ta1, setop_hash_table_03.b as tb1, setop_hash_table_01.a as ta2, setop_hash_table_01.b as tb2 from setop_hash_table_03 inner join setop_hash_table_01 on (setop_hash_table_01.a = setop_hash_table_03.a);
+create index index_on_hash_01 on setop_hash_table_01(a);
+create index index_on_hash_02 on setop_hash_table_02(a);
+create index index_on_hash_03 on setop_hash_table_03(b);
+create index index_on_hash_04 on setop_hash_table_04(a);
+create index index_on_replication_01 on setop_replication_table_01(a);
+create index index_on_replication_02 on setop_replication_table_02(a);
+create index index_on_replication_03 on setop_replication_table_03(a);
+insert into setop_hash_table_01 values (generate_series(1,2), generate_series(2,3), 'setop_hash_table_01');
+insert into setop_hash_table_02 values (generate_series(1,3), generate_series(2,4), 'setop_hash_table_02');
+insert into setop_hash_table_03 values (generate_series(1,4), generate_series(2,5), 'setop_hash_table_03');
+insert into setop_hash_table_04 values (generate_series(1,5), generate_series(2,6), 'setop_hash_table_04');
+insert into setop_replication_table_01 values (generate_series(1,2), generate_series(2,3), 'setop_replication_table_01');
+insert into setop_replication_table_02 values (generate_series(1,3), generate_series(2,4), 'setop_replication_table_02');
+insert into setop_replication_table_03 values (generate_series(1,4), generate_series(2,5), 'setop_replication_table_03');
+insert into setop_hash_table_01 values (generate_series(1,2), generate_series(2,3), 't');
+insert into setop_hash_table_02 values (generate_series(1,3), generate_series(2,4), 't');
+insert into setop_hash_table_03 values (generate_series(1,4), generate_series(2,5), 't');
+insert into setop_hash_table_04 values (generate_series(1,5), generate_series(2,6), 't');
+insert into setop_replication_table_01 values (generate_series(1,2), generate_series(2,3), 't');
+insert into setop_replication_table_02 values (generate_series(1,3), generate_series(2,4), 't');
+insert into setop_replication_table_03 values (generate_series(1,4), generate_series(2,5), 't');
+analyze setop_hash_table_01;
+analyze setop_hash_table_02;
+analyze setop_hash_table_03;
+analyze setop_hash_table_04;
+analyze setop_replication_table_01;
+analyze setop_replication_table_02;
+analyze setop_replication_table_03;
+analyze pg_auth_members;
+--
+---- INTERSECT
+--
+-- hash + hash + same distributeKey + Append executes on all DNs
+select * from setop_hash_table_01 intersect select * from setop_hash_table_02 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+ 1 | 2 | t
+ 2 | 3 | t
+(2 rows)
+
+select a, b from setop_hash_table_01 intersect select b, a from setop_hash_table_03 order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+select * from setop_hash_table_01 where a = 1 intersect select * from setop_hash_table_02 where b = 1 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+select a, b from setop_hash_table_01 where a = 1 intersect select b, a from setop_hash_table_03 where a = 1 order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+-- hash + hash + same distributeKey + Append executes on special DN
+select * from setop_hash_table_01 where a = 1 intersect select * from setop_hash_table_02 where a = 1 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+ 1 | 2 | t
+(1 row)
+
+select a, b from setop_hash_table_01 where a = 1 intersect select b, a from setop_hash_table_03 where b = 1 order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+-- hash + hash + different distributeKey + Append executes on all DNs
+select * from setop_hash_table_01 intersect select * from setop_hash_table_03 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+ 1 | 2 | t
+ 2 | 3 | t
+(2 rows)
+
+select a, b from setop_hash_table_01 intersect select b, a from setop_hash_table_02 order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+-- hash + hash + different distributeKey + Append executes on special DN
+select * from setop_hash_table_01 where a = 1 intersect select * from setop_hash_table_03 where b = 1 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+(0 rows)
+
+select a, b from setop_hash_table_01 where a = 1 intersect select b, a from setop_hash_table_02 where a = 1 order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+-- hash + hash + type cast
+select * from setop_hash_table_01 intersect select * from setop_hash_table_04 order by 1, 2, 3;
+ a | b | c 
+---+---+---
+ 1 | 2 | t
+ 2 | 3 | t
+(2 rows)
+
+select a, b from setop_hash_table_01 intersect select b, a from setop_hash_table_04 order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+-- hash + replication  + Append executes on special DN
+select * from setop_hash_table_01 intersect select * from setop_replication_table_01 order by 1, 2;
+ a | b | c 
+---+---+---
+ 1 | 2 | t
+ 2 | 3 | t
+(2 rows)
+
+-- replication + replication
+select * from setop_replication_table_01 intersect select * from setop_replication_table_02 order by 1, 2;
+ a | b | c 
+---+---+---
+ 1 | 2 | t
+ 2 | 3 | t
+(2 rows)
+
+-- execute on cn + hash
+select 1 from pg_auth_members intersect select b from setop_hash_table_02 order by 1;
+ ?column? 
+----------
+(0 rows)
+
+-- targetlist dosenot contains distributeKey
+select a from setop_hash_table_01 intersect select b from setop_hash_table_02 order by 1;
+ a 
+---
+ 2
+(1 row)
+
+select b from setop_hash_table_01 intersect select b from setop_hash_table_02 order by 1;
+ b 
+---
+ 2
+ 3
+(2 rows)
+
+select * from setop_view_table_12 intersect select * from setop_view_table_23 order by 1, 2, 3;
+ ta1 | tb1 | ta2 | tb2 
+-----+-----+-----+-----
+   1 |   2 |   1 |   2
+   2 |   3 |   2 |   3
+(2 rows)
+
+SELECT 1 AS one intersect SELECT 1.1::float8 order by 1;
+ one 
+-----
+(0 rows)
+
+--
+----EXCEPT ALL 
+--
+-- hash + hash + same distributeKey + Append executes on all DNs
+select * from setop_hash_table_01 except all select * from setop_hash_table_02 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+(2 rows)
+
+select a, b from setop_hash_table_01 except all select b, a from setop_hash_table_03 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+ 2 | 3
+ 2 | 3
+(4 rows)
+
+select * from setop_hash_table_01 where a = 1 except all select * from setop_hash_table_02 where b = 1 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 1 | 2 | t
+(2 rows)
+
+select a, b from setop_hash_table_01 where a = 1 except all select b, a from setop_hash_table_03 where a = 1 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+(2 rows)
+
+-- hash + hash + same distributeKey + Append executes on special DN
+select * from setop_hash_table_01 where a = 1 except all select * from setop_hash_table_02 where a = 1 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+(1 row)
+
+select a, b from setop_hash_table_01 where a = 1 except all select b, a from setop_hash_table_03 where b = 1 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+(2 rows)
+
+-- hash + hash + different distributeKey + Append executes on all DNs
+select * from setop_hash_table_01 except all select * from setop_hash_table_03 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+(2 rows)
+
+select a, b from setop_hash_table_01 except all select b, a from setop_hash_table_02 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+ 2 | 3
+ 2 | 3
+(4 rows)
+
+-- hash + hash + different distributeKey + Append executes on special DN
+select * from setop_hash_table_01 where a = 1 except all select * from setop_hash_table_03 where b = 1 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 1 | 2 | t
+(2 rows)
+
+select a, b from setop_hash_table_01 where a = 1 except all select b, a from setop_hash_table_02 where a = 1 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+(2 rows)
+
+-- hash + hash + type cast
+select * from setop_hash_table_01 except all select * from setop_hash_table_04 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+(2 rows)
+
+select a, b from setop_hash_table_01 except all select b, a from setop_hash_table_04 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 1 | 2
+ 2 | 3
+ 2 | 3
+(4 rows)
+
+-- hash + replication  + Append executes on special DN
+select * from setop_hash_table_01 except all select * from setop_replication_table_01 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+(2 rows)
+
+-- replication + replication
+select * from setop_replication_table_01 except all select * from setop_replication_table_02 order by 1, 2, 3;
+ a | b |             c              
+---+---+----------------------------
+ 1 | 2 | setop_replication_table_01
+ 2 | 3 | setop_replication_table_01
+(2 rows)
+
+-- execute on cn + hash
+select 1 from pg_auth_members except all select b from setop_hash_table_02 order by 1;
+ ?column? 
+----------
+(0 rows)
+
+-- targetlist dosenot contains distributeKey
+select a from setop_hash_table_01 except all select b from setop_hash_table_02 order by 1;
+ a 
+---
+ 1
+ 1
+(2 rows)
+
+select b from setop_hash_table_01 except all select b from setop_hash_table_02 order by 1;
+ b 
+---
+(0 rows)
+
+select * from setop_view_table_12 except all select * from setop_view_table_23 order by 1, 2, 3;
+ ta1 | tb1 | ta2 | tb2 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT 1 AS one except all SELECT 1.1::float8 order by 1;
+ one 
+-----
+   1
+(1 row)
+
+--
+----EXCEPT 
+--
+-- hash + hash + same distributeKey + Append executes on all DNs
+explain (verbose on, costs off, nodes off) select * from setop_hash_table_01 union all select * from setop_hash_table_02;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Append
+   ->  Subquery Scan on "*SELECT* 1"
+         Output: "*SELECT* 1".a, "*SELECT* 1".b, "*SELECT* 1".c
+         ->  Seq Scan on distribute_setop.setop_hash_table_01
+               Output: setop_hash_table_01.a, setop_hash_table_01.b, setop_hash_table_01.c
+   ->  Seq Scan on distribute_setop.setop_hash_table_02
+         Output: setop_hash_table_02.a, setop_hash_table_02.b, setop_hash_table_02.c
+(7 rows)
+
+select * from setop_hash_table_01 except select * from setop_hash_table_02 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+(2 rows)
+
+select a, b from setop_hash_table_01 except select b, a from setop_hash_table_03 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 2 | 3
+(2 rows)
+
+select * from setop_hash_table_01 where a = 1 except select * from setop_hash_table_02 where b = s1 order by 1, 2, 3;
+ERROR:  column "s1" does not exist
+LINE 1: ...xcept select * from setop_hash_table_02 where b = s1 order b...
+                                                             ^
+select a, b from setop_hash_table_01 where a = 1 except select b, a from setop_hash_table_03 where a = 1 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+(1 row)
+
+-- hash + hash + same distributeKey + Append executes on special DN
+select * from setop_hash_table_01 where a = 1 except select * from setop_hash_table_02 where a = 1 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+(1 row)
+
+select a, b from setop_hash_table_01 where a = 1 except select b, a from setop_hash_table_03 where b = 1 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+(1 row)
+
+-- hash + hash + different distributeKey + Append executes on all DNs
+select * from setop_hash_table_01 except select * from setop_hash_table_03 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+(2 rows)
+
+select a, b from setop_hash_table_01 except select b, a from setop_hash_table_02 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 2 | 3
+(2 rows)
+
+-- hash + hash + different distributeKey + Append executes on special DN
+select * from setop_hash_table_01 where a = 1 except select * from setop_hash_table_03 where b = 1 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 1 | 2 | t
+(2 rows)
+
+select a, b from setop_hash_table_01 where a = 1 except select b, a from setop_hash_table_02 where a = 1 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+(1 row)
+
+-- hash + hash + type cast
+select * from setop_hash_table_01 except select * from setop_hash_table_04 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+(2 rows)
+
+select a, b from setop_hash_table_01 except select b, a from setop_hash_table_04 order by 1, 2;
+ a | b 
+---+---
+ 1 | 2
+ 2 | 3
+(2 rows)
+
+-- hash + replication  + Append executes on special DN
+select * from setop_hash_table_01 except select * from setop_replication_table_01 order by 1, 2, 3;
+ a | b |          c          
+---+---+---------------------
+ 1 | 2 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+(2 rows)
+
+-- replication + replication
+select * from setop_replication_table_01 except select * from setop_replication_table_02 order by 1, 2, 3;
+ a | b |             c              
+---+---+----------------------------
+ 1 | 2 | setop_replication_table_01
+ 2 | 3 | setop_replication_table_01
+(2 rows)
+
+-- execute on cn + hash
+select 1 from pg_auth_members except select b from setop_hash_table_02 order by 1;
+ ?column? 
+----------
+(0 rows)
+
+-- targetlist dosenot contains distributeKey
+select a from setop_hash_table_01 except select b from setop_hash_table_02 order by 1;
+ a 
+---
+ 1
+(1 row)
+
+select b from setop_hash_table_01 except select b from setop_hash_table_02 order by 1;
+ b 
+---
+(0 rows)
+
+select * from setop_view_table_12 except select * from setop_view_table_23 order by 1, 2, 3;
+ ta1 | tb1 | ta2 | tb2 
+-----+-----+-----+-----
+(0 rows)
+
+SELECT 1 AS one except SELECT 1.1::float8 order by 1;
+ one 
+-----
+   1
+(1 row)
+
+--setop optimizer
+explain (verbose on, costs off) select 'setop_hash_table_01',b from setop_hash_table_01 union select 'setop_hash_table_03',a from setop_hash_table_03;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ HashAggregate
+   Output: ('setop_hash_table_01'::text), setop_hash_table_01.b
+   Group By Key: ('setop_hash_table_01'::text), setop_hash_table_01.b
+   ->  Append
+         ->  Seq Scan on distribute_setop.setop_hash_table_01
+               Output: 'setop_hash_table_01'::text, setop_hash_table_01.b
+         ->  Seq Scan on distribute_setop.setop_hash_table_03
+               Output: 'setop_hash_table_03'::text, setop_hash_table_03.a
+(8 rows)
+
+select 'setop_hash_table_01',b from setop_hash_table_01 union select 'setop_hash_table_03',a from setop_hash_table_03 order by 1,2;
+      ?column?       | b 
+---------------------+---
+ setop_hash_table_01 | 2
+ setop_hash_table_01 | 3
+ setop_hash_table_03 | 1
+ setop_hash_table_03 | 2
+ setop_hash_table_03 | 3
+ setop_hash_table_03 | 4
+(6 rows)
+
+explain (verbose on, costs off) SELECT b FROM setop_hash_table_01 INTERSECT (((SELECT a FROM setop_hash_table_02 UNION SELECT b FROM setop_hash_table_03))) ORDER BY 1;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Sort
+   Output: (("*SELECT* 1".b)::bigint), (0)
+   Sort Key: (("*SELECT* 1".b)::bigint)
+   ->  HashSetOp Intersect
+         Output: (("*SELECT* 1".b)::bigint), (0)
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     Output: "*SELECT* 1".b, 0
+                     ->  Seq Scan on distribute_setop.setop_hash_table_01
+                           Output: setop_hash_table_01.b
+               ->  Result
+                     Output: (("*SELECT* 2".a)::bigint), 1
+                     ->  HashAggregate
+                           Output: (("*SELECT* 2".a)::bigint)
+                           Group By Key: (("*SELECT* 2".a)::bigint)
+                           ->  Append
+                                 ->  Subquery Scan on "*SELECT* 2"
+                                       Output: "*SELECT* 2".a
+                                       ->  Seq Scan on distribute_setop.setop_hash_table_02
+                                             Output: setop_hash_table_02.a
+                                 ->  Seq Scan on distribute_setop.setop_hash_table_03
+                                       Output: setop_hash_table_03.b
+(22 rows)
+
+SELECT b FROM setop_hash_table_01 INTERSECT (((SELECT a FROM setop_hash_table_02 UNION SELECT b FROM setop_hash_table_03))) ORDER BY 1;
+ b 
+---
+ 2
+ 3
+(2 rows)
+
+--union all between replication and hash
+explain (nodes off, costs off) select * from setop_replication_table_01 except select * from setop_replication_table_02 
+union all 
+select setop_hash_table_01.a as ta1, setop_hash_table_01.b as tb1, setop_hash_table_01.c as tc1 from setop_hash_table_01 left join setop_hash_table_02 on (setop_hash_table_01.b = setop_hash_table_02.b);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Result
+         ->  HashSetOp Except
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           ->  Seq Scan on setop_replication_table_01
+                     ->  Subquery Scan on "*SELECT* 2"
+                           ->  Seq Scan on setop_replication_table_02
+   ->  Subquery Scan on "*SELECT* 3"
+         ->  Hash Right Join
+               Hash Cond: (setop_hash_table_02.b = (setop_hash_table_01.b)::numeric)
+               ->  Seq Scan on setop_hash_table_02
+               ->  Hash
+                     ->  Seq Scan on setop_hash_table_01
+(14 rows)
+
+select * from setop_replication_table_01 except select * from setop_replication_table_02 
+union all 
+select setop_hash_table_01.a as ta1, setop_hash_table_01.b as tb1, setop_hash_table_01.c as tc1 from setop_hash_table_01 left join setop_hash_table_02 on (setop_hash_table_01.b = setop_hash_table_02.b) 
+order by 1, 2, 3;
+ a | b |             c              
+---+---+----------------------------
+ 1 | 2 | setop_hash_table_01
+ 1 | 2 | setop_hash_table_01
+ 1 | 2 | setop_replication_table_01
+ 1 | 2 | t
+ 1 | 2 | t
+ 2 | 3 | setop_hash_table_01
+ 2 | 3 | setop_hash_table_01
+ 2 | 3 | setop_replication_table_01
+ 2 | 3 | t
+ 2 | 3 | t
+(10 rows)
+
+explain (nodes off, costs off) select distinct b*2/3+5 from setop_hash_table_01 union all select a from setop_hash_table_02 order by 1; 
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Sort
+   Sort Key: ((((setop_hash_table_01.b * 2) / 3) + 5::double precision))
+   ->  Append
+         ->  HashAggregate
+               Group By Key: (((setop_hash_table_01.b * 2) / 3) + 5::double precision)
+               ->  Seq Scan on setop_hash_table_01
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Seq Scan on setop_hash_table_02
+(8 rows)
+
+select distinct b*2/3+5 from setop_replication_table_01 union all select a from setop_replication_table_02 order by 1; 
+     ?column?     
+------------------
+                1
+                1
+                2
+                2
+                3
+                3
+ 6.33333333333333
+                7
+(8 rows)
+
+drop table setop_hash_table_01 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view setop_view_table_12
+drop cascades to view setop_view_table_31
+drop table setop_hash_table_02 cascade;
+NOTICE:  drop cascades to view setop_view_table_23
+drop table setop_hash_table_03 cascade;
+drop table setop_hash_table_04 cascade;
+drop table setop_replication_table_01 cascade;
+drop table setop_replication_table_02 cascade;
+drop table setop_replication_table_03 cascade;
+reset current_schema;
+drop schema distribute_setop;

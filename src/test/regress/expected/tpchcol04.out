@@ -1,0 +1,69 @@
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off) select
+	o_orderpriority,
+	count(*) as order_count
+from
+	orders
+where
+	o_orderdate >= '1993-07-01'::date
+	and o_orderdate < '1993-07-01'::date + interval '3 month'
+	and exists (
+		select
+			*
+		from
+			lineitem
+		where
+			l_orderkey = o_orderkey
+			and l_commitdate < l_receiptdate
+	)
+group by
+	o_orderpriority
+order by
+        order_count;
+                                                                                         QUERY PLAN                                                                                          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: (count(*))
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: orders.o_orderpriority
+               ->  Vector Hash Right Semi Join
+                     Hash Cond: (lineitem.l_orderkey = orders.o_orderkey)
+                     ->  CStore Scan on lineitem
+                           Filter: (l_commitdate < l_receiptdate)
+                     ->  CStore Scan on orders
+                           Filter: ((o_orderdate >= 'Thu Jul 01 00:00:00 1993'::timestamp(0) without time zone) AND (o_orderdate < 'Fri Oct 01 00:00:00 1993'::timestamp without time zone))
+(11 rows)
+
+select
+	o_orderpriority,
+	count(*) as order_count
+from
+	orders
+where
+	o_orderdate >= '1993-07-01'::date
+	and o_orderdate < '1993-07-01'::date + interval '3 month'
+	and exists (
+		select
+			*
+		from
+			lineitem
+		where
+			l_orderkey = o_orderkey
+			and l_commitdate < l_receiptdate
+	)
+group by
+	o_orderpriority
+order by
+        order_count;
+ o_orderpriority | order_count 
+-----------------+-------------
+ 1-URGENT        |          93
+ 4-NOT SPECIFIED |         102
+ 2-HIGH          |         103
+ 3-MEDIUM        |         109
+ 5-LOW           |         128
+(5 rows)
+

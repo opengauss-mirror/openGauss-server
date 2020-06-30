@@ -1,0 +1,5 @@
+#multi_standby_single/sync_commit
+#multi_standby_single/quorum
+multi_standby_single/failover
+#multi_standby_single/most_available
+multi_standby_single/failover_with_data

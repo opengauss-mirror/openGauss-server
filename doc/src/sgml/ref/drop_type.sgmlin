@@ -1,0 +1,22 @@
+<refentry id="sql-droptype">
+ <indexterm zone="sql-droptype">
+  <primary>DROP TYPE</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle>DROP TYPE</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>DROP TYPE</refname>
+  <refpurpose>remove a data type</refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+<synopsis>
+DROP TYPE [ IF EXISTS ] <replaceable class="parameter">name</replaceable> [, ...] [ CASCADE | RESTRICT ]
+</synopsis>
+ </refsynopsisdiv>
+</refentry>

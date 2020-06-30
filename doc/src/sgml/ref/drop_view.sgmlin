@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_VIEW">
+<refmeta>
+<refentrytitle>DROP VIEW</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP VIEW</refname>
+<refpurpose>remove a view</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP VIEW [ IF EXISTS ] view_name [, ...] [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

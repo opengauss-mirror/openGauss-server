@@ -1,0 +1,567 @@
+--
+-- JOIN
+-- Test JOIN clauses
+--
+drop table J1_TBL;
+ERROR:  table "j1_tbl" does not exist
+drop foreign table J2_TBL;
+ERROR:  foreign table "j2_tbl" does not exist
+CREATE  TABLE J1_TBL (
+  i integer,
+  j integer,
+  t text
+);
+CREATE foreign TABLE J2_TBL (
+  i integer,
+  k integer
+);
+INSERT INTO J1_TBL VALUES (1, 4, 'one');
+INSERT INTO J1_TBL VALUES (2, 3, 'two');
+INSERT INTO J1_TBL VALUES (3, 2, 'three');
+INSERT INTO J1_TBL VALUES (4, 1, 'four');
+INSERT INTO J1_TBL VALUES (5, 0, 'five');
+INSERT INTO J1_TBL VALUES (6, 6, 'six');
+INSERT INTO J1_TBL VALUES (7, 7, 'seven');
+INSERT INTO J1_TBL VALUES (8, 8, 'eight');
+INSERT INTO J1_TBL VALUES (0, NULL, 'zero');
+INSERT INTO J1_TBL VALUES (NULL, NULL, 'null');
+INSERT INTO J1_TBL VALUES (NULL, 0, 'zero');
+INSERT INTO J2_TBL VALUES (1, -1);
+INSERT INTO J2_TBL VALUES (2, 2);
+INSERT INTO J2_TBL VALUES (3, -3);
+INSERT INTO J2_TBL VALUES (2, 4);
+INSERT INTO J2_TBL VALUES (5, -5);
+INSERT INTO J2_TBL VALUES (5, -5);
+INSERT INTO J2_TBL VALUES (0, NULL);
+INSERT INTO J2_TBL VALUES (NULL, NULL);
+INSERT INTO J2_TBL VALUES (NULL, 0);
+--
+-- CORRELATION NAMES
+-- Make sure that table/column aliases are supported
+-- before diving into more complex join syntax.
+--
+SELECT '' AS "xxx", *
+  FROM J1_TBL AS tx 
+  ORDER BY i, j, t;
+ xxx | i | j |   t   
+-----+---+---+-------
+     | 0 |   | zero
+     | 1 | 4 | one
+     | 2 | 3 | two
+     | 3 | 2 | three
+     | 4 | 1 | four
+     | 5 | 0 | five
+     | 6 | 6 | six
+     | 7 | 7 | seven
+     | 8 | 8 | eight
+     |   | 0 | zero
+     |   |   | null
+(11 rows)
+
+SELECT '' AS "xxx", *
+  FROM J1_TBL tx 
+  ORDER BY i, j, t;
+ xxx | i | j |   t   
+-----+---+---+-------
+     | 0 |   | zero
+     | 1 | 4 | one
+     | 2 | 3 | two
+     | 3 | 2 | three
+     | 4 | 1 | four
+     | 5 | 0 | five
+     | 6 | 6 | six
+     | 7 | 7 | seven
+     | 8 | 8 | eight
+     |   | 0 | zero
+     |   |   | null
+(11 rows)
+
+SELECT '' AS "xxx", *
+  FROM J1_TBL AS t1 (a, b, c) 
+  ORDER BY a, b, c;
+ xxx | a | b |   c   
+-----+---+---+-------
+     | 0 |   | zero
+     | 1 | 4 | one
+     | 2 | 3 | two
+     | 3 | 2 | three
+     | 4 | 1 | four
+     | 5 | 0 | five
+     | 6 | 6 | six
+     | 7 | 7 | seven
+     | 8 | 8 | eight
+     |   | 0 | zero
+     |   |   | null
+(11 rows)
+
+SELECT '' AS "xxx", *
+  FROM J1_TBL t1 (a, b, c)
+  ORDER BY a, b, c;
+ xxx | a | b |   c   
+-----+---+---+-------
+     | 0 |   | zero
+     | 1 | 4 | one
+     | 2 | 3 | two
+     | 3 | 2 | three
+     | 4 | 1 | four
+     | 5 | 0 | five
+     | 6 | 6 | six
+     | 7 | 7 | seven
+     | 8 | 8 | eight
+     |   | 0 | zero
+     |   |   | null
+(11 rows)
+
+SELECT '' AS "xxx", *
+  FROM J1_TBL t1 (a, b, c), J2_TBL t2 (d, e) 
+  ORDER BY a, b, c, d, e;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", t1.a, t2.e
+  FROM J1_TBL t1 (a, b, c), J2_TBL t2 (d, e)
+  WHERE t1.a = t2.d
+  ORDER BY a, e;
+ERROR:  Cross storage engine query is not supported
+--
+-- CROSS JOIN
+-- Qualifications are not allowed on cross joins,
+-- which degenerate into a standard unqualified inner join.
+--
+SELECT '' AS "xxx", *
+  FROM J1_TBL CROSS JOIN J2_TBL
+  ORDER BY J1_TBL.i, J1_TBL.j, J1_TBL.t, J2_TBL.i, J2_TBL.k;
+ERROR:  Cross storage engine query is not supported
+-- ambiguous column
+SELECT '' AS "xxx", i, k, t
+  FROM J1_TBL CROSS JOIN J2_TBL;
+ERROR:  column reference "i" is ambiguous
+LINE 1: SELECT '' AS "xxx", i, k, t
+                            ^
+CONTEXT:  referenced column: i
+-- resolve previous ambiguity by specifying the table name
+SELECT '' AS "xxx", t1.i, k, t
+  FROM J1_TBL t1 CROSS JOIN J2_TBL t2
+  ORDER BY i, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", ii, tt, kk
+  FROM (J1_TBL CROSS JOIN J2_TBL)
+    AS tx (ii, jj, tt, ii2, kk)
+    ORDER BY ii, tt, kk;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", tx.ii, tx.jj, tx.kk
+  FROM (J1_TBL t1 (a, b, c) CROSS JOIN J2_TBL t2 (d, e))
+    AS tx (ii, jj, tt, ii2, kk)
+    ORDER BY ii, jj, kk;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL CROSS JOIN J2_TBL a CROSS JOIN J2_TBL b
+  ORDER BY J1_TBL.i,J1_TBL.j,J1_TBL.t,a.i,a.k,b.i,b.k;
+ERROR:  Cross storage engine query is not supported
+--
+--
+-- Inner joins (equi-joins)
+--
+--
+--
+-- Inner joins (equi-joins) with USING clause
+-- The USING syntax changes the shape of the resulting table
+-- by including a column in the USING clause only once in the result.
+--
+-- Inner equi-join on specified column
+SELECT '' AS "xxx", *
+  FROM J1_TBL INNER JOIN J2_TBL USING (i)
+  ORDER BY i, j, k, t;
+ERROR:  Cross storage engine query is not supported
+-- Same as above, slightly different syntax
+SELECT '' AS "xxx", *
+  FROM J1_TBL JOIN J2_TBL USING (i)
+  ORDER BY i, j, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL t1 (a, b, c) JOIN J2_TBL t2 (a, d) USING (a)
+  ORDER BY a, d;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL t1 (a, b, c) JOIN J2_TBL t2 (a, b) USING (b)
+  ORDER BY b, t1.a;
+ERROR:  Cross storage engine query is not supported
+--
+-- NATURAL JOIN
+-- Inner equi-join on all columns with the same name
+--
+SELECT '' AS "xxx", *
+  FROM J1_TBL NATURAL JOIN J2_TBL
+  ORDER BY i, j, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL t1 (a, b, c) NATURAL JOIN J2_TBL t2 (a, d)
+  ORDER BY a, b, c, d;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL t1 (a, b, c) NATURAL JOIN J2_TBL t2 (d, a)
+  ORDER BY a, b, c, d;
+ERROR:  Cross storage engine query is not supported
+-- mismatch number of columns
+-- currently, Postgres will fill in with underlying names
+SELECT '' AS "xxx", *
+  FROM J1_TBL t1 (a, b) NATURAL JOIN J2_TBL t2 (a)
+  ORDER BY a, b, t, k;
+ERROR:  Cross storage engine query is not supported
+--
+-- Inner joins (equi-joins)
+--
+SELECT '' AS "xxx", *
+  FROM J1_TBL JOIN J2_TBL ON (J1_TBL.i = J2_TBL.i)
+  ORDER BY J1_TBL.i, J1_TBL.j, J1_TBL.t, J2_TBL.i, J2_TBL.k;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL JOIN J2_TBL ON (J1_TBL.i = J2_TBL.k)
+  ORDER BY J1_TBL.i, J1_TBL.j, J1_TBL.t, J2_TBL.i, J2_TBL.k;
+ERROR:  Cross storage engine query is not supported
+--
+-- Non-equi-joins
+--
+SELECT '' AS "xxx", *
+  FROM J1_TBL JOIN J2_TBL ON (J1_TBL.i <= J2_TBL.k)
+  ORDER BY J1_TBL.i, J1_TBL.j, J1_TBL.t, J2_TBL.i, J2_TBL.k;
+ERROR:  Cross storage engine query is not supported
+--
+-- Outer joins
+-- Note that OUTER is a noise word
+--
+SELECT '' AS "xxx", *
+  FROM J1_TBL LEFT OUTER JOIN J2_TBL USING (i)
+  ORDER BY i, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL LEFT JOIN J2_TBL USING (i)
+  ORDER BY i, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL RIGHT OUTER JOIN J2_TBL USING (i)
+  ORDER BY i, j, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL RIGHT JOIN J2_TBL USING (i)
+  ORDER BY i, j, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL FULL OUTER JOIN J2_TBL USING (i)
+  ORDER BY i, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL FULL JOIN J2_TBL USING (i)
+  ORDER BY i, k, t;
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL LEFT JOIN J2_TBL USING (i) WHERE (k = 1);
+ERROR:  Cross storage engine query is not supported
+SELECT '' AS "xxx", *
+  FROM J1_TBL LEFT JOIN J2_TBL USING (i) WHERE (i = 1);
+ERROR:  Cross storage engine query is not supported
+--
+-- More complicated constructs
+--
+--
+-- Multiway full join
+--
+drop table t1;
+ERROR:  table "t1" does not exist
+drop foreign table t2;
+ERROR:  foreign table "t2" does not exist
+drop table t3;
+ERROR:  table "t3" does not exist
+CREATE TABLE t1 (name TEXT, n INTEGER);
+CREATE foreign TABLE t2 (name char(2), n INTEGER);
+CREATE TABLE t3 (name TEXT, n INTEGER);
+INSERT INTO t1 VALUES ( 'bb', 11 );
+INSERT INTO t2 VALUES ( 'bb', 12 );
+INSERT INTO t2 VALUES ( 'cc', 22 );
+INSERT INTO t2 VALUES ( 'ee', 42 );
+INSERT INTO t3 VALUES ( 'bb', 13 );
+INSERT INTO t3 VALUES ( 'cc', 23 );
+INSERT INTO t3 VALUES ( 'dd', 33 );
+SELECT * FROM t1 FULL JOIN t2 USING (name) FULL JOIN t3 USING (name) 
+ORDER BY name,t1.n, t2.n, t3.n;
+ERROR:  Cross storage engine query is not supported
+--
+-- Test interactions of join syntax and subqueries
+--
+-- Basic cases (we expect planner to pull up the subquery here)
+SELECT * FROM
+(SELECT * FROM t2) as s2
+INNER JOIN
+(SELECT * FROM t3) s3
+USING (name)
+ORDER BY name, s2.n, s3.n;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM
+(SELECT * FROM t2) as s2
+LEFT JOIN
+(SELECT * FROM t3) s3
+USING (name)
+ORDER BY name, s2.n, s3.n;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM
+(SELECT * FROM t2) as s2
+FULL JOIN
+(SELECT * FROM t3) s3
+USING (name)
+ORDER BY name, s2.n, s3.n;
+ERROR:  Cross storage engine query is not supported
+-- Cases with non-nullable expressions in subquery results;
+-- make sure these go to null as expected
+SELECT * FROM
+(SELECT name, n as s2_n, 2 as s2_2 FROM t2) as s2
+NATURAL INNER JOIN
+(SELECT name, n as s3_n, 3 as s3_2 FROM t3) s3
+ORDER BY name, s2_n, s3_n;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM
+(SELECT name, n as s2_n, 2 as s2_2 FROM t2) as s2
+NATURAL LEFT JOIN
+(SELECT name, n as s3_n, 3 as s3_2 FROM t3) s3
+ORDER BY name, s2_n, s3_n;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM
+(SELECT name, n as s2_n, 2 as s2_2 FROM t2) as s2
+NATURAL FULL JOIN
+(SELECT name, n as s3_n, 3 as s3_2 FROM t3) s3
+ORDER BY name, s2_n, s3_n;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM
+(SELECT name, n as s1_n, 1 as s1_1 FROM t1) as s1
+NATURAL INNER JOIN
+(SELECT name, n as s2_n, 2 as s2_2 FROM t2) as s2
+NATURAL INNER JOIN
+(SELECT name, n as s3_n, 3 as s3_2 FROM t3) s3
+ORDER BY name, s1_n, s2_n, s3_n;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM
+(SELECT name, n as s1_n, 1 as s1_1 FROM t1) as s1
+NATURAL FULL JOIN
+(SELECT name, n as s2_n, 2 as s2_2 FROM t2) as s2
+NATURAL FULL JOIN
+(SELECT name, n as s3_n, 3 as s3_2 FROM t3) s3
+ORDER BY name, s1_n, s2_n, s3_n;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM
+(SELECT name, n as s1_n FROM t1) as s1
+NATURAL FULL JOIN
+  (SELECT * FROM
+    (SELECT name, n as s2_n FROM t2) as s2
+    NATURAL FULL JOIN
+    (SELECT name, n as s3_n FROM t3) as s3
+  ) ss2
+  ORDER BY name, s1_n, s2_n, s3_n;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM
+(SELECT name, n as s1_n FROM t1) as s1
+NATURAL FULL JOIN
+  (SELECT * FROM
+    (SELECT name, n as s2_n, 2 as s2_2 FROM t2) as s2
+    NATURAL FULL JOIN
+    (SELECT name, n as s3_n FROM t3) as s3
+  ) ss2
+  ORDER BY name, s1_n, s2_n, s3_n;
+ERROR:  Cross storage engine query is not supported
+-- Test for propagation of nullability constraints into sub-joins
+drop foreign table x;
+ERROR:  foreign table "x" does not exist
+drop table y;
+ERROR:  table "y" does not exist
+create foreign table x (x1 int, x2 int);
+insert into x values (1,11);
+insert into x values (2,22);
+insert into x values (3,null);
+insert into x values (4,44);
+insert into x values (5,null);
+create temp table y (y1 int, y2 int);
+insert into y values (1,111);
+insert into y values (2,222);
+insert into y values (3,333);
+insert into y values (4,null);
+select * from x ORDER BY x1;
+ x1 | x2 
+----+----
+  1 | 11
+  2 | 22
+  3 |   
+  4 | 44
+  5 |   
+(5 rows)
+
+select * from y ORDER BY y1;
+ y1 | y2  
+----+-----
+  1 | 111
+  2 | 222
+  3 | 333
+  4 |    
+(4 rows)
+
+select * from x left join y on (x1 = y1 and x2 is not null) ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+select * from x left join y on (x1 = y1 and y2 is not null) ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+select * from (x left join y on (x1 = y1)) left join x xx(xx1,xx2)
+on (x1 = xx1) ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+select * from (x left join y on (x1 = y1)) left join x xx(xx1,xx2)
+on (x1 = xx1 and x2 is not null) ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+select * from (x left join y on (x1 = y1)) left join x xx(xx1,xx2)
+on (x1 = xx1 and y2 is not null) ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+select * from (x left join y on (x1 = y1)) left join x xx(xx1,xx2)
+on (x1 = xx1 and xx2 is not null) ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+-- these should NOT give the same answers as above
+select * from (x left join y on (x1 = y1)) left join x xx(xx1,xx2)
+on (x1 = xx1) where (x2 is not null)
+ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+select * from (x left join y on (x1 = y1)) left join x xx(xx1,xx2)
+on (x1 = xx1) where (y2 is not null)
+ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+select * from (x left join y on (x1 = y1)) left join x xx(xx1,xx2)
+on (x1 = xx1) where (xx2 is not null)
+ORDER BY x1, x2, y1, y2;
+ERROR:  Cross storage engine query is not supported
+--
+-- Clean up
+--
+DROP TABLE t1;
+DROP foreign TABLE t2;
+DROP TABLE t3;
+-- Both DELETE and UPDATE allow the specification of additional tables
+-- to "join" against to determine which rows should be modified.
+CREATE  TABLE t1 (a int, b int);
+CREATE foreign TABLE t2 (a int, b int);
+CREATE  TABLE t3 (x int, y int);
+INSERT INTO t1 VALUES (5, 10);
+INSERT INTO t1 VALUES (15, 20);
+INSERT INTO t1 VALUES (100, 100);
+INSERT INTO t1 VALUES (200, 1000);
+INSERT INTO t2 VALUES (200, 2000);
+INSERT INTO t3 VALUES (5, 20);
+INSERT INTO t3 VALUES (6, 7);
+INSERT INTO t3 VALUES (7, 8);
+INSERT INTO t3 VALUES (500, 100);
+DELETE FROM t3 USING t1 table1 WHERE t3.x = table1.a;
+SELECT * FROM t3 ORDER By x, y;
+  x  |  y  
+-----+-----
+   6 |   7
+   7 |   8
+ 500 | 100
+(3 rows)
+
+DELETE FROM t3 USING t1 JOIN t2 USING (a) WHERE t3.x > t1.a;
+ERROR:  Cross storage engine query is not supported
+SELECT * FROM t3 ORDER By x, y;
+  x  |  y  
+-----+-----
+   6 |   7
+   7 |   8
+ 500 | 100
+(3 rows)
+
+DELETE FROM t3 USING t3 t3_other WHERE t3.x = t3_other.x AND t3.y = t3_other.y;
+SELECT * FROM t3 ORDER By x, y;
+ x | y 
+---+---
+(0 rows)
+
+select * from (select * from t1 where t1.a in (1,4,11) union all select * from t2) as dt order by 1;
+ERROR:  Cross storage engine query is not supported
+update t1 set a =1 where b in (select b from t1 where t1.a in (1,4,11) union all select b from t2);
+ERROR:  Cross storage engine query is not supported
+update t1 set a =1 where b in (select b from t1 where t1.a in (1,4,11) union all select b from t3);
+delete t1 where b in (select b from t1 where t1.a in (1,4,11) union all select b from t2);
+ERROR:  Cross storage engine query is not supported
+delete t1 where b in (select b from t2 where t2.a in (1,4,11) union all select b from t3);
+ERROR:  Cross storage engine query is not supported
+delete t1 where b in (select b from t1 where t1.a in (1,4,11) union all select b from t3);
+select a from (select a from t2);
+  a  
+-----
+ 200
+(1 row)
+
+select a , (select a from t3) from (select a from t1);
+  a  | a 
+-----+---
+   5 |  
+  15 |  
+ 100 |  
+ 200 |  
+(4 rows)
+
+select a , (select a from t3) from (select a from t2);
+ERROR:  Cross storage engine query is not supported
+select a , (select a from t2) from (select a from t2);
+  a  |  a  
+-----+-----
+ 200 | 200
+(1 row)
+
+-- test deep nested cases
+drop table y1;
+ERROR:  table "y1" does not exist
+drop table y2;
+ERROR:  table "y2" does not exist
+drop table y3;
+ERROR:  table "y3" does not exist
+drop foreign table y4;
+ERROR:  foreign table "y4" does not exist
+drop table y5;
+ERROR:  table "y5" does not exist
+CREATE  TABLE y1 (a int, b int);
+CREATE  TABLE y2 (a int, b int);
+CREATE  TABLE y3 (a int, b int);
+CREATE  foreign TABLE y4 (a int, y int);
+CREATE  TABLE y5 (a int, y int);
+select y5.a ,
+(select (select y1.b from y1, y2) from (select y3.a from y3,y4))
+from y5;
+ERROR:  Cross storage engine query is not supported
+select y5.a ,
+(select (select y1.b from y1, y2) from (select y3.a from y3,y2))
+from y5;
+ a | b 
+---+---
+(0 rows)
+
+select y5.a ,
+(select (select y1.b from y1, y2 ) from (select y3.a from y3,y2))
+from y5;
+ a | b 
+---+---
+(0 rows)
+
+select y5.a ,(select (select y1.b from y1, y2 where y1.a in (select y4.a from y4 )) from (select y3.a from y3,y2)) 
+from y5;
+ERROR:  Cross storage engine query is not supported
+-- cross transaction check
+begin;
+insert into y1 values (1);
+insert into y4 values (1);
+ERROR:  Cross storage engine transaction is not supported
+end;
+begin;
+delete from y1 ;
+delete from y4;
+ERROR:  Cross storage engine transaction is not supported
+end;
+begin;
+update y1 set a =1;
+update y4 set a =2;
+ERROR:  Cross storage engine transaction is not supported
+end;
+begin;
+update y1 set a =1 where a in (select a from y4);
+ERROR:  Cross storage engine query is not supported
+update y4 set a =2;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+end;

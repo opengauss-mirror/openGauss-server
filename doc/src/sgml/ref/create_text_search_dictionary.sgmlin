@@ -1,0 +1,18 @@
+<refentry id="SQL-CREATE_TEXT_SEARCH_DICTIONARY">
+<refmeta>
+<refentrytitle>CREATE TEXT SEARCH DICTIONARY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE TEXT SEARCH DICTIONARY</refname>
+<refpurpose>define a new text search dictionary</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE TEXT SEARCH DICTIONARY name 
+     ( TEMPLATE = template_name | COPY = source_config
+     [, option = value [, ...] ] );
+</synopsis>
+</refsynopsisdiv>
+</refentry>

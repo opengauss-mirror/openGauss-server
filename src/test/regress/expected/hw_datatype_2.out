@@ -1,0 +1,1090 @@
+--change datestyle to Postgres
+SET Datestyle = 'Postgres,DMY';
+--change datestyle to ISO mode which is default output style of GaussDB
+set datestyle = iso,ymd;
+create schema hw_datatype_2;
+set search_path = hw_datatype_2;
+--TEST FOR A NEW TYPE TINYINT
+--TEST FOR INT1SEND IN INT2
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID INT2);
+INSERT INTO TEST_TINYINT VALUES (2);
+SELECT * FROM TEST_TINYINT;
+ id 
+----
+  2
+(1 row)
+
+INSERT INTO TEST_TINYINT VALUES (0);
+INSERT INTO TEST_TINYINT VALUES (255);
+INSERT INTO TEST_TINYINT VALUES (-1);
+INSERT INTO TEST_TINYINT VALUES (256);
+INSERT INTO TEST_TINYINT VALUES (1000);
+SELECT INT1SEND(ID) FROM TEST_TINYINT WHERE ID >= 0 AND ID <= 255 ORDER BY 1;
+ int1send 
+----------
+ \x00
+ \x02
+ \xff
+(3 rows)
+
+SELECT INT1SEND(ID) FROM TEST_TINYINT WHERE ID > 255 ORDER BY 1;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: int1send
+SELECT * FROM TEST_TINYINT ORDER BY 1;
+  id  
+------
+   -1
+    0
+    2
+  255
+  256
+ 1000
+(6 rows)
+
+DROP TABLE TEST_TINYINT;
+/*
+ * adapt Sybase, add a new data type tinyint 
+ *		tinyinteq			- returns 1 if arg1 == arg2
+ *		tinyintne			- returns 1 if arg1 != arg2
+ *		tinyintlt			- returns 1 if arg1 < arg2
+ *		tinyintle			- returns 1 if arg1 <= arg2
+ *		tinyintgt			- returns 1 if arg1 > arg2
+ *		tinyintge			- returns 1 if arg1 >= arg2
+ */
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID TINYINT,IT TINYINT);
+INSERT INTO TEST_TINYINT VALUES (2,2);
+INSERT INTO TEST_TINYINT VALUES (0,5);
+INSERT INTO TEST_TINYINT VALUES (254,255);
+INSERT INTO TEST_TINYINT VALUES (0,0);
+INSERT INTO TEST_TINYINT VALUES (255,255);
+INSERT INTO TEST_TINYINT VALUES (-1,-1);
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: id
+INSERT INTO TEST_TINYINT VALUES (256,256);
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: id
+INSERT INTO TEST_TINYINT VALUES (25,20);
+INSERT INTO TEST_TINYINT VALUES (1000,1000);
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: id
+SELECT * FROM TEST_TINYINT ORDER BY 1, 2;
+ id  | it  
+-----+-----
+ 0   | 0
+ 0   | 5
+ 2   | 2
+ 25  | 20
+ 254 | 255
+ 255 | 255
+(6 rows)
+
+SELECT INT1EQ(ID,IT) AS THREE FROM TEST_TINYINT ORDER BY 1;
+ three 
+-------
+ f
+ f
+ f
+ t
+ t
+ t
+(6 rows)
+
+SELECT INT1NE(ID,IT) AS THREE FROM TEST_TINYINT ORDER BY 1;
+ three 
+-------
+ f
+ f
+ f
+ t
+ t
+ t
+(6 rows)
+
+SELECT INT1LT(ID,IT) AS ONE FROM TEST_TINYINT ORDER BY 1;
+ one 
+-----
+ f
+ f
+ f
+ f
+ t
+ t
+(6 rows)
+
+SELECT INT1LE(ID,IT) AS FOUR FROM TEST_TINYINT ORDER BY 1;
+ four 
+------
+ f
+ t
+ t
+ t
+ t
+ t
+(6 rows)
+
+SELECT INT1GT(ID,IT) AS ONE FROM TEST_TINYINT ORDER BY 1;
+ one 
+-----
+ f
+ f
+ f
+ f
+ f
+ t
+(6 rows)
+
+SELECT INT1GE(ID,IT) AS FOUR FROM TEST_TINYINT ORDER BY 1;
+ four 
+------
+ f
+ f
+ t
+ t
+ t
+ t
+(6 rows)
+
+DROP TABLE IF EXISTS TEST_TINYINT;
+CREATE TABLE TEST_TINYINT (ID TINYINT,IT TINYINT);
+INSERT INTO TEST_TINYINT VALUES (2,2);
+INSERT INTO TEST_TINYINT VALUES (0,5);
+INSERT INTO TEST_TINYINT VALUES (15,5);
+INSERT INTO TEST_TINYINT VALUES (255,5);
+INSERT INTO TEST_TINYINT VALUES (150,3);
+INSERT INTO TEST_TINYINT VALUES (50,0);
+SELECT ID,IT,int1pl(ID,IT) FROM TEST_TINYINT WHERE ID < 100 ORDER BY 1,2;
+ id | it | int1pl 
+----+----+--------
+ 0  | 5  | 5
+ 2  | 2  | 4
+ 15 | 5  | 20
+ 50 | 0  | 50
+(4 rows)
+
+SELECT ID,IT,int1pl(ID,IT) FROM TEST_TINYINT WHERE ID > 100 ORDER BY 1,2;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: int1pl
+SELECT ID,IT,int1mi(ID,IT) FROM TEST_TINYINT WHERE ID < 100 ORDER BY 1,2;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: int1mi
+SELECT ID,IT,int1mi(ID,IT) FROM TEST_TINYINT WHERE ID > 100 ORDER BY 1,2;
+ id  | it | int1mi 
+-----+----+--------
+ 150 | 3  | 147
+ 255 | 5  | 250
+(2 rows)
+
+SELECT ID,IT,int1mul(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: int1mul
+SELECT ID,IT,int1div(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
+ERROR:  division by zero
+CONTEXT:  referenced column: int1div
+SELECT ID,IT,int1and(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
+ id  | it | int1and 
+-----+----+---------
+ 0   | 5  | 0
+ 2   | 2  | 2
+ 15  | 5  | 5
+ 50  | 0  | 0
+ 150 | 3  | 2
+ 255 | 5  | 5
+(6 rows)
+
+SELECT ID,IT,int1or(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;	
+ id  | it | int1or 
+-----+----+--------
+ 0   | 5  | 5
+ 2   | 2  | 2
+ 15  | 5  | 15
+ 50  | 0  | 50
+ 150 | 3  | 151
+ 255 | 5  | 255
+(6 rows)
+
+SELECT ID,IT,int1xor(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
+ id  | it | int1xor 
+-----+----+---------
+ 0   | 5  | 5
+ 2   | 2  | 0
+ 15  | 5  | 10
+ 50  | 0  | 50
+ 150 | 3  | 149
+ 255 | 5  | 250
+(6 rows)
+
+SELECT ID,IT,int1not(IT) FROM TEST_TINYINT ORDER BY 1,2;	
+ id  | it | int1not 
+-----+----+---------
+ 0   | 5  | 250
+ 2   | 2  | 253
+ 15  | 5  | 250
+ 50  | 0  | 255
+ 150 | 3  | 252
+ 255 | 5  | 250
+(6 rows)
+
+SELECT ID,IT,int1shl(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
+ id  | it | int1shl 
+-----+----+---------
+ 0   | 5  | 0
+ 2   | 2  | 8
+ 15  | 5  | 224
+ 50  | 0  | 50
+ 150 | 3  | 176
+ 255 | 5  | 224
+(6 rows)
+
+SELECT ID,IT,int1shr(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
+ id  | it | int1shr 
+-----+----+---------
+ 0   | 5  | 0
+ 2   | 2  | 0
+ 15  | 5  | 0
+ 50  | 0  | 50
+ 150 | 3  | 18
+ 255 | 5  | 7
+(6 rows)
+
+	
+SELECT ID,IT,int1larger(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
+ id  | it | int1larger 
+-----+----+------------
+ 0   | 5  | 5
+ 2   | 2  | 2
+ 15  | 5  | 15
+ 50  | 0  | 50
+ 150 | 3  | 150
+ 255 | 5  | 255
+(6 rows)
+
+SELECT ID,IT,int1smaller(ID,IT) FROM TEST_TINYINT ORDER BY 1,2;
+ id  | it | int1smaller 
+-----+----+-------------
+ 0   | 5  | 0
+ 2   | 2  | 2
+ 15  | 5  | 5
+ 50  | 0  | 0
+ 150 | 3  | 3
+ 255 | 5  | 5
+(6 rows)
+
+	
+SELECT int1abs(ID) FROM TEST_TINYINT ORDER BY 1;
+ int1abs 
+---------
+ 0
+ 2
+ 15
+ 50
+ 150
+ 255
+(6 rows)
+
+SELECT int1mod(ID,IT) FROM TEST_TINYINT ORDER BY 1;
+ int1mod 
+---------
+ 0
+ 0
+ 0
+ 0
+ 0
+ 50
+(6 rows)
+
+	  
+SELECT int1um(ID) FROM TEST_TINYINT ORDER BY 1;
+ int1um 
+--------
+   -255
+   -150
+    -50
+    -15
+     -2
+      0
+(6 rows)
+
+SELECT int1up(ID) FROM TEST_TINYINT ORDER BY 1;
+ int1up 
+--------
+ 0
+ 2
+ 15
+ 50
+ 150
+ 255
+(6 rows)
+
+SELECT int1inc(ID) FROM TEST_TINYINT ORDER BY 1;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: int1inc
+ 
+/*
+ * adapt Sybase, add a new data type tinyint
+ * test for order by 
+ */
+DROP TABLE IF EXISTS TEST_TINYINT;
+CREATE TABLE TEST_TINYINT (ID INT1);
+INSERT INTO TEST_TINYINT VALUES (1);
+INSERT INTO TEST_TINYINT VALUES (2);
+INSERT INTO TEST_TINYINT VALUES (3);
+INSERT INTO TEST_TINYINT VALUES (4);
+SELECT * FROM TEST_TINYINT ORDER BY 1;
+ id 
+----
+ 1
+ 2
+ 3
+ 4
+(4 rows)
+
+SELECT ID FROM TEST_TINYINT ORDER BY ID;
+ id 
+----
+ 1
+ 2
+ 3
+ 4
+(4 rows)
+
+/*
+ * adapt Sybase, add a new data type tinyint
+ *		i1toi2			- convert int1 to int2
+ *		i1toi4			- convert int1 to int4
+ *		i1toi8			- convert int1 to int8
+ *		i1tof4			- convert int1 to float4
+ *		i1tof8			- convert int1 to float8
+ *		int1_bool		- convert int1 to bool
+ *		int1_numeric	- convert int1 to numeric
+ *		i2toi1			- convert int2 to int1
+ *		i4toi1			- convert int4 to int1
+ *		i8toi1			- convert int8 to int1
+ *		f4toi1			- convert float4 to int1
+ *		f8toi1			- convert float8 to int1
+ *		bool_int1		- convert bool to int1
+ *		numeric_int1	- convert numeric to int1
+ */
+DROP TABLE IF EXISTS TEST_TINYINT;
+CREATE TABLE TEST_TINYINT (ID INT1);
+INSERT INTO TEST_TINYINT VALUES (1);
+SELECT * FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT I1TOI2(ID) FROM TEST_TINYINT ORDER BY 1;
+ i1toi2 
+--------
+      1
+(1 row)
+
+SELECT I1TOI4(ID) FROM TEST_TINYINT ORDER BY 1;
+ i1toi4 
+--------
+      1
+(1 row)
+
+SELECT I1TOI8(ID) FROM TEST_TINYINT ORDER BY 1;
+ i1toi8 
+--------
+      1
+(1 row)
+
+SELECT I1TOF4(ID) FROM TEST_TINYINT ORDER BY 1;
+ i1tof4 
+--------
+      1
+(1 row)
+
+SELECT I1TOF8(ID) FROM TEST_TINYINT ORDER BY 1;
+ i1tof8 
+--------
+      1
+(1 row)
+
+SELECT BOOL(ID) FROM TEST_TINYINT ORDER BY 1;
+ bool 
+------
+ t
+(1 row)
+
+DROP TABLE TEST_TINYINT;
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID int2);
+INSERT INTO TEST_TINYINT VALUES (1);
+SELECT i2toi1(id) FROM TEST_TINYINT;
+ i2toi1 
+--------
+ 1
+(1 row)
+
+DROP TABLE TEST_TINYINT;
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID int4);
+INSERT INTO TEST_TINYINT VALUES (1);
+INSERT INTO TEST_TINYINT VALUES (0);
+INSERT INTO TEST_TINYINT VALUES (255);
+INSERT INTO TEST_TINYINT VALUES (-1);
+INSERT INTO TEST_TINYINT VALUES (256);
+SELECT i4toi1(id) FROM TEST_TINYINT;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: i4toi1
+DROP TABLE TEST_TINYINT;
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID int8);
+INSERT INTO TEST_TINYINT VALUES (1);
+INSERT INTO TEST_TINYINT VALUES (0);
+INSERT INTO TEST_TINYINT VALUES (255);
+INSERT INTO TEST_TINYINT VALUES (-1);
+INSERT INTO TEST_TINYINT VALUES (256);
+SELECT i8toi1(id) FROM TEST_TINYINT;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: i8toi1
+DROP TABLE IF EXISTS TEST_TINYINT;
+CREATE TABLE TEST_TINYINT (ID float4);
+INSERT INTO TEST_TINYINT VALUES (1);
+INSERT INTO TEST_TINYINT VALUES (0);
+INSERT INTO TEST_TINYINT VALUES (255);
+INSERT INTO TEST_TINYINT VALUES (-1);
+INSERT INTO TEST_TINYINT VALUES (256);
+SELECT f4toi1(id) FROM TEST_TINYINT;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: f4toi1
+DROP TABLE IF EXISTS TEST_TINYINT;
+CREATE TABLE TEST_TINYINT (ID float8);
+INSERT INTO TEST_TINYINT VALUES (1);
+INSERT INTO TEST_TINYINT VALUES (0);
+INSERT INTO TEST_TINYINT VALUES (255);
+INSERT INTO TEST_TINYINT VALUES (-1);
+INSERT INTO TEST_TINYINT VALUES (256);
+SELECT f8toi1(id) FROM TEST_TINYINT;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: f8toi1
+DROP TABLE TEST_TINYINT;
+SELECT BOOL_INT1('t');
+ bool_int1 
+-----------
+ 1
+(1 row)
+
+SELECT BOOL_INT1('f');
+ bool_int1 
+-----------
+ 0
+(1 row)
+
+SELECT BOOL_INT1(null);
+ bool_int1 
+-----------
+ 
+(1 row)
+
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID INT1);
+INSERT INTO TEST_TINYINT VALUES (1);
+SELECT int1_NUMERIC(id) FROM TEST_TINYINT;
+ int1_numeric 
+--------------
+            1
+(1 row)
+
+SELECT ID::OID FROM TEST_TINYINT;
+ id 
+----
+  1
+(1 row)
+
+SELECT ID::TEXT FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT ID::VARCHAR FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT ID::REGPROC FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT ID::REGOPER FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT ID::REGOPERATOR FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT ID::REGCLASS FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT ID::REGTYPE FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT ID::REGCONFIG FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+SELECT ID::INTERVAL FROM TEST_TINYINT;
+   id    
+---------
+ @ 1 day
+(1 row)
+
+SELECT ID::REGDICTIONARY  FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+DROP TABLE TEST_TINYINT;
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID NUMERIC);
+INSERT INTO TEST_TINYINT VALUES (1);
+INSERT INTO TEST_TINYINT VALUES (0);
+INSERT INTO TEST_TINYINT VALUES (255);
+INSERT INTO TEST_TINYINT VALUES (-1);
+INSERT INTO TEST_TINYINT VALUES (256);
+SELECT numeric_int1(id) FROM TEST_TINYINT;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: numeric_int1
+DROP TABLE TEST_TINYINT;
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID int1);
+INSERT INTO TEST_TINYINT VALUES (1);
+SELECT int1_numeric(id) FROM TEST_TINYINT;
+ int1_numeric 
+--------------
+            1
+(1 row)
+
+DROP TABLE TEST_TINYINT;
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+CREATE TABLE TEST_TINYINT (ID text);
+INSERT INTO TEST_TINYINT VALUES (1);
+SELECT id :: INT1 FROM TEST_TINYINT;
+ id 
+----
+ 1
+(1 row)
+
+DROP TABLE TEST_TINYINT;
+---add for test of new data type tinyint
+DROP TABLE IF EXISTS TEST;
+NOTICE:  table "test" does not exist, skipping
+CREATE TABLE TEST (ID TEXT);
+INSERT INTO TEST VALUES ('100');
+SELECT INT1(ID) FROM TEST;
+ int1 
+------
+ 100
+(1 row)
+
+INSERT INTO TEST VALUES ('1001');
+SELECT INT1(ID) FROM TEST;
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: int1
+DROP TABLE TEST;
+DROP TABLE IF EXISTS TEST;
+NOTICE:  table "test" does not exist, skipping
+CREATE TABLE TEST (ID INT1);
+INSERT INTO TEST VALUES (12);
+INSERT INTO TEST VALUES (123);
+SELECT TO_TEXT(ID) FROM TEST ORDER BY ID;
+ to_text 
+---------
+ 12
+ 123
+(2 rows)
+
+SELECT TO_TEXT(ID) FROM TEST ORDER BY ID;
+ to_text 
+---------
+ 12
+ 123
+(2 rows)
+
+SELECT NUMTODAY(ID) FROM TEST  ORDER BY 1;
+  numtoday  
+------------
+ @ 12 days
+ @ 123 days
+(2 rows)
+
+DROP TABLE TEST;
+DROP TABLE IF EXISTS TEST_TINYINT;
+NOTICE:  table "test_tinyint" does not exist, skipping
+/*CREATE TABLE TEST_TINYINT (ID INT1 primary key);
+INSERT INTO TEST_TINYINT VALUES (15);
+INSERT INTO TEST_TINYINT VALUES (22);
+INSERT INTO TEST_TINYINT VALUES (13);
+INSERT INTO TEST_TINYINT VALUES (1);
+SELECT * FROM TEST_TINYINT;
+SELECT * FROM TEST_TINYINT ORDER BY ID;
+SELECT * FROM TEST_TINYINT WHERE ID LIKE '1';
+SELECT * FROM TEST_TINYINT WHERE ID LIKE '1%';
+DROP TABLE IF EXISTS TEST_TINYINT;*/
+/* f.BINARY_DOUBLE type */
+CREATE TABLE test_type(
+	my_double BINARY_DOUBLE
+	);
+INSERT INTO test_type VALUES(15.23448);
+INSERT INTO test_type VALUES(1E-323);
+INSERT INTO test_type VALUES(1E-324);
+--?ERROR.*
+CONTEXT:  referenced column: my_double
+INSERT INTO test_type VALUES(1E+308);
+INSERT INTO test_type VALUES(1E+309);
+ERROR:  "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
+CONTEXT:  referenced column: my_double
+SELECT * FROM test_type order by 1;
+       my_double       
+-----------------------
+ 9.88131291682493e-324
+              15.23448
+                1e+308
+(3 rows)
+
+DROP TABLE test_type;
+/* g.Type BINARY_INTEGER */
+CREATE TABLE test_type(
+	my_double BINARY_INTEGER
+	);
+INSERT INTO test_type values(0);
+INSERT INTO test_type values(-2147483648);
+INSERT INTO test_type values(2147483647);
+INSERT INTO test_type values(2147483648);
+ERROR:  integer out of range
+CONTEXT:  referenced column: my_double
+INSERT INTO test_type values(-2147483649);
+ERROR:  integer out of range
+CONTEXT:  referenced column: my_double
+SELECT * FROM test_type order by 1;
+  my_double  
+-------------
+ -2147483648
+           0
+  2147483647
+(3 rows)
+
+DROP TABLE test_type;
+/* h.Integer(p,s) format */
+CREATE TABLE test_type(
+	my_integer INTEGER(10,4)
+	);
+INSERT INTO test_type values(99999.9);
+INSERT INTO test_type values(999999.9);
+INSERT INTO test_type values(9999999.9);
+ERROR:  numeric field overflow
+DETAIL:  A field with precision 10, scale 4 must round to an absolute value less than 10^6.
+CONTEXT:  referenced column: my_integer
+SELECT * FROM test_type order by 1;
+ my_integer  
+-------------
+  99999.9000
+ 999999.9000
+(2 rows)
+
+DROP TABLE test_type;
+/* 2)tests for implicit conversion between some data types */
+/* a.test implicit conversion between int2 and int4 */
+create table i4ti2(
+	a int2,
+	b int4
+);
+insert into i4ti2 values(9,10);
+select a&b from i4ti2;
+ ?column? 
+----------
+        8
+(1 row)
+
+drop table i4ti2;
+/* b.test implicit conversion between number(including 
+     int2,int4,int8,float4,float8,number) and text */
+select substr('123',1,2)*12;
+ ?column? 
+----------
+      144
+(1 row)
+
+select 123::int2||1;
+ ?column? 
+----------
+ 1231
+(1 row)
+
+select 123::int4||1;
+ ?column? 
+----------
+ 1231
+(1 row)
+
+select 123::int8||1;
+ ?column? 
+----------
+ 1231
+(1 row)
+
+select 123.1::float4||1;
+ ?column? 
+----------
+ 123.11
+(1 row)
+
+select 123.1::float8||1;
+ ?column? 
+----------
+ 123.11
+(1 row)
+
+values(1,1),(2,2.2);
+ column1 | column2 
+---------+---------
+       1 |       1
+       2 |     2.2
+(2 rows)
+
+SELECT 1 AS one UNION SELECT 1.1::float8;
+ one 
+-----
+   1
+ 1.1
+(2 rows)
+
+select greatest(1, 1.1);
+ greatest 
+----------
+      1.1
+(1 row)
+
+select greatest(1.1, 1);
+ greatest 
+----------
+      1.1
+(1 row)
+
+select least(1, 0.9);
+ least 
+-------
+    .9
+(1 row)
+
+select least(0.9, 1);
+ least 
+-------
+    .9
+(1 row)
+
+create or replace function test_cast(a numeric)
+returns int as
+$$
+declare
+
+begin
+	case a
+		when 1.1 then
+			raise info '%', '1.1';
+		when 1 then
+			raise info '%', '1';
+	end case;
+	return 1;
+end;
+$$ language plpgsql;
+select test_cast(1);
+INFO:  1
+CONTEXT:  referenced column: test_cast
+ test_cast 
+-----------
+         1
+(1 row)
+
+select test_cast(1.1);
+INFO:  1.1
+CONTEXT:  referenced column: test_cast
+ test_cast 
+-----------
+         1
+(1 row)
+
+create table test_cast( a numeric[]);
+insert into test_cast values(array[1,2,1.1,4]);
+select * from test_cast;
+      a      
+-------------
+ {1,2,1.1,4}
+(1 row)
+
+drop table test_cast;
+create table test_cast (a int);
+create table test_cast1 (a numeric);
+insert into test_cast values(1);
+insert into test_cast1 values(1.1);
+select * from test_cast join test_cast1 using (a);
+ a 
+---
+(0 rows)
+
+select * from test_cast where a in (1.1,2,3);
+ a 
+---
+(0 rows)
+
+drop table test_cast;
+drop table test_cast1;
+drop function test_cast(numeric);
+create table test_raw(r raw);
+insert into test_raw values ('a');
+select r from test_raw order by r;
+ r  
+----
+ 0A
+(1 row)
+
+drop table test_raw;
+create table test_raw (r raw);
+insert into test_raw values ('a');
+insert into test_raw values ('b');
+insert into test_raw values ('s');
+ERROR:  invalid hexadecimal digit: "s"
+LINE 1: insert into test_raw values ('s');
+                                     ^
+CONTEXT:  referenced column: r
+insert into test_raw values ('as');
+ERROR:  invalid hexadecimal digit: "s"
+LINE 1: insert into test_raw values ('as');
+                                     ^
+CONTEXT:  referenced column: r
+insert into test_raw values ('c');
+insert into test_raw values ('f');
+insert into test_raw values ('dd');
+insert into test_raw values ('d');
+insert into test_raw values ('e');
+insert into test_raw values ('12');
+select r from test_raw order by r desc;
+ r  
+----
+ DD
+ 12
+ 0F
+ 0E
+ 0D
+ 0C
+ 0B
+ 0A
+(8 rows)
+
+select r from test_raw order by r asc;
+ r  
+----
+ 0A
+ 0B
+ 0C
+ 0D
+ 0E
+ 0F
+ 12
+ DD
+(8 rows)
+
+drop table test_raw;
+create table test_raw (a raw(1), b raw(1));
+insert into test_raw values ('a', 'a');
+insert into test_raw values ('b', 'c');
+insert into test_raw values ('d', '9');
+insert into test_raw values ('6', '6');
+insert into test_raw values ('5', 'f');
+select * from test_raw where a < b order by a desc;
+ a  | b  
+----+----
+ 0B | 0C
+ 05 | 0F
+(2 rows)
+
+select * from test_raw where a > b order by b asc;
+ a  | b  
+----+----
+ 0D | 09
+(1 row)
+
+select * from test_raw where a < b or a > b order by a desc;
+ a  | b  
+----+----
+ 0D | 09
+ 0B | 0C
+ 05 | 0F
+(3 rows)
+
+select * from test_raw where a < b or a > b order by a asc;
+ a  | b  
+----+----
+ 05 | 0F
+ 0B | 0C
+ 0D | 09
+(3 rows)
+
+select * from test_raw where a = b order by a desc;
+ a  | b  
+----+----
+ 0A | 0A
+ 06 | 06
+(2 rows)
+
+select * from test_raw where a = b order by a asc;
+ a  | b  
+----+----
+ 06 | 06
+ 0A | 0A
+(2 rows)
+
+select * from test_raw where a >= b order by a desc;
+ a  | b  
+----+----
+ 0D | 09
+ 0A | 0A
+ 06 | 06
+(3 rows)
+
+select * from test_raw where a >= b order by a asc;
+ a  | b  
+----+----
+ 06 | 06
+ 0A | 0A
+ 0D | 09
+(3 rows)
+
+select * from test_raw where a <= b order by a desc;
+ a  | b  
+----+----
+ 0B | 0C
+ 0A | 0A
+ 06 | 06
+ 05 | 0F
+(4 rows)
+
+select * from test_raw where a <= b order by a asc;
+ a  | b  
+----+----
+ 05 | 0F
+ 06 | 06
+ 0A | 0A
+ 0B | 0C
+(4 rows)
+
+drop table test_raw;
+create table test_raw1 (a raw(1), b raw(1));
+create table test_raw2 (a raw(1), b raw(1));
+insert into test_raw1 values ('a', 'a');
+insert into test_raw1 values ('b', '4');
+insert into test_raw1 values ('2', '9');
+insert into test_raw1 values ('6', '6');
+insert into test_raw1 values ('5', 'e');
+insert into test_raw2 values ('a', 'a');
+insert into test_raw2 values ('d', 'c');
+insert into test_raw2 values ('d', '9');
+insert into test_raw2 values ('2', '6');
+insert into test_raw2 values ('1', 'f');
+select * from test_raw1 where a like 'd';
+ a | b 
+---+---
+(0 rows)
+
+select * from test_raw1 test1 cross join test_raw2 test2 where test1.a = test2.b order by 1,2;
+ a  | b  | a  | b  
+----+----+----+----
+ 06 | 06 | 02 | 06
+ 0A | 0A | 0A | 0A
+(2 rows)
+
+select * from test_raw1 test1 join test_raw2 test2 using(a) order by 1;
+ a  | b  | b  
+----+----+----
+ 02 | 09 | 06
+ 0A | 0A | 0A
+(2 rows)
+
+select * from test_raw1 test1 full join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 01 |    | 0F
+ 02 | 09 | 06
+ 05 | 0E | 
+ 06 | 06 | 
+ 0A | 0A | 0A
+ 0B | 04 | 
+ 0D |    | 09
+ 0D |    | 0C
+(8 rows)
+
+select * from test_raw1 test1 left join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 02 | 09 | 06
+ 05 | 0E | 
+ 06 | 06 | 
+ 0A | 0A | 0A
+ 0B | 04 | 
+(5 rows)
+
+select * from test_raw1 test1 right join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 01 |    | 0F
+ 02 | 09 | 06
+ 0A | 0A | 0A
+ 0D |    | 09
+ 0D |    | 0C
+(5 rows)
+
+select * from test_raw1 test1 inner join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 02 | 09 | 06
+ 0A | 0A | 0A
+(2 rows)
+
+select * from test_raw1 test1 inner join test_raw2 test2 using(a) order by 1,2,3;
+ a  | b  | b  
+----+----+----
+ 02 | 09 | 06
+ 0A | 0A | 0A
+(2 rows)
+
+select * from test_raw1 test1 natural join test_raw2 test2;
+ a  | b  
+----+----
+ 0A | 0A
+(1 row)
+
+drop table test_raw1;
+drop table test_raw2;
+reset search_path;

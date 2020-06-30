@@ -1,0 +1,51 @@
+\! echo "" >@abs_srcdir@/gsql_parallel.sql
+\! echo "drop table if exists test_tmp;" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "create temp table test_tmp (id bigint) with (orientation = column);" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "\parallel on 2" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "insert into test_tmp values (generate_series(1,20));" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "insert into test_tmp values (generate_series(1,20));" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "insert into test_tmp values (generate_series(1,20));" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "insert into test_tmp values (generate_series(1,20));" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "insert into test_tmp values (generate_series(1,20));" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "insert into test_tmp values (generate_series(1,20));" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "\parallel off" >>@abs_srcdir@/gsql_parallel.sql
+\! echo "select count(*) from test_tmp;" >>@abs_srcdir@/gsql_parallel.sql
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/gsql_parallel.sql
+gsql:@abs_srcdir@/gsql_parallel.sql:2: NOTICE:  table "test_tmp" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+Parallel is on with scale 2.
+Parallel is off.
+SET
+INSERT 0 20
+INSERT 0 20
+INSERT 0 20
+INSERT 0 20
+INSERT 0 20
+INSERT 0 20
+ count 
+-------
+   120
+(1 row)
+
+--?
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/gsql_parallel.sql
+--?
+DROP TABLE
+CREATE TABLE
+Parallel is on with scale 2.
+Parallel is off.
+SET
+INSERT 0 20
+INSERT 0 20
+INSERT 0 20
+INSERT 0 20
+INSERT 0 20
+INSERT 0 20
+ count 
+-------
+   120
+(1 row)
+
+--?
+\! rm @abs_srcdir@/gsql_parallel.sql

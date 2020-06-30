@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<scene name="default" desc="The tool performs an inspection for the cluster.">
+    <configuration/>
+
+    <allowitems>
+        <item name="CheckProcMem"/>
+        <item name="CheckCPU"/>
+            <threshold>
+                StandardCPUIdle=10;
+            </threshold>
+        <item name="CheckSlowDisk"/>
+        <item name="CheckNetWorkDrop"/>
+            <threshold>
+                dropRate=1;
+            </threshold>
+        <item name="CheckClusterState"/>
+        <item name="CheckDBConnection"/>
+    </allowitems>
+</scene>

@@ -1,0 +1,32 @@
+<refentry id="SQL-ALTER_NODE">
+<refmeta>
+<refentrytitle>ALTER NODE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER NODE</refname>
+<refpurpose>alter a cluster node</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER NODE nodename WITH
+  (
+    [ TYPE = nodetype,]
+    [ HOST = hostname,]
+    [ PORT = portnum,]
+    [ HOST1 = 'hostname',]
+    [ PORT1 = portnum,]
+    [ HOSTPRIMARY [ = boolean ],]
+    [ PRIMARY [ = boolean ],]
+    [ PREFERRED [ = boolean ],]
+    [ SCTP_PORT = portnum,]
+    [ CONTROL_PORT = portnum,]
+    [ SCTP_PORT1 = portnum,]
+    [ CONTROL_PORT1 = portnum, ]
+    [ NODEIS_CENTRAL [= boolean], ]
+    [ NODEIS_ACTIVE [= boolean] ]
+  );
+</synopsis>
+</refsynopsisdiv>
+</refentry>

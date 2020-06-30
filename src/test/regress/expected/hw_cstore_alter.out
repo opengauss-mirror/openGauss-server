@@ -1,0 +1,521 @@
+-- 1. column partitioned table
+CREATE TABLE hw_cstore_alter1_t3 (a int, b int, c decimal(20, 0) ) with (orientation = column)
+PARTITION BY RANGE(a)(
+PARTITION p1 values less than (10),
+PARTITION p2 values less than (20),
+PARTITION p3 values less than (30)
+);
+INSERT INTO hw_cstore_alter1_t3 VALUES (1, 2, 20), (12, 22, 40), (24, 55, 100);
+ALTER TABLE hw_cstore_alter1_t3 RENAME a TO a1; -- ok
+SELECT a1 FROM hw_cstore_alter1_t3 ORDER BY 1;
+ a1 
+----
+  1
+ 12
+ 24
+(3 rows)
+
+ALTER TABLE hw_cstore_alter1_t3 RENAME COLUMN b TO b1; -- ok
+SELECT b1 FROM hw_cstore_alter1_t3 ORDER BY 1;
+ b1 
+----
+  2
+ 22
+ 55
+(3 rows)
+
+ALTER TABLE hw_cstore_alter1_t3 RENAME c TO a1; -- failed, name conflicts
+ERROR:  column "a1" of relation "hw_cstore_alter1_t3" already exists
+ALTER TABLE hw_cstore_alter1_t3 RENAME c TO xmin; -- failed, conflict with system column name
+ERROR:  column name "xmin" conflicts with a system column name
+SELECT c FROM hw_cstore_alter1_t3 ORDER BY 1;
+  c  
+-----
+  20
+  40
+ 100
+(3 rows)
+
+ALTER TABLE hw_cstore_alter1_t3 RENAME c TO abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234; -- ok , but truncate
+NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123"
+SELECT * FROM hw_cstore_alter1_t3 ORDER BY a1;
+ a1 | b1 | abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123 
+----+----+-----------------------------------------------------------------
+  1 |  2 |                                                              20
+ 12 | 22 |                                                              40
+ 24 | 55 |                                                             100
+(3 rows)
+
+ALTER TABLE hw_cstore_alter1_t3 RENAME abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234 TO c; -- ok
+NOTICE:  identifier "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij123"
+-- 1.1 column partitioned index
+CREATE INDEX idx_hw_cstore_alter1_t3 ON hw_cstore_alter1_t3(b1) LOCAL;
+ALTER INDEX idx_hw_cstore_alter1_t3 RENAME TO idx1_hw_cstore_alter1_t3; -- ok
+select count(1) from pg_class where relname = 'idx1_hw_cstore_alter1_t3';
+ count 
+-------
+     1
+(1 row)
+
+-- 2. column partition
+ALTER TABLE hw_cstore_alter1_t3 RENAME PARTITION p1 TO p2; -- failed, name conflicts
+ERROR:  partition "p2" of relation "hw_cstore_alter1_t3" already exists
+ALTER TABLE IF EXISTS hw_cstore_alter1_t3 RENAME PARTITION p1 TO p2; -- failed, name conflicts
+ERROR:  partition "p2" of relation "hw_cstore_alter1_t3" already exists
+ALTER TABLE IF EXISTS hw_cstore_alter1_t3 RENAME PARTITION FOR (5) TO p2; -- failed, name conflicts
+ERROR:  partition "p2" of relation "hw_cstore_alter1_t3" already exists
+ALTER TABLE hw_cstore_alter1_t3 RENAME PARTITION FOR (5) TO p2; -- failed, name conflicts
+ERROR:  partition "p2" of relation "hw_cstore_alter1_t3" already exists
+ALTER TABLE hw_cstore_alter1_t3 RENAME PARTITION FOR (5) TO p4; -- ok
+ALTER TABLE hw_cstore_alter1_t3 RENAME PARTITION p4 TO p5; -- ok
+ALTER TABLE hw_cstore_alter1_t3 RENAME PARTITION p6 TO p7; -- failed, partition not exist
+ERROR:  partition "p6" of relation "hw_cstore_alter1_t3" does not exist
+ALTER TABLE hw_cstore_alter1_t3 RENAME PARTITION FOR (100) TO p7; -- failed, partition not exist
+ERROR:  The partition number is invalid or out-of-range
+ALTER TABLE hw_cstore_alter1_t3 RENAME PARTITION p2 TO pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234; -- ok but truncate
+NOTICE:  identifier "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12"
+SELECT * FROM hw_cstore_alter1_t3 PARTITION (pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12) ORDER BY 1; -- ok
+ a1 | b1 | c  
+----+----+----
+ 12 | 22 | 40
+(1 row)
+
+SELECT * FROM hw_cstore_alter1_t3 PARTITION (pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234) ORDER BY 1; -- ok but truncate
+NOTICE:  identifier "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12"
+ a1 | b1 | c  
+----+----+----
+ 12 | 22 | 40
+(1 row)
+
+ALTER TABLE hw_cstore_alter1_t3 RENAME PARTITION pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234
+TO pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234; -- failed
+NOTICE:  identifier "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12"
+NOTICE:  identifier "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12"
+ERROR:  partition "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12" of relation "hw_cstore_alter1_t3" already exists
+-- 2.1 index partition
+\d+ hw_cstore_alter1_t3
+                    Table "public.hw_cstore_alter1_t3"
+ Column |     Type      | Modifiers | Storage | Stats target | Description 
+--------+---------------+-----------+---------+--------------+-------------
+ a1     | integer       |           | plain   |              | 
+ b1     | integer       |           | plain   |              | 
+ c      | numeric(20,0) |           | main    |              | 
+Indexes:
+    "idx1_hw_cstore_alter1_t3" psort (b1) LOCAL(PARTITION p1_b1_idx, PARTITION p2_b1_idx, PARTITION p3_b1_idx)  TABLESPACE pg_default
+Range partition by(a1)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=column, compression=low
+
+ALTER INDEX idx1_hw_cstore_alter1_t3 RENAME PARTITION p1_b1_idx TO p2_b1_idx; -- failed, name conflicts
+ERROR:  partition index "p2_b1_idx" already exists
+ALTER INDEX IF EXISTS idx1_hw_cstore_alter1_t3 RENAME PARTITION p7_b1_idx TO p1_b1_idx; -- failed, not found
+ERROR:  partition index "p7_b1_idx" does not exist
+ALTER INDEX idx1_hw_cstore_alter1_t3 RENAME PARTITION p1_b1_idx TO pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234; -- ok, but truncate
+NOTICE:  identifier "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12"
+ALTER INDEX idx1_hw_cstore_alter1_t3 RENAME PARTITION pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234 TO p1_b1_idx; -- ok
+NOTICE:  identifier "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234" will be truncated to "pabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12"
+DROP TABLE hw_cstore_alter1_t3;
+-- 3. update view on partition
+create table hw_cstore_alter_t4(id int) partition by range(id)
+(
+partition p1 values less than(5),
+partition p2 values less than(10)
+);
+INSERT INTO hw_cstore_alter_t4 values(1), (2), (3), (4);
+-- 3.1 partiton name
+create view v1_hw_cstore_alter_t4 as select id from hw_cstore_alter_t4 partition(p1);
+\d+ v1_hw_cstore_alter_t4
+         View "public.v1_hw_cstore_alter_t4"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+View definition:
+ SELECT hw_cstore_alter_t4.id
+   FROM hw_cstore_alter_t4 PARTITION(p1);
+
+alter table hw_cstore_alter_t4 rename partition p1 to pp1;
+\d+ v1_hw_cstore_alter_t4
+         View "public.v1_hw_cstore_alter_t4"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+View definition:
+ SELECT hw_cstore_alter_t4.id
+   FROM hw_cstore_alter_t4 PARTITION(pp1);
+
+SELECT COUNT(*) FROM v1_hw_cstore_alter_t4;
+ count 
+-------
+     4
+(1 row)
+
+-- 3.2 partition for (values list)
+create view v2_hw_cstore_alter_t4 as select id from hw_cstore_alter_t4 partition FOR (8);
+\d+ v2_hw_cstore_alter_t4
+         View "public.v2_hw_cstore_alter_t4"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+View definition:
+ SELECT hw_cstore_alter_t4.id
+   FROM hw_cstore_alter_t4 PARTITION FOR(8);
+
+alter table hw_cstore_alter_t4 rename partition p2 TO pp2;
+\d+ v2_hw_cstore_alter_t4
+         View "public.v2_hw_cstore_alter_t4"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+View definition:
+ SELECT hw_cstore_alter_t4.id
+   FROM hw_cstore_alter_t4 PARTITION FOR(8);
+
+SELECT COUNT(*) FROM v2_hw_cstore_alter_t4;
+ count 
+-------
+     0
+(1 row)
+
+DROP TABLE hw_cstore_alter_t4 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view v1_hw_cstore_alter_t4
+drop cascades to view v2_hw_cstore_alter_t4
+-- 3.10 column table
+create table hw_cstore_alter_t5(id int) with (orientation = column)
+partition by range(id)
+(
+partition p1 values less than(5),
+partition p2 values less than(10)
+);
+INSERT INTO hw_cstore_alter_t5 values(1), (2), (3), (4);
+-- 3.10.1 partition name
+create view v1_hw_cstore_alter_t5 as select id from hw_cstore_alter_t5 partition(p1);
+\d+ v1_hw_cstore_alter_t5
+         View "public.v1_hw_cstore_alter_t5"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+View definition:
+ SELECT hw_cstore_alter_t5.id
+   FROM hw_cstore_alter_t5 PARTITION(p1);
+
+alter table hw_cstore_alter_t5 rename partition p1 to pp1;
+\d+ v1_hw_cstore_alter_t5
+         View "public.v1_hw_cstore_alter_t5"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+View definition:
+ SELECT hw_cstore_alter_t5.id
+   FROM hw_cstore_alter_t5 PARTITION(pp1);
+
+SELECT COUNT(*) FROM v1_hw_cstore_alter_t5;
+ count 
+-------
+     4
+(1 row)
+
+-- 3.10.2 partition for (values list)
+create view v2_hw_cstore_alter_t5 as select id from hw_cstore_alter_t5 partition FOR (8);
+\d+ v2_hw_cstore_alter_t5
+         View "public.v2_hw_cstore_alter_t5"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+View definition:
+ SELECT hw_cstore_alter_t5.id
+   FROM hw_cstore_alter_t5 PARTITION FOR(8);
+
+alter table hw_cstore_alter_t5 rename partition p2 TO pp2;
+\d+ v2_hw_cstore_alter_t5
+         View "public.v2_hw_cstore_alter_t5"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+View definition:
+ SELECT hw_cstore_alter_t5.id
+   FROM hw_cstore_alter_t5 PARTITION FOR(8);
+
+SELECT COUNT(*) FROM v2_hw_cstore_alter_t5;
+ count 
+-------
+     0
+(1 row)
+
+DROP TABLE hw_cstore_alter_t5 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view v1_hw_cstore_alter_t5
+drop cascades to view v2_hw_cstore_alter_t5
+-- 4. alter table column set/reset attribute_option
+CREATE TABLE hw_cstore_alter_t6 (a int, b int, c int);
+ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a SET (n_distinct_inherited = 7);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a RESET (n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a SET (n_distinct = 7);
+ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a RESET (n_distinct);
+ALTER TABLE hw_cstore_alter_t6 ALTER COLUMN a RESET (n_distinct, n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+DROP TABLE hw_cstore_alter_t6;
+CREATE TABLE hw_cstore_alter_t7 (a int, b int, c int) with (internal_mask = 1024); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+CREATE TABLE hw_cstore_alter_t7 (a int, b int, c int) WITH (orientation = column);
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a SET (n_distinct_inherited = 7); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a RESET (n_distinct_inherited); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a SET (n_distinct = 7);
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a RESET (n_distinct);
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a RESET (n_distinct, n_distinct_inherited); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+\d+ hw_cstore_alter_t7
+                  Table "public.hw_cstore_alter_t7"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- 4.1 change storage type
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a SET STORAGE PLAIN; -- failed
+ERROR:  Storage type "plain" is meaningless for column relation
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a SET STORAGE EXTERNAL; -- failed
+ERROR:  Storage type "external" is meaningless for column relation
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a SET STORAGE EXTENDED; -- failed
+ERROR:  Storage type "extended" is meaningless for column relation
+ALTER TABLE hw_cstore_alter_t7 ALTER COLUMN a SET STORAGE MAIN; -- failed
+ERROR:  Storage type "main" is meaningless for column relation
+-- 4.2 set with/without oids
+ALTER TABLE hw_cstore_alter_t7 SET WITH OIDS; -- failed
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITH OIDS is not yet supported.
+ALTER TABLE hw_cstore_alter_t7 SET WITHOUT OIDS; -- failed
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITHOUT OIDS is not yet supported.
+-- 4.3 SET/RESET relation options
+-- 4.3.1 column table
+ALTER TABLE hw_cstore_alter_t7 SET (ORIENTATION = ROW); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t7 RESET (ORIENTATION); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t7 SET (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER TABLE hw_cstore_alter_t7 RESET (internal_mask); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER TABLE hw_cstore_alter_t7 SET (FILLFACTOR = 70); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "fillfactor" for column/timeseries relation
+ALTER TABLE hw_cstore_alter_t7 RESET (FILLFACTOR); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "fillfactor" for column/timeseries relation
+ALTER TABLE hw_cstore_alter_t7 SET (autovacuum_enabled = true); -- ok
+ALTER TABLE hw_cstore_alter_t7 RESET (autovacuum_enabled); -- ok
+ALTER TABLE hw_cstore_alter_t7 SET (security_barrier); -- failed
+ERROR:  unrecognized parameter "security_barrier"
+ALTER TABLE hw_cstore_alter_t7 RESET (security_barrier); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "security_barrier" for column/timeseries relation
+\d+ hw_cstore_alter_t7
+                  Table "public.hw_cstore_alter_t7"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- 4.3.2 psort table
+CREATE INDEX idx1_hw_cstore_alter_t7 ON hw_cstore_alter_t7(b) with (compression = 'low'); -- failed
+ERROR:  unrecognized parameter "compression"
+CREATE INDEX idx1_hw_cstore_alter_t7 ON hw_cstore_alter_t7(b) with (fillfactor = 100); -- failed
+ERROR:  unrecognized parameter "fillfactor"
+CREATE INDEX idx1_hw_cstore_alter_t7 ON hw_cstore_alter_t7(b) with (autovacuum_enabled = true); -- failed
+ERROR:  unrecognized parameter "autovacuum_enabled"
+CREATE INDEX idx1_hw_cstore_alter_t7 ON hw_cstore_alter_t7(b) with (security_barrier = on); -- failed
+ERROR:  unrecognized parameter "security_barrier"
+CREATE INDEX idx1_hw_cstore_alter_t7 ON hw_cstore_alter_t7(b) with (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+CREATE INDEX idx1_hw_cstore_alter_t7 ON hw_cstore_alter_t7(b) with (orientation = column); -- failed
+ERROR:  unrecognized parameter "orientation"
+CREATE INDEX idx1_hw_cstore_alter_t7 ON hw_cstore_alter_t7(b) with (max_batchrow = 60000, deltarow_threshold = 9999, partial_cluster_rows = 600000); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t7 SET (ORIENTATION = ROW); -- failed
+ERROR:  unrecognized parameter "orientation"
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (ORIENTATION); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER INDEX idx1_hw_cstore_alter_t7 SET (compression = 'yes'); -- failed
+ERROR:  unrecognized parameter "compression"
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (compression); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "compression" for psort index
+ALTER INDEX idx1_hw_cstore_alter_t7 SET (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (internal_mask); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER INDEX idx1_hw_cstore_alter_t7 SET (max_batchrow = 60000); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (max_batchrow); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t7 SET (deltarow_threshold = 5000); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (deltarow_threshold); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t7 SET (partial_cluster_rows = 700000); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (partial_cluster_rows); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t7 SET (security_barrier = false); -- failed
+ERROR:  unrecognized parameter "security_barrier"
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (security_barrier); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "security_barrier" for psort index
+ALTER INDEX idx1_hw_cstore_alter_t7 SET (FILLFACTOR = 70); -- failed
+ERROR:  unrecognized parameter "fillfactor"
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (FILLFACTOR); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "fillfactor" for psort index
+ALTER TABLE idx1_hw_cstore_alter_t7 SET (autovacuum_enabled = true); -- failed
+ERROR:  unrecognized parameter "autovacuum_enabled"
+ALTER INDEX idx1_hw_cstore_alter_t7 RESET (autovacuum_enabled); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "autovacuum_enabled" for psort index
+DROP INDEX idx1_hw_cstore_alter_t7;
+DROP TABLE hw_cstore_alter_t7;
+-- 4.3.3 row table
+CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (compression = 'high'); -- failed
+ERROR:  Value "high" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (max_batchrow = 60000); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "max_batchrow" for row relation
+CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (deltarow_threshold = 9999); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "deltarow_threshold" for row relation
+CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (partial_cluster_rows = 600000); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "partial_cluster_rows" for row relation
+CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (internal_mask = 1024); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+CREATE TABLE hw_cstore_alter_t8(a int , b int , c int ) with (compression = 'yes', fillfactor=70); -- ok
+ALTER TABLE hw_cstore_alter_t8 SET (compression = 'yes'); -- ok
+ALTER TABLE hw_cstore_alter_t8 SET (compression = 'no'); -- ok
+ALTER TABLE hw_cstore_alter_t8 SET (compression = 'low'); -- failed
+ERROR:  Value "low" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+ALTER TABLE hw_cstore_alter_t8 SET (compression = 'middle'); -- failed
+ERROR:  Value "middle" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+ALTER TABLE hw_cstore_alter_t8 SET (compression = 'high'); -- failed
+ERROR:  Value "high" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+\d+ hw_cstore_alter_t8
+                  Table "public.hw_cstore_alter_t8"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, fillfactor=70, compression=no
+
+ALTER TABLE hw_cstore_alter_t8 RESET (compression); -- ok
+\d+ hw_cstore_alter_t8
+                  Table "public.hw_cstore_alter_t8"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, fillfactor=70
+
+ALTER TABLE hw_cstore_alter_t8 SET (max_batchrow = 10000); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "max_batchrow" for row relation
+ALTER TABLE hw_cstore_alter_t8 RESET (max_batchrow); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "max_batchrow" for row relation
+ALTER TABLE hw_cstore_alter_t8 SET (deltarow_threshold = 9999); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "deltarow_threshold" for row relation
+ALTER TABLE hw_cstore_alter_t8 RESET (deltarow_threshold); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "deltarow_threshold" for row relation
+ALTER TABLE hw_cstore_alter_t8 SET (partial_cluster_rows = 600000); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "partial_cluster_rows" for row relation
+ALTER TABLE hw_cstore_alter_t8 RESET (partial_cluster_rows); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "partial_cluster_rows" for row relation
+ALTER TABLE hw_cstore_alter_t8 SET (ORIENTATION = COLUMN); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t8 SET (ORIENTATION = ROW); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t8 RESET (ORIENTATION); -- failed
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
+ALTER TABLE hw_cstore_alter_t8 SET (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER TABLE hw_cstore_alter_t8 RESET (internal_mask); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+DROP TABLE hw_cstore_alter_t8;
+CREATE TABLE hw_cstore_alter_t9(a int , b int , c int ); -- ok
+DROP TABLE hw_cstore_alter_t9;
+CREATE TABLE hw_cstore_alter_t9(a int , b int , c int ) with ( orientation = row ); -- ok
+-- 4.3.3.1 bree index
+CREATE INDEX idx1_hw_cstore_alter_t9 ON hw_cstore_alter_t9(b); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (fillfactor = 70); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (fillfactor); -- ok
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (compression = 'yes'); -- failed, unsupported
+ERROR:  unrecognized parameter "compression"
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (compression); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (autovacuum_enabled = true); -- failed, unsupported
+ERROR:  unrecognized parameter "autovacuum_enabled"
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (autovacuum_enabled); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (security_barrier = true); -- failed, unsupported
+ERROR:  unrecognized parameter "security_barrier"
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (security_barrier); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (max_batchrow=10000); -- failed
+ERROR:  unrecognized parameter "max_batchrow"
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (max_batchrow); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (orientation = column); -- failed
+ERROR:  unrecognized parameter "orientation"
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (orientation); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (internal_mask = 0); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (internal_mask); -- failed
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "internal_mask"
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (partial_cluster_rows = 600000); -- failed
+ERROR:  unrecognized parameter "partial_cluster_rows"
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (partial_cluster_rows); -- ok, ignore it
+ALTER INDEX idx1_hw_cstore_alter_t9 SET (deltarow_threshold = 5000); -- failed
+ERROR:  unrecognized parameter "deltarow_threshold"
+ALTER INDEX idx1_hw_cstore_alter_t9 RESET (deltarow_threshold); -- ok, ignore it
+\d+ idx1_hw_cstore_alter_t9
+ Index "public.idx1_hw_cstore_alter_t9"
+ Column |  Type   | Definition | Storage 
+--------+---------+------------+---------
+ b      | integer | b          | plain
+btree, for table "public.hw_cstore_alter_t9"
+
+DROP INDEX idx1_hw_cstore_alter_t9;
+drop TABLE hw_cstore_alter_t9;

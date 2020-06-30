@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<scene name="default" desc="The tool performs an inspection for the cluster.">
+    <configuration/>
+
+    <allowitems>
+        <item name="CheckClusterState"/>
+        <item name="CheckDirPermissions"/>
+        <item name="CheckGaussVer"/>
+        <item name="CheckIntegrity"/>
+        <item name="CheckDebugSwitch"/>
+        <item name="CheckEnvProfile"/>
+        <item name="CheckDBParams"/>
+        <item name="CheckDBConnection"/>
+        <item name="CheckLockNum"/>
+        <item name="CheckCursorNum"/>
+        <item name="CheckCurConnCount"/>
+        <item name="CheckInstallDiskUsage"/>
+        <item name="CheckLogDiskUsage"/>
+        <item name="CheckDataDiskUsage"/>
+        <item name="CheckTmpDiskUsage"/>
+    </allowitems>
+</scene>

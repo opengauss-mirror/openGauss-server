@@ -1,0 +1,56 @@
+<!--
+doc/src/sgml/ref/create_workload_group.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-CREATEWORKLOADGROUP">
+ <refmeta>
+  <refentrytitle>CREATE WORKLOAD GROUP</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>CREATE WORKLOAD GROUP</refname>
+  <refpurpose>create a new workload group</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-createworkloadgroup">
+  <primary>CREATE WORKLOAD GROUP</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+CREATE WORKLOAD GROUP <replaceable class="PARAMETER">wg_name</replaceable>
+    [USING RESOURCE POOL  <replaceable class="PARAMETER">pool_name</replaceable>
+        [WITH (ACT_STATEMENTS = <replaceable class="PARAMETER">counts</replaceable>]]
+</synopsis>
+ </refsynopsisdiv>
+<!--
+doc/src/sgml/ref/create_workload_group.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-CREATEWORKLOADGROUP">
+ <refmeta>
+  <refentrytitle>CREATE WORKLOAD GROUP</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>CREATE WORKLOAD GROUP</refname>
+  <refpurpose>create a new workload group</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-createworkloadgroup">
+  <primary>CREATE WORKLOAD GROUP</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+CREATE WORKLOAD GROUP <replaceable class="PARAMETER">wg_name</replaceable>
+    [USING RESOURCE POOL  <replaceable class="PARAMETER">pool_name</replaceable>
+        [WITH (ACT_STATEMENTS = <replaceable class="PARAMETER">counts</replaceable>]]
+</synopsis>
+ </refsynopsisdiv>

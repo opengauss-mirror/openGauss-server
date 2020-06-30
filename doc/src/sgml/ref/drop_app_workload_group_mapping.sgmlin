@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_APP_WORKLOAD_GROUP_MAPPING">
+<refmeta>
+<refentrytitle>DROP APP WORKLOAD GROUP MAPPING</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP APP WORKLOAD GROUP MAPPING</refname>
+<refpurpose>remove a workload group mapping</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP APP WORKLOAD GROUP MAPPING [ IF EXISTS ] app_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

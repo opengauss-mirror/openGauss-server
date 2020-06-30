@@ -1,0 +1,5 @@
+-- create temp view
+
+CREATE SCHEMA test_view_schema                                                                                                                                                        
+  CREATE TEMP VIEW testview AS SELECT 1;
+ 

@@ -1,0 +1,20 @@
+<refentry id="SQL-ALTERTRIGGER">
+<refmeta>
+<refentrytitle>ALTER TRIGGER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER TRIGGER</refname>
+<refpurpose>change the definition of a trigger</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<indexterm zone="sql-altertrigger">
+<primary>ALTER TRIGGER</primary>
+</indexterm>
+<refsynopsisdiv>
+<synopsis>
+ALTER TRIGGER name ON table_name RENAME TO new_name
+</synopsis>
+</refsynopsisdiv>
+</refentry>

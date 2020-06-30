@@ -1,0 +1,19 @@
+<refentry id="SQL-CREATE_SYNONYM">
+<refmeta>
+<refentrytitle>CREATE SYNONYM</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE SYNONYM</refname>
+<refpurpose>define a new synonym</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ OR REPLACE ] SYNONYM synonym_name
+    FOR object_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>
+
+

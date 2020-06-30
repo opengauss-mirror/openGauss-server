@@ -1,0 +1,54 @@
+--report error under single-node mode
+select getbucket(2, 1);
+ERROR:  unsupported proc in single node mode.
+CONTEXT:  referenced column: getbucket
+select getbucket(sysdate, 1);
+ERROR:  unsupported proc in single node mode.
+CONTEXT:  referenced column: getbucket
+select getbucket('123'::char, 1);
+ERROR:  unsupported proc in single node mode.
+CONTEXT:  referenced column: getbucket
+select get_remote_prepared_xacts();
+ERROR:  unsupported view in single node mode.
+CONTEXT:  referenced column: get_remote_prepared_xacts
+select global_clean_prepared_xacts(1,2);
+ERROR:  unsupported proc in single node mode.
+CONTEXT:  referenced column: global_clean_prepared_xacts
+select global_comm_get_client_info();
+ERROR:  unsupported view in single node mode.
+CONTEXT:  referenced column: global_comm_get_client_info
+select global_comm_get_recv_stream();
+ERROR:  unsupported view in single node mode.
+CONTEXT:  referenced column: global_comm_get_recv_stream
+select global_comm_get_send_stream();
+ERROR:  unsupported view in single node mode.
+CONTEXT:  referenced column: global_comm_get_send_stream
+select global_comm_get_status();
+ERROR:  unsupported view in single node mode.
+CONTEXT:  referenced column: global_comm_get_status
+create table t1 (a int);
+create table t2 (a int);
+select gs_switch_relfilenode('t1', 't2');
+ERROR:  function gs_switch_relfilenode(unknown, unknown) does not exist
+LINE 1: select gs_switch_relfilenode('t1', 't2');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: gs_switch_relfilenode
+select gs_wlm_get_workload_records(1);
+ERROR:  unsupported view in single node mode.
+CONTEXT:  referenced column: gs_wlm_get_workload_records
+select pg_cancel_invalid_query();
+ERROR:  unsupported proc in single node mode.
+CONTEXT:  referenced column: pg_cancel_invalid_query
+select pg_stat_get_wlm_session_info_internal(null,null,null,null);
+ERROR:  unsupported proc in single node mode.
+CONTEXT:  referenced column: pg_stat_get_wlm_session_info_internal
+select pgxc_gtm_snapshot_status();
+ERROR:  unsupported view in single node mode.
+CONTEXT:  referenced column: pgxc_gtm_snapshot_status
+select pgxc_snapshot_status();
+ERROR:  unsupported view in single node mode.
+CONTEXT:  referenced column: pgxc_snapshot_status
+--cleanup
+drop table t1;
+drop table t2;

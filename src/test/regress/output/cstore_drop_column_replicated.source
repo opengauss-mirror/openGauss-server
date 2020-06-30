@@ -1,0 +1,558 @@
+drop schema if exists cstore_drop_column_replicated;
+NOTICE:  schema "cstore_drop_column_replicated" does not exist, skipping
+create schema cstore_drop_column_replicated;
+set current_schema = 'cstore_drop_column_replicated';
+drop table if exists rowtable;
+NOTICE:  table "rowtable" does not exist, skipping
+drop table if exists coltable;
+NOTICE:  table "coltable" does not exist, skipping
+create table coltable(c1 int, c2 int, c3 text) with(orientation = column);
+create table rowtable(c1 int, c2 int, c3 text);
+insert into rowtable values(generate_series(1,10),generate_series(101,110),generate_series(1001,1010));
+insert into coltable select * from rowtable;
+insert into coltable values (11,111,1011);
+insert into coltable values (12,112,1012),(13,113,1013);
+insert into coltable (c2) values(114);
+insert into coltable values (15,115,1015),(16,116,1016);
+delete from coltable where c1 = 16;
+select * from coltable order by c1,c2,c3;
+ c1 | c2  |  c3  
+----+-----+------
+  1 | 101 | 1001
+  2 | 102 | 1002
+  3 | 103 | 1003
+  4 | 104 | 1004
+  5 | 105 | 1005
+  6 | 106 | 1006
+  7 | 107 | 1007
+  8 | 108 | 1008
+  9 | 109 | 1009
+ 10 | 110 | 1010
+ 11 | 111 | 1011
+ 12 | 112 | 1012
+ 13 | 113 | 1013
+ 15 | 115 | 1015
+    | 114 | 
+(15 rows)
+
+--UT1 DROP COLUMN
+ALTER TABLE COLTABLE DROP COLUMN C2;
+select * from coltable order by c1,c3;
+ c1 |  c3  
+----+------
+  1 | 1001
+  2 | 1002
+  3 | 1003
+  4 | 1004
+  5 | 1005
+  6 | 1006
+  7 | 1007
+  8 | 1008
+  9 | 1009
+ 10 | 1010
+ 11 | 1011
+ 12 | 1012
+ 13 | 1013
+ 15 | 1015
+    | 
+(15 rows)
+
+ALTER TABLE COLTABLE DROP COLUMN C1; 
+ALTER TABLE COLTABLE DROP COLUMN C3;
+ERROR:  must have at least one column
+--contains sequence on the dropped column
+drop table if exists seqTable;
+NOTICE:  table "seqtable" does not exist, skipping
+create table seqTable(c1 int, c2 serial, c3 int) with (orientation = column);
+NOTICE:  CREATE TABLE will create implicit sequence "seqtable_c2_seq" for serial column "seqtable.c2"
+insert into seqTable select * from rowtable;
+select * from seqTable order by c1,c2,c3;
+ c1 | c2  |  c3  
+----+-----+------
+  1 | 101 | 1001
+  2 | 102 | 1002
+  3 | 103 | 1003
+  4 | 104 | 1004
+  5 | 105 | 1005
+  6 | 106 | 1006
+  7 | 107 | 1007
+  8 | 108 | 1008
+  9 | 109 | 1009
+ 10 | 110 | 1010
+(10 rows)
+
+ALTER TABLE seqTable DROP COLUMN c2;
+select * from seqTable order by c1,c3;
+ c1 |  c3  
+----+------
+  1 | 1001
+  2 | 1002
+  3 | 1003
+  4 | 1004
+  5 | 1005
+  6 | 1006
+  7 | 1007
+  8 | 1008
+  9 | 1009
+ 10 | 1010
+(10 rows)
+
+drop table seqTable;
+--contains index on the dropped column
+truncate coltable;
+alter table coltable add c1 int;
+insert into coltable(c1,c3) select c1,c3 from rowtable;
+insert into coltable(c1,c3) values (11,1011);
+insert into coltable(c1,c3) values (12,1012),(13,1013);
+insert into coltable(c1,c3) values(NULL,NULL);
+insert into coltable(c1,c3) values (15,1015),(16,1016);
+delete from coltable where c1 = 16;
+create index c1c3Idx on coltable(c3,c1);
+create index c3Idx on coltable(c3);
+insert into coltable(c1,c3) values(17,1017),(18,1018);
+insert into coltable(c1,c3) values(19,1019);
+insert into coltable(c1) values(20);
+\d+ coltable
+            Table "cstore_drop_column_replicated.coltable"
+ Column |  Type   | Modifiers | Storage  | Stats target | Description 
+--------+---------+-----------+----------+--------------+-------------
+ c3     | text    |           | extended |              | 
+ c1     | integer |           | plain    |              | 
+Indexes:
+    "c1c3idx" psort (c3, c1) TABLESPACE pg_default
+    "c3idx" psort (c3) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=column, compression=low
+
+alter table coltable drop column c1;
+\d+ coltable
+          Table "cstore_drop_column_replicated.coltable"
+ Column | Type | Modifiers | Storage  | Stats target | Description 
+--------+------+-----------+----------+--------------+-------------
+ c3     | text |           | extended |              | 
+Indexes:
+    "c3idx" psort (c3) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=column, compression=low
+
+set enable_seqscan=off;
+select * from coltable where c3 IS NULL;
+ c3 
+----
+ 
+ 
+(2 rows)
+
+--drop partition column table
+drop table if exists cstore_part_table;
+NOTICE:  table "cstore_part_table" does not exist, skipping
+create table cstore_part_table
+(c1 int,
+c2 text,
+c3 int
+)with (orientation = column)
+partition by range (c3)
+(
+ partition cstore_part_table_p0 values less than (5),
+ partition cstore_part_table_p1 values less than (10),
+ partition cstore_part_table_p2 values less than (15),
+ partition cstore_part_table_p3 values less than (20)
+);
+insert into cstore_part_table select c3,c2,c1 from rowtable;
+alter table cstore_part_table drop column c3;  --should fail, can not drop partition key
+ERROR:  cannot drop partitioning column "c3"
+alter table cstore_part_table drop column c1;
+select * from cstore_part_table order by c2,c3;
+ c2  | c3 
+-----+----
+ 101 |  1
+ 102 |  2
+ 103 |  3
+ 104 |  4
+ 105 |  5
+ 106 |  6
+ 107 |  7
+ 108 |  8
+ 109 |  9
+ 110 | 10
+(10 rows)
+
+--test add column
+alter table coltable add column c2 int;
+select count(*) from coltable where c2 is null;
+ count 
+-------
+    19
+(1 row)
+
+alter table coltable add column c1 int default 3;
+select count(*) from coltable where c1 = 3;
+ count 
+-------
+    19
+(1 row)
+
+alter table coltable alter column c2 set default 2;
+select count(*) from coltable where c2 = 2;
+ count 
+-------
+     0
+(1 row)
+
+alter table coltable alter column c2 type text;
+alter table coltable alter column c3 type text;
+insert into coltable (c1) values(14);
+alter table cstore_part_table add column c1 text default 100;
+--test alter table add column, drop column in the stament statement
+alter table coltable drop column c2, add column c2 text default 100;
+alter table coltable add column c3 text default 1000, drop column c3;
+alter table coltable alter column c3 type int, drop column c3;
+ERROR:  column "c3" of relation "coltable" does not exist
+--test truncate table
+truncate coltable;
+select * from coltable;
+ c1 | c2 | c3 
+----+----+----
+(0 rows)
+
+select count(*) from cstore_part_table where c3 < 5;
+ count 
+-------
+     4
+(1 row)
+
+alter table cstore_part_table truncate partition cstore_part_table_p0;
+select count(*) from cstore_part_table where c3 < 5;
+ count 
+-------
+     0
+(1 row)
+
+truncate cstore_part_table;
+--bulkload
+insert into coltable(c1,c2,c3) select c1,c2,c3 from rowtable;
+insert into cstore_part_table(c1,c3,c2) select c3,c1,c2 from rowtable;
+select c1,cast(c2 as int),c3 from coltable
+minus 
+select c1,c2,c3 from rowtable;
+ c1 | c2 | c3 
+----+----+----
+(0 rows)
+
+select c1,c3,c2 from cstore_part_table
+minus
+select c3,c1,cast(c2 as text)from rowtable;
+ c1 | c3 | c2 
+----+----+----
+(0 rows)
+
+--transaction related
+start transaction;
+alter table coltable drop column c2;
+alter table cstore_part_table drop column c2;
+rollback;
+select c2,c3 from coltable order by c1,c2,c3;
+ c2  |  c3  
+-----+------
+ 101 | 1001
+ 102 | 1002
+ 103 | 1003
+ 104 | 1004
+ 105 | 1005
+ 106 | 1006
+ 107 | 1007
+ 108 | 1008
+ 109 | 1009
+ 110 | 1010
+(10 rows)
+
+select c2,c3 from cstore_part_table order by c1,c2,c3;
+ c2  | c3 
+-----+----
+ 101 |  1
+ 102 |  2
+ 103 |  3
+ 104 |  4
+ 105 |  5
+ 106 |  6
+ 107 |  7
+ 108 |  8
+ 109 |  9
+ 110 | 10
+(10 rows)
+
+start transaction;
+alter table coltable drop column c2;
+alter table cstore_part_table drop column c2;
+commit;
+truncate table coltable;
+truncate table cstore_part_table;
+insert into coltable(c1,c3) select c1,c3 from rowtable;
+insert into cstore_part_table(c3,c1) select c1,c3 from rowtable;
+select c1,c3 from coltable order by c1,c3;
+ c1 |  c3  
+----+------
+  1 | 1001
+  2 | 1002
+  3 | 1003
+  4 | 1004
+  5 | 1005
+  6 | 1006
+  7 | 1007
+  8 | 1008
+  9 | 1009
+ 10 | 1010
+(10 rows)
+
+select * from cstore_part_table order by c1,c3;
+ c3 |  c1  
+----+------
+  1 | 1001
+  2 | 1002
+  3 | 1003
+  4 | 1004
+  5 | 1005
+  6 | 1006
+  7 | 1007
+  8 | 1008
+  9 | 1009
+ 10 | 1010
+(10 rows)
+
+--analyze 
+analyze coltable;
+select count(*) from pg_stats where tablename = 'coltable' and schemaname = 'cstore_drop_column_replicated';
+ count 
+-------
+     2
+(1 row)
+
+select histogram_bounds from pg_stats where tablename = 'coltable' and attname = 'c3' and schemaname = 'cstore_drop_column_replicated';
+                  histogram_bounds                   
+-----------------------------------------------------
+ {1001,1002,1003,1004,1005,1006,1007,1008,1009,1010}
+(1 row)
+
+analyze cstore_part_table;
+select count(*) from pg_stats where tablename = 'cstore_part_table' and schemaname = 'cstore_drop_column_replicated';
+ count 
+-------
+     2
+(1 row)
+
+select histogram_bounds from pg_stats where tablename = 'cstore_part_table' and attname = 'c3' and schemaname = 'cstore_drop_column_replicated';
+    histogram_bounds    
+------------------------
+ {1,2,3,4,5,6,7,8,9,10}
+(1 row)
+
+--vacuum 
+vacuum full coltable;
+vacuum full cstore_part_table;
+--change table space
+drop tablespace if exists new_tablespace_cstore_drop_column_replicated;
+NOTICE:  Tablespace "new_tablespace_cstore_drop_column_replicated" does not exist, skipping.
+create tablespace new_tablespace_cstore_drop_column_replicated relative location 'new_tablespace_cstore_drop_column_replicated';
+alter table coltable set tablespace new_tablespace_cstore_drop_column_replicated;
+--test update
+update coltable set c3 = 101 where c1 = 1;
+update coltable set c3 = 100+c1 where c1>1;
+alter table coltable rename column c3 to c2;
+select c1,c2 from coltable order by c1,c2;
+ c1 | c2  
+----+-----
+  1 | 101
+  2 | 102
+  3 | 103
+  4 | 104
+  5 | 105
+  6 | 106
+  7 | 107
+  8 | 108
+  9 | 109
+ 10 | 110
+(10 rows)
+
+alter table coltable add column c3 text;
+update coltable set c3=1000+c1 where c3 is null;
+select c1,c2,c3 from coltable order by c1,c2,c3;
+ c1 | c2  |  c3  
+----+-----+------
+  1 | 101 | 1001
+  2 | 102 | 1002
+  3 | 103 | 1003
+  4 | 104 | 1004
+  5 | 105 | 1005
+  6 | 106 | 1006
+  7 | 107 | 1007
+  8 | 108 | 1008
+  9 | 109 | 1009
+ 10 | 110 | 1010
+(10 rows)
+
+--update table change partition
+update cstore_part_table set c3 = 10 where c3 =1;
+select count(*) from cstore_part_table where c3 = 1; 
+ count 
+-------
+     0
+(1 row)
+
+select * from cstore_part_table where c3 = 10 order by c1,c3;
+ c3 |  c1  
+----+------
+ 10 | 1001
+ 10 | 1010
+(2 rows)
+
+--merge partition
+select * from cstore_part_table partition (cstore_part_table_p0) order by c3;
+ c3 |  c1  
+----+------
+  2 | 1002
+  3 | 1003
+  4 | 1004
+(3 rows)
+
+select * from cstore_part_table partition (cstore_part_table_p1) order by c3;
+ c3 |  c1  
+----+------
+  5 | 1005
+  6 | 1006
+  7 | 1007
+  8 | 1008
+  9 | 1009
+(5 rows)
+
+alter table cstore_part_table merge partitions cstore_part_table_p0,cstore_part_table_p1 into partition cstore_part_table_p4;
+select * from cstore_part_table partition (cstore_part_table_p4) order by c3;
+ c3 |  c1  
+----+------
+  2 | 1002
+  3 | 1003
+  4 | 1004
+  5 | 1005
+  6 | 1006
+  7 | 1007
+  8 | 1008
+  9 | 1009
+(8 rows)
+
+alter table cstore_part_table move partition cstore_part_table_p4 tablespace new_tablespace_cstore_drop_column_replicated;
+select * from cstore_part_table order by c1,c3;
+ c3 |  c1  
+----+------
+ 10 | 1001
+  2 | 1002
+  3 | 1003
+  4 | 1004
+  5 | 1005
+  6 | 1006
+  7 | 1007
+  8 | 1008
+  9 | 1009
+ 10 | 1010
+(10 rows)
+
+alter table cstore_part_table truncate partition cstore_part_table_p4;
+select * from cstore_part_table partition (cstore_part_table_p4);
+ c3 | c1 
+----+----
+(0 rows)
+
+select * from cstore_part_table order by c1,c3;
+ c3 |  c1  
+----+------
+ 10 | 1001
+ 10 | 1010
+(2 rows)
+
+--exchange partition
+drop table if exists ord_table;
+NOTICE:  table "ord_table" does not exist, skipping
+create table ord_table (c1 int, c2 text, c3 int)with(orientation=column);
+alter table ord_table drop column c1;
+alter table ord_table add column c1 text default 100;
+alter table ord_table drop column c2;
+insert into ord_table(c1,c3) values(generate_series(1,6),generate_series(1,6));
+alter table cstore_part_table exchange partition(cstore_part_table_p4) with table ord_table with validation;
+select * from cstore_part_table partition (cstore_part_table_p4) order by c3;
+ c3 | c1 
+----+----
+  1 | 1
+  2 | 2
+  3 | 3
+  4 | 4
+  5 | 5
+  6 | 6
+(6 rows)
+
+select * from ord_table order by c1;
+ c3 | c1 
+----+----
+(0 rows)
+
+drop table ord_table;
+--add partition then vacuum full 
+alter table cstore_part_table add partition p5 values less than(maxvalue);
+vacuum full cstore_part_table;
+--delete 
+delete from coltable where c2 = 101;
+--min max scan
+select min(c1),max(c3) from coltable;
+ min | max  
+-----+------
+   2 | 1010
+(1 row)
+
+select min(c1),max(c3) from cstore_part_table; 
+ min | max 
+-----+-----
+ 1   |  10
+(1 row)
+
+--copy 
+alter table coltable drop column c1;
+COPY coltable to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/coltable_out_repli.data';
+create table coltable_new (like coltable);
+COPY coltable_new FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/coltable_out_repli.data';
+select * from coltable
+minus 
+select * from coltable_new;
+ c2 | c3 
+----+----
+(0 rows)
+
+drop table coltable_new;
+select coltable from coltable order by 1;
+  coltable  
+------------
+ (102,1002)
+ (103,1003)
+ (104,1004)
+ (105,1005)
+ (106,1006)
+ (107,1007)
+ (108,1008)
+ (109,1009)
+ (110,1010)
+(9 rows)
+
+select cstore_part_table from cstore_part_table order by 1;
+ cstore_part_table 
+-------------------
+ (1,1)
+ (2,2)
+ (3,3)
+ (4,4)
+ (5,5)
+ (6,6)
+ (10,1001)
+ (10,1010)
+(8 rows)
+
+--clear
+drop table rowtable;
+drop table coltable;
+drop table cstore_part_table;
+drop tablespace new_tablespace_cstore_drop_column_replicated;

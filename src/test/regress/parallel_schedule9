@@ -1,0 +1,5 @@
+
+test: vec_nestloop_pre vec_mergejoin_prepare vec_result vec_limit vec_mergejoin_1 vec_mergejoin_2 vec_stream
+test: vec_nestloop1  vec_mergejoin_inner vec_mergejoin_left vec_mergejoin_semi vec_mergejoin_anti llvm_vecexpr1 llvm_vecexpr2 llvm_vecexpr3 llvm_vecexpr_td llvm_target_expr llvm_target_expr2 llvm_target_expr3 
+test: vec_nestloop_end vec_mergejoin_aggregation llvm_vecagg llvm_vecagg2 llvm_vecagg3 llvm_vechashjoin 
+#test:llvm_vechashjoin2

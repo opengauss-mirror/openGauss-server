@@ -1,0 +1,764 @@
+--
+-- HW_LIGHT_CN
+--
+set enable_light_proxy to on;
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+select * from getdatabaseencoding();
+ getdatabaseencoding 
+---------------------
+ UTF8
+(1 row)
+
+create table hw_light_cn_t1 (id1 int, id2 int, num int);
+insert into hw_light_cn_t1 values (1,11,11), (2,21,21), (3,31,31), (4,41,41), (5,51,51);
+-- Testset 1 one query in one transaction
+-- single table
+explain select * from hw_light_cn_t1 where id1 = 3;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+   Filter: (id1 = 3)
+(2 rows)
+
+explain select * from hw_light_cn_t1 where id1 = 3 for update;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+--? LockRows  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 3)
+(3 rows)
+
+explain insert into hw_light_cn_t1 values (6,6,6);
+                         QUERY PLAN                         
+------------------------------------------------------------
+ [Bypass]
+--? Insert on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+--?   ->  Result  (cost=.* rows=.* width=.*)
+(3 rows)
+
+explain update hw_light_cn_t1 set num = 0 where id1 = 1;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+--? Update on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 1)
+(3 rows)
+
+explain delete from hw_light_cn_t1 where id1 = 2;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+--? Delete on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 2)
+(3 rows)
+
+explain select * from hw_light_cn_t1 order by id1;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+--? Sort  (cost=.* rows=.* width=.*)
+   Sort Key: id1
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+(3 rows)
+
+select * from hw_light_cn_t1 where id1 = 3;
+ id1 | id2 | num 
+-----+-----+-----
+   3 |  31 |  31
+(1 row)
+
+select * from hw_light_cn_t1 where id1 = 3 for update;
+ id1 | id2 | num 
+-----+-----+-----
+   3 |  31 |  31
+(1 row)
+
+insert into hw_light_cn_t1 values (6,6,6);
+update hw_light_cn_t1 set num = 0 where id1 = 1;
+delete from hw_light_cn_t1 where id1 = 2;
+select * from hw_light_cn_t1 order by id1;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   0
+   3 |  31 |  31
+   4 |  41 |  41
+   5 |  51 |  51
+   6 |   6 |   6
+(5 rows)
+
+-- Testset 2 multiple queries in one transaction
+start transaction;
+select * from hw_light_cn_t1 where id1 = 3;
+ id1 | id2 | num 
+-----+-----+-----
+   3 |  31 |  31
+(1 row)
+
+select * from hw_light_cn_t1 where id1 = 3 for update;
+ id1 | id2 | num 
+-----+-----+-----
+   3 |  31 |  31
+(1 row)
+
+insert into hw_light_cn_t1 values (6,6,6);
+update hw_light_cn_t1 set num = 1 where id1 = 1;
+delete from hw_light_cn_t1 where id1 = 3;
+select * from hw_light_cn_t1 order by id1;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   1
+   4 |  41 |  41
+   5 |  51 |  51
+   6 |   6 |   6
+   6 |   6 |   6
+(5 rows)
+
+end;
+select * from hw_light_cn_t1 order by id1;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   1
+   4 |  41 |  41
+   5 |  51 |  51
+   6 |   6 |   6
+   6 |   6 |   6
+(5 rows)
+
+start transaction;
+select * from hw_light_cn_t1 where id1 = 4;
+ id1 | id2 | num 
+-----+-----+-----
+   4 |  41 |  41
+(1 row)
+
+select * from hw_light_cn_t1 where id1 = 4 for update;
+ id1 | id2 | num 
+-----+-----+-----
+   4 |  41 |  41
+(1 row)
+
+insert into hw_light_cn_t1 values (6,6,6);
+update hw_light_cn_t1 set num = 2 where id1 = 1;
+delete from hw_light_cn_t1 where id1 = 4;
+select * from hw_light_cn_t1 order by id1;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   2
+   5 |  51 |  51
+   6 |   6 |   6
+   6 |   6 |   6
+   6 |   6 |   6
+(5 rows)
+
+abort;
+select * from hw_light_cn_t1 order by id1;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   1
+   4 |  41 |  41
+   5 |  51 |  51
+   6 |   6 |   6
+   6 |   6 |   6
+(5 rows)
+
+-- Testset 3 queries that do not support light_cn
+-- enable_light_proxy
+set enable_light_proxy = off;
+explain select * from hw_light_cn_t1 where id1 = 3;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+   Filter: (id1 = 3)
+(2 rows)
+
+select * from hw_light_cn_t1 where id1 = 3;
+ id1 | id2 | num 
+-----+-----+-----
+(0 rows)
+
+set enable_light_proxy = on;
+explain select * from hw_light_cn_t1 where id1 = 3;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+   Filter: (id1 = 3)
+(2 rows)
+
+select * from hw_light_cn_t1 where id1 = 3;
+ id1 | id2 | num 
+-----+-----+-----
+(0 rows)
+
+-- more than one shard
+explain select * from hw_light_cn_t1;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+(1 row)
+
+-- has agg
+explain select count(*) from hw_light_cn_t1 where id1 = 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+--? Aggregate  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 1)
+(3 rows)
+
+explain select sum(num) from hw_light_cn_t1 where id1 = 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+--? Aggregate  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 1)
+(3 rows)
+
+explain select avg(num) from hw_light_cn_t1 where id1 = 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+--? Aggregate  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 1)
+(3 rows)
+
+explain select min(num) from hw_light_cn_t1 where id1 = 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+--? Aggregate  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 1)
+(3 rows)
+
+explain select max(num) from hw_light_cn_t1 where id1 = 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+--? Aggregate  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 1)
+(3 rows)
+
+select count(*) from hw_light_cn_t1 where id1 = 1;
+ count 
+-------
+     1
+(1 row)
+
+select sum(num) from hw_light_cn_t1 where id1 = 1;
+ sum 
+-----
+   1
+(1 row)
+
+select avg(num) from hw_light_cn_t1 where id1 = 1;
+          avg           
+------------------------
+ 1.00000000000000000000
+(1 row)
+
+select min(num) from hw_light_cn_t1 where id1 = 1;
+ min 
+-----
+   1
+(1 row)
+
+select max(num) from hw_light_cn_t1 where id1 = 1;
+ max 
+-----
+   1
+(1 row)
+
+-- declare cursor
+start transaction;
+explain cursor c1 for select * from hw_light_cn_t1 where id1 = 1;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+   Filter: (id1 = 1)
+(2 rows)
+
+cursor c1 for select * from hw_light_cn_t1 where id1 = 1;
+fetch all c1;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   1
+(1 row)
+
+end;
+-- subquery
+explain select * from (select avg(num) from hw_light_cn_t1 where id1 = 1) t1; 
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+--? Aggregate  (cost=.* rows=.* width=.*)
+--?   ->  Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+         Filter: (id1 = 1)
+(3 rows)
+
+select * from (select avg(num) from hw_light_cn_t1 where id1 = 1) t1; 
+          avg           
+------------------------
+ 1.00000000000000000000
+(1 row)
+
+-- update sharding key
+update hw_light_cn_t1 set id1 = 1 where id1 = 2;
+-- permission denied
+create user tuser identified by "Test@Mpp";
+grant select on hw_light_cn_t1 to tuser;
+SET SESSION AUTHORIZATION tuser PASSWORD 'Test@Mpp';
+SELECT session_user, current_user;
+ session_user | current_user 
+--------------+--------------
+ tuser        | tuser
+(1 row)
+
+select * from hw_light_cn_t1 where id1 = 1;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   1
+(1 row)
+
+insert into hw_light_cn_t1 values (6,6,6);
+ERROR:  permission denied for relation hw_light_cn_t1
+update hw_light_cn_t1 set num = 2 where id1 = 1;
+ERROR:  permission denied for relation hw_light_cn_t1
+delete from hw_light_cn_t1 where id1 = 2;
+ERROR:  permission denied for relation hw_light_cn_t1
+select * from hw_light_cn_t1 order by id1;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   1
+   4 |  41 |  41
+   5 |  51 |  51
+   6 |   6 |   6
+   6 |   6 |   6
+(5 rows)
+
+\c
+drop user tuser cascade;
+-- encoding not same
+set client_encoding='GBK'; 
+create table testtd(
+c_nchar nchar(10),
+c_character1 character(10),
+c_character2 character varying(10),
+c_varchar2 varchar2(10)
+);
+explain insert into testtd values('a','a','a','a');
+                     QUERY PLAN                     
+----------------------------------------------------
+--? Insert on testtd  (cost=.* rows=.* width=.*)
+--?   ->  Result  (cost=.* rows=.* width=.*)
+(2 rows)
+
+insert into testtd values('a','a','a','a');
+drop table testtd;
+reset client_encoding;
+-- pbe by prepare/execute
+prepare a as select * from hw_light_cn_t1 where id1 = 1;
+explain execute a;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+   Filter: (id1 = 1)
+(2 rows)
+
+execute a;
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   1
+(1 row)
+
+deallocate a;
+prepare a as select * from hw_light_cn_t1 where id1 = $1;
+explain execute a(1);
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+   Filter: (id1 = $1)
+(2 rows)
+
+execute a(1);
+ id1 | id2 | num 
+-----+-----+-----
+   1 |  11 |   1
+(1 row)
+
+deallocate a;
+-- explain verbose/analyze/performance
+explain verbose select * from hw_light_cn_t1 where id1 = 1;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+--? Seq Scan on public.hw_light_cn_t1  (cost=.* rows=.* width=.*)
+   Output: id1, id2, num
+   Filter: (hw_light_cn_t1.id1 = 1)
+(3 rows)
+
+explain analyze select * from hw_light_cn_t1 where id1 = 1;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*) (actual time=.* rows=.* loops=.*)
+   Filter: (id1 = 1)
+   Rows Removed by Filter: 4
+--? Total runtime: .* ms
+(4 rows)
+
+explain analyze verbose select * from hw_light_cn_t1 where id1 = 1;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+--? Seq Scan on public.hw_light_cn_t1  (cost=.* rows=.* width=.*) (actual time=.* rows=.* loops=.*)
+   Output: id1, id2, num
+   Filter: (hw_light_cn_t1.id1 = 1)
+   Rows Removed by Filter: 4
+--? Total runtime: .* ms
+(5 rows)
+
+explain performance select * from hw_light_cn_t1 where id1 = 1;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+--? Seq Scan on public.hw_light_cn_t1  (cost=.* rows=.* width=.*) (actual time=.* rows=.* loops=.*)
+   Output: id1, id2, num
+   Filter: (hw_light_cn_t1.id1 = 1)
+   Rows Removed by Filter: 4
+   (Buffers: shared hit=1)
+--?   (CPU: ex c/r=.*, ex row=.*, ex cyc=.*, inc cyc=.*)
+--? Total runtime: .* ms
+(7 rows)
+
+-- function
+CREATE OR REPLACE FUNCTION test_lp()
+RETURNS bool
+AS $$
+DECLARE
+	tmp record;
+	result bool;
+	BEGIN
+		execute('explain select * from hw_light_cn_t1 where id1 = 1');
+		execute('select * from hw_light_cn_t1 where id1 = 1');
+		return true;
+	END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select test_lp();
+ test_lp 
+---------
+ t
+(1 row)
+
+explain select * from hw_light_cn_t1 where id1 = 1;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+--? Seq Scan on hw_light_cn_t1  (cost=.* rows=.* width=.*)
+   Filter: (id1 = 1)
+(2 rows)
+
+-- Bug fixing
+truncate hw_light_cn_t1;
+start transaction;
+insert into hw_light_cn_t1 values (7,7,7);
+select cmax, cmin, id1 from hw_light_cn_t1 order by 3;
+ cmax | cmin | id1 
+------+------+-----
+    0 |    0 |   7
+(1 row)
+
+insert into hw_light_cn_t1 values (8,8,8);
+select cmax, cmin, id1 from hw_light_cn_t1 order by 3;
+ cmax | cmin | id1 
+------+------+-----
+    0 |    0 |   7
+    1 |    1 |   8
+(2 rows)
+
+commit;
+select cmax, cmin, id1 from hw_light_cn_t1 order by 3;
+ cmax | cmin | id1 
+------+------+-----
+    0 |    0 |   7
+    1 |    1 |   8
+(2 rows)
+
+truncate hw_light_cn_t1;
+start transaction;
+insert into hw_light_cn_t1 values (7,7,7);
+select cmax, cmin, id1 from hw_light_cn_t1 where id1 = 7;
+ cmax | cmin | id1 
+------+------+-----
+    0 |    0 |   7
+(1 row)
+
+insert into hw_light_cn_t1 values (8,8,8);
+select cmax, cmin, id1 from hw_light_cn_t1 where id1 = 8;
+ cmax | cmin | id1 
+------+------+-----
+    1 |    1 |   8
+(1 row)
+
+commit;
+select cmax, cmin, id1 from hw_light_cn_t1 order by 3;
+ cmax | cmin | id1 
+------+------+-----
+    0 |    0 |   7
+    1 |    1 |   8
+(2 rows)
+
+-- N message
+create table ts_test(id int, c1 text);
+insert into ts_test values(1, rpad('bcg', 2500, 'AbCdef'));
+select to_tsvector(c1) from ts_test where id = 1;
+NOTICE:  word is too long to be indexed
+DETAIL:  Words longer than 2047 characters are ignored.
+CONTEXT:  referenced column: to_tsvector
+ to_tsvector 
+-------------
+ 
+(1 row)
+
+drop table ts_test;
+-- one distribute key
+create table tnull (id int, num int);
+explain verbose insert into tnull values (null,1);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ [Bypass]
+--? Insert on public.tnull  (cost=.* rows=.* width=.*)
+--?   ->  Result  (cost=.* rows=.* width=.*)
+         Output: NULL::integer, 1
+(4 rows)
+
+insert into tnull values (null,1);
+explain verbose select * from tnull where id is null;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+--? Seq Scan on public.tnull  (cost=.* rows=.* width=.*)
+   Output: id, num
+   Filter: (tnull.id IS NULL)
+(3 rows)
+
+select * from tnull where id is null;
+ id | num 
+----+-----
+    |   1
+(1 row)
+
+explain verbose select * from tnull where id = null;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+--? Result  (cost=.* rows=.* width=.*)
+   Output: id, num
+   One-Time Filter: NULL::boolean
+--?   ->  Seq Scan on public.tnull  (cost=.* rows=.* width=.*)
+         Output: id, num
+(5 rows)
+
+select * from tnull where id = null;
+ id | num 
+----+-----
+(0 rows)
+
+-- multiple distribute key
+create table tnull2 (id1 int, id2 int, num int);
+explain verbose insert into tnull2 values (null,null,1);
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ [Bypass]
+--? Insert on public.tnull2  (cost=.* rows=.* width=.*)
+--?   ->  Result  (cost=.* rows=.* width=.*)
+         Output: NULL::integer, NULL::integer, 1
+(4 rows)
+
+explain verbose insert into tnull2 values (null,1,1);
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ [Bypass]
+--? Insert on public.tnull2  (cost=.* rows=.* width=.*)
+--?   ->  Result  (cost=.* rows=.* width=.*)
+         Output: NULL::integer, 1, 1
+(4 rows)
+
+explain verbose insert into tnull2 values (null,20,1);
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ [Bypass]
+--? Insert on public.tnull2  (cost=.* rows=.* width=.*)
+--?   ->  Result  (cost=.* rows=.* width=.*)
+         Output: NULL::integer, 20, 1
+(4 rows)
+
+insert into tnull2 values (null,null,1);
+insert into tnull2 values (null,1,1);
+insert into tnull2 values (null,20,1);
+explain verbose select * from tnull2 where id1 is null and id2 is null;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+--? Seq Scan on public.tnull2  (cost=.* rows=.* width=.*)
+   Output: id1, id2, num
+   Filter: ((tnull2.id1 IS NULL) AND (tnull2.id2 IS NULL))
+(3 rows)
+
+select * from tnull2 where id1 is null and id2 is null;
+ id1 | id2 | num 
+-----+-----+-----
+     |     |   1
+(1 row)
+
+explain verbose select * from tnull2 where id1 is null and id2 = 1;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+--? Seq Scan on public.tnull2  (cost=.* rows=.* width=.*)
+   Output: id1, id2, num
+   Filter: ((tnull2.id1 IS NULL) AND (tnull2.id2 = 1))
+(3 rows)
+
+select * from tnull2 where id1 is null and id2 = 1;
+ id1 | id2 | num 
+-----+-----+-----
+     |   1 |   1
+(1 row)
+
+explain verbose select * from tnull2 where id1 is null and id2 = 20;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+--? Seq Scan on public.tnull2  (cost=.* rows=.* width=.*)
+   Output: id1, id2, num
+   Filter: ((tnull2.id1 IS NULL) AND (tnull2.id2 = 20))
+(3 rows)
+
+select * from tnull2 where id1 is null and id2 = 20;
+ id1 | id2 | num 
+-----+-----+-----
+     |  20 |   1
+(1 row)
+
+-- join
+create table tnull1 (id1 int, num int);
+insert into tnull1 values (null,1);
+explain verbose select id from tnull, tnull1 where id is null and id1 is null;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+--? Nested Loop  (cost=.* rows=.* width=.*)
+   Output: tnull.id
+--?   ->  Seq Scan on public.tnull  (cost=.* rows=.* width=.*)
+         Output: tnull.id, tnull.num
+         Filter: (tnull.id IS NULL)
+--?   ->  Materialize  (cost=.* rows=.* width=.*)
+         Output: tnull1.id1, tnull1.num
+--?         ->  Seq Scan on public.tnull1  (cost=.* rows=.* width=.*)
+               Output: tnull1.id1, tnull1.num
+               Filter: (tnull1.id1 IS NULL)
+(10 rows)
+
+select id from tnull, tnull1 where id is null and id1 is null;
+ id 
+----
+   
+(1 row)
+
+explain verbose select id from tnull, tnull2 where id is null and id1 is null and id2 is null;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+--? Nested Loop  (cost=.* rows=.* width=.*)
+   Output: tnull.id
+--?   ->  Seq Scan on public.tnull2  (cost=.* rows=.* width=.*)
+         Output: tnull2.id1, tnull2.id2, tnull2.num
+         Filter: ((tnull2.id1 IS NULL) AND (tnull2.id2 IS NULL))
+--?   ->  Seq Scan on public.tnull  (cost=.* rows=.* width=.*)
+         Output: tnull.id, tnull.num
+         Filter: (tnull.id IS NULL)
+(8 rows)
+
+select id from tnull, tnull2 where id is null and id1 is null and id2 is null;
+ id 
+----
+   
+(1 row)
+
+explain verbose select id from tnull, tnull2 where id is null and id1 is null and id2 =1;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+--? Nested Loop  (cost=.* rows=.* width=.*)
+   Output: tnull.id
+--?   ->  Seq Scan on public.tnull2  (cost=.* rows=.* width=.*)
+         Output: tnull2.id1, tnull2.id2, tnull2.num
+         Filter: ((tnull2.id1 IS NULL) AND (tnull2.id2 = 1))
+--?   ->  Seq Scan on public.tnull  (cost=.* rows=.* width=.*)
+         Output: tnull.id, tnull.num
+         Filter: (tnull.id IS NULL)
+(8 rows)
+
+select id from tnull, tnull2 where id is null and id1 is null and id2 =1;
+ id 
+----
+   
+(1 row)
+
+explain verbose select id from tnull, tnull2 where id is null and id1 is null and id2 =20;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+--? Nested Loop  (cost=.* rows=.* width=.*)
+   Output: tnull.id
+--?   ->  Seq Scan on public.tnull2  (cost=.* rows=.* width=.*)
+         Output: tnull2.id1, tnull2.id2, tnull2.num
+         Filter: ((tnull2.id1 IS NULL) AND (tnull2.id2 = 20))
+--?   ->  Seq Scan on public.tnull  (cost=.* rows=.* width=.*)
+         Output: tnull.id, tnull.num
+         Filter: (tnull.id IS NULL)
+(8 rows)
+
+select id from tnull, tnull2 where id is null and id1 is null and id2 =20;
+ id 
+----
+   
+(1 row)
+
+-- BufferConnection
+create table t_BufferConnection (id int, num int);
+insert into t_BufferConnection values (1,1),(2,2),(3,3),(4,4);
+begin;
+declare c1 cursor for select * from t_BufferConnection order by id;
+fetch next from c1;
+ id | num 
+----+-----
+  1 |   1
+(1 row)
+
+insert into t_BufferConnection values (5,5);
+fetch next from c1;
+ id | num 
+----+-----
+  2 |   2
+(1 row)
+
+fetch next from c1;
+ id | num 
+----+-----
+  3 |   3
+(1 row)
+
+fetch next from c1;
+ id | num 
+----+-----
+  4 |   4
+(1 row)
+
+fetch next from c1;
+ id | num 
+----+-----
+(0 rows)
+
+end;
+select * from t_BufferConnection order by id;
+ id | num 
+----+-----
+  1 |   1
+  2 |   2
+  3 |   3
+  4 |   4
+  5 |   5
+(5 rows)
+
+drop table t_BufferConnection;
+-- clean up
+drop table hw_light_cn_t1;

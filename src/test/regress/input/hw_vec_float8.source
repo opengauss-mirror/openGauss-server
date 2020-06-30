@@ -1,0 +1,35 @@
+--float8
+CREATE TABLE vfloat8_test(a INT4, b float8, c float8) with (orientation = column) ;
+copy vfloat8_test from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vfloat8_normal.data' delimiter '|' NULL '';
+
+--test vfloat_sop
+select b,c from vfloat8_test where b=c order by a;
+select b,c from vfloat8_test where b<>c order by a;
+select b,c from vfloat8_test where b>c order by a;
+select b,c from vfloat8_test where b>=c order by a;
+select b,c from vfloat8_test where b<c order by a;
+select b,c from vfloat8_test where b<=c order by a;
+
+select b,c from vfloat8_test where b=c and a > 0 order by a;
+select b,c from vfloat8_test where b<>c and a > 0 order by a;
+select b,c from vfloat8_test where b>c and a > 0 order by a;
+select b,c from vfloat8_test where b>=c and a > 0 order by a;
+select b,c from vfloat8_test where b<c and a > 0 order by a;
+select b,c from vfloat8_test where b<=c and a > 0 order by a;
+
+select b+c from vfloat8_test where b=c order by a;
+select b+c from vfloat8_test where b<>c order by a;
+select b+c from vfloat8_test where b>c order by a;
+select b+c from vfloat8_test where b>=c order by a;
+select b+c from vfloat8_test where b<c order by a;
+select b+c from vfloat8_test where b<=c order by a;
+        
+select b+c from vfloat8_test where b=c and a > 0 order by a;
+select b+c from vfloat8_test where b<>c and a > 0 order by a;
+select b+c from vfloat8_test where b>c and a > 0 order by a;
+select b+c from vfloat8_test where b>=c and a > 0 order by a;
+select b+c from vfloat8_test where b<c and a > 0 order by a;
+select b+c from vfloat8_test where b<=c and a > 0 order by a;		
+--clean table
+drop table vfloat8_test;
+

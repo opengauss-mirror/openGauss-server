@@ -1,0 +1,5 @@
+# roach_api extension
+comment = 'test_decoding wrapper'
+default_version = '1.0'
+module_pathname = '$libdir/test_decoding'
+relocatable = true

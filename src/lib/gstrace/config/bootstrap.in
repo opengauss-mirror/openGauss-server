@@ -1,0 +1,15 @@
+<func> AuxiliaryProcessMain
+<func> err_out
+<func> closerel
+<func> boot_openrel
+<func> DefineAttr
+<func> InsertOneTuple
+<func> InsertOneValue
+<func> InsertOneNull
+<func> MapArrayTypeName
+<func> index_register
+<func> build_indices
+<func> boot_get_type_io_data
+<func> boot_yyparse
+<func> boot_yylex
+<func> boot_yyerror

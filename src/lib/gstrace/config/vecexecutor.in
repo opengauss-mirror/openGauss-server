@@ -1,0 +1,7 @@
+<func> VectorEngine
+<func> ExecVecProject
+<func> ExecInitVecExpr
+<func> ExecAssignVecScanProjectionInfo
+<func> ExecVecMarkPos
+<func> ExecVecRestrPos
+<func> VecExecReScan

@@ -1,0 +1,24 @@
+<refentry id="SQL-CREATE_DATABASE">
+<refmeta>
+<refentrytitle>CREATE DATABASE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE DATABASE</refname>
+<refpurpose>create a new database</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE DATABASE database_name
+    [ [ WITH ] {[ OWNER [=] user_name ]|
+           [ TEMPLATE [=] template ]|
+           [ ENCODING [=] encoding ]|
+           [ LC_COLLATE [=] lc_collate ]|
+           [ LC_CTYPE [=] lc_ctype ]|
+           [ DBCOMPATIBILITY [=] compatibility_type ]|
+           [ TABLESPACE [=] tablespace_name ]|
+           [ CONNECTION LIMIT [=] connlimit ]}[...] ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

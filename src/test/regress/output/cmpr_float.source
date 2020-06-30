@@ -1,0 +1,69 @@
+--
+-- case 1: float type
+--
+CREATE TABLE cmpr_float ( 
+	RR_ID int,
+	R0_ID float NOT NULL,
+	R1_ID float NOT NULL,
+	R2_ID float NOT NULL,
+	R3_ID float NOT NULL,
+	R4_ID float NOT NULL,
+	R5_ID float NOT NULL,
+	R6_ID float NOT NULL,
+	R7_ID float NOT NULL,
+	R8_ID float NOT NULL,
+	R9_ID float NOT NULL,
+	R10_ID float NOT NULL,
+	R11_ID float NOT NULL,
+	R12_ID float NOT NULL,
+	R13_ID float NOT NULL,
+	R14_ID float NOT NULL,
+	R15_ID float NOT NULL,
+	R16_ID float NOT NULL,
+	R17_ID float NOT NULL,
+	R18_ID float NOT NULL,
+	R19_ID float NOT NULL
+) COMPRESS;
+CREATE TABLE cmpr_float_raw ( 
+	RR_ID int,
+	R0_ID float NOT NULL,
+	R1_ID float NOT NULL,
+	R2_ID float NOT NULL,
+	R3_ID float NOT NULL,
+	R4_ID float NOT NULL,
+	R5_ID float NOT NULL,
+	R6_ID float NOT NULL,
+	R7_ID float NOT NULL,
+	R8_ID float NOT NULL,
+	R9_ID float NOT NULL,
+	R10_ID float NOT NULL,
+	R11_ID float NOT NULL,
+	R12_ID float NOT NULL,
+	R13_ID float NOT NULL,
+	R14_ID float NOT NULL,
+	R15_ID float NOT NULL,
+	R16_ID float NOT NULL,
+	R17_ID float NOT NULL,
+	R18_ID float NOT NULL,
+	R19_ID float NOT NULL
+);
+COPY cmpr_float FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_float.data';
+COPY cmpr_float_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_float.data';
+SELECT (SELECT COUNT(*) FROM cmpr_float) - (SELECT COUNT(*) FROM cmpr_float_raw);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_float_raw) MINUS ALL (SELECT * FROM cmpr_float);
+ rr_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id | r10_id | r11_id | r12_id | r13_id | r14_id | r15_id | r16_id | r17_id | r18_id | r19_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+(SELECT * FROM cmpr_float) MINUS ALL (SELECT * FROM cmpr_float_raw);
+ rr_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id | r10_id | r11_id | r12_id | r13_id | r14_id | r15_id | r16_id | r17_id | r18_id | r19_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+DROP TABLE cmpr_float;
+DROP TABLE cmpr_float_raw;

@@ -1,0 +1,90 @@
+CREATE TABLE part
+(
+  a int,
+  b int,
+  c int,
+  d int
+)WITH(orientation=row)
+PARTITION BY RANGE (a, b)
+(
+  PARTITION P_050_BEFORE VALUES LESS THAN (100, 100),
+  PARTITION P_100 VALUES LESS THAN (100, 200),
+  PARTITION P_150 VALUES LESS THAN (200, 100),
+  PARTITION P_200 VALUES LESS THAN (200, 200)
+);
+COPY part FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/partition_pathkey.dat';
+analyze part;
+
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+
+-- case 1
+create index idx_a on part(a) local;
+explain(costs off) select * from part order by a limit 10; -- OK
+explain(costs off) select * from part order by a desc limit 10; -- OK
+explain(costs off) select * from part where b = 10 order by a, b limit 10; -- OK
+explain(costs off) select * from part where b = 10 order by a desc, b desc limit 10; -- OK
+
+explain(costs off) select * from part order by a asc  nulls first limit 10;
+explain(costs off) select * from part order by a desc nulls last limit 10;
+explain(costs off) select * from part order by b limit 10;
+
+explain(costs off) select * from part where b = 10 order by a desc nulls last, b desc limit 10;
+explain(costs off) select * from part where b = 10 order by a desc, b desc nulls last limit 10; -- OK
+
+-- case 2
+drop index idx_a;
+create index idx_a_b on part(a,b) local;
+explain(costs off) select * from part order by a limit 10; -- OK
+explain(costs off) select * from part order by a desc limit 10; -- OK
+explain(costs off) select * from part order by a, b limit 10; -- OK
+explain(costs off) select * from part order by a desc, b desc limit 10; -- OK
+explain(costs off) select * from part where c = 10 order by a, b, c limit 10; -- OK
+explain(costs off) select * from part where c = 10 order by a desc, b desc, c desc limit 10; -- OK
+
+explain(costs off) select * from part order by a asc, b desc limit 10;
+explain(costs off) select * from part order by a desc, b asc limit 10;
+explain(costs off) select * from part order by a desc, b desc nulls last limit 10;
+explain(costs off) select * from part order by a desc nulls last, b desc limit 10;
+explain(costs off) select * from part order by a desc nulls last limit 10;
+explain(costs off) select * from part order by a asc nulls first limit 10;
+explain(costs off) select * from part order by b limit 10;
+explain(costs off) select * from part order by a, b, c limit 10;
+
+drop index idx_a_b;
+create index idx_a_b_c on part(a,b,c) local;
+explain(costs off) select * from part order by a limit 10; -- OK
+explain(costs off) select * from part order by a desc limit 10; -- OK
+explain(costs off) select * from part order by a, b limit 10; -- OK
+explain(costs off) select * from part order by a desc, b desc limit 10; -- OK
+explain(costs off) select * from part order by a, b, c limit 10; -- OK
+explain(costs off) select * from part order by a desc, b desc, c desc limit 10; -- OK
+explain(costs off) select * from part where a = 50 order by b, c limit 10; -- OK
+explain(costs off) select * from part where a < 100 order by a, b, c limit 10; -- OK
+explain(costs off) select * from part where a = 10 and b = 10 order by a, b, c limit 10; -- OK
+explain(costs off) select * from part order by b, c limit 10;
+
+drop index idx_a_b_c;
+create index idx_a_b_c on part(a desc,b,c desc) local;
+explain(costs off) select * from part where a < 100 order by a desc, b, c desc limit 10; -- OK
+explain(costs off) select * from part where a < 100 and b < 100 order by a desc, b, c desc limit 10; -- OK
+explain(costs off) select * from part where a < 100 and b < 100 order by a , b desc, c limit 10;  -- OK
+explain(costs off) select * from part where b = 10 order by a desc, c desc limit 10; -- OK
+
+drop index idx_a_b_c;
+create index idx_b_c on part(b,c) local;
+explain(costs off) select * from part where a = 80 order by b,c limit 10;  -- OK
+explain(costs off) select * from part where a < 80 order by b,c limit 10;  -- OK
+explain(costs off) select * from part where a = 80 order by b desc,c desc limit 10;  -- OK
+explain(costs off) select * from part where a = 80 and b = 10 order by c limit 10;  -- OK
+explain(costs off) select * from part where a = 80 and c = 10 order by b limit 10;  -- OK
+explain(costs off) select * from part where a < 200 and a > 100 order by b,c limit 10; -- OK
+explain(costs off) select * from part order by b,c limit 10;
+
+drop index idx_b_c;
+create index idx_a_d on part(a,d) local;
+explain(costs off) select * from part where b = 10 order by a, d limit 10;  -- OK
+explain(costs off) select * from part where b = 10 order by a desc, d desc limit 10;  -- OK
+explain(costs off) select * from part where a < 80 order by a, d limit 10;  -- OK
+
+DROP TABLE part;

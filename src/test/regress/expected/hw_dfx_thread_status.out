@@ -1,0 +1,35 @@
+--default value
+show track_thread_wait_status_interval;
+ track_thread_wait_status_interval 
+-----------------------------------
+ 30min
+(1 row)
+
+--boundary setting
+set track_thread_wait_status_interval=0;
+show track_thread_wait_status_interval;
+ track_thread_wait_status_interval 
+-----------------------------------
+ 0
+(1 row)
+
+set track_thread_wait_status_interval=1440;
+show track_thread_wait_status_interval;
+ track_thread_wait_status_interval 
+-----------------------------------
+ 1d
+(1 row)
+
+--out of range value setting
+set track_thread_wait_status_interval=-1;
+ERROR:  -1 is outside the valid range for parameter "track_thread_wait_status_interval" (0 .. 1440)
+set track_thread_wait_status_interval=1441;
+ERROR:  1441 is outside the valid range for parameter "track_thread_wait_status_interval" (0 .. 1440)
+--regular setting
+set track_thread_wait_status_interval=5;
+show track_thread_wait_status_interval;
+ track_thread_wait_status_interval 
+-----------------------------------
+ 5min
+(1 row)
+

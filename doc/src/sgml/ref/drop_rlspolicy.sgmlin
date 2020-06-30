@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_POLICY">
+<refmeta>
+<refentrytitle>DROP ROW LEVEL SECURITY POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP ROW LEVEL SECURITY POLICY</refname>
+<refpurpose>remove a row level security policy from a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP [ ROW LEVEL SECURITY ] POLICY [ IF EXISTS ] policy_name ON table_name [ CASCADE | RESTRICT ]
+</synopsis>
+</refsynopsisdiv>
+</refentry>

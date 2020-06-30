@@ -1,0 +1,81 @@
+--for LLT
+--test call scanEreport and generate errmsg.h
+\! @abs_srcdir@/../../../src/bin/gsqlerr/scanEreport
+argc error.
+\! @abs_srcdir@/../../../src/bin/gsqlerr/scanEreport 0
+argv[1] or argv[2] is null.
+\! @abs_srcdir@/../../../src/bin/gsqlerr/scanEreport src/ src/errcodes.txt
+call resolved_path:src/ get resolved_name error.
+\! @abs_srcdir@/../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../src/common/backend/ @abs_srcdir@/../../../src/gausskernel/ src/errcodes.txt
+call resolved_path:src/errcodes.txt get resolved_name error.
+\! @abs_srcdir@/../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../src/common/backend/ @abs_srcdir@/../../../src/gausskernel/ @abs_srcdir@/../../../src/common/backend/utils/errcodes.txt
+--test gsqlerr error
+\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr
+Invalid option, please use 'gsqlerr -h' for more information.
+Display errorcode description
+
+gsqlerror [options...]
+
+Options:
+  -h               print online manual
+  -v               print version
+  [errorcode]      print errorcode description
+--?.*
+
+\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -a 11
+Invalid option, please use 'gsqlerr -h' for more information.
+Display errorcode description
+
+gsqlerror [options...]
+
+Options:
+  -h               print online manual
+  -v               print version
+  [errorcode]      print errorcode description
+--?.*
+
+--test gsqlerr outer help
+\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -h
+Display errorcode description
+
+gsqlerror [options...]
+
+Options:
+  -h               print online manual
+  -v               print version
+  [errorcode]      print errorcode description
+--?.*
+
+--test gsql outer -v
+\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr -v
+
+V1.0 for gsqlerror. 
+--test gsql outer -errcode
+\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 0
+Invalid option, please use 'gsqlerr -h' for more information.
+Display errorcode description
+
+gsqlerror [options...]
+
+Options:
+  -h               print online manual
+  -v               print version
+  [errorcode]      print errorcode description
+--?.*
+
+\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 1
+
+[Description]
+--?.*
+
+[Causes]
+--?.*
+
+[Action]
+--?.*
+
+\! @abs_srcdir@/../../../src/bin/gsqlerr/gsqlerr 9999
+
+Error code 9999 does not exist.
+--?.*
+

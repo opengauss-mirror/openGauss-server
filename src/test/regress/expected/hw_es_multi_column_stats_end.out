@@ -1,0 +1,27 @@
+drop table if exists test_range_gist;
+NOTICE:  table "test_range_gist" does not exist, skipping
+create table test_range_gist(ir int4range) ;
+set default_statistics_target=100;
+analyze test_range_gist;
+INFO:  Please set default_statistics_target to a negative value to collect extended statistics.
+set default_statistics_target=-2;
+analyze test_range_gist;
+INFO:  No columns in test_range_gist can be used to collect statistics.
+drop table test_range_gist;
+drop schema hw_es_multi_column_stats cascade;
+NOTICE:  drop cascades to 14 other objects
+DETAIL:  drop cascades to table hw_es_multi_column_stats.t1
+drop cascades to table hw_es_multi_column_stats.t1r
+drop cascades to table hw_es_multi_column_stats.t1_1
+drop cascades to table hw_es_multi_column_stats.t1r_1
+drop cascades to table hw_es_multi_column_stats.t1_2
+drop cascades to table hw_es_multi_column_stats.t1r_2
+drop cascades to table hw_es_multi_column_stats.t1_3
+drop cascades to table hw_es_multi_column_stats.t1r_3
+drop cascades to table hw_es_multi_column_stats.t1_4
+drop cascades to table hw_es_multi_column_stats.t1r_4
+drop cascades to table hw_es_multi_column_stats.t1_5
+drop cascades to table hw_es_multi_column_stats.t1r_5
+drop cascades to table hw_es_multi_column_stats.t1_6
+drop cascades to table hw_es_multi_column_stats.t3_7
+reset default_statistics_target;

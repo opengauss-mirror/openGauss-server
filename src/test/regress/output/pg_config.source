@@ -1,0 +1,421 @@
+--每个参数单独测试
+\! @abs_bindir@/pg_config --bindir
+@abs_bindir@/..//bin
+\! @abs_bindir@/pg_config --docdir
+@abs_bindir@/..//share/doc/postgresql
+\! @abs_bindir@/pg_config --htmldir
+@abs_bindir@/..//share/doc/postgresql
+\! @abs_bindir@/pg_config --includedir
+@abs_bindir@/..//include
+\! @abs_bindir@/pg_config --pkgincludedir
+@abs_bindir@/..//include/postgresql
+\! @abs_bindir@/pg_config --includedir-server
+@abs_bindir@/..//include/postgresql/server
+\! @abs_bindir@/pg_config --libdir
+@abs_bindir@/..//lib
+\! @abs_bindir@/pg_config --pkglibdir
+@abs_bindir@/..//lib/postgresql
+\! @abs_bindir@/pg_config --localedir
+@abs_bindir@/..//share/locale
+\! @abs_bindir@/pg_config --mandir
+@abs_bindir@/..//share/man
+\! @abs_bindir@/pg_config --sharedir
+@abs_bindir@/..//share/postgresql
+\! @abs_bindir@/pg_config --sysconfdir
+@abs_bindir@/..//etc/postgresql
+\! @abs_bindir@/pg_config --pgxs
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+\! @abs_bindir@/pg_config --configure
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+\! @abs_bindir@/pg_config --cc
+g++
+\! @abs_bindir@/pg_config --cppflags
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+\! @abs_bindir@/pg_config --cflags
+-std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DSTREAMPLAN -DPGXC -mcx16 -msse4.2 -g3 -O2 -w -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -Wendif-labels -Wmissing-format-attribute -Wformat-security -fno-strict-aliasing -fwrapv -g -DENABLE_GSTRACE -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations -Wno-unused-but-set-variable -fstack-protector -Wl,-z,relro,-z,now -Wl,-z,noexecstack -pthread  -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHREAD_SEMANTICS
+\! @abs_bindir@/pg_config --cflags_sl
+-fpic
+\! @abs_bindir@/pg_config --ldflags
+--?.*
+\! @abs_bindir@/pg_config --ldflags_ex
+
+\! @abs_bindir@/pg_config --ldflags_sl
+
+\! @abs_bindir@/pg_config --libs
+-lpgport -lcrypt -ldl -lm  -ledit -lssl -lcrypto  -lsecurec -pthread -D_REENTRANT -lrt -lz -lminiunz
+\! @abs_bindir@/pg_config --version
+--?PostgreSQL .*
+\! @abs_bindir@/pg_config --help
+
+pg_config provides information about the installed version of PostgreSQL.
+
+Usage:
+  pg_config [OPTION]...
+
+Options:
+  --bindir              show location of user executables
+  --docdir              show location of documentation files
+  --htmldir             show location of HTML documentation files
+  --includedir          show location of C header files of the client
+                        interfaces
+  --pkgincludedir       show location of other C header files
+  --includedir-server   show location of C header files for the server
+  --libdir              show location of object code libraries
+  --pkglibdir           show location of dynamically loadable modules
+  --localedir           show location of locale support files
+  --mandir              show location of manual pages
+  --sharedir            show location of architecture-independent support files
+  --sysconfdir          show location of system-wide configuration files
+  --pgxs                show location of extension makefile
+  --configure           show options given to "configure" script when
+                        PostgreSQL was built
+  --cc                  show CC value used when PostgreSQL was built
+  --cppflags            show CPPFLAGS value used when PostgreSQL was built
+  --cflags              show CFLAGS value used when PostgreSQL was built
+  --cflags_sl           show CFLAGS_SL value used when PostgreSQL was built
+  --ldflags             show LDFLAGS value used when PostgreSQL was built
+  --ldflags_ex          show LDFLAGS_EX value used when PostgreSQL was built
+  --ldflags_sl          show LDFLAGS_SL value used when PostgreSQL was built
+  --libs                show LIBS value used when PostgreSQL was built
+  --version             show the PostgreSQL version
+  -?, --help            show this help, then exit
+
+With no arguments, all known items are shown.
+
+Report bugs to <pgsql-bugs@postgresql.org>.
+--多个参数组合测试
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+-std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DSTREAMPLAN -DPGXC -mcx16 -msse4.2 -g3 -O2 -w -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -Wendif-labels -Wmissing-format-attribute -Wformat-security -fno-strict-aliasing -fwrapv -g -DENABLE_GSTRACE -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations -Wno-unused-but-set-variable -fstack-protector -Wl,-z,relro,-z,now -Wl,-z,noexecstack -pthread  -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHREAD_SEMANTICS
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+-std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DSTREAMPLAN -DPGXC -mcx16 -msse4.2 -g3 -O2 -w -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -Wendif-labels -Wmissing-format-attribute -Wformat-security -fno-strict-aliasing -fwrapv -g -DENABLE_GSTRACE -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations -Wno-unused-but-set-variable -fstack-protector -Wl,-z,relro,-z,now -Wl,-z,noexecstack -pthread  -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHREAD_SEMANTICS
+-fpic
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+-std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DSTREAMPLAN -DPGXC -mcx16 -msse4.2 -g3 -O2 -w -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -Wendif-labels -Wmissing-format-attribute -Wformat-security -fno-strict-aliasing -fwrapv -g -DENABLE_GSTRACE -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations -Wno-unused-but-set-variable -fstack-protector -Wl,-z,relro,-z,now -Wl,-z,noexecstack -pthread  -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHREAD_SEMANTICS
+-fpic
+--?.*
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+-std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DSTREAMPLAN -DPGXC -mcx16 -msse4.2 -g3 -O2 -w -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -Wendif-labels -Wmissing-format-attribute -Wformat-security -fno-strict-aliasing -fwrapv -g -DENABLE_GSTRACE -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations -Wno-unused-but-set-variable -fstack-protector -Wl,-z,relro,-z,now -Wl,-z,noexecstack -pthread  -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHREAD_SEMANTICS
+-fpic
+--?.*
+
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex --ldflags_sl
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+-std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DSTREAMPLAN -DPGXC -mcx16 -msse4.2 -g3 -O2 -w -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -Wendif-labels -Wmissing-format-attribute -Wformat-security -fno-strict-aliasing -fwrapv -g -DENABLE_GSTRACE -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations -Wno-unused-but-set-variable -fstack-protector -Wl,-z,relro,-z,now -Wl,-z,noexecstack -pthread  -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHREAD_SEMANTICS
+-fpic
+--?.*
+
+
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex --ldflags_sl --libs
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+-std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DSTREAMPLAN -DPGXC -mcx16 -msse4.2 -g3 -O2 -w -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -Wendif-labels -Wmissing-format-attribute -Wformat-security -fno-strict-aliasing -fwrapv -g -DENABLE_GSTRACE -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations -Wno-unused-but-set-variable -fstack-protector -Wl,-z,relro,-z,now -Wl,-z,noexecstack -pthread  -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHREAD_SEMANTICS
+-fpic
+--?.*
+
+
+-lpgport -lcrypt -ldl -lm  -ledit -lssl -lcrypto  -lsecurec -pthread -D_REENTRANT -lrt -lz -lminiunz
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex --ldflags_sl --libs --version
+@abs_bindir@/..//bin
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//share/doc/postgresql
+@abs_bindir@/..//include
+@abs_bindir@/..//include/postgresql
+@abs_bindir@/..//include/postgresql/server
+@abs_bindir@/..//lib
+@abs_bindir@/..//lib/postgresql
+@abs_bindir@/..//share/locale
+@abs_bindir@/..//share/man
+@abs_bindir@/..//share/postgresql
+@abs_bindir@/..//etc/postgresql
+@abs_bindir@/..//lib/postgresql/pgxs/src/makefiles/pgxs.mk
+--?'--prefix=@abs_srcdir@/..//..//..//install' '--enable-debug' '--enable-cassert' 'CC=g++' 'CFLAGS=-g3 -O2 -w' '--without-zlib' '--gcc-version=.*' '--3rd=@abs_srcdir@/..//..//..//binarylibs'
+g++
+-D_GNU_SOURCE -I@abs_bindir@/..//include
+-std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DSTREAMPLAN -DPGXC -mcx16 -msse4.2 -g3 -O2 -w -Wall -Wpointer-arith -Wno-write-strings -fnon-call-exceptions -Wendif-labels -Wmissing-format-attribute -Wformat-security -fno-strict-aliasing -fwrapv -g -DENABLE_GSTRACE -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations -Wno-unused-but-set-variable -fstack-protector -Wl,-z,relro,-z,now -Wl,-z,noexecstack -pthread  -D_REENTRANT -D_THREAD_SAFE -D_POSIX_PTHREAD_SEMANTICS
+-fpic
+--?.*
+
+
+-lpgport -lcrypt -ldl -lm  -ledit -lssl -lcrypto  -lsecurec -pthread -D_REENTRANT -lrt -lz -lminiunz
+--?PostgreSQL .*
+\! @abs_bindir@/pg_config --bindir --docdir --htmldir --includedir --pkgincludedir --includedir-server --libdir --pkglibdir --localedir --mandir --sharedir --sysconfdir --pgxs --configure --cc --cppflags --cflags --cflags_sl --ldflags --ldflags_ex --ldflags_sl --libs --version --help
+
+pg_config provides information about the installed version of PostgreSQL.
+
+Usage:
+  pg_config [OPTION]...
+
+Options:
+  --bindir              show location of user executables
+  --docdir              show location of documentation files
+  --htmldir             show location of HTML documentation files
+  --includedir          show location of C header files of the client
+                        interfaces
+  --pkgincludedir       show location of other C header files
+  --includedir-server   show location of C header files for the server
+  --libdir              show location of object code libraries
+  --pkglibdir           show location of dynamically loadable modules
+  --localedir           show location of locale support files
+  --mandir              show location of manual pages
+  --sharedir            show location of architecture-independent support files
+  --sysconfdir          show location of system-wide configuration files
+  --pgxs                show location of extension makefile
+  --configure           show options given to "configure" script when
+                        PostgreSQL was built
+  --cc                  show CC value used when PostgreSQL was built
+  --cppflags            show CPPFLAGS value used when PostgreSQL was built
+  --cflags              show CFLAGS value used when PostgreSQL was built
+  --cflags_sl           show CFLAGS_SL value used when PostgreSQL was built
+  --ldflags             show LDFLAGS value used when PostgreSQL was built
+  --ldflags_ex          show LDFLAGS_EX value used when PostgreSQL was built
+  --ldflags_sl          show LDFLAGS_SL value used when PostgreSQL was built
+  --libs                show LIBS value used when PostgreSQL was built
+  --version             show the PostgreSQL version
+  -?, --help            show this help, then exit
+
+With no arguments, all known items are shown.
+
+Report bugs to <pgsql-bugs@postgresql.org>.
+--不符合格式的参数测试执行
+\! @abs_bindir@/pg_config -b
+pg_config: invalid argument: -b

@@ -1,0 +1,2009 @@
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `h_d_id` , `h_c_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `o_ol_cnt` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `no_o_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `c_street_1` , `c_middle` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `o_ol_cnt` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `h_c_w_id` , `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `c_last` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `ol_dist_info` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `d_next_o_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `ol_delivery_d` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `c_credit` , `c_balance` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_street_2` , `d_tax` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `d_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `i_im_id` , `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `c_credit` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `w_ytd` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `ol_d_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `s_ytd` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `w_ytd` , `w_zip` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `d_city` , `d_ytd` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `ol_supply_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `ol_o_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `o_carrier_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `w_name` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `d_zip` , `d_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `c_zip` , `c_middle` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `i_name` , `i_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `c_middle` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `s_order_cnt` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `ol_d_id` , `ol_supply_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `w_ytd` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_name` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `ol_i_id` , `ol_amount` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `c_middle` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `d_zip` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_zip` , `c_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `c_discount` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `s_remote_cnt` , `s_dist_03` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `w_state` , `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `d_ytd` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `i_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `h_amount` , `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_middle` , `c_street_2` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `c_payment_cnt` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `h_c_d_id` , `hist_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `w_ytd` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `s_order_cnt` , `s_dist_08` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `d_tax` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `c_credit` , `c_first` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `i_name` , `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_ytd` , `d_street_2` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `o_ol_cnt` , `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `s_dist_08` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `i_data` , `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `s_dist_06` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `w_street_1` , `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `w_state` , `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `ol_dist_info` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_state` , `d_name` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_street_1` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `c_middle` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `i_price` , `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `w_tax` , `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_tax` , `d_city` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `ol_i_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `w_zip` , `w_state` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `w_id` , `w_id` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `d_city` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `ol_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_o_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `s_quantity` , `s_quantity` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `w_street_1` , `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `ol_supply_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `s_quantity` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `h_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `s_order_cnt` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `c_phone` , `c_credit` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `o_c_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `h_amount` , `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `d_city` , `d_zip` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `s_dist_03` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_quantity` , `s_dist_07` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `d_state` , `d_street_2` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `c_first` , `c_city` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `o_d_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `hist_id` , `h_data` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `d_street_1` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `s_dist_08` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `s_ytd` , `s_dist_07` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `c_state` , `c_last` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_dist_06` , `s_dist_09` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `s_dist_10` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `s_dist_07` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `d_name` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `s_dist_06` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `d_street_1` , `d_zip` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_o_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `no_o_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `o_all_local` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `h_data` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_dist_04` , `s_ytd` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `d_name` , `d_ytd` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_street_2` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `c_middle` , `c_credit` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `o_id` , `o_d_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `s_dist_08` , `s_dist_02` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `w_street_1` , `w_id` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `o_c_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `w_name` , `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `h_amount` , `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `s_dist_04` , `s_dist_08` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `ol_o_id` , `ol_supply_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `s_dist_09` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `h_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `d_city` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `o_entry_d` , `o_all_local` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_state` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `s_order_cnt` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `d_next_o_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_street_1` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `d_ytd` , `d_city` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `c_balance` , `c_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `c_street_1` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `h_c_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `s_dist_06` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `h_data` , `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `o_ol_cnt` , `o_carrier_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `ol_amount` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_id` , `c_w_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `w_zip` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `w_zip` , `w_street_2` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_first` , `c_city` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `h_c_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `d_ytd` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `c_city` , `c_ytd_payment` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `o_carrier_id` , `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `s_dist_02` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `s_data` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `ol_w_id` , `ol_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `s_dist_05` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `c_delivery_cnt` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `o_all_local` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `ol_amount` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `d_w_id` , `d_tax` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `c_state` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `i_name` , `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `i_name` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `ol_delivery_d` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `hist_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `d_next_o_id` , `d_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_dist_01` , `s_i_id` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `w_city` , `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `ol_i_id` , `ol_d_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `c_delivery_cnt` , `c_data` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `i_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `d_tax` , `d_ytd` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `h_w_id` , `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `h_c_w_id` , `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `s_data` , `s_dist_03` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `ol_amount` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `o_c_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `ol_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `h_amount` , `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_city` , `d_street_1` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `s_dist_09` , `s_i_id` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `s_dist_02` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `d_name` , `d_city` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `c_data` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `i_id` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `s_ytd` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `hist_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `w_name` , `w_ytd` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_state` , `d_state` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_state` , `d_state` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `i_data` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `w_name` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `o_w_id` , `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_w_id` , `d_zip` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `d_next_o_id` , `d_street_1` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `o_d_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `i_id` , `i_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `w_street_2` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `d_state` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `ol_w_id` , `ol_amount` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `ol_delivery_d` , `ol_quantity` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_dist_06` , `s_remote_cnt` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `i_price` , `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `o_w_id` , `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `c_zip` , `c_ytd_payment` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `s_data` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `d_next_o_id` , `d_zip` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `i_id` , `i_name` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `ol_supply_w_id` , `ol_supply_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `ol_amount` , `ol_i_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `d_name` , `d_tax` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `d_next_o_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `c_phone` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `c_zip` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `o_carrier_id` , `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `ol_delivery_d` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `o_d_id` , `o_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `i_id` , `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `ol_amount` , `ol_amount` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `ol_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `o_ol_cnt` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `c_middle` , `c_ytd_payment` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `w_id` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `c_city` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `c_middle` , `c_state` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_next_o_id` , `d_name` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `w_name` , `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `d_next_o_id` , `d_city` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `ol_dist_info` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_state` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `s_w_id` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_street_2` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `c_street_2` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `i_im_id` , `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `o_carrier_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `i_name` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `s_ytd` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `d_name` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `i_name` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `h_data` , `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `w_state` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `ol_d_id` , `ol_dist_info` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `h_data` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `w_id` , `w_tax` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `ol_w_id` , `ol_number` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `d_id` , `d_state` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `w_state` , `w_state` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `w_street_2` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `s_ytd` , `s_quantity` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `d_w_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `s_data` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `i_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `h_date` , `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `o_ol_cnt` , `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `h_w_id` , `h_c_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `h_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `c_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `s_dist_03` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `w_state` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_last` , `c_last` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `c_first` , `c_credit_lim` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `h_d_id` , `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `c_zip` , `c_city` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `ol_amount` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `i_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `s_dist_07` , `s_dist_01` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `i_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `c_d_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_street_2` , `c_credit` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `i_id` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `h_c_w_id` , `h_c_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `i_id` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `i_data` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_dist_03` , `s_dist_09` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `s_dist_03` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `o_c_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `c_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_street_2` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `ol_w_id` , `ol_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `o_w_id` , `o_c_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_zip` , `d_zip` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `w_ytd` , `w_name` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `w_zip` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `h_w_id` , `h_c_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_dist_01` , `s_w_id` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `h_c_w_id` , `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `ol_w_id` , `ol_delivery_d` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `h_data` , `h_date` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `w_state` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `c_street_1` , `c_street_1` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `h_c_d_id` , `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `w_id` , `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `h_c_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_first` , `c_payment_cnt` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `ol_delivery_d` , `ol_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `o_all_local` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `i_price` , `i_name` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `s_dist_10` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `h_d_id` , `h_c_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `w_city` , `w_street_2` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `h_date` , `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `ol_amount` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `ol_d_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `i_name` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `s_quantity` , `s_remote_cnt` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `ol_i_id` , `ol_delivery_d` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `d_tax` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `s_dist_04` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `o_w_id` , `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `d_street_2` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_dist_03` , `s_ytd` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `s_dist_09` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `d_street_1` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `o_all_local` , `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `i_data` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `c_city` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_payment_cnt` , `c_zip` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `no_o_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `ol_amount` , `ol_quantity` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `s_dist_09` , `s_order_cnt` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_zip` , `d_w_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `h_c_d_id` , `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `hist_id` , `h_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `o_c_id` , `o_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `h_c_id` , `h_d_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `w_name` , `w_street_1` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `o_ol_cnt` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `w_street_1` , `w_tax` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `o_carrier_id` , `o_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `no_o_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `s_dist_07` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `d_ytd` , `d_street_1` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `o_entry_d` , `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `c_street_1` , `c_w_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `c_zip` , `c_d_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_city` , `d_city` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `d_state` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `i_price` , `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `d_name` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `w_state` , `w_state` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `s_w_id` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `i_name` , `i_im_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `h_c_id` , `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `c_data` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `s_quantity` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `s_ytd` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `w_name` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `o_all_local` , `o_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `o_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `w_street_2` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `w_street_2` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `w_street_2` , `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `d_w_id` , `d_zip` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `s_dist_04` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_w_id` , `s_dist_07` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `o_ol_cnt` , `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `i_im_id` , `i_id` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `s_dist_01` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `c_credit_lim` , `c_delivery_cnt` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_dist_08` , `s_dist_04` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `s_ytd` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `c_ytd_payment` , `c_ytd_payment` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `o_ol_cnt` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `c_credit_lim` , `c_payment_cnt` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `c_state` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `ol_number` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `s_order_cnt` , `s_order_cnt` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT `s_order_cnt` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `d_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `c_d_id` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `w_street_2` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `c_first` , `c_data` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `i_id` , `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_o_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `h_c_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `no_o_id` , `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `o_ol_cnt` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `c_first` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `i_price` , `i_name` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `i_im_id` , `i_name` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `s_remote_cnt` , `s_dist_03` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `s_w_id` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `h_w_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `c_last` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT DISTINCTROW `d_next_o_id` , `d_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `w_ytd` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `ol_w_id` , `ol_quantity` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `d_id` , `d_name` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `s_dist_10` , `s_dist_04` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `ol_number` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `h_amount` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `c_street_1` , `c_ytd_payment` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `c_middle` , `c_middle` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT DISTINCTROW `o_carrier_id` , `o_c_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `w_state` , `w_state` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `c_state` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `o_d_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `w_name` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `w_street_2` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT DISTINCTROW `d_tax` , `d_zip` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_history` SET `h_data` = ? WHERE `h_c_id` = ?
+SELECT `ol_o_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `w_city` , `w_id` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `no_o_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `w_street_1` , `w_ytd` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `w_id` , `w_id` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `c_credit_lim` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `ol_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `s_data` FROM `bmsql_stock` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `o_c_id` , `o_entry_d` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT `w_id` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `ol_supply_w_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_2` = ? WHERE `w_id` = ?
+SELECT `d_name` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `i_id` , `i_price` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `d_name` , `d_street_2` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_04` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `no_d_id` , `no_w_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_stock` SET `s_dist_01` = ? WHERE `s_i_id` = ?
+SELECT `i_data` FROM `bmsql_item` LIMIT ?
+INSERT INTO `bmsql_warehouse` ( `w_id` , `w_name` , `w_street_1` , `w_street_2` , `w_city` , `w_state` , `w_zip` , `w_tax` , `w_ytd` ) VALUES (...)
+DELETE FROM `bmsql_warehouse` WHERE `w_id` = ?
+UPDATE `bmsql_item` SET `i_data` = ? WHERE `i_id` = ?
+SELECT `d_next_o_id` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `ol_i_id` FROM `bmsql_order_line` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_customer` SET `c_street_2` = ? WHERE `c_id` = ?
+SELECT `d_city` FROM `bmsql_district` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `w_state` , `w_city` FROM `bmsql_warehouse` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `hist_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT `c_zip` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_03` = ? WHERE `s_i_id` = ?
+SELECT DISTINCTROW `o_d_id` , `o_ol_cnt` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_new_order` ( `no_o_id` , `no_d_id` , `no_w_id` ) VALUES (...)
+DELETE FROM `bmsql_new_order` WHERE `no_o_id` = ?
+UPDATE `bmsql_district` SET `d_street_2` = ? WHERE `d_id` = ?
+SELECT `h_data` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_warehouse` SET `w_street_1` = ? WHERE `w_id` = ?
+SELECT DISTINCTROW `c_street_2` , `c_balance` FROM `bmsql_customer` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+SELECT DISTINCTROW `h_d_id` , `h_c_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_stock` SET `s_dist_02` = ? WHERE `s_i_id` = ?
+SELECT `h_c_id` FROM `bmsql_history` LIMIT ?
+INSERT INTO `bmsql_district` ( `d_id` , `d_w_id` , `d_name` , `d_street_1` , `d_street_2` , `d_city` , `d_state` , `d_zip` , `d_tax` , `d_ytd` , `d_next_o_id` ) VALUES (...)
+DELETE FROM `bmsql_district` WHERE `d_tax` = ?
+UPDATE `bmsql_item` SET `i_name` = ? WHERE `i_id` = ?
+SELECT DISTINCTROW `no_w_id` , `no_d_id` FROM `bmsql_new_order` LIMIT ?
+INSERT INTO `bmsql_history` ( `h_c_id` , `h_c_d_id` , `h_c_w_id` , `h_d_id` , `h_w_id` , `h_date` , `h_amount` , `h_data` ) VALUES (...)
+DELETE FROM `bmsql_history` WHERE `h_data` = ?
+UPDATE `bmsql_order_line` SET `ol_dist_info` = ? WHERE `ol_o_id` = ?
+SELECT `o_w_id` FROM `bmsql_oorder` LIMIT ?
+INSERT INTO `bmsql_item` ( `i_id` , `i_im_id` , `i_name` , `i_price` , `i_data` ) VALUES (...)
+DELETE FROM `bmsql_item` WHERE `i_id` = ?
+UPDATE `bmsql_customer` SET `c_street_1` = ? WHERE `c_id` = ?
+NULL
+SELECT @@`version_comment` LIMIT ?

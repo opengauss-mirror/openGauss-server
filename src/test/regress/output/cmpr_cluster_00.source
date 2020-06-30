@@ -1,0 +1,94 @@
+--
+-- TEST CASE: cluster compressed table
+--
+CREATE TABLE cmpr_cluster_00 (
+	RS_ID int,
+	R0_ID int NOT NULL,
+	R1_ID int NOT NULL,
+	R2_ID int NOT NULL,
+	R3_ID int NOT NULL,
+	R4_ID int NOT NULL,
+	R5_ID int NOT NULL,
+	R6_ID int NOT NULL,
+	R7_ID int NOT NULL,
+	R8_ID int NOT NULL,
+	R9_ID int NOT NULL
+);
+COPY cmpr_cluster_00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+INSERT INTO cmpr_cluster_00 SELECT * FROM cmpr_cluster_00;
+INSERT INTO cmpr_cluster_00 SELECT * FROM cmpr_cluster_00;
+INSERT INTO cmpr_cluster_00 SELECT * FROM cmpr_cluster_00;
+INSERT INTO cmpr_cluster_00 SELECT * FROM cmpr_cluster_00;
+INSERT INTO cmpr_cluster_00 SELECT * FROM cmpr_cluster_00;
+COPY cmpr_cluster_00 TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_cluster.data';
+CREATE TABLE cmpr_cluster_01 (
+	RS_ID int,
+	R0_ID int NOT NULL,
+	R1_ID int NOT NULL,
+	R2_ID int NOT NULL,
+	R3_ID int NOT NULL,
+	R4_ID int NOT NULL,
+	R5_ID int NOT NULL,
+	R6_ID int NOT NULL,
+	R7_ID int NOT NULL,
+	R8_ID int NOT NULL,
+	R9_ID int NOT NULL
+)  COMPRESS;
+CREATE INDEX cmpr_cluster_index_00 ON cmpr_cluster_01(R0_ID);
+COPY cmpr_cluster_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_cluster.data';
+-- CASE 1
+UPDATE cmpr_cluster_01 SET R3_ID = 14 WHERE R2_ID = 5;
+CLUSTER cmpr_cluster_01 USING cmpr_cluster_index_00;
+UPDATE cmpr_cluster_00 SET R3_ID = 14 WHERE R2_ID = 5;
+SELECT (SELECT COUNT(*) FROM cmpr_cluster_00) - (SELECT COUNT(*) FROM cmpr_cluster_00);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_cluster_00) MINUS ALL (SELECT * FROM cmpr_cluster_01);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_cluster_01) MINUS ALL (SELECT * FROM cmpr_cluster_00);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+--
+-- CASE 2
+--
+TRUNCATE cmpr_cluster_00;
+TRUNCATE cmpr_cluster_01;
+COPY cmpr_cluster_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_cluster.data';
+UPDATE cmpr_cluster_01 SET R2_ID = 1000;
+UPDATE cmpr_cluster_01 SET R2_ID = 1001;
+UPDATE cmpr_cluster_01 SET R2_ID = 1002;
+COPY cmpr_cluster_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_cluster.data';
+CLUSTER cmpr_cluster_01 USING cmpr_cluster_index_00;
+COPY cmpr_cluster_00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_cluster.data';
+UPDATE cmpr_cluster_00 SET R2_ID = 1000;
+UPDATE cmpr_cluster_00 SET R2_ID = 1001;
+UPDATE cmpr_cluster_00 SET R2_ID = 1002;
+COPY cmpr_cluster_00 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_cluster.data';
+SELECT (SELECT COUNT(*) FROM cmpr_cluster_00) - (SELECT COUNT(*) FROM cmpr_cluster_00);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_cluster_00) MINUS ALL (SELECT * FROM cmpr_cluster_01);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_cluster_01) MINUS ALL (SELECT * FROM cmpr_cluster_00);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+-- clean up
+DROP TABLE cmpr_cluster_00;
+DROP TABLE cmpr_cluster_01;
+\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_cluster.data

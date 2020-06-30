@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+# ############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : Parallel ssh to the set of nodes in hosts.txt.
+#                 For each node, this essentially does an "ssh host command".
+#                 from each remote node in a directory.
+#                 Each output file in that directory will be named
+#                 by the corresponding remote node's hostname or IP address.
+# ############################################################################
+import os
+import optparse
+import sys
+import shlex
+import xml.etree.cElementTree as ETree
+from TaskPool import TaskPool
+from TaskPool import read_host_file
+
+TIME_OUT = 300
+PARALLEL_NUM = 32
+
+
+def parse_command():
+    """
+    return: parser
+    """
+    parser = optparse.OptionParser(conflict_handler='resolve')
+    parser.disable_interspersed_args()
+    parser.usage = "%prog [OPTIONS] command"
+    parser.epilog = "Example: pssh -H hostname 'id'"
+    parser.add_option('-H', dest='hostname', action='append',
+                      help='Nodes to be connected')
+    parser.add_option('-h', dest='hostfile',
+                      help='Host file with each line per node')
+    parser.add_option('-t', dest='timeout', type='int',
+                      help='Timeouts in seconds')
+    parser.add_option('-p', dest='parallel', type='int',
+                      help='Maximum number of parallel')
+    parser.add_option('-o', dest='outdir', help='Output results folder')
+    parser.add_option('-e', dest='errdir', help='Error results folder')
+    parser.add_option('-P', dest='print', action='store_true',
+                      help='Print output')
+    parser.add_option('-s', dest='shellmode', action='store_true',
+                      help='Output only execution results')
+    parser.add_option('-x', dest='extra',
+                      help='Extra command-line arguments')
+    parser.add_option('-i', dest='inline', action='store_true',
+                      help='aggregated output and error for each server')
+    parser.add_option('-O', dest='opt', action='append',
+                      help='Additional scp parameters')
+    return parser
+
+
+def check_parse(parser_info):
+    """
+    :param parser_info: Parameter key-value pairs
+    :return: opts_info: Parameter key-value pairs
+             args_info: commands list
+    """
+    # set defaults parallel and timeout value
+    defaults = dict(parallel=PARALLEL_NUM, timeout=TIME_OUT)
+    parser_info.set_defaults(**defaults)
+    opts_info, args_info = parser_info.parse_args()
+
+    if not opts_info:
+        parser_info.error("The commands is request.")
+    if not opts_info.hostname and not opts_info.hostfile:
+        parser_info.error("The host info is request.")
+
+    return opts_info, args_info
+
+
+def run(hosts):
+    """
+    function: do run process
+    input : hosts
+    output: NA
+    """
+
+    manager = TaskPool(opts)
+    for host in hosts:
+        env_dist = os.environ
+        if "HOST_IP" in env_dist.keys():
+            tool_path = os.path.join(os.path.dirname(__file__), "../../../../")
+            cmd_sender_path = os.path.join(tool_path, 'script/cmd_sender.py')
+
+            if not os.path.exists(cmd_sender_path):
+                sys.exit(2)
+
+            xml_path = os.path.join(tool_path, "cluster_default_agent.xml")
+            agent_port = 0
+            tmp_dir = ""
+            try:
+                dom_tree = ETree.parse(xml_path)
+                root_node = dom_tree.getroot()
+                element = root_node.findall('CLUSTER')[0]
+                elem_array = element.findall('PARAM')
+                for elem in elem_array:
+                    name = elem.attrib['name']
+                    if name == "agentPort":
+                        agent_port = int(elem.attrib['value'])
+                    if name == "tmpMppdbPath":
+                        tmp_dir = str(elem.attrib['value'])
+            except Exception as ex:
+                raise Exception("Failed to parsing xml. Error: \n%s." %
+                                str(ex))
+
+            action_file = os.path.join(tmp_dir, ".action_flag_file")
+            if os.path.exists(action_file):
+                with open(action_file, "r") as fp:
+                    result = fp.read()
+                action = result.strip()
+            else:
+                action = "common"
+            cmd = ['python3', cmd_sender_path, '-H', host, '-p',
+                   str(agent_port), '-a', action, '-t', str(opts.timeout)]
+        else:
+            cmd = ["ssh", host, "-q",
+                   "-o", "SendEnv=PSSH_NODENUM PSSH_HOST",
+                   "-o", "BatchMode=yes",
+                   "-o", "ConnectionAttempts=10",
+                   "-o", "ConnectTimeout=30",
+                   "-o", "NumberOfPasswordPrompts=1",
+                   "-o", "ServerAliveCountMax=10",
+                   "-o", "ServerAliveInterval=30",
+                   "-o", "TCPKeepAlive=yes"]
+            if opts.extra:
+                extra_info = shlex.split(opts.extra)
+                cmd.extend(extra_info)
+            if opts.opt:
+                for i in opts.opt:
+                    cmd.append("-o")
+                    cmd.append(i)
+        cmd.extend(args)
+        manager.add_task(host, cmd)
+    try:
+        statuses = manager.start()
+        if min(statuses) < 0:
+            # At least one process was killed.
+            sys.exit(3)
+        for status in statuses:
+            if status == 255 and not opts.shellmode:
+                sys.exit(4)
+        for status in statuses:
+            if status != 0 and not opts.shellmode:
+                sys.exit(5)
+            elif status != 0:
+                sys.exit(status)
+
+    except Exception as ex:
+        print(str(ex))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    """
+    """
+    try:
+        parsers = parse_command()
+        opts, args = check_parse(parsers)
+        if opts.hostfile:
+            host_list = read_host_file(opts.hostfile)
+        else:
+            host_list = opts.hostname
+        host_list = list(set(host_list))
+        run(host_list)
+    except Exception as e:
+        print(str(e))
+        sys.exit(1)

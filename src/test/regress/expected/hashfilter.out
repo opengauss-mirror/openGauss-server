@@ -1,0 +1,1130 @@
+create schema hashfilter;
+set current_schema = hashfilter;
+START TRANSACTION;
+--create row table
+create table hashfilter_t1(a int not null, b varchar(10), c regproc);
+create table hashfilter_t2(a int not null, b varchar(10), c regproc);
+create table hashfilter_t3(a int not null, b varchar(10), c regproc);
+--create column table
+create table hashfilter_t4(a int not null, b varchar(10)) WITH (ORIENTATION = COLUMN);
+create table hashfilter_t5(a int not null, b varchar(10)) WITH (ORIENTATION = COLUMN);
+create table hashfilter_t6(a int not null, b varchar(10)) WITH (ORIENTATION = COLUMN);
+--mutiple distribute key
+create table hf_t1(a int, b int, c int, d varchar(10)) WITH (ORIENTATION = COLUMN);
+create table hf_t2(a int, b int, c int, d varchar(10)) WITH (ORIENTATION = COLUMN);
+create table hf_t3(a int, b int, c int, d varchar(10));
+create table hf_t4(a int, b int, c int, d varchar(10));
+create table hf_t5(a int, b int, c int, d varchar(10)) WITH (ORIENTATION = COLUMN);
+create table hf_t6(a int, b int, c int, d varchar(10)) WITH (ORIENTATION = COLUMN);
+--partition table
+create table hashfilter_t7(a int, b int) WITH (ORIENTATION=COLUMN)
+partition by range (a) 
+(
+partition p0 values less than (50), 
+partition p1 values less than (100), 
+partition p2 values less than (150)
+) ;
+create table hashfilter_t8(a int, b int);
+--
+-- Data for Name: hashfilter_t1; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hashfilter_t1 (a, b, c) FROM stdin;
+;
+--
+-- Data for Name: hashfilter_t2; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hashfilter_t2 (a, b, c) FROM stdin;
+;
+--
+-- Data for Name: hashfilter_t3; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hashfilter_t3 (a, b, c) FROM stdin;
+;
+--
+-- Data for Name: hashfilter_t4; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hashfilter_t4 (a, b) FROM stdin;
+;
+--
+-- Data for Name: hashfilter_t5; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hashfilter_t5 (a, b) FROM stdin;
+;
+--
+-- Data for Name: hashfilter_t6; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hashfilter_t6 (a, b) FROM stdin;
+;
+--
+-- Data for Name: hashfilter_t7; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hashfilter_t7 (a, b) FROM stdin;
+;
+--
+-- Data for Name: hashfilter_t8; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hashfilter_t8 (a, b) FROM stdin;
+;
+--
+-- Data for Name: hf_t1; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hf_t1 (a, b, c, d) FROM stdin;
+;
+--
+-- Data for Name: hf_t2; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hf_t2 (a, b, c, d) FROM stdin;
+;
+--
+-- Data for Name: hf_t3; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hf_t3 (a, b, c, d) FROM stdin;
+;
+--
+-- Data for Name: hf_t4; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hf_t4 (a, b, c, d) FROM stdin;
+;
+--
+-- Data for Name: hf_t5; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hf_t5 (a, b, c, d) FROM stdin;
+;
+--
+-- Data for Name: hf_t6; Type: TABLE DATA; Schema: hashfilter; Owner: jyh
+--
+COPY hf_t6 (a, b, c, d) FROM stdin;
+;
+COMMIT;
+--analyze
+analyze hashfilter_t1;
+analyze hashfilter_t2;
+analyze hashfilter_t3;
+analyze hashfilter_t4;
+analyze hashfilter_t5;
+analyze hashfilter_t6;
+analyze hf_t1;
+analyze hf_t2;
+analyze hf_t3;
+analyze hf_t4;
+analyze hf_t5;
+analyze hf_t6;
+--SetOp for append between replication and hash
+explain (costs off, nodes off) select b from hashfilter_t1 union all (select b from hashfilter_t2) order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Sort Key: hashfilter_t1.b
+   ->  Result
+         ->  Append
+               ->  Seq Scan on hashfilter_t1
+               ->  Seq Scan on hashfilter_t2
+(6 rows)
+
+select b from hashfilter_t1 union all (select b from hashfilter_t2) order by b;
+  b  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 222
+ 333
+ 333
+ 444
+ 444
+ 
+ 
+ 
+ 
+(16 rows)
+
+explain (costs off, nodes off) select b from hashfilter_t1 union all (select b from hashfilter_t1 union all (select b from hashfilter_t2)) order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Sort Key: hashfilter.hashfilter_t1.b
+   ->  Result
+         ->  Append
+               ->  Seq Scan on hashfilter_t1
+               ->  Seq Scan on hashfilter_t1
+               ->  Seq Scan on hashfilter_t2
+(7 rows)
+
+select b from hashfilter_t1 union all (select b from hashfilter_t1 union all (select b from hashfilter_t2)) order by b;
+  b  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+ 333
+ 444
+ 444
+ 444
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+(25 rows)
+
+explain (costs off, nodes off) select b from hashfilter_t4 union all (select b from hashfilter_t5) order by b;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: hashfilter_t4.b
+         ->  Vector Result
+               ->  Vector Append
+                     ->  CStore Scan on hashfilter_t4
+                     ->  CStore Scan on hashfilter_t5
+(7 rows)
+
+select b from hashfilter_t4 union all (select b from hashfilter_t5) order by b;
+  b  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 222
+ 333
+ 333
+ 444
+ 444
+ 
+ 
+ 
+ 
+(16 rows)
+
+explain (costs off, nodes off) select b from hashfilter_t1 union (select b from hashfilter_t2) order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Sort Key: hashfilter_t1.b
+   ->  HashAggregate
+         Group By Key: hashfilter_t1.b
+         ->  Append
+               ->  Seq Scan on hashfilter_t1
+               ->  Seq Scan on hashfilter_t2
+(7 rows)
+
+select b from hashfilter_t1 union (select b from hashfilter_t2) order by b;
+  b  
+-----
+ 111
+ 222
+ 333
+ 444
+ 
+(5 rows)
+
+explain (costs off, nodes off) select b from hashfilter_t4 union (select b from hashfilter_t5) order by b;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: hashfilter_t4.b
+         ->  Vector Sonic Hash Aggregate
+               Group By Key: hashfilter_t4.b
+               ->  Vector Append
+                     ->  CStore Scan on hashfilter_t4
+                     ->  CStore Scan on hashfilter_t5
+(8 rows)
+
+select b from hashfilter_t4 union (select b from hashfilter_t5) order by b;
+  b  
+-----
+ 111
+ 222
+ 333
+ 444
+ 
+(5 rows)
+
+explain (costs off, nodes off) select a from hashfilter_t1 intersect all (select a from hashfilter_t3) order by a;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".a
+   ->  HashSetOp Intersect All
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     ->  Seq Scan on hashfilter_t1
+               ->  Subquery Scan on "*SELECT* 2"
+                     ->  Seq Scan on hashfilter_t3
+(8 rows)
+
+select a from hashfilter_t1 intersect all (select a from hashfilter_t3) order by a;
+  a  
+-----
+ 111
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+(7 rows)
+
+explain (costs off, nodes off) select a from hashfilter_t4 intersect all (select a from hashfilter_t6) order by a;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: "*SELECT* 1".a
+         ->  Vector HashSetOp Intersect All
+               ->  Vector Append
+                     ->  Vector Subquery Scan on "*SELECT* 1"
+                           ->  CStore Scan on hashfilter_t4
+                     ->  Vector Subquery Scan on "*SELECT* 2"
+                           ->  CStore Scan on hashfilter_t6
+(9 rows)
+
+select a from hashfilter_t4 intersect all (select a from hashfilter_t6) order by a;
+  a  
+-----
+ 111
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+(7 rows)
+
+explain (costs off, nodes off) select a from hashfilter_t1 except all (select a from hashfilter_t3) order by a;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".a
+   ->  HashSetOp Except All
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     ->  Seq Scan on hashfilter_t1
+               ->  Subquery Scan on "*SELECT* 2"
+                     ->  Seq Scan on hashfilter_t3
+(8 rows)
+
+select a from hashfilter_t1 except all (select a from hashfilter_t3) order by a;
+  a  
+-----
+ 111
+ 333
+(2 rows)
+
+explain (costs off, nodes off) select a from hashfilter_t4 except all (select a from hashfilter_t6) order by a;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: "*SELECT* 1".a
+         ->  Vector HashSetOp Except All
+               ->  Vector Append
+                     ->  Vector Subquery Scan on "*SELECT* 1"
+                           ->  CStore Scan on hashfilter_t4
+                     ->  Vector Subquery Scan on "*SELECT* 2"
+                           ->  CStore Scan on hashfilter_t6
+(9 rows)
+
+select a from hashfilter_t4 except all (select a from hashfilter_t6) order by a;
+  a  
+-----
+ 111
+ 333
+(2 rows)
+
+explain (costs off, nodes off) (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1) except all select a from hashfilter_t2 order by 1;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".a
+   ->  HashSetOp Except All
+         ->  Append
+               ->  Result
+                     ->  HashSetOp Intersect All
+                           ->  Append
+                                 ->  Subquery Scan on "*SELECT* 1"
+                                       ->  Seq Scan on hashfilter_t1
+                                 ->  Subquery Scan on "*SELECT* 2"
+                                       ->  Seq Scan on hashfilter_t1
+               ->  Subquery Scan on "*SELECT* 3"
+                     ->  Seq Scan on hashfilter_t2
+(13 rows)
+
+(select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1) except all select a from hashfilter_t2 order by 1;
+  a  
+-----
+ 111
+ 333
+(2 rows)
+
+explain (costs off, nodes off) (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1 limit 6) except all (select a from hashfilter_t2 order by 1 limit 3) order by 1;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".a
+   ->  HashSetOp Except All
+         ->  Append
+               ->  Result
+                     ->  HashSetOp Intersect All
+                           ->  Append
+                                 ->  Subquery Scan on "*SELECT* 1"
+                                       ->  Seq Scan on hashfilter_t1
+                                 ->  Subquery Scan on "*SELECT* 2"
+                                       ->  Limit
+                                             ->  Sort
+                                                   Sort Key: hashfilter.hashfilter_t1.a
+                                                   ->  Seq Scan on hashfilter_t1
+               ->  Subquery Scan on "*SELECT* 3"
+                     ->  Limit
+                           ->  Sort
+                                 Sort Key: hashfilter_t2.a
+                                 ->  Seq Scan on hashfilter_t2
+(19 rows)
+
+(select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1 limit 6) except all (select a from hashfilter_t2 order by 1 limit 3) order by 1;
+  a  
+-----
+ 111
+ 222
+ 333
+(3 rows)
+
+create view v1 as (select a from hashfilter_t1 order by 1) intersect all (select a from hashfilter_t1 order by 1 limit 6);
+explain (costs off, nodes off) select v1.a from v1 left join (select a from hashfilter_t2 order by 1 limit 3) t2 on v1.a=t2.a order by 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Merge Left Join
+   Merge Cond: (v1.a = hashfilter_t2.a)
+   ->  Sort
+         Sort Key: v1.a
+         ->  Subquery Scan on v1
+               ->  HashSetOp Intersect All
+                     ->  Append
+                           ->  Subquery Scan on "*SELECT* 1"
+                                 ->  Seq Scan on hashfilter_t1
+                           ->  Subquery Scan on "*SELECT* 2"
+                                 ->  Limit
+                                       ->  Sort
+                                             Sort Key: hashfilter.hashfilter_t1.a
+                                             ->  Seq Scan on hashfilter_t1
+   ->  Materialize
+         ->  Limit
+               ->  Sort
+                     Sort Key: hashfilter_t2.a
+                     ->  Seq Scan on hashfilter_t2
+(19 rows)
+
+select v1.a from v1 left join (select a from hashfilter_t2 order by 1 limit 3) t2 on v1.a=t2.a order by 1;
+  a  
+-----
+ 111
+ 111
+ 222
+ 222
+ 222
+ 222
+ 222
+ 222
+ 333
+(9 rows)
+
+--two table join between replication and hash
+explain (costs off, nodes off) select t1.a from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.b order by t1.a;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: t1.a
+   ->  Hash Left Join
+         Hash Cond: (t1.a = (t2.b)::bigint)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t1.a from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.b order by t1.a;
+  a  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 222
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+ 333
+(16 rows)
+
+explain (costs off, nodes off) select t1.a from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.a=t2.b order by t1.a;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: t1.a
+         ->  Vector Hash Left Join
+               Hash Cond: (t1.a = (t2.b)::bigint)
+               ->  CStore Scan on hashfilter_t4 t1
+               ->  CStore Scan on hashfilter_t6 t2
+(7 rows)
+
+select t1.a from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.a=t2.b order by t1.a;
+  a  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 222
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+ 333
+(16 rows)
+
+explain (costs off, nodes off) select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a order by t1.b;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: t1.b
+   ->  Hash Left Join
+         Hash Cond: ((t1.b)::bigint = t2.a)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a order by t1.b;
+  b  
+-----
+ 111
+ 111
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+ 333
+ 333
+ 333
+ 444
+ 
+ 
+ 
+(15 rows)
+
+explain (costs off, nodes off) select t1.b from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.b=t2.a order by t1.b;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: t1.b
+         ->  Vector Hash Left Join
+               Hash Cond: ((t1.b)::bigint = t2.a)
+               ->  CStore Scan on hashfilter_t4 t1
+               ->  CStore Scan on hashfilter_t6 t2
+(7 rows)
+
+select t1.b from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.b=t2.a order by t1.b;
+  b  
+-----
+ 111
+ 111
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+ 333
+ 333
+ 333
+ 444
+ 
+ 
+ 
+(15 rows)
+
+explain (costs off, nodes off) select t1.b from hashfilter_t1 t1 full join hashfilter_t2 t2 on t1.b=t2.b order by t1.b;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Sort
+   Sort Key: t1.b
+   ->  Hash Full Join
+         Hash Cond: ((t1.b)::text = (t2.b)::text)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t1.b from hashfilter_t1 t1 full join hashfilter_t2 t2 on t1.b=t2.b order by t1.b;
+  b  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 333
+ 333
+ 444
+ 
+ 
+ 
+ 
+(15 rows)
+
+explain (costs off, nodes off) select t1.b from hashfilter_t4 t1 full join hashfilter_t6 t2 on t1.b=t2.b order by t1.b;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Sort
+   Sort Key: t1.b
+   ->  Hash Full Join
+         Hash Cond: ((t1.b)::text = (t2.b)::text)
+         ->  Row Adapter
+               ->  CStore Scan on hashfilter_t4 t1
+         ->  Hash
+               ->  Row Adapter
+                     ->  CStore Scan on hashfilter_t6 t2
+(9 rows)
+
+select t1.b from hashfilter_t4 t1 full join hashfilter_t6 t2 on t1.b=t2.b order by t1.b;
+  b  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 333
+ 333
+ 444
+ 
+ 
+ 
+ 
+(15 rows)
+
+explain (costs off, nodes off) select t2.b from hashfilter_t2 t2 full join hashfilter_t1 t1 on t1.b=t2.b order by t2.b; 
+                    QUERY PLAN                    
+--------------------------------------------------
+ Sort
+   Sort Key: t2.b
+   ->  Hash Full Join
+         Hash Cond: ((t1.b)::text = (t2.b)::text)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t2.b from hashfilter_t2 t2 full join hashfilter_t1 t1 on t1.b=t2.b order by t2.b; 
+  b  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 444
+ 
+ 
+ 
+ 
+ 
+ 
+(15 rows)
+
+explain (costs off, nodes off) select t2.a from hashfilter_t2 t2 right join hashfilter_t1 t1 on t1.a=t2.b order by t2.a;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: t2.a
+   ->  Hash Left Join
+         Hash Cond: (t1.a = (t2.b)::bigint)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t2.a from hashfilter_t2 t2 right join hashfilter_t1 t1 on t1.a=t2.b order by t2.a;
+  a  
+-----
+ 111
+ 111
+ 222
+ 222
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+ 333
+ 333
+    
+    
+    
+    
+(16 rows)
+
+explain (costs off, nodes off) select t1.a from hashfilter_t6 t1 right join hashfilter_t4 t2 on t1.a=t2.b order by t1.a;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: t1.a
+         ->  Vector Hash Left Join
+               Hash Cond: ((t2.b)::bigint = t1.a)
+               ->  CStore Scan on hashfilter_t4 t2
+               ->  CStore Scan on hashfilter_t6 t1
+(7 rows)
+
+select t1.a from hashfilter_t4 t1 left join hashfilter_t6 t2 on t1.a=t2.b order by t1.a;
+  a  
+-----
+ 111
+ 111
+ 111
+ 111
+ 111
+ 111
+ 222
+ 222
+ 222
+ 222
+ 222
+ 222
+ 333
+ 333
+ 333
+ 333
+(16 rows)
+
+explain (costs off, nodes off) select t1.* from hashfilter_t1 t1 where t1.b in (select t2.b from hashfilter_t2 t2) order by t1.b; 
+                      QUERY PLAN                      
+------------------------------------------------------
+ Sort
+   Sort Key: t1.b
+   ->  Hash Join
+         Hash Cond: ((t1.b)::text = (t2.b)::text)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  HashAggregate
+                     Group By Key: (t2.b)::text
+                     ->  Seq Scan on hashfilter_t2 t2
+(9 rows)
+
+select t1.b from hashfilter_t1 t1 where t1.b in (select t2.b from hashfilter_t2 t2) order by t1.b;
+  b  
+-----
+ 111
+ 111
+ 222
+ 444
+(4 rows)
+
+explain (costs off, nodes off) select t1.b from hashfilter_t4 t1 where t1.b in (select t2.b from hashfilter_t6 t2) order by t1.b;  
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Row Adapter
+   ->  Vector Sort
+         Sort Key: t1.b
+         ->  Vector Sonic Hash Join
+               Hash Cond: ((t1.b)::text = (t2.b)::text)
+               ->  CStore Scan on hashfilter_t4 t1
+               ->  Vector Sonic Hash Aggregate
+                     Group By Key: (t2.b)::text
+                     ->  CStore Scan on hashfilter_t6 t2
+(9 rows)
+
+select t1.b from hashfilter_t4 t1 where t1.b in (select t2.b from hashfilter_t6 t2) order by t1.b;
+  b  
+-----
+ 111
+ 111
+ 222
+ 444
+(4 rows)
+
+explain (costs off, nodes off) select t1.* from hashfilter_t1 t1 where t1.a not in (select t2.a from hashfilter_t2 t2) order by t1.a;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: t1.a
+   ->  Hash Anti Join
+         Hash Cond: (t1.a = t2.a)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t1.* from hashfilter_t1 t1 where t1.a not in (select t2.a from hashfilter_t2 t2) order by t1.a;
+ a | b | c 
+---+---+---
+(0 rows)
+
+explain (costs off, nodes off) select t1.* from hashfilter_t1 t1 where not exists (select * from hashfilter_t2 t2 where t2.a=t1.b) order by t1.b; 
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: t1.b
+   ->  Hash Anti Join
+         Hash Cond: ((t1.b)::bigint = t2.a)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t1.* from hashfilter_t1 t1 where not exists (select * from hashfilter_t2 t2 where t2.a=t1.b) order by 1, 2, 3; 
+  a  |  b  |   c    
+-----+-----+--------
+ 111 |     | ascii
+ 222 |     | bool
+ 333 | 444 | any_in
+ 333 |     | bit_in
+(4 rows)
+
+explain (costs off, nodes off) select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a and t1.a=t2.b order by t1.a,t1.b; 
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Sort
+   Sort Key: t1.a, t1.b
+   ->  Hash Left Join
+         Hash Cond: (((t1.b)::bigint = t2.a) AND (t1.a = (t2.b)::bigint))
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.b=t2.a and t1.a=t2.b order by t1.a,t1.b; 
+  b  
+-----
+ 111
+ 
+ 222
+ 333
+ 
+ 111
+ 333
+ 444
+ 
+(9 rows)
+
+explain (costs off, nodes off) select t1.a,t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a+222=t2.b order by t1.a,t1.b; 
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: t1.a, t1.b
+   ->  Hash Left Join
+         Hash Cond: ((t1.a + 222) = (t2.b)::bigint)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t1.a,t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a+222=t2.b order by t1.a,t1.b;
+  a  |  b  
+-----+-----
+ 111 | 111
+ 111 | 
+ 222 | 222
+ 222 | 333
+ 222 | 
+ 333 | 111
+ 333 | 333
+ 333 | 444
+ 333 | 
+(9 rows)
+
+--unsupport data type redistribute
+explain (costs off, nodes off) select t1.c from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.c=t2.c order by t1.c;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Sort Key: t1.c
+   ->  Hash Left Join
+         Hash Cond: ((t1.c)::oid = (t2.c)::oid)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  Seq Scan on hashfilter_t2 t2
+(7 rows)
+
+select t1.c from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.c=t2.c order by t1.c;
+    c     
+----------
+ array_eq
+ array_eq
+ bit_in
+ bit_in
+ ascii
+ ascii
+ any_in
+ any_in
+ any_in
+ any_in
+ bool
+ bool
+(12 rows)
+
+--multiply table join between replication and hash
+explain (costs off, nodes off) select t1.a from hashfilter_t1 t1 where t1.b in (select t3.b from hashfilter_t1 t3 left join hashfilter_t2 t2 on t3.a=t2.b) order by t1.a;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Sort Key: t1.a
+   ->  Hash Join
+         Hash Cond: ((t1.b)::text = (t3.b)::text)
+         ->  Seq Scan on hashfilter_t1 t1
+         ->  Hash
+               ->  HashAggregate
+                     Group By Key: (t3.b)::text
+                     ->  Hash Left Join
+                           Hash Cond: (t3.a = (t2.b)::bigint)
+                           ->  Seq Scan on hashfilter_t1 t3
+                           ->  Hash
+                                 ->  Seq Scan on hashfilter_t2 t2
+(13 rows)
+
+select t1.a from hashfilter_t1 t1 where t1.b in (select t3.b from hashfilter_t1 t3 left join hashfilter_t2 t2 on t3.a=t2.b) order by t1.a;
+  a  
+-----
+ 111
+ 222
+ 222
+ 333
+ 333
+ 333
+(6 rows)
+
+--setop and join combination
+explain (costs off, nodes off) select b from hashfilter_t1 intersect (select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.a) order by b;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".b
+   ->  HashSetOp Intersect
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     ->  Seq Scan on hashfilter_t1
+               ->  Subquery Scan on "*SELECT* 2"
+                     ->  Hash Left Join
+                           Hash Cond: (t1.a = t2.a)
+                           ->  Seq Scan on hashfilter_t1 t1
+                           ->  Hash
+                                 ->  Seq Scan on hashfilter_t2 t2
+(12 rows)
+
+select b from hashfilter_t1 intersect (select t1.b from hashfilter_t1 t1 left join hashfilter_t2 t2 on t1.a=t2.a) order by b;
+  b  
+-----
+ 111
+ 222
+ 333
+ 444
+ 
+(5 rows)
+
+--partition replication table join with hash table
+explain (costs off, nodes off) select min(table_01.b) from hashfilter_t7 as table_01 full outer join hashfilter_t8 as table_02 on table_01.b = table_02.b;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Aggregate
+   ->  Hash Full Join
+         Hash Cond: (table_02.b = table_01.b)
+         ->  Seq Scan on hashfilter_t8 table_02
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 3
+                     ->  Row Adapter
+                           ->  Partitioned CStore Scan on hashfilter_t7 table_01
+                                 Selected Partitions:  1..3
+(10 rows)
+
+--the side which add hashfilter need add remote query because other side has gather on CN
+explain (costs off, nodes off) select * from hashfilter_t1 t1 where t1.a in (select t2.a from hashfilter_t2 t2 where t2.a in (select t3.a from hashfilter_t1 t13 left join hashfilter_t3 t3 on t13.a=t3.b order by 1 limit 10) order by 1 limit 7) order by 1 limit 6;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Limit
+   ->  Merge Join
+         Merge Cond: (t2.a = t1.a)
+         ->  Sort
+               Sort Key: t2.a
+               ->  HashAggregate
+                     Group By Key: t2.a
+                     ->  Limit
+                           ->  Sort
+                                 Sort Key: t2.a
+                                 ->  Hash Semi Join
+                                       Hash Cond: (t2.a = t3.a)
+                                       ->  Seq Scan on hashfilter_t2 t2
+                                       ->  Hash
+                                             ->  Limit
+                                                   ->  Sort
+                                                         Sort Key: t3.a
+                                                         ->  Hash Left Join
+                                                               Hash Cond: (t13.a = (t3.b)::bigint)
+                                                               ->  Seq Scan on hashfilter_t1 t13
+                                                               ->  Hash
+                                                                     ->  Seq Scan on hashfilter_t3 t3
+         ->  Sort
+               Sort Key: t1.a
+               ->  Seq Scan on hashfilter_t1 t1
+(25 rows)
+
+select * from hashfilter_t1 t1 where t1.a in (select t2.a from hashfilter_t2 t2 where t2.a in (select t3.a from hashfilter_t1 t13 left join hashfilter_t3 t3 on t13.a=t3.b order by 1 limit 10) order by 1 limit 7) order by 1 limit 6;
+  a  |  b  |    c     
+-----+-----+----------
+ 111 | 111 | bool
+ 111 |     | ascii
+ 222 | 222 | any_in
+ 222 | 333 | array_eq
+ 222 |     | bool
+ 333 | 333 | ascii
+(6 rows)
+
+--query for mutiple distribute key
+select count(*) from hf_t1 t1 left join hf_t2 t2 on t1.a = t2.b and t1.b=t2.c where t1.a=5;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from hf_t3 t3 left join hf_t4 t4 on t3.a = t4.b and t3.b=t4.c where t3.a=5;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from hf_t5 t5 left join hf_t6 t6 on t5.a=t6.a and t5.b=t6.b and t5.c=t6.c;
+ count 
+-------
+     6
+(1 row)
+
+--reduce stream plan
+set enable_hashjoin=on;
+set enable_mergejoin=off;
+set enable_nestloop=on;
+set plan_mode_seed=107782559;
+select * from hashfilter_t1 t1 where t1.a in (select t2.a from hashfilter_t2 t2 where t2.a in (select t3.a from hashfilter_t1 t13 left join hashfilter_t3 t3 on t13.a=t3.b order by 1 limit 10) order by 1 limit 7) order by 1,2,3 limit 6;
+  a  |  b  |    c     
+-----+-----+----------
+ 111 | 111 | bool
+ 111 |     | ascii
+ 222 | 222 | any_in
+ 222 | 333 | array_eq
+ 222 |     | bool
+ 333 | 111 | array_eq
+(6 rows)
+
+set plan_mode_seed=356300280;
+select * from hashfilter_t1 t1 where t1.a in (select t2.a from hashfilter_t2 t2 where t2.a in (select t3.a from hashfilter_t1 t13 left join hashfilter_t3 t3 on t13.a=t3.b order by 1 limit 10) order by 1 limit 7) order by 1,2,3 limit 6;
+  a  |  b  |    c     
+-----+-----+----------
+ 111 | 111 | bool
+ 111 |     | ascii
+ 222 | 222 | any_in
+ 222 | 333 | array_eq
+ 222 |     | bool
+ 333 | 111 | array_eq
+(6 rows)
+
+--hash filter + append pushdown
+select * from hashfilter_t1 union all select * from hashfilter_t2 where a=111 order by 1,2,3;
+  a  |  b  |    c     
+-----+-----+----------
+ 111 | 111 | bit_in
+ 111 | 111 | bool
+ 111 |     | ascii
+ 222 | 222 | any_in
+ 222 | 333 | array_eq
+ 222 |     | bool
+ 333 | 111 | array_eq
+ 333 | 333 | ascii
+ 333 | 444 | any_in
+ 333 |     | bit_in
+(10 rows)
+
+reset plan_mode_seed;
+--hash filter for bitmapscan
+set enable_seqscan=off;
+set enable_indexscan=off;
+alter table hf_t3 add primary key (a, b, c, d);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "hf_t3_pkey" for table "hf_t3"
+explain (costs off, nodes off) update hf_t3 set c=t2.a from hashfilter_t2 t2 where hf_t3.a=t2.a and t2.a<=5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Update on hf_t3
+   ->  Nested Loop
+         ->  Seq Scan on hashfilter_t2 t2
+               Filter: (a <= 5)
+         ->  Bitmap Heap Scan on hf_t3
+               Recheck Cond: ((a = t2.a) AND (a <= 5))
+               ->  Bitmap Index Scan on hf_t3_pkey
+                     Index Cond: ((a = t2.a) AND (a <= 5))
+(8 rows)
+
+--clean up
+reset current_schema;
+drop schema hashfilter cascade;
+NOTICE:  drop cascades to 15 other objects
+DETAIL:  drop cascades to table hashfilter.hashfilter_t1
+drop cascades to table hashfilter.hashfilter_t2
+drop cascades to table hashfilter.hashfilter_t3
+drop cascades to table hashfilter.hashfilter_t4
+drop cascades to table hashfilter.hashfilter_t5
+drop cascades to table hashfilter.hashfilter_t6
+drop cascades to table hashfilter.hf_t1
+drop cascades to table hashfilter.hf_t2
+drop cascades to table hashfilter.hf_t3
+drop cascades to table hashfilter.hf_t4
+drop cascades to table hashfilter.hf_t5
+drop cascades to table hashfilter.hf_t6
+drop cascades to table hashfilter.hashfilter_t7
+drop cascades to table hashfilter.hashfilter_t8
+drop cascades to view hashfilter.v1

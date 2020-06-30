@@ -1,0 +1,29 @@
+<refentry id="SQL-ANALYSE">
+<refmeta>
+<refentrytitle>ANALYSE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ANALYSE</refname>
+<refpurpose>collect statistics about a database</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+{ANALYZE | ANALYSE} [ VERBOSE ]
+    [ table_name [ ( column_name [, ...] ) ] ];
+{ANALYZE | ANALYSE} [ VERBOSE ]
+    [ table_name [ ( column_name [, ...] ) ] ]
+    PARTITION patrition_name;
+{ANALYZE | ANALYSE} [ VERBOSE ]
+    { foreign_table_name | FOREIGN TABLES };
+{ANALYZE | ANALYSE} [ VERBOSE ]
+    table_name (( column_1_name, column_2_name [, ...] ));
+{ANALYZE | ANALYSE} VERIFY {FAST|COMPLETE};
+{ANALYZE | ANALYSE} VERIFY {FAST|COMPLETE}
+    table_name|index_name [CASCADE];
+{ANALYZE | ANALYSE} VERIFY {FAST|COMPLETE}
+    table_name PARTITION (patrition_name) [CASCADE];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

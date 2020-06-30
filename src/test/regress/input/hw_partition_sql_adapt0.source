@@ -1,0 +1,885 @@
+
+---- check partitioned table adaptation of sql
+
+--
+----    ALTER TABLE [ IF EXISTS ] [ ONLY ] name [ * ] 
+----	ADD [ COLUMN ] column data_type [ COLLATE collation ] [ column_constraint [ ... ] ];
+--
+
+-- 0. test function (ok)
+-- 1. test data type of added column (ok)
+-- 2. test add column on interval partitioned table (ok)
+-- 3. test only and * (ok)
+-- 4. test not null constraint (ok)
+-- 5. test null constraint (ok)
+-- 6. test check constraint (ok)
+-- 7. test default constraint (ok)
+-- 8. test not supported column constraint (ok)
+-- 9. test partitoned table has index (ok)
+-- 10. test make view on partitioned table (ok)
+-- 11. test partitioned table has tablespace (OK)
+-- 12. test transaction commit and rollack (ok)
+
+
+
+-- 0. test function
+create table test_add_column (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_p1 values less than(1),
+	partition test_add_column_p2 values less than(4),
+	partition test_add_column_p3 values less than(7)
+);
+
+insert into test_add_column values (0, 0);
+
+-- success
+alter table test_add_column add column c int;
+insert into test_add_column values (1,1,1);
+select * from test_add_column order by 1, 2, 3;
+
+-- clean
+drop table test_add_column;
+
+
+
+-- 1. test data type of added column
+create table test_add_column_type (c1 int, c2 int)
+partition by range (c1)
+(
+	partition test_add_column_type_p1 values less than(1),
+	partition test_add_column_type_p2 values less than(4),
+	partition test_add_column_type_p3 values less than(7)
+);
+
+ALTER TABLE test_add_column_type ADD COLUMN a int4;
+
+ALTER TABLE test_add_column_type ADD COLUMN b name;
+
+ALTER TABLE test_add_column_type ADD COLUMN c text;
+
+ALTER TABLE test_add_column_type ADD COLUMN d float8;
+
+ALTER TABLE test_add_column_type ADD COLUMN e float4;
+
+ALTER TABLE test_add_column_type ADD COLUMN f int2;
+
+ALTER TABLE test_add_column_type ADD COLUMN g polygon;
+
+ALTER TABLE test_add_column_type ADD COLUMN h abstime;
+
+ALTER TABLE test_add_column_type ADD COLUMN i char;
+
+ALTER TABLE test_add_column_type ADD COLUMN j abstime[];
+
+ALTER TABLE test_add_column_type ADD COLUMN k int4;
+
+ALTER TABLE test_add_column_type ADD COLUMN l tid;
+
+ALTER TABLE test_add_column_type ADD COLUMN m xid;
+
+ALTER TABLE test_add_column_type ADD COLUMN n oidvector;
+
+--ALTER TABLE test_add_column_type ADD COLUMN o lock;
+ALTER TABLE test_add_column_type ADD COLUMN p smgr;
+
+ALTER TABLE test_add_column_type ADD COLUMN q point;
+
+ALTER TABLE test_add_column_type ADD COLUMN r lseg;
+
+ALTER TABLE test_add_column_type ADD COLUMN s path;
+
+ALTER TABLE test_add_column_type ADD COLUMN t box;
+
+ALTER TABLE test_add_column_type ADD COLUMN u tinterval;
+
+ALTER TABLE test_add_column_type ADD COLUMN v timestamp;
+
+ALTER TABLE test_add_column_type ADD COLUMN w interval;
+
+ALTER TABLE test_add_column_type ADD COLUMN x float8[];
+
+ALTER TABLE test_add_column_type ADD COLUMN y float4[];
+
+ALTER TABLE test_add_column_type ADD COLUMN z int2[];
+
+INSERT INTO test_add_column_type (c1, c2, a, b, c, d, e, f, g, h, i, j, k, l, m, n, p, q, r, s, t, u,
+	v, w, x, y, z)
+   VALUES (0, 0, 4, 'name', 'text', 4.1, 4.1, 2, '(4.1,4.1,3.1,3.1)',
+        'Mon May  1 00:30:30 1995', 'c', '{Mon May  1 00:30:30 1995, Monday Aug 24 14:43:07 1992, epoch}',
+	314159, '(1,1)', '512',
+	'1 2 3 4 5 6 7 8', 'magnetic disk', '(1.1,1.1)', '(4.1,4.1,3.1,3.1)',
+	'(0,2,4.1,4.1,3.1,3.1)', '(4.1,4.1,3.1,3.1)', '["epoch" "infinity"]',
+	'epoch', '01:00:10', '{1.0,2.0,3.0,4.0}', '{1.0,2.0,3.0,4.0}', '{1,2,3,4}');
+
+SELECT * FROM test_add_column_type order by 1, 2, 3, 4, 5;
+
+
+-- clean
+drop table test_add_column_type;
+
+
+
+-- 2. test add column on interval partitioned table
+--create table test_add_column_interval (a int, b int)
+--partition by range (a)
+--interval (3)
+--(
+--	partition p1 values less than(1),
+--	partition p2 values less than(4),
+--	partition p3 values less than(7)
+--);
+--
+--insert into test_add_column_interval values (0, 0);
+--insert into test_add_column_interval values (1, 1);
+--insert into test_add_column_interval values (7, 7);
+--insert into test_add_column_interval values (20, 20);
+--insert into test_add_column_interval values (100, 100);
+--insert into test_add_column_interval values (200, 200);
+--
+---- success
+--alter table test_add_column_interval add column c int;
+--insert into test_add_column_interval values (2,2,2);
+--select * from test_add_column_interval;
+--
+---- clean
+--drop table test_add_column_interval;
+
+-- 3. test only and *
+create table test_add_column_only (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_only_p1 values less than(1),
+	partition test_add_column_only_p2 values less than(4),
+	partition test_add_column_only_p3 values less than(7)
+);
+
+insert into test_add_column_only values (0, 0);
+
+
+-- success
+alter table only test_add_column_only add column c int;
+insert into test_add_column_only values (1, 1, 1);
+select * from test_add_column_only order by 1, 2, 3;
+
+-- success
+alter table test_add_column_only * add column d int;
+insert into test_add_column_only values (2, 2, 2, 2);
+select * from test_add_column_only order by 1, 2, 3, 4;
+
+-- failed
+alter table only test_add_column_only * add column d int;
+
+
+--clean
+drop table test_add_column_only;
+
+
+
+-- 4. test not null constraint
+create table test_add_column_not_null (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_not_null_p1 values less than(1),
+	partition test_add_column_not_null_p2 values less than(4),
+	partition test_add_column_not_null_p3 values less than(7)
+);
+
+insert into test_add_column_not_null values (0, 0);
+
+
+-- failed
+alter table test_add_column_not_null add column c int not null;
+-- success
+delete from test_add_column_not_null;
+alter table test_add_column_not_null add column c int not null;
+-- failed
+insert into test_add_column_not_null values (1, 1);
+-- success
+insert into test_add_column_not_null values (1, 1, 1);
+select * from test_add_column_not_null order by 1, 2;
+
+
+-- clean
+drop table test_add_column_not_null;
+
+
+
+-- 5. test null constraint
+create table test_add_column_null (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_null_p1 values less than(1),
+	partition test_add_column_null_p2 values less than(4),
+	partition test_add_column_null_p3 values less than(7)
+);
+
+insert into test_add_column_null values (0, 0);
+
+
+-- success
+alter table test_add_column_null add column c int null;
+insert into test_add_column_null values (1, 1);
+insert into test_add_column_null values (2, 2, 2);
+select * from test_add_column_null order by 1, 2, 3;
+
+
+-- clean
+drop table test_add_column_null;
+
+
+
+-- 6. test check constraint
+create table test_add_column_check (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_check_p1 values less than(1),
+	partition test_add_column_check_p2 values less than(4),
+	partition test_add_column_check_p3 values less than(7)
+);
+
+insert into test_add_column_check values (0, 0);
+
+
+-- success
+alter table test_add_column_check add column c int check (c>=0);
+-- failed
+insert into test_add_column_check values (-1, -1, -1);
+-- success
+insert into test_add_column_check values (1, 1, 1);
+select * from test_add_column_check order by 1, 2;
+
+
+-- clean
+drop table test_add_column_check;
+
+
+
+-- 7. test default constraint
+create table test_add_column_default (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_default_p1 values less than(1),
+	partition test_add_column_default_p2 values less than(4),
+	partition test_add_column_default_p3 values less than(7)
+);
+
+insert into test_add_column_default values (0, 0);
+
+-- success
+alter table test_add_column_default add column c int default 3;
+insert into test_add_column_default values (1, 1, 1);
+select * from test_add_column_default order by 1,2,3;
+
+insert into test_add_column_default values (2, 2);
+select * from test_add_column_default order by 1,2,3;
+
+-- clean
+drop table test_add_column_default;
+
+
+
+-- 8. test not supported column constraint
+create table test_add_column_constraint (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_constraint_p1 values less than(1),
+	partition test_add_column_constraint_p2 values less than(4),
+	partition test_add_column_constraint_p3 values less than(7)
+);
+
+insert into test_add_column_constraint values (0, 0);
+
+
+-- a. unique
+-- failed
+alter table test_add_column_constraint add column c1 int unique;
+
+-- b. primary key
+-- failed
+alter table test_add_column_constraint add column c2 int primary key;
+
+-- c. references
+create table test (a int primary key);
+insert into test values (0);
+-- failed
+alter table test_add_column_constraint add foreign key (a) references test(a) ;
+
+drop table test cascade;
+
+
+-- d.deferrable 
+-- failed
+alter table test_add_column_constraint add column c4 int deferrable;
+
+-- e.deferrable 
+-- failed
+alter table test_add_column_constraint add column c5 int not deferrable;
+
+-- clean
+drop table test_add_column_constraint;
+
+
+
+-- 9. test partitoned table has index
+create table test_add_column_index (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_index_p1 values less than(1),
+	partition test_add_column_index_p2 values less than(4),
+	partition test_add_column_index_p3 values less than(7)
+);
+
+create index temp_index on test_add_column_index(b) local
+(
+	partition temp_index_p1_index_local,
+	partition temp_index_p2_index_local,
+	partition temp_index_p3_index_local
+);
+
+insert into test_add_column_index values (0, 0);
+
+
+alter table test_add_column_index add column c int;
+insert into test_add_column_index values (1, 1, 1);
+select * from test_add_column_index order by 1,2;
+
+
+-- clean
+drop index temp_index;
+drop table test_add_column_index;
+
+
+
+-- 10. test make view on partitioned table
+create table test_add_column_view (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_view_p1 values less than(1),
+	partition test_add_column_view_p2 values less than(4),
+	partition test_add_column_view_p3 values less than(7)
+);
+
+create view temp_view as select * from test_add_column_view;
+
+insert into test_add_column_view values (0, 0);
+
+
+alter table test_add_column_view add column c int;
+insert into test_add_column_view values (1, 1, 1);
+select * from test_add_column_view order by 1,2;
+select * from temp_View order by 1,2;
+
+
+-- clean
+drop view temp_view;
+drop table test_add_column_view;
+
+
+
+-- 11. test partitioned table has tablespace
+\! rm -fr '@testtablespace@/hw_partition_sql_adapt_ts1'
+\! mkdir '@testtablespace@/hw_partition_sql_adapt_ts1'
+create tablespace hw_partition_sql_adapt_ts1 location '@testtablespace@/hw_partition_sql_adapt_ts1';
+
+-- a. partitioned table has tablespace
+create table test_add_column_tablespace (a int, b int)
+tablespace hw_partition_sql_adapt_ts1
+partition by range (a)
+(
+	partition test_add_column_tablespace_p1 values less than(1),
+	partition test_add_column_tablespace_p2 values less than(4)tablespace hw_partition_sql_adapt_ts1,
+	partition test_add_column_tablespace_p3 values less than(7)tablespace hw_partition_sql_adapt_ts1
+);
+
+insert into test_add_column_tablespace values (0, 0);
+
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.parentid in (select oid from pg_class where relname = 'test_add_column_tablespace')  order by 1,2;
+
+
+alter table test_add_column_tablespace add column c int;
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.parentid in (select oid from pg_class where relname = 'test_add_column_tablespace')  order by 1,2;
+
+insert into test_add_column_tablespace values (1, 1, 1);
+select * from test_add_column_tablespace order by 1,2;
+
+-- clean
+drop table test_add_column_tablespace;
+
+
+
+-- b. partitioned table has not tablespace
+create table test_add_column_tablespace_null (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_tablespace_null_p1 values less than(1),
+	partition test_add_column_tablespace_null_p2 values less than(4)tablespace hw_partition_sql_adapt_ts1,
+	partition test_add_column_tablespace_null_p3 values less than(7)tablespace hw_partition_sql_adapt_ts1
+);
+
+insert into test_add_column_tablespace_null values (0, 0);
+
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.parentid in (select oid from pg_class where relname = 'test_add_column_tablespace_null')  order by 1,2;
+
+
+alter table test_add_column_tablespace_null add column c int;
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.parentid in (select oid from pg_class where relname = 'test_add_column_tablespace_null')  order by 1,2;
+
+insert into test_add_column_tablespace_null values (1, 1, 1);
+select * from test_add_column_tablespace_null order by 1,2,3;
+
+
+-- clean
+drop table test_add_column_tablespace_null;
+
+
+-- clean tablespace
+drop tablespace hw_partition_sql_adapt_ts1;
+
+-- 12. test transaction commit and rollack
+create table test_add_column_transaction (a int, b int)
+partition by range (a)
+(
+	partition test_add_column_transaction_p1 values less than(1),
+	partition test_add_column_transaction_p2 values less than(4),
+	partition test_add_column_transaction_p3 values less than(7)
+);
+
+insert into test_add_column_transaction values (0, 0);
+
+
+-- a. commit
+start transaction;
+alter table test_add_column_transaction add column c int;
+insert into test_add_column_transaction values (1, 1, 1);
+select * from test_add_column_transaction order by 1,2,3;
+commit;
+
+-- success
+insert into test_add_column_transaction values (2, 2, 2);
+select * from test_add_column_transaction order by 1,2,3;
+
+-- b. rollback
+start transaction;
+alter table test_add_column_transaction add column d int;
+insert into test_add_column_transaction values (3, 3, 3, 3);
+select * from test_add_column_transaction order by 1,2,3,4;
+rollback;
+
+-- failed
+insert into test_add_column_transaction values (4, 4, 4, 4);
+select * from test_add_column_transaction order by 1,2,3;
+
+-- clean
+drop table test_add_column_transaction;
+
+--
+----    ALTER TABLE [ IF EXISTS ] [ ONLY ] name [ * ] 
+----    DROP [ COLUMN ] [ IF EXISTS ] column [ RESTRICT | CASCADE ];
+--
+
+-- 1. test function (OK)
+-- 2. test drop column on interval partitioned table (OK)
+-- 3. test containing RESTRICT CASCADE (OK)
+-- 4. test table has index (OK)
+-- 5. test table has tablespace (OK)
+-- 6. test table has toast (OK)
+-- 7. test make view on partitioned table (OK)
+-- 8. test transaction commit and rollack (OK)
+
+
+-- 1. test function
+create table test_drop_column (d int, c int, b int, a int)
+partition by range (a, b)
+(
+	partition test_drop_column_p1 values less than(1, 1),
+	partition test_drop_column_p2 values less than(4, 4),
+	partition test_drop_column_p3 values less than(7, 7)
+);
+
+insert into test_drop_column values (0, 0, 0, 0);
+
+-- success
+alter table test_drop_column drop column c;
+insert into test_drop_column values (1, 1, 1);
+select * from test_drop_column order by 1, 2, 3;
+
+-- failed: partition key can not be dropped
+alter table test_drop_column drop column a;
+select * from test_drop_column order by 1,2,3;
+
+-- clean
+drop table test_drop_column;
+
+
+
+-- 2. test drop column on interval partitioned table
+--create table test_drop_column_interval (c int, b int, a int)
+--partition by range (a)
+--interval (3)
+--(
+--	partition p1 values less than(1),
+--	partition p2 values less than(4),
+--	partition p3 values less than(7)
+--);
+--
+--insert into test_drop_column_interval values (0, 0, 0);
+--insert into test_drop_column_interval values (20, 20, 20);
+--insert into test_drop_column_interval values (30, 30, 30);
+--
+---- success
+--alter table test_drop_column_interval drop column b;
+--insert into test_drop_column_interval values (1, 1);
+--insert into test_drop_column_interval values (7, 7);
+--insert into test_drop_column_interval values (40, 40);
+--select * from test_drop_column_interval order by 1,2;
+--
+---- failed: partition key can not be dropped
+--alter table test_drop_column_interval drop column a;
+--select * from test_drop_column_interval order by 1,2;
+--
+---- clean
+--drop table test_drop_column_interval;
+
+-- 3. test containing RESTRICT CASCADE
+-- a. RESTRICT
+create table test_drop_column_restrict (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_drop_column_restrict_p1 values less than(1, 1),
+	partition test_drop_column_restrict_p2 values less than(4, 4),
+	partition test_drop_column_restrict_p3 values less than(7, 7)
+);
+
+create index temp_index on test_drop_column_restrict(c) local
+(
+	partition temp_index_p1_index_local,
+	partition temp_index_p2_index_local,
+	partition temp_index_p3_index_local
+);
+
+insert into test_drop_column_restrict values (0, 0, 0, 0);
+
+-- success
+alter table test_drop_column_restrict drop column c restrict;
+insert into test_drop_column_restrict values (1, 1, 1);
+select * from test_drop_column_restrict order by 1,2;
+
+-- clean
+-- failed: index "TEMP_INDEX" does not exist
+drop index temp_index;
+-- success
+drop table test_drop_column_restrict;
+
+
+-- a. CASCADE
+create table test_drop_column_cascade (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_drop_column_cascade_p1 values less than(1, 1),
+	partition test_drop_column_cascade_p2 values less than(4, 4),
+	partition test_drop_column_cascade_p3 values less than(7, 7)
+);
+
+create index temp_index on test_drop_column_cascade(c) local
+(
+	partition temp_index_p1_index_local,
+	partition temp_index_p2_index_local,
+	partition temp_index_p3_index_local
+);
+
+insert into test_drop_column_cascade values (0, 0, 0, 0);
+
+-- success
+alter table test_drop_column_cascade drop column c cascade;
+insert into test_drop_column_cascade values (1, 1, 1);
+select * from test_drop_column_cascade order by 1,2, 3;
+
+--clean
+-- failed: index "TEMP_INDEX" does not exist
+drop index temp_index;
+-- success
+drop table test_drop_column_cascade;
+
+
+
+-- 4. test table has index
+create table test_drop_column_index (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_drop_column_index_p1 values less than(1, 1),
+	partition test_drop_column_index_p2 values less than(4, 4),
+	partition test_drop_column_index_p3 values less than(7, 7)
+);
+
+create index temp_index on test_drop_column_index(c) local
+(
+	partition temp_index_p1_index_local,
+	partition temp_index_p2_index_local,
+	partition temp_index_p3_index_local
+);
+
+insert into test_drop_column_index values (0, 0, 0, 0);
+
+-- success
+alter table test_drop_column_index drop column c;
+insert into test_drop_column_index values (1, 1, 1);
+select * from test_drop_column_index order by 1,2,3;
+
+-- clean
+-- failed: index "CINDEX" does not exist
+drop index temp_index;
+-- success
+drop table test_drop_column_index;
+
+
+
+-- 5. test table has tablespace
+\! rm -fr '@testtablespace@/hw_partition_sql_adapt_ts1'
+\! mkdir '@testtablespace@/hw_partition_sql_adapt_ts1'
+create tablespace hw_partition_sql_adapt_ts1 location '@testtablespace@/hw_partition_sql_adapt_ts1';
+
+-- a. partitioned table has tablespace
+create table test_drop_column_tablespace (a int, b int, c int, d int)
+tablespace hw_partition_sql_adapt_ts1
+partition by range (a, b)
+(
+	partition test_drop_column_tablespace_p1 values less than(1, 1),
+	partition test_drop_column_tablespace_p2 values less than(4, 4)tablespace hw_partition_sql_adapt_ts1,
+	partition test_drop_column_tablespace_p3 values less than(7, 7)tablespace hw_partition_sql_adapt_ts1
+);
+
+insert into test_drop_column_tablespace values (0, 0, 0, 0);
+
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.parentid in (select oid from pg_class where relname = 'test_drop_column_tablespace') order by p.relname;
+
+
+alter table test_drop_column_tablespace drop column c;
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.parentid in (select oid from pg_class where relname = 'test_drop_column_tablespace') order by p.relname;
+
+-- failed
+insert into test_drop_column_tablespace values (1, 1, 1, 1);
+-- sueccess
+insert into test_drop_column_tablespace values (1, 1, 1);
+select * from test_drop_column_tablespace order by 1,2,3;
+
+
+-- clean
+drop table test_drop_column_tablespace;
+
+
+
+-- b. partitioned table has not tablespace
+create table test_drop_column_tablespace_null (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_drop_column_tablespace_null_p1 values less than(1, 1),
+	partition test_drop_column_tablespace_null_p2 values less than(4, 4)tablespace hw_partition_sql_adapt_ts1,
+	partition test_drop_column_tablespace_null_p3 values less than(7, 7)tablespace hw_partition_sql_adapt_ts1
+);
+
+insert into test_drop_column_tablespace_null values (0, 0, 0, 0);
+
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.parentid in (select oid from pg_class where relname = 'test_drop_column_tablespace_null') order by p.relname;
+
+
+alter table test_drop_column_tablespace_null drop column c;
+select p.relname, t.spcname from pg_partition p left join pg_tablespace t on (p.reltablespace = t.oid) where p.parentid in (select oid from pg_class where relname = 'test_drop_column_tablespace_null') order by p.relname;
+
+-- failed
+insert into test_drop_column_tablespace_null values (1, 1, 1, 1);
+-- sueccess
+insert into test_drop_column_tablespace_null values (1, 1, 1);
+select * from test_drop_column_tablespace_null order by 1,2,3;
+
+
+-- clean
+drop table test_drop_column_tablespace_null;
+
+
+-- clean tablespace
+drop tablespace hw_partition_sql_adapt_ts1;
+
+
+
+-- 6. test table has toast
+create table test_drop_column_toast (a int, b int, c text, d text, e text)
+partition by range (a, b)
+(
+	partition test_drop_column_toast_p1 values less than(1, 1),
+	partition test_drop_column_toast_p2 values less than(4, 4),
+	partition test_drop_column_toast_p3 values less than(7, 7)
+);
+
+insert into test_drop_column_toast values (0, 0, 'c0', 'd0', 'e0');
+
+alter table test_drop_column_toast drop column c;
+insert into test_drop_column_toast values (1, 1, 'd1', 'e1');
+select * from test_drop_column_toast order by 1,2,3,4;
+
+alter table test_drop_column_toast drop column d restrict;
+insert into test_drop_column_toast values (2, 2, 'e2');
+select * from test_drop_column_toast order by 1,2,3;
+
+alter table test_drop_column_toast drop column e cascade;
+insert into test_drop_column_toast values (3, 3);
+select * from test_drop_column_toast order by 1,2;
+
+-- clean
+drop table test_drop_column_toast;
+
+
+
+-- 7. test make view on partitioned table
+create table test_drop_column_view (a int, b int, c int, d int, e int)
+partition by range (a, b)
+(
+	partition test_drop_column_view_p1 values less than(1, 1),
+	partition test_drop_column_view_p2 values less than(4, 4),
+	partition test_drop_column_view_p3 values less than(7, 7)
+);
+
+create view temp_view as select * from test_drop_column_view;
+
+insert into test_drop_column_view values (0, 0, 0, 0, 0);
+
+-- failed
+alter table test_drop_column_view drop column c;
+
+-- failed
+alter table test_drop_column_view drop column d restrict;
+
+-- success:   at the same time, drop view
+alter table test_drop_column_view drop column e cascade;
+insert into test_drop_column_view values (3, 3);
+select * from test_drop_column_view order by 1,2;
+-- failed
+select * from temp_view order by 1,2;
+
+
+-- failed
+drop view temp_view;
+-- clean
+drop table test_drop_column_view;
+
+
+-- 8. test transaction commit and rollack
+create table test_drop_column_transaction (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_drop_column_transaction_p1 values less than(1, 1),
+	partition test_drop_column_transaction_p2 values less than(4, 4),
+	partition test_drop_column_transaction_p3 values less than(7, 7)
+);
+
+insert into test_drop_column_transaction values (0, 0, 0, 0);
+
+
+start transaction;
+alter table test_drop_column_transaction drop column c;
+insert into test_drop_column_transaction values (1, 1, 1);
+select * from test_drop_column_transaction order by 1,2,3;
+rollback;
+
+select * from test_drop_column_transaction order by 1, 2, 3;
+
+
+start transaction;
+alter table test_drop_column_transaction drop column c;
+insert into test_drop_column_transaction values (1, 1, 1);
+select * from test_drop_column_transaction order by 1,2,3;
+commit;
+
+select * from test_drop_column_transaction order by 1,2,3;
+
+
+-- clean
+drop table test_drop_column_transaction;
+
+
+--
+----    ALTER TABLE [ IF EXISTS ] [ ONLY ] name [ * ] 
+----    ALTER [ COLUMN ] column [ SET DATA ] TYPE data_type [ COLLATE collation ] [ USING expression ];
+--
+
+-- 1. test function (OK)
+-- 2. test alter column type on interval partitioned table (OK)
+-- 3. test containing using clause(OK)
+-- 4. test column has default (OK)
+-- 5. test table has index (OK)
+-- 6. test table has tablespace (OK)
+-- 7. test make view on partitioned table (OK)
+-- 8. test transaction commit and rollack (OK)
+
+
+-- 1. test function
+create table test_modify_column_type (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_modify_column_type_p1 values less than(1, 1),
+	partition test_modify_column_type_p2 values less than(4, 4),
+	partition test_modify_column_type_p3 values less than(7, 7)
+);
+
+insert into test_modify_column_type values (0, 0, 0, 0);
+insert into test_modify_column_type values (1, 1, 1, 1);
+
+---- a. column is not partition key
+-- failed
+insert into test_modify_column_type values (2, 2, 'c', 2);
+-- success
+alter table test_modify_column_type alter column c set data type text;
+insert into test_modify_column_type values (2, 2, 'c', 2);
+select * from test_modify_column_type where a=2;
+
+-- success
+alter table test_modify_column_type alter column d set data type float;
+insert into test_modify_column_type values (3, 3, 'c', 3.12313);
+select * from test_modify_column_type where a=3;
+
+-- failed
+alter table test_modify_column_type alter column c type int;
+
+
+---- b. column is partition key
+-- failed: data type of b partitioned table's partition key can not be changed
+alter table test_modify_column_type alter column b set data type text;
+
+-- clean
+drop table test_modify_column_type;
+
+
+
+-- 2. test alter column type on interval partitioned table
+--create table test_modify_column_type_interval (a int, b int)
+--partition by range (a)
+--interval(3)
+--(
+--	partition p1 values less than(1),
+--	partition p2 values less than(4),
+--	partition p3 values less than(7)
+--);
+--
+--insert into test_modify_column_type_interval values (0, 0);
+--insert into test_modify_column_type_interval values (1, 1);
+--insert into test_modify_column_type_interval values (7, 7);
+--insert into test_modify_column_type_interval values (15, 15);
+--insert into test_modify_column_type_interval values (25, 25);
+--insert into test_modify_column_type_interval values (35, 35);
+--insert into test_modify_column_type_interval values (350, 350);
+--
+---- failed
+--insert into test_modify_column_type_interval values (2, 'b');
+---- success
+--alter table test_modify_column_type_interval alter column b set data type text;
+--insert into test_modify_column_type_interval values (2, 'b');
+--select * from test_modify_column_type_interval;
+--
+---- failed: data type of a partitioned table's partition key can not be changed
+--alter table test_modify_column_type_interval alter column a set data type text;
+--
+--
+---- clean
+--drop table test_modify_column_type_interval;
+
+

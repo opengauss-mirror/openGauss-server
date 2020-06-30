@@ -1,0 +1,133 @@
+---
+- hosts: all
+  tasks:
+    - name: Install vim dos2unix
+      yum:
+        name:
+          - vim
+          - dos2unix
+          - parted
+          - zip
+          - redhat-lsb-core-4.1-27.el7.centos.1.x86_64
+          - libaio-devel
+          - expect
+        state: present
+#    - name: make disk partition /dev/vdb1
+#      parted:
+#        device: /dev/vdb
+#        number: 1
+#        state: present
+#    - name: make filesytem for /dev/vdb1
+#      filesystem:
+#        fstype: ext4
+#        dev: /dev/vdb1
+#    - name: create /usr1  directory
+#      file:
+#        path: /usr1
+#        state: directory
+#        mode: 0755
+#    - name: mount /usr1 to /dev/vdb1
+#      mount:
+#          path: /usr1
+#          src: /dev/vdb1
+#          fstype: ext4
+#          state: mounted
+    - name: create /usr1/tools directory
+      file:
+        path: /usr1/tools
+        state: directory
+    - name: copy jdk-8u191-linux-x64.tar.gz to /usr1/tools
+      copy:
+        src: jdk-8u191-linux-x64.tar.gz
+        dest: /usr1/tools/
+    - name: 
+      unarchive:
+        src: /usr1/tools/jdk-8u191-linux-x64.tar.gz 
+        dest: /usr/local/
+        remote_src: yes
+    - name: link to /usr/local/java
+      file:
+        src: /usr/local/jdk1.8.0_191
+        dest: /usr/local/java
+        state: link
+    - name: configure java env
+      blockinfile:
+        path: /etc/profile
+        marker: "# java path"
+        block: |
+          export JAVA_HOME=/usr/local/java
+          export PATH=$JAVA_HOME/bin:$PATH
+          export CLASSPATH=.:$JAVA_HOME/lib/tools.jar:$JAVA_HOME/lib/dt.jar:$CLASSPATH
+    - name: configure sshd_config
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: "#MACs "
+        replace: "MACs hmac-sha1,"
+    - name: restart sshd 
+      service:
+        name: sshd
+        state: restarted
+    - name: Install git lfs
+      shell: "curl -k https://isource-pages.huawei.com/iSource/git-lfs/git_lfs_autoinstall.sh -o git_lfs_autoinstall.sh && sudo sh git_lfs_autoinstall.sh && (git lfs uninstall; git lfs install)"
+    - name: configure sysctl.conf
+      blockinfile:
+        path: /etc/sysctl.conf
+        block: |
+          kernel.sem= 2500 32000 320 65535
+    - name: sysctl -p
+      shell: sysctl -p
+    - name: copy python3
+      copy:
+        src: files/python36.tar.gz
+        dest: /usr1/tools/
+    - name: unarchive python3
+      unarchive:
+        src: /usr1/tools/python36.tar.gz
+        dest: /usr/local/
+        remote_src: yes
+    - name: configure python3 path
+      blockinfile:
+        path: /etc/profile
+        marker: "# python3 path"
+        block: |
+          export PATH=/usr/local/python36/bin:$PATH
+    - name: copy .ssh
+      copy:
+        src: files/.ssh
+        dest: /root/
+        mode: preserve
+    - name: copy .gitconfig
+      copy:
+         src: files/.gitconfig
+         dest: /root/
+    - name: create ~/.pip directory
+      file:
+        path: /root/.pip
+        state: directory
+    - name: create pip.conf
+      file:
+        path: /root/.pip/pip.conf
+        state: touch
+    - name: configure pip repo
+      blockinfile:
+        path: /root/.pip/pip.conf
+        block: |
+          [global]
+          trusted-host=cmc-cd-mirror.rnd.huawei.com
+          index-url=http://cmc-cd-mirror.rnd.huawei.com/pypi/simple/
+    - name: source /etc/profile
+      shell: source /etc/profile
+    - name: create group "users"
+      group:
+        name: users
+        state: present
+    - name: create tester2 user
+      user:
+        name: tester2
+        state: present
+        groups: users
+    - name: create soft link
+      shell: "ln -s /usr/local/java/bin/java /usr/bin/java && ln -s /usr/local/python36/bin/python3 /usr/bin/python3"
+    - name: install regex pyyaml
+      shell: "/usr/local/python36/bin/pip3 install regex PyYAML"
+     

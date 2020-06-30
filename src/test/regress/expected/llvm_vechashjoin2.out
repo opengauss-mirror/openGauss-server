@@ -1,0 +1,113 @@
+/*
+ * This file is used to test the function of hashjoin with LLVM Optimization
+ */
+----
+--- Create Table and Insert Data
+----
+drop schema if exists llvm_hashjoin_engine2 cascade;
+NOTICE:  schema "llvm_hashjoin_engine2" does not exist, skipping
+create schema llvm_hashjoin_engine2;
+set current_schema = llvm_hashjoin_engine2;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+set codegen_cost_threshold=0;
+CREATE TABLE llvm_hashjoin_engine2.LLVM_HASHJOIN_TABLE_01(
+    col_int1    int,
+    col_int2    int,
+    col_bint    bigint,
+    col_char1   char(1),
+    col_char2 	char(10),
+    col_bchar1	bpchar(7),
+    col_bchar2	bpchar(12),
+    col_vchar1	varchar(18)
+)with(orientation=column
+partition by range (col_int1)
+(
+    partition joinp1 values less than (100),
+    partition joinp2 values less than (200),
+    partition joinp3 values less than (500),
+    partition joinp4 values less than (1000)
+);
+copy llvm_hashjoin_table_01 from stdin;
+CREATE TABLE llvm_hashjoin_engine2.LLVM_HASHJOIN_TABLE_02(
+    col_int1	int,
+    col_int2	int,
+    col_bint	bigint,
+    col_char1	char(3),
+    col_char2	char(10),
+    col_bchar1	bpchar(7),
+    col_bchar2	bpchar(12),
+    col_vchar	varchar(18)
+)with(orientation=column)
+partition by range (col_int1)
+(
+    partition joinp1 values less than (100),
+    partition joinp2 values less than (200),
+    partition joinp3 values less than (500),
+    partition joinp4 values less than (1000)
+);
+copy llvm_hashjoin_table_02 from stdin;
+----
+--- test : construct case with needcopy is true
+----
+set work_mem='64kB';
+set query_mem=0;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_01 select * from llvm_hashjoin_table_01;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+insert into llvm_hashjoin_table_02 select * from llvm_hashjoin_table_02;
+analyze llvm_hashjoin_table_01;
+analyze llvm_hashjoin_table_02;
+explain (analyze on, timing off)select count(*) from llvm_hashjoin_table_01 A right join llvm_hashjoin_table_02 B on A.col_char2 = B.col_char2; 
+                                                                    QUERY PLAN                                                                    
+--------------------------------------------------------------------------------------------------------------------------------------------------
+--? Row Adapter  (cost=.* rows=1 width=8) (actual rows=1 loops=1)
+--?   ->  Vector Aggregate  (cost=.* rows=1 width=8) (actual rows=1 loops=1)
+--?         ->  Vector Hash Right Join  (cost=.* rows=.* width=0) (actual rows=5511680 loops=1)
+               Hash Cond: (a.col_char2 = b.col_char2)
+--?               ->  Vector Partition Iterator  (cost=.* rows=16384 width=11) (actual rows=16384 loops=1)
+                     Iterations: 4
+--?                     ->  Partitioned CStore Scan on llvm_hashjoin_table_01 a  (cost=.* rows=16384 width=11) (actual rows=16384 loops=4)
+                           Selected Partitions:  1..4
+--?               ->  Vector Partition Iterator  (cost=.* rows=12800 width=11) (actual rows=12800 loops=1)
+                     Iterations: 4
+--?                     ->  Partitioned CStore Scan on llvm_hashjoin_table_02 b  (cost=.* rows=12800 width=11) (actual rows=12800 loops=4)
+                           Selected Partitions:  1..4
+--? Total runtime: .*
+(13 rows)
+
+select count(*) from llvm_hashjoin_table_01 A inner join llvm_hashjoin_table_02 B on A.col_char2 = B.col_char2; 
+  count  
+---------
+ 5505024
+(1 row)
+
+select count(*) from llvm_hashjoin_table_01 A inner join llvm_hashjoin_table_02 B on A.col_int1 = B.col_int1 and A.col_bint = B.col_bint;
+  count  
+---------
+ 1572864
+(1 row)
+
+reset work_mem;
+reset query_mem;
+----
+---  clean table and resource
+----
+drop schema llvm_hashjoin_engine2 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table llvm_hashjoin_table_01
+drop cascades to table llvm_hashjoin_table_02

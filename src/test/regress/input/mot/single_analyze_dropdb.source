@@ -1,0 +1,14 @@
+-- DROP database after analyze
+CREATE DATABASE my_db1;
+\c my_db1
+CREATE FOREIGN TABLE tt1(a int) SERVER mot_server ;
+insert into tt1 values(1);
+CREATE schema "table_模式1_#@_schema";
+set current_schema="table_模式1_#@_schema";
+CREATE FOREIGN TABLE "bbb_表_#@%_TABLE1"(a int) SERVER mot_server ;
+insert into "bbb_表_#@%_TABLE1" select generate_series(1,100);
+analyze;
+\! @abs_bindir@/gsql -p @dn1port@ -d my_db1 -c "analyze";
+\! sleep 3
+set enable_global_stats=off;
+analyze;

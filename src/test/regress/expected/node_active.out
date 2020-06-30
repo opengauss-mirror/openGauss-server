@@ -1,0 +1,43 @@
+--test column nodeis_active;
+select nodeis_active from pgxc_node where node_name = 'coordinator1';
+ nodeis_active 
+---------------
+ t
+(1 row)
+
+create database "testDB";
+--exception case
+alter coordinator coordinator2 set false with (coordinator3);
+WARNING:  Number of coordinators in with clause can not be less than half of numCoords(3)
+alter coordinator datanode1 set false with (coordinator1, coordinator3);
+ERROR:  PGXC Node datanode1 is not a valid coordinator
+alter coordinator coordinator2 set false with (coordinator1, coordinator3,datanode2);
+ERROR:  Invalid value "datanode2" in WITH clause
+alter coordinator coordinator2 set mmo with (coordinator3, coordinator1);
+ERROR:  parameter requires a Boolean value
+alter coordinator coordinator2 set false with (coordinator3, coordinator1);
+create role testdb  password 'huawei@124';
+set role testdb  password 'huawei@124';
+alter coordinator coordinator2 set false with (coordinator3, coordinator1);
+ERROR:  must be system admin to change cluster nodes
+reset role;
+alter coordinator coordinator2 set true with (coordinator3, coordinator1);
+select * from pgxc_pool_reload();
+ pgxc_pool_reload 
+------------------
+ t
+(1 row)
+
+select nodeis_active from pgxc_node where node_name = 'coordinator2';
+ nodeis_active 
+---------------
+ t
+(1 row)
+
+ alter coordinator coordinator2 set true with (coordinator3, coordinator1);
+select nodeis_active from pgxc_node where node_name = 'coordinator2';
+ nodeis_active 
+---------------
+ t
+(1 row)
+

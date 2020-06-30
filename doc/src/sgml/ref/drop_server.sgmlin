@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_SERVER">
+<refmeta>
+<refentrytitle>DROP SERVER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP SERVER</refname>
+<refpurpose>remove a foreign server descriptor</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP SERVER [ IF EXISTS ] server_name [ { CASCADE | RESTRICT } ] ;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,19 @@
+drop database if exists export;
+NOTICE:  database "export" does not exist, skipping
+create database export encoding='gbk' LC_COLLATE='zh_CN.GBK' LC_CTYPE ='zh_CN.GBK' TEMPLATE=template0;
+--other seesion set up and quit quickly
+\! @gsqldir@/gsql -dexport -p @portstring@ -c '\q'
+--multi bytes
+select upper('abc数据表');
+   upper   
+-----------
+ ABC数据表
+(1 row)
+
+select lower('abc数据表');
+   lower   
+-----------
+ abc数据表
+(1 row)
+
+drop database export;  

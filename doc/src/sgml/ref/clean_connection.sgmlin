@@ -1,0 +1,19 @@
+<refentry id="SQL-CLEAN_CONNECTION">
+<refmeta>
+<refentrytitle>CLEAN CONNECTION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CLEAN CONNECTION</refname>
+<refpurpose>clean up pooler connections in a cluster</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CLEAN CONNECTION
+    TO { COORDINATOR ( nodename [, ... ] ) | NODE ( nodename [, ... ] ) | ALL [ CHECK ] [ FORCE ] }
+    [ FOR DATABASE dbname ]
+    [ TO USER username ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

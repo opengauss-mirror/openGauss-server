@@ -1,0 +1,18 @@
+<refentry id="SQL-CREATE_SCHEMA">
+<refmeta>
+<refentrytitle>CREATE SCHEMA</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE SCHEMA</refname>
+<refpurpose>define a new schema</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE SCHEMA schema_name
+    [ AUTHORIZATION user_name ] [ schema_element [ ... ] ];
+CREATE SCHEMA AUTHORIZATION user_name [ schema_element [ ... ] ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

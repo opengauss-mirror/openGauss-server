@@ -1,0 +1,17 @@
+<refentry id="SQL-DROP_TABLE">
+<refmeta>
+<refentrytitle>DROP TABLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP TABLE</refname>
+<refpurpose>remove a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP TABLE [ IF EXISTS ] 
+{[schema.]table_name} [, ...] [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

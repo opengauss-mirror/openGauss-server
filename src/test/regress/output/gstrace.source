@@ -1,0 +1,43 @@
+--test pg_resetxlog -V&help
+\! @abs_bindir@/pg_resetxlog -?
+pg_resetxlog resets the PostgreSQL transaction log.
+
+Usage:
+  pg_resetxlog [OPTION]... DATADIR
+
+Options:
+  -e XIDEPOCH      set next transaction ID epoch
+  -f               force update to be done
+  -l xlogfile  force minimum WAL starting location for new transaction log
+  -m XID           set next multitransaction ID
+  -n               no update, just show extracted control values (for testing)
+  -o OID           set next OID
+  -O OFFSET        set next multitransaction offset
+  -V, --version    output version information, then exit
+  -x XID           set next transaction ID
+  -?, --help       show this help, then exit
+
+Report bugs to <pgsql-bugs@postgresql.org>.
+\! @abs_bindir@/pg_resetxlog --help
+pg_resetxlog resets the PostgreSQL transaction log.
+
+Usage:
+  pg_resetxlog [OPTION]... DATADIR
+
+Options:
+  -e XIDEPOCH      set next transaction ID epoch
+  -f               force update to be done
+  -l xlogfile  force minimum WAL starting location for new transaction log
+  -m XID           set next multitransaction ID
+  -n               no update, just show extracted control values (for testing)
+  -o OID           set next OID
+  -O OFFSET        set next multitransaction offset
+  -V, --version    output version information, then exit
+  -x XID           set next transaction ID
+  -?, --help       show this help, then exit
+
+Report bugs to <pgsql-bugs@postgresql.org>.
+\! @abs_bindir@/pg_resetxlog -V
+--?pg_resetxlog.*
+\! @abs_bindir@/pg_resetxlog --version
+--?pg_resetxlog.*

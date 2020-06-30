@@ -1,0 +1,207 @@
+\c postgres
+set current_schema='sql_self_tuning';
+set resource_track_duration=0;
+set resource_track_cost=30;
+set resource_track_level=operator;
+/*subqueryScan*/
+create table self_tuning_02( a int);
+insert into self_tuning_02 select count(*) from t4,t5 where
+t5.c3=t4.c2 and t4.c1<10;
+select warning,query from pgxc_wlm_session_history where query like '%self_tuning_02%';
+                                warning                                 |                            query                            
+------------------------------------------------------------------------+-------------------------------------------------------------
+ Statistic Not Collect:                                                +| insert into self_tuning_02 select count(*) from t4,t5 where+
+     sql_self_tuning.t4(c1,c2)                                         +| t5.c3=t4.c2 and t4.c1<10;
+                                                                       +| 
+                                                                       +| 
+ PlanNode[9] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:524288 | 
+(1 row)
+
+/*
+ * SQL-Self Tuning scenario[2] Large Table Broadcast
+ */
+/* Large Table in Broadcast */ select /*+ broadcast(a)*/ count(*)
+from t5 a, t4 b
+where a.c1=b.c2;
+ count  
+--------
+ 419840
+(1 row)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%Large Table in Broadcast%' order by 1;
+                               query                               |                                          query_plan                                          |                                  warning                                   
+-------------------------------------------------------------------+----------------------------------------------------------------------------------------------+----------------------------------------------------------------------------
+--? /\*                                                               +| 1 | Aggregate  (.*)                                   +| Statistic Not Collect:                                                    +
+--?  \* SQL-Self Tuning scenario[2] Large Table Broadcast             +| 2 |  ->  Streaming (type: GATHER)  (.*)              +|     sql_self_tuning.t4(c1,c2)                                             +
+--?  \*/                                                              +| 3 |   ->  Aggregate  (.*)                            +|                                                                           +
+--? /\* Large Table in Broadcast \*/ select /\*+ broadcast(a)\*/ count(\*)+| 4 |    ->  Hash Join  (.*)                           +|                                                                           +
+ from t5 a, t4 b                                                  +|   |     Hash Cond: (a.c1 = b.c2)                                                            +| PlanNode[6] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:524288    +
+--? where a.c1=b.c2;                                                  | 5 |     ->  Streaming(type: BROADCAST dop: 1/2)  (.*)+| PlanNode[5] Large Table in Broadcast "Streaming(type: BROADCAST dop: 1/2)"
+--?                                                                   | 6 |      ->  Seq Scan on t5 a  (.*)                     +| 
+--?                                                                   | 7 |     ->  Hash  (.*)                                      +| 
+--?                                                                   | 8 |      ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)    +| 
+--?                                                                   | 9 |       ->  Seq Scan on t4 b  (.*)                          | 
+(1 row)
+
+/*
+ * SQL-Self Tuning scenario[3] Large Table as inner
+ */
+select 'not implemented' as "Result";
+     Result      
+-----------------
+ not implemented
+(1 row)
+
+/*
+ * SQL-Self Tuning scenario[4] Large table in Nestloop with equal-condition
+ */
+/* Large Table with Equal-Condition use Nestloop */
+select /*+ nestloop(a b)*/ count(*)
+from t13 a, t4 b
+where a.c1=b.c2 and b.c2 < 20;
+  count  
+---------
+ 1679360
+(1 row)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%Large Table with Equal-Condition use Nestloop%' order by 1;
+                                    query                                    |                                               query_plan                                               |                                  warning                                   
+-----------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------
+--? /\*                                                                         +|  1 | Aggregate  (.*)                                              +| Statistic Not Collect:                                                    +
+--?  \* SQL-Self Tuning scenario[4] Large table in Nestloop with equal-condition+|  2 |  ->  Streaming (type: GATHER)  (.*)                         +|     sql_self_tuning.t4(c1,c2)                                             +
+--?  \*/                                                                        +|  3 |   ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)          +|                                                                           +
+--? /\* Large Table with Equal-Condition use Nestloop \*/                        +|  4 |    ->  Aggregate  (.*)                                      +|                                                                           +
+--? select /\*+ nestloop(a b)\*/ count(\*)                                        +|  5 |     ->  Nested Loop  (.*)                                   +| PlanNode[7] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:839680    +
+ from t13 a, t4 b                                                           +|    |      Join Filter: (a.c1 = b.c2)                                                                  +| PlanNode[8] DataSkew:"Materialize", min_dn_tuples:0, max_dn_tuples:1679362+
+--? where a.c1=b.c2 and b.c2 < 20;                                              |  6 |      ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)  (.*)+| PlanNode[5] Large Table with Equal-Condition use Nestloop"Nested Loop"
+--?                                                                             |  7 |       ->  Seq Scan on t13 a  (.*)                           +| 
+                                                                             |    |        Filter: (c1 < 20)                                                                         +| 
+--?                                                                             |  8 |      ->  Materialize  (.*)                                         +| 
+--?                                                                             |  9 |       ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (.*)       +| 
+--?                                                                             | 10 |        ->  Seq Scan on t4 b  (.*)                                  +| 
+                                                                             |    |         Filter: (c2 < 20)                                                                         | 
+(1 row)
+
+/* Large Table with Equal-Condition use Nestloop */
+select /*+ nestloop(a b)*/ count(*)
+from t13 a, t4 b
+where a.c1=b.c2 and a.c3<b.c4 and b.c2 < 20;
+ count 
+-------
+     0
+(1 row)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%Large Table with Equal-Condition use Nestloop%' order by 1;
+                                    query                                    |                                               query_plan                                               |                                  warning                                   
+-----------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------
+--? /\* Large Table with Equal-Condition use Nestloop \*/                        +|  1 | Aggregate  (.*)                                              +| Statistic Not Collect:                                                    +
+--? select /\*+ nestloop(a b)\*/ count(\*)                                        +|  2 |  ->  Streaming (type: GATHER)  (.*)                         +|     sql_self_tuning.t4(c1,c2)                                             +
+--? from t13 a, t4 b                                                           +|  3 |   ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)          +|                                                                           +
+--? where a.c1=b.c2 and a.c3<b.c4 and b.c2 < 20;                                |  4 |    ->  Aggregate  (.*)                                      +|                                                                           +
+--?                                                                             |  5 |     ->  Nested Loop  (.*)                                   +| PlanNode[7] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:839680    +
+                                                                             |    |      Join Filter: ((a.c3 < b.c4) AND (a.c1 = b.c2))                                              +| PlanNode[8] DataSkew:"Materialize", min_dn_tuples:0, max_dn_tuples:1679362+
+--?                                                                             |  6 |      ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)  (.*)+| PlanNode[5] Large Table with Equal-Condition use Nestloop"Nested Loop"
+--?                                                                             |  7 |       ->  Seq Scan on t13 a  (.*)                           +| 
+                                                                             |    |        Filter: (c1 < 20)                                                                         +| 
+--?                                                                             |  8 |      ->  Materialize  (.*)                                         +| 
+--?                                                                             |  9 |       ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (.*)       +| 
+--?                                                                             | 10 |        ->  Seq Scan on t4 b  (.*)                                  +| 
+                                                                             |    |         Filter: (c2 < 20)                                                                         | 
+--? /\*                                                                         +|  1 | Aggregate  (.*)                                              +| Statistic Not Collect:                                                    +
+--?  \* SQL-Self Tuning scenario[4] Large table in Nestloop with equal-condition+|  2 |  ->  Streaming (type: GATHER)  (.*)                         +|     sql_self_tuning.t4(c1,c2)                                             +
+--?  \*/                                                                        +|  3 |   ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)          +|                                                                           +
+--? /\* Large Table with Equal-Condition use Nestloop \*/                        +|  4 |    ->  Aggregate  (.*)                                      +|                                                                           +
+--? select /\*+ nestloop(a b)\*/ count(\*)                                        +|  5 |     ->  Nested Loop  (.*)                                   +| PlanNode[7] DataSkew:"Seq Scan", min_dn_tuples:0, max_dn_tuples:839680    +
+ from t13 a, t4 b                                                           +|    |      Join Filter: (a.c1 = b.c2)                                                                  +| PlanNode[8] DataSkew:"Materialize", min_dn_tuples:0, max_dn_tuples:1679362+
+--? where a.c1=b.c2 and b.c2 < 20;                                              |  6 |      ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)  (.*)+| PlanNode[5] Large Table with Equal-Condition use Nestloop"Nested Loop"
+--?                                                                             |  7 |       ->  Seq Scan on t13 a  (.*)                           +| 
+                                                                             |    |        Filter: (c1 < 20)                                                                         +| 
+--?                                                                             |  8 |      ->  Materialize  (.*)                                         +| 
+--?                                                                             |  9 |       ->  Streaming(type: SPLIT REDISTRIBUTE dop: 2/2)  (.*)       +| 
+--?                                                                             | 10 |        ->  Seq Scan on t4 b  (.*)                                  +| 
+                                                                             |    |         Filter: (c2 < 20)                                                                         | 
+(2 rows)
+
+/*
+ * SQL-Self Tuning scenario[8] Check Indexscan/Seqscan
+ */
+set resource_track_cost=1;
+/* Check Indexscan */ select count(*)
+from t16 where c4=0;
+ count  
+--------
+ 524288
+(1 row)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%Check Indexscan%' order by 1;
+                 query                 |                                    query_plan                                     |                                                warning                                                
+---------------------------------------+-----------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------
+--? /\* Check Indexscan \*/ select count(\*)+| 1 | Aggregate  (.*)                                  +| Statistic Not Collect:                                                                               +
+--? from t16 where c4=0;                  | 2 |  ->  Streaming (type: GATHER)  (.*)              +|     sql_self_tuning.t16(c1,c4)                                                                       +
+--?                                       | 3 |   ->  Aggregate  (.*)                            +|                                                                                                      +
+--?                                       | 4 |    ->  Index Only Scan using idx_t16 on t16  (.*)+|                                                                                                      +
+                                       |   |     Index Cond: (c4 = 0)                                                      | PlanNode[4] Indexscan is not properly used:"Index Only Scan", output:524288, filtered:0, rate:1.00000+
+                                       |                                                                                   | PlanNode[4] DataSkew:"Index Only Scan", min_dn_tuples:0, max_dn_tuples:314880                        +
+                                       |                                                                                   | PlanNode[4] Inaccurate Estimation-Rows: "Index Only Scan" A-Rows:524288, E-Rows:1
+(1 row)
+
+insert into t16 values (1,1,1025,1);
+/* Check Seqscan */ select count(*)
+from t16 where c3=1025;
+ count 
+-------
+     1
+(1 row)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%Check Seqscan%' order by 1;
+                query                |                                      query_plan                                      |                                            warning                                            
+-------------------------------------+--------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------
+--? /\* Check Seqscan \*/ select count(\*)+| 1 | Aggregate  (.*)                                   +| Statistic Not Collect:                                                                       +
+--? from t16 where c3=1025;             | 2 |  ->  Streaming (type: GATHER)  (.*)               +|     sql_self_tuning.t16(c1,c3)                                                               +
+--?                                     | 3 |   ->  Streaming(type: LOCAL GATHER dop: 1/2)  (.*)+|                                                                                              +
+--?                                     | 4 |    ->  Aggregate  (.*)                            +|                                                                                              +
+--?                                     | 5 |     ->  Seq Scan on t16  (.*)                      +| PlanNode[5] Indexscan is ought to be used:"Seq Scan", output:1, filtered:524288, rate:0.00000
+                                     |   |      Filter: (c3 = 1025)                                                         | 
+(1 row)
+
+delete from ct16 where c3=3;
+insert into ct16 values (0,1,3,0);
+/* Check CStore Seqscan */ select count(*)
+from ct16 where c3=3;
+ count 
+-------
+     1
+(1 row)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%Check CStore Seqscan%' order by 1;
+                   query                    |                                          query_plan                                          |                                             warning                                              
+--------------------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------
+--? /\* Check CStore Seqscan \*/ select count(\*)+| 1 | Row Adapter  (.*)                                         +| Statistic Not Collect:                                                                          +
+--? from ct16 where c3=3;                      | 2 |  ->  Vector Aggregate  (.*)                               +|     sql_self_tuning.ct16(c2,c3)                                                                 +
+--?                                            | 3 |   ->  Vector Streaming (type: GATHER)  (.*)               +|                                                                                                 +
+--?                                            | 4 |    ->  Vector Streaming(type: LOCAL GATHER dop: 1/2)  (.*)+|                                                                                                 +
+--?                                            | 5 |     ->  Vector Aggregate  (.*)                            +| PlanNode[6] Indexscan is ought to be used:"CStore Scan", output:1, filtered:341504, rate:0.00000
+--?                                            | 6 |      ->  CStore Scan on ct16  (.*)                         +| 
+                                            |   |       Filter: (c3 = 3)                                                                   | 
+(1 row)
+
+set enable_seqscan=off;
+/* Check CStore Indexscan */ select count(*)
+from ct16 where c1=1;
+ count  
+--------
+ 104960
+(1 row)
+
+select query, query_plan, warning from pgxc_wlm_session_history where query like '%Check CStore Indexscan%' order by 1;
+                    query                     |                                          query_plan                                           |                                                   warning                                                    
+----------------------------------------------+-----------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------
+--? /\* Check CStore Indexscan \*/ select count(\*)+| 1 | Row Adapter  (.*)                                        +| Statistic Not Collect:                                                                                      +
+--? from ct16 where c1=1;                        | 2 |  ->  Vector Aggregate  (.*)                              +|     sql_self_tuning.ct16(c2,c1)                                                                             +
+--?                                              | 3 |   ->  Vector Streaming (type: GATHER)  (.*)              +|                                                                                                             +
+--?                                              | 4 |    ->  Vector Aggregate  (.*)                            +|                                                                                                             +
+--?                                              | 5 |     ->  CStore Index Only Scan using idx_ct16 on ct16  (.*)+| PlanNode[5] Indexscan is not properly used:"CStore Index Only Scan", output:104960, filtered:0, rate:1.00000
+                                              |   |      Index Cond: (c1 = 1)                                                                 | 
+(1 row)
+
+\c regression

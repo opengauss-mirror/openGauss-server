@@ -1,0 +1,312 @@
+create schema global_stats;
+set current_schema = global_stats;
+create table global_stats_table_01(c1 int2, c2 int4, c3 int8);
+create index global_stats_table_01_idx1 on global_stats_table_01(c1, c2);
+create table global_stats_table_02(c1 int2, c2 int4, c3 int8);
+create table global_stats_table_03(c1 int2, c2 int4, c3 int8);
+create table global_stats_table_04(c1 bigint, c2 int, c3 char(10)) WITH (ORIENTATION = COLUMN);
+create index global_stats_table_04_idx1 on global_stats_table_02(c1, c2);
+CREATE TABLE global_stats_table_05
+(
+    c1 int2,
+	c2 int4,
+	c3 int8
+) 
+PARTITION BY RANGE(c1)
+(
+    PARTITION c11 VALUES LESS THAN(80),
+    PARTITION c12 VALUES LESS THAN(100),
+    PARTITION c13 VALUES LESS THAN(120)
+) ;
+copy global_stats_table_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/quality_derive1.data';
+copy global_stats_table_02 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/quality_derive2.data';
+copy global_stats_table_03 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/quality_derive3.data';
+insert into global_stats_table_04 select generate_series(1,100), generate_series(1,100), 'col'|| generate_series(1,100);
+insert into global_stats_table_05 select * from global_stats_table_01;
+--test for analyze
+analyze global_stats_table_01;
+analyze global_stats_table_02;
+analyze global_stats_table_03;
+analyze global_stats_table_04;
+analyze global_stats_table_05;
+--test for optimizer
+--test hashjoin
+set enable_nestloop=off;
+set enable_mergejoin=off;
+--join between rows table/column table/partition table
+explain (verbose on, costs off,nodes on) select * from global_stats_table_01 t1 
+inner join global_stats_table_04 t4 on t1.c1 = t4.c2 
+inner join global_stats_table_05 t5 on t4.c2 = t5.c1 where t4.c2 < 50;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Hash Join
+   Output: t1.c1, t1.c2, t1.c3, t4.c1, t4.c2, t4.c3, t5.c1, t5.c2, t5.c3
+   Hash Cond: (t1.c1 = t5.c1)
+   ->  Hash Join
+         Output: t1.c1, t1.c2, t1.c3, t4.c1, t4.c2, t4.c3
+         Hash Cond: (t4.c2 = t1.c1)
+         ->  Row Adapter
+               Output: t4.c1, t4.c2, t4.c3
+               ->  CStore Scan on global_stats.global_stats_table_04 t4
+                     Output: t4.c1, t4.c2, t4.c3
+                     Filter: (t4.c2 < 50)
+         ->  Hash
+               Output: t1.c1, t1.c2, t1.c3
+               ->  Seq Scan on global_stats.global_stats_table_01 t1
+                     Output: t1.c1, t1.c2, t1.c3
+                     Filter: (t1.c1 < 50)
+   ->  Hash
+         Output: t5.c1, t5.c2, t5.c3
+         ->  Partition Iterator
+               Output: t5.c1, t5.c2, t5.c3
+               Iterations: 1
+               ->  Partitioned Seq Scan on global_stats.global_stats_table_05 t5
+                     Output: t5.c1, t5.c2, t5.c3
+                     Filter: (t5.c1 < 50)
+                     Selected Partitions:  1
+(25 rows)
+
+--A==B && B==C
+explain (verbose on, costs off,nodes on) SELECT global_stats_table_01.*, global_stats_table_02.c1, global_stats_table_03.c1 
+FROM global_stats_table_01, global_stats_table_02, global_stats_table_03 
+WHERE global_stats_table_01.c1 = global_stats_table_02.c2 AND global_stats_table_02.c2 = global_stats_table_03.c1;
+                                                                 QUERY PLAN                                                                 
+--------------------------------------------------------------------------------------------------------------------------------------------
+ Hash Join
+   Output: global_stats_table_01.c1, global_stats_table_01.c2, global_stats_table_01.c3, global_stats_table_02.c1, global_stats_table_03.c1
+   Hash Cond: (global_stats_table_02.c2 = global_stats_table_01.c1)
+   ->  Hash Join
+         Output: global_stats_table_02.c1, global_stats_table_02.c2, global_stats_table_03.c1
+         Hash Cond: (global_stats_table_03.c1 = global_stats_table_02.c2)
+         ->  Seq Scan on global_stats.global_stats_table_03
+               Output: global_stats_table_03.c1, global_stats_table_03.c2, global_stats_table_03.c3
+         ->  Hash
+               Output: global_stats_table_02.c1, global_stats_table_02.c2
+               ->  Seq Scan on global_stats.global_stats_table_02
+                     Output: global_stats_table_02.c1, global_stats_table_02.c2
+   ->  Hash
+         Output: global_stats_table_01.c1, global_stats_table_01.c2, global_stats_table_01.c3
+         ->  Seq Scan on global_stats.global_stats_table_01
+               Output: global_stats_table_01.c1, global_stats_table_01.c2, global_stats_table_01.c3
+(16 rows)
+
+--broadcast
+set plan_mode_seed=1888912287;
+explain (verbose on, costs off,nodes on) select * from global_stats_table_01 t1 
+inner join global_stats_table_02 t2 on t1.c2 = t2.c2 
+inner join global_stats_table_03 t3 on t2.c2 = t3.c2 where t2.c2 < 50;
+                   QUERY PLAN (RANDOM seed 1888912287)                   
+-------------------------------------------------------------------------
+ Nested Loop
+   Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3, t3.c1, t3.c2, t3.c3
+   Join Filter: (t1.c2 = t2.c2)
+   ->  Nested Loop
+         Output: t1.c1, t1.c2, t1.c3, t3.c1, t3.c2, t3.c3
+         Join Filter: (t1.c2 = t3.c2)
+         ->  Seq Scan on global_stats.global_stats_table_01 t1
+               Output: t1.c1, t1.c2, t1.c3
+               Filter: (t1.c2 < 50)
+         ->  Seq Scan on global_stats.global_stats_table_03 t3
+               Output: t3.c1, t3.c2, t3.c3
+               Filter: (t3.c2 < 50)
+   ->  Materialize
+         Output: t2.c1, t2.c2, t2.c3
+         ->  Seq Scan on global_stats.global_stats_table_02 t2
+               Output: t2.c1, t2.c2, t2.c3
+               Filter: (t2.c2 < 50)
+(17 rows)
+
+--A==B && B!=C, C is hash
+set plan_mode_seed=1093804588;
+explain (verbose on, costs off,nodes on) select * from global_stats_table_01 t1 
+inner join global_stats_table_02 t2 on t1.c1 = t2.c1 
+inner join global_stats_table_03 t3 on t2.c2 = t3.c2 where t2.c2 < 50;
+                                  QUERY PLAN (RANDOM seed 1093804588)                                   
+--------------------------------------------------------------------------------------------------------
+ Hash Join
+   Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3, t3.c1, t3.c2, t3.c3
+   Hash Cond: (t3.c2 = t2.c2)
+   ->  Seq Scan on global_stats.global_stats_table_03 t3
+         Output: t3.c1, t3.c2, t3.c3
+         Filter: (t3.c2 < 50)
+   ->  Hash
+         Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3
+         ->  Nested Loop
+               Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3
+               Join Filter: (t1.c1 = t2.c1)
+               ->  Seq Scan on global_stats.global_stats_table_02 t2
+                     Output: t2.c1, t2.c2, t2.c3
+                     Filter: (t2.c2 < 50)
+               ->  Index Scan using global_stats_table_01_idx1 on global_stats.global_stats_table_01 t1
+                     Output: t1.c1, t1.c2, t1.c3
+(16 rows)
+
+--A!=B && B==C
+set plan_mode_seed=8679368;
+explain (verbose on, costs off,nodes on) select * from global_stats_table_01 t1 
+inner join global_stats_table_02 t2 on t1.c2 = t2.c2 
+inner join global_stats_table_03 t3 on t2.c2 = t3.c2 where t2.c2 < 50;
+                      QUERY PLAN (RANDOM seed 8679368)                       
+-----------------------------------------------------------------------------
+ Hash Join
+   Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3, t3.c1, t3.c2, t3.c3
+   Hash Cond: (t3.c2 = t1.c2)
+   ->  Seq Scan on global_stats.global_stats_table_03 t3
+         Output: t3.c1, t3.c2, t3.c3
+         Filter: (t3.c2 < 50)
+   ->  Hash
+         Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3
+         ->  Hash Join
+               Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3
+               Hash Cond: (t2.c2 = t1.c2)
+               ->  Bitmap Heap Scan on global_stats.global_stats_table_02 t2
+                     Output: t2.c1, t2.c2, t2.c3
+                     Recheck Cond: (t2.c2 < 50)
+                     ->  Bitmap Index Scan on global_stats_table_04_idx1
+                           Index Cond: (t2.c2 < 50)
+               ->  Hash
+                     Output: t1.c1, t1.c2, t1.c3
+                     ->  Seq Scan on global_stats.global_stats_table_01 t1
+                           Output: t1.c1, t1.c2, t1.c3
+                           Filter: (t1.c2 < 50)
+(21 rows)
+
+--A!=B && B!=C
+set plan_mode_seed=73138634;
+explain (verbose on, costs off,nodes on) select * from global_stats_table_01 t1 
+inner join global_stats_table_02 t2 on t1.c1 = t2.c1 
+inner join global_stats_table_03 t3 on t2.c2 = t3.c2 where t2.c2 < 50;
+                                QUERY PLAN (RANDOM seed 73138634)                                 
+--------------------------------------------------------------------------------------------------
+ Hash Join
+   Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3, t3.c1, t3.c2, t3.c3
+   Hash Cond: (t2.c2 = t3.c2)
+   ->  Nested Loop
+         Output: t1.c1, t1.c2, t1.c3, t2.c1, t2.c2, t2.c3
+         Join Filter: (t1.c1 = t2.c1)
+         ->  Index Scan using global_stats_table_04_idx1 on global_stats.global_stats_table_02 t2
+               Output: t2.c1, t2.c2, t2.c3
+               Index Cond: (t2.c2 < 50)
+         ->  Materialize
+               Output: t1.c1, t1.c2, t1.c3
+               ->  Seq Scan on global_stats.global_stats_table_01 t1
+                     Output: t1.c1, t1.c2, t1.c3
+   ->  Hash
+         Output: t3.c1, t3.c2, t3.c3
+         ->  Seq Scan on global_stats.global_stats_table_03 t3
+               Output: t3.c1, t3.c2, t3.c3
+               Filter: (t3.c2 < 50)
+(18 rows)
+
+--test hashagg
+reset plan_mode_seed;
+--group_exprs include plan->distribute_keys, and plan->distributed_keys include baserel distkey(A==B && B==C)
+explain (verbose on, costs off,nodes on) select t1.c1,t3.c1 from global_stats_table_01 t1 join global_stats_table_03 t3 on t1.c1=t3.c1 group by t1.c1,t3.c1;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ HashAggregate
+   Output: t1.c1, t3.c1
+   Group By Key: t1.c1, t3.c1
+   ->  Hash Join
+         Output: t1.c1, t3.c1
+         Hash Cond: (t3.c1 = t1.c1)
+         ->  Seq Scan on global_stats.global_stats_table_03 t3
+               Output: t3.c1, t3.c2, t3.c3
+         ->  Hash
+               Output: t1.c1
+               ->  Seq Scan on global_stats.global_stats_table_01 t1
+                     Output: t1.c1
+(12 rows)
+
+--group_exprs include plan->distribute_keys, and plan->distributed_keys not include baserel distkey(A==B && B!=C)
+explain (verbose on, costs off,nodes on) select t1.c2,t3.c2 from global_stats_table_01 t1 join global_stats_table_03 t3 on t1.c2=t3.c1 group by t1.c2,t3.c2;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ HashAggregate
+   Output: t1.c2, t3.c2
+   Group By Key: t1.c2, t3.c2
+   ->  Hash Join
+         Output: t1.c2, t3.c2
+         Hash Cond: (t3.c1 = t1.c2)
+         ->  Seq Scan on global_stats.global_stats_table_03 t3
+               Output: t3.c1, t3.c2, t3.c3
+         ->  Hash
+               Output: t1.c2
+               ->  Seq Scan on global_stats.global_stats_table_01 t1
+                     Output: t1.c2
+(12 rows)
+
+--group_exprs not include plan->distribute_keys, and plan->distributed_keys include baserel distkey(A!=B && B==C)
+explain (verbose on, costs off,nodes on) select t1.c2, t2.c1 from global_stats_table_01 t1 join global_stats_table_02 t2 on t1.c1=t2.c2 group by t1.c2,t2.c1;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ HashAggregate
+   Output: t1.c2, t2.c1
+   Group By Key: t1.c2, t2.c1
+   ->  Hash Join
+         Output: t1.c2, t2.c1
+         Hash Cond: (t1.c1 = t2.c2)
+         ->  Seq Scan on global_stats.global_stats_table_01 t1
+               Output: t1.c1, t1.c2, t1.c3
+         ->  Hash
+               Output: t2.c1, t2.c2
+               ->  Seq Scan on global_stats.global_stats_table_02 t2
+                     Output: t2.c1, t2.c2
+(12 rows)
+
+--group_exprs not include plan->distribute_keys, and plan->distributed_keys not include baserel distkey(A!=B && B!=C)
+explain (costs off, nodes off) 
+(select c1,c2 from global_stats_table_01 t1 where t1.c1 in (select c2 from global_stats_table_02 union all (select c2 from global_stats_table_01)) group by 1,2) 
+intersect (select tt1.c1,tt1.c2 from global_stats_table_01 tt1 left join (select c1 from global_stats_table_02 union (select c1 from global_stats_table_01)) tt2 on tt1.c1=tt2.c1 group by 1,2) 
+except all select t32.c1,t32.c2 from global_stats_table_02 t32 right join global_stats_table_01 t31 on t31.c2=t32.c1 group by 1,2 order by 1,2;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: "*SELECT* 1".c1, "*SELECT* 1".c2
+   ->  HashSetOp Except All
+         ->  Append
+               ->  Result
+                     ->  HashSetOp Intersect
+                           ->  Append
+                                 ->  Subquery Scan on "*SELECT* 1"
+                                       ->  HashAggregate
+                                             Group By Key: t1.c1, t1.c2
+                                             ->  Hash Right Semi Join
+                                                   Hash Cond: (global_stats_table_02.c2 = t1.c1)
+                                                   ->  Append
+                                                         ->  Seq Scan on global_stats_table_02
+                                                         ->  Seq Scan on global_stats_table_01
+                                                   ->  Hash
+                                                         ->  Seq Scan on global_stats_table_01 t1
+                                 ->  Subquery Scan on "*SELECT* 2"
+                                       ->  HashAggregate
+                                             Group By Key: tt1.c1, tt1.c2
+                                             ->  Seq Scan on global_stats_table_01 tt1
+               ->  Subquery Scan on "*SELECT* 3"
+                     ->  HashAggregate
+                           Group By Key: t32.c1, t32.c2
+                           ->  Hash Right Join
+                                 Hash Cond: (t32.c1 = t31.c2)
+                                 ->  Seq Scan on global_stats_table_02 t32
+                                 ->  Hash
+                                       ->  Seq Scan on global_stats_table_01 t31
+(29 rows)
+
+drop table global_stats_table_01;
+drop table global_stats_table_02;
+drop table global_stats_table_03;
+drop table global_stats_table_04;
+drop table global_stats_table_05;
+select staattnum, stavalues1 from pg_statistic where starelid in (select oid from pg_class where  relname ='pg_language') order by staattnum;
+ staattnum |          stavalues1           
+-----------+-------------------------------
+         1 | {c,internal,java,plpgsql,sql}
+         2 | {10}
+         3 | {f}
+         4 | {f,t}
+         5 | {0}
+         6 | {0}
+         7 | {0,2246,2247,2248,11687}
+         8 | 
+(8 rows)
+

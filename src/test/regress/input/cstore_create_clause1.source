@@ -1,0 +1,159 @@
+-- problem:
+-- SQL clause about CREATE TABLE for compression
+
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = 9999)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01;
+DROP TABLE cstore_create_clause_01;
+-- problem:
+-- SQL clause about CREATE TABLE for compression
+-- case 1: default compress level
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01
+DROP TABLE cstore_create_clause_01;
+
+-- case 2: no compress
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = no )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01
+DROP TABLE cstore_create_clause_01;
+
+-- case 3: compress yes
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = yes )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01
+DROP TABLE cstore_create_clause_01;
+
+-- case 4: compress low
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = low )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01
+DROP TABLE cstore_create_clause_01;
+
+-- case 5: compress middle
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = middle )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01
+DROP TABLE cstore_create_clause_01;
+
+-- case 4: compress high
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = high )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01
+DROP TABLE cstore_create_clause_01;
+
+-- case 5: invalid compress type
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = zlib )  ;
+
+-- case 6: max_batchrow option test
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , max_batchrow = 10000)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01
+DROP TABLE cstore_create_clause_01;
+
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , max_batchrow = 60000)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01
+DROP TABLE cstore_create_clause_01;
+
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , max_batchrow = 65536)  ;
+
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , max_batchrow = 9999)  ;
+
+-- case 7: deltarow_threshold option test
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = 10000)  ;
+
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = -1)  ;
+
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = 0)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01;
+DROP TABLE cstore_create_clause_01;
+
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = 9999)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+\dS+ cstore_create_clause_01;
+DROP TABLE cstore_create_clause_01;
+
+-- case 8: partial_cluster_rows
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column, partial_cluster_rows = 50000 )  ;
+
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column, partial_cluster_rows = 60000 )  ;
+\dS+ cstore_create_clause_01;
+DROP TABLE cstore_create_clause_01;
+
+
+

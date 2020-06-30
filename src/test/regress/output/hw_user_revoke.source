@@ -1,0 +1,19 @@
+--test audit for set role/session rollback
+CREATE USER SET_SESSION_ROLLBACK_AUDIT PASSWORD 'TTEST@123';
+START TRANSACTION;
+SET SESSION SESSION AUTHORIZATION SET_SESSION_ROLLBACK_AUDIT PASSWORD 'TTEST@123';
+CREATE USER SET_SESSION_ROLLBACK_AUDIT_TABLE IDENTIFIED BY 'TTEST@123';
+ERROR:  Permission denied to create role.
+COMMIT;
+DROP USER SET_SESSION_ROLLBACK_AUDIT;
+create user test_drop_user password 'Ttest@123';
+SET SESSION AUTHORIZATION test_drop_user PASSWORD 'Ttest@123';
+create table test_drop_user_tbl(id int);
+drop table test_drop_user_tbl;
+RESET SESSION AUTHORIZATION;
+drop user test_drop_user cascade;
+REVOKE ALL on schema public FROM public;
+create role test_revoke_for_sysadmin login sysadmin password 'Ttest@123';
+drop role test_revoke_for_sysadmin;
+GRANT ALL on schema public TO public;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;

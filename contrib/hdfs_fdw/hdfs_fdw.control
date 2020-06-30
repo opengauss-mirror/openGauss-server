@@ -1,0 +1,5 @@
+# hdfs_fdw extension
+comment = 'foreign-data wrapper for flat file access'
+default_version = '1.0'
+module_pathname = '$libdir/hdfs_fdw'
+relocatable = true

@@ -1,0 +1,516 @@
+set time zone 'PRC';
+--
+--Add mutliple column 
+CREATE TABLE cstore8_tmp (initial int4) with(orientation = column);
+insert into cstore8_tmp values(1);
+ALTER TABLE cstore8_tmp ADD(mychar char default 'a', mychar1 varchar(10) NOT NULL default 'ab', id integer NULL);
+select * from cstore8_tmp;
+ initial | mychar | mychar1 | id 
+---------+--------+---------+----
+       1 | a      | ab      |   
+(1 row)
+
+insert into cstore8_tmp values(2,'b','abc',2);
+select * from cstore8_tmp order by initial;
+ initial | mychar | mychar1 | id 
+---------+--------+---------+----
+       1 | a      | ab      |   
+       2 | b      | abc     |  2
+(2 rows)
+
+drop table cstore8_tmp;
+-- Add column for patitioned table
+CREATE TABLE cstore8_tmp(a int, b int) with ( orientation = column )  partition by range(b)
+(
+partition p1 values less than (3),
+partition p2 values less than (6),
+partition p3 values less than (10)
+);
+insert into cstore8_tmp values(1,1);
+insert into cstore8_tmp values(2,4);
+insert into cstore8_tmp values(3,9);
+Alter table cstore8_tmp add column c int default 2;
+select * from cstore8_tmp order by a;
+ a | b | c 
+---+---+---
+ 1 | 1 | 2
+ 2 | 4 | 2
+ 3 | 9 | 2
+(3 rows)
+
+insert into cstore8_tmp values(2,5,4);
+select * from cstore8_tmp order by a, b;
+ a | b | c 
+---+---+---
+ 1 | 1 | 2
+ 2 | 4 | 2
+ 2 | 5 | 4
+ 3 | 9 | 2
+(4 rows)
+
+drop table cstore8_tmp;
+--
+--Alter type
+--
+--char,char(n),varchar(n),integer
+create table t1(id1 integer, mychar char, name char(5), name2 varchar(5)) with(orientation = column);
+insert into t1 values(1,'1','12','1234');
+insert into t1 values(2,'a','ab','abcd');
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+   2 | a      | ab    | abcd
+(2 rows)
+
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+--can't alter distributed key
+alter table t1 alter id1 type char;
+-- char->int, failed
+alter table t1 alter mychar type int;
+ERROR:  invalid input syntax for integer: "a"
+-- char(n) extended
+alter table t1 alter name type char(10);
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | character(1)         |           | extended |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(10)        |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+ 
+--test altered column char extended
+update t1 set name = 'abcdefg' where id1=2;
+select * from t1 order by id1;
+ id1 | mychar |    name    | name2 
+-----+--------+------------+-------
+ 1   | 1      | 12         | 1234
+ 2   | a      | abcdefg    | abcd
+(2 rows)
+
+delete t1 where id1=2;
+-- char->int, succeed
+alter table t1 alter mychar type int;
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | character(1)         |           | extended |              | 
+ mychar | integer              |           | plain    |              | 
+ name   | character(10)        |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+--test altered column char->int, can't insert succeed
+insert into t1 values(1,'b','abcdef','1234');
+ERROR:  invalid input syntax for integer: "b"
+LINE 1: insert into t1 values(1,'b','abcdef','1234');
+                                ^
+CONTEXT:  referenced column: mychar
+-- varchar(n) extended
+alter table t1 alter name2 type varchar(20);
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ id1    | character(1)          |           | extended |              | 
+ mychar | integer               |           | plain    |              | 
+ name   | character(10)         |           | extended |              | 
+ name2  | character varying(20) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+--test altered column varchar(n)
+insert into t1 values(2,3,'abcdef','1234567');
+select * from t1 order by id1;
+ id1 | mychar |    name    |  name2  
+-----+--------+------------+---------
+ 1   |      1 | 12         | 1234
+ 2   |      3 | abcdef     | 1234567
+(2 rows)
+
+-- varchar(n)->int
+alter table t1 alter name2 type int;
+\d+ t1;
+                             Table "public.t1"
+ Column |     Type      | Modifiers | Storage  | Stats target | Description 
+--------+---------------+-----------+----------+--------------+-------------
+ id1    | character(1)  |           | extended |              | 
+ mychar | integer       |           | plain    |              | 
+ name   | character(10) |           | extended |              | 
+ name2  | integer       |           | plain    |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- int->char(n)
+alter table t1 alter mychar type char(4);
+\d+ t1;
+                             Table "public.t1"
+ Column |     Type      | Modifiers | Storage  | Stats target | Description 
+--------+---------------+-----------+----------+--------------+-------------
+ id1    | character(1)  |           | extended |              | 
+ mychar | character(4)  |           | extended |              | 
+ name   | character(10) |           | extended |              | 
+ name2  | integer       |           | plain    |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+insert into t1 values(3,'abc','abcde',12);
+select * from t1 order by id1;
+ id1 | mychar |    name    |  name2  
+-----+--------+------------+---------
+ 1   | 1      | 12         |    1234
+ 2   | 3      | abcdef     | 1234567
+ 3   | abc    | abcde      |      12
+(3 rows)
+
+-- char(n)->char(m) cut shorter
+alter table t1 alter name type char(5);
+ERROR:  value too long for type character(5)
+alter table t1 alter name type char(7);
+-- char(n)->varchar(m)
+alter table t1 alter name type varchar(4);
+ERROR:  value too long for type character varying(4)
+alter table t1 alter name type varchar(12);
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ id1    | character(1)          |           | extended |              | 
+ mychar | character(4)          |           | extended |              | 
+ name   | character varying(12) |           | extended |              | 
+ name2  | integer               |           | plain    |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- int->smallint
+alter table t1 alter name2 type smallint;
+ERROR:  smallint out of range
+delete from t1 where id1=2;
+alter table t1 alter name2 type smallint;
+\d+ t1;
+                                 Table "public.t1"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ id1    | character(1)          |           | extended |              | 
+ mychar | character(4)          |           | extended |              | 
+ name   | character varying(12) |           | extended |              | 
+ name2  | smallint              |           | plain    |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- varchar(n)->text
+alter table t1 alter name type text;
+\d+ t1;
+                             Table "public.t1"
+ Column |     Type     | Modifiers | Storage  | Stats target | Description 
+--------+--------------+-----------+----------+--------------+-------------
+ id1    | character(1) |           | extended |              | 
+ mychar | character(4) |           | extended |              | 
+ name   | text         |           | extended |              | 
+ name2  | smallint     |           | plain    |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+-- int->numeric
+alter table t1 alter name2 type numeric(10,2);
+\d+ t1;
+                             Table "public.t1"
+ Column |     Type      | Modifiers | Storage  | Stats target | Description 
+--------+---------------+-----------+----------+--------------+-------------
+ id1    | character(1)  |           | extended |              | 
+ mychar | character(4)  |           | extended |              | 
+ name   | text          |           | extended |              | 
+ name2  | numeric(10,2) |           | main     |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+select * from t1 order by id1;
+ id1 | mychar | name  |  name2  
+-----+--------+-------+---------
+ 1   | 1      | 12    | 1234.00
+ 3   | abc    | abcde |   12.00
+(2 rows)
+
+insert into t1 values(4,'bc','ab',3.1415);
+select * from t1 order by id1;
+ id1 | mychar | name  |  name2  
+-----+--------+-------+---------
+ 1   | 1      | 12    | 1234.00
+ 3   | abc    | abcde |   12.00
+ 4   | bc     | ab    |    3.14
+(3 rows)
+
+-- numeric->numeric
+alter table t1 alter name2 type numeric(5,2);  --failed
+ERROR:  numeric field overflow
+DETAIL:  A field with precision 5, scale 2 must round to an absolute value less than 10^3.
+alter table t1 alter name2 type numeric(7,3);  --succeed
+select * from t1 order by id1;
+ id1 | mychar | name  |  name2   
+-----+--------+-------+----------
+ 1   | 1      | 12    | 1234.000
+ 3   | abc    | abcde |   12.000
+ 4   | bc     | ab    |    3.140
+(3 rows)
+
+-- numeric->char(n)
+alter table t1 alter name2 type char(6);  --failed
+ERROR:  value too long for type character(6)
+alter table t1 alter name2 type char(10);  --succeed
+\d+ t1;
+                             Table "public.t1"
+ Column |     Type      | Modifiers | Storage  | Stats target | Description 
+--------+---------------+-----------+----------+--------------+-------------
+ id1    | character(1)  |           | extended |              | 
+ mychar | character(4)  |           | extended |              | 
+ name   | text          |           | extended |              | 
+ name2  | character(10) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+insert into t1 values(5,'ab','123','12.34567890123');  --failed
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: name2
+insert into t1 values(5,'ab','123','12.3456789');  --succeed
+-- char(n)->decimal
+alter table t1 alter name2 type decimal;
+select * from t1 order by id1;
+ id1 | mychar | name  |   name2    
+-----+--------+-------+------------
+ 1   | 1      | 12    |   1234.000
+ 3   | abc    | abcde |     12.000
+ 4   | bc     | ab    |      3.140
+ 5   | ab     | 123   | 12.3456789
+(4 rows)
+
+-- decimal->float8
+alter table t1 alter name2 type float;
+select * from t1 order by id1;
+ id1 | mychar | name  |   name2    
+-----+--------+-------+------------
+ 1   | 1      | 12    |       1234
+ 3   | abc    | abcde |         12
+ 4   | bc     | ab    |       3.14
+ 5   | ab     | 123   | 12.3456789
+(4 rows)
+
+-- float8->real(float4)
+alter table t1 alter name2 type real;
+select * from t1 order by id1;
+ id1 | mychar | name  |  name2  
+-----+--------+-------+---------
+ 1   | 1      | 12    |    1234
+ 3   | abc    | abcde |      12
+ 4   | bc     | ab    |    3.14
+ 5   | ab     | 123   | 12.3457
+(4 rows)
+
+-- real->numeric()
+alter table t1 alter name2 type numeric(5,2);  --failed
+ERROR:  numeric field overflow
+DETAIL:  A field with precision 5, scale 2 must round to an absolute value less than 10^3.
+alter table t1 alter name2 type numeric(5,1);  --succeed
+select * from t1 order by id1;
+ id1 | mychar | name  | name2  
+-----+--------+-------+--------
+ 1   | 1      | 12    | 1234.0
+ 3   | abc    | abcde |   12.0
+ 4   | bc     | ab    |    3.1
+ 5   | ab     | 123   |   12.3
+(4 rows)
+
+-- numeric->int
+alter table t1 alter name2 type int;
+select * from t1 order by id1;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+ 1   | 1      | 12    |  1234
+ 3   | abc    | abcde |    12
+ 4   | bc     | ab    |     3
+ 5   | ab     | 123   |    12
+(4 rows)
+
+drop table t1;
+--time type 
+create table timetest(c1 timestamp, c2 timestamptz, c3 date) with(orientation = column);
+insert into timetest values('2015-04-13 16:50:12', '2015-04-13 16:51:13', '2015-01-13');
+insert into timetest values('2015/04/13 04:11:12 pm','04/13/2015 15:30:21', '02/04/2015');
+select * from timetest order by c1;
+            c1            |              c2              |            c3            
+--------------------------+------------------------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | Mon Apr 13 15:30:21 2015 CST | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | Mon Apr 13 16:51:13 2015 CST | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- timestamptz->time
+alter table timetest alter c2 type time;
+select * from timetest order by c1;
+            c1            |    c2    |            c3            
+--------------------------+----------+--------------------------
+ Mon Apr 13 16:11:12 2015 | 15:30:21 | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | 16:51:13 | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- time->timetz
+alter table timetest alter c2 type timetz;
+select * from timetest order by c1;
+            c1            |     c2      |            c3            
+--------------------------+-------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | 15:30:21+08 | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | 16:51:13+08 | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- timetz->timestamptz
+alter table timetest alter c2 type timestamptz;
+ERROR:  column "c2" cannot be cast automatically to type timestamp with time zone
+HINT:  Specify a USING expression to perform the conversion.
+-- date->timestamptz
+alter table timetest alter c3 type timestamptz;
+select * from timetest order by c1;
+            c1            |     c2      |              c3              
+--------------------------+-------------+------------------------------
+ Mon Apr 13 16:11:12 2015 | 15:30:21+08 | Wed Feb 04 00:00:00 2015 CST
+ Mon Apr 13 16:50:12 2015 | 16:51:13+08 | Tue Jan 13 00:00:00 2015 CST
+(2 rows)
+
+-- timestamptz->date
+alter table timetest alter c3 type date;
+select * from timetest order by c1;
+            c1            |     c2      |            c3            
+--------------------------+-------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | 15:30:21+08 | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | 16:51:13+08 | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- timetz->char(n)
+alter table timetest alter c2 type char(15);
+select * from timetest order by c1;
+            c1            |       c2        |            c3            
+--------------------------+-----------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | 15:30:21+08     | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | 16:51:13+08     | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+-- char(n)->timetz
+alter table timetest alter c2 type timetz;  --failed
+ERROR:  column "c2" cannot be cast automatically to type time with time zone
+HINT:  Specify a USING expression to perform the conversion.
+alter table timetest alter c2 type char(12); 
+alter table timetest alter c2 type timetz;  --failed
+ERROR:  column "c2" cannot be cast automatically to type time with time zone
+HINT:  Specify a USING expression to perform the conversion.
+--using
+alter table timetest alter c2 type timetz using timetz(c2);  --succeed
+select * from timetest order by c1;
+            c1            |     c2      |            c3            
+--------------------------+-------------+--------------------------
+ Mon Apr 13 16:11:12 2015 | 15:30:21+08 | Wed Feb 04 00:00:00 2015
+ Mon Apr 13 16:50:12 2015 | 16:51:13+08 | Tue Jan 13 00:00:00 2015
+(2 rows)
+
+alter table timetest alter c2 type date using c3;  --refer other column,failed
+ERROR:  cannot refer to other columns in transform expression for column store table
+drop table timetest;
+--
+-- ALTER_TABLE MERGE PARTITIONS
+-- Merge existing partitions for a partitioned table
+--
+-- Create table for testing
+drop table if exists cstoremp_t;
+NOTICE:  table "cstoremp_t" does not exist, skipping
+create table cstoremp_t (a int, b text)
+with (orientation = column)
+partition by range (a)
+(
+partition cstoremp_t_p1 values less than (10),
+partition cstoremp_t_p2 values less than (20),
+partition cstoremp_t_p3 values less than (30),
+partition cstoremp_t_p4 values less than (40)
+)
+;
+insert into cstoremp_t values (1, 'A'), (11 ,'B'), (21 ,'C'), (31 ,'D');
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'cstoremp_t') order by 2;
+    relname    | boundaries 
+---------------+------------
+ cstoremp_t_p1 | {10}
+ cstoremp_t_p2 | {20}
+ cstoremp_t_p3 | {30}
+ cstoremp_t_p4 | {40}
+ cstoremp_t    | 
+(5 rows)
+
+create index cstoremp_t_idx on cstoremp_t(a) local;
+-- Check partition indexing correctness
+select relname from pg_partition where parentid = (select oid from pg_class where relname = 'cstoremp_t_idx') order by 1;
+       relname       
+---------------------
+ cstoremp_t_p1_a_idx
+ cstoremp_t_p2_a_idx
+ cstoremp_t_p3_a_idx
+ cstoremp_t_p4_a_idx
+(4 rows)
+
+explain select * from cstoremp_t where a=1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+--? Row Adapter  (cost=.* rows=.* width=.*)
+--?   ->  Vector Partition Iterator  (cost=.* rows=.* width=.*)
+         Iterations: 1
+--?         ->  Partitioned CStore Scan on cstoremp_t  (cost=.* rows=.* width=.*)
+               Filter: (a = 1)
+               Selected Partitions:  1
+(6 rows)
+
+-- Merge two paritions, check name, range, indice of merged partition
+alter table cstoremp_t merge partitions cstoremp_t_p1, cstoremp_t_p2 into partition cstoremp_t_px;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'cstoremp_t') order by 2;
+    relname    | boundaries 
+---------------+------------
+ cstoremp_t_px | {20}
+ cstoremp_t_p3 | {30}
+ cstoremp_t_p4 | {40}
+ cstoremp_t    | 
+(4 rows)
+
+-- Check partition indexing correctness after merging
+select relname from pg_partition where parentid = (select oid from pg_class where relname = 'cstoremp_t_idx') order by 1;
+       relname       
+---------------------
+ cstoremp_t_p2_a_idx
+ cstoremp_t_p3_a_idx
+ cstoremp_t_p4_a_idx
+(3 rows)
+
+explain select * from cstoremp_t where a=1;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+--? Row Adapter  (cost=.* rows=.* width=.*)
+--?   ->  Vector Partition Iterator  (cost=.* rows=.* width=.*)
+         Iterations: 1
+--?         ->  Partitioned CStore Scan on cstoremp_t  (cost=.* rows=.* width=.*)
+               Filter: (a = 1)
+               Selected Partitions:  1
+(6 rows)
+
+-- Merge paritions that in the wrong order / does not exist
+alter table cstoremp_t merge partitions cstoremp_t_p3, cstoremp_t_px into partition cstoremp_t_px;
+ERROR:  source partitions must be continuous and in ascending order of boundary
+alter table cstoremp_t merge partitions cstoremp_t_p5, cstoremp_t_p6 into partition cstoremp_t_px;
+ERROR:  partition "cstoremp_t_p5" does not exist
+-- End. Clean up

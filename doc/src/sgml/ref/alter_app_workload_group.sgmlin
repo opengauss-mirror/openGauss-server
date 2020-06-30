@@ -1,0 +1,52 @@
+<!--
+doc/src/sgml/ref/alter_app_workload_group.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-ALTERAPPWORKLOADGROUP">
+ <refmeta>
+  <refentrytitle>ALTER APP WORKLOAD GROUP</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+ <refname>ALTER APP WORKLOAD GROUP</refname>
+  <refpurpose>change the definition of a app workload group</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-alterappworkloadgroup">
+  <primary>ALTER APP WORKLOAD GROUP</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+ALTER APP WORKLOAD GROUP MAPPING app_name WITH ([ WORKLOAD_GPNAME  = workload_gpname, ])
+</synopsis>
+ </refsynopsisdiv>
+<!--
+doc/src/sgml/ref/alter_app_workload_group.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-ALTERAPPWORKLOADGROUP">
+ <refmeta>
+  <refentrytitle>ALTER APP WORKLOAD GROUP</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+ <refname>ALTER APP WORKLOAD GROUP</refname>
+  <refpurpose>change the definition of a app workload group</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-alterappworkloadgroup">
+  <primary>ALTER APP WORKLOAD GROUP</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+ALTER APP WORKLOAD GROUP MAPPING app_name WITH ([ WORKLOAD_GPNAME  = workload_gpname, ])
+</synopsis>
+ </refsynopsisdiv>

@@ -1,0 +1,16 @@
+<refentry id="SQL-EXECUTE_DIRECT">
+<refmeta>
+<refentrytitle>EXECUTE DIRECT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>EXECUTE DIRECT</refname>
+<refpurpose>launch queries directly to dedicated nodes</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+EXECUTE DIRECT ON ( nodename [, ... ] ) query;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

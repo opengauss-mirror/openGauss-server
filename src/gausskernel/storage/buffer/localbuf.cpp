@@ -1,0 +1,569 @@
+/* -------------------------------------------------------------------------
+ *
+ * localbuf.cpp
+ *    local buffer manager. Fast buffer manager for temporary tables,
+ *    which never need to be WAL-logged or checkpointed, etc.
+ *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1994-5, Regents of the University of California
+ *
+ *
+ * IDENTIFICATION
+ *    src/gausskernel/storage/buffer/localbuf.cpp
+ *
+ * -------------------------------------------------------------------------
+ */
+#include "postgres.h"
+#include "knl/knl_variable.h"
+
+#include "catalog/catalog.h"
+#include "access/double_write.h"
+#include "executor/instrument.h"
+#include "storage/buf_internals.h"
+#include "storage/bufmgr.h"
+#include "utils/guc.h"
+#include "utils/memutils.h"
+#include "utils/resowner.h"
+#include "pgstat.h"
+
+/* entry for buffer lookup hashtable */
+typedef struct {
+    BufferTag key; /* Tag of a disk page */
+    int id;        /* Associated local buffer's index */
+} LocalBufferLookupEnt;
+
+/* Note: this macro only works on local buffers, not shared ones! */
+#define LocalBufHdrGetBlock(bufHdr) t_thrd.storage_cxt.LocalBufferBlockPointers[-((bufHdr)->buf_id + 2)]
+
+static void InitLocalBuffers(void);
+static Block GetLocalBufferStorage(void);
+
+/*
+ * LocalPrefetchBuffer -
+ *    initiate asynchronous read of a block of a relation
+ *
+ * Do PrefetchBuffer's work for temporary relations.
+ * No-op if prefetching isn't compiled in.
+ */
+void LocalPrefetchBuffer(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum)
+{
+#ifdef USE_PREFETCH
+    BufferTag new_tag; /* identity of requested block */
+    LocalBufferLookupEnt* hresult = NULL;
+
+    INIT_BUFFERTAG(new_tag, smgr->smgr_rnode.node, forkNum, blockNum);
+
+    /* Initialize local buffers if first request in this session */
+    if (t_thrd.storage_cxt.LocalBufHash == NULL)
+        InitLocalBuffers();
+
+    /* See if the desired buffer already exists */
+    hresult = (LocalBufferLookupEnt*)hash_search(t_thrd.storage_cxt.LocalBufHash, (void*)&new_tag, HASH_FIND, NULL);
+    if (hresult != NULL) {
+        /* Yes, so nothing to do */
+        return;
+    }
+
+    /* Not in buffers, so initiate prefetch */
+    smgrprefetch(smgr, forkNum, blockNum);
+#endif /* USE_PREFETCH */
+}
+
+void LocalBufferWrite(BufferDesc *bufHdr)
+{
+    SMgrRelation oreln;
+    Page        localpage = (char *) LocalBufHdrGetBlock(bufHdr);
+
+    /* Find smgr relation for buffer */
+    oreln = smgropen(bufHdr->tag.rnode, t_thrd.proc_cxt.MyBackendId);
+
+    PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
+
+    /* And write... */
+    smgrwrite(oreln,
+              bufHdr->tag.forkNum,
+              bufHdr->tag.blockNum,
+              localpage,
+              false);
+}
+
+void LocalBufferFlushForExtremRTO(BufferDesc *bufHdr)
+{
+    if (dw_enabled())
+    {
+        /* double write */
+    
+    }
+    FlushBuffer(bufHdr, NULL, WITH_LOCAL_CACHE);
+}
+
+void LocalBufferFlushAllBuffer()
+{
+    int i;
+
+    for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
+        BufferDesc *bufHdr = &t_thrd.storage_cxt.LocalBufferDescriptors[i];
+        uint32 buf_state;
+
+        buf_state = pg_atomic_read_u32(&bufHdr->state);
+        Assert(t_thrd.storage_cxt.LocalRefCount[i] == 0);
+
+        if ((buf_state & BM_VALID) && (buf_state & BM_DIRTY)) {     
+            LocalBufferFlushForExtremRTO(bufHdr);
+
+            buf_state &= ~BM_DIRTY;
+            pg_atomic_write_u32(&bufHdr->state, buf_state);
+
+            u_sess->instr_cxt.pg_buffer_usage->local_blks_written++;
+        }
+    }
+}
+/*
+ * LocalBufferAlloc -
+ *    Find or create a local buffer for the given page of the given relation.
+ *
+ * API is similar to bufmgr.c's BufferAlloc, except that we do not need
+ * to do any locking since this is all local.   Also, IO_IN_PROGRESS
+ * does not get set.  Lastly, we support only default access strategy
+ * (hence, usage_count is always advanced).
+ */
+BufferDesc* LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum, bool* foundPtr)
+{
+    BufferTag new_tag; /* identity of requested block */
+    LocalBufferLookupEnt* hresult = NULL;
+    BufferDesc* buf_desc = NULL;
+    int b;
+    int try_counter;
+    bool found = false;
+    uint32 buf_state;
+
+    INIT_BUFFERTAG(new_tag, smgr->smgr_rnode.node, forkNum, blockNum);
+
+    /* Initialize local buffers if first request in this session */
+    if (t_thrd.storage_cxt.LocalBufHash == NULL)
+        InitLocalBuffers();
+
+    /* See if the desired buffer already exists */
+    hresult = (LocalBufferLookupEnt*)hash_search(t_thrd.storage_cxt.LocalBufHash, (void*)&new_tag, HASH_FIND, NULL);
+    if (hresult != NULL) {
+        b = hresult->id;
+        buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[b];
+        if (!BUFFERTAGS_EQUAL(buf_desc->tag, new_tag)) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        (errmsg("local buffer hash tag mismatch."))));
+        }
+#ifdef LBDEBUG
+        fprintf(stderr, "LB ALLOC (%u,%d,%d) %d\n", smgr->smgr_rnode.node.relNode, forkNum, blockNum, -b - 1);
+#endif
+        buf_state = pg_atomic_read_u32(&buf_desc->state);
+
+        /* this part is equivalent to PinBuffer for a shared buffer */
+        if (t_thrd.storage_cxt.LocalRefCount[b] == 0) {
+            if (BUF_STATE_GET_USAGECOUNT(buf_state) < BM_MAX_USAGE_COUNT) {
+                buf_state += BUF_USAGECOUNT_ONE;
+                pg_atomic_write_u32(&buf_desc->state, buf_state);
+            }
+        }
+        t_thrd.storage_cxt.LocalRefCount[b]++;
+        ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf_desc));
+        if (buf_state & BM_VALID)
+            *foundPtr = TRUE;
+        else {
+            /* Previous read attempt must have failed; try again */
+            *foundPtr = FALSE;
+        }
+#ifdef EXTREME_RTO_DEBUG
+        ereport(LOG, (errmsg("LocalBufferAlloc %u/%u/%u %u %u find in local buf %u/%u/%u %u %u id %d state %X, lsn %lu", 
+                smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode, forkNum, blockNum,
+                hresult->key.rnode.spcNode, hresult->key.rnode.dbNode, hresult->key.rnode.relNode, hresult->key.forkNum,
+                hresult->key.blockNum, hresult->id, buf_state, LocalBufGetLSN(buf_desc))));
+#endif
+        return buf_desc;
+    }
+
+#ifdef LBDEBUG
+    fprintf(stderr,
+        "LB ALLOC (%u,%d,%d) %d\n",
+        smgr->smgr_rnode.node.relNode,
+        forkNum,
+        blockNum,
+        -t_thrd.storage_cxt.nextFreeLocalBuf - 1);
+#endif
+
+    /*
+     * Need to get a new buffer.  We use a clock sweep algorithm (essentially
+     * the same as what freelist.c does now...)
+     */
+    try_counter = t_thrd.storage_cxt.NLocBuffer;
+    for (;;) {
+        b = t_thrd.storage_cxt.nextFreeLocalBuf;
+
+        if (++t_thrd.storage_cxt.nextFreeLocalBuf >= t_thrd.storage_cxt.NLocBuffer)
+            t_thrd.storage_cxt.nextFreeLocalBuf = 0;
+
+        buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[b];
+
+        if (t_thrd.storage_cxt.LocalRefCount[b] == 0) {
+            buf_state = pg_atomic_read_u32(&buf_desc->state);
+            if (BUF_STATE_GET_USAGECOUNT(buf_state) > 0) {
+                buf_state -= BUF_USAGECOUNT_ONE;
+                pg_atomic_write_u32(&buf_desc->state, buf_state);
+                try_counter = t_thrd.storage_cxt.NLocBuffer;
+            } else {
+                /* Found a usable buffer */
+                t_thrd.storage_cxt.LocalRefCount[b]++;
+                ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf_desc));
+
+#ifdef EXTREME_RTO_DEBUG
+        ereport(LOG, (errmsg("LocalBufferAlloc prepare to %u/%u/%u %u %u from %u/%u/%u %u %u, id %d state %X", 
+                smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode, forkNum, blockNum,
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, buf_desc->tag.forkNum,
+                buf_desc->tag.blockNum, -(buf_desc->buf_id + 2), buf_desc->state)));
+#endif
+                break;
+            }
+        } else if (--try_counter == 0)
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("no empty local buffer available")));
+    }
+
+    /*
+     * this buffer is not referenced but it might still be dirty. if that's
+     * the case, write it out before reusing it!
+     */
+    if (buf_state & BM_DIRTY) {
+        
+        if (AmPageRedoProcess()) {            
+            LocalBufferFlushForExtremRTO(buf_desc);
+        }
+        else {
+            LocalBufferWrite(buf_desc);
+        }
+        
+        /* Mark not-dirty now in case we error out below */
+        buf_state &= ~BM_DIRTY;
+        pg_atomic_write_u32(&buf_desc->state, buf_state);
+
+        u_sess->instr_cxt.pg_buffer_usage->local_blks_written++;
+#ifdef EXTREME_RTO_DEBUG
+        ereport(LOG, (errmsg("LocalBufferAlloc write %u/%u/%u %u %u id %d lsn %lu", 
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+                -(buf_desc->buf_id + 2), LocalBufGetLSN(buf_desc))));
+#endif
+
+    }
+
+    /*
+     * lazy memory allocation: allocate space on first use of a buffer.
+     */
+    if (LocalBufHdrGetBlock(buf_desc) == NULL) {
+        /* Set pointer for use by BufferGetBlock() macro */
+        LocalBufHdrGetBlock(buf_desc) = GetLocalBufferStorage();
+    }
+
+    /*
+     * Update the hash table: remove old entry, if any, and make new one.
+     */
+    if (buf_state & BM_TAG_VALID) {
+        hresult =
+            (LocalBufferLookupEnt*)hash_search(t_thrd.storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
+        if (hresult == NULL) /* shouldn't happen */
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("local buffer hash table corrupted."))));
+        /* mark buffer invalid just in case hash insert fails */
+        CLEAR_BUFFERTAG(buf_desc->tag);
+        buf_state &= ~(BM_VALID | BM_TAG_VALID);
+        pg_atomic_write_u32(&buf_desc->state, buf_state);
+    }
+
+    hresult = (LocalBufferLookupEnt*)hash_search(t_thrd.storage_cxt.LocalBufHash, (void*)&new_tag, HASH_ENTER, &found);
+    if (found) /* shouldn't happen */
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("local buffer hash table corrupted."))));
+    hresult->id = b;
+
+    /*
+     * it's all ours now.
+     */
+    buf_desc->tag = new_tag;
+    buf_state &= ~(BM_VALID | BM_DIRTY | BM_JUST_DIRTIED | BM_IO_ERROR);
+    buf_state |= BM_TAG_VALID;
+    buf_state &= ~BUF_USAGECOUNT_MASK;
+    buf_state += BUF_USAGECOUNT_ONE;
+    pg_atomic_write_u32(&buf_desc->state, buf_state);
+#ifdef EXTREME_RTO_DEBUG
+    ereport(LOG, (errmsg("LocalBufferAlloc new to %u/%u/%u %u %u id %d", 
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+            -(buf_desc->buf_id + 2))));
+#endif
+
+
+    *foundPtr = FALSE;
+    return buf_desc;
+}
+
+/*
+ * MarkLocalBufferDirty -
+ *    mark a local buffer dirty
+ */
+void MarkLocalBufferDirty(Buffer buffer)
+{
+    int buf_id;
+    BufferDesc* buf_desc = NULL;
+    uint32 buf_state;
+
+    Assert(BufferIsLocal(buffer));
+
+#ifdef LBDEBUG
+    fprintf(stderr, "LB DIRTY %d\n", buffer);
+#endif
+
+    buf_id = -(buffer + 1);
+
+    Assert(t_thrd.storage_cxt.LocalRefCount[buf_id] > 0);
+
+    buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[buf_id];
+
+    buf_state = pg_atomic_fetch_or_u32(&buf_desc->state, BM_DIRTY);
+    if (!(buf_state & BM_DIRTY)) {
+        u_sess->instr_cxt.pg_buffer_usage->local_blks_dirtied++;
+        pgstatCountLocalBlocksDirtied4SessionLevel();
+    }
+#ifdef EXTREME_RTO_DEBUG
+    ereport(LOG, (errmsg("MarkLocalBufferDirty  %u/%u/%u %u %u id %d state %u lsn %lu", 
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode, 
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+            -(buf_desc->buf_id + 2), buf_desc->state, LocalBufGetLSN(buf_desc))));
+#endif
+
+}
+
+/*
+ * DropRelFileNodeLocalBuffers
+ *      This function removes from the buffer pool all the pages of the
+ *      specified relation that have block numbers >= firstDelBlock.
+ *      (In particular, with firstDelBlock = 0, all pages are removed.)
+ *      Dirty pages are simply dropped, without bothering to write them
+ *      out first.  Therefore, this is NOT rollback-able, and so should be
+ *      used only with extreme caution!
+ *
+ *      See DropRelFileNodeBuffers in bufmgr.c for more notes.
+ */
+void DropRelFileNodeLocalBuffers(const RelFileNode& rnode, ForkNumber forkNum, BlockNumber firstDelBlock)
+{
+    int i;
+
+    for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
+        BufferDesc* buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[i];
+        LocalBufferLookupEnt* hresult = NULL;
+        uint32 buf_state;
+
+        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        if ((buf_state & BM_TAG_VALID) && RelFileNodeEquals(buf_desc->tag.rnode, rnode) &&
+            buf_desc->tag.forkNum == forkNum && buf_desc->tag.blockNum >= firstDelBlock) {
+            if (t_thrd.storage_cxt.LocalRefCount[i] != 0) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_BUFFER_REFERENCE),
+                        (errmsg("block %u of %s is still referenced (local %d)",
+                            buf_desc->tag.blockNum,
+                            relpathbackend(buf_desc->tag.rnode, t_thrd.proc_cxt.MyBackendId, buf_desc->tag.forkNum),
+                            t_thrd.storage_cxt.LocalRefCount[i]))));
+            }
+            /* Remove entry from hashtable */
+            hresult = (LocalBufferLookupEnt*)hash_search(
+                t_thrd.storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
+            if (hresult == NULL) /* shouldn't happen */
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("local buffer hash table corrupted."))));
+            /* Mark buffer invalid */
+            CLEAR_BUFFERTAG(buf_desc->tag);
+            buf_state &= ~BUF_FLAG_MASK;
+            buf_state &= ~BUF_USAGECOUNT_MASK;
+            pg_atomic_write_u32(&buf_desc->state, buf_state);
+        }
+    }
+}
+
+/*
+ * DropRelFileNodeAllLocalBuffers
+ *      This function removes from the buffer pool all pages of all forks
+ *      of the specified relation.
+ *
+ *      See DropRelFileNodeAllBuffers in bufmgr.c for more notes.
+ */
+void DropRelFileNodeAllLocalBuffers(const RelFileNode& rnode)
+{
+    int i;
+
+    for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
+        BufferDesc* buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[i];
+        LocalBufferLookupEnt* hresult = NULL;
+        uint32 buf_state;
+
+        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        if ((buf_state & BM_TAG_VALID) && RelFileNodeEquals(buf_desc->tag.rnode, rnode)) {
+            if (t_thrd.storage_cxt.LocalRefCount[i] != 0) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_BUFFER_REFERENCE),
+                        (errmsg("block %u of %s is still referenced (local %d)",
+                            buf_desc->tag.blockNum,
+                            relpathbackend(buf_desc->tag.rnode, t_thrd.proc_cxt.MyBackendId, buf_desc->tag.forkNum),
+                            t_thrd.storage_cxt.LocalRefCount[i]))));
+            }
+            /* Remove entry from hashtable */
+            hresult = (LocalBufferLookupEnt*)hash_search(
+                t_thrd.storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
+            if (hresult == NULL) /* shouldn't happen */
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("local buffer hash table corrupted."))));
+            /* Mark buffer invalid */
+            CLEAR_BUFFERTAG(buf_desc->tag);
+            buf_state &= ~BUF_FLAG_MASK;
+            buf_state &= ~BUF_USAGECOUNT_MASK;
+            pg_atomic_write_u32(&buf_desc->state, buf_state);
+        }
+    }
+}
+
+/*
+ * InitLocalBuffers -
+ *    init the local buffer cache. Since most queries (esp. multi-user ones)
+ *    don't involve local buffers, we delay allocating actual memory for the
+ *    buffers until we need them; just make the buffer headers here.
+ */
+static void InitLocalBuffers(void)
+{
+    int nbufs = u_sess->attr.attr_storage.num_temp_buffers;
+    HASHCTL info;
+    int i;
+
+    /* Allocate and zero buffer headers and auxiliary arrays */
+    t_thrd.storage_cxt.LocalBufferDescriptors =
+        (BufferDesc*)MemoryContextAllocZero(t_thrd.top_mem_cxt, (unsigned int)nbufs * sizeof(BufferDesc));
+    t_thrd.storage_cxt.LocalBufferBlockPointers =
+        (Block*)MemoryContextAllocZero(t_thrd.top_mem_cxt, (unsigned int)nbufs * sizeof(Block));
+    t_thrd.storage_cxt.LocalRefCount =
+        (int32*)MemoryContextAllocZero(t_thrd.top_mem_cxt, (unsigned int)nbufs * sizeof(int32));
+    if (!t_thrd.storage_cxt.LocalBufferDescriptors || !t_thrd.storage_cxt.LocalBufferBlockPointers ||
+        !t_thrd.storage_cxt.LocalRefCount)
+        ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+
+    t_thrd.storage_cxt.nextFreeLocalBuf = 0;
+
+    /* initialize fields that need to start off nonzero */
+    for (i = 0; i < nbufs; i++) {
+        BufferDesc* buf = &t_thrd.storage_cxt.LocalBufferDescriptors[i];
+
+        /*
+         * negative to indicate local buffer. This is tricky: shared buffers
+         * start with 0. We have to start with -2. (Note that the routine
+         * BufferDescriptorGetBuffer adds 1 to buf_id so our first buffer id
+         * is -1.)
+         */
+        buf->buf_id = -i - 2;
+    }
+
+    /* Create the lookup hash table */
+    errno_t ret = memset_s(&info, sizeof(info), 0, sizeof(info));
+    securec_check(ret, "\0", "\0");
+    info.keysize = sizeof(BufferTag);
+    info.entrysize = sizeof(LocalBufferLookupEnt);
+    info.hash = tag_hash;
+
+    t_thrd.storage_cxt.LocalBufHash = hash_create("Local Buffer Lookup Table", nbufs, &info, HASH_ELEM | HASH_FUNCTION);
+
+    if (!t_thrd.storage_cxt.LocalBufHash)
+        ereport(ERROR, (errcode(ERRCODE_INITIALIZE_FAILED), (errmsg("could not initialize local buffer hash table."))));
+
+    /* Initialization done, mark buffers allocated */
+    t_thrd.storage_cxt.NLocBuffer = nbufs;
+}
+
+/*
+ * GetLocalBufferStorage - allocate memory for a local buffer
+ *
+ * The idea of this function is to aggregate our requests for storage
+ * so that the memory manager doesn't see a whole lot of relatively small
+ * requests.  Since we'll never give back a local buffer once it's created
+ * within a particular process, no point in burdening memmgr with separately
+ * managed chunks.
+ */
+static Block GetLocalBufferStorage(void)
+{
+    char* this_buf = NULL;
+
+    Assert(t_thrd.storage_cxt.total_bufs_allocated < t_thrd.storage_cxt.NLocBuffer);
+
+    if (t_thrd.storage_cxt.next_buf_in_block >= t_thrd.storage_cxt.num_bufs_in_block) {
+        /* Need to make a new request to memmgr */
+        int num_bufs;
+
+        /*
+         * We allocate local buffers in a context of their own, so that the
+         * space eaten for them is easily recognizable in MemoryContextStats
+         * output.  Create the context on first use.
+         */
+        if (t_thrd.storage_cxt.LocalBufferContext == NULL)
+            t_thrd.storage_cxt.LocalBufferContext = AllocSetContextCreate(t_thrd.top_mem_cxt,
+                "LocalBufferContext",
+                ALLOCSET_DEFAULT_MINSIZE,
+                ALLOCSET_DEFAULT_INITSIZE,
+                ALLOCSET_DEFAULT_MAXSIZE);
+
+        /* Start with a 16-buffer request; subsequent ones double each time */
+        num_bufs = Max(t_thrd.storage_cxt.num_bufs_in_block * 2, 16);
+        /* But not more than what we need for all remaining local bufs */
+        num_bufs = Min(num_bufs, t_thrd.storage_cxt.NLocBuffer - t_thrd.storage_cxt.total_bufs_allocated);
+        /* And don't overflow MaxAllocSize, either */
+        num_bufs = Min((unsigned int)(num_bufs), MaxAllocSize / BLCKSZ);
+
+        t_thrd.storage_cxt.cur_block =
+            (char*)MemoryContextAlloc(t_thrd.storage_cxt.LocalBufferContext, num_bufs * BLCKSZ);
+        t_thrd.storage_cxt.next_buf_in_block = 0;
+        t_thrd.storage_cxt.num_bufs_in_block = num_bufs;
+    }
+
+    /* Allocate next buffer in current memory block */
+    this_buf = t_thrd.storage_cxt.cur_block + t_thrd.storage_cxt.next_buf_in_block * BLCKSZ;
+    t_thrd.storage_cxt.next_buf_in_block++;
+    t_thrd.storage_cxt.total_bufs_allocated++;
+
+    return (Block)this_buf;
+}
+
+/*
+ * AtEOXact_LocalBuffers - clean up at end of transaction.
+ *
+ * This is just like AtEOXact_Buffers, but for local buffers.
+ */
+void AtEOXact_LocalBuffers(bool isCommit)
+{
+#ifdef USE_ASSERT_CHECKING
+    if (assert_enabled) {
+        int i;
+
+        for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
+            Assert(t_thrd.storage_cxt.LocalRefCount[i] == 0);
+        }
+    }
+#endif
+}
+
+/*
+ * AtProcExit_LocalBuffers - ensure we have dropped pins during backend exit.
+ *
+ * This is just like AtProcExit_Buffers, but for local buffers.  We shouldn't
+ * be holding any remaining pins; if we are, and assertions aren't enabled,
+ * we'll fail later in DropRelFileNodeBuffers while trying to drop the temp
+ * rels.
+ */
+void AtProcExit_LocalBuffers(void)
+{
+#ifdef USE_ASSERT_CHECKING
+    if (assert_enabled && t_thrd.storage_cxt.LocalRefCount) {
+        int i;
+
+        for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
+            Assert(t_thrd.storage_cxt.LocalRefCount[i] == 0);
+        }
+    }
+#endif
+}

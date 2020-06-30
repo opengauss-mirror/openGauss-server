@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_GROUP">
+<refmeta>
+<refentrytitle>DROP GROUP</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP GROUP</refname>
+<refpurpose>remove a database role</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP GROUP [ IF EXISTS ] group_name [, ...];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

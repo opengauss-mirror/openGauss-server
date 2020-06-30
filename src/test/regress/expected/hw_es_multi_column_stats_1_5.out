@@ -1,0 +1,134 @@
+--==========================================================
+--==========================================================
+\set ECHO all
+set current_schema = hw_es_multi_column_stats;
+set default_statistics_target=-2;
+--========================================================== system column and system table
+analyze t1_5 ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1_5" does not exist
+analyze t1r_5 ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1r_5" does not exist
+alter table t1_5 add statistics ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1_5" does not exist
+alter table t1r_5 add statistics ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1r_5" does not exist
+alter table t1_5 delete statistics ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1_5" does not exist
+alter table t1r_5 delete statistics ((xmax, xmin));
+ERROR:  column "xmax" of relation "t1r_5" does not exist
+analyze pg_class ((relname, relnamespace));
+ERROR:  System catalog is not supported by extended statistic.
+analyze pg_class (abc);
+ERROR:  column "abc" of relation "pg_class" does not exist
+analyze pg_class ((relname, abc));
+ERROR:  System catalog is not supported by extended statistic.
+alter table pg_class add statistics ((relname, relnamespace));
+ERROR:  permission denied: "pg_class" is a system catalog
+alter table pg_class add statistics (abc);
+ERROR:  syntax error at or near "abc"
+LINE 1: alter table pg_class add statistics (abc);
+                                             ^
+alter table pg_class add statistics ((relname, abc));
+ERROR:  permission denied: "pg_class" is a system catalog
+alter table pg_class delete statistics ((relname, relnamespace));
+ERROR:  permission denied: "pg_class" is a system catalog
+alter table pg_class delete statistics (abc);
+ERROR:  syntax error at or near "abc"
+LINE 1: alter table pg_class delete statistics (abc);
+                                                ^
+alter table pg_class delete statistics ((relname, abc));
+ERROR:  permission denied: "pg_class" is a system catalog
+--========================================================== syntax error
+analyze t1_5 (());
+ERROR:  syntax error at or near ")"
+LINE 1: analyze t1_5 (());
+                       ^
+analyze t1_5 ((b));
+ERROR:  Multi-column statistic needs at least two columns.
+analyze t1_5 ((a, a));
+ERROR:  Multi-column statistic needs at least two columns.
+analyze t1_5 ((c, c, d));
+analyze t1_5 ((b, d, b));
+analyze t1_5 ((a, b), (b, c));
+ERROR:  syntax error at or near ","
+LINE 1: analyze t1_5 ((a, b), (b, c));
+                            ^
+analyze t1_5 (a, (b, c));
+ERROR:  syntax error at or near "("
+LINE 1: analyze t1_5 (a, (b, c));
+                         ^
+analyze t1_5 ((b, c), a);
+ERROR:  syntax error at or near ","
+LINE 1: analyze t1_5 ((b, c), a);
+                            ^
+analyze t1_5 ((c, e));
+ERROR:  column "e" of relation "t1_5" does not exist
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1_5' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      |         most_common_freqs         | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------+-----------------------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1_5      | 2 4     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,1,1}"} | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_5      | 3 4     | f         |         0 |         8 |   -.333333 |            0 | {"{1,2}","{1,1}"}         | {.444444,.444444}                 |                       |                        | 
+(2 rows)
+
+alter table t1_5 add statistics (());
+ERROR:  syntax error at or near ")"
+LINE 1: alter table t1_5 add statistics (());
+                                          ^
+alter table t1_5 add statistics ((b));
+ERROR:  Multi-column statistic needs at least two columns.
+alter table t1_5 add statistics ((a, a));
+ERROR:  Multi-column statistic needs at least two columns.
+alter table t1_5 add statistics ((c, c, d));
+WARNING:  Some of extended statistics have already been defined.
+alter table t1_5 add statistics ((b, d, b));
+WARNING:  Some of extended statistics have already been defined.
+alter table t1_5 add statistics ((a, b), (b, c));
+ERROR:  syntax error at or near ","
+LINE 1: alter table t1_5 add statistics ((a, b), (b, c));
+                                               ^
+alter table t1_5 add statistics (a, (b, c));
+ERROR:  syntax error at or near "a"
+LINE 1: alter table t1_5 add statistics (a, (b, c));
+                                         ^
+alter table t1_5 add statistics ((b, c), a);
+ERROR:  syntax error at or near ","
+LINE 1: alter table t1_5 add statistics ((b, c), a);
+                                               ^
+alter table t1_5 add statistics ((c, e));
+ERROR:  column "e" of relation "t1_5" does not exist
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1_5' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      |         most_common_freqs         | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------+-----------------------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1_5      | 2 4     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,1,1}"} | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_5      | 3 4     | f         |         0 |         8 |   -.333333 |            0 | {"{1,2}","{1,1}"}         | {.444444,.444444}                 |                       |                        | 
+(2 rows)
+
+alter table t1_5 delete statistics (());
+ERROR:  syntax error at or near ")"
+LINE 1: alter table t1_5 delete statistics (());
+                                             ^
+alter table t1_5 delete statistics ((b));
+ERROR:  Multi-column statistic needs at least two columns.
+alter table t1_5 delete statistics ((a, a));
+ERROR:  Multi-column statistic needs at least two columns.
+alter table t1_5 delete statistics ((c, c, d));
+alter table t1_5 delete statistics ((b, d, b));
+alter table t1_5 delete statistics ((a, b), (b, c));
+ERROR:  syntax error at or near ","
+LINE 1: alter table t1_5 delete statistics ((a, b), (b, c));
+                                                  ^
+alter table t1_5 delete statistics (a, (b, c));
+ERROR:  syntax error at or near "a"
+LINE 1: alter table t1_5 delete statistics (a, (b, c));
+                                            ^
+alter table t1_5 delete statistics ((b, c), a);
+ERROR:  syntax error at or near ","
+LINE 1: alter table t1_5 delete statistics ((b, c), a);
+                                                  ^
+alter table t1_5 delete statistics ((c, e));
+ERROR:  column "e" of relation "t1_5" does not exist
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1_5' order by attname;
+ schemaname | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
+(0 rows)
+

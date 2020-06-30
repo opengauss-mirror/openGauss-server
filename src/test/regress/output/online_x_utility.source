@@ -1,0 +1,456 @@
+/*
+ * Checkpoint 1
+ * basic
+ */
+create table t1(x int, y int)  ;
+insert into t1 select v, v from generate_series(1,40) as v;
+-- index
+create index i1 on t1(x);
+alter table t1 set (append_mode=off);
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- cluster
+cluster t1 using i1;
+ERROR:  Unsupport 'CLUSTER' command during online expansion on 't1'
+alter table t1 set (append_mode=off);
+cluster t1 using i1;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- reindex
+reindex index i1;
+ERROR:  Unsupport 'REINDEX' command during online expansion on 'i1'
+drop index i1;
+-- view
+create view v1 as select * from t1 where x%2=0;
+drop view v1;
+-- analyze  succeed
+analyze t1;
+-- vacuum
+vacuum t1;
+ERROR:  Unsupport 'VACUUM' command during online expansion on 't1'
+vacuum full t1;
+ERROR:  Unsupport 'VACUUM FULL' command during online expansion on 't1'
+alter table t1 set (append_mode=off);
+vacuum full t1;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- sequence
+create sequence s1
+	increment by 1
+	minvalue 1 maxvalue 30
+	start 1
+	cache 5
+	owned by t1.x;
+ERROR:  Unsupport 'CREATE SEQUENCE' command during online expansion on 't1'
+-- cursor
+CURSOR cursor1 for SELECT * FROM t1;
+ERROR:  Unsupport 'DECLARE CURSOR' command during online expansion on 't1'
+alter table t1 set (append_mode=off);
+drop table t1;
+/*
+ * Checkpoint 2
+ * alter table
+ */
+create table a(x int, y int , z int);
+insert into a select v, v, v from generate_series(1, 10) as v;
+select * from a order by 1;
+ x  | y  | z  
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+ 10 | 10 | 10
+(10 rows)
+
+alter table a set (append_mode=on,rel_cn_oid=16391);
+-- add column
+alter table a add column zz int;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ADD COLUMN' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a add column zz int;
+update a set zz = 1;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                          Table "public.a"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ x      | integer |           | plain   |              | 
+ y      | integer |           | plain   |              | 
+ z      | integer |           | plain   |              | 
+ zz     | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+-- set not null
+alter table a alter column zz set not null;
+ERROR:  Unsupport 'ALTER TABLE' command with 'SET NOT NULL' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a alter column zz set not null;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                          Table "public.a"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ x      | integer |           | plain   |              | 
+ y      | integer |           | plain   |              | 
+ z      | integer |           | plain   |              | 
+ zz     | integer | not null  | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+-- drop not null
+alter table a alter column zz drop not null;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DROP NOT NULL' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a alter column zz drop not null;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                          Table "public.a"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ x      | integer |           | plain   |              | 
+ y      | integer |           | plain   |              | 
+ z      | integer |           | plain   |              | 
+ zz     | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+-- set default
+alter table a alter column zz set default 10;
+ERROR:  Unsupport 'ALTER TABLE' command with 'COLUMN DEFAULT' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a alter column zz set default 10;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                           Table "public.a"
+ Column |  Type   | Modifiers  | Storage | Stats target | Description 
+--------+---------+------------+---------+--------------+-------------
+ x      | integer |            | plain   |              | 
+ y      | integer |            | plain   |              | 
+ z      | integer |            | plain   |              | 
+ zz     | integer | default 10 | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+-- set statistics
+alter table a alter column zz set statistics -1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'SET STATISTICS' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a alter column zz set statistics -1;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+-- set options
+alter table a alter column x set(attribute_option=n_distinct);
+ERROR:  Unsupport 'ALTER TABLE' command with 'SET OPTIONS' option during online expansion on 'a'
+-- reset options
+alter table a alter column zz reset(attribute_option);
+ERROR:  Unsupport 'ALTER TABLE' command with 'RESET OPTIONS' option during online expansion on 'a'
+-- set rel options
+alter table a set(compression=no);
+ERROR:  Unsupport 'ALTER TABLE' command with 'SET REL OPTIONS' option during online expansion on 'a'
+-- reset rel options
+alter table a reset(compression=no);
+ERROR:  Unsupport 'ALTER TABLE' command with 'RESET REL OPTIONS' option during online expansion on 'a'
+-- set storage
+alter table a alter column zz set storage plain;
+ERROR:  Unsupport 'ALTER TABLE' command with 'SET STORAGE' option during online expansion on 'a'
+-- alter column type
+alter table a alter column zz type varchar(20);
+ERROR:  Unsupport 'ALTER TABLE' command with 'ALTER COLUMN TYPE' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a alter column zz type varchar(20);
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                                  Table "public.a"
+ Column |         Type          | Modifiers  | Storage  | Stats target | Description 
+--------+-----------------------+------------+----------+--------------+-------------
+ x      | integer               |            | plain    |              | 
+ y      | integer               |            | plain    |              | 
+ z      | integer               |            | plain    |              | 
+ zz     | character varying(20) | default 10 | extended |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+-- rename column
+alter table a rename column zz to zzz;
+ERROR:  Unsupport 'ALTER TABLE' command during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a rename column zz to zzz;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                                  Table "public.a"
+ Column |         Type          | Modifiers  | Storage  | Stats target | Description 
+--------+-----------------------+------------+----------+--------------+-------------
+ x      | integer               |            | plain    |              | 
+ y      | integer               |            | plain    |              | 
+ z      | integer               |            | plain    |              | 
+ zzz    | character varying(20) | default 10 | extended |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+-- drop column
+alter table a drop column zzz;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DROP COLUMN' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a drop column zzz;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                          Table "public.a"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ x      | integer |           | plain   |              | 
+ y      | integer |           | plain   |              | 
+ z      | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+-- add oids
+alter table a set with oids;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ADD OIDS' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a set with oids;
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITH OIDS is not yet supported.
+alter table a set (append_mode=on,rel_cn_oid=16391);
+-- drop oids
+alter table a set without oids;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DROP OIDS' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a set with oids;
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITH OIDS is not yet supported.
+alter table a set (append_mode=on,rel_cn_oid=16391);
+-- cluster on
+create unique index i1 on a(x);
+ERROR:  Unsupport 'CREATE INDEX' command during online expansion on 'a'
+alter table a cluster on i1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'CLUSTER ON' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a cluster on i1;
+ERROR:  index "i1" for table "a" does not exist
+alter table a set (append_mode=on,rel_cn_oid=16391);
+-- drop cluster
+alter table a set without cluster;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DROP CLUSTER' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a set without cluster;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+-- add constraint
+alter table a add constraint a_key primary key(x);
+ERROR:  Unsupport 'ALTER TABLE' command with 'ADD CONSTRAINT' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a add constraint a_key primary key(x);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "a_key" for table "a"
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                          Table "public.a"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ x      | integer | not null  | plain   |              | 
+ y      | integer |           | plain   |              | 
+ z      | integer |           | plain   |              | 
+Indexes:
+    "a_key" PRIMARY KEY, btree (x) TABLESPACE pg_default
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+-- drop constraint
+alter table a drop constraint a_key;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DROP CONSTRAINT' option during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a drop constraint a_key;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+                          Table "public.a"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ x      | integer | not null  | plain   |              | 
+ y      | integer |           | plain   |              | 
+ z      | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(x)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16391, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+alter table a set (append_mode=on,rel_cn_oid=16391);
+-- validate constraint
+alter table a validate constraint a_key;
+ERROR:  Unsupport 'ALTER TABLE' command with 'VALIDATE CONSTRAINT' option during online expansion on 'a'
+-- add of
+alter table a of int;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ADD OF' option during online expansion on 'a'
+-- drop of
+alter table a not of;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DROP OF' option during online expansion on 'a'
+-- change owner
+alter table a owner to xue;
+ERROR:  Unsupport 'ALTER TABLE' command with 'CHANGE OWNER' option during online expansion on 'a'
+-- set compress
+alter table a set compress;
+ERROR:  Unsupport 'ALTER TABLE' command with 'SET COMPRESS' option during online expansion on 'a'
+alter table a   ;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DISTRIBUTE BY' option during online expansion on 'a'
+-- inherit
+alter table a inherit in1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ADD INHERIT' option during online expansion on 'a'
+alter table a no inherit in1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DROP INHERIT' option during online expansion on 'a'
+-- sub cluster
+alter table a to group ng1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'SUB CLUSTER' option during online expansion on 'a'
+-- trigger
+alter table a disable trigger t1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DISABLE TRIGGER' option during online expansion on 'a'
+alter table a enable trigger t1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ENABLE TRIGGER' option during online expansion on 'a'
+alter table a enable replica trigger t1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ENABLE REPLICA TRIGGER' option during online expansion on 'a'
+alter table a enable always trigger t1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ENABLE ALWAYS TRIGGER' option during online expansion on 'a'
+-- rule
+alter table a disable rule t1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DISABLE RULE' option during online expansion on 'a'
+alter table a enable rule t1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ENABLE RULE' option during online expansion on 'a'
+alter table a enable replica rule t1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ENABLE REPLICA RULE' option during online expansion on 'a'
+alter table a enable always rule t1;
+ERROR:  Unsupport 'ALTER TABLE' command with 'ENABLE ALWAYS RULE' option during online expansion on 'a'
+-- set tablespace
+alter table a set tablespace pg_default;
+ERROR:  Unsupport 'ALTER TABLE' command with 'SET TABLE SPACE' option during online expansion on 'a'
+-- table rename
+alter table a rename to aa;
+ERROR:  Unsupport 'ALTER TABLE' command during online expansion on 'a'
+alter table a set (append_mode=off);
+alter table a rename to aa;
+drop table aa;
+-- partition table
+create table t1
+(
+    x int,
+    y int,
+    z int
+) 
+PARTITION BY RANGE(x)
+(
+    PARTITION x1 VALUES LESS THAN(60),
+    PARTITION x2 VALUES LESS THAN(80),
+    PARTITION x3 VALUES LESS THAN(100)
+);
+create schema data_redis;
+CREATE TABLE data_redis.data_redis_tmp_16391 (LIKE t1 INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING PARTITION, nodeid int,partitionoid int,tupleblocknum bigint,tupleoffset int);
+create unlogged table data_redis.pg_delete_delta_16391
+(
+        xcnodeid int,
+        dnrelid int,
+        block_number bigint,
+        block_offset int
+)
+ ;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- truncate partition
+ALTER TABLE t1 truncate PARTITION x3;
+-- add partition
+alter table t1 add partition x4 values less than(120);
+ERROR:  Unsupport 'ALTER TABLE' command with 'ADD PARTITION' option during online expansion on 't1'
+alter table t1 set (append_mode=off);
+alter table t1 add partition x4 values less than(120);
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- drop partition
+alter table t1 drop partition x4;
+ERROR:  Unsupport 'ALTER TABLE' command with 'DROP PARTITION' option during online expansion on 't1'
+alter table t1 set (append_mode=off);
+alter table t1 drop partition x4;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- split
+alter table t1 split partition x2 into
+(
+	PARTITION x2_1 VALUES LESS THAN(70),
+	PARTITION x2_2 VALUES LESS THAN(80)
+);
+ERROR:  Unsupport 'ALTER TABLE' command with 'SPLIT PARTITION' option during online expansion on 't1'
+alter table t1 set (append_mode=off);
+alter table t1 split partition x2 into
+(
+	PARTITION x2_1 VALUES LESS THAN(70),
+	PARTITION x2_2 VALUES LESS THAN(80)
+);
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- merge
+alter table t1 merge partitions x2_1, x2_2 into partition x2;
+ERROR:  Unsupport 'ALTER TABLE' command with 'MERGE PARTITION' option during online expansion on 't1'
+alter table t1 set (append_mode=off);
+alter table t1 merge partitions x2_1, x2_2 into partition x2;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- unnsable all index
+alter table t1 modify partition x1 unusable local indexes;
+ERROR:  Unsupport 'ALTER TABLE' command with 'UNUSABLE ALL INDEX ON PARTITION' option during online expansion on 't1'
+alter table t1 set (append_mode=off);
+drop table data_redis.data_redis_tmp_16391;
+drop table data_redis.pg_delete_delta_16391;
+drop schema data_redis;
+drop table t1;
+-- verify skip analyze in read-only mode
+create table t1(c1 int, c2 int);
+insert into t1 select v,v from generate_series(1,100) as v;
+select reltuples from pg_class where relname = 't1';
+ reltuples 
+-----------
+         0
+(1 row)
+
+alter table t1 set (append_mode=read_only);
+analyze t1;
+WARNING:  skipping "t1" --- only none read-only mode can do analyze command
+select reltuples from pg_class where relname = 't1';
+ reltuples 
+-----------
+         0
+(1 row)
+
+alter table t1 set (append_mode=off);
+analyze t1;
+select reltuples from pg_class where relname = 't1';
+ reltuples 
+-----------
+       100
+(1 row)
+
+drop table t1;
+create table t1(c1 int, c2 int);
+insert into t1 select v,v from generate_series(1,100) as v;
+select reltuples from pg_class where relname = 't1';
+ reltuples 
+-----------
+         0
+(1 row)
+
+alter table t1 set (append_mode=read_only);
+analyze t1;
+alter table t1 set (append_mode=off);
+select reltuples from pg_class where relname = 't1';
+ reltuples 
+-----------
+       100
+(1 row)
+
+drop table t1;

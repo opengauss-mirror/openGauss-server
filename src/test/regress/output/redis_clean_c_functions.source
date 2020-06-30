@@ -1,0 +1,2 @@
+drop function pg_enable_redis_proc_cancelable;
+drop function pg_disable_redis_proc_cancelable;

@@ -1,0 +1,19 @@
+<refentry id="SQL-ALTER_TEXT_SEARCH_DICTIONARY">
+<refmeta>
+<refentrytitle>ALTER TEXT SEARCH DICTIONARY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER TEXT SEARCH DICTIONARY</refname>
+<refpurpose>change the definition of a text search dictionary</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER TEXT SEARCH DICTIONARY name ( option = value | option [, ...] );
+ALTER TEXT SEARCH DICTIONARY name RENAME TO new_name;
+ALTER TEXT SEARCH DICTIONARY name OWNER TO new_owner;
+ALTER TEXT SEARCH DICTIONARY name SET SCHEMA new_schema;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

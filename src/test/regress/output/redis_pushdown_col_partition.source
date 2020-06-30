@@ -1,0 +1,126 @@
+create table t1(c1 int, c2 int) with(orientation = column)  
+PARTITION BY RANGE (c2)
+(
+        partition p0 values less than (10),
+        partition p1 values less than (20),
+        partition p2 values less than (30),
+        partition p3 values less than (maxvalue)
+)
+ENABLE ROW MOVEMENT;
+;
+CREATE TABLE t1_like (LIKE t1 INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING PARTITION INCLUDING CONSTRAINTS, nodeid int,partitionoid int,tupleblocknum bigint,tupleoffset int);
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_start_ctid' LANGUAGE C STABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text,name) RETURNS tid AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_get_redis_rel_end_ctid' LANGUAGE C STABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_blocknum(tid) RETURNS bigint AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_tupleid_get_blocknum' LANGUAGE C STABLE NOT FENCED;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_offset(tid) RETURNS int AS '@abs_bindir@/../lib/postgresql/gsredistribute@DLSUFFIX@', 'pg_tupleid_get_offset' LANGUAGE C STABLE NOT FENCED;
+create view ctid_view as
+select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t1 partition (p0)
+where ctid between pg_get_redis_rel_start_ctid('t1','p0') and pg_get_redis_rel_end_ctid('t1','p0')
+UNION ALL
+select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t1 partition (p1)
+where ctid between pg_get_redis_rel_start_ctid('t1','p1') and pg_get_redis_rel_end_ctid('t1','p1')
+UNION ALL
+select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t1 partition (p2)
+where ctid between pg_get_redis_rel_start_ctid('t1','p2') and pg_get_redis_rel_end_ctid('t1','p2')
+UNION ALL
+select *, xc_node_id,pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid) from t1 partition (p3)
+where ctid between pg_get_redis_rel_start_ctid('t1','p3') and pg_get_redis_rel_end_ctid('t1','p3')
+;
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+-- test empty table
+select count(*) from ctid_view; 
+ count 
+-------
+     0
+(1 row)
+
+-- 1st load 
+insert into t1 select * from source_table;
+insert into t1 select * from t1;
+insert into t1 select * from t1;
+insert into t1 select * from t1;
+insert into t1 select * from t1;
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+select count(*) from t1;
+ count  
+--------
+ 480000
+(1 row)
+
+explain (costs off) select count(*) from ctid_view;
+                                                                                     QUERY PLAN                                                                                      
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  Vector Streaming (type: GATHER)
+               Node/s: All datanodes
+               ->  Vector Aggregate
+                     ->  Vector Append
+                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                 ->  Vector Partition Iterator
+                                       Iterations: 1
+                                       ->  Partitioned CStore Scan on t1
+                                             Filter: ((ctid >= pg_get_redis_rel_start_ctid('t1'::text, 'p0'::name)) AND (ctid <= pg_get_redis_rel_end_ctid('t1'::text, 'p0'::name)))
+                                             Selected Partitions:  1
+                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                 ->  Vector Partition Iterator
+                                       Iterations: 1
+                                       ->  Partitioned CStore Scan on t1
+                                             Filter: ((ctid >= pg_get_redis_rel_start_ctid('t1'::text, 'p1'::name)) AND (ctid <= pg_get_redis_rel_end_ctid('t1'::text, 'p1'::name)))
+                                             Selected Partitions:  2
+                           ->  Vector Subquery Scan on "*SELECT* 3"
+                                 ->  Vector Partition Iterator
+                                       Iterations: 1
+                                       ->  Partitioned CStore Scan on t1
+                                             Filter: ((ctid >= pg_get_redis_rel_start_ctid('t1'::text, 'p2'::name)) AND (ctid <= pg_get_redis_rel_end_ctid('t1'::text, 'p2'::name)))
+                                             Selected Partitions:  3
+                           ->  Vector Subquery Scan on "*SELECT* 4"
+                                 ->  Vector Partition Iterator
+                                       Iterations: 1
+                                       ->  Partitioned CStore Scan on t1
+                                             Filter: ((ctid >= pg_get_redis_rel_start_ctid('t1'::text, 'p3'::name)) AND (ctid <= pg_get_redis_rel_end_ctid('t1'::text, 'p3'::name)))
+                                             Selected Partitions:  4
+(30 rows)
+
+select count(*) from ctid_view;
+ count  
+--------
+ 480000
+(1 row)
+
+insert into t1_like select * FROM ONLY ctid_view; 
+select count(*) from t1_like;
+ count  
+--------
+ 480000
+(1 row)
+
+-- 2nd load 
+insert into t1 select * from source_table;
+ALTER TABLE t1 SET(append_mode=on, rel_cn_oid=12345);
+select count(*) from t1;
+ count  
+--------
+ 510000
+(1 row)
+
+select count(*) from ctid_view;
+ count 
+-------
+ 30000
+(1 row)
+
+insert into t1_like select * FROM ONLY ctid_view;
+select count(*) from t1_like;
+ count  
+--------
+ 510000
+(1 row)
+
+drop view ctid_view;
+drop table t1;
+drop table t1_like;
+drop function pg_get_redis_rel_start_ctid(text, name);
+drop function pg_get_redis_rel_end_ctid(text, name);
+drop function pg_tupleid_get_offset;
+drop function pg_tupleid_get_blocknum;

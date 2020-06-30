@@ -1,0 +1,397 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_collector is a utility
+# to collect information about the cluster.
+#############################################################################
+
+import os
+import sys
+import pwd
+import time
+import json
+from datetime import datetime
+from datetime import timedelta
+
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.Common import DefaultValue
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParameterParsecheck import Parameter
+from impl.collect.OLAP.CollectImplOLAP import CollectImplOLAP
+
+def my_obj_pairs_hook(lst):
+    result = {}
+    count = {}
+    for key, val in lst:
+        if key in count:
+            count[key] = 1 + count[key]
+        else:
+            count[key] = 1
+        if key in result:
+            if count[key] >= 2:
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_512["GAUSS_51245"] % key)
+            else:
+                result[key] = [result[key], val]
+        else:
+            result[key] = val
+    return result
+
+
+class Collect(ParallelBaseOM):
+    """
+    define option
+    """
+
+    def __init__(self):
+        ParallelBaseOM.__init__(self)
+        # initialize variable
+        self.host = ""
+        self.inFile = ""
+        self.outFile = ""
+        self.nodeName = []
+        self.config = {}
+        self.appPath = ""
+
+        self.begintime = ""
+        self.endtime = ""
+        self.keyword = ""
+        # speed limit to copy/scp files, in MB/s
+        self.speedLimit = 1024
+        self.speedLimitFlag = 0
+
+        # config file
+        self.configFile = ""
+
+        # Our products may generate 200MB/(1DN per day),
+        # So max log size is (8DN * (1master+7standbys) + 1CN) * 200MB = 13GB/node
+        # Other logs, such as OM/CM/Audit we ignore them here, which are too small.
+        self.LOG_SIZE_PER_DAY_ONE_NODE = 1024 * 13
+
+        # As we test, the speed for packaging logs into a compressed tar file is 45MB/s.
+        self.TAR_SPEED = 45
+
+        # endtime - begintime, in days, rounded up.
+        self.duration = 0
+
+    #############################################################################
+    # Parse and check parameters
+    #############################################################################
+    def usage(self):
+        """
+gs_collector is a utility to collect information about the cluster.
+
+Usage:
+  gs_collector -? | --help
+  gs_collector -V | --version
+  gs_collector --begin-time="BEGINTIME" --end-time="ENDTIME" [-h HOSTNAME | -f HOSTFILE] 
+                [--keyword=KEYWORD] [--speed-limit=SPEED] [-o OUTPUT] [-l LOGFILE]
+
+General options:
+      --begin-time=BEGINTIME      Time to start log file collection. Pattern:yyyymmdd hh:mm.
+      --end-time=ENDTIME          Time to end log file collection. Pattern:yyyymmdd hh:mm.
+      --speed-limit=SPEED         Bandwidth to copy files, a nonnegative integer, in MByte/s.
+                                  0 means unlimited. Only supported if rsync command exists.
+  -h                              Names of hosts whose information is to be collected.
+                                  Example: host1,host2.
+  -f                              File listing names of all the hosts to connect to.
+      --keyword=KEYWORD           Save log files containing the keyword.
+  -o                              Save the result to the specified file.
+  -l                              Path of log file.
+  -?, --help                      Show help information for this utility, and exit the command line mode.
+  -V, --version                   Show version information.
+  -C                              gs_collector config file, listing which info to collect
+  # gs_collector.json example
+  {
+    "Collect":
+    [
+        {"TypeName": "name", "Content": "value", "Interval": "seconds", "Count": "counts"} # interval is in Second
+    ]
+  }
+
+  # TypeName : content
+  COLLECT_INFO_MAP
+  {
+        "System" : "HardWareInfo,RunTimeInfo",
+        "Database" : "pg_catalog.pg_stat_activity,dbe_perf.wait_events",
+        "Log" : "Coordinator,DataNode,Gtm,ClusterManager,FFDC,AWRReport",
+        "XLog": "Coordinator,DataNode",
+        "Config" : "Coordinator,DataNode,Gtm",
+        "Gstack" : "Coordinator,DataNode,Gtm",
+        "CoreDump": "gaussdb,gs_gtm,gs_rewind,cm_server,cm_agent,gs_ctl"
+        "Trace": "Dump"
+        "Plan": "*"    # Any database name or character "*"
+   }
+
+        """
+        print(self.usage.__doc__)
+
+    def dateCheck(self, datestr):
+        """
+        function: check the type of date wether is is correct or not
+        input : timedate
+        output: bool
+        """
+        # Check the time format
+        try:
+            time.strptime(datestr, "%Y%m%d %H:%M")
+            if (len(datestr.split(" ")[0]) != 8
+                    or len(datestr.split(" ")[1]) != 5):
+                return False
+            return True
+        except Exception:
+            return False
+
+    def parseCommandLine(self):
+        """
+        function: do parse command line
+        input : cmdCommand
+        output: help/version information
+        """
+        # Parse command
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("collector")
+
+        # If help is included in the parameter,
+        # the help message is printed and exited
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(0)
+        # Save parameter
+        if (ParaDict.__contains__("nodename")):
+            self.nodeName = ParaDict.get("nodename")
+        # Save parameter hostfile
+        if (ParaDict.__contains__("hostfile")):
+            self.inFile = ParaDict.get("hostfile")
+        # Save parameter begintime
+        if (ParaDict.__contains__("begintime")):
+            self.begintime = ParaDict.get("begintime")
+            # Check the begin time parameter format is correct
+            if (not self.dateCheck(self.begintime)):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50003"] %
+                                       ('-begin-time',
+                                        "date") + " Pattern: yyyymmdd hh:mm.")
+        # Save parameter endtime
+        if (ParaDict.__contains__("endtime")):
+            self.endtime = ParaDict.get("endtime")
+            # Check the end time parameter format is correct
+            if (not self.dateCheck(self.endtime)):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50003"] %
+                                       ('-end-time',
+                                        "date") + " Pattern: yyyymmdd hh:mm.")
+        # Save parameter keyword
+        if (ParaDict.__contains__("keyword")):
+            self.keyword = ParaDict.get("keyword")
+        # Save parameter outFile
+        if (ParaDict.__contains__("outFile")):
+            self.outFile = ParaDict.get("outFile")
+        # Save parameter logFile
+        if (ParaDict.__contains__("logFile")):
+            self.logFile = ParaDict.get("logFile")
+
+        # Get speed limit to copy/remote copy files.
+        if (ParaDict.__contains__("speedLimit")):
+            self.speedLimit = str(ParaDict.get("speedLimit"))
+            if (not self.speedLimit.isdigit() or int(self.speedLimit) < 0):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50003"] %
+                                       ('-speed-limit',
+                                        'a nonnegative integer'))
+            self.speedLimit = int(self.speedLimit)
+            self.speedLimitFlag = 1
+
+        # Save parameter configFile
+        if (ParaDict.__contains__("configFile")):
+            self.configFile = ParaDict.get("configFile")
+
+    def checkParameter(self):
+        """
+        function: do parameters checking
+        input : check parameters
+        output: ErrorCode
+        """
+
+        # The -h and -f parameters can not be specified at the same time
+        if (len(self.nodeName) != 0 and self.inFile != ""):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_500["GAUSS_50005"] % ('h', 'f'))
+
+        if (self.inFile != ""):
+            # Check if the hostname file exists
+            if (not os.path.exists(self.inFile)):
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_502["GAUSS_50201"] % self.inFile)
+            # Get the value in the hostname file
+            with open(self.inFile, "r") as fp:
+                for line in fp:
+                    node = line.strip().split("\n")[0]
+                    if node is not None and node != "" \
+                            and (node not in self.nodeName):
+                        self.nodeName.append(node)
+            # An error exit if the node name is not available
+            if len(self.nodeName) == 0:
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_502["GAUSS_50203"] % self.inFile)
+        # check configFile
+        if self.configFile == "":
+            self.configFile = "%s/%s" % (
+                os.path.dirname(os.path.realpath(__file__)),
+                DefaultValue.GS_COLLECTOR_CONFIG_FILE)
+
+        if self.configFile != "":
+            # Check if the config file exists
+            if not os.path.exists(self.configFile):
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_502["GAUSS_50201"] % self.configFile)
+            # Get the value in the configFile file
+            try:
+                with open(self.configFile, "r") as fp:
+                    config_json = json.loads(fp.read(),
+                                             object_pairs_hook=my_obj_pairs_hook)
+                items = config_json.items()
+
+                for key, value in items:
+                    if str(key) != "Collect":
+                        GaussLog.exitWithError(
+                            ErrorCode.GAUSS_512["GAUSS_51242"] % (
+                            self.configFile, str(key)))
+                    for it in value:
+                        d_c = ""
+                        u_c = ""
+                        for k, v in it.items():
+                            if k not in DefaultValue.COLLECT_CONF_JSON_KEY_LIST:
+                                GaussLog.exitWithError(
+                                    ErrorCode.GAUSS_512["GAUSS_51242"]
+                                    % (self.configFile, str(k)))
+                            if k == "TypeName":
+                                d_c = DefaultValue.COLLECT_CONF_MAP[v]
+                            elif k == "Content":
+                                u_c = v
+                            elif k == "Interval" or k == "Count":
+                                if (not v.replace(" ", "").isdigit()
+                                        or int(v.replace(" ", "")) < 0):
+                                    GaussLog.exitWithError(
+                                        ErrorCode.GAUSS_512["GAUSS_51241"]
+                                        % (k, v))
+
+                        if len(u_c) > 0 and len(d_c) > 0:
+                            T_Name = it["TypeName"]
+                            it["Content"] = ""
+                            if T_Name in "Plan,Database":
+                                it["Content"] = u_c
+                            else:
+                                uc = u_c.replace(" ", "").split(",")
+                                for c in uc:
+                                    if c not in d_c:
+                                        GaussLog.exitWithError(
+                                            ErrorCode.GAUSS_512["GAUSS_51243"]
+                                            % (c, it['TypeName'],
+                                               self.configFile))
+                                    elif DefaultValue.COLLECT_CONF_CONTENT_MAP.__contains__(c):
+                                        it["Content"] += \
+                                            DefaultValue.COLLECT_CONF_CONTENT_MAP[c] + ","
+                                    else:
+                                        GaussLog.exitWithError(
+                                            ErrorCode.GAUSS_512["GAUSS_51244"]
+                                            % c)
+                            if self.config.__contains__(T_Name):
+                                self.config[T_Name].append(it)
+                            else:
+                                contentList = [it]
+                                self.config[T_Name] = contentList
+                        else:
+                            GaussLog.exitWithError(
+                                ErrorCode.GAUSS_512["GAUSS_51240"])
+
+            except Exception as e:
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_512["GAUSS_51239"] % self.configFile)
+
+            if len(self.config) == 0:
+                GaussLog.exitWithError(ErrorCode.GAUSS_535["GAUSS_53516"])
+
+        # An error exit if the begin time parameter is not entered
+        if (not self.begintime):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                   % '-begin-time' + " for [gs_collector].")
+        else:
+            # Extract the time in --end-time according to the format
+            self.begintime = self.begintime.replace(" ", "").replace(":", "")
+
+        # An error exit if the end time parameter is not entered
+        if (not self.endtime):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                   % '-end-time' + " for [gs_collector].")
+        else:
+            # Extract the time in --begin-time according to the format
+            self.endtime = self.endtime.replace(" ", "").replace(":", "")
+
+        if self.endtime and self.begintime:
+            # The start time must be earlier than the end time,
+            # notice: using string comparison !!!
+            if (self.endtime < self.begintime):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"]
+                                       % "-end-time or --begin-time" +
+                                       "The value of '--end-time' must"
+                                       " be greater than the value "
+                                       "of '--begin-time'.")
+            datebegin = datetime.strptime(self.begintime, "%Y%m%d%H%M")
+            dateend = datetime.strptime(self.endtime, "%Y%m%d%H%M")
+            diff = dateend - datebegin
+            self.duration = diff.days + 1
+
+        # check mpprc file path
+        self.mpprcFile = DefaultValue.getMpprcFile()
+        # check if user exist and is the right user
+        try:
+            self.user = pwd.getpwuid(os.getuid()).pw_name
+            DefaultValue.checkUser(self.user)
+        except Exception as e:
+            GaussLog.exitWithError(str(e))
+
+        # check log file
+        if (self.logFile == ""):
+            self.logFile = DefaultValue.getOMLogPath(
+                DefaultValue.GS_COLLECTOR_LOG_FILE, self.user, "")
+
+        if (self.speedLimit == 0):
+            self.speedLimit = 1024
+
+
+if __name__ == '__main__':
+    """
+    function: main
+    input : NA
+    output: NA
+    """
+    # check if is root user
+    if (os.getuid() == 0):
+        GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50105"])
+    try:
+        # Objectize class
+        collectObj = Collect()
+
+        # Initialize self and Parse command line and save to global variable
+        collectObj.parseCommandLine()
+        # check the parameters is not OK
+        collectObj.checkParameter()
+        impl = CollectImplOLAP(collectObj)
+        impl.run()
+    except Exception as e:
+        GaussLog.exitWithError(str(e))
+    sys.exit(0)

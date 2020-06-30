@@ -1,0 +1,74 @@
+--
+-- case 1: integer type
+--
+CREATE TABLE cmpr_int_raw (
+	RS_ID int,
+	R0_ID int NOT NULL,
+	R1_ID int NOT NULL,
+	R2_ID int NOT NULL,
+	R3_ID int NOT NULL,
+	R4_ID int NOT NULL,
+	R5_ID int NOT NULL,
+	R6_ID int NOT NULL,
+	R7_ID int NOT NULL,
+	R8_ID int NOT NULL,
+	R9_ID int NOT NULL
+);
+COPY cmpr_int_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+
+CREATE TABLE cmpr_int_auto (
+	RS_ID int,
+	R0_ID int NOT NULL,
+	R1_ID int NOT NULL,
+	R2_ID int NOT NULL,
+	R3_ID int NOT NULL,
+	R4_ID int NOT NULL,
+	R5_ID int NOT NULL,
+	R6_ID int NOT NULL,
+	R7_ID int NOT NULL,
+	R8_ID int NOT NULL,
+	R9_ID int NOT NULL
+)  COMPRESS;
+COPY cmpr_int_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_int_raw) - (SELECT COUNT(*) FROM cmpr_int_auto);
+(SELECT * FROM cmpr_int_raw) MINUS ALL (SELECT * FROM cmpr_int_auto);
+(SELECT * FROM cmpr_int_auto) MINUS ALL (SELECT * FROM cmpr_int_raw);
+DROP TABLE cmpr_int_auto;
+
+CREATE TABLE cmpr_int_dict (
+	RS_ID int dictionary,
+	R0_ID int dictionary NOT NULL,
+	R1_ID int dictionary NOT NULL,
+	R2_ID int dictionary NOT NULL,
+	R3_ID int dictionary NOT NULL,
+	R4_ID int dictionary NOT NULL,
+	R5_ID int dictionary NOT NULL,
+	R6_ID int dictionary NOT NULL,
+	R7_ID int dictionary NOT NULL,
+	R8_ID int dictionary NOT NULL,
+	R9_ID int dictionary NOT NULL
+)  COMPRESS;
+COPY cmpr_int_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_int_raw) - (SELECT COUNT(*) FROM cmpr_int_dict);
+(SELECT * FROM cmpr_int_raw) MINUS ALL (SELECT * FROM cmpr_int_dict);
+(SELECT * FROM cmpr_int_dict) MINUS ALL (SELECT * FROM cmpr_int_raw);
+DROP TABLE cmpr_int_dict;
+
+CREATE TABLE cmpr_int_delta (
+	RS_ID int delta,
+	R0_ID int delta NOT NULL,
+	R1_ID int delta NOT NULL,
+	R2_ID int delta NOT NULL,
+	R3_ID int delta NOT NULL,
+	R4_ID int delta NOT NULL,
+	R5_ID int delta NOT NULL,
+	R6_ID int delta NOT NULL,
+	R7_ID int delta NOT NULL,
+	R8_ID int delta NOT NULL,
+	R9_ID int delta NOT NULL
+)  COMPRESS;
+COPY cmpr_int_delta FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_int_raw) - (SELECT COUNT(*) FROM cmpr_int_delta);
+(SELECT * FROM cmpr_int_raw) MINUS ALL (SELECT * FROM cmpr_int_delta);
+(SELECT * FROM cmpr_int_delta) MINUS ALL (SELECT * FROM cmpr_int_raw);
+DROP TABLE cmpr_int_delta;

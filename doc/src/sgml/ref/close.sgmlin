@@ -1,0 +1,16 @@
+<refentry id="SQL-CLOSE">
+<refmeta>
+<refentrytitle>CLOSE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CLOSE</refname>
+<refpurpose>close a cursor</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CLOSE { cursor_name | ALL };
+</synopsis>
+</refsynopsisdiv>
+</refentry>

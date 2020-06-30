@@ -1,0 +1,130 @@
+--Row sort, sortagg, merge join
+drop schema if exists row_sort cascade;
+NOTICE:  schema "row_sort" does not exist, skipping
+create schema row_sort;
+--Create Table
+create table row_sort.test_sort_1(id int, num1 numeric, num2 decimal, str1 char(8), str2 char(8), str3 varchar(8), str4 varchar(8), str5 bytea, str6 bytea);
+--Insert Data
+COPY row_sort.test_sort_1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/sort_optimize.data' delimiter ',';
+--Sortagg
+set enable_hashagg=off;
+-- numeric
+select count(distinct(id)) as num from row_sort.test_sort_1 group by num1 order by num limit 10; 
+ num  
+------
+  100
+ 5000
+(2 rows)
+
+select count(distinct(id)) as num from row_sort.test_sort_1 group by num2 order by num limit 10; 
+ num 
+-----
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+(10 rows)
+
+-- text
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str1 order by num limit 10; 
+ num  
+------
+  100
+ 5000
+(2 rows)
+
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str2 order by num limit 10; 
+ num 
+-----
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+(10 rows)
+
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str3 order by num limit 10; 
+ num  
+------
+  100
+ 5000
+(2 rows)
+
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str4 order by num limit 10; 
+ num 
+-----
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+(10 rows)
+
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str5 order by num limit 10; 
+ num  
+------
+  100
+ 5000
+(2 rows)
+
+select count(distinct(id)) as num from row_sort.test_sort_1 group by str6 order by num limit 10; 
+ num 
+-----
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+   1
+(10 rows)
+
+CREATE TABLE row_sort.test_sort_2(COL_NAME varchar2(20), COL_POPU char(5)) ;
+INSERT INTO row_sort.test_sort_2 VALUES('num_1','chart');
+INSERT INTO row_sort.test_sort_2 VALUES('num_2','ch');
+INSERT INTO row_sort.test_sort_2 VALUES('num_3','Infin');
+INSERT INTO row_sort.test_sort_2 VALUES('num_3','-Infi');
+INSERT INTO row_sort.test_sort_2 VALUES('num_5',' ');
+SELECT COL_POPU,length(COL_POPU),
+CASE COL_POPU
+WHEN 'chart' THEN 'man'
+WHEN cast('-Infinity' AS char(5)) THEN '-Infinity be cut'
+WHEN cast('Infinity' AS char(5)) THEN 'Infinity be cut'
+WHEN ' ' THEN 'space'
+ELSE 'others'
+END AS CASE_CHAR
+FROM row_sort.test_sort_2 ORDER BY COL_POPU,CASE_CHAR;
+ col_popu | length |    case_char     
+----------+--------+------------------
+          |      5 | space
+ ch       |      5 | others
+ chart    |      5 | man
+ -Infi    |      5 | -Infinity be cut
+ Infin    |      5 | Infinity be cut
+(5 rows)
+
+reset enable_hashagg;
+--drop schema
+drop schema if exists row_sort cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table row_sort.test_sort_1
+drop cascades to table row_sort.test_sort_2

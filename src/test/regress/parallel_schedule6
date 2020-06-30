@@ -1,0 +1,27 @@
+# ----------
+# Postgres-XC additional tests
+# ----------
+
+# This was used by triggers
+test: create_function_1
+test: xc_create_function
+# Now xc_misc is used by xc_returning_step1 and xc_returning_step2
+test: xc_misc
+# This was used by select of update
+test: xc_for_update
+# Those ones can be run in parallel
+test: xc_groupby xc_distkey xc_having
+test: hw_rewrite_lazyagg hw_light
+test: xc_temp xc_remote xc_FQS hw_pbe
+test: xc_FQS_join xc_copy xc_alter_table 
+test: xc_constraints xc_limit xc_sort 
+test: xc_params xc_returning_step1
+test: xc_returning_step2
+
+#test row compress
+test: compress compress01 compress02 cmpr_toast_000 cmpr_toast_update cmpr_index_00 cmpr_6bytes cmpr_int cmpr_datetime cmpr_numstr cmpr_numstr01 cmpr_float cmpr_nulls_delta cmpr_nulls_prefix cmpr_copyto cmpr_mode_none00 cmpr_mode_none01 cmpr_references_00 cmpr_references_01
+test: cmpr_rollback cmpr_drop_column cmpr_drop_column_01 cmpr_drop_column_02 cmpr_drop_column_03 cmpr_dead_loop_00 cmpr_timewithzone cmpr_cluster_00
+
+# Cluster setting related test is independant
+
+test: xc_dml

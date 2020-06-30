@@ -1,0 +1,92 @@
+\! @abs_bindir@/gs_guc check  -D @abs_srcdir@/tmp_check/datanode1/ -c max_stack_depth
+--?expected guc information: .*: max_stack_depth=.*
+--?gs_guc check: .*: max_stack_depth=.*
+
+Total GUC values: 1. Failed GUC values: 0.
+The details for max_stack_depth:
+--?    [.*]  max_stack_depth=.*
+
+\! @abs_bindir@/gs_guc -V
+--?gs_guc .*
+\! @abs_bindir@/gs_guc -?
+gs_guc is an inferface to modify config files or encrypt plain text to cipher text.
+
+Checking GUC parameters:
+    gs_guc check [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c "parameter", -c "parameter", ...}
+    gs_guc check [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c parameter, -c parameter, ...}
+
+Configuring GUC parameters:
+  Usage:
+        gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c "parameter = value" -c "parameter = value" ...}
+        gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c " parameter = value " -c " parameter = value " ...}
+        gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c "parameter = 'value'" -c "parameter = 'value'" ...}
+        gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c " parameter = 'value' " -c " parameter = 'value' " ...}
+        gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c "parameter" -c "parameter" ...}
+    e.g. gs_guc set -N all -I all -c "program = '\"Hello\", World\!'".
+    e.g. gs_guc reload -N all -I all -c "program = '\"Hello\", World\!'".
+
+  If parameter value set or reload to DEFAULT OR COMMENT configuration parameter, use the form: -c "parameter"
+
+  You can choose Usage as you like, and perhaps the first one will
+    be more suitable for you!
+
+Configuring Authentication Policy:
+    gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h "HOSTTYPE DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options" 
+    gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h "HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK AUTHMEHOD authentication-options" 
+    gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h "HOSTTYPE DATABASE USERNAME HOSTNAME AUTHMEHOD authentication-options" 
+  If authentication policy need to set/reload DEFAULT OR COMMENT then provide without authentication menthod, use the form: 
+    gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h "HOSTTYPE DATABASE USERNAME IPADDR IPMASK" 
+    gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h "HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK " 
+    gs_guc {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h "HOSTTYPE DATABASE USERNAME HOSTNAME" 
+
+Encrypt plain text to cipher text:
+    gs_guc encrypt [-M keymode] -K password [-U username] -D DATADIR
+
+Generate plain cipher key to cipher text:
+    gs_guc generate [-o prefix] -S cipherkey -D DATADIR
+
+Common options:
+  -N                      nodename in which this command need to be executed
+  -I                      instance name
+  -D, --pgdata=DATADIR    location of the database storage area
+  -c    parameter=value   the parameter to set
+  -c    parameter         the parameter value to DEFAULT (i.e comments in configuration file)
+  -h    host-auth-policy  to set authentication policy in HBA conf file
+  -?, --help              show this help, then exit
+  -V, --version           output version information, then exit
+
+Options for encrypt: 
+  -M, --keymode=MODE     the cipher files will be applies in server, client or source,default value is server mode
+  -K PASSWORD            the plain password you want to encrypt
+  -U, --keyuser=USER     if appointed,the cipher files will name with the user name
+
+
+Options for generate: 
+  -o PREFIX               the cipher files prefix. default value is obsserver
+  -S CIPHERKEY            the plain cipher key you want to encrypt
+-----Check(GUC)
+\! @abs_bindir@/gs_guc check -D @abs_srcdir@/tmp_check/datanode1/ -c cstore_buffers
+--?expected guc information: .*: cstore_buffers=.*
+--?gs_guc check: .*: cstore_buffers=.*
+
+Total GUC values: 1. Failed GUC values: 0.
+The value of parameter cstore_buffers is same on all instances.
+--?    cstore_buffers=.*
+
+-----Set(GUC)
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "cstore_buffers=10GB"
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: cstore_buffers=10GB: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+-----Reload(GUC)
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "cstore_buffers=10GB"
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc reload: cstore_buffers=10GB: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+

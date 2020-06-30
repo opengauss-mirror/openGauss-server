@@ -1,0 +1,2730 @@
+-- this file contains tests for GROUP BY with combinations of following
+-- 1. enable_hashagg = on/off (to force the grouping by sorting)
+-- 2. distributed or replicated tables across the datanodes
+-- If a testcase is added to any of the combinations, please check if it's
+-- applicable in other combinations as well.
+-- Since we want to test the plan reduction of GROUP and AGG nodes, disable fast
+-- query shipping
+-- Combination 1: enable_hashagg on and distributed tables
+set enable_hashagg to on;
+-- create required tables and fill them with data
+create table xc_groupby_tab1 (val int, val2 int);
+create table xc_groupby_tab2 (val int, val2 int);
+insert into xc_groupby_tab1 values (1, 1), (2, 1), (3, 1), (2, 2), (6, 2), (4, 3), (1, 3), (6, 3);
+insert into xc_groupby_tab2 values (1, 1), (4, 1), (8, 1), (2, 4), (9, 4), (3, 4), (4, 2), (5, 2), (3, 2);
+select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_groupby_tab1 group by val2 order by val2;
+ count | sum |        avg         |     ?column?     | val2 
+-------+-----+--------------------+------------------+------
+     3 |   6 | 2.0000000000000000 |                2 |    1
+     2 |   8 | 4.0000000000000000 |                4 |    2
+     3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_groupby_tab1 group by val2 order by val2;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (count(*)), (sum(val)), (avg(val)), (((sum(val))::double precision / (count(*))::double precision)), val2
+   Sort Key: xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: count(*), sum(val), avg(val), ((sum(val))::double precision / (count(*))::double precision), val2
+         Group By Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2, val
+(8 rows)
+
+-- joins and group by
+select count(*), sum(xc_groupby_tab1.val * xc_groupby_tab2.val), avg(xc_groupby_tab1.val*xc_groupby_tab2.val), sum(xc_groupby_tab1.val*xc_groupby_tab2.val)::float8/count(*), xc_groupby_tab1.val2 gt1_val2, xc_groupby_tab2.val2 gt2_val2 from xc_groupby_tab1 full outer join xc_groupby_tab2 on xc_groupby_tab1.val2 = xc_groupby_tab2.val2 group by xc_groupby_tab1.val2, xc_groupby_tab2.val2 order by gt1_val2, gt2_val2;
+ count | sum |         avg         |     ?column?     | gt1_val2 | gt2_val2 
+-------+-----+---------------------+------------------+----------+----------
+     9 |  78 |  8.6666666666666667 | 8.66666666666667 |        1 |        1
+     6 |  96 | 16.0000000000000000 |               16 |        2 |        2
+     3 |     |                     |                  |        3 |         
+     3 |     |                     |                  |          |        4
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select count(*), sum(xc_groupby_tab1.val * xc_groupby_tab2.val), avg(xc_groupby_tab1.val*xc_groupby_tab2.val), sum(xc_groupby_tab1.val*xc_groupby_tab2.val)::float8/count(*), xc_groupby_tab1.val2 gt1_val2, xc_groupby_tab2.val2 gt2_val2 from xc_groupby_tab1 full outer join xc_groupby_tab2 on xc_groupby_tab1.val2 = xc_groupby_tab2.val2 group by xc_groupby_tab1.val2, xc_groupby_tab2.val2 order by gt1_val2, gt2_val2;
+                                                                                                                                QUERY PLAN                                                                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: count(*), sum((xc_groupby_tab1.val * xc_groupby_tab2.val)), avg((xc_groupby_tab1.val * xc_groupby_tab2.val)), ((sum((xc_groupby_tab1.val * xc_groupby_tab2.val)))::double precision / (count(*))::double precision), xc_groupby_tab1.val2, xc_groupby_tab2.val2
+   Group By Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
+   ->  Sort
+         Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
+         Sort Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
+         ->  Hash Full Join
+               Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
+               Hash Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- aggregates over aggregates
+select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x order by x;
+ sum 
+-----
+   8
+  17
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x order by x;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: sum(q1.y), q1.x
+   Group By Key: q1.x
+   ->  Sort
+         Output: q1.x, q1.y
+         Sort Key: q1.x
+         ->  Subquery Scan on q1
+               Output: q1.x, q1.y
+               ->  HashAggregate
+                     Output: sum(xc_groupby_tab1.val), (xc_groupby_tab1.val2 % 2), xc_groupby_tab1.val2
+                     Group By Key: xc_groupby_tab1.val2
+                     ->  Seq Scan on public.xc_groupby_tab1
+                           Output: xc_groupby_tab1.val2, xc_groupby_tab1.val
+(13 rows)
+
+-- group by without aggregate
+select val2 from xc_groupby_tab1 group by val2 order by val2;
+ val2 
+------
+    1
+    2
+    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select val2 from xc_groupby_tab1 group by val2 order by val2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: val2
+   Sort Key: xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: val2
+         Group By Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2
+(8 rows)
+
+select val + val2 from xc_groupby_tab1 group by val + val2 order by val + val2;
+ ?column? 
+----------
+        2
+        3
+        4
+        7
+        8
+        9
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select val + val2 from xc_groupby_tab1 group by val + val2 order by val + val2;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Sort
+   Output: ((val + val2))
+   Sort Key: ((xc_groupby_tab1.val + xc_groupby_tab1.val2))
+   ->  HashAggregate
+         Output: ((val + val2))
+         Group By Key: (xc_groupby_tab1.val + xc_groupby_tab1.val2)
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: (val + val2)
+(8 rows)
+
+select val + val2, val, val2 from xc_groupby_tab1 group by val, val2 order by val, val2;
+ ?column? | val | val2 
+----------+-----+------
+        2 |   1 |    1
+        4 |   1 |    3
+        3 |   2 |    1
+        4 |   2 |    2
+        4 |   3 |    1
+        7 |   4 |    3
+        8 |   6 |    2
+        9 |   6 |    3
+(8 rows)
+
+explain (verbose true, costs false, nodes false) select val + val2, val, val2 from xc_groupby_tab1 group by val, val2 order by val, val2;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Output: ((val + val2)), val, val2
+   Sort Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: (val + val2), val, val2
+         Group By Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val, val2
+(8 rows)
+
+select xc_groupby_tab1.val + xc_groupby_tab2.val2, xc_groupby_tab1.val gt1_val, xc_groupby_tab2.val2 gt2_val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val, xc_groupby_tab2.val2 order by gt1_val, gt2_val2;
+ ?column? | gt1_val | gt2_val2 
+----------+---------+----------
+        2 |       1 |        1
+        6 |       2 |        4
+        5 |       3 |        2
+        7 |       3 |        4
+        5 |       4 |        1
+        6 |       4 |        2
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val + xc_groupby_tab2.val2, xc_groupby_tab1.val gt1_val, xc_groupby_tab2.val2 gt2_val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val, xc_groupby_tab2.val2 order by gt1_val, gt2_val2;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Group
+   Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2), xc_groupby_tab1.val, xc_groupby_tab2.val2
+   Group By Key: xc_groupby_tab1.val, xc_groupby_tab2.val2
+   ->  Sort
+         Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+         Sort Key: xc_groupby_tab1.val, xc_groupby_tab2.val2
+         ->  Hash Join
+               Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+select xc_groupby_tab1.val + xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val + xc_groupby_tab2.val2 order by 1;
+ ?column? 
+----------
+        2
+        5
+        6
+        7
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val + xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val + xc_groupby_tab2.val2 order by 1;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Group
+   Output: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+   Group By Key: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+   ->  Sort
+         Output: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+         Sort Key: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+         ->  Hash Join
+               Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2)
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- same group by expressions 
+select count(xc_groupby_tab1.val), xc_groupby_tab2.val2, xc_groupby_tab2.val2, count(xc_groupby_tab1.val) from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by 2,3 order by 1,2,3,4;
+ count | val2 | val2 | count 
+-------+------+------+-------
+     2 |    2 |    2 |     2
+     3 |    1 |    1 |     3
+     3 |    4 |    4 |     3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(xc_groupby_tab1.val), xc_groupby_tab2.val2, xc_groupby_tab2.val2, count(xc_groupby_tab1.val) from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by 2,3 order by 1,2,3,4;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (count(xc_groupby_tab1.val)), xc_groupby_tab2.val2, xc_groupby_tab2.val2, (count(xc_groupby_tab1.val))
+   Sort Key: (count(xc_groupby_tab1.val)), xc_groupby_tab2.val2
+   ->  HashAggregate
+         Output: count(xc_groupby_tab1.val), xc_groupby_tab2.val2, xc_groupby_tab2.val2, count(xc_groupby_tab1.val)
+         Group By Key: xc_groupby_tab2.val2, xc_groupby_tab2.val2
+         ->  Hash Join
+               Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+select count(xc_groupby_tab1.val), xc_groupby_tab2.val2, max(xc_groupby_tab1.val), xc_groupby_tab2.val2, xc_groupby_tab1.val2, count(xc_groupby_tab1.val) from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by 2,4,5 order by 1,2,3,4,5;
+ count | val2 | max | val2 | val2 | count 
+-------+------+-----+------+------+-------
+     1 |    1 |   1 |    1 |    1 |     1
+     1 |    2 |   3 |    2 |    1 |     1
+     1 |    2 |   4 |    2 |    3 |     1
+     1 |    4 |   2 |    4 |    2 |     1
+     2 |    1 |   4 |    1 |    3 |     2
+     2 |    4 |   3 |    4 |    1 |     2
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select count(xc_groupby_tab1.val), xc_groupby_tab2.val2, max(xc_groupby_tab1.val), xc_groupby_tab2.val2, xc_groupby_tab1.val2, count(xc_groupby_tab1.val) from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by 2,4,5 order by 1,2,3,4,5;
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (count(xc_groupby_tab1.val)), xc_groupby_tab2.val2, (max(xc_groupby_tab1.val)), xc_groupby_tab2.val2, xc_groupby_tab1.val2, (count(xc_groupby_tab1.val))
+   Sort Key: (count(xc_groupby_tab1.val)), xc_groupby_tab2.val2, (max(xc_groupby_tab1.val)), xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: count(xc_groupby_tab1.val), xc_groupby_tab2.val2, max(xc_groupby_tab1.val), xc_groupby_tab2.val2, xc_groupby_tab1.val2, count(xc_groupby_tab1.val)
+         Group By Key: xc_groupby_tab2.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val2
+         ->  Hash Join
+               Output: xc_groupby_tab1.val2, xc_groupby_tab1.val, xc_groupby_tab2.val2
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+select max(xc_groupby_tab1.val2), xc_groupby_tab1.val + xc_groupby_tab2.val2, min(xc_groupby_tab2.val), xc_groupby_tab2.val2, max(xc_groupby_tab1.val), xc_groupby_tab1.val + xc_groupby_tab2.val2, sum(xc_groupby_tab2.val), xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by 2,4,6,8 order by 1,2,3,4,5,6,7,8;
+ max | ?column? | min | val2 | max | ?column? | sum | val2 
+-----+----------+-----+------+-----+----------+-----+------
+   1 |        5 |   3 |    2 |   3 |        5 |   3 |    2
+   1 |        7 |   3 |    4 |   3 |        7 |   3 |    4
+   2 |        6 |   2 |    4 |   2 |        6 |   4 |    4
+   3 |        2 |   1 |    1 |   1 |        2 |   2 |    1
+   3 |        5 |   4 |    1 |   4 |        5 |   4 |    1
+   3 |        6 |   4 |    2 |   4 |        6 |   4 |    2
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select max(xc_groupby_tab1.val2), xc_groupby_tab1.val + xc_groupby_tab2.val2, min(xc_groupby_tab2.val), xc_groupby_tab2.val2, max(xc_groupby_tab1.val), xc_groupby_tab1.val + xc_groupby_tab2.val2, sum(xc_groupby_tab2.val), xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by 2,4,6,8 order by 1,2,3,4,5,6,7,8;
+                                                                                                                              QUERY PLAN                                                                                                                               
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (max(xc_groupby_tab1.val2)), ((xc_groupby_tab1.val + xc_groupby_tab2.val2)), (min(xc_groupby_tab2.val)), xc_groupby_tab2.val2, (max(xc_groupby_tab1.val)), ((xc_groupby_tab1.val + xc_groupby_tab2.val2)), (sum(xc_groupby_tab2.val)), xc_groupby_tab2.val2
+   Sort Key: (max(xc_groupby_tab1.val2)), ((xc_groupby_tab1.val + xc_groupby_tab2.val2)), (min(xc_groupby_tab2.val)), xc_groupby_tab2.val2, (max(xc_groupby_tab1.val)), (sum(xc_groupby_tab2.val))
+   ->  HashAggregate
+         Output: max(xc_groupby_tab1.val2), ((xc_groupby_tab1.val + xc_groupby_tab2.val2)), min(xc_groupby_tab2.val), xc_groupby_tab2.val2, max(xc_groupby_tab1.val), ((xc_groupby_tab1.val + xc_groupby_tab2.val2)), sum(xc_groupby_tab2.val), xc_groupby_tab2.val2
+         Group By Key: (xc_groupby_tab1.val + xc_groupby_tab2.val2), xc_groupby_tab2.val2, (xc_groupby_tab1.val + xc_groupby_tab2.val2), xc_groupby_tab2.val2
+         ->  Hash Join
+               Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2), xc_groupby_tab2.val2, (xc_groupby_tab1.val + xc_groupby_tab2.val2), xc_groupby_tab2.val2, xc_groupby_tab1.val2, xc_groupby_tab2.val, xc_groupby_tab1.val
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- same group by references
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2, xc_groupby_tab1.val2 from xc_groupby_tab1 group by 4,1,xc_groupby_tab1.val order by 1, 4;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Output: val, val2, val2, val2
+   Sort Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: val, val2, val2, val2
+         Group By Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val, val2
+(8 rows)
+
+select xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2, xc_groupby_tab1.val2 from xc_groupby_tab1 group by 4,1,xc_groupby_tab1.val order by 1, 4;
+ val | val2 | val2 | val2 
+-----+------+------+------
+   1 |    1 |    1 |    1
+   1 |    3 |    3 |    3
+   2 |    1 |    1 |    1
+   2 |    2 |    2 |    2
+   3 |    1 |    1 |    1
+   4 |    3 |    3 |    3
+   6 |    2 |    2 |    2
+   6 |    3 |    3 |    3
+(8 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2 from xc_groupby_tab1 group by 3,1,xc_groupby_tab1.val order by 1, 3;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Output: val, val2, val2
+   Sort Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: val, val2, val2
+         Group By Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val, val2
+(8 rows)
+
+select xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2 from xc_groupby_tab1 group by 3,1,xc_groupby_tab1.val order by 1, 3;
+ val | val2 | val2 
+-----+------+------
+   1 |    1 |    1
+   1 |    3 |    3
+   2 |    1 |    1
+   2 |    2 |    2
+   3 |    1 |    1
+   4 |    3 |    3
+   6 |    2 |    2
+   6 |    3 |    3
+(8 rows)
+
+explain (verbose true, costs false, nodes false) select distinct on (3, 1, val) xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2 from xc_groupby_tab1 order by 1, 3;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Unique
+   Output: val, val2, val2
+   ->  Sort
+         Output: val, val2, val2
+         Sort Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val, val2, val2
+(7 rows)
+
+select distinct on (3, 1, val) xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2 from xc_groupby_tab1 order by 1, 3;
+ val | val2 | val2 
+-----+------+------
+   1 |    1 |    1
+   1 |    3 |    3
+   2 |    1 |    1
+   2 |    2 |    2
+   3 |    1 |    1
+   4 |    3 |    3
+   6 |    2 |    2
+   6 |    3 |    3
+(8 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2 from xc_groupby_tab1 group by 3,1,xc_groupby_tab1.val order by val>some(select val2 from xc_groupby_tab2), 1, 2;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Output: xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2, ((SubPlan 1))
+   Sort Key: ((SubPlan 1)), xc_groupby_tab1.val, xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2, (SubPlan 1)
+         Group By Key: xc_groupby_tab1.val2, xc_groupby_tab1.val
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+         SubPlan 1
+           ->  Materialize
+                 Output: xc_groupby_tab2.val2
+                 ->  Seq Scan on public.xc_groupby_tab2
+                       Output: xc_groupby_tab2.val2
+(13 rows)
+
+select xc_groupby_tab1.val, xc_groupby_tab1.val2, xc_groupby_tab1.val2 from xc_groupby_tab1 group by 3,1,xc_groupby_tab1.val order by val>some(select val2 from xc_groupby_tab2), 1, 2;
+ val | val2 | val2 
+-----+------+------
+   1 |    1 |    1
+   1 |    3 |    3
+   2 |    1 |    1
+   2 |    2 |    2
+   3 |    1 |    1
+   4 |    3 |    3
+   6 |    2 |    2
+   6 |    3 |    3
+(8 rows)
+
+-- group by with aggregates in expression
+select count(*) + sum(val) + avg(val), val2 from xc_groupby_tab1 group by val2 order by val2;
+      ?column?       | val2 
+---------------------+------
+ 11.0000000000000000 |    1
+ 14.0000000000000000 |    2
+ 17.6666666666666667 |    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(*) + sum(val) + avg(val), val2 from xc_groupby_tab1 group by val2 order by val2;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Output: ((((count(*) + sum(val)))::numeric + avg(val))), val2
+   Sort Key: xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: (((count(*) + sum(val)))::numeric + avg(val)), val2
+         Group By Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2, val
+(8 rows)
+
+-- group by with expressions in group by clause
+select sum(val), avg(val), 2 * val2 expr from xc_groupby_tab1 group by 2 * val2 order by expr; 
+ sum |        avg         | expr 
+-----+--------------------+------
+   6 | 2.0000000000000000 |    2
+   8 | 4.0000000000000000 |    4
+  11 | 3.6666666666666667 |    6
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select sum(val), avg(val), 2 * val2 expr from xc_groupby_tab1 group by 2 * val2 order by expr;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Sort
+   Output: (sum(val)), (avg(val)), ((2 * val2))
+   Sort Key: ((2 * xc_groupby_tab1.val2))
+   ->  HashAggregate
+         Output: sum(val), avg(val), ((2 * val2))
+         Group By Key: (2 * xc_groupby_tab1.val2)
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: (2 * val2), val
+(8 rows)
+
+--hashagg distinct is 0
+SELECT TIMEOFDAY()  Ch_v_x_p_D FROM xc_groupby_tab1 T_x_t_V_n, xc_groupby_tab2 T_D_w_3_t WHERE (27/28+31) = (66) GROUP BY 1;
+ ch_v_x_p_d 
+------------
+(0 rows)
+
+drop table xc_groupby_tab1;
+drop table xc_groupby_tab2;
+-- some tests involving nulls, characters, float type etc.
+create table xc_groupby_def(a int, b varchar(25)); 
+insert into xc_groupby_def VALUES (NULL, NULL);
+insert into xc_groupby_def VALUES (1, NULL);
+insert into xc_groupby_def VALUES (NULL, 'One');
+insert into xc_groupby_def VALUES (2, 'Two');
+insert into xc_groupby_def VALUES (2, 'Two');
+insert into xc_groupby_def VALUES (3, 'Three');
+insert into xc_groupby_def VALUES (4, 'Three');
+insert into xc_groupby_def VALUES (5, 'Three');
+insert into xc_groupby_def VALUES (6, 'Two');
+insert into xc_groupby_def VALUES (7, NULL);
+insert into xc_groupby_def VALUES (8, 'Two');
+insert into xc_groupby_def VALUES (9, 'Three');
+insert into xc_groupby_def VALUES (10, 'Three');
+select avg(a), sum(a), count(*), b from xc_groupby_def group by b order by b;
+        avg         | sum | count |   b   
+--------------------+-----+-------+-------
+                    |     |     1 | One
+ 6.2000000000000000 |  31 |     5 | Three
+ 4.5000000000000000 |  18 |     4 | Two
+ 4.0000000000000000 |   8 |     3 | 
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select avg(a), sum(a), count(*), b from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Output: (avg(a)), (sum(a)), (count(*)), b
+   Sort Key: xc_groupby_def.b
+   ->  HashAggregate
+         Output: avg(a), sum(a), count(*), b
+         Group By Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b, a
+(8 rows)
+
+select b from xc_groupby_def group by b order by b;
+   b   
+-------
+ One
+ Three
+ Two
+ 
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select b from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Output: b
+   Sort Key: xc_groupby_def.b
+   ->  HashAggregate
+         Output: b
+         Group By Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+(8 rows)
+
+select b,count(b) from xc_groupby_def group by b order by b;
+   b   | count 
+-------+-------
+ One   |     1
+ Three |     5
+ Two   |     4
+       |     0
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select b,count(b) from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Output: b, (count(b))
+   Sort Key: xc_groupby_def.b
+   ->  HashAggregate
+         Output: b, count(b)
+         Group By Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+(8 rows)
+
+select count(*) from xc_groupby_def where b is null group by b;
+ count 
+-------
+     3
+(1 row)
+
+explain (verbose true, costs false, nodes false) select count(*) from xc_groupby_def where b is null group by b;
+                 QUERY PLAN                 
+--------------------------------------------
+ HashAggregate
+   Output: count(*), b
+   Group By Key: xc_groupby_def.b
+   ->  Seq Scan on public.xc_groupby_def
+         Output: b
+         Filter: (xc_groupby_def.b IS NULL)
+(6 rows)
+
+create table xc_groupby_g(a int, b float, c numeric);
+insert into xc_groupby_g values(1,2.1,3.2);
+insert into xc_groupby_g values(1,2.1,3.2);
+insert into xc_groupby_g values(2,2.3,5.2);
+select sum(a) from xc_groupby_g group by a order by a;
+ sum 
+-----
+   2
+   2
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(a) from xc_groupby_g group by a order by a;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (sum(a)), a
+   Sort Key: xc_groupby_g.a
+   ->  HashAggregate
+         Output: sum(a), a
+         Group By Key: xc_groupby_g.a
+         ->  Seq Scan on public.xc_groupby_g
+               Output: a
+(8 rows)
+
+select sum(b) from xc_groupby_g group by b order by b;
+ sum 
+-----
+ 4.2
+ 2.3
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(b) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (sum(b)), b
+   Sort Key: xc_groupby_g.b
+   ->  HashAggregate
+         Output: sum(b), b
+         Group By Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b
+(8 rows)
+
+select sum(c) from xc_groupby_g group by b order by b;
+ sum 
+-----
+ 6.4
+ 5.2
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(c) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (sum(c)), b
+   Sort Key: xc_groupby_g.b
+   ->  HashAggregate
+         Output: sum(c), b
+         Group By Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b, c
+(8 rows)
+
+select avg(a) from xc_groupby_g group by b order by b;
+          avg           
+------------------------
+ 1.00000000000000000000
+     2.0000000000000000
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(a) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (avg(a)), b
+   Sort Key: xc_groupby_g.b
+   ->  HashAggregate
+         Output: avg(a), b
+         Group By Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b, a
+(8 rows)
+
+select avg(b) from xc_groupby_g group by c order by c;
+ avg 
+-----
+ 2.1
+ 2.3
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(b) from xc_groupby_g group by c order by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (avg(b)), c
+   Sort Key: xc_groupby_g.c
+   ->  HashAggregate
+         Output: avg(b), c
+         Group By Key: xc_groupby_g.c
+         ->  Seq Scan on public.xc_groupby_g
+               Output: c, b
+(8 rows)
+
+select avg(c) from xc_groupby_g group by c order by c;
+        avg         
+--------------------
+ 3.2000000000000000
+ 5.2000000000000000
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(c) from xc_groupby_g group by c order by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (avg(c)), c
+   Sort Key: xc_groupby_g.c
+   ->  HashAggregate
+         Output: avg(c), c
+         Group By Key: xc_groupby_g.c
+         ->  Seq Scan on public.xc_groupby_g
+               Output: c
+(8 rows)
+
+drop table xc_groupby_def;
+drop table xc_groupby_g;
+-- Combination 2, enable_hashagg on and replicated tables.
+-- repeat the same tests for replicated tables
+-- create required tables and fill them with data
+create table xc_groupby_tab1 (val int, val2 int);
+create table xc_groupby_tab2 (val int, val2 int);
+insert into xc_groupby_tab1 values (1, 1), (2, 1), (3, 1), (2, 2), (6, 2), (4, 3), (1, 3), (6, 3);
+insert into xc_groupby_tab2 values (1, 1), (4, 1), (8, 1), (2, 4), (9, 4), (3, 4), (4, 2), (5, 2), (3, 2);
+select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_groupby_tab1 group by val2 order by val2;
+ count | sum |        avg         |     ?column?     | val2 
+-------+-----+--------------------+------------------+------
+     3 |   6 | 2.0000000000000000 |                2 |    1
+     2 |   8 | 4.0000000000000000 |                4 |    2
+     3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_groupby_tab1 group by val2 order by val2;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (count(*)), (sum(val)), (avg(val)), (((sum(val))::double precision / (count(*))::double precision)), val2
+   Sort Key: xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: count(*), sum(val), avg(val), ((sum(val))::double precision / (count(*))::double precision), val2
+         Group By Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2, val
+(8 rows)
+
+-- joins and group by
+select count(*), sum(xc_groupby_tab1.val * xc_groupby_tab2.val), avg(xc_groupby_tab1.val*xc_groupby_tab2.val), sum(xc_groupby_tab1.val*xc_groupby_tab2.val)::float8/count(*), xc_groupby_tab1.val2 c1, xc_groupby_tab2.val2 c2 from xc_groupby_tab1 full outer join xc_groupby_tab2 on xc_groupby_tab1.val2 = xc_groupby_tab2.val2 group by xc_groupby_tab1.val2, xc_groupby_tab2.val2 order by c1, c2;
+ count | sum |         avg         |     ?column?     | c1 | c2 
+-------+-----+---------------------+------------------+----+----
+     9 |  78 |  8.6666666666666667 | 8.66666666666667 |  1 |  1
+     6 |  96 | 16.0000000000000000 |               16 |  2 |  2
+     3 |     |                     |                  |  3 |   
+     3 |     |                     |                  |    |  4
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select count(*), sum(xc_groupby_tab1.val * xc_groupby_tab2.val), avg(xc_groupby_tab1.val*xc_groupby_tab2.val), sum(xc_groupby_tab1.val*xc_groupby_tab2.val)::float8/count(*), xc_groupby_tab1.val2 c1, xc_groupby_tab2.val2 c2 from xc_groupby_tab1 full outer join xc_groupby_tab2 on xc_groupby_tab1.val2 = xc_groupby_tab2.val2 group by xc_groupby_tab1.val2, xc_groupby_tab2.val2 order by c1, c2;
+                                                                                                                                QUERY PLAN                                                                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: count(*), sum((xc_groupby_tab1.val * xc_groupby_tab2.val)), avg((xc_groupby_tab1.val * xc_groupby_tab2.val)), ((sum((xc_groupby_tab1.val * xc_groupby_tab2.val)))::double precision / (count(*))::double precision), xc_groupby_tab1.val2, xc_groupby_tab2.val2
+   Group By Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
+   ->  Sort
+         Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
+         Sort Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
+         ->  Hash Full Join
+               Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
+               Hash Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- aggregates over aggregates
+select sum(y) sum from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x order by sum;
+ sum 
+-----
+   8
+  17
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(y) sum from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x order by sum;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (sum(q1.y)), q1.x
+   Sort Key: (sum(q1.y))
+   ->  HashAggregate
+         Output: sum(q1.y), q1.x
+         Group By Key: q1.x
+         ->  Subquery Scan on q1
+               Output: q1.x, q1.y
+               ->  HashAggregate
+                     Output: sum(xc_groupby_tab1.val), (xc_groupby_tab1.val2 % 2), xc_groupby_tab1.val2
+                     Group By Key: xc_groupby_tab1.val2
+                     ->  Seq Scan on public.xc_groupby_tab1
+                           Output: xc_groupby_tab1.val2, xc_groupby_tab1.val
+(13 rows)
+
+-- group by without aggregate
+select val2 from xc_groupby_tab1 group by val2 order by val2;
+ val2 
+------
+    1
+    2
+    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select val2 from xc_groupby_tab1 group by val2 order by val2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Sort
+   Output: val2
+   Sort Key: xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: val2
+         Group By Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2
+(8 rows)
+
+select val + val2 sum from xc_groupby_tab1 group by val + val2 order by sum;
+ sum 
+-----
+   2
+   3
+   4
+   7
+   8
+   9
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select val + val2 sum from xc_groupby_tab1 group by val + val2 order by sum;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Sort
+   Output: ((val + val2))
+   Sort Key: ((xc_groupby_tab1.val + xc_groupby_tab1.val2))
+   ->  HashAggregate
+         Output: ((val + val2))
+         Group By Key: (xc_groupby_tab1.val + xc_groupby_tab1.val2)
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: (val + val2)
+(8 rows)
+
+select val + val2, val, val2 from xc_groupby_tab1 group by val, val2 order by val, val2;
+ ?column? | val | val2 
+----------+-----+------
+        2 |   1 |    1
+        4 |   1 |    3
+        3 |   2 |    1
+        4 |   2 |    2
+        4 |   3 |    1
+        7 |   4 |    3
+        8 |   6 |    2
+        9 |   6 |    3
+(8 rows)
+
+explain (verbose true, costs false, nodes false) select val + val2, val, val2 from xc_groupby_tab1 group by val, val2 order by val, val2;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Output: ((val + val2)), val, val2
+   Sort Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+   ->  HashAggregate
+         Output: (val + val2), val, val2
+         Group By Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val, val2
+(8 rows)
+
+select xc_groupby_tab1.val + xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val, xc_groupby_tab2.val2 order by val, val2;
+ ?column? | val | val2 
+----------+-----+------
+        2 |   1 |    1
+        6 |   2 |    4
+        5 |   3 |    2
+        7 |   3 |    4
+        5 |   4 |    1
+        6 |   4 |    2
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val + xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val, xc_groupby_tab2.val2 order by val, val2;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Group
+   Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2), xc_groupby_tab1.val, xc_groupby_tab2.val2
+   Group By Key: xc_groupby_tab1.val, xc_groupby_tab2.val2
+   ->  Sort
+         Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+         Sort Key: xc_groupby_tab1.val, xc_groupby_tab2.val2
+         ->  Hash Join
+               Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+select xc_groupby_tab1.val + xc_groupby_tab2.val2 sum from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val + xc_groupby_tab2.val2 order by sum;
+ sum 
+-----
+   2
+   5
+   6
+   7
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val + xc_groupby_tab2.val2 sum from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val + xc_groupby_tab2.val2 order by sum;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Group
+   Output: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+   Group By Key: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+   ->  Sort
+         Output: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+         Sort Key: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+         ->  Hash Join
+               Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2)
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- group by with aggregates in expression
+select count(*) + sum(val) + avg(val), val2 from xc_groupby_tab1 group by val2 order by 1;
+      ?column?       | val2 
+---------------------+------
+ 11.0000000000000000 |    1
+ 14.0000000000000000 |    2
+ 17.6666666666666667 |    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(*) + sum(val) + avg(val), val2 from xc_groupby_tab1 group by val2 order by 1;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Sort
+   Output: ((((count(*) + sum(val)))::numeric + avg(val))), val2
+   Sort Key: ((((count(*) + sum(xc_groupby_tab1.val)))::numeric + avg(xc_groupby_tab1.val)))
+   ->  HashAggregate
+         Output: (((count(*) + sum(val)))::numeric + avg(val)), val2
+         Group By Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2, val
+(8 rows)
+
+-- group by with expressions in group by clause
+select sum(val), avg(val), 2 * val2 from xc_groupby_tab1 group by 2 * val2 order by 2 * val2;
+ sum |        avg         | ?column? 
+-----+--------------------+----------
+   6 | 2.0000000000000000 |        2
+   8 | 4.0000000000000000 |        4
+  11 | 3.6666666666666667 |        6
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select sum(val), avg(val), 2 * val2 from xc_groupby_tab1 group by 2 * val2 order by 2 * val2;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Sort
+   Output: (sum(val)), (avg(val)), ((2 * val2))
+   Sort Key: ((2 * xc_groupby_tab1.val2))
+   ->  HashAggregate
+         Output: sum(val), avg(val), ((2 * val2))
+         Group By Key: (2 * xc_groupby_tab1.val2)
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: (2 * val2), val
+(8 rows)
+
+drop table xc_groupby_tab1;
+drop table xc_groupby_tab2;
+-- some tests involving nulls, characters, float type etc.
+create table xc_groupby_def(a int, b varchar(25)); 
+insert into xc_groupby_def VALUES (NULL, NULL);
+insert into xc_groupby_def VALUES (1, NULL);
+insert into xc_groupby_def VALUES (NULL, 'One');
+insert into xc_groupby_def VALUES (2, 'Two');
+insert into xc_groupby_def VALUES (2, 'Two');
+insert into xc_groupby_def VALUES (3, 'Three');
+insert into xc_groupby_def VALUES (4, 'Three');
+insert into xc_groupby_def VALUES (5, 'Three');
+insert into xc_groupby_def VALUES (6, 'Two');
+insert into xc_groupby_def VALUES (7, NULL);
+insert into xc_groupby_def VALUES (8, 'Two');
+insert into xc_groupby_def VALUES (9, 'Three');
+insert into xc_groupby_def VALUES (10, 'Three');
+select avg(a), sum(a), count(*), b from xc_groupby_def group by b order by b;
+        avg         | sum | count |   b   
+--------------------+-----+-------+-------
+                    |     |     1 | One
+ 6.2000000000000000 |  31 |     5 | Three
+ 4.5000000000000000 |  18 |     4 | Two
+ 4.0000000000000000 |   8 |     3 | 
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select avg(a), sum(a), count(*), b from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Output: (avg(a)), (sum(a)), (count(*)), b
+   Sort Key: xc_groupby_def.b
+   ->  HashAggregate
+         Output: avg(a), sum(a), count(*), b
+         Group By Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b, a
+(8 rows)
+
+select b from xc_groupby_def group by b order by b;
+   b   
+-------
+ One
+ Three
+ Two
+ 
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select b from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Output: b
+   Sort Key: xc_groupby_def.b
+   ->  HashAggregate
+         Output: b
+         Group By Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+(8 rows)
+
+select b,count(b) from xc_groupby_def group by b order by b;
+   b   | count 
+-------+-------
+ One   |     1
+ Three |     5
+ Two   |     4
+       |     0
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select b,count(b) from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Sort
+   Output: b, (count(b))
+   Sort Key: xc_groupby_def.b
+   ->  HashAggregate
+         Output: b, count(b)
+         Group By Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+(8 rows)
+
+select count(*) from xc_groupby_def where b is null group by b;
+ count 
+-------
+     3
+(1 row)
+
+explain (verbose true, costs false, nodes false) select count(*) from xc_groupby_def where b is null group by b;
+                 QUERY PLAN                 
+--------------------------------------------
+ HashAggregate
+   Output: count(*), b
+   Group By Key: xc_groupby_def.b
+   ->  Seq Scan on public.xc_groupby_def
+         Output: b
+         Filter: (xc_groupby_def.b IS NULL)
+(6 rows)
+
+create table xc_groupby_g(a int, b float, c numeric);
+insert into xc_groupby_g values(1,2.1,3.2);
+insert into xc_groupby_g values(1,2.1,3.2);
+insert into xc_groupby_g values(2,2.3,5.2);
+select sum(a) from xc_groupby_g group by a order by a;
+ sum 
+-----
+   2
+   2
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(a) from xc_groupby_g group by a order by a;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (sum(a)), a
+   Sort Key: xc_groupby_g.a
+   ->  HashAggregate
+         Output: sum(a), a
+         Group By Key: xc_groupby_g.a
+         ->  Seq Scan on public.xc_groupby_g
+               Output: a
+(8 rows)
+
+select sum(b) from xc_groupby_g group by b order by b;
+ sum 
+-----
+ 4.2
+ 2.3
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(b) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (sum(b)), b
+   Sort Key: xc_groupby_g.b
+   ->  HashAggregate
+         Output: sum(b), b
+         Group By Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b
+(8 rows)
+
+select sum(c) from xc_groupby_g group by b order by b;
+ sum 
+-----
+ 6.4
+ 5.2
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(c) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (sum(c)), b
+   Sort Key: xc_groupby_g.b
+   ->  HashAggregate
+         Output: sum(c), b
+         Group By Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b, c
+(8 rows)
+
+select avg(a) from xc_groupby_g group by b order by b;
+          avg           
+------------------------
+ 1.00000000000000000000
+     2.0000000000000000
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(a) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (avg(a)), b
+   Sort Key: xc_groupby_g.b
+   ->  HashAggregate
+         Output: avg(a), b
+         Group By Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b, a
+(8 rows)
+
+select avg(b) from xc_groupby_g group by c order by c;
+ avg 
+-----
+ 2.1
+ 2.3
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(b) from xc_groupby_g group by c order by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (avg(b)), c
+   Sort Key: xc_groupby_g.c
+   ->  HashAggregate
+         Output: avg(b), c
+         Group By Key: xc_groupby_g.c
+         ->  Seq Scan on public.xc_groupby_g
+               Output: c, b
+(8 rows)
+
+select avg(c) from xc_groupby_g group by c order by c;
+        avg         
+--------------------
+ 3.2000000000000000
+ 5.2000000000000000
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(c) from xc_groupby_g group by c order by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ Sort
+   Output: (avg(c)), c
+   Sort Key: xc_groupby_g.c
+   ->  HashAggregate
+         Output: avg(c), c
+         Group By Key: xc_groupby_g.c
+         ->  Seq Scan on public.xc_groupby_g
+               Output: c
+(8 rows)
+
+drop table xc_groupby_def;
+drop table xc_groupby_g;
+reset enable_hashagg;
+-- Combination 3 enable_hashagg off and distributed tables
+set enable_hashagg to off;
+-- create required tables and fill them with data
+create table xc_groupby_tab1 (val int, val2 int);
+create table xc_groupby_tab2 (val int, val2 int);
+insert into xc_groupby_tab1 values (1, 1), (2, 1), (3, 1), (2, 2), (6, 2), (4, 3), (1, 3), (6, 3);
+insert into xc_groupby_tab2 values (1, 1), (4, 1), (8, 1), (2, 4), (9, 4), (3, 4), (4, 2), (5, 2), (3, 2);
+select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_groupby_tab1 group by val2;
+ count | sum |        avg         |     ?column?     | val2 
+-------+-----+--------------------+------------------+------
+     3 |   6 | 2.0000000000000000 |                2 |    1
+     2 |   8 | 4.0000000000000000 |                4 |    2
+     3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_groupby_tab1 group by val2;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: count(*), sum(val), avg(val), ((sum(val))::double precision / (count(*))::double precision), val2
+   Group By Key: xc_groupby_tab1.val2
+   ->  Sort
+         Output: val2, val
+         Sort Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2, val
+(8 rows)
+
+-- joins and group by
+select count(*), sum(xc_groupby_tab1.val * xc_groupby_tab2.val), avg(xc_groupby_tab1.val*xc_groupby_tab2.val), sum(xc_groupby_tab1.val*xc_groupby_tab2.val)::float8/count(*), xc_groupby_tab1.val2, xc_groupby_tab2.val2 from xc_groupby_tab1 full outer join xc_groupby_tab2 on xc_groupby_tab1.val2 = xc_groupby_tab2.val2 group by xc_groupby_tab1.val2, xc_groupby_tab2.val2;
+ count | sum |         avg         |     ?column?     | val2 | val2 
+-------+-----+---------------------+------------------+------+------
+     9 |  78 |  8.6666666666666667 | 8.66666666666667 |    1 |    1
+     6 |  96 | 16.0000000000000000 |               16 |    2 |    2
+     3 |     |                     |                  |    3 |     
+     3 |     |                     |                  |      |    4
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select count(*), sum(xc_groupby_tab1.val * xc_groupby_tab2.val), avg(xc_groupby_tab1.val*xc_groupby_tab2.val), sum(xc_groupby_tab1.val*xc_groupby_tab2.val)::float8/count(*), xc_groupby_tab1.val2, xc_groupby_tab2.val2 from xc_groupby_tab1 full outer join xc_groupby_tab2 on xc_groupby_tab1.val2 = xc_groupby_tab2.val2 group by xc_groupby_tab1.val2, xc_groupby_tab2.val2;
+                                                                                                                                QUERY PLAN                                                                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: count(*), sum((xc_groupby_tab1.val * xc_groupby_tab2.val)), avg((xc_groupby_tab1.val * xc_groupby_tab2.val)), ((sum((xc_groupby_tab1.val * xc_groupby_tab2.val)))::double precision / (count(*))::double precision), xc_groupby_tab1.val2, xc_groupby_tab2.val2
+   Group By Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
+   ->  Sort
+         Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
+         Sort Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
+         ->  Hash Full Join
+               Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
+               Hash Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- aggregates over aggregates
+select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x;
+ sum 
+-----
+   8
+  17
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: sum(q1.y), q1.x
+   Group By Key: q1.x
+   ->  Sort
+         Output: q1.x, q1.y
+         Sort Key: q1.x
+         ->  Subquery Scan on q1
+               Output: q1.x, q1.y
+               ->  GroupAggregate
+                     Output: sum(xc_groupby_tab1.val), (xc_groupby_tab1.val2 % 2), xc_groupby_tab1.val2
+                     Group By Key: xc_groupby_tab1.val2
+                     ->  Sort
+                           Output: xc_groupby_tab1.val2, xc_groupby_tab1.val
+                           Sort Key: xc_groupby_tab1.val2
+                           ->  Seq Scan on public.xc_groupby_tab1
+                                 Output: xc_groupby_tab1.val2, xc_groupby_tab1.val
+(16 rows)
+
+-- group by without aggregate
+select val2 from xc_groupby_tab1 group by val2 order by val2;
+ val2 
+------
+    1
+    2
+    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select val2 from xc_groupby_tab1 group by val2 order by val2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Group
+   Output: val2
+   Group By Key: xc_groupby_tab1.val2
+   ->  Sort
+         Output: val2
+         Sort Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2
+(8 rows)
+
+select val + val2 from xc_groupby_tab1 group by val + val2;
+ ?column? 
+----------
+        2
+        3
+        4
+        7
+        8
+        9
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select val + val2 from xc_groupby_tab1 group by val + val2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Group
+   Output: ((val + val2))
+   Group By Key: ((xc_groupby_tab1.val + xc_groupby_tab1.val2))
+   ->  Sort
+         Output: ((val + val2))
+         Sort Key: ((xc_groupby_tab1.val + xc_groupby_tab1.val2))
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: (val + val2)
+(8 rows)
+
+select val + val2, val, val2 from xc_groupby_tab1 group by val, val2;
+ ?column? | val | val2 
+----------+-----+------
+        2 |   1 |    1
+        4 |   1 |    3
+        3 |   2 |    1
+        4 |   2 |    2
+        4 |   3 |    1
+        7 |   4 |    3
+        8 |   6 |    2
+        9 |   6 |    3
+(8 rows)
+
+explain (verbose true, costs false, nodes false) select val + val2, val, val2 from xc_groupby_tab1 group by val, val2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Group
+   Output: (val + val2), val, val2
+   Group By Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+   ->  Sort
+         Output: val, val2
+         Sort Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val, val2
+(8 rows)
+
+select xc_groupby_tab1.val + xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val, xc_groupby_tab2.val2;
+ ?column? | val | val2 
+----------+-----+------
+        2 |   1 |    1
+        6 |   2 |    4
+        5 |   3 |    2
+        7 |   3 |    4
+        5 |   4 |    1
+        6 |   4 |    2
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val + xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val, xc_groupby_tab2.val2;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Group
+   Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2), xc_groupby_tab1.val, xc_groupby_tab2.val2
+   Group By Key: xc_groupby_tab1.val, xc_groupby_tab2.val2
+   ->  Sort
+         Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+         Sort Key: xc_groupby_tab1.val, xc_groupby_tab2.val2
+         ->  Hash Join
+               Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+select xc_groupby_tab1.val + xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val + xc_groupby_tab2.val2;
+ ?column? 
+----------
+        2
+        5
+        6
+        7
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val + xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val + xc_groupby_tab2.val2;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Group
+   Output: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+   Group By Key: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+   ->  Sort
+         Output: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+         Sort Key: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+         ->  Hash Join
+               Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2)
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- group by with aggregates in expression
+select count(*) + sum(val) + avg(val), val2 from xc_groupby_tab1 group by val2 order by val2;
+      ?column?       | val2 
+---------------------+------
+ 11.0000000000000000 |    1
+ 14.0000000000000000 |    2
+ 17.6666666666666667 |    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(*) + sum(val) + avg(val), val2 from xc_groupby_tab1 group by val2 order by val2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ GroupAggregate
+   Output: (((count(*) + sum(val)))::numeric + avg(val)), val2
+   Group By Key: xc_groupby_tab1.val2
+   ->  Sort
+         Output: val2, val
+         Sort Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2, val
+(8 rows)
+
+-- group by with expressions in group by clause
+select sum(val), avg(val), 2 * val2 from xc_groupby_tab1 group by 2 * val2 order by 2 * val2;
+ sum |        avg         | ?column? 
+-----+--------------------+----------
+   6 | 2.0000000000000000 |        2
+   8 | 4.0000000000000000 |        4
+  11 | 3.6666666666666667 |        6
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select sum(val), avg(val), 2 * val2 from xc_groupby_tab1 group by 2 * val2 order by 2 * val2;
+                   QUERY PLAN                   
+------------------------------------------------
+ GroupAggregate
+   Output: sum(val), avg(val), ((2 * val2))
+   Group By Key: ((2 * xc_groupby_tab1.val2))
+   ->  Sort
+         Output: ((2 * val2)), val
+         Sort Key: ((2 * xc_groupby_tab1.val2))
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: (2 * val2), val
+(8 rows)
+
+drop table xc_groupby_tab1;
+drop table xc_groupby_tab2;
+-- some tests involving nulls, characters, float type etc.
+create table xc_groupby_def(a int, b varchar(25)); 
+insert into xc_groupby_def VALUES (NULL, NULL);
+insert into xc_groupby_def VALUES (1, NULL);
+insert into xc_groupby_def VALUES (NULL, 'One');
+insert into xc_groupby_def VALUES (2, 'Two');
+insert into xc_groupby_def VALUES (2, 'Two');
+insert into xc_groupby_def VALUES (3, 'Three');
+insert into xc_groupby_def VALUES (4, 'Three');
+insert into xc_groupby_def VALUES (5, 'Three');
+insert into xc_groupby_def VALUES (6, 'Two');
+insert into xc_groupby_def VALUES (7, NULL);
+insert into xc_groupby_def VALUES (8, 'Two');
+insert into xc_groupby_def VALUES (9, 'Three');
+insert into xc_groupby_def VALUES (10, 'Three');
+select avg(a), sum(a), count(*), b from xc_groupby_def group by b order by b;
+        avg         | sum | count |   b   
+--------------------+-----+-------+-------
+                    |     |     1 | One
+ 6.2000000000000000 |  31 |     5 | Three
+ 4.5000000000000000 |  18 |     4 | Two
+ 4.0000000000000000 |   8 |     3 | 
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select avg(a), sum(a), count(*), b from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ GroupAggregate
+   Output: avg(a), sum(a), count(*), b
+   Group By Key: xc_groupby_def.b
+   ->  Sort
+         Output: b, a
+         Sort Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b, a
+(8 rows)
+
+select b from xc_groupby_def group by b order by b;
+   b   
+-------
+ One
+ Three
+ Two
+ 
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select b from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Group
+   Output: b
+   Group By Key: xc_groupby_def.b
+   ->  Sort
+         Output: b
+         Sort Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+(8 rows)
+
+select b,count(b) from xc_groupby_def group by b order by b;
+   b   | count 
+-------+-------
+ One   |     1
+ Three |     5
+ Two   |     4
+       |     0
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select b,count(b) from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ GroupAggregate
+   Output: b, count(b)
+   Group By Key: xc_groupby_def.b
+   ->  Sort
+         Output: b
+         Sort Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+(8 rows)
+
+select count(*) from xc_groupby_def where b is null group by b;
+ count 
+-------
+     3
+(1 row)
+
+explain (verbose true, costs false, nodes false) select count(*) from xc_groupby_def where b is null group by b;
+                    QUERY PLAN                    
+--------------------------------------------------
+ GroupAggregate
+   Output: count(*), b
+   Group By Key: xc_groupby_def.b
+   ->  Sort
+         Output: b
+         Sort Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+               Filter: (xc_groupby_def.b IS NULL)
+(9 rows)
+
+create table xc_groupby_g(a int, b float, c numeric);
+insert into xc_groupby_g values(1,2.1,3.2);
+insert into xc_groupby_g values(1,2.1,3.2);
+insert into xc_groupby_g values(2,2.3,5.2);
+select sum(a) from xc_groupby_g group by a order by a;
+ sum 
+-----
+   2
+   2
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(a) from xc_groupby_g group by a order by a;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: sum(a), a
+   Group By Key: xc_groupby_g.a
+   ->  Sort
+         Output: a
+         Sort Key: xc_groupby_g.a
+         ->  Seq Scan on public.xc_groupby_g
+               Output: a
+(8 rows)
+
+select sum(b) from xc_groupby_g group by b order by b;
+ sum 
+-----
+ 4.2
+ 2.3
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(b) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: sum(b), b
+   Group By Key: xc_groupby_g.b
+   ->  Sort
+         Output: b
+         Sort Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b
+(8 rows)
+
+select sum(c) from xc_groupby_g group by b order by b;
+ sum 
+-----
+ 6.4
+ 5.2
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(c) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: sum(c), b
+   Group By Key: xc_groupby_g.b
+   ->  Sort
+         Output: b, c
+         Sort Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b, c
+(8 rows)
+
+select avg(a) from xc_groupby_g group by b order by b;
+          avg           
+------------------------
+ 1.00000000000000000000
+     2.0000000000000000
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(a) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: avg(a), b
+   Group By Key: xc_groupby_g.b
+   ->  Sort
+         Output: b, a
+         Sort Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b, a
+(8 rows)
+
+select avg(b) from xc_groupby_g group by c order by c;
+ avg 
+-----
+ 2.1
+ 2.3
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(b) from xc_groupby_g group by c order by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: avg(b), c
+   Group By Key: xc_groupby_g.c
+   ->  Sort
+         Output: c, b
+         Sort Key: xc_groupby_g.c
+         ->  Seq Scan on public.xc_groupby_g
+               Output: c, b
+(8 rows)
+
+select avg(c) from xc_groupby_g group by c order by c;
+        avg         
+--------------------
+ 3.2000000000000000
+ 5.2000000000000000
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(c) from xc_groupby_g group by c order by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: avg(c), c
+   Group By Key: xc_groupby_g.c
+   ->  Sort
+         Output: c
+         Sort Key: xc_groupby_g.c
+         ->  Seq Scan on public.xc_groupby_g
+               Output: c
+(8 rows)
+
+drop table xc_groupby_def;
+drop table xc_groupby_g;
+-- Combination 4 enable_hashagg off and replicated tables.
+-- repeat the same tests for replicated tables
+-- create required tables and fill them with data
+create table xc_groupby_tab1 (val int, val2 int);
+create table xc_groupby_tab2 (val int, val2 int);
+insert into xc_groupby_tab1 values (1, 1), (2, 1), (3, 1), (2, 2), (6, 2), (4, 3), (1, 3), (6, 3);
+insert into xc_groupby_tab2 values (1, 1), (4, 1), (8, 1), (2, 4), (9, 4), (3, 4), (4, 2), (5, 2), (3, 2);
+select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_groupby_tab1 group by val2 order by val2;
+ count | sum |        avg         |     ?column?     | val2 
+-------+-----+--------------------+------------------+------
+     3 |   6 | 2.0000000000000000 |                2 |    1
+     2 |   8 | 4.0000000000000000 |                4 |    2
+     3 |  11 | 3.6666666666666667 | 3.66666666666667 |    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(*), sum(val), avg(val), sum(val)::float8/count(*), val2 from xc_groupby_tab1 group by val2 order by val2;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: count(*), sum(val), avg(val), ((sum(val))::double precision / (count(*))::double precision), val2
+   Group By Key: xc_groupby_tab1.val2
+   ->  Sort
+         Output: val2, val
+         Sort Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2, val
+(8 rows)
+
+-- joins and group by
+select count(*), sum(xc_groupby_tab1.val * xc_groupby_tab2.val), avg(xc_groupby_tab1.val*xc_groupby_tab2.val), sum(xc_groupby_tab1.val*xc_groupby_tab2.val)::float8/count(*), xc_groupby_tab1.val2, xc_groupby_tab2.val2 from xc_groupby_tab1 full outer join xc_groupby_tab2 on xc_groupby_tab1.val2 = xc_groupby_tab2.val2 group by xc_groupby_tab1.val2, xc_groupby_tab2.val2 order by xc_groupby_tab1.val2, xc_groupby_tab2.val2;
+ count | sum |         avg         |     ?column?     | val2 | val2 
+-------+-----+---------------------+------------------+------+------
+     9 |  78 |  8.6666666666666667 | 8.66666666666667 |    1 |    1
+     6 |  96 | 16.0000000000000000 |               16 |    2 |    2
+     3 |     |                     |                  |    3 |     
+     3 |     |                     |                  |      |    4
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select count(*), sum(xc_groupby_tab1.val * xc_groupby_tab2.val), avg(xc_groupby_tab1.val*xc_groupby_tab2.val), sum(xc_groupby_tab1.val*xc_groupby_tab2.val)::float8/count(*), xc_groupby_tab1.val2, xc_groupby_tab2.val2 from xc_groupby_tab1 full outer join xc_groupby_tab2 on xc_groupby_tab1.val2 = xc_groupby_tab2.val2 group by xc_groupby_tab1.val2, xc_groupby_tab2.val2 order by xc_groupby_tab1.val2, xc_groupby_tab2.val2;
+                                                                                                                                QUERY PLAN                                                                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: count(*), sum((xc_groupby_tab1.val * xc_groupby_tab2.val)), avg((xc_groupby_tab1.val * xc_groupby_tab2.val)), ((sum((xc_groupby_tab1.val * xc_groupby_tab2.val)))::double precision / (count(*))::double precision), xc_groupby_tab1.val2, xc_groupby_tab2.val2
+   Group By Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
+   ->  Sort
+         Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
+         Sort Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
+         ->  Hash Full Join
+               Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
+               Hash Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- aggregates over aggregates
+select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x order by x;
+ sum 
+-----
+   8
+  17
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x order by x;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: sum(q1.y), q1.x
+   Group By Key: q1.x
+   ->  Sort
+         Output: q1.x, q1.y
+         Sort Key: q1.x
+         ->  Subquery Scan on q1
+               Output: q1.x, q1.y
+               ->  GroupAggregate
+                     Output: sum(xc_groupby_tab1.val), (xc_groupby_tab1.val2 % 2), xc_groupby_tab1.val2
+                     Group By Key: xc_groupby_tab1.val2
+                     ->  Sort
+                           Output: xc_groupby_tab1.val2, xc_groupby_tab1.val
+                           Sort Key: xc_groupby_tab1.val2
+                           ->  Seq Scan on public.xc_groupby_tab1
+                                 Output: xc_groupby_tab1.val2, xc_groupby_tab1.val
+(16 rows)
+
+-- group by without aggregate
+select val2 from xc_groupby_tab1 group by val2 order by val2;
+ val2 
+------
+    1
+    2
+    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select val2 from xc_groupby_tab1 group by val2 order by val2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Group
+   Output: val2
+   Group By Key: xc_groupby_tab1.val2
+   ->  Sort
+         Output: val2
+         Sort Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2
+(8 rows)
+
+select val + val2 from xc_groupby_tab1 group by val + val2 order by val + val2;
+ ?column? 
+----------
+        2
+        3
+        4
+        7
+        8
+        9
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select val + val2 from xc_groupby_tab1 group by val + val2 order by val + val2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Group
+   Output: ((val + val2))
+   Group By Key: ((xc_groupby_tab1.val + xc_groupby_tab1.val2))
+   ->  Sort
+         Output: ((val + val2))
+         Sort Key: ((xc_groupby_tab1.val + xc_groupby_tab1.val2))
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: (val + val2)
+(8 rows)
+
+select val + val2, val, val2 from xc_groupby_tab1 group by val, val2 order by val, val2;
+ ?column? | val | val2 
+----------+-----+------
+        2 |   1 |    1
+        4 |   1 |    3
+        3 |   2 |    1
+        4 |   2 |    2
+        4 |   3 |    1
+        7 |   4 |    3
+        8 |   6 |    2
+        9 |   6 |    3
+(8 rows)
+
+explain (verbose true, costs false, nodes false) select val + val2, val, val2 from xc_groupby_tab1 group by val, val2 order by val, val2;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Group
+   Output: (val + val2), val, val2
+   Group By Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+   ->  Sort
+         Output: val, val2
+         Sort Key: xc_groupby_tab1.val, xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val, val2
+(8 rows)
+
+select xc_groupby_tab1.val + xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val, xc_groupby_tab2.val2 order by xc_groupby_tab1.val, xc_groupby_tab2.val2;
+ ?column? | val | val2 
+----------+-----+------
+        2 |   1 |    1
+        6 |   2 |    4
+        5 |   3 |    2
+        7 |   3 |    4
+        5 |   4 |    1
+        6 |   4 |    2
+(6 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val + xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val, xc_groupby_tab2.val2 order by xc_groupby_tab1.val, xc_groupby_tab2.val2;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Group
+   Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2), xc_groupby_tab1.val, xc_groupby_tab2.val2
+   Group By Key: xc_groupby_tab1.val, xc_groupby_tab2.val2
+   ->  Sort
+         Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+         Sort Key: xc_groupby_tab1.val, xc_groupby_tab2.val2
+         ->  Hash Join
+               Output: xc_groupby_tab1.val, xc_groupby_tab2.val2
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+select xc_groupby_tab1.val + xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val + xc_groupby_tab2.val2 order by xc_groupby_tab1.val + xc_groupby_tab2.val2;
+ ?column? 
+----------
+        2
+        5
+        6
+        7
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select xc_groupby_tab1.val + xc_groupby_tab2.val2 from xc_groupby_tab1, xc_groupby_tab2 where xc_groupby_tab1.val = xc_groupby_tab2.val group by xc_groupby_tab1.val + xc_groupby_tab2.val2 order by xc_groupby_tab1.val + xc_groupby_tab2.val2;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Group
+   Output: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+   Group By Key: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+   ->  Sort
+         Output: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+         Sort Key: ((xc_groupby_tab1.val + xc_groupby_tab2.val2))
+         ->  Hash Join
+               Output: (xc_groupby_tab1.val + xc_groupby_tab2.val2)
+               Hash Cond: (xc_groupby_tab1.val = xc_groupby_tab2.val)
+               ->  Seq Scan on public.xc_groupby_tab1
+                     Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
+               ->  Hash
+                     Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+                     ->  Seq Scan on public.xc_groupby_tab2
+                           Output: xc_groupby_tab2.val2, xc_groupby_tab2.val
+(15 rows)
+
+-- group by with aggregates in expression
+select count(*) + sum(val) + avg(val), val2 from xc_groupby_tab1 group by val2 order by val2;
+      ?column?       | val2 
+---------------------+------
+ 11.0000000000000000 |    1
+ 14.0000000000000000 |    2
+ 17.6666666666666667 |    3
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select count(*) + sum(val) + avg(val), val2 from xc_groupby_tab1 group by val2 order by val2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ GroupAggregate
+   Output: (((count(*) + sum(val)))::numeric + avg(val)), val2
+   Group By Key: xc_groupby_tab1.val2
+   ->  Sort
+         Output: val2, val
+         Sort Key: xc_groupby_tab1.val2
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: val2, val
+(8 rows)
+
+-- group by with expressions in group by clause
+select sum(val), avg(val), 2 * val2 from xc_groupby_tab1 group by 2 * val2 order by 2 * val2;
+ sum |        avg         | ?column? 
+-----+--------------------+----------
+   6 | 2.0000000000000000 |        2
+   8 | 4.0000000000000000 |        4
+  11 | 3.6666666666666667 |        6
+(3 rows)
+
+explain (verbose true, costs false, nodes false) select sum(val), avg(val), 2 * val2 from xc_groupby_tab1 group by 2 * val2 order by 2 * val2;
+                   QUERY PLAN                   
+------------------------------------------------
+ GroupAggregate
+   Output: sum(val), avg(val), ((2 * val2))
+   Group By Key: ((2 * xc_groupby_tab1.val2))
+   ->  Sort
+         Output: ((2 * val2)), val
+         Sort Key: ((2 * xc_groupby_tab1.val2))
+         ->  Seq Scan on public.xc_groupby_tab1
+               Output: (2 * val2), val
+(8 rows)
+
+drop table xc_groupby_tab1;
+drop table xc_groupby_tab2;
+-- some tests involving nulls, characters, float type etc.
+create table xc_groupby_def(a int, b varchar(25)); 
+insert into xc_groupby_def VALUES (NULL, NULL);
+insert into xc_groupby_def VALUES (1, NULL);
+insert into xc_groupby_def VALUES (NULL, 'One');
+insert into xc_groupby_def VALUES (2, 'Two');
+insert into xc_groupby_def VALUES (2, 'Two');
+insert into xc_groupby_def VALUES (3, 'Three');
+insert into xc_groupby_def VALUES (4, 'Three');
+insert into xc_groupby_def VALUES (5, 'Three');
+insert into xc_groupby_def VALUES (6, 'Two');
+insert into xc_groupby_def VALUES (7, NULL);
+insert into xc_groupby_def VALUES (8, 'Two');
+insert into xc_groupby_def VALUES (9, 'Three');
+insert into xc_groupby_def VALUES (10, 'Three');
+select avg(a), sum(a), count(*), b from xc_groupby_def group by b order by b;
+        avg         | sum | count |   b   
+--------------------+-----+-------+-------
+                    |     |     1 | One
+ 6.2000000000000000 |  31 |     5 | Three
+ 4.5000000000000000 |  18 |     4 | Two
+ 4.0000000000000000 |   8 |     3 | 
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select avg(a), sum(a), count(*), b from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ GroupAggregate
+   Output: avg(a), sum(a), count(*), b
+   Group By Key: xc_groupby_def.b
+   ->  Sort
+         Output: b, a
+         Sort Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b, a
+(8 rows)
+
+select b from xc_groupby_def group by b order by b;
+   b   
+-------
+ One
+ Three
+ Two
+ 
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select b from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Group
+   Output: b
+   Group By Key: xc_groupby_def.b
+   ->  Sort
+         Output: b
+         Sort Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+(8 rows)
+
+select b,count(b) from xc_groupby_def group by b order by b;
+   b   | count 
+-------+-------
+ One   |     1
+ Three |     5
+ Two   |     4
+       |     0
+(4 rows)
+
+explain (verbose true, costs false, nodes false) select b,count(b) from xc_groupby_def group by b order by b;
+                  QUERY PLAN                   
+-----------------------------------------------
+ GroupAggregate
+   Output: b, count(b)
+   Group By Key: xc_groupby_def.b
+   ->  Sort
+         Output: b
+         Sort Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+(8 rows)
+
+select count(*) from xc_groupby_def where b is null group by b;
+ count 
+-------
+     3
+(1 row)
+
+explain (verbose true, costs false, nodes false) select count(*) from xc_groupby_def where b is null group by b;
+                    QUERY PLAN                    
+--------------------------------------------------
+ GroupAggregate
+   Output: count(*), b
+   Group By Key: xc_groupby_def.b
+   ->  Sort
+         Output: b
+         Sort Key: xc_groupby_def.b
+         ->  Seq Scan on public.xc_groupby_def
+               Output: b
+               Filter: (xc_groupby_def.b IS NULL)
+(9 rows)
+
+create table xc_groupby_g(a int, b float, c numeric);
+insert into xc_groupby_g values(1,2.1,3.2);
+insert into xc_groupby_g values(1,2.1,3.2);
+insert into xc_groupby_g values(2,2.3,5.2);
+select sum(a) from xc_groupby_g group by a order by a;
+ sum 
+-----
+   2
+   2
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(a) from xc_groupby_g group by a order by a;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: sum(a), a
+   Group By Key: xc_groupby_g.a
+   ->  Sort
+         Output: a
+         Sort Key: xc_groupby_g.a
+         ->  Seq Scan on public.xc_groupby_g
+               Output: a
+(8 rows)
+
+select sum(b) from xc_groupby_g group by b order by b;
+ sum 
+-----
+ 4.2
+ 2.3
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(b) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: sum(b), b
+   Group By Key: xc_groupby_g.b
+   ->  Sort
+         Output: b
+         Sort Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b
+(8 rows)
+
+select sum(c) from xc_groupby_g group by b order by b;
+ sum 
+-----
+ 6.4
+ 5.2
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select sum(c) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: sum(c), b
+   Group By Key: xc_groupby_g.b
+   ->  Sort
+         Output: b, c
+         Sort Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b, c
+(8 rows)
+
+select avg(a) from xc_groupby_g group by b order by b;
+          avg           
+------------------------
+ 1.00000000000000000000
+     2.0000000000000000
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(a) from xc_groupby_g group by b order by b;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: avg(a), b
+   Group By Key: xc_groupby_g.b
+   ->  Sort
+         Output: b, a
+         Sort Key: xc_groupby_g.b
+         ->  Seq Scan on public.xc_groupby_g
+               Output: b, a
+(8 rows)
+
+select avg(b) from xc_groupby_g group by c order by c;
+ avg 
+-----
+ 2.1
+ 2.3
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(b) from xc_groupby_g group by c order by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: avg(b), c
+   Group By Key: xc_groupby_g.c
+   ->  Sort
+         Output: c, b
+         Sort Key: xc_groupby_g.c
+         ->  Seq Scan on public.xc_groupby_g
+               Output: c, b
+(8 rows)
+
+select avg(c) from xc_groupby_g group by c order by c;
+        avg         
+--------------------
+ 3.2000000000000000
+ 5.2000000000000000
+(2 rows)
+
+explain (verbose true, costs false, nodes false) select avg(c) from xc_groupby_g group by c order by c;
+                 QUERY PLAN                  
+---------------------------------------------
+ GroupAggregate
+   Output: avg(c), c
+   Group By Key: xc_groupby_g.c
+   ->  Sort
+         Output: c
+         Sort Key: xc_groupby_g.c
+         ->  Seq Scan on public.xc_groupby_g
+               Output: c
+(8 rows)
+
+drop table xc_groupby_def;
+drop table xc_groupby_g;
+reset enable_hashagg;
+create table groupby_b (c_int8 int8,c_int2 int2,c_oid oid,c_int4 int4,c_bool bool,c_int2vector int2vector,c_oidvector oidvector,c_char char(10),c_name name,c_text text,c_bpchar bpchar,c_bytea bytea,c_varchar varchar(20),c_float4 float4,c_float8 float8,c_numeric numeric,c_abstime abstime,c_reltime reltime,c_date date,c_time time,c_timestamp timestamp,c_timestamptz timestamptz,c_interval interval,c_timetz timetz,c_box box,c_money money,c_tsvector tsvector);
+create or replace function redis_func_0000(rownums integer) returns boolean as $$ declare 
+    i integer;
+    star_tsw timestamp without time zone;
+    star_date date;
+    distnums integer;
+begin
+    distnums = 30;
+    star_tsw = '2012-08-21 12:11:50';
+    star_date = '1999-01-21';
+
+    for i in 1..rownums loop
+        insert into groupby_b values(i,i-35,i+10,i*3,i%2,cast(''||i+4090||' '||i||' '||i-4090||'' as int2vector),cast(''||i-21||' '||i*2||' '||i+21||' '||i*21||'' as oidvector),'turkey'||i||'','hello'||i*322||'','svn_git'||i*112||'','ad '||i*22||'',cast('mpp'||i||'' as bytea),'abs'||i*98||'','10.'||i+2||'','23.'||i+5||'','1024.'||i+16||'',star_date-i,cast(''||(i%4096)/16||'' as reltime),star_date-666+i,(select timestamp 'epoch' +  (i*2121) * interval '11 second')::time,i+star_tsw,star_date+i,cast(''||i+4090||'.4096' as interval),(select timestamp with time zone 'epoch' +  (i*1024) * interval '21 second')::timetz,cast('('||i+4090||','||i||'),('||i-4090||','||i+1024||')' as box),cast(''||i+4090||'.'||i*21||'' as money),cast(''||i||' mpp db ver '||i+1024||' vrspcb' as tsvector));
+    end loop;
+    return true;     
+end;
+$$ language plpgsql;
+call redis_func_0000(168);
+ redis_func_0000 
+-----------------
+ t
+(1 row)
+
+explain (verbose true, costs false, nodes false)
+select (sum(length(c_varchar)),sum(length(c_char))) from groupby_b group by c_int8,c_numeric,c_varchar order by c_int8;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: ROW(sum(length((c_varchar)::text)), sum(length(c_char))), c_int8, c_numeric, c_varchar
+   Group By Key: groupby_b.c_int8, groupby_b.c_numeric, groupby_b.c_varchar
+   ->  Sort
+         Output: c_int8, c_numeric, c_varchar, c_char
+         Sort Key: groupby_b.c_int8, groupby_b.c_numeric, groupby_b.c_varchar
+         ->  Seq Scan on public.groupby_b
+               Output: c_int8, c_numeric, c_varchar, c_char
+(8 rows)
+
+select (sum(length(c_varchar)),sum(length(c_char))) from groupby_b group by c_int8,c_numeric,c_varchar order by c_int8;
+  row   
+--------
+ (5,10)
+ (6,10)
+ (6,10)
+ (6,10)
+ (6,10)
+ (6,10)
+ (6,10)
+ (6,10)
+ (6,10)
+ (6,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (7,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+ (8,10)
+(168 rows)
+
+explain (verbose true, costs false, nodes false)
+select (sum(c_int2),avg(c_int2),sum(c_int4),avg(c_int4),sum(c_int8),avg(c_int8),sum(c_numeric),avg(c_numeric),sum(length(c_varchar)),avg(length(c_varchar)),sum(length(c_char)),avg(length(c_char)),sum(length(c_text)),avg(length(c_text)),sum(length(c_varchar)),avg(length(c_varchar)),sum(length(c_varchar)),avg(length(c_varchar)))
+from groupby_b 
+group by c_int8,c_numeric,c_varchar order by c_int8;
+                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Output: ROW(sum(c_int2), avg(c_int2), sum(c_int4), avg(c_int4), sum(c_int8), avg(c_int8), sum(c_numeric), avg(c_numeric), sum(length((c_varchar)::text)), avg(length((c_varchar)::text)), sum(length(c_char)), avg(length(c_char)), sum(length(c_text)), avg(length(c_text)), sum(length((c_varchar)::text)), avg(length((c_varchar)::text)), sum(length((c_varchar)::text)), avg(length((c_varchar)::text))), c_int8, c_numeric, c_varchar
+   Group By Key: groupby_b.c_int8, groupby_b.c_numeric, groupby_b.c_varchar
+   ->  Sort
+         Output: c_int8, c_numeric, c_varchar, c_int2, c_int4, c_char, c_text
+         Sort Key: groupby_b.c_int8, groupby_b.c_numeric, groupby_b.c_varchar
+         ->  Seq Scan on public.groupby_b
+               Output: c_int8, c_numeric, c_varchar, c_int2, c_int4, c_char, c_text
+(8 rows)
+
+select (sum(c_int2),avg(c_int2),sum(c_int4),avg(c_int4),sum(c_int8),avg(c_int8),sum(c_numeric),avg(c_numeric),sum(length(c_varchar)),avg(length(c_varchar)),sum(length(c_char)),avg(length(c_char)),sum(length(c_text)),avg(length(c_text)),sum(length(c_varchar)),avg(length(c_varchar)),sum(length(c_varchar)),avg(length(c_varchar)))
+from groupby_b 
+group by c_int8,c_numeric,c_varchar order by c_int8;
+                                                                                                           row                                                                                                            
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ (-34,-34.0000000000000000,3,3.0000000000000000,1,1.00000000000000000000,1024.17,1024.1700000000000000,5,5.0000000000000000,10,10.0000000000000000,10,10.0000000000000000,5,5.0000000000000000,5,5.0000000000000000)
+ (-33,-33.0000000000000000,6,6.0000000000000000,2,2.0000000000000000,1024.18,1024.1800000000000000,6,6.0000000000000000,10,10.0000000000000000,10,10.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-32,-32.0000000000000000,9,9.0000000000000000,3,3.0000000000000000,1024.19,1024.1900000000000000,6,6.0000000000000000,10,10.0000000000000000,10,10.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-31,-31.0000000000000000,12,12.0000000000000000,4,4.0000000000000000,1024.20,1024.2000000000000000,6,6.0000000000000000,10,10.0000000000000000,10,10.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-30,-30.0000000000000000,15,15.0000000000000000,5,5.0000000000000000,1024.21,1024.2100000000000000,6,6.0000000000000000,10,10.0000000000000000,10,10.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-29,-29.0000000000000000,18,18.0000000000000000,6,6.0000000000000000,1024.22,1024.2200000000000000,6,6.0000000000000000,10,10.0000000000000000,10,10.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-28,-28.0000000000000000,21,21.0000000000000000,7,7.0000000000000000,1024.23,1024.2300000000000000,6,6.0000000000000000,10,10.0000000000000000,10,10.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-27,-27.0000000000000000,24,24.0000000000000000,8,8.0000000000000000,1024.24,1024.2400000000000000,6,6.0000000000000000,10,10.0000000000000000,10,10.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-26,-26.0000000000000000,27,27.0000000000000000,9,9.0000000000000000,1024.25,1024.2500000000000000,6,6.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-25,-25.0000000000000000,30,30.0000000000000000,10,10.0000000000000000,1024.26,1024.2600000000000000,6,6.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,6,6.0000000000000000,6,6.0000000000000000)
+ (-24,-24.0000000000000000,33,33.0000000000000000,11,11.0000000000000000,1024.27,1024.2700000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-23,-23.0000000000000000,36,36.0000000000000000,12,12.0000000000000000,1024.28,1024.2800000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-22,-22.0000000000000000,39,39.0000000000000000,13,13.0000000000000000,1024.29,1024.2900000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-21,-21.0000000000000000,42,42.0000000000000000,14,14.0000000000000000,1024.30,1024.3000000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-20,-20.0000000000000000,45,45.0000000000000000,15,15.0000000000000000,1024.31,1024.3100000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-19,-19.0000000000000000,48,48.0000000000000000,16,16.0000000000000000,1024.32,1024.3200000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-18,-18.0000000000000000,51,51.0000000000000000,17,17.0000000000000000,1024.33,1024.3300000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-17,-17.0000000000000000,54,54.0000000000000000,18,18.0000000000000000,1024.34,1024.3400000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-16,-16.0000000000000000,57,57.0000000000000000,19,19.0000000000000000,1024.35,1024.3500000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-15,-15.0000000000000000,60,60.0000000000000000,20,20.0000000000000000,1024.36,1024.3600000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-14,-14.0000000000000000,63,63.0000000000000000,21,21.0000000000000000,1024.37,1024.3700000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-13,-13.0000000000000000,66,66.0000000000000000,22,22.0000000000000000,1024.38,1024.3800000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-12,-12.0000000000000000,69,69.0000000000000000,23,23.0000000000000000,1024.39,1024.3900000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-11,-11.0000000000000000,72,72.0000000000000000,24,24.0000000000000000,1024.40,1024.4000000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-10,-10.0000000000000000,75,75.0000000000000000,25,25.0000000000000000,1024.41,1024.4100000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-9,-9.0000000000000000,78,78.0000000000000000,26,26.0000000000000000,1024.42,1024.4200000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-8,-8.0000000000000000,81,81.0000000000000000,27,27.0000000000000000,1024.43,1024.4300000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-7,-7.0000000000000000,84,84.0000000000000000,28,28.0000000000000000,1024.44,1024.4400000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-6,-6.0000000000000000,87,87.0000000000000000,29,29.0000000000000000,1024.45,1024.4500000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-5,-5.0000000000000000,90,90.0000000000000000,30,30.0000000000000000,1024.46,1024.4600000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-4,-4.0000000000000000,93,93.0000000000000000,31,31.0000000000000000,1024.47,1024.4700000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-3,-3.0000000000000000,96,96.0000000000000000,32,32.0000000000000000,1024.48,1024.4800000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-2,-2.0000000000000000,99,99.0000000000000000,33,33.0000000000000000,1024.49,1024.4900000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (-1,-1.00000000000000000000,102,102.0000000000000000,34,34.0000000000000000,1024.50,1024.5000000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (0,0.00000000000000000000,105,105.0000000000000000,35,35.0000000000000000,1024.51,1024.5100000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (1,1.00000000000000000000,108,108.0000000000000000,36,36.0000000000000000,1024.52,1024.5200000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (2,2.0000000000000000,111,111.0000000000000000,37,37.0000000000000000,1024.53,1024.5300000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (3,3.0000000000000000,114,114.0000000000000000,38,38.0000000000000000,1024.54,1024.5400000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (4,4.0000000000000000,117,117.0000000000000000,39,39.0000000000000000,1024.55,1024.5500000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (5,5.0000000000000000,120,120.0000000000000000,40,40.0000000000000000,1024.56,1024.5600000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (6,6.0000000000000000,123,123.0000000000000000,41,41.0000000000000000,1024.57,1024.5700000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (7,7.0000000000000000,126,126.0000000000000000,42,42.0000000000000000,1024.58,1024.5800000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (8,8.0000000000000000,129,129.0000000000000000,43,43.0000000000000000,1024.59,1024.5900000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (9,9.0000000000000000,132,132.0000000000000000,44,44.0000000000000000,1024.60,1024.6000000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (10,10.0000000000000000,135,135.0000000000000000,45,45.0000000000000000,1024.61,1024.6100000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (11,11.0000000000000000,138,138.0000000000000000,46,46.0000000000000000,1024.62,1024.6200000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (12,12.0000000000000000,141,141.0000000000000000,47,47.0000000000000000,1024.63,1024.6300000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (13,13.0000000000000000,144,144.0000000000000000,48,48.0000000000000000,1024.64,1024.6400000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (14,14.0000000000000000,147,147.0000000000000000,49,49.0000000000000000,1024.65,1024.6500000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (15,15.0000000000000000,150,150.0000000000000000,50,50.0000000000000000,1024.66,1024.6600000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (16,16.0000000000000000,153,153.0000000000000000,51,51.0000000000000000,1024.67,1024.6700000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (17,17.0000000000000000,156,156.0000000000000000,52,52.0000000000000000,1024.68,1024.6800000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (18,18.0000000000000000,159,159.0000000000000000,53,53.0000000000000000,1024.69,1024.6900000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (19,19.0000000000000000,162,162.0000000000000000,54,54.0000000000000000,1024.70,1024.7000000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (20,20.0000000000000000,165,165.0000000000000000,55,55.0000000000000000,1024.71,1024.7100000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (21,21.0000000000000000,168,168.0000000000000000,56,56.0000000000000000,1024.72,1024.7200000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (22,22.0000000000000000,171,171.0000000000000000,57,57.0000000000000000,1024.73,1024.7300000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (23,23.0000000000000000,174,174.0000000000000000,58,58.0000000000000000,1024.74,1024.7400000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (24,24.0000000000000000,177,177.0000000000000000,59,59.0000000000000000,1024.75,1024.7500000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (25,25.0000000000000000,180,180.0000000000000000,60,60.0000000000000000,1024.76,1024.7600000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (26,26.0000000000000000,183,183.0000000000000000,61,61.0000000000000000,1024.77,1024.7700000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (27,27.0000000000000000,186,186.0000000000000000,62,62.0000000000000000,1024.78,1024.7800000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (28,28.0000000000000000,189,189.0000000000000000,63,63.0000000000000000,1024.79,1024.7900000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (29,29.0000000000000000,192,192.0000000000000000,64,64.0000000000000000,1024.80,1024.8000000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (30,30.0000000000000000,195,195.0000000000000000,65,65.0000000000000000,1024.81,1024.8100000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (31,31.0000000000000000,198,198.0000000000000000,66,66.0000000000000000,1024.82,1024.8200000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (32,32.0000000000000000,201,201.0000000000000000,67,67.0000000000000000,1024.83,1024.8300000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (33,33.0000000000000000,204,204.0000000000000000,68,68.0000000000000000,1024.84,1024.8400000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (34,34.0000000000000000,207,207.0000000000000000,69,69.0000000000000000,1024.85,1024.8500000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (35,35.0000000000000000,210,210.0000000000000000,70,70.0000000000000000,1024.86,1024.8600000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (36,36.0000000000000000,213,213.0000000000000000,71,71.0000000000000000,1024.87,1024.8700000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (37,37.0000000000000000,216,216.0000000000000000,72,72.0000000000000000,1024.88,1024.8800000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (38,38.0000000000000000,219,219.0000000000000000,73,73.0000000000000000,1024.89,1024.8900000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (39,39.0000000000000000,222,222.0000000000000000,74,74.0000000000000000,1024.90,1024.9000000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (40,40.0000000000000000,225,225.0000000000000000,75,75.0000000000000000,1024.91,1024.9100000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (41,41.0000000000000000,228,228.0000000000000000,76,76.0000000000000000,1024.92,1024.9200000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (42,42.0000000000000000,231,231.0000000000000000,77,77.0000000000000000,1024.93,1024.9300000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (43,43.0000000000000000,234,234.0000000000000000,78,78.0000000000000000,1024.94,1024.9400000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (44,44.0000000000000000,237,237.0000000000000000,79,79.0000000000000000,1024.95,1024.9500000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (45,45.0000000000000000,240,240.0000000000000000,80,80.0000000000000000,1024.96,1024.9600000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (46,46.0000000000000000,243,243.0000000000000000,81,81.0000000000000000,1024.97,1024.9700000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (47,47.0000000000000000,246,246.0000000000000000,82,82.0000000000000000,1024.98,1024.9800000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (48,48.0000000000000000,249,249.0000000000000000,83,83.0000000000000000,1024.99,1024.9900000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (49,49.0000000000000000,252,252.0000000000000000,84,84.0000000000000000,1024.100,1024.1000000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (50,50.0000000000000000,255,255.0000000000000000,85,85.0000000000000000,1024.101,1024.1010000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (51,51.0000000000000000,258,258.0000000000000000,86,86.0000000000000000,1024.102,1024.1020000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (52,52.0000000000000000,261,261.0000000000000000,87,87.0000000000000000,1024.103,1024.1030000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (53,53.0000000000000000,264,264.0000000000000000,88,88.0000000000000000,1024.104,1024.1040000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (54,54.0000000000000000,267,267.0000000000000000,89,89.0000000000000000,1024.105,1024.1050000000000000,7,7.0000000000000000,10,10.0000000000000000,11,11.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (55,55.0000000000000000,270,270.0000000000000000,90,90.0000000000000000,1024.106,1024.1060000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (56,56.0000000000000000,273,273.0000000000000000,91,91.0000000000000000,1024.107,1024.1070000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (57,57.0000000000000000,276,276.0000000000000000,92,92.0000000000000000,1024.108,1024.1080000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (58,58.0000000000000000,279,279.0000000000000000,93,93.0000000000000000,1024.109,1024.1090000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (59,59.0000000000000000,282,282.0000000000000000,94,94.0000000000000000,1024.110,1024.1100000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (60,60.0000000000000000,285,285.0000000000000000,95,95.0000000000000000,1024.111,1024.1110000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (61,61.0000000000000000,288,288.0000000000000000,96,96.0000000000000000,1024.112,1024.1120000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (62,62.0000000000000000,291,291.0000000000000000,97,97.0000000000000000,1024.113,1024.1130000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (63,63.0000000000000000,294,294.0000000000000000,98,98.0000000000000000,1024.114,1024.1140000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (64,64.0000000000000000,297,297.0000000000000000,99,99.0000000000000000,1024.115,1024.1150000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (65,65.0000000000000000,300,300.0000000000000000,100,100.0000000000000000,1024.116,1024.1160000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (66,66.0000000000000000,303,303.0000000000000000,101,101.0000000000000000,1024.117,1024.1170000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (67,67.0000000000000000,306,306.0000000000000000,102,102.0000000000000000,1024.118,1024.1180000000000000,7,7.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,7,7.0000000000000000,7,7.0000000000000000)
+ (68,68.0000000000000000,309,309.0000000000000000,103,103.0000000000000000,1024.119,1024.1190000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (69,69.0000000000000000,312,312.0000000000000000,104,104.0000000000000000,1024.120,1024.1200000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (70,70.0000000000000000,315,315.0000000000000000,105,105.0000000000000000,1024.121,1024.1210000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (71,71.0000000000000000,318,318.0000000000000000,106,106.0000000000000000,1024.122,1024.1220000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (72,72.0000000000000000,321,321.0000000000000000,107,107.0000000000000000,1024.123,1024.1230000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (73,73.0000000000000000,324,324.0000000000000000,108,108.0000000000000000,1024.124,1024.1240000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (74,74.0000000000000000,327,327.0000000000000000,109,109.0000000000000000,1024.125,1024.1250000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (75,75.0000000000000000,330,330.0000000000000000,110,110.0000000000000000,1024.126,1024.1260000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (76,76.0000000000000000,333,333.0000000000000000,111,111.0000000000000000,1024.127,1024.1270000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (77,77.0000000000000000,336,336.0000000000000000,112,112.0000000000000000,1024.128,1024.1280000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (78,78.0000000000000000,339,339.0000000000000000,113,113.0000000000000000,1024.129,1024.1290000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (79,79.0000000000000000,342,342.0000000000000000,114,114.0000000000000000,1024.130,1024.1300000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (80,80.0000000000000000,345,345.0000000000000000,115,115.0000000000000000,1024.131,1024.1310000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (81,81.0000000000000000,348,348.0000000000000000,116,116.0000000000000000,1024.132,1024.1320000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (82,82.0000000000000000,351,351.0000000000000000,117,117.0000000000000000,1024.133,1024.1330000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (83,83.0000000000000000,354,354.0000000000000000,118,118.0000000000000000,1024.134,1024.1340000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (84,84.0000000000000000,357,357.0000000000000000,119,119.0000000000000000,1024.135,1024.1350000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (85,85.0000000000000000,360,360.0000000000000000,120,120.0000000000000000,1024.136,1024.1360000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (86,86.0000000000000000,363,363.0000000000000000,121,121.0000000000000000,1024.137,1024.1370000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (87,87.0000000000000000,366,366.0000000000000000,122,122.0000000000000000,1024.138,1024.1380000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (88,88.0000000000000000,369,369.0000000000000000,123,123.0000000000000000,1024.139,1024.1390000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (89,89.0000000000000000,372,372.0000000000000000,124,124.0000000000000000,1024.140,1024.1400000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (90,90.0000000000000000,375,375.0000000000000000,125,125.0000000000000000,1024.141,1024.1410000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (91,91.0000000000000000,378,378.0000000000000000,126,126.0000000000000000,1024.142,1024.1420000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (92,92.0000000000000000,381,381.0000000000000000,127,127.0000000000000000,1024.143,1024.1430000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (93,93.0000000000000000,384,384.0000000000000000,128,128.0000000000000000,1024.144,1024.1440000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (94,94.0000000000000000,387,387.0000000000000000,129,129.0000000000000000,1024.145,1024.1450000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (95,95.0000000000000000,390,390.0000000000000000,130,130.0000000000000000,1024.146,1024.1460000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (96,96.0000000000000000,393,393.0000000000000000,131,131.0000000000000000,1024.147,1024.1470000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (97,97.0000000000000000,396,396.0000000000000000,132,132.0000000000000000,1024.148,1024.1480000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (98,98.0000000000000000,399,399.0000000000000000,133,133.0000000000000000,1024.149,1024.1490000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (99,99.0000000000000000,402,402.0000000000000000,134,134.0000000000000000,1024.150,1024.1500000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (100,100.0000000000000000,405,405.0000000000000000,135,135.0000000000000000,1024.151,1024.1510000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (101,101.0000000000000000,408,408.0000000000000000,136,136.0000000000000000,1024.152,1024.1520000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (102,102.0000000000000000,411,411.0000000000000000,137,137.0000000000000000,1024.153,1024.1530000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (103,103.0000000000000000,414,414.0000000000000000,138,138.0000000000000000,1024.154,1024.1540000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (104,104.0000000000000000,417,417.0000000000000000,139,139.0000000000000000,1024.155,1024.1550000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (105,105.0000000000000000,420,420.0000000000000000,140,140.0000000000000000,1024.156,1024.1560000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (106,106.0000000000000000,423,423.0000000000000000,141,141.0000000000000000,1024.157,1024.1570000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (107,107.0000000000000000,426,426.0000000000000000,142,142.0000000000000000,1024.158,1024.1580000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (108,108.0000000000000000,429,429.0000000000000000,143,143.0000000000000000,1024.159,1024.1590000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (109,109.0000000000000000,432,432.0000000000000000,144,144.0000000000000000,1024.160,1024.1600000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (110,110.0000000000000000,435,435.0000000000000000,145,145.0000000000000000,1024.161,1024.1610000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (111,111.0000000000000000,438,438.0000000000000000,146,146.0000000000000000,1024.162,1024.1620000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (112,112.0000000000000000,441,441.0000000000000000,147,147.0000000000000000,1024.163,1024.1630000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (113,113.0000000000000000,444,444.0000000000000000,148,148.0000000000000000,1024.164,1024.1640000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (114,114.0000000000000000,447,447.0000000000000000,149,149.0000000000000000,1024.165,1024.1650000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (115,115.0000000000000000,450,450.0000000000000000,150,150.0000000000000000,1024.166,1024.1660000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (116,116.0000000000000000,453,453.0000000000000000,151,151.0000000000000000,1024.167,1024.1670000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (117,117.0000000000000000,456,456.0000000000000000,152,152.0000000000000000,1024.168,1024.1680000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (118,118.0000000000000000,459,459.0000000000000000,153,153.0000000000000000,1024.169,1024.1690000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (119,119.0000000000000000,462,462.0000000000000000,154,154.0000000000000000,1024.170,1024.1700000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (120,120.0000000000000000,465,465.0000000000000000,155,155.0000000000000000,1024.171,1024.1710000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (121,121.0000000000000000,468,468.0000000000000000,156,156.0000000000000000,1024.172,1024.1720000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (122,122.0000000000000000,471,471.0000000000000000,157,157.0000000000000000,1024.173,1024.1730000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (123,123.0000000000000000,474,474.0000000000000000,158,158.0000000000000000,1024.174,1024.1740000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (124,124.0000000000000000,477,477.0000000000000000,159,159.0000000000000000,1024.175,1024.1750000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (125,125.0000000000000000,480,480.0000000000000000,160,160.0000000000000000,1024.176,1024.1760000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (126,126.0000000000000000,483,483.0000000000000000,161,161.0000000000000000,1024.177,1024.1770000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (127,127.0000000000000000,486,486.0000000000000000,162,162.0000000000000000,1024.178,1024.1780000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (128,128.0000000000000000,489,489.0000000000000000,163,163.0000000000000000,1024.179,1024.1790000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (129,129.0000000000000000,492,492.0000000000000000,164,164.0000000000000000,1024.180,1024.1800000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (130,130.0000000000000000,495,495.0000000000000000,165,165.0000000000000000,1024.181,1024.1810000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (131,131.0000000000000000,498,498.0000000000000000,166,166.0000000000000000,1024.182,1024.1820000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (132,132.0000000000000000,501,501.0000000000000000,167,167.0000000000000000,1024.183,1024.1830000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+ (133,133.0000000000000000,504,504.0000000000000000,168,168.0000000000000000,1024.184,1024.1840000000000000,8,8.0000000000000000,10,10.0000000000000000,12,12.0000000000000000,8,8.0000000000000000,8,8.0000000000000000)
+(168 rows)
+
+drop table groupby_b;
+drop function redis_func_0000;
+reset enable_hashagg;
+create table agg_test(a int, b int, c int, d int);
+explain (verbose on, costs off) select a from agg_test group by a;
+            QUERY PLAN             
+-----------------------------------
+ HashAggregate
+   Output: a
+   Group By Key: agg_test.a
+   ->  Seq Scan on public.agg_test
+         Output: a
+(5 rows)
+
+explain (verbose on, costs off) select a, b from agg_test group by a, b;
+               QUERY PLAN               
+----------------------------------------
+ HashAggregate
+   Output: a, b
+   Group By Key: agg_test.a, agg_test.b
+   ->  Seq Scan on public.agg_test
+         Output: a, b
+(5 rows)
+
+explain (verbose on, costs off) select a, b from agg_test group by b, a;
+               QUERY PLAN               
+----------------------------------------
+ HashAggregate
+   Output: a, b
+   Group By Key: agg_test.b, agg_test.a
+   ->  Seq Scan on public.agg_test
+         Output: a, b
+(5 rows)
+
+explain (verbose on, costs off) select a, b from agg_test group by a, b, c;
+                     QUERY PLAN                     
+----------------------------------------------------
+ HashAggregate
+   Output: a, b, c
+   Group By Key: agg_test.a, agg_test.b, agg_test.c
+   ->  Seq Scan on public.agg_test
+         Output: a, b, c
+(5 rows)
+
+explain (verbose on, costs off) select a, c from agg_test group by a, c;
+               QUERY PLAN               
+----------------------------------------
+ HashAggregate
+   Output: a, c
+   Group By Key: agg_test.a, agg_test.c
+   ->  Seq Scan on public.agg_test
+         Output: a, c
+(5 rows)
+
+explain (verbose on, costs off) select b, c from agg_test group by b, c;
+               QUERY PLAN               
+----------------------------------------
+ HashAggregate
+   Output: b, c
+   Group By Key: agg_test.b, agg_test.c
+   ->  Seq Scan on public.agg_test
+         Output: b, c
+(5 rows)
+
+explain (verbose on, costs off) select distinct a, b from agg_test;
+               QUERY PLAN               
+----------------------------------------
+ HashAggregate
+   Output: a, b
+   Group By Key: agg_test.a, agg_test.b
+   ->  Seq Scan on public.agg_test
+         Output: a, b
+(5 rows)
+
+explain (verbose on, costs off) select distinct a, b, c, d from agg_test;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ HashAggregate
+   Output: a, b, c, d
+   Group By Key: agg_test.a, agg_test.b, agg_test.c, agg_test.d
+   ->  Seq Scan on public.agg_test
+         Output: a, b, c, d
+(5 rows)
+
+explain (verbose on, costs off) select distinct b, c, d from agg_test;
+                     QUERY PLAN                     
+----------------------------------------------------
+ HashAggregate
+   Output: b, c, d
+   Group By Key: agg_test.b, agg_test.c, agg_test.d
+   ->  Seq Scan on public.agg_test
+         Output: b, c, d
+(5 rows)
+
+explain (verbose on, costs off) select distinct c, d from agg_test;
+               QUERY PLAN               
+----------------------------------------
+ HashAggregate
+   Output: c, d
+   Group By Key: agg_test.c, agg_test.d
+   ->  Seq Scan on public.agg_test
+         Output: c, d
+(5 rows)
+
+insert into agg_test values(1, 11, generate_series(1, 30) % 5,  generate_series(1, 30) % 6);
+insert into agg_test select * from agg_test;
+insert into agg_test select * from agg_test;
+insert into agg_test select * from agg_test;
+insert into agg_test select * from agg_test;
+insert into agg_test select * from agg_test;
+analyze agg_test;
+--agg choose multiple distribute key
+explain (verbose on, costs off)select c , d from agg_test group by c, d;
+               QUERY PLAN               
+----------------------------------------
+ HashAggregate
+   Output: c, d
+   Group By Key: agg_test.c, agg_test.d
+   ->  Seq Scan on public.agg_test
+         Output: c, d
+(5 rows)
+
+select c, d from agg_test group by c, d order by 1, 2;
+ c | d 
+---+---
+ 0 | 0
+ 0 | 1
+ 0 | 2
+ 0 | 3
+ 0 | 4
+ 0 | 5
+ 1 | 0
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 2 | 0
+ 2 | 1
+ 2 | 2
+ 2 | 3
+ 2 | 4
+ 2 | 5
+ 3 | 0
+ 3 | 1
+ 3 | 2
+ 3 | 3
+ 3 | 4
+ 3 | 5
+ 4 | 0
+ 4 | 1
+ 4 | 2
+ 4 | 3
+ 4 | 4
+ 4 | 5
+(30 rows)
+
+drop table agg_test;

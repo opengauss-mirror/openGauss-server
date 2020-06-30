@@ -1,0 +1,17 @@
+<refentry id="SQL-CREATE_APP_WORKLOAD_GROUP_MAPPING">
+<refmeta>
+<refentrytitle>CREATE APP WORKLOAD GROUP MAPPING</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE APP WORKLOAD GROUP MAPPING</refname>
+<refpurpose>create a workload group mapping</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE APP WORKLOAD GROUP MAPPING app_name
+    [ WITH ( WORKLOAD_GPNAME  = workload_gpname ) ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,1039 @@
+--
+-- XC_FOR_UPDATE
+--
+-- create some tables
+create table t1(val int, val2 int);
+create table t2(val int, val2 int);
+create table t3(val int, val2 int);
+create table p1(a int, b int);
+create table c1(a int, b int,d int, e int);
+-- insert some rows in them
+insert into t1 values(1,11),(2,11);
+insert into t2 values(3,11),(4,11);
+insert into t3 values(5,11),(6,11);
+insert into p1 values(55,66),(77,88),(111,222),(123,345);
+insert into c1 values(111,222,333,444),(123,345,567,789);
+select * from t1 order by val;
+ val | val2 
+-----+------
+   1 |   11
+   2 |   11
+(2 rows)
+
+select * from t2 order by val;
+ val | val2 
+-----+------
+   3 |   11
+   4 |   11
+(2 rows)
+
+select * from t3 order by val;
+ val | val2 
+-----+------
+   5 |   11
+   6 |   11
+(2 rows)
+
+select * from p1 order by a;
+  a  |  b  
+-----+-----
+  55 |  66
+  77 |  88
+ 111 | 222
+ 123 | 345
+(4 rows)
+
+select * from c1 order by a;
+  a  |  b  |  d  |  e  
+-----+-----+-----+-----
+ 111 | 222 | 333 | 444
+ 123 | 345 | 567 | 789
+(2 rows)
+
+-- create a view too
+create view v1 as select * from t1 for update;
+-- test a few queries with row marks
+select * from t1 order by 1 for update of t1 nowait;
+ val | val2 
+-----+------
+   1 |   11
+   2 |   11
+(2 rows)
+
+select * from t1, t2, t3 order by 1 for update;
+ val | val2 | val | val2 | val | val2 
+-----+------+-----+------+-----+------
+   1 |   11 |   3 |   11 |   5 |   11
+   1 |   11 |   3 |   11 |   6 |   11
+   1 |   11 |   4 |   11 |   5 |   11
+   1 |   11 |   4 |   11 |   6 |   11
+   2 |   11 |   3 |   11 |   5 |   11
+   2 |   11 |   3 |   11 |   6 |   11
+   2 |   11 |   4 |   11 |   5 |   11
+   2 |   11 |   4 |   11 |   6 |   11
+(8 rows)
+
+select * from v1 order by val;
+ val | val2 
+-----+------
+   1 |   11
+   2 |   11
+(2 rows)
+
+WITH q1 AS (SELECT * from t1 order by 1 FOR UPDATE) SELECT * FROM q1,t2 order by 1 FOR UPDATE;
+ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
+WITH q1 AS (SELECT * from t1 order by 1) SELECT * FROM q1;
+ val | val2 
+-----+------
+   1 |   11
+   2 |   11
+(2 rows)
+
+WITH q1 AS (SELECT * from t1 order by 1) SELECT * FROM q1 FOR UPDATE;
+ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
+WITH q1 AS (SELECT * from t1 order by 1 FOR UPDATE) SELECT * FROM q1 FOR UPDATE;
+ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
+-- confirm that in various join scenarios for update gets to the remote query
+-- single table case
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for update of t1 nowait;
+           QUERY PLAN            
+---------------------------------
+ LockRows
+   Output: val, val2, ctid
+   ->  Seq Scan on public.t1
+         Output: val, val2, ctid
+(4 rows)
+
+-- two table case
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 where t1.val = t2.val for update nowait;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+   ->  Hash Join
+         Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+         Hash Cond: (t1.val = t2.val)
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Hash
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(11 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 where t1.val = t2.val for update;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+   ->  Hash Join
+         Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+         Hash Cond: (t1.val = t2.val)
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Hash
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(11 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 where t1.val = t2.val for share;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+   ->  Hash Join
+         Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+         Hash Cond: (t1.val = t2.val)
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Hash
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(11 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 where t1.val = t2.val;
+                 QUERY PLAN                 
+--------------------------------------------
+ Hash Join
+   Output: t1.val, t1.val2, t2.val, t2.val2
+   Hash Cond: (t1.val = t2.val)
+   ->  Seq Scan on public.t1
+         Output: t1.val, t1.val2
+   ->  Hash
+         Output: t2.val, t2.val2
+         ->  Seq Scan on public.t2
+               Output: t2.val, t2.val2
+(9 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2;
+                 QUERY PLAN                 
+--------------------------------------------
+ Nested Loop
+   Output: t1.val, t1.val2, t2.val, t2.val2
+   ->  Seq Scan on public.t1
+         Output: t1.val, t1.val2
+   ->  Materialize
+         Output: t2.val, t2.val2
+         ->  Seq Scan on public.t2
+               Output: t2.val, t2.val2
+(8 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for update;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Materialize
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(10 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for update nowait;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Materialize
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(10 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for share nowait;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Materialize
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(10 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for share;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t1.ctid, t2.ctid
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Materialize
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(10 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for share of t2;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t2.ctid, t1.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t2.ctid, t1.ctid
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Materialize
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(10 rows)
+
+-- three table case
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Nested Loop
+   Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2
+         ->  Materialize
+               Output: t2.val, t2.val2
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2
+   ->  Materialize
+         Output: t3.val, t3.val2
+         ->  Seq Scan on public.t3
+               Output: t3.val, t3.val2
+(14 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for update;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t2.ctid, t3.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t2.ctid, t3.ctid
+         ->  Nested Loop
+               Output: t1.val, t1.val2, t1.ctid, t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t1
+                     Output: t1.val, t1.val2, t1.ctid
+               ->  Materialize
+                     Output: t2.val, t2.val2, t2.ctid
+                     ->  Seq Scan on public.t2
+                           Output: t2.val, t2.val2, t2.ctid
+         ->  Materialize
+               Output: t3.val, t3.val2, t3.ctid
+               ->  Seq Scan on public.t3
+                     Output: t3.val, t3.val2, t3.ctid
+(16 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for update of t1;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t2.ctid, t3.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t2.ctid, t3.ctid
+         ->  Nested Loop
+               Output: t1.val, t1.val2, t1.ctid, t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t1
+                     Output: t1.val, t1.val2, t1.ctid
+               ->  Materialize
+                     Output: t2.val, t2.val2, t2.ctid
+                     ->  Seq Scan on public.t2
+                           Output: t2.val, t2.val2, t2.ctid
+         ->  Materialize
+               Output: t3.val, t3.val2, t3.ctid
+               ->  Seq Scan on public.t3
+                     Output: t3.val, t3.val2, t3.ctid
+(16 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for update of t1,t3;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t3.ctid, t2.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t3.ctid, t2.ctid
+         ->  Nested Loop
+               Output: t1.val, t1.val2, t1.ctid, t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t1
+                     Output: t1.val, t1.val2, t1.ctid
+               ->  Materialize
+                     Output: t2.val, t2.val2, t2.ctid
+                     ->  Seq Scan on public.t2
+                           Output: t2.val, t2.val2, t2.ctid
+         ->  Materialize
+               Output: t3.val, t3.val2, t3.ctid
+               ->  Seq Scan on public.t3
+                     Output: t3.val, t3.val2, t3.ctid
+(16 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for update of t1,t3 nowait;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t3.ctid, t2.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t3.ctid, t2.ctid
+         ->  Nested Loop
+               Output: t1.val, t1.val2, t1.ctid, t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t1
+                     Output: t1.val, t1.val2, t1.ctid
+               ->  Materialize
+                     Output: t2.val, t2.val2, t2.ctid
+                     ->  Seq Scan on public.t2
+                           Output: t2.val, t2.val2, t2.ctid
+         ->  Materialize
+               Output: t3.val, t3.val2, t3.ctid
+               ->  Seq Scan on public.t3
+                     Output: t3.val, t3.val2, t3.ctid
+(16 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for share of t1,t2 nowait;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t2.ctid, t3.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2, t1.ctid, t2.ctid, t3.ctid
+         ->  Nested Loop
+               Output: t1.val, t1.val2, t1.ctid, t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t1
+                     Output: t1.val, t1.val2, t1.ctid
+               ->  Materialize
+                     Output: t2.val, t2.val2, t2.ctid
+                     ->  Seq Scan on public.t2
+                           Output: t2.val, t2.val2, t2.ctid
+         ->  Materialize
+               Output: t3.val, t3.val2, t3.ctid
+               ->  Seq Scan on public.t3
+                     Output: t3.val, t3.val2, t3.ctid
+(16 rows)
+
+-- check a few subquery cases
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from (select * from t1 for update of t1 nowait) as foo;
+                   QUERY PLAN                   
+------------------------------------------------
+ Subquery Scan on foo
+   Output: foo.val, foo.val2
+   ->  LockRows
+         Output: t1.val, t1.val2, t1.ctid
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+(6 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 where val in (select val from t2 for update of t2 nowait) for update;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t1.ctid, "ANY_subquery".val
+   ->  Hash Join
+         Output: t1.val, t1.val2, t1.ctid, "ANY_subquery".val
+         Hash Cond: (t1.val = "ANY_subquery".val)
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Hash
+               Output: "ANY_subquery".val
+               ->  HashAggregate
+                     Output: "ANY_subquery".val
+                     Group By Key: "ANY_subquery".val
+                     ->  Subquery Scan on "ANY_subquery"
+                           Output: "ANY_subquery".val
+                           ->  LockRows
+                                 Output: t2.val, t2.ctid
+                                 ->  Seq Scan on public.t2
+                                       Output: t2.val, t2.ctid
+(18 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 where val in (select val from t2 for update of t2 nowait);
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Hash Join
+   Output: t1.val, t1.val2
+   Hash Cond: (t1.val = "ANY_subquery".val)
+   ->  Seq Scan on public.t1
+         Output: t1.val, t1.val2
+   ->  Hash
+         Output: "ANY_subquery".val
+         ->  HashAggregate
+               Output: "ANY_subquery".val
+               Group By Key: "ANY_subquery".val
+               ->  Subquery Scan on "ANY_subquery"
+                     Output: "ANY_subquery".val
+                     ->  LockRows
+                           Output: t2.val, t2.ctid
+                           ->  Seq Scan on public.t2
+                                 Output: t2.val, t2.ctid
+(16 rows)
+
+-- test multiple row marks
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2 for share of t2 for update of t1;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ LockRows
+   Output: t1.val, t1.val2, t2.val, t2.val2, t2.ctid, t1.ctid
+   ->  Nested Loop
+         Output: t1.val, t1.val2, t2.val, t2.val2, t2.ctid, t1.ctid
+         ->  Seq Scan on public.t1
+               Output: t1.val, t1.val2, t1.ctid
+         ->  Materialize
+               Output: t2.val, t2.val2, t2.ctid
+               ->  Seq Scan on public.t2
+                     Output: t2.val, t2.val2, t2.ctid
+(10 rows)
+
+-- make sure FOR UPDATE takes prioriy over FOR SHARE when mentioned for the same table
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for share of t1 for update of t1;
+           QUERY PLAN            
+---------------------------------
+ LockRows
+   Output: val, val2, ctid
+   ->  Seq Scan on public.t1
+         Output: val, val2, ctid
+(4 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for update of t1 for share of t1;
+           QUERY PLAN            
+---------------------------------
+ LockRows
+   Output: val, val2, ctid
+   ->  Seq Scan on public.t1
+         Output: val, val2, ctid
+(4 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for share of t1 for share of t1 for update of t1;
+           QUERY PLAN            
+---------------------------------
+ LockRows
+   Output: val, val2, ctid
+   ->  Seq Scan on public.t1
+         Output: val, val2, ctid
+(4 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for share of t1 for share of t1 for share of t1;
+           QUERY PLAN            
+---------------------------------
+ LockRows
+   Output: val, val2, ctid
+   ->  Seq Scan on public.t1
+         Output: val, val2, ctid
+(4 rows)
+
+-- make sure NOWAIT is used in remote query even if it is not mentioned with FOR UPDATE clause
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 for share of t1 for share of t1 nowait for update of t1;
+           QUERY PLAN            
+---------------------------------
+ LockRows
+   Output: val, val2, ctid
+   ->  Seq Scan on public.t1
+         Output: val, val2, ctid
+(4 rows)
+
+-- same table , different aliases and different row marks for different aliases
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 a,t1 b for share of a for update of b;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ LockRows
+   Output: a.val, a.val2, b.val, b.val2, a.ctid, b.ctid
+   ->  Nested Loop
+         Output: a.val, a.val2, b.val, b.val2, a.ctid, b.ctid
+         ->  Seq Scan on public.t1 a
+               Output: a.val, a.val2, a.ctid
+         ->  Materialize
+               Output: b.val, b.val2, b.ctid
+               ->  Seq Scan on public.t1 b
+                     Output: b.val, b.val2, b.ctid
+(10 rows)
+
+-- test WITH queries
+-- join of a WITH table and a normal table
+explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1 FOR UPDATE) SELECT * FROM q1,t2 FOR UPDATE;
+ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
+explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1) SELECT * FROM q1;
+            QUERY PLAN             
+-----------------------------------
+ CTE Scan on q1
+   Output: q1.val, q1.val2
+   CTE q1
+     ->  Seq Scan on public.t1
+           Output: t1.val, t1.val2
+(5 rows)
+
+-- make sure row marks are no ops for queries on WITH tables
+explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1) SELECT * FROM q1 FOR UPDATE;
+ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
+explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1 FOR UPDATE) SELECT * FROM q1 FOR UPDATE;
+ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
+-- test case of inheried tables
+select * from p1 order by 1 for update;
+  a  |  b  
+-----+-----
+  55 |  66
+  77 |  88
+ 111 | 222
+ 123 | 345
+(4 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from p1 for update;
+         QUERY PLAN          
+-----------------------------
+ LockRows
+   Output: a, b, ctid
+   ->  Seq Scan on public.p1
+         Output: a, b, ctid
+(4 rows)
+
+select * from c1 order by 1 for update;
+  a  |  b  |  d  |  e  
+-----+-----+-----+-----
+ 111 | 222 | 333 | 444
+ 123 | 345 | 567 | 789
+(2 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)  select * from c1 for update;
+            QUERY PLAN            
+----------------------------------
+ LockRows
+   Output: a, b, d, e, ctid
+   ->  Seq Scan on public.c1
+         Output: a, b, d, e, ctid
+(4 rows)
+
+-- drop objects created
+drop table c1;
+drop table p1;
+drop view v1;
+drop table t1;
+drop table t2;
+drop table t3;
+--new add test cases from developer test and customer's case
+create table t1(a int,b int,c int);
+create table t2(a int,b int,c int);
+create table t3(a int,b int,c int);
+create table rep(a int,b int,c int);
+create table vt(a int,b int,c int) with(orientation = column);
+create foreign table ft (id int not null) server gsmpp_server options(format 'text', location 'gsfs://127.0.0.1:99999/test.data', mode 'normal', delimiter '|');
+ERROR:  server "gsmpp_server" does not exist
+create view view_t1 as select * from t1;
+create view view_vt as select * from vt;
+create view view_ft as select * from ft;
+ERROR:  relation "ft" does not exist on datanode1
+LINE 1: create view view_ft as select * from ft;
+                                             ^
+insert into t1 values(1,1,1);
+insert into t1 values(2,2,2);
+insert into t1 values(3,3,3);
+insert into t2 values(3,3,3);
+insert into t2 values(4,4,4);
+insert into t3 values(1,1,1);
+insert into t3 values(2,2,2);
+insert into t3 values(3,3,3);
+--test support table type and view for update
+select * from t1 for update;
+ a | b | c 
+---+---+---
+ 1 | 1 | 1
+ 2 | 2 | 2
+ 3 | 3 | 3
+(3 rows)
+
+select * from view_t1 for update;
+ a | b | c 
+---+---+---
+ 1 | 1 | 1
+ 2 | 2 | 2
+ 3 | 3 | 3
+(3 rows)
+
+select * from vt for update;
+ERROR:  SELECT FOR UPDATE/SHARE cannot be used with column table "vt"
+select * from view_vt for update;
+ERROR:  unrecognized node type: 2008 when executing executor node.
+select * from ft for update;
+ERROR:  relation "ft" does not exist on datanode1
+LINE 1: select * from ft for update;
+                      ^
+select * from view_ft for update;
+ERROR:  relation "view_ft" does not exist on datanode1
+LINE 1: select * from view_ft for update;
+                      ^
+--test case from customer's application
+select * from t1 m where exists (select * from t2 n where m.a+2=n.b) order by a for update;
+ a | b | c 
+---+---+---
+ 1 | 1 | 1
+ 2 | 2 | 2
+(2 rows)
+
+select * from t1 t where exists (select * from t3 a where a.a = t.a) order by a for update;
+ a | b | c 
+---+---+---
+ 1 | 1 | 1
+ 2 | 2 | 2
+ 3 | 3 | 3
+(3 rows)
+
+select * from t1 t where exists (select 1 from (select b.a from t2 b where exists (select 1 from t3 t1 where t1.a = b.a)) c where c.a = t.a) order by a for update;
+ a | b | c 
+---+---+---
+ 3 | 3 | 3
+(1 row)
+
+select * from t1 m where exists (select * from t2 n where m.a+2=n.b for update) for update;
+ a | b | c 
+---+---+---
+ 1 | 1 | 1
+ 2 | 2 | 2
+(2 rows)
+
+select 1 from t1 t where exists (select * from t3 a where a.a = t.a for update) for update;
+ ?column? 
+----------
+        1
+        1
+        1
+(3 rows)
+
+select * from t1 m where exists (select * from t2 n where m.a+2=n.b order by a for update) order by a for update;
+ a | b | c 
+---+---+---
+ 1 | 1 | 1
+ 2 | 2 | 2
+(2 rows)
+
+select 1 from t1 t where exists (select 1 from (select b.a from t2 b where exists (select 1 from t3 t1 where t1.a = b.a)) c where c.a = t.a for update) for update;
+ ?column? 
+----------
+        1
+(1 row)
+
+--test unsupport case of multiple FOR UPDATE/SHARE or multiple lock table
+select * from t1,(select * from t1 for update) for update of t1;
+ a | b | c | a | b | c 
+---+---+---+---+---+---
+ 1 | 1 | 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 2 | 2 | 2
+ 1 | 1 | 1 | 3 | 3 | 3
+ 2 | 2 | 2 | 1 | 1 | 1
+ 2 | 2 | 2 | 2 | 2 | 2
+ 2 | 2 | 2 | 3 | 3 | 3
+ 3 | 3 | 3 | 1 | 1 | 1
+ 3 | 3 | 3 | 2 | 2 | 2
+ 3 | 3 | 3 | 3 | 3 | 3
+(9 rows)
+
+select * from (select * from t1 for update) as a, (select * from t1 for update) as b for update;
+ a | b | c | a | b | c 
+---+---+---+---+---+---
+ 1 | 1 | 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 2 | 2 | 2
+ 1 | 1 | 1 | 3 | 3 | 3
+ 2 | 2 | 2 | 1 | 1 | 1
+ 2 | 2 | 2 | 2 | 2 | 2
+ 2 | 2 | 2 | 3 | 3 | 3
+ 3 | 3 | 3 | 1 | 1 | 1
+ 3 | 3 | 3 | 2 | 2 | 2
+ 3 | 3 | 3 | 3 | 3 | 3
+(9 rows)
+
+--no need add redistribute specially
+explain verbose select * from t1,t2 where t1.a=t2.a for update of t1;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=53.76..490.69 rows=18915 width=36)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t1.ctid, t2.ctid
+   ->  Hash Join  (cost=53.76..301.54 rows=18915 distinct=[200, 200] width=36)
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t1.ctid, t2.ctid
+         Hash Cond: (t1.a = t2.a)
+         ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+         ->  Hash  (cost=29.45..29.45 rows=1945 width=18)
+               Output: t2.a, t2.b, t2.c, t2.ctid
+               ->  Seq Scan on public.t2  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t2.a, t2.b, t2.c, t2.ctid
+(11 rows)
+
+--no need add redistribute specially
+explain verbose select * from t1,t2 where t1.a=t2.b for update of t1;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=53.76..490.69 rows=18915 width=36)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t1.ctid, t2.ctid
+   ->  Hash Join  (cost=53.76..301.54 rows=18915 distinct=[200, 200] width=36)
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t1.ctid, t2.ctid
+         Hash Cond: (t1.a = t2.b)
+         ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+         ->  Hash  (cost=29.45..29.45 rows=1945 width=18)
+               Output: t2.a, t2.b, t2.c, t2.ctid
+               ->  Seq Scan on public.t2  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t2.a, t2.b, t2.c, t2.ctid
+(11 rows)
+
+--need add redistribute specially
+explain verbose select * from t1,t2 where t1.b=t2.b for update of t1;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=53.76..490.69 rows=18915 width=36)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t1.ctid, t2.ctid
+   ->  Hash Join  (cost=53.76..301.54 rows=18915 distinct=[200, 200] width=36)
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t1.ctid, t2.ctid
+         Hash Cond: (t1.b = t2.b)
+         ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+         ->  Hash  (cost=29.45..29.45 rows=1945 width=18)
+               Output: t2.a, t2.b, t2.c, t2.ctid
+               ->  Seq Scan on public.t2  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t2.a, t2.b, t2.c, t2.ctid
+(11 rows)
+
+--need add redistribute specially
+explain verbose select * from t1,t2 where t1.b=t2.a for update of t1;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=53.76..490.69 rows=18915 width=36)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t1.ctid, t2.ctid
+   ->  Hash Join  (cost=53.76..301.54 rows=18915 distinct=[200, 200] width=36)
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t1.ctid, t2.ctid
+         Hash Cond: (t1.b = t2.a)
+         ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+         ->  Hash  (cost=29.45..29.45 rows=1945 width=18)
+               Output: t2.a, t2.b, t2.c, t2.ctid
+               ->  Seq Scan on public.t2  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t2.a, t2.b, t2.c, t2.ctid
+(11 rows)
+
+--no need add redistribute specially
+explain verbose select * from t1,t2 where t1.a=t2.a for update of t2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=53.76..490.69 rows=18915 width=36)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t2.ctid, t1.ctid
+   ->  Hash Join  (cost=53.76..301.54 rows=18915 distinct=[200, 200] width=36)
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t2.ctid, t1.ctid
+         Hash Cond: (t1.a = t2.a)
+         ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+         ->  Hash  (cost=29.45..29.45 rows=1945 width=18)
+               Output: t2.a, t2.b, t2.c, t2.ctid
+               ->  Seq Scan on public.t2  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t2.a, t2.b, t2.c, t2.ctid
+(11 rows)
+
+--need add redistribute specially
+explain verbose select * from t1,t2 where t1.a=t2.b for update of t2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=53.76..490.69 rows=18915 width=36)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t2.ctid, t1.ctid
+   ->  Hash Join  (cost=53.76..301.54 rows=18915 distinct=[200, 200] width=36)
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t2.ctid, t1.ctid
+         Hash Cond: (t1.a = t2.b)
+         ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+         ->  Hash  (cost=29.45..29.45 rows=1945 width=18)
+               Output: t2.a, t2.b, t2.c, t2.ctid
+               ->  Seq Scan on public.t2  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t2.a, t2.b, t2.c, t2.ctid
+(11 rows)
+
+--need add redistribute specially
+explain verbose select * from t1,t2 where t1.b=t2.b for update of t2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=53.76..490.69 rows=18915 width=36)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t2.ctid, t1.ctid
+   ->  Hash Join  (cost=53.76..301.54 rows=18915 distinct=[200, 200] width=36)
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t2.ctid, t1.ctid
+         Hash Cond: (t1.b = t2.b)
+         ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+         ->  Hash  (cost=29.45..29.45 rows=1945 width=18)
+               Output: t2.a, t2.b, t2.c, t2.ctid
+               ->  Seq Scan on public.t2  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t2.a, t2.b, t2.c, t2.ctid
+(11 rows)
+
+--no need add redistribute specially
+explain verbose select * from t1,t2 where t1.b=t2.a for update of t2;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=53.76..490.69 rows=18915 width=36)
+   Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t2.ctid, t1.ctid
+   ->  Hash Join  (cost=53.76..301.54 rows=18915 distinct=[200, 200] width=36)
+         Output: t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, t2.ctid, t1.ctid
+         Hash Cond: (t1.b = t2.a)
+         ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+         ->  Hash  (cost=29.45..29.45 rows=1945 width=18)
+               Output: t2.a, t2.b, t2.c, t2.ctid
+               ->  Seq Scan on public.t2  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t2.a, t2.b, t2.c, t2.ctid
+(11 rows)
+
+--no need add redistribute for replication table
+explain verbose select * from rep,t1 for update of rep;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ LockRows  (cost=0.00..85181.82 rows=3783025 width=36)
+   Output: rep.a, rep.b, rep.c, t1.a, t1.b, t1.c, rep.ctid, t1.ctid
+   ->  Nested Loop  (cost=0.00..47351.57 rows=3783025 width=36)
+         Output: rep.a, rep.b, rep.c, t1.a, t1.b, t1.c, rep.ctid, t1.ctid
+         ->  Seq Scan on public.rep  (cost=0.00..29.45 rows=1945 width=18)
+               Output: rep.a, rep.b, rep.c, rep.ctid
+         ->  Materialize  (cost=0.00..39.17 rows=1945 width=18)
+               Output: t1.a, t1.b, t1.c, t1.ctid
+               ->  Seq Scan on public.t1  (cost=0.00..29.45 rows=1945 width=18)
+                     Output: t1.a, t1.b, t1.c, t1.ctid
+(10 rows)
+
+drop view view_t1;
+drop view view_vt;
+drop view view_ft;
+ERROR:  view "view_ft" does not exist
+drop table t1;
+drop table t2;
+drop table t3;
+drop table rep;
+drop table vt;
+drop foreign table ft;
+ERROR:  foreign table "ft" does not exist
+--test lock partition
+create table lock_partition_001(val int, val2 int)
+partition by range(val)
+(
+    partition p1 values less than (2451179) ,
+    partition p2 values less than (2451544) ,
+    partition p3 values less than (2451910) ,
+    partition p4 values less than (2452275) ,
+    partition p5 values less than (2452640) ,
+    partition p6 values less than (2453005) ,
+    partition p7 values less than (maxvalue)
+);
+create table lock_partition_002(val int, val2 int)
+partition by range(val)
+(
+    partition p1 values less than (2451179) ,
+    partition p2 values less than (2451544) ,
+    partition p3 values less than (2451910) ,
+    partition p4 values less than (2452275) ,
+    partition p5 values less than (2452640) ,
+    partition p6 values less than (2453005) ,
+    partition p7 values less than (maxvalue)
+);
+create table lock_partition_003(val int, val2 int)
+partition by range(val)
+(
+    partition p1 values less than (2451179) ,
+    partition p2 values less than (2451544) ,
+    partition p3 values less than (2451910) ,
+    partition p4 values less than (2452275) ,
+    partition p5 values less than (2452640) ,
+    partition p6 values less than (2453005) ,
+    partition p7 values less than (maxvalue)
+);
+insert into lock_partition_001 values(1,1);
+insert into lock_partition_002 values(2,2);
+insert into lock_partition_003 values(3,3);
+insert into lock_partition_003 values(3,11);
+insert into lock_partition_003 values(3,12);
+insert into lock_partition_003 values(3,13);
+select * from lock_partition_001, lock_partition_002, lock_partition_003 order by lock_partition_003.val2 for update of lock_partition_001;
+ val | val2 | val | val2 | val | val2 
+-----+------+-----+------+-----+------
+   1 |    1 |   2 |    2 |   3 |    3
+   1 |    1 |   2 |    2 |   3 |   11
+   1 |    1 |   2 |    2 |   3 |   12
+   1 |    1 |   2 |    2 |   3 |   13
+(4 rows)
+
+explain (costs off, verbose on, nodes off) select * from lock_partition_001, lock_partition_002, lock_partition_003 order by lock_partition_003.val2 for update of lock_partition_001;
+                                                                                                                                                                QUERY PLAN                                                                                                                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: lock_partition_001.val, lock_partition_001.val2, lock_partition_002.val, lock_partition_002.val2, lock_partition_003.val, lock_partition_003.val2, lock_partition_001.ctid, lock_partition_001.tableoid, lock_partition_002.ctid, lock_partition_002.tableoid, lock_partition_003.ctid, lock_partition_003.tableoid
+   Sort Key: lock_partition_003.val2
+   ->  LockRows
+         Output: lock_partition_001.val, lock_partition_001.val2, lock_partition_002.val, lock_partition_002.val2, lock_partition_003.val, lock_partition_003.val2, lock_partition_001.ctid, lock_partition_001.tableoid, lock_partition_002.ctid, lock_partition_002.tableoid, lock_partition_003.ctid, lock_partition_003.tableoid
+         ->  Nested Loop
+               Output: lock_partition_001.val, lock_partition_001.val2, lock_partition_002.val, lock_partition_002.val2, lock_partition_003.val, lock_partition_003.val2, lock_partition_001.ctid, lock_partition_001.tableoid, lock_partition_002.ctid, lock_partition_002.tableoid, lock_partition_003.ctid, lock_partition_003.tableoid
+               ->  Nested Loop
+                     Output: lock_partition_001.val, lock_partition_001.val2, lock_partition_001.ctid, lock_partition_001.tableoid, lock_partition_002.val, lock_partition_002.val2, lock_partition_002.ctid, lock_partition_002.tableoid
+                     ->  Partition Iterator
+                           Output: lock_partition_001.val, lock_partition_001.val2, lock_partition_001.ctid, lock_partition_001.tableoid
+                           Iterations: 7
+                           ->  Partitioned Seq Scan on public.lock_partition_001
+                                 Output: lock_partition_001.val, lock_partition_001.val2, lock_partition_001.ctid, lock_partition_001.tableoid
+                                 Selected Partitions:  1..7
+                     ->  Materialize
+                           Output: lock_partition_002.val, lock_partition_002.val2, lock_partition_002.ctid, lock_partition_002.tableoid
+                           ->  Partition Iterator
+                                 Output: lock_partition_002.val, lock_partition_002.val2, lock_partition_002.ctid, lock_partition_002.tableoid
+                                 Iterations: 7
+                                 ->  Partitioned Seq Scan on public.lock_partition_002
+                                       Output: lock_partition_002.val, lock_partition_002.val2, lock_partition_002.ctid, lock_partition_002.tableoid
+                                       Selected Partitions:  1..7
+               ->  Materialize
+                     Output: lock_partition_003.val, lock_partition_003.val2, lock_partition_003.ctid, lock_partition_003.tableoid
+                     ->  Partition Iterator
+                           Output: lock_partition_003.val, lock_partition_003.val2, lock_partition_003.ctid, lock_partition_003.tableoid
+                           Iterations: 7
+                           ->  Partitioned Seq Scan on public.lock_partition_003
+                                 Output: lock_partition_003.val, lock_partition_003.val2, lock_partition_003.ctid, lock_partition_003.tableoid
+                                 Selected Partitions:  1..7
+(31 rows)
+
+drop table lock_partition_001;
+drop table lock_partition_002;
+drop table lock_partition_003;
+create table customer
+(
+    c_customer_sk             integer               not null,
+    c_customer_id             char(16)              not null,
+    c_current_cdemo_sk        integer                       ,
+    c_current_hdemo_sk        integer                       ,
+    c_current_addr_sk         integer                       ,
+    c_first_shipto_date_sk    integer                       ,
+    c_first_sales_date_sk     integer                       ,
+    c_salutation              char(10)                      ,
+    c_first_name              char(20)                      ,
+    c_last_name               char(30)                      ,
+    c_preferred_cust_flag     char(1)                       ,
+    c_birth_day               integer                       ,
+    c_birth_month             integer                       ,
+    c_birth_year              integer                       ,
+    c_birth_country           varchar(20)                   ,
+    c_login                   char(13)                      ,
+    c_email_address           char(50)                      ,
+    c_last_review_date        char(10)                      
+); 
+create table customer_address
+(
+    ca_address_sk             integer               not null,
+    ca_address_id             char(16)              not null,
+    ca_street_number          char(10)                      ,
+    ca_street_name            varchar(60)                   ,
+    ca_street_type            char(15)                      ,
+    ca_suite_number           char(10)                      ,
+    ca_city                   varchar(60)                   ,
+    ca_county                 varchar(30)                   ,
+    ca_state                  char(2)                       ,
+    ca_zip                    char(10)                      ,
+    ca_country                varchar(20)                   ,
+    ca_gmt_offset             decimal(5,2)                  ,
+    ca_location_type          char(20)                     
+);
+create table household_demographics
+(
+    hd_demo_sk                integer               not null,
+    hd_income_band_sk         integer                       ,
+    hd_buy_potential          char(15)                      ,
+    hd_dep_count              integer                       ,
+    hd_vehicle_count          integer                       
+);
+--failed for limit
+select c_current_addr_sk, c_current_hdemo_sk, c_first_shipto_date_sk
+from customer a where exists
+(select ca_address_sk from customer_address b where a.c_current_addr_sk = b.ca_address_sk + b.ca_address_sk)
+or exists
+(select hd_demo_sk from household_demographics c where a.c_current_hdemo_sk = c.hd_demo_sk * hd_dep_count)
+order by 1, 2, 3 limit 200 for update;
+ c_current_addr_sk | c_current_hdemo_sk | c_first_shipto_date_sk 
+-------------------+--------------------+------------------------
+(0 rows)
+
+--success for targetlist not contain lock table's distribute key
+select c_current_addr_sk, c_current_hdemo_sk, c_first_shipto_date_sk
+from customer a where exists
+(select ca_address_sk from customer_address b where a.c_current_addr_sk = b.ca_address_sk + b.ca_address_sk)
+or exists
+(select hd_demo_sk from household_demographics c where a.c_current_hdemo_sk = c.hd_demo_sk * hd_dep_count)
+order by 1, 2, 3 for update;
+ c_current_addr_sk | c_current_hdemo_sk | c_first_shipto_date_sk 
+-------------------+--------------------+------------------------
+(0 rows)
+
+--success for targetlist contain lock table's distribute key
+select c_birth_day, c_birth_month, c_current_addr_sk, c_current_hdemo_sk, c_first_shipto_date_sk
+from customer a where exists
+(select ca_address_sk from customer_address b where a.c_current_addr_sk = b.ca_address_sk + b.ca_address_sk)
+or exists
+(select hd_demo_sk from household_demographics c where a.c_current_hdemo_sk = c.hd_demo_sk * hd_dep_count)
+order by 1, 2, 3 for update;
+ c_birth_day | c_birth_month | c_current_addr_sk | c_current_hdemo_sk | c_first_shipto_date_sk 
+-------------+---------------+-------------------+--------------------+------------------------
+(0 rows)
+
+drop table customer;
+drop table customer_address;

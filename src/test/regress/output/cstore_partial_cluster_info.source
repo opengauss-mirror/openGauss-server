@@ -1,0 +1,61 @@
+-- problem:
+-- show Partial Cluster infomation by psql command \d+
+-- case 1: \d and \d+ for table without Partial Cluster Key
+CREATE TABLE cstore_without_partial_cluster_key
+(
+	a int,
+	b int
+) with ( orientation = column )  ;
+\d cstore_without_partial_cluster_key
+Table "public.cstore_without_partial_cluster_key"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+
+\d+ cstore_without_partial_cluster_key
+          Table "public.cstore_without_partial_cluster_key"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+DROP TABLE cstore_without_partial_cluster_key;
+-- case 2: \d and \d+ for table with Partial Cluster Key
+CREATE TABLE cstore_with_partial_cluster_key
+(
+	a int,
+	b int,
+	PARTIAL CLUSTER KEY (b)
+) with ( orientation = column , compression = high )  ;
+\d cstore_with_partial_cluster_key
+Table "public.cstore_with_partial_cluster_key"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ a      | integer | 
+ b      | integer | 
+Partial Cluster :
+    "cstore_with_partial_cluster_key_cluster" PARTIAL CLUSTER KEY (b)
+
+\d+ cstore_with_partial_cluster_key
+           Table "public.cstore_with_partial_cluster_key"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Partial Cluster :
+    "cstore_with_partial_cluster_key_cluster" PARTIAL CLUSTER KEY (b)
+Has OIDs: no
+Options: orientation=column, compression=high
+
+DROP TABLE cstore_with_partial_cluster_key;
+--- case 3: row table does not support PARTIAL CLUSTER KEY
+CREATE TABLE row_table_with_partial_cluster_key
+(
+	a int,
+	b int,
+	PARTIAL CLUSTER KEY (b)
+);
+ERROR:  partial cluster key constraint does not support row/timeseries store

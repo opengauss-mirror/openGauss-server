@@ -1,0 +1,52 @@
+<refentry id="SQL-SELECT">
+<refmeta>
+<refentrytitle>SELECT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SELECT</refname>
+<refpurpose>retrieve rows from a table or view</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+SELECT [/*+ plan_hint */] [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
+    { * | {expression [ [ AS ] output_name ]} [, ...] }
+    [ FROM from_item [, ...] ]
+    [ WHERE condition ]
+    [ GROUP BY grouping_element [, ...] ]
+    [ HAVING condition [, ...] ]
+    [ WINDOW {window_name AS ( window_definition )} [, ...] ]
+    [ { UNION | INTERSECT | EXCEPT | MINUS } [ ALL | DISTINCT ] select ]
+    [ ORDER BY {expression [ [ ASC | DESC | USING operator ] | nlssort_expression_clause ] [ NULLS { FIRST | LAST } ]} [, ...] ]
+    [ LIMIT { [offset,] count | ALL } ] 
+    [ OFFSET start [ ROW | ROWS ] ]
+    [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
+    [ {FOR { UPDATE | SHARE } [ OF table_name [, ...] ] [ NOWAIT ]} [...] ];
+TABLE { ONLY {(table_name)| table_name} | table_name [ * ]};
+
+where from_item can be:
+[ ONLY ] table_name [ * ] [ partition_clause ] [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
+[ TABLESAMPLE sampling_method ( argument [, ...] ) [ REPEATABLE ( seed ) ] ]
+|( select ) [ AS ] alias [ ( column_alias [, ...] ) ]
+|with_query_name [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
+|function_name ( [ argument [, ...] ] ) [ AS ] alias [ ( column_alias [, ...] | column_definition [, ...] ) ]
+|function_name ( [ argument [, ...] ] ) AS ( column_definition [, ...] )
+|from_item [ NATURAL ] join_type from_item [ ON join_condition | USING ( join_column [, ...] ) ]
+where grouping_element can be:
+() 
+|expression 
+|( expression [, ...] ) 
+|ROLLUP ( { expression | ( expression [, ...] ) } [, ...] )
+|CUBE ( { expression | ( expression [, ...] ) } [, ...] )
+|GROUPING SETS ( grouping_element [, ...] )
+where with_query can be:
+with_query_name [ ( column_name [, ...] ) ] AS ( {select | values | insert | update | delete} )
+where partition_clause can be:
+PARTITION { ( partition_name ) | FOR (  partition_value [, ...] ) }
+where nlssort_expression_clause can be:
+NLSSORT ( column_name, ' NLS_SORT = { SCHINESE_PINYIN_M | generic_m_ci } ' )
+</synopsis>
+</refsynopsisdiv>
+</refentry>

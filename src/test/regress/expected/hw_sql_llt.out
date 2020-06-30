@@ -1,0 +1,447 @@
+--test function mark_distribute_dml
+create table test_mark_distribute_dml(a integer);
+insert into test_mark_distribute_dml values(1), (9);
+create view test_mark_distribute_dml_view as select * from test_mark_distribute_dml;
+insert into test_mark_distribute_dml_view values(3);
+ERROR:  cannot insert into view "test_mark_distribute_dml_view"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+update test_mark_distribute_dml_view set a = 10;
+ERROR:  cannot update view "test_mark_distribute_dml_view"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+delete from test_mark_distribute_dml_view;
+ERROR:  cannot delete from view "test_mark_distribute_dml_view"
+HINT:  You need an unconditional ON DELETE DO INSTEAD rule or an INSTEAD OF DELETE trigger.
+drop view test_mark_distribute_dml_view;
+drop table test_mark_distribute_dml;
+--test function mark_distribute_dml->stream_broadcast
+create table test_mark_distribute_dml_t1 (a integer);
+insert into test_mark_distribute_dml_t1 values(1);
+create table test_mark_distribute_dml_t2 (col integer primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_mark_distribute_dml_t2_pkey" for table "test_mark_distribute_dml_t2"
+insert into test_mark_distribute_dml_t2 select * from test_mark_distribute_dml_t1;
+drop table test_mark_distribute_dml_t1;
+drop table test_mark_distribute_dml_t2;
+--test function locate_join_clause
+create table test_locate_join_1(a integer);
+create table test_locate_join_2(b integer);
+insert into test_locate_join_2 (select a from test_locate_join_1, test_locate_join_2 where a < b);
+drop table test_locate_join_1;
+drop table test_locate_join_2;
+--test function stream_walker
+create table test_stream_walker(c1 integer, c2 integer); 
+insert into test_stream_walker values(1, 2);
+WITH RECURSIVE t(n) AS (
+    VALUES (1)
+  UNION ALL
+    SELECT c1+1 FROM test_stream_walker WHERE c1 < 100
+)
+SELECT sum(c1) FROM test_stream_walker;
+ sum 
+-----
+   1
+(1 row)
+
+insert into test_stream_walker values(2, 9);
+select distinct sum(c1) from test_stream_walker;
+ sum 
+-----
+   3
+(1 row)
+
+select distinct on(c2) sum(c1) from test_stream_walker group by c2;
+ sum 
+-----
+   1
+   2
+(2 rows)
+
+--test function mark_group_stream
+create table test_mark_group_stream_tb1(t1_1 integer, t1_2 integer);
+create table test_mark_group_stream_tb2 (t2_1 integer, t2_2 integer);
+insert into test_mark_group_stream_tb1 values(1, 2);
+insert into test_mark_group_stream_tb2 values(1, 2);
+select * from test_mark_group_stream_tb2 where (t2_2) in (select t1_2 from test_mark_group_stream_tb1 group by t1_2 order by t1_2);
+ t2_1 | t2_2 
+------+------
+    1 |    2
+(1 row)
+
+drop table test_mark_group_stream_tb1;
+drop table test_mark_group_stream_tb2;
+--test function check_var_nonnullable
+create table test_check_var_nonnullable_t1(t1_1 integer, t1_2 integer);
+create table test_check_var_nonnullable_t2(t2_1 integer, t2_2 integer);
+select * from test_check_var_nonnullable_t1 where t1_1 not in (select t2_1 from test_check_var_nonnullable_t2 inner join test_check_var_nonnullable_t1 on(t2_2 = t1_2));
+ t1_1 | t1_2 
+------+------
+(0 rows)
+
+select * from test_check_var_nonnullable_t1 where t1_1 not in (select min(t2_1) from test_check_var_nonnullable_t2 inner join test_check_var_nonnullable_t1 on(t2_2 = t1_2));
+ t1_1 | t1_2 
+------+------
+(0 rows)
+
+drop table test_check_var_nonnullable_t1;
+drop table test_check_var_nonnullable_t2;
+--test function adjust_all_pathkeys_by_agg_tlist
+create TABLE test_pathkeys_by_agg_tlist_window(a integer, b integer);
+select  min(b) OVER (PARTITION BY b) from test_pathkeys_by_agg_tlist_window group by b;
+ min 
+-----
+(0 rows)
+
+--test function CopyToCompatiblePartions
+create table test_copyto_partitioned_table (a int)
+partition by range (a)
+(
+	partition test_reindex_partitioned_table_p1 values less than (10),
+	partition test_reindex_partitioned_table_p2 values less than (20)
+);
+insert into test_copyTo_partitioned_table values(1);
+copy test_copyto_partitioned_table to stdout (delimiter '|');
+1
+drop table test_copyto_partitioned_table;
+--test function _readMergeAppend
+create table test_mergeappend_1(a integer);
+create table test_mergeappend_2(a integer);
+(select * from test_mergeappend_1 order by a) union all (select * from test_mergeappend_2 order by 1) order by 1;
+ a 
+---
+(0 rows)
+
+--test function _readFunctionScan
+create table test_func_scan_1(col integer);
+insert into test_func_scan_1 values(1);
+select * from generate_series(1, 21, 1), test_func_scan_1;
+ generate_series | col 
+-----------------+-----
+               1 |   1
+               2 |   1
+               3 |   1
+               4 |   1
+               5 |   1
+               6 |   1
+               7 |   1
+               8 |   1
+               9 |   1
+              10 |   1
+              11 |   1
+              12 |   1
+              13 |   1
+              14 |   1
+              15 |   1
+              16 |   1
+              17 |   1
+              18 |   1
+              19 |   1
+              20 |   1
+              21 |   1
+(21 rows)
+
+drop table test_func_scan_1;
+--test function check_log_duration
+set log_duration = true;
+select 1;
+ ?column? 
+----------
+        1
+(1 row)
+
+reset log_duration;
+--test function show_sort_info
+create table test_sort_exlpain(a integer, b integer);
+explain analyze select * from test_sort_exlpain order by 1;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+--? Sort  .*
+   Sort Key: a
+--?   Sort Method: quicksort  Memory: .*
+--?   ->  Seq Scan on test_sort_exlpain  .*
+--? Total runtime:.*
+(5 rows)
+
+explain analyze select * from test_sort_exlpain order by 1;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+--? Sort  .*
+   Sort Key: a
+--?   Sort Method: quicksort  Memory: .*
+--?   ->  Seq Scan on test_sort_exlpain  .*
+--? Total runtime: .*
+(5 rows)
+
+explain (analyze on,  format json)select * from test_sort_exlpain order by 1;
+                   QUERY PLAN                    
+-------------------------------------------------
+ [                                              +
+   {                                            +
+     "Plan": {                                  +
+       "Node Type": "Sort",                     +
+--?       "Startup Cost":.*
+--?       "Total Cost":.*
+--?       "Plan Rows":.*
+--?       "Plan Width":.*
+--?       "Actual Startup Time":.*
+--?       "Actual Total Time":.*
+--?       "Actual Rows":.*
+--?       "Actual Loops":.*
+       "Sort Key": ["a"],                       +
+       "Sort Method": "quicksort",              +
+--?       "Sort Space Used":.*
+       "Sort Space Type": "Memory",             +
+       "Plans": [                               +
+         {                                      +
+           "Node Type": "Seq Scan",             +
+           "Parent Relationship": "Outer",      +
+           "Relation Name": "test_sort_exlpain",+
+           "Alias": "test_sort_exlpain",        +
+--?           "Startup Cost":.*
+--?           "Total Cost":.*
+--?           "Plan Rows":.*
+--?           "Plan Width":.*
+--?           "Actual Startup Time":.*
+--?           "Actual Total Time":.*
+--?           "Actual Rows":.*
+--?           "Actual Loops":.*
+         }                                      +
+       ]                                        +
+     },                                         +
+     "Triggers": [                              +
+     ],                                         +
+--?     "Total Runtime":.*
+   }                                            +
+ ]
+(1 row)
+
+explain analyze select generate_series(1, 5) order by 1;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+--? Sort  .*
+   Sort Key: (generate_series(1, 5))
+--?   Sort Method: quicksort  Memory: .*
+--?   ->  Result  .*
+--? Total runtime: .*
+(5 rows)
+
+explain (analyze on, format json) select generate_series(1, 5) order by 1;
+                   QUERY PLAN                   
+------------------------------------------------
+ [                                             +
+   {                                           +
+     "Plan": {                                 +
+       "Node Type": "Sort",                    +
+--?       "Startup Cost":.*
+--?       "Total Cost":.*
+--?       "Plan Rows":.*
+--?       "Plan Width":.*
+--?       "Actual Startup Time":.*
+--?       "Actual Total Time":.*
+--?       "Actual Rows":.*
+--?       "Actual Loops":.*
+       "Sort Key": ["(generate_series(1, 5))"],+
+       "Sort Method": "quicksort",             +
+--?       "Sort Space Used":.*
+       "Sort Space Type": "Memory",            +
+       "Plans": [                              +
+         {                                     +
+           "Node Type": "Result",              +
+           "Parent Relationship": "Outer",     +
+--?           "Startup Cost":.*
+--?           "Total Cost":.*
+--?           "Plan Rows":.*
+--?           "Plan Width":.*
+--?           "Actual Startup Time":.*
+--?           "Actual Total Time":.*
+--?           "Actual Rows":.*
+--?           "Actual Loops":.*
+         }                                     +
+       ]                                       +
+     },                                        +
+     "Triggers": [                             +
+     ],                                        +
+--?     "Total Runtime":.*
+   }                                           +
+ ]
+(1 row)
+
+drop table test_sort_exlpain;
+--test function AddRoleMems DelRoleMems
+create role test_addrolemems_1 password 'Ttest@123';
+create role test_addrolemems_2 password 'Ttest@123';
+create role test_addrolemems_3 sysadmin password 'Ttest@123';
+create role test_addrolemems_4 password 'Ttest@123';
+set role test_addrolemems_1 password 'Ttest@123';
+grant test_addrolemems_2 to test_addrolemems_1;
+ERROR:  must have admin option on role "test_addrolemems_2"
+grant test_addrolemems_3 to test_addrolemems_2;
+ERROR:  Permission denied.
+reset role;
+grant test_addrolemems_1 to test_addrolemems_2;
+grant test_addrolemems_1 to test_addrolemems_2;
+NOTICE:  role "test_addrolemems_2" is already a member of role "test_addrolemems_1"
+grant test_addrolemems_2 to test_addrolemems_1;
+ERROR:  role "test_addrolemems_2" is a member of role "test_addrolemems_1"
+grant test_addrolemems_3 to test_addrolemems_1;
+grant test_addrolemems_1 to test_addrolemems_4;
+set role test_addrolemems_4 password 'Ttest@123';
+revoke test_addrolemems_1 from test_addrolemems_2;
+ERROR:  must have admin option on role "test_addrolemems_1"
+REVOKE  test_addrolemems_3 FROM test_addrolemems_1;
+ERROR:  Permission denied.
+reset role;
+drop role test_addrolemems_1;
+drop role test_addrolemems_2;
+drop role test_addrolemems_3;
+drop role test_addrolemems_4;
+--test function check_log_statement
+set log_statement = ddl;
+create table test_check_log_statement (a integer);
+reset log_statement;
+drop table test_check_log_statement;
+--test function transformExecDirectStmt
+create table test_transformExecDirectStmt (a integer, b integer);
+--test function contain_stream_plan_node: Append, MergeAppend
+create table test_contain_stream_plan_node_1 (a1 integer, b1 integer, c1 integer);
+create table test_contain_stream_plan_node_2 (a2 integer, b2 integer, c2 integer);
+create table test_contain_stream_plan_node_3 (a3 integer, b3 integer, c3 integer);
+set enable_nestloop = false;
+select * from test_contain_stream_plan_node_1 as t1 left join (select * from test_contain_stream_plan_node_2 union select * from test_contain_stream_plan_node_3) as t2 on (t1.a1 = t2.a2);
+ a1 | b1 | c1 | a2 | b2 | c2 
+----+----+----+----+----+----
+(0 rows)
+
+reset enable_nestloop;
+select * from test_contain_stream_plan_node_1 as t1 left join ((select a2 from test_contain_stream_plan_node_2 order by 1) union all(select a3 from test_contain_stream_plan_node_3 order by 1) order by 1) as t2 on (t1.a1 < t2.a2);
+ a1 | b1 | c1 | a2 
+----+----+----+----
+(0 rows)
+
+--test function ResetUsage
+set log_parser_stats = on;
+select 1;
+ ?column? 
+----------
+        1
+(1 row)
+
+reset log_parser_stats;
+--test function getWeights
+SELECT ts_rank(array[[1, 1], [1, 0]], ' a:1 s:2C d g'::tsvector, 'a | s');
+ERROR:  array of weight must be one-dimensional
+CONTEXT:  referenced column: ts_rank
+SELECT ts_rank(array[1, 1, 1], ' a:1 s:2C d g'::tsvector, 'a | s');
+ERROR:  array of weight is too short
+CONTEXT:  referenced column: ts_rank
+SELECT ts_rank(array[1, 1, 1, ''], ' a:1 s:2C d g'::tsvector, 'a | s');
+ERROR:  array of weight must not contain nulls
+CONTEXT:  referenced column: ts_rank
+SELECT ts_rank(array[1, 1, 1, 2], ' a:1 s:2C d g'::tsvector, 'a | s');
+ERROR:  weight out of range
+CONTEXT:  referenced column: ts_rank
+--test function tsvector_concat 
+select ' a:1 s:2C d g'::tsvector || ' a:1 s:2C d g'::tsvector;
+         ?column?          
+---------------------------
+ 'a':1,3 'd' 'g' 's':2C,4C
+(1 row)
+
+select ' b:1 s:2C d g'::tsvector || ' a:1 s:2C d g'::tsvector;
+           ?column?            
+-------------------------------
+ 'a':3 'b':1 'd' 'g' 's':2C,4C
+(1 row)
+
+select ' a s:2C d g'::tsvector || ' a:1 s:2C d g'::tsvector;
+        ?column?         
+-------------------------
+ 'a':3 'd' 'g' 's':2C,4C
+(1 row)
+
+select ' e f g h'::tsvector || ' a:1 b:2C c d'::tsvector;
+               ?column?               
+--------------------------------------
+ 'a':1 'b':2C 'c' 'd' 'e' 'f' 'g' 'h'
+(1 row)
+
+select ' a:1 b:2C c d'::tsvector || ' e f g h'::tsvector;
+               ?column?               
+--------------------------------------
+ 'a':1 'b':2C 'c' 'd' 'e' 'f' 'g' 'h'
+(1 row)
+
+-- function compute_return_type
+create user test_func_user password 'Ttest@123';
+CREATE OR REPLACE FUNCTION my_union(internal, internal)
+RETURNS test_func_user.internal
+AS 'MODULE_PATHNAME'
+LANGUAGE C STRICT;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+set enforce_a_behavior=off;
+CREATE OR REPLACE FUNCTION my_union(internal, internal)
+RETURNS test_func_user.internal
+AS 'MODULE_PATHNAME'
+LANGUAGE C STRICT;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+reset enforce_a_behavior;
+--function  CreateFunction
+revoke create on schema test_func_user from test_func_user;
+create or replace function test_func_user.test_CreateFunction_fun() returns integer
+AS
+$$
+begin
+    return 1;
+end;
+$$language plpgsql;
+ERROR:  permission denied for schema test_func_user
+create table test_CreateFunction_tbl (a integer);
+create view test_CreateFunction_view as select * from  test_CreateFunction_tbl;
+create or replace function test_CreateFunction_fun()RETURNS SETOF test_CreateFunction_view
+as $$
+select * from test_CreateFunction_view;
+$$language sql;
+ERROR:  function result type cannot be a view.
+drop user test_func_user;
+drop view  test_CreateFunction_view;
+drop table test_CreateFunction_tbl;
+--test function rawnlike
+select rawnlike('123', 'abc');
+ rawnlike 
+----------
+ t
+(1 row)
+
+--test funciton byteagt
+select byteagt('23', '123');
+ byteagt 
+---------
+ t
+(1 row)
+
+--test pg_thread_wait_status
+select count(*)>=0 from pg_thread_wait_status; 
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(*)>=0 from pgxc_thread_wait_status; 
+ERROR:  unsupported view in single node mode.
+--test view with setop
+create table setop_a(id int,name varchar);
+create table setop_b(id int,name varchar);
+create view v as (select id ,name from setop_a INTERSECT (select id,name from setop_b));
+select definition from pg_views where viewname = 'v';
+                                              definition                                              
+------------------------------------------------------------------------------------------------------
+ SELECT setop_a.id, setop_a.name FROM setop_a INTERSECT SELECT setop_b.id, setop_b.name FROM setop_b;
+(1 row)
+
+drop view v;
+drop table setop_a,setop_b;
+--test data type of pg_sequence_parameters's input parameters
+select pg_get_function_arguments(3078);
+                                                          pg_get_function_arguments                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------
+ sequence_oid oid, OUT start_value bigint, OUT minimum_value bigint, OUT maximum_value bigint, OUT increment bigint, OUT cycle_option boolean
+(1 row)
+

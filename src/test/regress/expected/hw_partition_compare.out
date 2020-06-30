@@ -1,0 +1,659 @@
+--
+---- chaeck partitionkey number for range partition
+--
+--sucess
+create table test_range_pkn_1(a int, b int)
+partition by range(a, b)
+(
+	partition test_range_pkn_1_p1 values less than (1, 2),
+	partition test_range_pkn_1_p2 values less than (2, 1)
+);
+--fail
+create table test_range_pkn_2(a int, b int)
+partition by range(a, b)
+(
+	partition test_range_pkn_2_p1 values less than (1),
+	partition test_range_pkn_2_p2 values less than (2, 1)
+);
+ERROR:  partition bound list contains too few elements
+--fail
+create table test_range_pkn_3(a int, b int)
+partition by range(a, b)
+(
+	partition test_range_pkn_3_p1 values less than (1,2,3),
+	partition test_range_pkn_3_p2 values less than (2, 1)
+);
+ERROR:  partition bound list contains too many elements
+--clean up
+drop table test_range_pkn_1;
+--
+---- chaeck partitionkey datatype for range partition
+--
+--/* int2 */
+--sucess
+create table test_range_compare_datatype_int2_1(a int2)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int2_1_p1 values less than (1),
+	partition test_range_compare_datatype_int2_1_p2 values less than (2)
+);
+--fail
+create table test_range_compare_datatype_int2_2(a int2)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int2_2_p1 values less than (3),
+	partition test_range_compare_datatype_int2_2_p2 values less than (2)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_int2_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_int2_3(a int2)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int2_3_p1 values less than (3),
+	partition test_range_compare_datatype_int2_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_int2_4(a int4)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int2_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_int2_4_p2 values less than (2)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_int2_4_p2" is too low
+--/* int4 */
+--sucess
+create table test_range_compare_datatype_int4_1(a int)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int4_1_p1 values less than (1),
+	partition test_range_compare_datatype_int4_1_p2 values less than (2)
+);
+--fail
+create table test_range_compare_datatype_int4_2(a int)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int4_2_p1 values less than (3),
+	partition test_range_compare_datatype_int4_2_p2 values less than (2)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_int4_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_int4_3(a int)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int4_3_p1 values less than (1),
+	partition test_range_compare_datatype_int4_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_int4_4(a int)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int4_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_int4_4_p2 values less than (2)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_int4_4_p2" is too low
+--/* int8 */
+--sucess
+create table test_range_compare_datatype_int8_1(a int8)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int8_1_p1 values less than (1),
+	partition test_range_compare_datatype_int8_1_p2 values less than (2)
+);
+--fail
+create table test_range_compare_datatype_int8_2(a int8)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int8_2_p1 values less than (3),
+	partition test_range_compare_datatype_int8_2_p2 values less than (2)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_int8_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_int8_3(a int8)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int8_3_p1 values less than (3),
+	partition test_range_compare_datatype_int8_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_int8_4(a int8)
+partition by range(a)
+(
+	partition test_range_compare_datatype_int8_4_p1 values less than (3),
+	partition test_range_compare_datatype_int8_4_p2 values less than (2)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_int8_4_p2" is too low
+--/* decimal: decimal as numeric */
+--sucess
+create table test_range_compare_datatype_decimal_1(a decimal)
+partition by range(a)
+(
+	partition test_range_compare_datatype_decimal_1_p1 values less than (7.1),
+	partition test_range_compare_datatype_decimal_1_p2 values less than (8.4)
+);
+--fail
+create table test_range_compare_datatype_decimal_2(a decimal)
+partition by range(a)
+(
+	partition test_range_compare_datatype_decimal_2_p1 values less than (9.5),
+	partition test_range_compare_datatype_decimal_2_p2 values less than (8.4)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_decimal_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_decimal_3(a decimal)
+partition by range(a)
+(
+	partition test_range_compare_datatype_decimal_3_p1 values less than (7.1),
+	partition test_range_compare_datatype_decimal_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_decimal_4(a decimal)
+partition by range(a)
+(
+	partition test_range_compare_datatype_decimal_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_decimal_4_p2 values less than (8.4)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_decimal_4_p2" is too low
+--/* numeric */
+--sucess
+create table test_range_compare_datatype_numeric_1(a numeric(9,2))
+partition by range(a)
+(
+	partition test_range_compare_datatype_numeric_1_p1 values less than (7.1),
+	partition test_range_compare_datatype_numeric_1_p2 values less than (8.4)
+);
+--fail
+create table test_range_compare_datatype_numeric_2(a numeric(9,2))
+partition by range(a)
+(
+	partition test_range_compare_datatype_numeric_2_p1 values less than (9.1),
+	partition test_range_compare_datatype_numeric_2_p2 values less than (8.4)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_numeric_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_numeric_3(a numeric(9,2))
+partition by range(a)
+(
+	partition test_range_compare_datatype_numeric_3_p1 values less than (7.1),
+	partition test_range_compare_datatype_numeric_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_numeric_4(a numeric(9,2))
+partition by range(a)
+(
+	partition test_range_compare_datatype_numeric_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_numeric_4_p2 values less than (8.4)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_numeric_4_p2" is too low
+--/* real: real as float4 */
+--sucess
+create table test_range_compare_datatype_real_1(a REAL)
+partition by range(a)
+(
+	partition test_range_compare_datatype_real_1_p1 values less than (7.1),
+	partition test_range_compare_datatype_real_1_p2 values less than (8.4)
+);
+--fail
+create table test_range_compare_datatype_real_2(a REAL)
+partition by range(a)
+(
+	partition test_range_compare_datatype_real_2_p1 values less than (9.1),
+	partition test_range_compare_datatype_real_2_p2 values less than (8.4)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_real_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_real_3(a REAL)
+partition by range(a)
+(
+	partition test_range_compare_datatype_real_3_p1 values less than (7.1),
+	partition test_range_compare_datatype_real_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_real_4(a REAL)
+partition by range(a)
+(
+	partition test_range_compare_datatype_real_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_real_4_p2 values less than (8.4)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_real_4_p2" is too low
+--/* double precision: double precision as float8 */
+--sucess
+create table test_range_compare_datatype_doubleprecision_1(a double precision)
+partition by range(a)
+(
+	partition test_range_compare_datatype_doubleprecision_1_p1 values less than (7.1),
+	partition test_range_compare_datatype_doubleprecision_1_p2 values less than (8.4)
+);
+--fail
+create table test_range_compare_datatype_doubleprecision_2(a double precision)
+partition by range(a)
+(
+	partition test_range_compare_datatype_doubleprecision_2_p1 values less than (9.1),
+	partition test_range_compare_datatype_doubleprecision_2_p2 values less than (8.4)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_doubleprecision_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_doubleprecision_3(a double precision)
+partition by range(a)
+(
+	partition test_range_compare_datatype_doubleprecision_3_p1 values less than (7.1),
+	partition test_range_compare_datatype_doubleprecision_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_doubleprecision_4(a double precision)
+partition by range(a)
+(
+	partition test_range_compare_datatype_doubleprecision_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_doubleprecision_4_p2 values less than (8.4)
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_doubleprecision_4_p2" is too low
+--/* char: char as bpchar */
+--sucess
+create table test_range_compare_datatype_char_1(a char)
+partition by range(a)
+(
+	partition test_range_compare_datatype_char_1_p1 values less than ('A'),
+	partition test_range_compare_datatype_char_1_p2 values less than ('B')
+);
+--fail
+create table test_range_compare_datatype_char_2(a char)
+partition by range(a)
+(
+	partition test_range_compare_datatype_char_2_p1 values less than ('Z'),
+	partition test_range_compare_datatype_char_2_p2 values less than ('B')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_char_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_char_3(a char)
+partition by range(a)
+(
+	partition test_range_compare_datatype_char_3_p1 values less than ('A'),
+	partition test_range_compare_datatype_char_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_char_4(a char)
+partition by range(a)
+(
+	partition test_range_compare_datatype_char_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_char_4_p2 values less than ('B')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_char_4_p2" is too low
+--/* varchar(n) */
+--sucess
+create table test_range_compare_datatype_varcharn_1(a varchar(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_varcharn_1_p1 values less than ('A'),
+	partition test_range_compare_datatype_varcharn_1_p2 values less than ('B')
+);
+--fail
+create table test_range_compare_datatype_varcharn_2(a varchar(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_varcharn_2_p1 values less than ('Z'),
+	partition test_range_compare_datatype_varcharn_2_p2 values less than ('B')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_varcharn_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_varcharn_3(a varchar(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_varcharn_3_p1 values less than ('A'),
+	partition test_range_compare_datatype_varcharn_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_varcharn_4(a varchar(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_varcharn_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_varcharn_4_p2 values less than ('B')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_varcharn_4_p2" is too low
+--/* varchar */
+--sucess
+create table test_range_compare_datatype_varchar_1(a varchar)
+partition by range(a)
+(
+	partition test_range_compare_datatype_varchar_1_p1 values less than ('A'),
+	partition test_range_compare_datatype_varchar_1_p2 values less than ('B')
+);
+--fail
+create table test_range_compare_datatype_varchar_2(a varchar)
+partition by range(a)
+(
+	partition test_range_compare_datatype_varchar_2_p1 values less than ('Z'),
+	partition test_range_compare_datatype_varchar_2_p2 values less than ('BZ')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_varchar_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_varchar_3(a varchar)
+partition by range(a)
+(
+	partition test_range_compare_datatype_varchar_3_p1 values less than ('A'),
+	partition test_range_compare_datatype_varchar_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_varchar_4(a varchar)
+partition by range(a)
+(
+	partition test_range_compare_datatype_varchar_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_varchar_4_p2 values less than ('BZ')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_varchar_4_p2" is too low
+--/* char(n): as bpchar */
+--sucess
+create table test_range_compare_datatype_charn_1(a char(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_charn_1_p1 values less than ('A'),
+	partition test_range_compare_datatype_charn_1_p2 values less than ('B')
+);
+--fail
+create table test_range_compare_datatype_charn_2(a char(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_charn_2_p1 values less than ('Z'),
+	partition test_range_compare_datatype_charn_2_p2 values less than ('B')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_charn_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_charn_3(a char(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_charn_3_p1 values less than ('A'),
+	partition test_range_compare_datatype_charn_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_charn_4(a char(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_charn_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_charn_4_p2 values less than ('B')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_charn_4_p2" is too low
+--/* character(n): as bpchar */
+--sucess
+create table test_range_compare_datatype_charactern_1(a character(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_charactern_1_p1 values less than ('ABC'),
+	partition test_range_compare_datatype_charactern_1_p2 values less than ('BAZ')
+);
+--fail
+create table test_range_compare_datatype_charactern_2(a character(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_charactern_2_p1 values less than ('CBC'),
+	partition test_range_compare_datatype_charactern_2_p2 values less than ('BAZ')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_charactern_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_charactern_3(a character(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_charactern_3_p1 values less than ('ABC'),
+	partition test_range_compare_datatype_charactern_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_charactern_4(a character(3))
+partition by range(a)
+(
+	partition test_range_compare_datatype_charactern_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_charactern_4_p2 values less than ('BAZ')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_charactern_4_p2" is too low
+--/* text */
+--sucess:
+create table test_range_compare_datatype_text_1(a text)
+partition by range(a)
+(
+	partition test_range_compare_datatype_text_1_p1 values less than ('ACDC'),
+	partition test_range_compare_datatype_text_1_p2 values less than ('BSD')
+);
+--fail:
+create table test_range_compare_datatype_text_2(a text)
+partition by range(a)
+(
+	partition test_range_compare_datatype_text_2_p1 values less than ('ZCDC'),
+	partition test_range_compare_datatype_text_2_p2 values less than ('BSD')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_text_2_p2" is too low
+--sucess:
+create table test_range_compare_datatype_text_3(a text)
+partition by range(a)
+(
+	partition test_range_compare_datatype_text_3_p1 values less than ('ACDC'),
+	partition test_range_compare_datatype_text_3_p2 values less than (maxvalue)
+);
+--fail:
+create table test_range_compare_datatype_text_4(a text)
+partition by range(a)
+(
+	partition test_range_compare_datatype_text_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_text_4_p2 values less than ('BSD')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_text_4_p2" is too low
+--/* nvarchar2: as varchar */
+--sucess
+create table test_range_compare_datatype_nvarchar2_1(a nvarchar2)
+partition by range(a)
+(
+	partition test_range_compare_datatype_nvarchar2_1_p1 values less than ('ABV'),
+	partition test_range_compare_datatype_nvarchar2_1_p2 values less than ('B')
+);
+--fail
+create table test_range_compare_datatype_nvarchar2_2(a nvarchar2)
+partition by range(a)
+(
+	partition test_range_compare_datatype_nvarchar2_2_p1 values less than ('ZA'),
+	partition test_range_compare_datatype_nvarchar2_2_p2 values less than ('B')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_nvarchar2_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_nvarchar2_3(a nvarchar2)
+partition by range(a)
+(
+	partition test_range_compare_datatype_nvarchar2_3_p1 values less than ('ABV'),
+	partition test_range_compare_datatype_nvarchar2_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_nvarchar2_4(a nvarchar2)
+partition by range(a)
+(
+	partition test_range_compare_datatype_nvarchar2_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_nvarchar2_4_p2 values less than ('B')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_nvarchar2_4_p2" is too low
+--/* date */
+--sucess: 
+create table test_range_compare_datatype_date_1(a date)
+partition by range(a)
+(
+	partition test_range_compare_datatype_date_1_p1 values less than (to_date('2012-11-12','YYYY-MM-DD')),
+	partition test_range_compare_datatype_date_1_p2 values less than (to_date('2012-11-13','YYYY-MM-DD'))
+);
+--fail
+create table test_range_compare_datatype_date_2(a date)
+partition by range(a)
+(
+	partition test_range_compare_datatype_date_2_p1 values less than (to_date('2012-11-15','YYYY-MM-DD')),
+	partition test_range_compare_datatype_date_2_p2 values less than (to_date('2012-11-13','YYYY-MM-DD'))
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_date_2_p2" is too low
+--sucess: 
+create table test_range_compare_datatype_date_3(a date)
+partition by range(a)
+(
+	partition test_range_compare_datatype_date_3_p1 values less than (to_date('2012-11-12','YYYY-MM-DD')),
+	partition test_range_compare_datatype_date_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_date_4(a date)
+partition by range(a)
+(
+	partition test_range_compare_datatype_date_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_date_4_p2 values less than (to_date('2012-11-13','YYYY-MM-DD'))
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_date_4_p2" is too low
+--/* timestamp */
+--sucess
+create table test_range_compare_datatype_timestamp_1(a timestamp)
+partition by range(a)
+(
+	partition test_range_compare_datatype_timestamp_1_p1 values less than (to_timestamp('2012-11-12','YYYY-MM-DD')),
+	partition test_range_compare_datatype_timestamp_1_p2 values less than (to_timestamp('2012-11-13','YYYY-MM-DD'))
+);
+--fail
+create table test_range_compare_datatype_timestamp_2(a timestamp)
+partition by range(a)
+(
+	partition test_range_compare_datatype_timestamp_2_p1 values less than (to_timestamp('2012-11-15','YYYY-MM-DD')),
+	partition test_range_compare_datatype_timestamp_2_p2 values less than (to_timestamp('2012-11-13','YYYY-MM-DD'))
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_timestamp_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_timestamp_3(a timestamp)
+partition by range(a)
+(
+	partition test_range_compare_datatype_timestamp_3_p1 values less than (to_timestamp('2012-11-12','YYYY-MM-DD')),
+	partition test_range_compare_datatype_timestamp_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_timestamp_4(a timestamp)
+partition by range(a)
+(
+	partition test_range_compare_datatype_timestamp_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_timestamp_4_p2 values less than (to_timestamp('2012-11-13','YYYY-MM-DD'))
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_timestamp_4_p2" is too low
+--/* timestamptz */
+--sucess: 
+create table test_range_compare_datatype_timestamptz_1(a timestamptz)
+partition by range(a)
+(
+	partition test_range_compare_datatype_timestamptz_1_p1 values less than (to_date('2012-11-14','YYYY-MM-DD')),
+	partition test_range_compare_datatype_timestamptz_1_p2 values less than (to_date('2012-11-15','YYYY-MM-DD'))
+);
+--fail
+create table test_range_compare_datatype_timestamptz_2(a timestamptz)
+partition by range(a)
+(
+	partition test_range_compare_datatype_timestamptz_2_p1 values less than (to_date('2012-11-17','YYYY-MM-DD')),
+	partition test_range_compare_datatype_timestamptz_2_p2 values less than (to_date('2012-11-15','YYYY-MM-DD'))
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_timestamptz_2_p2" is too low
+--sucess: 
+create table test_range_compare_datatype_timestamptz_3(a timestamptz)
+partition by range(a)
+(
+	partition test_range_compare_datatype_timestamptz_3_p1 values less than (to_date('2012-11-14','YYYY-MM-DD')),
+	partition test_range_compare_datatype_timestamptz_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_timestamptz_4(a timestamptz)
+partition by range(a)
+(
+	partition test_range_compare_datatype_timestamptz_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_timestamptz_4_p2 values less than (to_date('2012-11-15','YYYY-MM-DD'))
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_timestamptz_4_p2" is too low
+--/* name */
+--sucess
+create table test_range_compare_datatype_name_1(a name)
+partition by range(a)
+(
+	partition test_range_compare_datatype_name_1_p1 values less than ('CBY'),
+	partition test_range_compare_datatype_name_1_p2 values less than ('JYH')
+);
+--fail
+create table test_range_compare_datatype_name_2(a name)
+partition by range(a)
+(
+	partition test_range_compare_datatype_name_2_p1 values less than ('ZBY'),
+	partition test_range_compare_datatype_name_2_p2 values less than ('JYH')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_name_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_name_3(a name)
+partition by range(a)
+(
+	partition test_range_compare_datatype_name_3_p1 values less than ('CBY'),
+	partition test_range_compare_datatype_name_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_name_4(a name)
+partition by range(a)
+(
+	partition test_range_compare_datatype_name_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_name_4_p2 values less than ('JYH')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_name_4_p2" is too low
+--/* bpchar */
+--sucess
+create table test_range_compare_datatype_bpchar_1(a bpchar)
+partition by range(a)
+(
+	partition test_range_compare_datatype_bpchar_1_p1 values less than ('CAD'),
+	partition test_range_compare_datatype_bpchar_1_p2 values less than ('ZCFD')
+);
+--fail
+create table test_range_compare_datatype_bpchar_2(a bpchar)
+partition by range(a)
+(
+	partition test_range_compare_datatype_bpchar_2_p1 values less than ('CAD'),
+	partition test_range_compare_datatype_bpchar_2_p2 values less than ('ACFD')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_bpchar_2_p2" is too low
+--sucess
+create table test_range_compare_datatype_bpchar_3(a bpchar)
+partition by range(a)
+(
+	partition test_range_compare_datatype_bpchar_3_p1 values less than ('CAD'),
+	partition test_range_compare_datatype_bpchar_3_p2 values less than (maxvalue)
+);
+--fail
+create table test_range_compare_datatype_bpchar_4(a bpchar)
+partition by range(a)
+(
+	partition test_range_compare_datatype_bpchar_4_p1 values less than (maxvalue),
+	partition test_range_compare_datatype_bpchar_4_p2 values less than ('ACFD')
+);
+ERROR:  partition bound of partition "test_range_compare_datatype_bpchar_4_p2" is too low
+--celan up
+drop table test_range_compare_datatype_bpchar_1;
+drop table test_range_compare_datatype_charactern_1;
+drop table test_range_compare_datatype_charn_1;
+drop table test_range_compare_datatype_char_1;
+drop table test_range_compare_datatype_date_1;
+drop table test_range_compare_datatype_decimal_1;
+drop table test_range_compare_datatype_doubleprecision_1;
+drop table test_range_compare_datatype_int2_1;
+drop table test_range_compare_datatype_int4_1;
+drop table test_range_compare_datatype_int8_1;
+drop table test_range_compare_datatype_name_1;
+drop table test_range_compare_datatype_numeric_1;
+drop table test_range_compare_datatype_nvarchar2_1;
+drop table test_range_compare_datatype_real_1;
+drop table test_range_compare_datatype_text_1;
+drop table test_range_compare_datatype_timestamptz_1;
+drop table test_range_compare_datatype_timestamp_1;
+drop table test_range_compare_datatype_varcharn_1;
+drop table test_range_compare_datatype_varchar_1;
+drop table test_range_compare_datatype_bpchar_3;
+drop table test_range_compare_datatype_charactern_3;
+drop table test_range_compare_datatype_charn_3;
+drop table test_range_compare_datatype_char_3;
+drop table test_range_compare_datatype_date_3;
+drop table test_range_compare_datatype_decimal_3;
+drop table test_range_compare_datatype_doubleprecision_3;
+drop table test_range_compare_datatype_int2_3;
+drop table test_range_compare_datatype_int4_3;
+drop table test_range_compare_datatype_int8_3;
+drop table test_range_compare_datatype_name_3;
+drop table test_range_compare_datatype_numeric_3;
+drop table test_range_compare_datatype_nvarchar2_3;
+drop table test_range_compare_datatype_real_3;
+drop table test_range_compare_datatype_text_3;
+drop table test_range_compare_datatype_timestamptz_3;
+drop table test_range_compare_datatype_timestamp_3;
+drop table test_range_compare_datatype_varcharn_3;
+drop table test_range_compare_datatype_varchar_3;

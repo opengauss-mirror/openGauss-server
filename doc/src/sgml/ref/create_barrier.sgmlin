@@ -1,0 +1,16 @@
+<refentry id="SQL-CREATE_BARRIER">
+<refmeta>
+<refentrytitle>CREATE BARRIER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE BARRIER</refname>
+<refpurpose>create a new barrier</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE BARRIER [ barrier_name ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

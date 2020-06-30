@@ -1,0 +1,20 @@
+<refentry id="SQL-CREATE_POLICY">
+<refmeta>
+<refentrytitle>CREATE ROW LEVEL SECURITY POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE ROW LEVEL SECURITY POLICY</refname>
+<refpurpose>define a new row level security policy for a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ ROW LEVEL SECURITY ] POLICY policy_name ON table_name
+    [ AS { PERMISSIVE | RESTRICTIVE } ]
+    [ FOR { ALL | SELECT | UPDATE | DELETE } ]
+    [ TO { role_name | PUBLIC } [, ...] ]
+    USING ( using_expression )
+</synopsis>
+</refsynopsisdiv>
+</refentry>

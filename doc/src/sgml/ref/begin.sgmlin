@@ -1,0 +1,31 @@
+<refentry id="SQL-BEGIN">
+<refmeta>
+<refentrytitle>BEGIN</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>BEGIN</refname>
+<refpurpose>1. start a anonymous block. 2. start a transaction.</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+
+start a anonymous block:
+[DECLARE [declare_statements]] 
+BEGIN
+execution_statements
+END;
+/
+
+start a transaction:
+BEGIN [ WORK | TRANSACTION ]
+  [ 
+    { 
+       ISOLATION LEVEL { READ COMMITTED | READ UNCOMMITTED | SERIALIZABLE | REPEATABLE READ }
+       | { READ WRITE | READ ONLY }
+      } [, ...] 
+  ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

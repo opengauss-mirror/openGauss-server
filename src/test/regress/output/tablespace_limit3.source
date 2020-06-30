@@ -1,0 +1,18 @@
+-- test tablespace limition without slaves cluster
+create tablespace tbs_alter_006 location '@abs_srcdir@/tmp_check/tbs_alter_006' MAXSIZE '5M';
+select a.spcname,a.spcmaxsize from pg_tablespace a,pg_roles b where a.spcowner=b.oid and a.spcname ='tbs_alter_006';
+    spcname    | spcmaxsize 
+---------------+------------
+ tbs_alter_006 | 5120 K
+(1 row)
+
+create table tbs_alter_table_006 (id int, info text, info2 text) tablespace tbs_alter_006;
+insert into tbs_alter_table_006 values(1, generate_series(1,10000), generate_series(1,10000));
+insert into tbs_alter_table_006 select * from tbs_alter_table_006;
+insert into tbs_alter_table_006 select * from tbs_alter_table_006;
+insert into tbs_alter_table_006 select * from tbs_alter_table_006;
+insert into tbs_alter_table_006 select * from tbs_alter_table_006;
+ERROR:  Insufficient storage space for tablespace "tbs_alter_006"
+--?.*
+DROP TABLE tbs_alter_table_006;
+DROP TABLESPACE tbs_alter_006;

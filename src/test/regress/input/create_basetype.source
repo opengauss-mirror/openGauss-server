@@ -1,0 +1,84 @@
+create type complex;
+
+CREATE FUNCTION complex_in(cstring)
+    RETURNS complex
+    AS '@libdir@/regress@DLSUFFIX@','complex_in'
+    LANGUAGE C IMMUTABLE STRICT not fenced;
+CREATE FUNCTION complex_out(complex)
+    RETURNS cstring
+    AS '@libdir@/regress@DLSUFFIX@','complex_out'
+    LANGUAGE C IMMUTABLE STRICT not fenced;
+CREATE FUNCTION complex_recv(internal)
+   RETURNS complex
+   AS '@libdir@/regress@DLSUFFIX@','complex_recv'
+   LANGUAGE C IMMUTABLE STRICT not fenced;
+CREATE FUNCTION complex_send(complex)
+   RETURNS bytea
+   AS '@libdir@/regress@DLSUFFIX@','complex_send'
+   LANGUAGE C IMMUTABLE STRICT not fenced;
+
+CREATE TYPE complex (
+   internallength = 16,
+   input = complex_in,
+   output = complex_out,
+   receive = complex_recv,
+   send = complex_send,
+   alignment = double
+);
+
+create table t1 (
+sk int,
+a complex,
+b complex
+)
+WITH (orientation=row);
+insert into t1 values(1,'(1,2)','(2,3)');
+insert into t1 values(1,'(3,4)','(4,5)');
+select * from t1;
+
+create table t1_rep (
+sk int,
+a complex,
+b complex
+)
+WITH (orientation=row) ;
+insert into t1_rep values(1,'(1,2)','(2,3)');
+insert into t1_rep values(1,'(3,4)','(4,5)');
+select * from t1_rep;
+
+insert into t1 values(1,'(1,2)','(2,3)');
+insert into t1 values(1,'(3,4)','(4,5)');
+CREATE FUNCTION test_type(complex) RETURNS complex
+AS 'select $1;'
+LANGUAGE SQL;
+call test_type(cast('(1,2)' as complex));
+
+create schema schema1;
+alter type complex set schema schema1;
+create table t1_schema_test1 (
+sk int,
+a complex,
+b complex
+)
+WITH (orientation=row);
+set current_schema = schema1;
+create table t1_schema_test2 (
+sk int,
+a complex,
+b complex
+)
+WITH (orientation=row);
+alter type complex set schema public;
+set current_schema = public;
+
+alter type complex rename to complex_1;
+alter type complex_1 rename to complex;
+
+drop type complex cascade;
+drop schema schema1 cascade;
+drop table t1;
+drop table t1_rep;
+
+\h create type
+\h alter type
+\h drop type

@@ -1,0 +1,36 @@
+<refentry id="sql-altertype">
+ <indexterm zone="sql-altertype">
+  <primary>ALTER TYPE</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle>ALTER TYPE</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>ALTER TYPE</refname>
+  <refpurpose>
+   change the definition of a type
+  </refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+<synopsis>
+ALTER TYPE <replaceable class="parameter">name</replaceable> <replaceable class="parameter">action</replaceable> [, ... ]
+ALTER TYPE <replaceable class="parameter">name</replaceable> OWNER TO { <replaceable class="parameter">new_owner</replaceable> | CURRENT_USER | SESSION_USER }
+ALTER TYPE <replaceable class="parameter">name</replaceable> RENAME ATTRIBUTE <replaceable class="parameter">attribute_name</replaceable> TO <replaceable class="parameter">new_attribute_name</replaceable> [ CASCADE | RESTRICT ]
+ALTER TYPE <replaceable class="parameter">name</replaceable> RENAME TO <replaceable class="parameter">new_name</replaceable>
+ALTER TYPE <replaceable class="parameter">name</replaceable> SET SCHEMA <replaceable class="parameter">new_schema</replaceable>
+ALTER TYPE <replaceable class="parameter">name</replaceable> ADD VALUE [ IF NOT EXISTS ] <replaceable class="parameter">new_enum_value</replaceable> [ { BEFORE | AFTER } <replaceable class="parameter">neighbor_enum_value</replaceable> ]
+ALTER TYPE <replaceable class="parameter">name</replaceable> RENAME VALUE <replaceable class="parameter">existing_enum_value</replaceable> TO <replaceable class="parameter">new_enum_value</replaceable>
+
+<phrase>where <replaceable class="parameter">action</replaceable> is one of:</phrase>
+
+    ADD ATTRIBUTE <replaceable class="parameter">attribute_name</replaceable> <replaceable class="parameter">data_type</replaceable> [ COLLATE <replaceable class="parameter">collation</replaceable> ] [ CASCADE | RESTRICT ]
+    DROP ATTRIBUTE [ IF EXISTS ] <replaceable class="parameter">attribute_name</replaceable> [ CASCADE | RESTRICT ]
+    ALTER ATTRIBUTE <replaceable class="parameter">attribute_name</replaceable> [ SET DATA ] TYPE <replaceable class="parameter">data_type</replaceable> [ COLLATE <replaceable class="parameter">collation</replaceable> ] [ CASCADE | RESTRICT ]
+</synopsis>
+ </refsynopsisdiv>
+</refentry>

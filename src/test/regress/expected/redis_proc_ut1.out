@@ -1,0 +1,38 @@
+/*
+ *  UT1:  1)redis_proc get the access share lock
+ *        2)Drop *can* cancel redis_proc
+ */
+START TRANSACTION;
+	select pg_enable_redis_proc_cancelable();	
+ pg_enable_redis_proc_cancelable 
+---------------------------------
+ t
+(1 row)
+
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	LOCK TABLE tx IN ACCESS SHARE MODE;
+	select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+	select pg_sleep(10);
+ERROR:  canceling data redistribution task
+CONTEXT:  referenced column: pg_sleep
+END;
+select current_timestamp;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select count(*) from tx;
+ERROR:  relation "tx" does not exist
+LINE 1: select count(*) from tx;
+                             ^

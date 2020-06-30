@@ -1,0 +1,56 @@
+/*
+ * This file is used to test the simple operation for different data-type
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_sop_engine_3;
+set current_schema=vector_sop_engine_3;
+create table vector_sop_engine_3.VECTOR_SOP_TABLE_03
+(
+   col_tz	timetz
+  ,col_int	int
+) with (orientation = column)
+partition by range (col_int) 
+(
+        partition timetz_partp1 values less than (10),
+        partition timetz_partp2 values less than (20),
+        partition timetz_partp3 values less than (30)
+);
+COPY VECTOR_SOP_TABLE_03(col_tz, col_int) FROM stdin;
+analyze vector_sop_table_03;
+----
+--- test 4: Operation with Partition
+----
+select * from vector_sop_table_03 order by 1, 2;
+   col_tz    | col_int 
+-------------+---------
+ 00:00:30+08 |       1
+ 00:00:30+08 |       9
+ 00:00:30+08 |      10
+ 00:00:30+08 |      19
+ 00:00:30+08 |      20
+ 00:00:30+08 |      29
+(6 rows)
+
+select * from vector_sop_table_03 where col_tz is NULl order by 1, 2;
+ col_tz | col_int 
+--------+---------
+(0 rows)
+
+select * from vector_sop_table_03 where col_tz is Not NULL  order by 1, 2;
+   col_tz    | col_int 
+-------------+---------
+ 00:00:30+08 |       1
+ 00:00:30+08 |       9
+ 00:00:30+08 |      10
+ 00:00:30+08 |      19
+ 00:00:30+08 |      20
+ 00:00:30+08 |      29
+(6 rows)
+
+----
+--- Clean Resource and Tables
+----
+drop schema vector_sop_engine_3 cascade;
+NOTICE:  drop cascades to table vector_sop_table_03

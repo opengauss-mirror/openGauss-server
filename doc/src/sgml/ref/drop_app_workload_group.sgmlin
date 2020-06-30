@@ -1,0 +1,52 @@
+<!--
+doc/src/sgml/ref/drop_app_workload_group.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-DROPAPPWORKLOADGROUP">
+ <refmeta>
+  <refentrytitle>DROP APP WORKLOAD GROUP</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+ <refname>DROP APP WORKLOAD GROUP</refname>
+  <refpurpose>change the definition of a workload group</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-dropappworkloadgroup">
+  <primary>DROP APP WORKLOAD GROUP</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+DROP APP WORKLOAD GROUP MAPPING [IF EXISTS] app_name
+</synopsis>
+ </refsynopsisdiv>
+<!--
+doc/src/sgml/ref/drop_app_workload_group.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-DROPAPPWORKLOADGROUP">
+ <refmeta>
+  <refentrytitle>DROP APP WORKLOAD GROUP</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+ <refname>DROP APP WORKLOAD GROUP</refname>
+  <refpurpose>change the definition of a workload group</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-dropappworkloadgroup">
+  <primary>DROP APP WORKLOAD GROUP</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+DROP APP WORKLOAD GROUP MAPPING [IF EXISTS] app_name
+</synopsis>
+ </refsynopsisdiv>

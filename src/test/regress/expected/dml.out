@@ -1,0 +1,752 @@
+create schema distribute_dml;
+set current_schema = distribute_dml;
+create table src(a int);
+insert into src values(1);
+-- Prepared data 
+create table distribute_source_hash_01(c1 int, c2 numeric, c3 char(10));
+create table distribute_target_hash_01(c1 int, c2 numeric, c3 char(10));
+create table distribute_source_hash_02(c1 int, c2 numeric, c3 char(10));
+create table distribute_target_hash_02(c1 numeric, c2 int, c3 char(10));
+create table distribute_source_replication_01(c1 int, c2 int, c3 char(10));
+create table distribute_target_replication_01(c1 int, c2 int, c3 char(10));
+insert into distribute_source_hash_02 select generate_series(500,1000,10), generate_series(500,1000,10), 'row'|| generate_series(1,51) from src;
+insert into distribute_source_hash_01 select generate_series(1,1000), generate_series(1,1000), 'row'|| generate_series(1,1000) from src;
+insert into distribute_source_replication_01 select generate_series(500,1000,8), generate_series(500,1000,8), 'row'|| generate_series(1,100) from src;
+analyze distribute_source_hash_01;
+analyze distribute_source_replication_01;
+analyze distribute_source_hash_02;
+---------------------------- distribute insert -------------------------------------
+--hash source matchs target distribute keys
+explain (verbose on, costs off, nodes off) insert into distribute_target_hash_01 select * from distribute_source_hash_01;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Insert on distribute_dml.distribute_target_hash_01
+   ->  Seq Scan on distribute_dml.distribute_source_hash_01
+         Output: distribute_source_hash_01.c1, distribute_source_hash_01.c2, distribute_source_hash_01.c3
+(3 rows)
+
+insert into distribute_target_hash_01 select * from distribute_source_hash_01;
+-- hash source doesn't match target distribute keys
+explain (verbose on, costs off, nodes off) insert into distribute_target_hash_02 select * from distribute_source_hash_01;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Insert on distribute_dml.distribute_target_hash_02
+   ->  Seq Scan on distribute_dml.distribute_source_hash_01
+         Output: distribute_source_hash_01.c1, distribute_source_hash_01.c2, distribute_source_hash_01.c3
+(3 rows)
+
+insert into distribute_target_hash_02 select * from distribute_source_hash_01;
+-- replicate target, hashed source
+explain (verbose on, costs off, nodes off) insert into distribute_target_replication_01 select * from distribute_source_hash_01;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Insert on distribute_dml.distribute_target_replication_01
+   ->  Seq Scan on distribute_dml.distribute_source_hash_01
+         Output: distribute_source_hash_01.c1, distribute_source_hash_01.c2, distribute_source_hash_01.c3
+(3 rows)
+
+insert into distribute_target_replication_01 select * from distribute_source_hash_01;
+-- replicate source, hashed target
+explain (verbose on, costs off, nodes off) insert into distribute_target_hash_01 select * from distribute_source_replication_01;
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_dml.distribute_target_hash_01
+   ->  Seq Scan on distribute_dml.distribute_source_replication_01
+         Output: distribute_source_replication_01.c1, distribute_source_replication_01.c2, distribute_source_replication_01.c3
+(3 rows)
+
+insert into distribute_target_hash_02 select * from distribute_source_replication_01;
+-- replicate source, replicate target
+explain (verbose on, costs off, nodes off) insert into distribute_target_replication_01 select * from distribute_source_replication_01;
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_dml.distribute_target_replication_01
+   ->  Seq Scan on distribute_dml.distribute_source_replication_01
+         Output: distribute_source_replication_01.c1, distribute_source_replication_01.c2, distribute_source_replication_01.c3
+(3 rows)
+
+insert into distribute_target_replication_01 select * from distribute_source_replication_01;
+-- join source
+explain (verbose on, costs off, nodes off) insert into distribute_target_hash_01 select t1.c1, t1.c2, t1.c3 from distribute_source_hash_01 t1 join distribute_source_hash_02 t2 on t1.c2=t2.c1 where t2.c2=500;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Insert on distribute_dml.distribute_target_hash_01
+   ->  Hash Join
+         Output: t1.c1, t1.c2, t1.c3
+         Hash Cond: (t1.c2 = (t2.c1)::numeric)
+         ->  Seq Scan on distribute_dml.distribute_source_hash_01 t1
+               Output: t1.c1, t1.c2, t1.c3
+         ->  Hash
+               Output: t2.c1
+               ->  Seq Scan on distribute_dml.distribute_source_hash_02 t2
+                     Output: t2.c1
+                     Filter: (t2.c2 = 500::numeric)
+(11 rows)
+
+insert into distribute_target_hash_01 select t1.c1, t1.c2, t1.c3 from distribute_source_hash_01 t1 join distribute_source_hash_02 t2 on t1.c2=t2.c1 where t2.c2=500;
+create table distribute_table_01
+(
+	c1 int,
+	c2 varchar(20)
+);
+create table distribute_partition_table_01
+(
+	c1 int,
+	c2 int,
+	c3 varchar(20)
+);
+insert into distribute_table_01 values
+		(1, 'fewfw'),
+		(2, 'bbbb'),
+		(3, 'cccc'),
+		(4, 'cccc'),
+		(5, 'cccc');
+insert into distribute_partition_table_01 values
+		(1, 12,'fewfw'),
+		(2, 105,'bbbb'),
+		(3, 500,'cccc'),
+		(4, 10,'cccc'),
+		(5, 600,'cccc');
+create table distribute_table_02
+(
+	c1 int,
+	c2 varchar(20)
+);
+create table distribute_partition_table_02
+(
+	c1 int,
+	c2 int,
+	c3 varchar(20)
+)
+partition by range(c2)
+(
+	partition p1 values less than(100),
+	partition p2 values less than(1000)
+);
+insert into distribute_table_02 select * from distribute_table_01;
+insert into distribute_partition_table_02 select * from distribute_partition_table_01;
+---------------------------- distribute update -------------------------------------
+explain (verbose on, costs off, nodes off) update distribute_target_hash_02 set c2 = c2 + 10 where c1 > 500;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Update on distribute_dml.distribute_target_hash_02
+   ->  Seq Scan on distribute_dml.distribute_target_hash_02
+         Output: c1, (c2 + 10), c3, ctid
+         Filter: (distribute_target_hash_02.c1 > 500::numeric)
+(4 rows)
+
+explain (verbose on, costs off, nodes off) update distribute_target_replication_01 set c2 = c2 + 10 where c2 > 500;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Update on distribute_dml.distribute_target_replication_01
+   ->  Seq Scan on distribute_dml.distribute_target_replication_01
+         Output: c1, (c2 + 10), c3, ctid
+         Filter: (distribute_target_replication_01.c2 > 500)
+(4 rows)
+
+explain (verbose on, costs off, nodes off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10 from distribute_source_hash_01 S1
+	where t1.c1 = s1.c2 and s1.c1 < 100;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Update on distribute_dml.distribute_target_hash_01 t1
+   ->  Hash Join
+         Output: t1.c1, (t1.c2 + 10::numeric), t1.c3, t1.ctid, s1.ctid
+         Hash Cond: ((t1.c1)::numeric = s1.c2)
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01 t1
+               Output: t1.c1, t1.c2, t1.c3, t1.ctid
+         ->  Hash
+               Output: s1.ctid, s1.c2
+               ->  Seq Scan on distribute_dml.distribute_source_hash_01 s1
+                     Output: s1.ctid, s1.c2
+                     Filter: (s1.c1 < 100)
+(11 rows)
+
+explain (verbose on, costs off, nodes off) update distribute_target_hash_01 t1 set (t1.c2, t1.c3) = (t1.c2 + 10 , ' ') from distribute_source_hash_01 s1
+	where t1.c1 = s1.c2 and s1.c1 > 600;   
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Update on distribute_dml.distribute_target_hash_01 t1
+   ->  Hash Join
+         Output: t1.c1, (t1.c2 + 10::numeric), '          '::character(10), t1.ctid, s1.ctid
+         Hash Cond: ((t1.c1)::numeric = s1.c2)
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01 t1
+               Output: t1.c1, t1.c2, t1.ctid
+         ->  Hash
+               Output: s1.ctid, s1.c2
+               ->  Seq Scan on distribute_dml.distribute_source_hash_01 s1
+                     Output: s1.ctid, s1.c2
+                     Filter: (s1.c1 > 600)
+(11 rows)
+
+explain (verbose on, costs off, nodes off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10 from distribute_source_hash_01 S1
+	where t1.c2 = s1.c1 and s1.c1 = 100;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Update on distribute_dml.distribute_target_hash_01 t1
+   ->  Hash Join
+         Output: t1.c1, (t1.c2 + 10::numeric), t1.c3, t1.ctid, s1.ctid
+         Hash Cond: (t1.c2 = (s1.c1)::numeric)
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01 t1
+               Output: t1.c1, t1.c2, t1.c3, t1.ctid
+         ->  Hash
+               Output: s1.ctid, s1.c1
+               ->  Seq Scan on distribute_dml.distribute_source_hash_01 s1
+                     Output: s1.ctid, s1.c1
+                     Filter: (s1.c1 = 100)
+(11 rows)
+
+explain (verbose on, costs off, nodes off) update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10
+	from distribute_source_hash_01 S1, distribute_source_hash_01 S2
+	where t1.c1 = s1.c2 + s2.c2 and s1.c1 < 100 and s1.c1 = s2.c1;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Update on distribute_dml.distribute_target_hash_01 t1
+   ->  Hash Join
+         Output: t1.c1, (t1.c2 + 10::numeric), t1.c3, t1.ctid, s1.ctid, s2.ctid
+         Hash Cond: ((t1.c1)::numeric = (s1.c2 + s2.c2))
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01 t1
+               Output: t1.c1, t1.c2, t1.c3, t1.ctid
+         ->  Hash
+               Output: s1.ctid, s1.c2, s2.ctid, s2.c2
+               ->  Hash Join
+                     Output: s1.ctid, s1.c2, s2.ctid, s2.c2
+                     Hash Cond: (s1.c1 = s2.c1)
+                     ->  Seq Scan on distribute_dml.distribute_source_hash_01 s1
+                           Output: s1.ctid, s1.c2, s1.c1
+                           Filter: (s1.c1 < 100)
+                     ->  Hash
+                           Output: s2.ctid, s2.c2, s2.c1
+                           ->  Seq Scan on distribute_dml.distribute_source_hash_01 s2
+                                 Output: s2.ctid, s2.c2, s2.c1
+                                 Filter: (s2.c1 < 100)
+(19 rows)
+
+update distribute_target_hash_01 set c1 = c1 + 10 where c1 > 500;
+update distribute_target_replication_01 set c2 = c2 + 10 where c2 > 500;
+update distribute_target_hash_02 T2  set t2.c1 = t2.c1 + 10 from distribute_source_hash_01 S1
+	where t2.c1 = s1.c2 and s1.c1 < 100;
+update distribute_target_hash_01 t1 set (t1.c2, t1.c3) = (t1.c2 + 10 , ' ') from distribute_source_hash_01 s1
+	where t1.c1 = s1.c2 and s1.c1 > 600;   
+update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10 from distribute_source_hash_01 S1
+	where t1.c2 = s1.c1 and s1.c1 = 100;
+update distribute_target_hash_01 t1  set t1.c2 = t1.c2 + 10
+	from distribute_source_hash_01 S1, distribute_source_hash_01 S2
+	where t1.c1 = s1.c2 + s2.c2 and s1.c1 < 100 and s1.c1 = s2.c1;
+-------------------------- distribute delete -------------------------------------
+explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Delete on distribute_dml.distribute_target_hash_01
+   ->  Seq Scan on distribute_dml.distribute_target_hash_01
+         Output: ctid
+(3 rows)
+
+explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 WHERE c1 = 400;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Delete on distribute_dml.distribute_target_hash_01
+   ->  Seq Scan on distribute_dml.distribute_target_hash_01
+         Output: ctid
+         Filter: (distribute_target_hash_01.c1 = 400)
+(4 rows)
+
+explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 WHERE c1 < 50;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Delete on distribute_dml.distribute_target_hash_01
+   ->  Seq Scan on distribute_dml.distribute_target_hash_01
+         Output: ctid
+         Filter: (distribute_target_hash_01.c1 < 50)
+(4 rows)
+
+explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 WHERE c1 in (select c2 from distribute_source_hash_01 where c1 < 50);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Delete on distribute_dml.distribute_target_hash_01
+   ->  Hash Join
+         Output: distribute_target_hash_01.ctid, distribute_source_hash_01.ctid
+         Hash Cond: ((distribute_target_hash_01.c1)::numeric = distribute_source_hash_01.c2)
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01
+               Output: distribute_target_hash_01.ctid, distribute_target_hash_01.c1
+         ->  Hash
+               Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+               ->  HashAggregate
+                     Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+                     Group By Key: distribute_source_hash_01.c2
+                     ->  Seq Scan on distribute_dml.distribute_source_hash_01
+                           Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+                           Filter: (distribute_source_hash_01.c1 < 50)
+(14 rows)
+
+explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 WHERE c3 in (select c2 from distribute_source_hash_01);
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Delete on distribute_dml.distribute_target_hash_01
+   ->  Hash Semi Join
+         Output: distribute_target_hash_01.ctid, distribute_source_hash_01.ctid
+         Hash Cond: ((distribute_target_hash_01.c3)::numeric = distribute_source_hash_01.c2)
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01
+               Output: distribute_target_hash_01.ctid, distribute_target_hash_01.c3
+         ->  Hash
+               Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+               ->  Seq Scan on distribute_dml.distribute_source_hash_01
+                     Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+(10 rows)
+
+explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_source_hash_01.c1 < 200;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Delete on distribute_dml.distribute_target_hash_01
+   ->  Hash Join
+         Output: distribute_target_hash_01.ctid, distribute_source_hash_01.ctid
+         Hash Cond: ((distribute_target_hash_01.c1)::numeric = distribute_source_hash_01.c2)
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01
+               Output: distribute_target_hash_01.ctid, distribute_target_hash_01.c1
+         ->  Hash
+               Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+               ->  Seq Scan on distribute_dml.distribute_source_hash_01
+                     Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+                     Filter: (distribute_source_hash_01.c1 < 200)
+(11 rows)
+
+explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_source_hash_01.c1 < 200;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Delete on distribute_dml.distribute_target_hash_01
+   ->  Hash Join
+         Output: distribute_target_hash_01.ctid, distribute_source_hash_01.ctid
+         Hash Cond: ((distribute_target_hash_01.c1)::numeric = distribute_source_hash_01.c2)
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01
+               Output: distribute_target_hash_01.ctid, distribute_target_hash_01.c1
+         ->  Hash
+               Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+               ->  Seq Scan on distribute_dml.distribute_source_hash_01
+                     Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c2
+                     Filter: (distribute_source_hash_01.c1 < 200)
+(11 rows)
+
+explain (verbose on, costs off, nodes off) DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c2=distribute_source_hash_01.c1 and distribute_source_hash_01.c1 = 200;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Delete on distribute_dml.distribute_target_hash_01
+   ->  Hash Join
+         Output: distribute_target_hash_01.ctid, distribute_source_hash_01.ctid
+         Hash Cond: (distribute_target_hash_01.c2 = (distribute_source_hash_01.c1)::numeric)
+         ->  Seq Scan on distribute_dml.distribute_target_hash_01
+               Output: distribute_target_hash_01.ctid, distribute_target_hash_01.c2
+         ->  Hash
+               Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c1
+               ->  Seq Scan on distribute_dml.distribute_source_hash_01
+                     Output: distribute_source_hash_01.ctid, distribute_source_hash_01.c1
+                     Filter: (distribute_source_hash_01.c1 = 200)
+(11 rows)
+
+DELETE FROM distribute_target_hash_01;
+DELETE FROM distribute_target_hash_01 WHERE c1 = 400;
+DELETE FROM distribute_target_hash_01 WHERE c1 < 50;
+DELETE FROM distribute_target_hash_01 WHERE c1 in (select c2 from distribute_source_hash_01 where c1 < 50);
+DELETE FROM distribute_target_hash_01 WHERE c3 in (select c2 from distribute_source_hash_01);
+DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_source_hash_01.c1 < 200;
+DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c2=distribute_source_hash_01.c1 and distribute_source_hash_01.c1 = 200;
+DELETE FROM distribute_target_hash_01 USING distribute_source_hash_01 where distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_target_hash_01.c1=distribute_source_hash_01.c2 and distribute_source_hash_01.c1 < 200;
+--added for llt
+--test tid scan for replication
+explain (verbose on, costs off, nodes off)  select * from  distribute_source_replication_01 where ctid='(0,1)';
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Tid Scan on distribute_dml.distribute_source_replication_01
+   Output: c1, c2, c3
+   TID Cond: (distribute_source_replication_01.ctid = '(0,1)'::tid)
+(3 rows)
+
+explain (verbose on, costs off, nodes off) select * from pg_class  where ctid='(0,1)';
+                                                                                                                                                                                                                                                        QUERY PLAN                                                                                                                                                                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Tid Scan on pg_catalog.pg_class
+   Output: relname, relnamespace, reltype, reloftype, relowner, relam, relfilenode, reltablespace, relpages, reltuples, relallvisible, reltoastrelid, reltoastidxid, reldeltarelid, reldeltaidx, relcudescrelid, relcudescidx, relhasindex, relisshared, relpersistence, relkind, relnatts, relchecks, relhasoids, relhaspkey, relhasrules, relhastriggers, relhassubclass, relcmprs, relhasclusterkey, relrowmovement, parttype, relfrozenxid, relacl, reloptions, relreplident, relfrozenxid64, relbucket, relbucketkey
+   TID Cond: (pg_class.ctid = '(0,1)'::tid)
+(3 rows)
+
+ --test _outValuesScan
+show client_min_messages;
+ client_min_messages 
+---------------------
+ notice
+(1 row)
+
+VALUES (1, 'one'), (2, 'two'), (3, 'three');
+ column1 | column2 
+---------+---------
+       1 | one
+       2 | two
+       3 | three
+(3 rows)
+
+create table stream_UI_diskey1(b1 int);
+insert into stream_UI_diskey1 select generate_series(1,100) from src;
+explain (verbose on, costs off, nodes off) insert into stream_UI_diskey1 select b1 + 100 from stream_UI_diskey1;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Insert on distribute_dml.stream_ui_diskey1
+   ->  Seq Scan on distribute_dml.stream_ui_diskey1
+         Output: (distribute_dml.stream_ui_diskey1.b1 + 100)
+(3 rows)
+
+insert into stream_UI_diskey1 select b1 + 100 from stream_UI_diskey1;
+select count(*) from stream_UI_diskey1 where b1 = 100;
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from stream_UI_diskey1 where b1+1 = 1+ 110;
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from stream_UI_diskey1 where b1 = 110;
+ count 
+-------
+     1
+(1 row)
+
+--insert update delete distriburte keys
+create table insert_tb1 (a int, b int, c int);
+create table insert_tb2 (a int, b int, c int);
+explain (costs off, verbose on) insert into insert_tb1  select * from insert_tb2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
+(3 rows)
+
+--Need redistribute
+explain (costs off, verbose on) insert into insert_tb1 (a, c) select a, c from insert_tb2;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.a, NULL::integer, insert_tb2.c
+(3 rows)
+
+explain (costs off, verbose on) insert into insert_tb1 (b, c) select a, c from insert_tb2;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: NULL::integer, insert_tb2.a, insert_tb2.c
+(3 rows)
+
+explain (costs off, verbose on) insert into insert_tb1 (a, b, c) select b, a, c from insert_tb2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.b, insert_tb2.a, insert_tb2.c
+(3 rows)
+
+explain (costs off, verbose on) insert into insert_tb1 (b, a, c) select b, a, c from insert_tb2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
+(3 rows)
+
+explain (costs off, verbose on) insert into insert_tb1 (b, a, c) select a, b, c from insert_tb2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.b, insert_tb2.a, insert_tb2.c
+(3 rows)
+
+drop table insert_tb1;
+drop table insert_tb2;
+create table insert_tb1 (a int, b int, c int);
+create table insert_tb2 (a int, b int, c int);
+explain (costs off, verbose on) insert into insert_tb1  select * from insert_tb2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
+(3 rows)
+
+explain (costs off, verbose on) delete from insert_tb1 where (a, b ,c) in (select * from insert_tb2);
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_dml.insert_tb1
+   ->  Hash Join
+         Output: insert_tb1.ctid, insert_tb2.ctid
+         Hash Cond: ((insert_tb1.a = insert_tb2.a) AND (insert_tb1.b = insert_tb2.b) AND (insert_tb1.c = insert_tb2.c))
+         ->  Seq Scan on distribute_dml.insert_tb1
+               Output: insert_tb1.ctid, insert_tb1.a, insert_tb1.b, insert_tb1.c
+         ->  Hash
+               Output: insert_tb2.ctid, insert_tb2.a, insert_tb2.b, insert_tb2.c
+               ->  HashAggregate
+                     Output: insert_tb2.ctid, insert_tb2.a, insert_tb2.b, insert_tb2.c
+                     Group By Key: insert_tb2.a, insert_tb2.b, insert_tb2.c
+                     ->  Seq Scan on distribute_dml.insert_tb2
+                           Output: insert_tb2.ctid, insert_tb2.a, insert_tb2.b, insert_tb2.c
+(13 rows)
+
+explain (costs off, verbose on) delete from insert_tb1 where (a, b) in (select a, b from insert_tb2);
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Delete on distribute_dml.insert_tb1
+   ->  Hash Join
+         Output: insert_tb1.ctid, insert_tb2.ctid
+         Hash Cond: ((insert_tb1.a = insert_tb2.a) AND (insert_tb1.b = insert_tb2.b))
+         ->  Seq Scan on distribute_dml.insert_tb1
+               Output: insert_tb1.ctid, insert_tb1.a, insert_tb1.b
+         ->  Hash
+               Output: insert_tb2.ctid, insert_tb2.a, insert_tb2.b
+               ->  HashAggregate
+                     Output: insert_tb2.ctid, insert_tb2.a, insert_tb2.b
+                     Group By Key: insert_tb2.a, insert_tb2.b
+                     ->  Seq Scan on distribute_dml.insert_tb2
+                           Output: insert_tb2.ctid, insert_tb2.a, insert_tb2.b
+(13 rows)
+
+insert into insert_tb2 select generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000) from src;
+insert into insert_tb1  select * from insert_tb2;
+select count(*) from insert_tb1;
+ count 
+-------
+  1000
+(1 row)
+
+delete from insert_tb1 where (a, b ,c) in (select * from insert_tb2);
+select * from insert_tb1;
+ a | b | c 
+---+---+---
+(0 rows)
+
+insert into insert_tb1  select * from insert_tb2;
+select count(*) from insert_tb1;
+ count 
+-------
+  1000
+(1 row)
+
+delete from insert_tb1 where (a, b) in (select a, b from insert_tb2);
+select count(*) from insert_tb1;
+ count 
+-------
+     0
+(1 row)
+
+drop table insert_tb1;
+drop table insert_tb2;
+create table insert_tb1 (a int, b int, c int);
+create table insert_tb2 (a int, b int, c int);
+explain (costs off, verbose on, nodes off) insert into insert_tb1  select * from insert_tb2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
+(3 rows)
+
+explain (costs off, verbose on, nodes off) insert into insert_tb1 (a, b, c) select b, a, c from insert_tb2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.b, insert_tb2.a, insert_tb2.c
+(3 rows)
+
+explain (costs off, verbose on, nodes off) insert into insert_tb1 (b, a, c) select b, a, c from insert_tb2;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb1
+   ->  Seq Scan on distribute_dml.insert_tb2
+         Output: insert_tb2.a, insert_tb2.b, insert_tb2.c
+(3 rows)
+
+explain (costs off, verbose on, nodes off) insert into insert_tb2 select * from insert_tb1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Insert on distribute_dml.insert_tb2
+   ->  Seq Scan on distribute_dml.insert_tb1
+         Output: insert_tb1.a, insert_tb1.b, insert_tb1.c
+(3 rows)
+
+drop table insert_tb1;
+drop table insert_tb2;
+create table delete_t1(a int, b int, c int);
+create table delete_t2(a int, b int, c int) ;
+insert into delete_t1 select generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000) from src;
+insert into delete_t2 select generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000) from src;
+analyze delete_t1;
+analyze delete_t2;
+delete from delete_t1 where b in (select b from delete_t2);
+select * from delete_t1;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop table delete_t1;
+drop table delete_t2;
+create table delete_t1(a int, b int, c int);
+create table delete_t2(a int, b int, c int);
+insert into delete_t1 select generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000) from src;
+insert into delete_t2 select generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000) from src;
+analyze delete_t1;
+analyze delete_t2;
+explain (verbose on, costs off) delete from delete_t1 where (a, b) in (select b, a from delete_t2);
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Delete on distribute_dml.delete_t1
+   ->  Hash Semi Join
+         Output: delete_t1.ctid, delete_t2.ctid
+         Hash Cond: ((delete_t1.a = delete_t2.b) AND (delete_t1.b = delete_t2.a))
+         ->  Seq Scan on distribute_dml.delete_t1
+               Output: delete_t1.ctid, delete_t1.a, delete_t1.b
+         ->  Hash
+               Output: delete_t2.ctid, delete_t2.b, delete_t2.a
+               ->  Seq Scan on distribute_dml.delete_t2
+                     Output: delete_t2.ctid, delete_t2.b, delete_t2.a
+(10 rows)
+
+delete from delete_t1 where (a, b) in (select b, a from delete_t2);
+select * from delete_t1;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop table delete_t1;
+drop table delete_t2;
+--hash and replication
+create table delete_t1(a int, b int, c int);
+create table delete_t2(a int, b int, c int);
+explain (verbose on, costs off) delete from delete_t1 where b in (select b from delete_t2);
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Delete on distribute_dml.delete_t1
+   ->  Hash Join
+         Output: delete_t1.ctid, delete_t2.ctid
+         Hash Cond: (delete_t1.b = delete_t2.b)
+         ->  Seq Scan on distribute_dml.delete_t1
+               Output: delete_t1.ctid, delete_t1.b
+         ->  Hash
+               Output: delete_t2.ctid, delete_t2.b
+               ->  HashAggregate
+                     Output: delete_t2.ctid, delete_t2.b
+                     Group By Key: delete_t2.b
+                     ->  Seq Scan on distribute_dml.delete_t2
+                           Output: delete_t2.ctid, delete_t2.b
+(13 rows)
+
+insert into delete_t1 select generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000) from src;
+insert into delete_t2 select generate_series(1, 1000), generate_series(1, 1000), generate_series(1, 1000) from src;
+delete from delete_t1 where b in (select b from delete_t2);
+select * from delete_t1;
+ a | b | c 
+---+---+---
+(0 rows)
+
+drop table delete_t1;
+drop table delete_t2;
+CREATE TABLE t1_col(a int, b int)with (orientation = column);
+CREATE TABLE t2_col(a int, b int)with (orientation = column);
+copy t1_col from stdin DELIMITER  '|';
+copy t2_col from stdin DELIMITER  '|';
+select * from table_skewness('t1_col', 'a');
+ERROR:  Bucketmap is NULL
+CONTEXT:  PL/pgSQL function table_skewness(text,text,text) line 26 at FOR over EXECUTE statement
+select * from table_skewness('t2_col', 'a');
+ERROR:  Bucketmap is NULL
+CONTEXT:  PL/pgSQL function table_skewness(text,text,text) line 26 at FOR over EXECUTE statement
+select * from table_skewness('t1_col', 'a') order by 1, 2, 3;
+ERROR:  Bucketmap is NULL
+CONTEXT:  PL/pgSQL function table_skewness(text,text,text) line 26 at FOR over EXECUTE statement
+select * from table_skewness('t2_col', 'a') order by 1, 2, 3;
+ERROR:  Bucketmap is NULL
+CONTEXT:  PL/pgSQL function table_skewness(text,text,text) line 26 at FOR over EXECUTE statement
+set enable_hashjoin=off;
+set enable_mergejoin=off;
+select * from t1_col as t1 join t2_col as t2 on(t1.a = t2.a or (t1.a is null and t2.a is null)) where getbucket(row(t1.a, t2.a), 'H') is null;
+ERROR:  unsupported proc in single node mode.
+create table test_parttable(c1 int, c2 float, c3 real, c4 text)
+partition by range (c1, c2, c3, c4)
+(
+        partition altertable_rangeparttable_p1 values less than (10, 10.00, 19.156, 'h'),
+        partition altertable_rangeparttable_p2 values less than (20, 20.89, 23.75, 'k'),
+        partition altertable_rangeparttable_p3 values less than (30, 30.45, 32.706, 's')
+);
+\d+ test_parttable
+                     Table "distribute_dml.test_parttable"
+ Column |       Type       | Modifiers | Storage  | Stats target | Description 
+--------+------------------+-----------+----------+--------------+-------------
+ c1     | integer          |           | plain    |              | 
+ c2     | double precision |           | plain    |              | 
+ c3     | real             |           | plain    |              | 
+ c4     | text             |           | extended |              | 
+Range partition by(c1, c2, c3, c4)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table t1_col;
+drop table t2_col;
+drop table test_parttable;
+create table create_columnar_table_033 ( c_smallint smallint null,c_double_precision double precision,
+c_time_without_time_zone time without time zone null,c_time_with_time_zone time with time zone,c_integer integer default 23423,
+c_bigint bigint default 923423432,c_decimal decimal(19) default 923423423,c_real real,c_numeric numeric(18,12) null,
+c_varchar varchar(19),c_char char(57) null,c_timestamp_with_timezone timestamp with time zone,c_char2 char default '0',
+c_text text null,c_varchar2 varchar2(20),c_timestamp_without_timezone timestamp without time zone,c_date date,
+c_varchar22 varchar2(11621),c_numeric2 numeric null ) 
+with (orientation=column , compression=high); 
+set plan_mode_seed=1591957696;
+explain (verbose on, costs off)
+delete from create_columnar_table_033 where c_integer in 
+(select min(c_integer) from create_columnar_table_033 where c_smallint<c_bigint);
+                                                                        QUERY PLAN (RANDOM seed 1591957696)                                                                        
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Delete on distribute_dml.create_columnar_table_033
+         ->  Vector Nest Loop Semi Join
+               Output: distribute_dml.create_columnar_table_033.ctid, distribute_dml.create_columnar_table_033.tableoid, (min(distribute_dml.create_columnar_table_033.c_integer))
+               Join Filter: (distribute_dml.create_columnar_table_033.c_integer = (min(distribute_dml.create_columnar_table_033.c_integer)))
+               ->  CStore Scan on distribute_dml.create_columnar_table_033
+                     Output: distribute_dml.create_columnar_table_033.ctid, distribute_dml.create_columnar_table_033.tableoid, distribute_dml.create_columnar_table_033.c_integer
+               ->  Vector Aggregate
+                     Output: min(distribute_dml.create_columnar_table_033.c_integer)
+                     ->  CStore Scan on distribute_dml.create_columnar_table_033
+                           Output: distribute_dml.create_columnar_table_033.c_integer
+                           Filter: (distribute_dml.create_columnar_table_033.c_smallint < distribute_dml.create_columnar_table_033.c_bigint)
+(12 rows)
+
+drop table create_columnar_table_033;
+reset plan_mode_seed;
+-- sdv core: insert into sys table
+create table tmp_description as select * from pg_description limit 5;
+explain (verbose on, costs off)
+insert into pg_description select * from tmp_description;
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Insert on pg_catalog.pg_description
+   ->  Seq Scan on distribute_dml.tmp_description
+         Output: tmp_description.objoid, tmp_description.classoid, tmp_description.objsubid, tmp_description.description
+(3 rows)
+
+drop table tmp_description;
+--data distribute skew functions and view 
+drop schema distribute_dml cascade;
+NOTICE:  drop cascades to 12 other objects
+DETAIL:  drop cascades to table src
+drop cascades to table distribute_source_hash_01
+drop cascades to table distribute_target_hash_01
+drop cascades to table distribute_source_hash_02
+drop cascades to table distribute_target_hash_02
+drop cascades to table distribute_source_replication_01
+drop cascades to table distribute_target_replication_01
+drop cascades to table distribute_table_01
+drop cascades to table distribute_partition_table_01
+drop cascades to table distribute_table_02
+drop cascades to table distribute_partition_table_02
+drop cascades to table stream_ui_diskey1

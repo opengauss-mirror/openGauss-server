@@ -1,0 +1,86 @@
+--==========================================================
+--==========================================================
+\set ECHO all
+set current_schema = hw_es_multi_column_stats;
+set default_statistics_target=-2;
+--========================================================== analyze with alter table
+alter table t1_3 add statistics ((a, b));
+alter table t1_3 add statistics ((b, c));
+alter table t1_3 add statistics ((a, d));
+alter table t1_3 add statistics ((b, d));
+alter table t1_3 add statistics ((b, c, d));
+alter table t1r_3 add statistics ((a, b));
+alter table t1r_3 add statistics ((b, c));
+alter table t1r_3 add statistics ((a, d));
+alter table t1r_3 add statistics ((b, d));
+alter table t1r_3 add statistics ((b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1_3' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1_3      | 1 2     | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 1 4     | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 3     | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 3 4   | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 4     | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+(5 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r_3' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1r_3     | 1 2     | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 1 4     | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 3     | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 3 4   | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 4     | f         |         0 |         0 |          0 |            0 |                  |                   |                       |                        | 
+(5 rows)
+
+analyze t1_3 ((b, d));
+analyze t1_3 ((c, d));
+analyze t1r_3 ((b, d));
+analyze t1r_3 ((c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1_3' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      |         most_common_freqs         | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------+-----------------------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1_3      | 1 2     | f         |         0 |         0 |          0 |            0 |                           |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 1 4     | f         |         0 |         0 |          0 |            0 |                           |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 3     | f         |         0 |         0 |          0 |            0 |                           |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 3 4   | f         |         0 |         0 |          0 |            0 |                           |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 4     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,1,1}"} | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 3 4     | f         |         0 |         8 |   -.333333 |            0 | {"{1,2}","{1,1}"}         | {.444444,.444444}                 |                       |                        | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r_3' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |     most_common_vals      |         most_common_freqs         | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------+-----------------------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1r_3     | 1 2     | f         |         0 |         0 |          0 |            0 |                           |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 1 4     | f         |         0 |         0 |          0 |            0 |                           |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 3     | f         |         0 |         0 |          0 |            0 |                           |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 3 4   | f         |         0 |         0 |          0 |            0 |                           |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 4     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,1,1}"} | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 3 4     | f         |         0 |         8 |   -.333333 |            0 | {"{1,2}","{1,1}"}         | {.444444,.444444}                 |                       |                        | 
+(6 rows)
+
+analyze t1_3;
+analyze t1r_3;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1_3' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            |         most_common_freqs         | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-----------------------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1_3      | 1 2     | f         |         0 |         8 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 1 4     | f         |         0 |         8 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 3     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,2,2}"}             | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 3 4   | f         |         0 |        12 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 2 4     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,1,1}"}             | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1_3      | 3 4     | f         |         0 |         8 |   -.333333 |            0 | {"{1,2}","{1,1}"}                     | {.444444,.444444}                 |                       |                        | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t1r_3' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |           most_common_vals            |         most_common_freqs         | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------------------+-----------------------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t1r_3     | 1 2     | f         |         0 |         8 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 1 4     | f         |         0 |         8 |         -1 |            0 |                                       |                                   |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 3     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,2,2}"}             | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 3 4   | f         |         0 |        12 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,2,2}","{1,1,1,1}"} | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 2 4     | f         |         0 |         8 |   -.555556 |            0 | {"{1,2,3,4}","{1,1,1,1}"}             | {.222222,.222222,.222222,.222222} |                       |                        | 
+ hw_es_multi_column_stats | t1r_3     | 3 4     | f         |         0 |         8 |   -.333333 |            0 | {"{1,2}","{1,1}"}                     | {.444444,.444444}                 |                       |                        | 
+(6 rows)
+

@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_NODE">
+<refmeta>
+<refentrytitle>DROP NODE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP NODE</refname>
+<refpurpose>drop a cluster node</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP NODE nodename;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

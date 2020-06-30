@@ -1,0 +1,5 @@
+# dist_fdw extension
+comment = 'foreign-data wrapper for distfs access'
+default_version = '1.0'
+module_pathname = '$libdir/dist_fdw'
+relocatable = true

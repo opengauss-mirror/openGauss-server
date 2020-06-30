@@ -1,0 +1,17 @@
+<refentry id="SQL-ALTER_DIRECTORY">
+<refmeta>
+<refentrytitle>ALTER DIRECTORY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER DIRECTORY</refname>
+<refpurpose>change a directory</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER DIRECTORY directory_name
+    OWNER TO new_owner;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,17 @@
+<refentry id="SQL-CREATE_DIRECTORY">
+<refmeta>
+<refentrytitle>CREATE DIRECTORY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE DIRECTORY</refname>
+<refpurpose>create a new directory</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [OR REPLACE] DIRECTORY directory_name
+AS 'path_name';
+</synopsis>
+</refsynopsisdiv>
+</refentry>

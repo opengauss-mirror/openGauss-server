@@ -1,0 +1,85 @@
+--
+-- BULK LOAD PARALLEL TEST 4
+--
+----
+
+
+CREATE TABLE tmp_nation (
+    n_nationkey integer NOT NULL,
+    n_name character(25),
+    n_regionkey integer NOT NULL,
+    n_comment character varying(152)
+)with (orientation = column);
+
+
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+
+
+TRUNCATE tmp_nation;
+----
+
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+
+TRUNCATE tmp_nation;
+
+----
+--23. Format in FIXED and specify FIX
+
+SELECT * FROM tmp_nation ORDER BY n_nationkey;
+
+
+
+---
+--td_compatible_truncation on varchar test (varchar, varchar2, nvarchar2)
+---
+
+-- prepare_working_env
+
+create database td_db_char_bulkload DBCOMPATIBILITY 'C';
+\c td_db_char_bulkload
+
+drop table if exists tdcompatibletruncatevarchar;
+CREATE TABLE tdcompatibletruncatevarchar
+(
+ L_ORDERKEY BIGINT NOT NULL
+, L_PARTKEY BIGINT NOT NULL
+, L_SUPPKEY BIGINT NOT NULL
+, L_LINENUMBER BIGINT NOT NULL
+, L_QUANTITY DECIMAL(15,2) NOT NULL
+, L_EXTENDEDPRICE DECIMAL(15,2) NOT NULL
+, L_DISCOUNT DECIMAL(15,2) NOT NULL
+, L_TAX DECIMAL(15,2) NOT NULL
+, L_RETURNFLAG CHAR(1) NOT NULL
+, L_LINESTATUS CHAR(1) NOT NULL
+, L_SHIPDATE DATE NOT NULL
+, L_COMMITDATE DATE NOT NULL
+, L_RECEIPTDATE DATE NOT NULL
+, L_SHIPINSTRUCT CHAR(1) NOT NULL
+, L_SHIPMODE VARCHAR2(1) NOT NULL
+, L_COMMENT VARCHAR(1) NOT NULL
+--, primary key (L_ORDERKEY, L_LINENUMBER)
+);
+
+drop table if exists testoperators;
+CREATE TABLE testoperators
+(
+ TEST_OPERATOR CHAR(3) NOT NULL
+);
+
+
+set td_compatible_truncation=on;
+
+-- Insert and also check whether required types are truncated successfully
+
+select L_SHIPINSTRUCT, L_SHIPMODE, L_COMMENT from tdcompatibletruncatevarchar where L_LINENUMBER = 1 and L_ORDERKEY = 1;
+
+SELECT TEST_OPERATOR FROM testoperators;
+
+-- End. Clean up
+
+set td_compatible_truncation=off;
+drop table if exists tdcompatibletruncatevarchar;
+
+drop table if exists testoperators;
+\c regression
+

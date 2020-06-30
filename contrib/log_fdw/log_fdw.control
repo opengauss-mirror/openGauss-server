@@ -1,0 +1,12 @@
+##########################################################################
+#
+#                foreign-data wrapper for LOG file
+#
+# contrib/log_fdw/log_fdw.control
+# 
+##########################################################################
+
+comment = 'Foreign Data Wrapper for accessing logging data'
+default_version = '1.0'
+module_pathname = '$libdir/log_fdw'
+relocatable = true

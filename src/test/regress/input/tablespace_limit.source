@@ -1,0 +1,268 @@
+CREATE TABLE import_src0
+(
+  c_hashid int,
+  c_tinyint  tinyint,
+  c_smallint smallint,
+  c_int integer,
+  c_bigint   bigint,
+  c_money    money,
+  c_numeric   numeric,
+  c_real      real,
+  c_double    double precision,
+  c_decimal   decimal,
+  c_varchar   varchar,
+  c_char   char(30),
+  c_nvarchar2  nvarchar2,
+  c_text text,
+  c_timestamp   timestamp with time zone,
+  c_timestamptz timestamp without time zone,
+  c_date     date,
+  c_time     time without time zone,
+  c_timetz   time with time zone,
+  c_interval  interval,
+  c_tinterval   tinterval,
+  c_smalldatetime   smalldatetime,
+  c_bytea   bytea,
+  c_boolean  boolean,
+  c_inet inet,
+  c_cidr cidr,
+  c_bit bit(10),
+  c_varbit varbit(10),
+  c_oid oid
+)
+   
+;
+
+CREATE TABLE import_src1
+(
+  c_hashid int,
+  c_tinyint  tinyint,
+  c_smallint smallint,
+  c_int integer,
+  c_bigint   bigint,
+  c_money    money,
+  c_numeric   numeric,
+  c_real      real,
+  c_double    double precision,
+  c_decimal   decimal,
+  c_varchar   varchar,
+  c_char   char(30),
+  c_nvarchar2  nvarchar2,
+  c_text text,
+  c_timestamp   timestamp with time zone,
+  c_timestamptz timestamp without time zone,
+  c_date     date,
+  c_time     time without time zone,
+  c_timetz   time with time zone,
+  c_interval  interval,
+  c_tinterval   tinterval,
+  c_smalldatetime   smalldatetime,
+  c_bytea   bytea,
+  c_boolean  boolean,
+  c_inet inet,
+  c_cidr cidr,
+  c_bit bit(10),
+  c_varbit varbit(10),
+  c_oid oid
+)
+WITH (ORIENTATION = COLUMN)
+ 
+;
+
+CREATE TABLESPACE ts location '@testtablespace@/tablespace_limit';
+
+COPY import_src0 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_alter_change_plus_update.dat';
+COPY import_src1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_alter_change_plus_update.dat';
+
+CREATE TABLE import_0
+(
+  c_hashid int,
+  c_tinyint  tinyint,
+  c_smallint smallint,
+  c_int integer,
+  c_bigint   bigint,
+  c_money    money,
+  c_numeric   numeric,
+  c_real      real,
+  c_double    double precision,
+  c_decimal   decimal,
+  c_varchar   varchar,
+  c_char   char(30),
+  c_nvarchar2  nvarchar2,
+  c_text text,
+  c_timestamp   timestamp with time zone,
+  c_timestamptz timestamp without time zone,
+  c_date     date,
+  c_time     time without time zone,
+  c_timetz   time with time zone,
+  c_interval  interval,
+  c_tinterval   tinterval,
+  c_smalldatetime   smalldatetime,
+  c_bytea   bytea,
+  c_boolean  boolean,
+  c_inet inet,
+  c_cidr cidr,
+  c_bit bit(10),
+  c_varbit varbit(10),
+  c_oid oid
+)
+TABLESPACE ts
+ 
+;
+
+CREATE TABLE import_1
+(
+  c_hashid int,
+  c_tinyint  tinyint,
+  c_smallint smallint,
+  c_int integer,
+  c_bigint   bigint,
+  c_money    money,
+  c_numeric   numeric,
+  c_real      real,
+  c_double    double precision,
+  c_decimal   decimal,
+  c_varchar   varchar,
+  c_char   char(30),
+  c_nvarchar2  nvarchar2,
+  c_text text,
+  c_timestamp   timestamp with time zone,
+  c_timestamptz timestamp without time zone,
+  c_date     date,
+  c_time     time without time zone,
+  c_timetz   time with time zone,
+  c_interval  interval,
+  c_tinterval   tinterval,
+  c_smalldatetime   smalldatetime,
+  c_bytea   bytea,
+  c_boolean  boolean,
+  c_inet inet,
+  c_cidr cidr,
+  c_bit bit(10),
+  c_varbit varbit(10),
+  c_oid oid
+)
+WITH (ORIENTATION = COLUMN)
+TABLESPACE ts
+ 
+;
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '5M';
+
+INSERT INTO import_0 SELECT * FROM import_src0;
+INSERT INTO import_1 SELECT * FROM import_src1;
+
+ALTER TABLESPACE ts RESIZE MAXSIZE UNLIMITED;
+
+INSERT INTO import_0 SELECT * FROM import_src0;
+INSERT INTO import_1 SELECT * FROM import_src1;
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 K';
+ALTER TABLESPACE ts RESIZE MAXSIZE '18014398509481983 K';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 K';
+ALTER TABLESPACE ts RESIZE MAXSIZE '18014398509481984 K';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 k';
+ALTER TABLESPACE ts RESIZE MAXSIZE '18014398509481983 k';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 k';
+ALTER TABLESPACE ts RESIZE MAXSIZE '18014398509481984 k';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 M';
+ALTER TABLESPACE ts RESIZE MAXSIZE '17592186044415 M';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 M';
+ALTER TABLESPACE ts RESIZE MAXSIZE '17592186044416 M';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 m';
+ALTER TABLESPACE ts RESIZE MAXSIZE '17592186044415 m';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 m';
+ALTER TABLESPACE ts RESIZE MAXSIZE '17592186044416 m';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 G';
+ALTER TABLESPACE ts RESIZE MAXSIZE '17179869183 G';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 G';
+ALTER TABLESPACE ts RESIZE MAXSIZE '17179869184 G';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 g';
+ALTER TABLESPACE ts RESIZE MAXSIZE '17179869183 g';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 g';
+ALTER TABLESPACE ts RESIZE MAXSIZE '17179869184 g';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 T';
+ALTER TABLESPACE ts RESIZE MAXSIZE '16777215 T';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 T';
+ALTER TABLESPACE ts RESIZE MAXSIZE '16777216 T';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 t';
+ALTER TABLESPACE ts RESIZE MAXSIZE '16777215 t';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 t';
+ALTER TABLESPACE ts RESIZE MAXSIZE '16777216 t';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 P';
+ALTER TABLESPACE ts RESIZE MAXSIZE '16383 P';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 P';
+ALTER TABLESPACE ts RESIZE MAXSIZE '16384 P';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 p';
+ALTER TABLESPACE ts RESIZE MAXSIZE '16383 p';
+ALTER TABLESPACE ts RESIZE MAXSIZE '0 p';
+ALTER TABLESPACE ts RESIZE MAXSIZE '16384 p';
+
+ALTER TABLESPACE ts RESIZE MAXSIZE '1 B';
+
+DROP TABLE import_0;
+DROP TABLE import_1;
+
+
+
+-- test tablespace for DDL and BTREE INDEX
+CREATE TABLESPACE tbs_001 location '@abs_srcdir@/tmp_check/tbs_001' MAXSIZE '50 K';
+-- failed because too small tablespace
+CREATE TABLE tbs_alter_table_007 ( id int, info int ) with ( ORIENTATION = COLUMN ) TABLESPACE tbs_001
+PARTITION BY RANGE (id)
+(
+    partition p0 values less than (1000),
+    partition p1 values less than (2000),
+    partition p2 values less than (3000),
+    partition p3 values less than (4000),
+    partition p4 values less than (5000),
+    partition p5 values less than (6000),
+    partition p6 values less than (7000),
+    partition p7 values less than (8000),
+    partition p8 values less than (9000),
+    partition p9 values less than (10000)
+);
+CREATE TABLE tbs_alter_table_008 TABLESPACE tbs_001 AS SELECT * FROM import_src0;
+-- test tablespace for VACUUM FULL
+ALTER TABLESPACE tbs_001 RESIZE MAXSIZE '30M';
+CREATE TABLE tbs_alter_table_009 TABLESPACE tbs_001 AS SELECT * FROM import_src0;
+VACUUM FULL tbs_alter_table_009;
+DROP TABLE tbs_alter_table_009;
+-- test tablespace for CLUSTER
+CREATE TABLE tbs_alter_table_010 TABLESPACE tbs_001 AS SELECT * FROM import_src0;
+CREATE INDEX idx_tbl010_00 ON tbs_alter_table_010(c_int);
+CLUSTER tbs_alter_table_010 USING idx_tbl010_00;
+DROP INDEX idx_tbl010_00;
+DROP TABLE tbs_alter_table_010;
+-- test tablespace for ALTER TABLE SET TABLESPACE
+CREATE TABLESPACE tbs_002 location '@abs_srcdir@/tmp_check/tbs_002' MAXSIZE '50 K';
+CREATE TABLE tbs_alter_table_011 TABLESPACE tbs_001 AS SELECT * FROM import_src0;
+ALTER TABLE tbs_alter_table_011 SET TABLESPACE tbs_002;
+DROP TABLE tbs_alter_table_011;
+-- test tablespace for MERGE PARTITION
+CREATE TABLE tbs_alter_table_012 ( id int, info text ) tablespace tbs_002
+PARTITION BY RANGE (id)
+(
+    PARTITION p0 values less than (10),
+    PARTITION p1 values less than (20)
+);
+INSERT INTO tbs_alter_table_012 VALUES (1, 'abcdefghijklmnopqrstuvwxyz10233456789');
+INSERT INTO tbs_alter_table_012 SELECT * FROM tbs_alter_table_012;
+ALTER TABLE tbs_alter_table_012 MERGE PARTITIONS p0, p1 INTO PARTITION p2;
+DROP TABLE tbs_alter_table_012;
+-- test tablespace for VM/FSM/BCM extending.
+DROP TABLE import_src0;
+DROP TABLE import_src1;
+DROP TABLESPACE ts;
+DROP TABLESPACE tbs_002;
+DROP TABLESPACE tbs_001;
+

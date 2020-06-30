@@ -1,0 +1,81 @@
+SET DATESTYLE=ISO;
+--
+-- Test: undo testing
+--
+-- case 1: simple undo testing
+CREATE TABLE cmpr_rollback ( 
+	RES_ID varchar(255) NOT NULL,
+	NE_ID int NOT NULL,
+	COLLECT_TIME timestamp(1) WITHOUT TIME ZONE NOT NULL,
+	INSERT_TIME timestamp(1) WITHOUT TIME ZONE NOT NULL,
+	IS_VALID int NOT NULL,
+	I3599 float NULL,
+	I3600 float NULL,
+	I3601 numeric(23,2) NULL,
+	I3602 numeric(23,0) NULL,
+	I3603 float NULL
+) COMPRESS;
+SELECT COUNT(*) FROM cmpr_rollback;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM cmpr_rollback;
+ res_id | ne_id | collect_time | insert_time | is_valid | i3599 | i3600 | i3601 | i3602 | i3603 
+--------+-------+--------------+-------------+----------+-------+-------+-------+-------+-------
+(0 rows)
+
+START TRANSACTION;
+COPY cmpr_rollback FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_common.data';
+ROLLBACK TRANSACTION;
+SELECT COUNT(*) FROM cmpr_rollback;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM cmpr_rollback;
+ res_id | ne_id | collect_time | insert_time | is_valid | i3599 | i3600 | i3601 | i3602 | i3603 
+--------+-------+--------------+-------------+----------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_rollback;
+CREATE TABLE cmpr_rollback_raw ( 
+	RES_ID varchar(255) NOT NULL,
+	NE_ID int NOT NULL,
+	COLLECT_TIME timestamp(1) WITHOUT TIME ZONE NOT NULL,
+	INSERT_TIME timestamp(1) WITHOUT TIME ZONE NOT NULL,
+	IS_VALID int NOT NULL,
+	I3599 float NULL,
+	I3600 float NULL,
+	I3601 numeric(23,2) NULL,
+	I3602 numeric(23,0) NULL,
+	I3603 float NULL
+);
+SELECT COUNT(*) FROM cmpr_rollback_raw;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM cmpr_rollback_raw;
+ res_id | ne_id | collect_time | insert_time | is_valid | i3599 | i3600 | i3601 | i3602 | i3603 
+--------+-------+--------------+-------------+----------+-------+-------+-------+-------+-------
+(0 rows)
+
+START TRANSACTION;
+COPY cmpr_rollback_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_common.data';
+ROLLBACK TRANSACTION;
+SELECT COUNT(*) FROM cmpr_rollback_raw;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM cmpr_rollback_raw;
+ res_id | ne_id | collect_time | insert_time | is_valid | i3599 | i3600 | i3601 | i3602 | i3603 
+--------+-------+--------------+-------------+----------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_rollback_raw;

@@ -1,0 +1,451 @@
+--cleanup
+DROP FOREIGN TABLE bmsql_warehouse;
+ERROR:  foreign table "bmsql_warehouse" does not exist
+DROP FOREIGN TABLE bmsql_district;
+ERROR:  foreign table "bmsql_district" does not exist
+SET default_tablespace = '';
+SET default_with_oids = false;
+CREATE FOREIGN TABLE bmsql_warehouse (
+  w_id        integer   not null,
+  w_ytd       decimal(12,2),
+  w_tax       decimal(4,4),
+  w_name      varchar(10),
+  w_street_1  varchar(20),
+  w_street_2  varchar(20),
+  w_city      varchar(20),
+  w_state     char(2),
+  w_zip       char(9),
+  primary key (w_id)
+) SERVER mot_server;
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "bmsql_warehouse_pkey" for foreign table "bmsql_warehouse"
+CREATE FOREIGN TABLE bmsql_district (
+  d_w_id       integer       not null,
+  d_id         integer       not null,
+  d_ytd        decimal(12,2),
+  d_tax        decimal(4,4),
+  d_next_o_id  integer,
+  d_name       varchar(10),
+  d_street_1   varchar(20),
+  d_street_2   varchar(20),
+  d_city       varchar(20),
+  d_state      char(2),
+  d_zip        char(9),
+  primary key (d_w_id, d_id)
+) SERVER mot_server;
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "bmsql_district_pkey" for foreign table "bmsql_district"
+CREATE index  d_idx1 on  bmsql_district(d_w_id);
+INSERT INTO bmsql_district VALUES (1,1, 103.22, .1934, 100, 'AAA', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,2, 133.22, .1234, 100, 'CCC', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,3, 133.22, .1234, 100, 'AAA', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,4, 123.22, .0234, 100, 'BBB', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,5, 723.22, .1234, 100, 'CCC', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,6, 123.22, .2234, 100, 'AAA', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,7, 23.22, .1234, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,8, 423.22, .05, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,9, 129.22, .1234, 100, 'BBB', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (1,10, 163.22, .2234, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (2,1, 123.22, .1234, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (2,2, 123.42, .2234, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (2,3, 123.22, .1234, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (3,1, 123.22, .175, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (3,2, 123.42, .1234, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_district VALUES (3,3, 123.22, .2234, 100, 'VVV', 'FFF', 'DDD', 'XXX', 'IL', '84965');
+INSERT INTO bmsql_warehouse VALUES (1, 300000.00, .1234, 'FirstWare', 'zoqVwMnEDh3ON', 'sooG1kQQ8Pz', 'NvUlyevdvfoZME2q', 'IL', '442111111');
+INSERT INTO bmsql_warehouse VALUES (2, 133.22, .0940, 'SecondWare', 'zoqVwMnEDh3ON', 'sooG1kQQ8Pz', 'NvUlyevdvfoZME2q', 'IL', '442111111');
+INSERT INTO bmsql_warehouse VALUES (3, 423.22, .2940, 'Y8tGa6iFq', 'zoqVwMnEDh3ON', 'sooG1kQQ8Pz', 'NvUlyevdvfoZME2q', 'IL', '442111111');
+INSERT INTO bmsql_warehouse VALUES (4, 100.00, .0940, 'Y8tGa6iFq', 'zoqVwMnEDh3ON', 'sooG1kQQ8Pz', 'NvUlyevdvfoZME2q', 'IL', '442111111');
+INSERT INTO bmsql_warehouse VALUES (5, 723.22, .1234, 'Y8tGa6iFq', 'zoqVwMnEDh3ON', 'sooG1kQQ8Pz', 'NvUlyevdvfoZME2q', 'IL', '442111111');
+-- Liran's addition:
+SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(16 rows)
+
+SELECT DISTINCT d_id FROM bmsql_district ORDER BY d_id;
+ d_id 
+------
+    1
+    2
+    3
+    4
+    5
+    6
+    7
+    8
+    9
+   10
+(10 rows)
+
+SELECT * FROM bmsql_district WHERE d_w_id=1 ORDER BY d_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(10 rows)
+
+-- issue #10 in isource:
+--SELECT * FROM bmsql_district WHERE d_w_id=1 OR d_id=2 ORDER BY d_id, d_w_id;
+--The SQL ORDER BY Keyword
+SELECT * FROM bmsql_district ORDER BY d_id, d_w_id ASC;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(16 rows)
+
+SELECT * FROM bmsql_district ORDER BY d_id, d_w_id DESC;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(16 rows)
+
+SELECT * FROM bmsql_district ORDER BY d_ytd, d_tax, d_id DESC;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+(16 rows)
+
+SELECT * FROM bmsql_district ORDER BY d_ytd, d_tax, d_id DESC;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+(16 rows)
+
+--The SQL GROUP BY Keyword
+SELECT * FROM bmsql_district GROUP BY d_id, d_w_id ORDER BY d_id, d_w_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(16 rows)
+
+SELECT COUNT(*) FROM bmsql_district GROUP BY d_name ORDER BY d_name ASC;
+ count 
+-------
+     3
+     2
+     2
+     9
+(4 rows)
+
+--SQL MIN() and MAX() Functions
+SELECT min(d_id) FROM bmsql_district;
+ min 
+-----
+   1
+(1 row)
+
+SELECT max(d_id) FROM bmsql_district;
+ max 
+-----
+  10
+(1 row)
+
+SELECT max(d_id) FROM bmsql_district WHERE d_w_id=1;
+ max 
+-----
+  10
+(1 row)
+
+SELECT min(d_id) FROM bmsql_district WHERE d_w_id=1;
+ min 
+-----
+   1
+(1 row)
+
+SELECT max(d_id) FROM bmsql_district WHERE d_tax>0.175;
+ max 
+-----
+  10
+(1 row)
+
+SELECT min(d_id) FROM bmsql_district WHERE d_tax>0.175;
+ min 
+-----
+   1
+(1 row)
+
+SELECT min(d_tax) FROM bmsql_district WHERE d_id BETWEEN 2 and 6;
+  min  
+-------
+ .0234
+(1 row)
+
+SELECT min(d_tax) FROM bmsql_district WHERE d_id in (2,3,5,10);
+  min  
+-------
+ .1234
+(1 row)
+
+-- TODO: use other VALUES.
+--The SQL COUNT(), AVG() and SUM() Functions
+SELECT COUNT(d_id) FROM bmsql_district WHERE d_tax>0.05;
+ count 
+-------
+    14
+(1 row)
+
+SELECT COUNT(d_id) FROM bmsql_district WHERE d_tax<0.05;
+ count 
+-------
+     1
+(1 row)
+
+SELECT COUNT(d_id) FROM bmsql_district;
+ count 
+-------
+    16
+(1 row)
+
+select avg(d_tax) FROM bmsql_district;
+          avg          
+-----------------------
+ .14516250000000000000
+(1 row)
+
+SELECT SUM(d_next_o_id) FROM bmsql_district;
+ sum  
+------
+ 1600
+(1 row)
+
+SELECT * FROM bmsql_district WHERE d_id>1 AND d_id<4 ORDER BY d_id, d_w_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(6 rows)
+
+SELECT d_id FROM bmsql_district WHERE EXISTS
+ (SELECT d_tax FROM bmsql_district WHERE d_id>7 AND d_id<9) ORDER BY d_id;
+ d_id 
+------
+    1
+    1
+    1
+    2
+    2
+    2
+    3
+    3
+    3
+    4
+    5
+    6
+    7
+    8
+    9
+   10
+(16 rows)
+
+-- TODO: use other VALUES.
+BEGIN;
+ DELETE FROM bmsql_district where d_name='BBB' and d_id=4;
+ DELETE FROM bmsql_district where d_name='AAA';
+ SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(12 rows)
+
+ROLLBACK;
+SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(16 rows)
+
+UPDATE bmsql_district SET d_street_1='elm' WHERE d_name='BBB' OR d_w_id=2;
+SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | elm        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | elm        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(16 rows)
+
+SELECT * FROM bmsql_warehouse AS w INNER JOIN bmsql_district AS d ON d.d_ytd=w.w_ytd ORDER BY d_id DESC;
+ w_id | w_ytd  | w_tax |   w_name   |  w_street_1   | w_street_2  |      w_city      | w_state |   w_zip   | d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+------+--------+-------+------------+---------------+-------------+------------------+---------+-----------+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+    3 | 423.22 | .2940 | Y8tGa6iFq  | zoqVwMnEDh3ON | sooG1kQQ8Pz | NvUlyevdvfoZME2q | IL      | 442111111 |      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+    5 | 723.22 | .1234 | Y8tGa6iFq  | zoqVwMnEDh3ON | sooG1kQQ8Pz | NvUlyevdvfoZME2q | IL      | 442111111 |      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+    2 | 133.22 | .0940 | SecondWare | zoqVwMnEDh3ON | sooG1kQQ8Pz | NvUlyevdvfoZME2q | IL      | 442111111 |      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+    2 | 133.22 | .0940 | SecondWare | zoqVwMnEDh3ON | sooG1kQQ8Pz | NvUlyevdvfoZME2q | IL      | 442111111 |      1 |    2 | 133.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+(4 rows)
+
+DELETE FROM bmsql_district WHERE d_w_id=1 AND d_id=2;
+SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      1 |    1 | 103.22 | .1934 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    3 | 133.22 | .1234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    4 | 123.22 | .0234 |         100 | BBB    | elm        | DDD        | XXX    | IL      | 84965    
+      1 |    5 | 723.22 | .1234 |         100 | CCC    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    6 | 123.22 | .2234 |         100 | AAA    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    7 |  23.22 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    8 | 423.22 | .0500 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      1 |    9 | 129.22 | .1234 |         100 | BBB    | elm        | DDD        | XXX    | IL      | 84965    
+      1 |   10 | 163.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(15 rows)
+
+DELETE FROM bmsql_district WHERE d_w_id=1;
+SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
+ d_w_id | d_id | d_ytd  | d_tax | d_next_o_id | d_name | d_street_1 | d_street_2 | d_city | d_state |   d_zip   
+--------+------+--------+-------+-------------+--------+------------+------------+--------+---------+-----------
+      2 |    1 | 123.22 | .1234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    1 | 123.22 | .1750 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    2 | 123.42 | .2234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    2 | 123.42 | .1234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+      2 |    3 | 123.22 | .1234 |         100 | VVV    | elm        | DDD        | XXX    | IL      | 84965    
+      3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
+(6 rows)
+
+--cleanup
+DROP FOREIGN TABLE bmsql_warehouse;
+DROP FOREIGN TABLE bmsql_district;

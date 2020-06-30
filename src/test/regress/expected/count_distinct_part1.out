@@ -1,0 +1,751 @@
+/*
+ * This file is used to test pull down of count(distinct) expression
+ */
+drop schema if exists distribute_count_distinct_part1 cascade;
+NOTICE:  schema "distribute_count_distinct_part1" does not exist, skipping
+create schema distribute_count_distinct_part1;
+set current_schema = distribute_count_distinct_part1;
+-- prepare a temp table for import data
+create table tmp_t1(c1 int);
+insert into tmp_t1 values (1);
+-- Create Table and Insert Data
+create table t_distinct(a int, b int, c int, d int, e regproc);
+insert into t_distinct select generate_series(1, 10000)%5001, generate_series(1, 10000)%750, generate_series(1, 10000)%246, generate_series(1, 10000)%7, 'sin' from tmp_t1;
+analyze t_distinct;
+-- Case 1 (with group by clause)
+-- Case 1.1 top level
+explain (costs off, nodes off) select d, count(distinct(a)), avg(a::numeric(7, 2)) from t_distinct group by d;
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Group By Key: d
+   ->  Sort
+         Sort Key: d
+         ->  Seq Scan on t_distinct
+(5 rows)
+
+select d, count(distinct(a)), avg(a::numeric(7, 2)) from t_distinct group by d order by d;
+ d | count |          avg          
+---+-------+-----------------------
+ 0 |  1428 | 2501.0000000000000000
+ 1 |  1429 | 2500.2498250524842547
+ 2 |  1429 | 2501.2498250524842547
+ 3 |  1429 | 2498.7501749475157453
+ 4 |  1429 | 2499.7501749475157453
+ 5 |  1428 | 2499.0000000000000000
+ 6 |  1428 | 2500.0000000000000000
+(7 rows)
+
+explain (costs off, nodes off) select c, count(distinct(b)), avg(a::numeric(7, 2)) from t_distinct group by c;
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Group By Key: c
+   ->  Sort
+         Sort Key: c
+         ->  Seq Scan on t_distinct
+(5 rows)
+
+select c, count(distinct(b)), avg(a::numeric(7, 2)) from t_distinct group by c order by c limit 10;
+ c | count |          avg          
+---+-------+-----------------------
+ 0 |    40 | 2542.5000000000000000
+ 1 |    41 | 2481.4878048780487805
+ 2 |    41 | 2482.4878048780487805
+ 3 |    41 | 2483.4878048780487805
+ 4 |    41 | 2484.4878048780487805
+ 5 |    41 | 2485.4878048780487805
+ 6 |    41 | 2486.4878048780487805
+ 7 |    41 | 2487.4878048780487805
+ 8 |    41 | 2488.4878048780487805
+ 9 |    41 | 2489.4878048780487805
+(10 rows)
+
+explain (costs off, nodes off) select 1, 1, b, count(distinct(a)), avg(a::numeric(7, 2)) from t_distinct group by 1,2,3 order by 1,2,3;
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Group By Key: (1), (1), b
+   ->  Sort
+         Sort Key: (1), (1), b
+         ->  Seq Scan on t_distinct
+(5 rows)
+
+select 1, 1, b, count(distinct(a)), avg(a::numeric(7, 2)) from t_distinct group by 1,2,3 order by 1,2,3 limit 10;
+ ?column? | ?column? | b | count |          avg          
+----------+----------+---+-------+-----------------------
+        1 |        1 | 0 |    13 | 2557.1538461538461538
+        1 |        1 | 1 |    14 | 2375.5000000000000000
+        1 |        1 | 2 |    14 | 2376.5000000000000000
+        1 |        1 | 3 |    14 | 2377.5000000000000000
+        1 |        1 | 4 |    14 | 2378.5000000000000000
+        1 |        1 | 5 |    14 | 2379.5000000000000000
+        1 |        1 | 6 |    14 | 2380.5000000000000000
+        1 |        1 | 7 |    14 | 2381.5000000000000000
+        1 |        1 | 8 |    14 | 2382.5000000000000000
+        1 |        1 | 9 |    14 | 2383.5000000000000000
+(10 rows)
+
+explain (costs off, nodes off) select d, count(distinct(b)), avg(a::numeric(7, 2)) from t_distinct group by d;
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Group By Key: d
+   ->  Sort
+         Sort Key: d
+         ->  Seq Scan on t_distinct
+(5 rows)
+
+select d, count(distinct(b)), avg(a::numeric(7, 2)) from t_distinct group by d order by d;
+ d | count |          avg          
+---+-------+-----------------------
+ 0 |   750 | 2501.0000000000000000
+ 1 |   750 | 2500.2498250524842547
+ 2 |   750 | 2501.2498250524842547
+ 3 |   750 | 2498.7501749475157453
+ 4 |   750 | 2499.7501749475157453
+ 5 |   750 | 2499.0000000000000000
+ 6 |   750 | 2500.0000000000000000
+(7 rows)
+
+explain (costs off, nodes off) select c, count(distinct(a)), count(distinct(b)), count(distinct(d)) from t_distinct group by c;
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Group By Key: c
+   ->  Sort
+         Sort Key: c
+         ->  Seq Scan on t_distinct
+(5 rows)
+
+select c, count(distinct(a)), count(distinct(b)), count(distinct(d)) from t_distinct group by c order by count(distinct(a)), c limit 10;
+  c  | count | count | count 
+-----+-------+-------+-------
+   0 |    40 |    40 |     7
+ 161 |    40 |    40 |     7
+ 162 |    40 |    40 |     7
+ 163 |    40 |    40 |     7
+ 164 |    40 |    40 |     7
+ 165 |    40 |    40 |     7
+ 166 |    40 |    40 |     7
+ 167 |    40 |    40 |     7
+ 168 |    40 |    40 |     7
+ 169 |    40 |    40 |     7
+(10 rows)
+
+explain (costs off, nodes off) select c, count(distinct(a)) ca, count(distinct(b)) cb, count(distinct(d)) cd from t_distinct group by c having count(distinct(b))+count(distinct(d))=47;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ GroupAggregate
+   Group By Key: c
+   Filter: ((count(DISTINCT b) + count(DISTINCT d)) = 47)
+   ->  Sort
+         Sort Key: c
+         ->  Seq Scan on t_distinct
+(6 rows)
+
+select c, count(distinct(a)) ca, count(distinct(b)) cb, count(distinct(d)) cd from t_distinct group by c having count(distinct(b))+count(distinct(d))=47 order by c limit 10;
+  c  | ca | cb | cd 
+-----+----+----+----
+   0 | 40 | 40 |  7
+ 161 | 40 | 40 |  7
+ 162 | 40 | 40 |  7
+ 163 | 40 | 40 |  7
+ 164 | 40 | 40 |  7
+ 165 | 40 | 40 |  7
+ 166 | 40 | 40 |  7
+ 167 | 40 | 40 |  7
+ 168 | 40 | 40 |  7
+ 169 | 40 | 40 |  7
+(10 rows)
+
+explain (costs off, nodes off) select a, count(distinct(b+d)), max(c+b) from t_distinct group by a;
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Group By Key: a
+   ->  Sort
+         Sort Key: a
+         ->  Seq Scan on t_distinct
+(5 rows)
+
+select a, count(distinct(b+d)), max(c+b) from t_distinct group by a order by a limit 10;
+ a | count | max 
+---+-------+-----
+ 0 |     1 | 582
+ 1 |     2 | 584
+ 2 |     2 | 586
+ 3 |     2 | 588
+ 4 |     2 | 590
+ 5 |     2 | 592
+ 6 |     2 | 594
+ 7 |     2 | 596
+ 8 |     2 | 598
+ 9 |     2 | 600
+(10 rows)
+
+explain (costs off, nodes off) select 1, count(distinct(b)), max(c), min(d), avg(a) from t_distinct group by 1;
+          QUERY PLAN          
+------------------------------
+ GroupAggregate
+   Group By Key: 1
+   ->  Seq Scan on t_distinct
+(3 rows)
+
+select 1, count(distinct(b)), max(c), min(d), avg(a) from t_distinct group by 1;
+ ?column? | count | max | min |          avg          
+----------+-------+-----+-----+-----------------------
+        1 |   750 | 245 |   0 | 2500.0000000000000000
+(1 row)
+
+explain (costs off, nodes off) SELECT sum(c),avg(c),max(c),min(c),avg(c),avg(c),sum(c),sum(c),count(distinct(c)) FROM t_distinct GROUP BY d order by d;
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Group By Key: d
+   ->  Sort
+         Sort Key: d
+         ->  Seq Scan on t_distinct
+(5 rows)
+
+SELECT sum(c),avg(c),max(c),min(c),avg(c),avg(c),sum(c),sum(c),count(distinct(c)) FROM t_distinct GROUP BY d order by d;
+  sum   |         avg          | max | min |         avg          |         avg          |  sum   |  sum   | count 
+--------+----------------------+-----+-----+----------------------+----------------------+--------+--------+-------
+ 174192 | 121.9831932773109244 | 245 |   0 | 121.9831932773109244 | 121.9831932773109244 | 174192 | 174192 |   246
+ 174145 | 121.8649405178446466 | 245 |   0 | 121.8649405178446466 | 121.8649405178446466 | 174145 | 174145 |   246
+ 174098 | 121.8320503848845346 | 245 |   0 | 121.8320503848845346 | 121.8320503848845346 | 174098 | 174098 |   246
+ 174051 | 121.7991602519244227 | 245 |   0 | 121.7991602519244227 | 121.7991602519244227 | 174051 | 174051 |   246
+ 174004 | 121.7662701189643107 | 245 |   0 | 121.7662701189643107 | 121.7662701189643107 | 174004 | 174004 |   246
+ 173796 | 121.7058823529411765 | 245 |   0 | 121.7058823529411765 | 121.7058823529411765 | 173796 | 173796 |   246
+ 173994 | 121.8445378151260504 | 245 |   0 | 121.8445378151260504 | 121.8445378151260504 | 173994 | 173994 |   246
+(7 rows)
+
+explain (costs off, nodes off) select sum(a) like '%1%', count(distinct c), d from t_distinct group by d order by 1,2,3;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Sort
+   Sort Key: (((sum(a))::text ~~ '%1%'::text)), (count(DISTINCT c)), d
+   ->  GroupAggregate
+         Group By Key: d
+         ->  Sort
+               Sort Key: d
+               ->  Seq Scan on t_distinct
+(7 rows)
+
+select sum(a) like '%1%', count(distinct c), d from t_distinct group by d order by 1,2,3;
+ ?column? | count | d 
+----------+-------+---
+ f        |   246 | 1
+ f        |   246 | 2
+ f        |   246 | 5
+ f        |   246 | 6
+ t        |   246 | 0
+ t        |   246 | 3
+ t        |   246 | 4
+(7 rows)
+
+explain (costs off, nodes off) select sum(a) like '%1%', count(distinct c), c from t_distinct group by c order by 1,2,3;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Sort
+   Sort Key: (((sum(a))::text ~~ '%1%'::text)), (count(DISTINCT c)), c
+   ->  GroupAggregate
+         Group By Key: c
+         ->  Sort
+               Sort Key: c
+               ->  Seq Scan on t_distinct
+(7 rows)
+
+select sum(a) like '%1%', count(distinct c), c from t_distinct group by c order by 1,2,3 limit 10;
+ ?column? | count |  c  
+----------+-------+-----
+ f        |     1 | 161
+ f        |     1 | 162
+ f        |     1 | 163
+ f        |     1 | 164
+ f        |     1 | 165
+ f        |     1 | 166
+ f        |     1 | 167
+ f        |     1 | 168
+ f        |     1 | 169
+ f        |     1 | 170
+(10 rows)
+
+explain (costs off, nodes off) select a from (select a, b from t_distinct union all select b, a from t_distinct) group by a having count(distinct(b+1)) = 1 order by 1 limit 5; 
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Limit
+   ->  GroupAggregate
+         Group By Key: distribute_count_distinct_part1.t_distinct.a
+         Filter: (count(DISTINCT (distribute_count_distinct_part1.t_distinct.b + 1)) = 1)
+         ->  Sort
+               Sort Key: distribute_count_distinct_part1.t_distinct.a
+               ->  Result
+                     ->  Append
+                           ->  Seq Scan on t_distinct
+                           ->  Seq Scan on t_distinct
+(10 rows)
+
+select a from (select a, b from t_distinct union all select b, a from t_distinct) group by a having count(distinct(b+1)) = 1 order by 1 limit 5; 
+  a   
+------
+ 5000
+(1 row)
+
+-- Case 1.2 sub level
+explain (costs off, nodes off) select c, ca, cb from (select c, count(distinct(a)) ca, max(b) cb, min(c+d) cd from t_distinct group by c) x where cd=7;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Subquery Scan on x
+   ->  GroupAggregate
+         Group By Key: t_distinct.c
+         Filter: (min((t_distinct.c + t_distinct.d)) = 7)
+         ->  Sort
+               Sort Key: t_distinct.c
+               ->  Seq Scan on t_distinct
+(7 rows)
+
+select c, ca, cb from (select c, count(distinct(a)) ca, max(b) cb, min(c+d) cd from t_distinct group by c) x where cd=7;
+ c | ca | cb  
+---+----+-----
+ 7 | 41 | 745
+(1 row)
+
+explain (costs off, nodes off) select c, ca, cb from (select c, count(distinct(a)) ca, count(distinct(b)) cb, count(distinct(d)) cd from t_distinct group by c) x where cd=7;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Subquery Scan on x
+   ->  GroupAggregate
+         Group By Key: t_distinct.c
+         Filter: (count(DISTINCT t_distinct.d) = 7)
+         ->  Sort
+               Sort Key: t_distinct.c
+               ->  Seq Scan on t_distinct
+(7 rows)
+
+select c, ca, cb from (select c, count(distinct(a)) ca, count(distinct(b)) cb, count(distinct(d)) cd from t_distinct group by c) x where cd=7 order by 1, 2, 3 limit 10;
+ c | ca | cb 
+---+----+----
+ 0 | 40 | 40
+ 1 | 41 | 41
+ 2 | 41 | 41
+ 3 | 41 | 41
+ 4 | 41 | 41
+ 5 | 41 | 41
+ 6 | 41 | 41
+ 7 | 41 | 41
+ 8 | 41 | 41
+ 9 | 41 | 41
+(10 rows)
+
+explain (costs off, nodes off) select avg(cab) from (select d, count(distinct(a+b)) cab, max(c+a) mca from t_distinct group by d);
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   ->  GroupAggregate
+         Group By Key: t_distinct.d
+         ->  Sort
+               Sort Key: t_distinct.d
+               ->  Seq Scan on t_distinct
+(6 rows)
+
+select avg(cab::numeric(15,10)) from (select d, count(distinct(a+b)) cab, max(c+a) mca from t_distinct group by d);
+          avg          
+-----------------------
+ 1428.5714285714285714
+(1 row)
+
+explain (costs off, nodes off) select tt.a, x.cbd, x.ccb from t_distinct tt, (select a, count(distinct(b+d)) cbd, max(c+b) ccb from t_distinct group by a) x where x.cbd=tt.a;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((count(DISTINCT (t_distinct.b + t_distinct.d))) = tt.a)
+   ->  GroupAggregate
+         Group By Key: t_distinct.a
+         ->  Sort
+               Sort Key: t_distinct.a
+               ->  Seq Scan on t_distinct
+   ->  Hash
+         ->  Seq Scan on t_distinct tt
+(9 rows)
+
+select tt.a, x.cbd, x.ccb from t_distinct tt, (select a, count(distinct(b+d)) cbd, max(c+b) ccb from t_distinct group by a) x where x.cbd=tt.a order by 1, 2, 3 limit 10;
+ a | cbd | ccb 
+---+-----+-----
+ 1 |   1 | 580
+ 1 |   1 | 580
+ 1 |   1 | 582
+ 1 |   1 | 582
+ 2 |   2 | 252
+ 2 |   2 | 252
+ 2 |   2 | 254
+ 2 |   2 | 254
+ 2 |   2 | 256
+ 2 |   2 | 256
+(10 rows)
+
+-- Case 1.3 with distinct
+explain (costs off, nodes off) select distinct count(distinct(a)) from t_distinct group by d;
+                QUERY PLAN                
+------------------------------------------
+ HashAggregate
+   Group By Key: count(DISTINCT a)
+   ->  GroupAggregate
+         Group By Key: d
+         ->  Sort
+               Sort Key: d
+               ->  Seq Scan on t_distinct
+(7 rows)
+
+select distinct count(distinct(a)) from t_distinct group by d order by 1;
+ count 
+-------
+  1428
+  1429
+(2 rows)
+
+explain (costs off, nodes off) select distinct count(distinct(b)) from t_distinct group by a;
+                QUERY PLAN                
+------------------------------------------
+ HashAggregate
+   Group By Key: count(DISTINCT b)
+   ->  GroupAggregate
+         Group By Key: a
+         ->  Sort
+               Sort Key: a
+               ->  Seq Scan on t_distinct
+(7 rows)
+
+select distinct count(distinct(b)) from t_distinct group by a order by 1;
+ count 
+-------
+     1
+     2
+(2 rows)
+
+-- Case 1.4 Can't push down
+explain (costs off, nodes off) select count(distinct(a)), max(d) from t_distinct group by e; 
+             QUERY PLAN             
+------------------------------------
+ GroupAggregate
+   Group By Key: e
+   ->  Sort
+         Sort Key: e
+         ->  Seq Scan on t_distinct
+(5 rows)
+
+select count(distinct(a)), max(d) from t_distinct group by e; 
+ count | max 
+-------+-----
+  5001 |   6
+(1 row)
+
+explain (costs off, nodes off) select count(distinct a order by a nulls last) from t_distinct;
+          QUERY PLAN          
+------------------------------
+ Aggregate
+   ->  Seq Scan on t_distinct
+(2 rows)
+
+select count(distinct a order by a nulls last) from t_distinct;
+ count 
+-------
+  5001
+(1 row)
+
+-- Case 1.5 not hashable
+explain (costs off, nodes off) select count(distinct(e)) from t_distinct group by e limit 5;
+                QUERY PLAN                
+------------------------------------------
+ Limit
+   ->  GroupAggregate
+         Group By Key: e
+         ->  Sort
+               Sort Key: e
+               ->  Seq Scan on t_distinct
+(6 rows)
+
+select count(distinct(e)) from t_distinct group by e limit 5;
+ count 
+-------
+     1
+(1 row)
+
+-- Case 2 (without group by clause)
+-- Case 2.1 not hashable
+explain (costs off, nodes off) select count(distinct(e)) from t_distinct;
+          QUERY PLAN          
+------------------------------
+ Aggregate
+   ->  Seq Scan on t_distinct
+(2 rows)
+
+select count(distinct(e)) from t_distinct;
+ count 
+-------
+     1
+(1 row)
+
+-- Case 2.2 top level
+-- Case 2.2.1 count_distinct within target list
+explain (costs off, nodes off) select count(distinct(a)), max(b+c), avg(d::numeric(15,10)) from t_distinct;
+          QUERY PLAN          
+------------------------------
+ Aggregate
+   ->  Seq Scan on t_distinct
+(2 rows)
+
+select count(distinct(a)), max(b+c), avg(d::numeric(15,10)) from t_distinct;
+ count | max |        avg         
+-------+-----+--------------------
+  5001 | 982 | 2.9998000000000000
+(1 row)
+
+explain (costs off, nodes off) select count(distinct(b)), max(a-c), avg(d::numeric(15,10)) from t_distinct;
+          QUERY PLAN          
+------------------------------
+ Aggregate
+   ->  Seq Scan on t_distinct
+(2 rows)
+
+select avg(distinct(b)), max(a-c), avg(d::numeric(15,10)) from t_distinct;
+         avg          | max  |        avg         
+----------------------+------+--------------------
+ 374.5000000000000000 | 4920 | 2.9998000000000000
+(1 row)
+
+explain (costs off, nodes off) select count(distinct(b+c)), max(a-c), avg(d::numeric(15,10)) from t_distinct;
+          QUERY PLAN          
+------------------------------
+ Aggregate
+   ->  Seq Scan on t_distinct
+(2 rows)
+
+select sum(distinct(b+c)), max(a-c), avg(d::numeric(15,10)) from t_distinct;
+  sum   | max  |        avg         
+--------+------+--------------------
+ 241572 | 4920 | 2.9998000000000000
+(1 row)
+
+-- Case 2.2.2 count_distinct within other place
+explain (costs off, nodes off) select max(b) from t_distinct order by count(distinct(d));
+             QUERY PLAN             
+------------------------------------
+ Sort
+   Sort Key: (count(DISTINCT d))
+   ->  Aggregate
+         ->  Seq Scan on t_distinct
+(4 rows)
+
+select max(b) from t_distinct order by count(distinct(d));
+ max 
+-----
+ 749
+(1 row)
+
+explain (costs off, nodes off) select max(b) from t_distinct having count(distinct(d))=7;
+            QUERY PLAN             
+-----------------------------------
+ Aggregate
+   Filter: (count(DISTINCT d) = 7)
+   ->  Seq Scan on t_distinct
+(3 rows)
+
+select max(b) from t_distinct having count(distinct(d))=7;
+ max 
+-----
+ 749
+(1 row)
+
+explain (costs off, nodes off) select avg(a+b+c+d) from t_distinct having count(distinct(a))=max(a)+1;
+                  QUERY PLAN                  
+----------------------------------------------
+ Aggregate
+   Filter: (count(DISTINCT a) = (max(a) + 1))
+   ->  Seq Scan on t_distinct
+(3 rows)
+
+select avg((a+b+c+d)::numeric(15,10)) from t_distinct having count(distinct(a))=max(a)+1;
+          avg          
+-----------------------
+ 2993.1028000000000000
+(1 row)
+
+explain (costs off, nodes off) select avg(c) from t_distinct order by count(distinct(a));
+             QUERY PLAN             
+------------------------------------
+ Sort
+   Sort Key: (count(DISTINCT a))
+   ->  Aggregate
+         ->  Seq Scan on t_distinct
+(4 rows)
+
+select avg(c::numeric(15,10)) from t_distinct order by count(distinct(a));
+         avg          
+----------------------
+ 121.8280000000000000
+(1 row)
+
+explain (costs off, nodes off) select avg(c) from t_distinct order by count(distinct(d));
+             QUERY PLAN             
+------------------------------------
+ Sort
+   Sort Key: (count(DISTINCT d))
+   ->  Aggregate
+         ->  Seq Scan on t_distinct
+(4 rows)
+
+select avg(c::numeric(15,10)) from t_distinct order by count(distinct(d));
+         avg          
+----------------------
+ 121.8280000000000000
+(1 row)
+
+-- test sublink in multi count(distinct)
+explain (costs off, nodes off) select 1 from t_distinct t1 where (a,b) not in
+ (select coalesce(t1.a+t2.b, t1.c+t2.d), coalesce(max(distinct(t2.c)), min(distinct(t2.d))) from t_distinct t2 group by 1);
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on t_distinct t1
+   Filter: (NOT (SubPlan 1))
+   SubPlan 1
+     ->  GroupAggregate
+           Group By Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+           ->  Sort
+                 Sort Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+                 ->  Seq Scan on t_distinct t2
+(8 rows)
+
+explain (costs off, nodes off) select 1 from t_distinct t1 where (a,b,c) not in
+ (select coalesce(t1.a+t2.b, t1.c+t2.d), t1.c, coalesce(max(distinct(t2.c)), min(distinct(t2.d))) from t_distinct t2 group by 1);
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on t_distinct t1
+   Filter: (NOT (SubPlan 1))
+   SubPlan 1
+     ->  GroupAggregate
+           Group By Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+           ->  Sort
+                 Sort Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+                 ->  Seq Scan on t_distinct t2
+(8 rows)
+
+explain (costs off, nodes off) select 1 from t_distinct t1 where (a,b) not in
+ (select coalesce(t1.a+t2.b, t1.c+t2.d), coalesce(max(distinct(t2.c)), min(distinct(t2.d))) from t_distinct t2 where t2.a in
+ (select avg(t3.c) from t_distinct t3 where t3.b=t1.a) group by 1);
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on t_distinct t1
+   Filter: (NOT (SubPlan 1))
+   SubPlan 1
+     ->  GroupAggregate
+           Group By Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+           ->  Sort
+                 Sort Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+                 ->  Hash Join
+                       Hash Cond: ((t2.a)::numeric = (avg(t3.c)))
+                       ->  Seq Scan on t_distinct t2
+                       ->  Hash
+                             ->  Aggregate
+                                   ->  Seq Scan on t_distinct t3
+                                         Filter: (b = t1.a)
+(14 rows)
+
+explain (costs off, nodes off) select 1 from t_distinct t1 where (a,b) not in
+ (select coalesce(t1.a+t2.b, t1.c+t2.d), coalesce(max(distinct(t2.c)), min(distinct(t2.d))) from t_distinct t2 where t2.a in
+ (select avg(t3.c) from t_distinct t3 where t2.b=t1.a) group by 1);
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on t_distinct t1
+   Filter: (NOT (SubPlan 2))
+   SubPlan 2
+     ->  GroupAggregate
+           Group By Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+           ->  Sort
+                 Sort Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+                 ->  Seq Scan on t_distinct t2
+                       Filter: (SubPlan 1)
+                       SubPlan 1
+                         ->  Aggregate
+                               ->  Result
+                                     One-Time Filter: (t2.b = t1.a)
+                                     ->  Seq Scan on t_distinct t3
+(14 rows)
+
+explain (costs off, nodes off) select 1 from t_distinct t1 where (a,b) not in
+ (with tmp as (select * from t_distinct)
+ select coalesce(t1.a+t2.b, t1.c+t2.d), coalesce(max(distinct(t2.c)), min(distinct(t2.d))) from tmp t2 where t2.a in
+ (select avg(t3.c) from tmp t3 where t2.b=t1.a) group by 1);
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on t_distinct t1
+   Filter: (NOT (SubPlan 3))
+   SubPlan 3
+     ->  GroupAggregate
+           Group By Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+           CTE tmp
+             ->  Seq Scan on t_distinct
+           ->  Sort
+                 Sort Key: (COALESCE((t1.a + t2.b), (t1.c + t2.d)))
+                 ->  CTE Scan on tmp t2
+                       Filter: (SubPlan 2)
+                       SubPlan 2
+                         ->  Aggregate
+                               ->  Result
+                                     One-Time Filter: (t2.b = t1.a)
+                                     ->  CTE Scan on tmp t3
+(16 rows)
+
+CREATE TABLE promotion (
+    p_promo_sk integer NOT NULL,
+    p_promo_id character(16) NOT NULL,
+    p_start_date_sk integer,
+    p_end_date_sk integer,
+    p_item_sk integer,
+    p_cost numeric(15,2),
+    p_response_target integer,
+    p_promo_name character(50),
+    p_channel_dmail character(1),
+    p_channel_email character(1),
+    p_channel_catalog character(1),
+    p_channel_tv character(1),
+    p_channel_radio character(1),
+    p_channel_press character(1),
+    p_channel_event character(1),
+    p_channel_demo character(1),
+    p_channel_details character varying(100),
+    p_purpose character(15),
+    p_discount_active character(1)
+);
+/*DISTRIBUTE BY HASH (p_cost);*/
+set enable_sort = on;
+set enable_hashagg = off;
+--/* stream's targetlist must be the same as lower operator's targetlist */
+explain (costs off, nodes off, verbose on)
+select 
+    count(min(p_cost)) over(),
+    max(distinct p_cost) AS C1,
+    p_promo_sk,
+    p_promo_name
+from promotion
+group by p_promo_name, p_promo_sk;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ WindowAgg
+   Output: count((min(p_cost))) OVER (), (max(DISTINCT p_cost)), p_promo_sk, p_promo_name
+   ->  GroupAggregate
+         Output: p_promo_sk, p_promo_name, min(p_cost), max(DISTINCT p_cost)
+         Group By Key: promotion.p_promo_name, promotion.p_promo_sk
+         ->  Sort
+               Output: p_promo_sk, p_promo_name, p_cost
+               Sort Key: promotion.p_promo_name, promotion.p_promo_sk
+               ->  Seq Scan on distribute_count_distinct_part1.promotion
+                     Output: p_promo_sk, p_promo_name, p_cost
+(10 rows)
+
+reset current_schema;
+drop schema if exists distribute_count_distinct_part1 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table distribute_count_distinct_part1.tmp_t1
+drop cascades to table distribute_count_distinct_part1.t_distinct
+drop cascades to table distribute_count_distinct_part1.promotion

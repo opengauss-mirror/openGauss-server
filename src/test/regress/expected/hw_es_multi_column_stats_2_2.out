@@ -1,0 +1,61 @@
+--==========================================================
+--==========================================================
+\set ECHO all
+set current_schema = hw_es_multi_column_stats;
+set default_statistics_target=-2;
+--========================================================== data feature : data with string
+insert into t3 values (1, 'b1b1', 'c1c1c1c1c1c1', 'd');
+insert into t3 values (2, 'b1b1', 'c1c1c1c1c1c1', 'd');
+insert into t3 values (3, 'b2b2b2', 'c1c1c1c1c1c1', 'd');
+insert into t3 values (4, 'b2b2b2', 'c1c1c1c1c1c1', 'd');
+insert into t3 values (5, 'b3b3b3b3b3', 'c2c2c2c2c2c2', 'd');
+insert into t3 values (6, 'b3b3b3b3b3', 'c2c2c2c2c2c2', 'd');
+insert into t3 values (7, 'b4b4b4b4b4b4', 'c2c2c2c2c2c2', 'd');
+insert into t3 values (8, 'b4b4b4b4b4b4', 'c2c2c2c2c2c2', 'd');
+insert into t3r select * from t3;
+analyze t3 ((a, b));
+analyze t3 ((b, c));
+analyze t3 ((a, d));
+analyze t3 ((b, d));
+analyze t3 ((c, d));
+analyze t3 ((b, c, d));
+analyze t3r ((a, b));
+analyze t3r ((b, c));
+analyze t3r ((a, d));
+analyze t3r ((b, d));
+analyze t3r ((c, d));
+analyze t3r ((b, c, d));
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t3' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |                                               most_common_vals                                                | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------------------------------------------------------------------------------------------+-------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t3        | 1 2     | f         |         0 |        13 |         -1 |            0 |                                                                                                               |                   |                       |                        | 
+ hw_es_multi_column_stats | t3        | 1 4     | f         |         0 |         6 |         -1 |            0 |                                                                                                               |                   |                       |                        | 
+ hw_es_multi_column_stats | t3        | 2 3     | f         |         0 |        22 |        -.5 |            0 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{c1c1c1c1c1c1,c1c1c1c1c1c1,c2c2c2c2c2c2,c2c2c2c2c2c2}"}             | {.25,.25,.25,.25} |                       |                        | 
+ hw_es_multi_column_stats | t3        | 2 3 4   | f         |         0 |        24 |        -.5 |            0 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{c1c1c1c1c1c1,c1c1c1c1c1c1,c2c2c2c2c2c2,c2c2c2c2c2c2}","{d,d,d,d}"} | {.25,.25,.25,.25} |                       |                        | 
+ hw_es_multi_column_stats | t3        | 2 4     | f         |         0 |        11 |        -.5 |            0 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{d,d,d,d}"}                                                         | {.25,.25,.25,.25} |                       |                        | 
+ hw_es_multi_column_stats | t3        | 3 4     | f         |         0 |        15 |       -.25 |            0 | {"{c1c1c1c1c1c1,c2c2c2c2c2c2}","{d,d}"}                                                                       | {.5,.5}           |                       |                        | 
+(6 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t3r' order by attname;
+        schemaname        | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct |                                               most_common_vals                                                | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+--------------------------+-----------+---------+-----------+-----------+-----------+------------+--------------+---------------------------------------------------------------------------------------------------------------+-------------------+-----------------------+------------------------+------------------
+ hw_es_multi_column_stats | t3r       | 1 2     | f         |         0 |        13 |         -1 |            0 |                                                                                                               |                   |                       |                        | 
+ hw_es_multi_column_stats | t3r       | 1 4     | f         |         0 |         6 |         -1 |            0 |                                                                                                               |                   |                       |                        | 
+ hw_es_multi_column_stats | t3r       | 2 3     | f         |         0 |        22 |        -.5 |            0 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{c1c1c1c1c1c1,c1c1c1c1c1c1,c2c2c2c2c2c2,c2c2c2c2c2c2}"}             | {.25,.25,.25,.25} |                       |                        | 
+ hw_es_multi_column_stats | t3r       | 2 3 4   | f         |         0 |        24 |        -.5 |            0 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{c1c1c1c1c1c1,c1c1c1c1c1c1,c2c2c2c2c2c2,c2c2c2c2c2c2}","{d,d,d,d}"} | {.25,.25,.25,.25} |                       |                        | 
+ hw_es_multi_column_stats | t3r       | 2 4     | f         |         0 |        11 |        -.5 |            0 | {"{b1b1,b2b2b2,b3b3b3b3b3,b4b4b4b4b4b4}","{d,d,d,d}"}                                                         | {.25,.25,.25,.25} |                       |                        | 
+ hw_es_multi_column_stats | t3r       | 3 4     | f         |         0 |        15 |       -.25 |            0 | {"{c1c1c1c1c1c1,c2c2c2c2c2c2}","{d,d}"}                                                                       | {.5,.5}           |                       |                        | 
+(6 rows)
+
+drop table t3;
+drop table t3r;
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t3' order by attname;
+ schemaname | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
+(0 rows)
+
+select * from pg_ext_stats where schemaname='hw_es_multi_column_stats' and tablename='t3r' order by attname;
+ schemaname | tablename | attname | inherited | null_frac | avg_width | n_distinct | n_dndistinct | most_common_vals | most_common_freqs | most_common_vals_null | most_common_freqs_null | histogram_bounds 
+------------+-----------+---------+-----------+-----------+-----------+------------+--------------+------------------+-------------------+-----------------------+------------------------+------------------
+(0 rows)
+

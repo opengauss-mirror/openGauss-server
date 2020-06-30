@@ -1,0 +1,16 @@
+CREATE FOREIGN TABLE mm_table (k integer);
+BEGIN;
+INSERT INTO mm_table VALUES (42);
+SELECT * from mm_table WHERE k = 42;
+ k  
+----
+ 42
+(1 row)
+
+ROLLBACK;
+SELECT * from mm_table WHERE k = 42;
+ k 
+---
+(0 rows)
+
+DROP FOREIGN TABLE mm_table;

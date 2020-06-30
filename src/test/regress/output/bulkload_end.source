@@ -1,0 +1,152 @@
+--
+-- BULK LOAD END
+--
+----
+--4. INSERT INTO NORMAL TABLE AND PARTITIONED TABLE
+----
+CREATE TABLE LINEITEM_C
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+compress;
+CREATE TABLE LINEITEM_CP
+(
+    L_ORDERKEY    BIGINT NOT NULL
+  , L_PARTKEY     BIGINT NOT NULL
+  , L_SUPPKEY     BIGINT NOT NULL
+  , L_LINENUMBER  BIGINT NOT NULL
+  , L_QUANTITY    DECIMAL(15,2) NOT NULL
+  , L_EXTENDEDPRICE  DECIMAL(15,2) NOT NULL
+  , L_DISCOUNT    DECIMAL(15,2) NOT NULL
+  , L_TAX         DECIMAL(15,2) NOT NULL
+  , L_RETURNFLAG  CHAR(1) NOT NULL
+  , L_LINESTATUS  CHAR(1) NOT NULL
+  , L_SHIPDATE    DATE NOT NULL
+  , L_COMMITDATE  DATE NOT NULL
+  , L_RECEIPTDATE DATE NOT NULL
+  , L_SHIPINSTRUCT CHAR(25) NOT NULL
+  , L_SHIPMODE     CHAR(10) NOT NULL
+  , L_COMMENT      VARCHAR(44) NOT NULL
+)
+compress
+partition by range(L_ORDERKEY)
+(
+	partition p1 values less than (500),
+	partition p2 values less than (90000000)
+);
+SELECT COUNT(*) FROM LINEITEM;
+ count 
+-------
+     0
+(1 row)
+
+TRUNCATE LINEITEM;
+----
+--4. INSERT INTO COMPRESS TABLE
+----
+SELECT COUNT(*) FROM LINEITEM_C;
+ count 
+-------
+     0
+(1 row)
+
+----
+--5. INSERT INTO COMPRESS PARTITION TABLE
+----
+SELECT COUNT(*) FROM LINEITEM_CP;
+ count 
+-------
+     0
+(1 row)
+
+----
+--14. Foreign table with SUBQUERY
+----
+create  table LOAD_PARTITION_TABLE_001_2
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(100), 
+c_varchar varchar(100),
+c_character_2 character(100), 
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp with time zone,
+c_timestamp_2 timestamp without time zone,
+c_date date
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition LOAD_PARTITION_TABLE_001_2_1  values less than (0,0,0,0),
+partition LOAD_PARTITION_TABLE_001_2_2  values less than (3,30,300,400.3),
+partition LOAD_PARTITION_TABLE_001_2_3  values less than (6,60,600,800.6),
+partition LOAD_PARTITION_TABLE_001_2_4  values less than (10,100,1000,1100.2)
+);
+SELECT * FROM LOAD_PARTITION_TABLE_001_2 ORDER BY c_smallint;
+ c_smallint | c_integer | c_bigint | c_decimal | c_numeric | c_real | c_double | c_character_1 | c_varchar | c_character_2 | c_char_1 | c_character_3 | c_char_2 | c_text | c_nvarchar2 | c_name | c_timestamp_1 | c_timestamp_2 | c_date 
+------------+-----------+----------+-----------+-----------+--------+----------+---------------+-----------+---------------+----------+---------------+----------+--------+-------------+--------+---------------+---------------+--------
+(0 rows)
+
+DROP TABLE LINEITEM;
+DROP TABLE LINEITEM_C;
+DROP TABLE LINEITEM_CP;
+DROP TABLE LOAD_PARTITION_TABLE_001_2;
+create table FULL_TEXT_TABLE_010_2 
+(
+C_CHAR_3 CHAR(102400),  
+C_VARCHAR_3 VARCHAR(1024),  
+C_INT INTEGER,  
+C_NUMERIC numeric(10,5),  
+C_TS_WITHOUT TIMESTAMP WITHOUT TIME ZONE,
+C_tsvector  tsvector
+);
+select trim(C_CHAR_3),trim(C_VARCHAR_3),c_int,C_NUMERIC,C_TS_WITHOUT,C_tsvector from FULL_TEXT_TABLE_010_2 order by 1,2,3,4,5;
+ btrim | btrim | c_int | c_numeric | c_ts_without | c_tsvector 
+-------+-------+-------+-----------+--------------+------------
+(0 rows)
+
+DROP TABLE FULL_TEXT_TABLE_010_2;
+----
+--25. Can not find encoding converter
+----
+CREATE DATABASE latin1db TEMPLATE template0 ENCODING 'latin1' LC_CTYPE 'C' LC_COLLATE 'C';
+\c latin1db
+\c regression
+DROP DATABASE latin1db;
+DROP TABLE tmp_nation;
+----
+--31.Check Duplicated GDS URI Info
+---
+CREATE TABLE CHECK_DUPLICATED_GDS_URI_INFO (
+        L_ORDERKEY    BIGINT NOT NULL,
+        L_PARTKEY     BIGINT NOT NULL,
+        L_SUPPKEY     BIGINT NOT NULL
+);
+DROP TABLE CHECK_DUPLICATED_GDS_URI_INFO;
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 34
+\! sleep 5
+\! ps ux | grep -w gds | grep -v grep | awk '{print $2}' | xargs kill -s 9 > /dev/null 2>&1

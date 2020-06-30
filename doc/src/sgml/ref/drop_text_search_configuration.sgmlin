@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_TEXT_SEARCH_CONFIGURATION">
+<refmeta>
+<refentrytitle>DROP TEXT SEARCH CONFIGURATION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP TEXT SEARCH CONFIGURATION</refname>
+<refpurpose>remove a text search configurationn</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP TEXT SEARCH CONFIGURATION [ IF EXISTS ] name [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

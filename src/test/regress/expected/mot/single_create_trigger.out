@@ -1,0 +1,27 @@
+CREATE FOREIGN TABLE emp_details (id serial, salary float);
+NOTICE:  CREATE FOREIGN TABLE will create implicit sequence "emp_details_id_seq" for serial column "emp_details.id"
+CREATE FOREIGN TABLE emp_log (emp_id serial, logged_salary float);
+NOTICE:  CREATE FOREIGN TABLE will create implicit sequence "emp_log_emp_id_seq" for serial column "emp_log.emp_id"
+CREATE OR REPLACE FUNCTION rec_insert()
+  RETURNS trigger AS
+$$
+BEGIN
+         INSERT INTO emp_log(logged_salary) VALUES(NEW.salary);
+    RETURN NEW;
+END;
+$$
+LANGUAGE 'plpgsql';
+CREATE TRIGGER ins_same_rec
+  AFTER INSERT
+  ON emp_details
+  FOR EACH ROW
+  EXECUTE PROCEDURE rec_insert();
+ERROR:  "emp_details" is not a table or view
+INSERT INTO emp_details VALUES (22000.0);
+SELECT * FROM emp_log;
+ emp_id | logged_salary 
+--------+---------------
+(0 rows)
+
+DROP FOREIGN TABLE emp_details;
+DROP FOREIGN TABLE emp_log;

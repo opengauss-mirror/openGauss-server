@@ -1,0 +1,296 @@
+/*
+ * This file is used to test the simple operation for different data-type
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_sop_engine_1;
+set current_schema=vector_sop_engine_1;
+create table vector_sop_engine_1.VECTOR_SOP_TABLE_01
+(
+   col_int2	int2
+  ,col_int4	int4
+  ,col_int8	int8
+  ,col_char	char(10)
+  ,col_vchar	varchar(12)
+  ,col_num	numeric(10,2)
+  ,col_interval	interval
+  ,col_timetz	timetz
+) with (orientation=column)  ;
+COPY VECTOR_SOP_TABLE_01(col_int2, col_int4, col_int8, col_char, col_vchar, col_num, col_interval, col_timetz) FROM stdin; 
+analyze vector_sop_table_01;
+----
+--- test 1: Simple Operation for numeric 
+----
+select * from vector_sop_table_01 where col_num=11.25 order by col_char;
+ col_int2 | col_int4 | col_int8 |  col_char  | col_vchar | col_num |           col_interval            | col_timetz  
+----------+----------+----------+------------+-----------+---------+-----------------------------------+-------------
+        3 |        4 |        3 | abc        | cdffef    |   11.25 | @ 4 days 12 hours 34 mins 56 secs | 00:00:30+08
+        3 |        4 |        3 | abc        | cdffef    |   11.25 | @ 3 days 12 hours 34 mins 56 secs | 
+        3 |        4 |        3 | agc        | cdffef    |   11.25 |                                   | 00:00:30+08
+(3 rows)
+
+select * from vector_sop_table_01 where col_num != 11.23 order by col_char;
+ col_int2 | col_int4 | col_int8 |  col_char  | col_vchar | col_num |           col_interval            | col_timetz  
+----------+----------+----------+------------+-----------+---------+-----------------------------------+-------------
+        3 |        4 |        3 | abc        | cdffef    |   11.25 | @ 4 days 12 hours 34 mins 56 secs | 00:00:30+08
+        3 |        4 |        3 | abc        | cdffef    |   11.25 | @ 3 days 12 hours 34 mins 56 secs | 
+        3 |        4 |        3 | agc        | cdffef    |   11.25 |                                   | 00:00:30+08
+(3 rows)
+
+select col_num + 2.2 from vector_sop_table_01 where col_num < 11.25;
+ ?column? 
+----------
+    13.43
+    13.43
+    13.43
+    13.43
+    13.43
+    13.43
+    13.43
+(7 rows)
+
+select col_num-2.3  from vector_sop_table_01 where col_num > 11.23;
+ ?column? 
+----------
+     8.95
+     8.95
+     8.95
+(3 rows)
+
+select col_num*1.1 from vector_sop_table_01 where col_num > 11.23;
+ ?column? 
+----------
+   12.375
+   12.375
+   12.375
+(3 rows)
+
+select col_num/1.1 from vector_sop_table_01 where col_num > 11.23;
+      ?column?       
+---------------------
+ 10.2272727272727273
+ 10.2272727272727273
+ 10.2272727272727273
+(3 rows)
+
+select * from vector_sop_table_01 where col_num >= 11.25 order by col_char;
+ col_int2 | col_int4 | col_int8 |  col_char  | col_vchar | col_num |           col_interval            | col_timetz  
+----------+----------+----------+------------+-----------+---------+-----------------------------------+-------------
+        3 |        4 |        3 | abc        | cdffef    |   11.25 | @ 4 days 12 hours 34 mins 56 secs | 00:00:30+08
+        3 |        4 |        3 | abc        | cdffef    |   11.25 | @ 3 days 12 hours 34 mins 56 secs | 
+        3 |        4 |        3 | agc        | cdffef    |   11.25 |                                   | 00:00:30+08
+(3 rows)
+
+select col_int8 from vector_sop_table_01 where col_num <= 11.23;
+ col_int8 
+----------
+        3
+        3
+        3
+        3
+        3
+        3
+        3
+(7 rows)
+
+----
+--- test 2 : Simple Operation for interval/timetz
+----
+select col_interval from vector_sop_table_01 order by 1;
+           col_interval            
+-----------------------------------
+ @ 1 day 12 hours 34 mins 56 secs
+ @ 1 day 12 hours 34 mins 56 secs
+ @ 1 day 12 hours 34 mins 56 secs
+ @ 1 day 12 hours 34 mins 56 secs
+ @ 1 day 12 hours 34 mins 56 secs
+ @ 2 days 12 hours 34 mins 56 secs
+ @ 3 days 12 hours 34 mins 56 secs
+ @ 4 days 12 hours 34 mins 56 secs
+ @ 5 days 12 hours 34 mins 56 secs
+ @ 6 days 12 hours 34 mins 56 secs
+ 
+ 
+(12 rows)
+
+select * from vector_sop_table_01 where col_interval='1 day 12:34:56' order by 1;
+ col_int2 | col_int4 | col_int8 |  col_char  | col_vchar | col_num |           col_interval           | col_timetz  
+----------+----------+----------+------------+-----------+---------+----------------------------------+-------------
+        1 |        2 |        3 | abc        | cdffef    |   11.23 | @ 1 day 12 hours 34 mins 56 secs | 00:00:30+08
+        1 |        2 |        3 | abc        | cdffef    |   11.23 | @ 1 day 12 hours 34 mins 56 secs | 00:00:30+08
+        1 |        2 |        3 | agc        | cdffef    |   11.23 | @ 1 day 12 hours 34 mins 56 secs | 00:00:30+08
+        1 |        2 |        3 | amc        | cdffef    |   11.23 | @ 1 day 12 hours 34 mins 56 secs | 00:00:30+08
+        1 |        2 |        3 | abc        | cdffef    |   11.23 | @ 1 day 12 hours 34 mins 56 secs | 
+(5 rows)
+
+select * from vector_sop_table_01 where col_interval is NULL order by 1;
+ col_int2 | col_int4 | col_int8 |  col_char  | col_vchar | col_num | col_interval | col_timetz  
+----------+----------+----------+------------+-----------+---------+--------------+-------------
+        1 |        2 |        3 |            | cdffef    |   11.23 |              | 00:00:30+08
+        3 |        4 |        3 | agc        | cdffef    |   11.25 |              | 00:00:30+08
+(2 rows)
+
+select col_interval + interval '1 day' from vector_sop_table_01 order by 1;
+             ?column?              
+-----------------------------------
+ @ 2 days 12 hours 34 mins 56 secs
+ @ 2 days 12 hours 34 mins 56 secs
+ @ 2 days 12 hours 34 mins 56 secs
+ @ 2 days 12 hours 34 mins 56 secs
+ @ 2 days 12 hours 34 mins 56 secs
+ @ 3 days 12 hours 34 mins 56 secs
+ @ 4 days 12 hours 34 mins 56 secs
+ @ 5 days 12 hours 34 mins 56 secs
+ @ 6 days 12 hours 34 mins 56 secs
+ @ 7 days 12 hours 34 mins 56 secs
+ 
+ 
+(12 rows)
+
+select col_interval + interval '1 hour' from vector_sop_table_01 order by 1;
+             ?column?              
+-----------------------------------
+ @ 1 day 13 hours 34 mins 56 secs
+ @ 1 day 13 hours 34 mins 56 secs
+ @ 1 day 13 hours 34 mins 56 secs
+ @ 1 day 13 hours 34 mins 56 secs
+ @ 1 day 13 hours 34 mins 56 secs
+ @ 2 days 13 hours 34 mins 56 secs
+ @ 3 days 13 hours 34 mins 56 secs
+ @ 4 days 13 hours 34 mins 56 secs
+ @ 5 days 13 hours 34 mins 56 secs
+ @ 6 days 13 hours 34 mins 56 secs
+ 
+ 
+(12 rows)
+
+select col_interval + interval '1 minute' from vector_sop_table_01 order by 1;
+             ?column?              
+-----------------------------------
+ @ 1 day 12 hours 35 mins 56 secs
+ @ 1 day 12 hours 35 mins 56 secs
+ @ 1 day 12 hours 35 mins 56 secs
+ @ 1 day 12 hours 35 mins 56 secs
+ @ 1 day 12 hours 35 mins 56 secs
+ @ 2 days 12 hours 35 mins 56 secs
+ @ 3 days 12 hours 35 mins 56 secs
+ @ 4 days 12 hours 35 mins 56 secs
+ @ 5 days 12 hours 35 mins 56 secs
+ @ 6 days 12 hours 35 mins 56 secs
+ 
+ 
+(12 rows)
+
+select col_interval + interval '1 second' from vector_sop_table_01 order by 1;
+             ?column?              
+-----------------------------------
+ @ 1 day 12 hours 34 mins 57 secs
+ @ 1 day 12 hours 34 mins 57 secs
+ @ 1 day 12 hours 34 mins 57 secs
+ @ 1 day 12 hours 34 mins 57 secs
+ @ 1 day 12 hours 34 mins 57 secs
+ @ 2 days 12 hours 34 mins 57 secs
+ @ 3 days 12 hours 34 mins 57 secs
+ @ 4 days 12 hours 34 mins 57 secs
+ @ 5 days 12 hours 34 mins 57 secs
+ @ 6 days 12 hours 34 mins 57 secs
+ 
+ 
+(12 rows)
+
+select col_timetz from vector_sop_table_01 order by 1;
+ col_timetz  
+-------------
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 
+ 
+ 
+(12 rows)
+
+select col_timetz from vector_sop_table_01 where col_timetz is not NULL order by 1;
+ col_timetz  
+-------------
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+ 00:00:30+08
+(9 rows)
+
+select col_timetz from vector_sop_table_01 where col_timetz is NULL order by 1;
+ col_timetz 
+------------
+ 
+ 
+ 
+(3 rows)
+
+select col_timetz + interval '1 hour' from vector_sop_table_01 order by 1; 
+  ?column?   
+-------------
+ 01:00:30+08
+ 01:00:30+08
+ 01:00:30+08
+ 01:00:30+08
+ 01:00:30+08
+ 01:00:30+08
+ 01:00:30+08
+ 01:00:30+08
+ 01:00:30+08
+ 
+ 
+ 
+(12 rows)
+
+select col_timetz + interval '1 minute' from vector_sop_table_01 order by 1; 
+  ?column?   
+-------------
+ 00:01:30+08
+ 00:01:30+08
+ 00:01:30+08
+ 00:01:30+08
+ 00:01:30+08
+ 00:01:30+08
+ 00:01:30+08
+ 00:01:30+08
+ 00:01:30+08
+ 
+ 
+ 
+(12 rows)
+
+select col_timetz + interval '1 second' from vector_sop_table_01 order by 1; 
+  ?column?   
+-------------
+ 00:00:31+08
+ 00:00:31+08
+ 00:00:31+08
+ 00:00:31+08
+ 00:00:31+08
+ 00:00:31+08
+ 00:00:31+08
+ 00:00:31+08
+ 00:00:31+08
+ 
+ 
+ 
+(12 rows)
+
+----
+--- Clean Resource and Tables
+----
+drop schema vector_sop_engine_1 cascade;
+NOTICE:  drop cascades to table vector_sop_table_01

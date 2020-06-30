@@ -1,0 +1,1082 @@
+-- 3. test containing using clause
+create table test_modify_column_type_using (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_modify_column_type_using_p1 values less than(1, 1),
+	partition test_modify_column_type_using_p2 values less than(4, 4),
+	partition test_modify_column_type_using_p3 values less than(7, 7)
+);
+insert into test_modify_column_type_using values (0, 0, 0, 0);
+insert into test_modify_column_type_using values (1, 1, 1, 1);
+-- failed
+insert into test_modify_column_type_using values (2, 2, 'c', 2);
+ERROR:  invalid input syntax for integer: "c"
+LINE 1: ...rt into test_modify_column_type_using values (2, 2, 'c', 2);
+                                                               ^
+CONTEXT:  referenced column: c
+-- success
+alter table test_modify_column_type_using alter column c set data type text
+	using case when c=0 then 'C IS 0' 
+               when c=1 then 'C IS 1'
+               else 'C IS 2' end;			   
+select * from test_modify_column_type_using order by 1, 2, 3, 4;
+ a | b |   c    | d 
+---+---+--------+---
+ 0 | 0 | C IS 0 | 0
+ 1 | 1 | C IS 1 | 1
+(2 rows)
+
+-- success
+insert into test_modify_column_type_using values (2, 2, 'c', 2);
+select * from test_modify_column_type_using order by 1, 2, 3, 4;
+ a | b |   c    | d 
+---+---+--------+---
+ 0 | 0 | C IS 0 | 0
+ 1 | 1 | C IS 1 | 1
+ 2 | 2 | c      | 2
+(3 rows)
+
+-- failed: data type of b partitioned table's partition key can not be changed
+alter table test_modify_column_type_using alter column b set data type text;
+ERROR:  cannot alter data type of partitioning column "b"
+-- clean
+drop table test_modify_column_type_using;
+-- 4. test column has default
+create table test_modify_column_type_default (a int, b int, c int default 2, d int default 2)
+partition by range (a, b)
+(
+	partition test_modify_column_type_default_p1 values less than(1, 1),
+	partition test_modify_column_type_default_p2 values less than(4, 4),
+	partition test_modify_column_type_default_p3 values less than(7, 7)
+);
+insert into test_modify_column_type_default values (0, 0, 0, 0);
+alter table test_modify_column_type_default alter column c set data type text;
+insert into test_modify_column_type_default values (1, 1, 'c1', 1);
+select * from test_modify_column_type_default order by 1,2,3,4;
+ a | b | c  | d 
+---+---+----+---
+ 0 | 0 | 0  | 0
+ 1 | 1 | c1 | 1
+(2 rows)
+
+alter table test_modify_column_type_default alter column d set data type text;
+insert into test_modify_column_type_default values (2, 2, 'c2');
+select * from test_modify_column_type_default order by 1,2,3;
+ a | b | c  | d 
+---+---+----+---
+ 0 | 0 | 0  | 0
+ 1 | 1 | c1 | 1
+ 2 | 2 | c2 | 2
+(3 rows)
+
+alter table test_modify_column_type_default alter column d set default 'd';
+insert into test_modify_column_type_default values (3, 3, 'c3');
+select * from test_modify_column_type_default order by 1, 2;
+ a | b | c  | d 
+---+---+----+---
+ 0 | 0 | 0  | 0
+ 1 | 1 | c1 | 1
+ 2 | 2 | c2 | 2
+ 3 | 3 | c3 | d
+(4 rows)
+
+-- clean
+drop table test_modify_column_type_default;
+-- 5. test table has index
+create table test_modify_column_type_index (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_modify_column_type_index_p1 values less than(1, 1),
+	partition test_modify_column_type_index_p2 values less than(4, 4),
+	partition test_modify_column_type_index_p3 values less than(7, 7)
+);
+create index temp_index on test_modify_column_type_index(c) local
+(
+	partition temp_index_p1_index_local,
+	partition temp_index_p2_index_local,
+	partition temp_index_p3_index_local
+);
+insert into test_modify_column_type_index values (0, 0, 0, 0);
+insert into test_modify_column_type_index values (1, 1, 1, 1);
+insert into test_modify_column_type_index values (5, 5, 5, 5);
+-- success
+alter table test_modify_column_type_index alter column c set data type text;
+-- success
+insert into test_modify_column_type_index values (2, 2, 'c', 2);
+select * from test_modify_column_type_index order by 1,2,3,4;
+ a | b | c | d 
+---+---+---+---
+ 0 | 0 | 0 | 0
+ 1 | 1 | 1 | 1
+ 2 | 2 | c | 2
+ 5 | 5 | 5 | 5
+(4 rows)
+
+-- failed: data type of b partitioned table's partition key can not be changed
+alter table test_modify_column_type_index alter column b set data type text;
+ERROR:  cannot alter data type of partitioning column "b"
+-- clean
+drop index temp_index;
+drop table test_modify_column_type_index;
+------ 3. set (n_distinct, n_distinct_inherited)
+---- a. column is not partition key
+-- success
+alter table test_set_attribute_option alter column c set (n_distinct=1, n_distinct_inherited=1);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='c';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | c       | 
+(1 row)
+
+-- success
+alter table test_set_attribute_option alter column c set (n_distinct=0, n_distinct_inherited=0);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='c';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | c       | 
+(1 row)
+
+-- success
+alter table test_set_attribute_option alter column c set (n_distinct=-1, n_distinct_inherited=-1);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='c';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | c       | 
+(1 row)
+
+-- success
+alter table test_set_attribute_option alter column c set (n_distinct=179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000, n_distinct_inherited=179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='c';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | c       | 
+(1 row)
+
+-- failed: too low
+alter table test_set_attribute_option alter column c set (n_distinct=-2, n_distinct_inherited=-2);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='c';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | c       | 
+(1 row)
+
+-- failed: too big
+alter table test_set_attribute_option alter column c set (n_distinct=279769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000, n_distinct_inherited=279769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='c';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | c       | 
+(1 row)
+
+---- b. column is partition key
+-- success
+alter table test_set_attribute_option alter column a set (n_distinct=1, n_distinct_inherited=1);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='a';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | a       | 
+(1 row)
+
+-- success
+alter table test_set_attribute_option alter column a set (n_distinct=0, n_distinct_inherited=0);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='a';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | a       | 
+(1 row)
+
+-- success
+alter table test_set_attribute_option alter column a set (n_distinct=-1, n_distinct_inherited=-1);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='a';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | a       | 
+(1 row)
+
+-- success
+alter table test_set_attribute_option alter column a set (n_distinct=179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000, n_distinct_inherited=179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='a';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | a       | 
+(1 row)
+
+-- failed: too low
+alter table test_set_attribute_option alter column a set (n_distinct=-2, n_distinct_inherited=-2);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='a';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | a       | 
+(1 row)
+
+-- failed: too big
+alter table test_set_attribute_option alter column a set (n_distinct=279769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000, n_distinct_inherited=279769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.000000);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_attribute_option' and a.attname='a';
+          relname          | attname | attoptions 
+---------------------------+---------+------------
+ test_set_attribute_option | a       | 
+(1 row)
+
+-- recovery
+alter table test_set_attribute_option alter column c reset (n_distinct, n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+alter table test_set_attribute_option alter column a reset (n_distinct, n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+-- clean 
+drop table test_set_attribute_option;
+--
+----  ALTER TABLE [ IF EXISTS ] [ ONLY ] name [ * ] ALTER [ COLUMN ] column RESET ( attribute_option [, ... ] )
+--
+create table test_reset_attribute_option (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_reset_attribute_option_p1 values less than(1, 1),
+	partition test_reset_attribute_option_p2 values less than(4, 4),
+	partition test_reset_attribute_option_p3 values less than(7, 7)
+);
+insert into test_reset_attribute_option values (0, 0, 0, 0);
+------ 1. reset (n_distinct)
+---- a. column is not partition key
+-- success
+alter table test_reset_attribute_option alter column c set (n_distinct=1);
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='c';
+           relname           | attname |   attoptions   
+-----------------------------+---------+----------------
+ test_reset_attribute_option | c       | {n_distinct=1}
+(1 row)
+
+alter table test_reset_attribute_option alter column c reset (n_distinct);
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='c';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | c       | 
+(1 row)
+
+-- failed: reset include values
+alter table test_reset_attribute_option alter column c reset (n_distinct=2);
+ERROR:  RESET must not include values for parameters
+-- recovery
+alter table test_reset_attribute_option alter column c reset (n_distinct);
+---- b. column is partition key
+-- success
+alter table test_reset_attribute_option alter column a set (n_distinct=1);
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='a';
+           relname           | attname |   attoptions   
+-----------------------------+---------+----------------
+ test_reset_attribute_option | a       | {n_distinct=1}
+(1 row)
+
+alter table test_reset_attribute_option alter column a reset (n_distinct);
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='a';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | a       | 
+(1 row)
+
+-- failed: reset include values
+alter table test_reset_attribute_option alter column a reset (n_distinct=2);
+ERROR:  RESET must not include values for parameters
+-- recovery
+alter table test_reset_attribute_option alter column a reset (n_distinct);
+------ 2. reset (n_distinct_inherited)
+---- a. column is not partition key
+-- success
+alter table test_reset_attribute_option alter column c set (n_distinct_inherited=1);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='c';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | c       | 
+(1 row)
+
+alter table test_reset_attribute_option alter column c reset (n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='c';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | c       | 
+(1 row)
+
+-- failed: reset include values
+alter table test_reset_attribute_option alter column c reset (n_distinct_inherited=2);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+-- recovery
+alter table test_reset_attribute_option alter column c reset (n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+---- b. column is partition key
+-- success
+alter table test_reset_attribute_option alter column a set (n_distinct_inherited=1);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='a';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | a       | 
+(1 row)
+
+alter table test_reset_attribute_option alter column a reset (n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='a';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | a       | 
+(1 row)
+
+-- failed: reset include values
+alter table test_reset_attribute_option alter column a reset (n_distinct_inherited=2);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+-- recovery
+alter table test_reset_attribute_option alter column a reset (n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+------ 3. reset (n_distinct, n_distinct_inherited)
+---- a. column is not partition key
+-- success
+alter table test_reset_attribute_option alter column c set (n_distinct=1, n_distinct_inherited=1);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='c';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | c       | 
+(1 row)
+
+alter table test_reset_attribute_option alter column c reset (n_distinct, n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='c';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | c       | 
+(1 row)
+
+-- failed: reset include values
+alter table test_reset_attribute_option alter column c reset (n_distinct=2, n_distinct_inherited=2);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+-- recovery
+alter table test_reset_attribute_option alter column c reset (n_distinct, n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+---- b. column is partition key
+-- success
+alter table test_reset_attribute_option alter column a set (n_distinct=1, n_distinct_inherited=1);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='a';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | a       | 
+(1 row)
+
+alter table test_reset_attribute_option alter column a reset (n_distinct, n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+select c.relname, a.attname, a.attoptions from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_reset_attribute_option' and a.attname='a';
+           relname           | attname | attoptions 
+-----------------------------+---------+------------
+ test_reset_attribute_option | a       | 
+(1 row)
+
+-- failed: reset include values
+alter table test_reset_attribute_option alter column a reset (n_distinct=2, n_distinct_inherited=2);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+-- recovery
+alter table test_reset_attribute_option alter column a reset (n_distinct, n_distinct_inherited);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set option "n_distinct_inherited" for both row and column relation
+-- clean 
+drop table test_reset_attribute_option;
+--
+----  ALTER TABLE [ IF EXISTS ] [ ONLY ] name [ * ] ALTER  [ COLUMN ] column SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN }
+--
+create table test_set_storage (a int, b text, c int, d text)
+partition by range (a, b)
+(
+	partition test_set_storage_p1 values less than(1, 'b'),
+	partition test_set_storage_p2 values less than(4, 'e'),
+	partition test_set_storage_p3 values less than(7, 'h')
+);
+insert into test_set_storage values (0, 'a', 0, 'a');
+------ 1. column datatype is int
+---- a. column is not partition key
+-- success: set storage plain
+alter table test_set_storage alter column c set storage plain;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='c';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | c       | p
+(1 row)
+
+--failed: column data type INTEGER can only have storage PLAIN
+alter table test_set_storage alter column c set storage external;
+ERROR:  column data type integer can only have storage PLAIN
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='c';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | c       | p
+(1 row)
+
+--failed: column data type INTEGER can only have storage PLAIN
+alter table test_set_storage alter column c set storage extended;
+ERROR:  column data type integer can only have storage PLAIN
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='c';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | c       | p
+(1 row)
+
+--failed: column data type INTEGER can only have storage PLAIN
+alter table test_set_storage alter column c set storage main;
+ERROR:  column data type integer can only have storage PLAIN
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='c';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | c       | p
+(1 row)
+
+---- b. column is partition key
+-- success: set storage plain
+alter table test_set_storage alter column a set storage plain;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='a';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | a       | p
+(1 row)
+
+--failed: column data type INTEGER can only have storage PLAIN
+alter table test_set_storage alter column a set storage external;
+ERROR:  column data type integer can only have storage PLAIN
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='a';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | a       | p
+(1 row)
+
+--failed: column data type INTEGER can only have storage PLAIN
+alter table test_set_storage alter column a set storage extended;
+ERROR:  column data type integer can only have storage PLAIN
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='a';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | a       | p
+(1 row)
+
+--failed: column data type INTEGER can only have storage PLAIN
+alter table test_set_storage alter column a set storage main;
+ERROR:  column data type integer can only have storage PLAIN
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='a';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | a       | p
+(1 row)
+
+------ 2. column datatype is text
+---- a. column is not partition key
+-- success: set storage plain
+alter table test_set_storage alter column d set storage plain;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='d';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | d       | p
+(1 row)
+
+-- success: set storage external
+alter table test_set_storage alter column d set storage external;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='d';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | d       | e
+(1 row)
+
+-- success: set storage extended
+alter table test_set_storage alter column d set storage extended;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='d';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | d       | x
+(1 row)
+
+-- success: set storage main
+alter table test_set_storage alter column d set storage main;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='d';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | d       | m
+(1 row)
+
+---- b. column is partition key
+-- success: set storage plain
+alter table test_set_storage alter column b set storage plain;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='b';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | b       | p
+(1 row)
+
+-- success: set storage external
+alter table test_set_storage alter column b set storage external;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='b';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | b       | e
+(1 row)
+
+-- success: set storage extended
+alter table test_set_storage alter column b set storage extended;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='b';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | b       | x
+(1 row)
+
+-- success: set storage main
+alter table test_set_storage alter column b set storage main;
+select c.relname, a.attname, a.attstorage from pg_class c, pg_attribute a where c.oid=a.attrelid and c.relname='test_set_storage' and a.attname='b';
+     relname      | attname | attstorage 
+------------------+---------+------------
+ test_set_storage | b       | m
+(1 row)
+
+-- clean
+drop table test_set_storage;
+--
+----  ALTER TABLE SET WITH OIDS
+--
+create table test_alter_table_set_with_oids (a int, b int) 
+partition by range(a) 
+(
+	partition test_alter_table_set_with_oids_p1 values less than (1), 
+	partition test_alter_table_set_with_oids_p2 values less than (4),
+	partition test_alter_table_set_with_oids_p3 values less than (7)
+);
+-- failed: partitioned table can not be setted with or without oids
+alter table test_alter_table_set_with_oids set with oids;
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITH OIDS is not yet supported.
+-- clean
+drop table test_alter_table_set_with_oids;
+--
+----  ALTER TABLE SET WITHOUT OIDS
+--
+create table test_alter_table_set_without_oids (a int, b int) 
+partition by range(a) 
+(
+	partition test_alter_table_set_without_oids_p1 values less than (1), 
+	partition test_alter_table_set_without_oids_p2 values less than (4),
+	partition test_alter_table_set_without_oids_p3 values less than (7)
+);
+-- failed: partitioned table can not be setted with or without oids
+alter table test_alter_table_set_without_oids set without oids;
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITHOUT OIDS is not yet supported.
+-- clean
+drop table test_alter_table_set_without_oids;
+--
+----  ALTER TABLE OWNER TO new_owner
+--
+---- 1). check alter owner of range partitioned table
+create table test_alter_range_owner (a int) 
+partition by range(a) 
+(
+	partition test_alter_range_owner_p1 values less than (1), 
+	partition test_alter_range_owner_p2 values less than (4),
+	partition test_alter_range_owner_p3 values less than (7)
+);
+create user temp_user_range password 'Ttest@123';
+-- success: alter owner of range partitioned table
+alter table test_alter_range_owner owner to temp_user_range;
+-- check
+select relname, rolname from pg_class, pg_roles where relname='test_alter_range_owner' and pg_class.relowner=pg_roles.oid;
+        relname         |     rolname     
+------------------------+-----------------
+ test_alter_range_owner | temp_user_range
+(1 row)
+
+-- clean
+drop table test_alter_range_owner;
+drop user temp_user_range;
+---- 2). check interval partitioned table
+--create table test_alter_interval_owner (a int) 
+--partition by range(a) 
+--interval (2)
+--(
+--	partition p1 values less than (1), 
+--	partition p2 values less than (4),
+--	partition p3 values less than (7)
+--);
+--
+--create user temp_user_interval password 'Ttest@123';
+--
+---- success: alter owner of range partitioned table
+--alter table test_alter_interval_owner owner to temp_user_interval;
+--
+---- check
+--select relname, rolname from pg_class, pg_roles where relname='test_alter_interval_owner' and pg_class.relowner=pg_roles.oid;
+--
+---- clean
+--drop table test_alter_interval_owner;
+--drop user temp_user_interval;
+--
+----  ALTER TABLE [ IF EXISTS ] [ ONLY ] name [ * ] RENAME [ COLUMN ] column TO new_column;
+--
+create table test_rename_column (a int, b int, c int, d int)
+partition by range (a, b)
+(
+	partition test_rename_column_p1 values less than(1, 1),
+	partition test_rename_column_p2 values less than(4, 4),
+	partition test_rename_column_p3 values less than(7, 7)
+);
+insert into test_rename_column values (0, 0, 0, 0);
+select * from test_rename_column;
+ a | b | c | d 
+---+---+---+---
+ 0 | 0 | 0 | 0
+(1 row)
+
+---- a. column is not partition key
+-- success
+alter table if exists test_rename_column rename column c to c1;
+insert into test_rename_column values (1, 1, 1, 1);
+select c1 from test_rename_column where c1=0;
+ c1 
+----
+  0
+(1 row)
+
+select c1 from test_rename_column where c1=1;
+ c1 
+----
+  1
+(1 row)
+
+alter table test_rename_column rename column c1 to c2;
+insert into test_rename_column values (2, 2, 2, 2);
+select c2 from test_rename_column where c2=0;
+ c2 
+----
+  0
+(1 row)
+
+select c2 from test_rename_column where c2=2;
+ c2 
+----
+  2
+(1 row)
+
+alter table test_rename_column rename c2 to c3;
+insert into test_rename_column values (3, 3, 3, 3);
+select c3 from test_rename_column where c3=0;
+ c3 
+----
+  0
+(1 row)
+
+select c3 from test_rename_column where c3=3;
+ c3 
+----
+  3
+(1 row)
+
+alter table only test_rename_column rename column c3 to c4;
+insert into test_rename_column values (4, 4, 4, 4);
+select c4 from test_rename_column where c4=0;
+ c4 
+----
+  0
+(1 row)
+
+select c4 from test_rename_column where c4=4;
+ c4 
+----
+  4
+(1 row)
+
+alter table only (test_rename_column) rename column c4 to c5;
+insert into test_rename_column values (5, 5, 5, 5);
+select c5 from test_rename_column where c5=0;
+ c5 
+----
+  0
+(1 row)
+
+select c5 from test_rename_column where c5=5;
+ c5 
+----
+  5
+(1 row)
+
+alter table test_rename_column * rename column c5 to c6;
+insert into test_rename_column values (6, 6, 6, 6);
+select c6 from test_rename_column where c6=0;
+ c6 
+----
+  0
+(1 row)
+
+select c6 from test_rename_column where c6=6;
+ c6 
+----
+  6
+(1 row)
+
+-- failed: only and * do not exist at the same time
+alter table only test_renmae_column * rename column d to d1;
+ERROR:  syntax error at or near "*"
+LINE 1: alter table only test_renmae_column * rename column d to d1;
+                                            ^
+-- failed: table does not exist
+alter table if exists test_rename_column_temp rename column d to d1;
+NOTICE:  relation "test_rename_column_temp" does not exist, skipping
+alter table test_rename_column_temp rename column d to d1;
+ERROR:  relation "test_rename_column_temp" does not exist
+-- failed: column does not exist
+alter table test_rename_column rename column c001 to c;
+ERROR:  column "c001" does not exist
+-- failed: column does already exists
+alter table test_rename_column rename column c6 to c6;
+ERROR:  column "c6" of relation "test_rename_column" already exists
+alter table test_rename_column rename column c6 to b;
+ERROR:  column "b" of relation "test_rename_column" already exists
+alter table test_rename_column rename column c6 to d;
+ERROR:  column "d" of relation "test_rename_column" already exists
+-- recovery
+alter table test_rename_column rename column c6 to c;
+delete from test_rename_column;
+insert into test_rename_column values (0, 0, 0, 0);
+select * from test_rename_column;
+ a | b | c | d 
+---+---+---+---
+ 0 | 0 | 0 | 0
+(1 row)
+
+---- b. column is partition key
+-- success
+alter table if exists test_rename_column rename column a to a1;
+insert into test_rename_column values (1, 1, 1, 1);
+select a1 from test_rename_column where a1=0;
+ a1 
+----
+  0
+(1 row)
+
+select a1 from test_rename_column where a1=1;
+ a1 
+----
+  1
+(1 row)
+
+alter table test_rename_column rename column a1 to a2;
+insert into test_rename_column values (2, 2, 2, 2);
+select a2 from test_rename_column where a2=0;
+ a2 
+----
+  0
+(1 row)
+
+select a2 from test_rename_column where a2=2;
+ a2 
+----
+  2
+(1 row)
+
+alter table test_rename_column rename a2 to a3;
+insert into test_rename_column values (3, 3, 3, 3);
+select a3 from test_rename_column where a3=0;
+ a3 
+----
+  0
+(1 row)
+
+select a3 from test_rename_column where a3=3;
+ a3 
+----
+  3
+(1 row)
+
+alter table only test_rename_column rename column a3 to a4;
+insert into test_rename_column values (4, 4, 4, 4);
+select a4 from test_rename_column where a4=0;
+ a4 
+----
+  0
+(1 row)
+
+select a4 from test_rename_column where a4=4;
+ a4 
+----
+  4
+(1 row)
+
+alter table only (test_rename_column) rename column a4 to a5;
+insert into test_rename_column values (5, 5, 5, 5);
+select a5 from test_rename_column where a5=0;
+ a5 
+----
+  0
+(1 row)
+
+select a5 from test_rename_column where a5=5;
+ a5 
+----
+  5
+(1 row)
+
+alter table test_rename_column * rename column a5 to a6;
+insert into test_rename_column values (6, 6, 6, 6);
+select a6 from test_rename_column where a6=0;
+ a6 
+----
+  0
+(1 row)
+
+select a6 from test_rename_column where a6=6;
+ a6 
+----
+  6
+(1 row)
+
+-- failed: only and * do not exist at the same time
+alter table only test_renmae_column * rename column b to b1;
+ERROR:  syntax error at or near "*"
+LINE 1: alter table only test_renmae_column * rename column b to b1;
+                                            ^
+-- failed: table does not exist
+alter table if exists test_rename_column_temp rename column b to b1;
+NOTICE:  relation "test_rename_column_temp" does not exist, skipping
+alter table test_rename_column_temp rename column b to b1;
+ERROR:  relation "test_rename_column_temp" does not exist
+-- failed: column does not exist
+alter table test_rename_column rename column a001 to a;
+ERROR:  column "a001" does not exist
+-- failed: column does already exists
+alter table test_rename_column rename column a6 to a6;
+ERROR:  column "a6" of relation "test_rename_column" already exists
+alter table test_rename_column rename column a6 to b;
+ERROR:  column "b" of relation "test_rename_column" already exists
+alter table test_rename_column rename column a6 to d;
+ERROR:  column "d" of relation "test_rename_column" already exists
+--clean
+drop table test_rename_column;
+--
+----  ALTER TABLE name SET SCHEMA new_schema
+--
+create schema test_set_schema;
+create schema test_set_schema_other;
+create table test_alter_talbe_set_schema (a int, b int)
+partition by range (a)
+(
+	partition test_alter_talbe_set_schema_p1 values less than(1),
+	partition test_alter_talbe_set_schema_p2 values less than(4),
+	partition test_alter_talbe_set_schema_p3 values less than(7)
+);
+create index temp_index on test_alter_talbe_set_schema(a) local
+(
+	partition temp_index_p1_index_local,
+	partition temp_index_p2_index_local,
+	partition temp_index_p3_index_local
+);
+insert into test_alter_talbe_set_schema values (0, 0);
+-- success
+alter table test_alter_talbe_set_schema set schema test_set_schema;
+insert into test_set_schema.test_alter_talbe_set_schema values (1, 1);
+select * from test_set_schema.test_alter_talbe_set_schema order by 1, 2;
+ a | b 
+---+---
+ 0 | 0
+ 1 | 1
+(2 rows)
+
+-- failed
+alter index temp_index rename to temp_index_new;
+ERROR:  relation "temp_index" does not exist
+-- success
+alter index test_set_schema.temp_index rename to temp_index_new;
+-- success
+alter table test_set_schema.test_alter_talbe_set_schema set schema test_set_schema_other;
+insert into test_set_schema_other.test_alter_talbe_set_schema values (2, 2);
+select * from test_set_schema_other.test_alter_talbe_set_schema order by 1, 2;
+ a | b 
+---+---
+ 0 | 0
+ 1 | 1
+ 2 | 2
+(3 rows)
+
+-- clean
+drop table test_set_schema_other.test_alter_talbe_set_schema;
+drop schema test_set_schema cascade;
+drop schema test_set_schema_other cascade;
+--
+----  COMMENT
+--
+create table test_comment (a int)
+partition by range(a) 
+(
+	partition test_comment_p1 values less than (1), 
+	partition test_comment_p2 values less than (4),
+	partition test_comment_p3 values less than (7)
+);
+create index test_comment_index on test_comment (a) local;
+comment on table test_comment is 'test_comment is a partitioned table';
+comment on index test_comment_index is 'test_comment_index is an index on test_comment';
+comment on column test_comment.a is 'a is a column of test_comment';
+\dS+ test_comment;
+                              Table "public.test_comment"
+ Column |  Type   | Modifiers | Storage | Stats target |          Description          
+--------+---------+-----------+---------+--------------+-------------------------------
+ a      | integer |           | plain   |              | a is a column of test_comment
+Indexes:
+    "test_comment_index" btree (a) LOCAL(PARTITION test_comment_p1_a_idx, PARTITION test_comment_p2_a_idx, PARTITION test_comment_p3_a_idx)  TABLESPACE pg_default
+Range partition by(a)
+Number of partition: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no
+
+-- clean
+drop table test_comment;
+--
+----  DROP OWNED BY name [, ...] [ CASCADE | RESTRICT ]
+--
+-- 1. test function
+-- 2. test foreign key constraint
+-- 1. test function
+create user temp_user password 'Ttest@123';
+set role temp_user password 'Ttest@123';
+create table test_drop_owned (a int)
+partition by range(a) 
+(
+	partition test_drop_owned_p1 values less than (1), 
+	partition test_drop_owned_p2 values less than (4),
+	partition test_drop_owned_p3 values less than (7)
+);
+reset role;
+select relname, rolname from pg_class, pg_roles where relname='test_drop_owned' and pg_class.relowner=pg_roles.oid;
+     relname     |  rolname  
+-----------------+-----------
+ test_drop_owned | temp_user
+(1 row)
+
+create index test_drop_owned_index on temp_user.test_drop_owned (a) local;
+select relname, rolname from pg_class, pg_roles where relname='test_drop_owned_index' and pg_class.relowner=pg_roles.oid;
+        relname        |  rolname  
+-----------------------+-----------
+ test_drop_owned_index | temp_user
+(1 row)
+
+-- failed
+drop user temp_user;
+ERROR:  cannot drop schema temp_user because other objects depend on it
+DETAIL:  table temp_user.test_drop_owned depends on schema temp_user
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+drop owned by temp_user;
+select relname, rolname from pg_class, pg_roles where relname='test_drop_owned' and pg_class.relowner=pg_roles.oid;
+ relname | rolname 
+---------+---------
+(0 rows)
+
+select relname, rolname from pg_class, pg_roles where relname='test_drop_owned_index' and pg_class.relowner=pg_roles.oid;
+ relname | rolname 
+---------+---------
+(0 rows)
+
+-- success
+drop user temp_user;
+-- 2. test foreign key constraint
+create user temp_user password 'Ttest@123';
+set role temp_user password 'Ttest@123';
+create table test_ordinary_reftable (a int, b text, unique (a, b));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_ordinary_reftable_a_b_key" for table "test_ordinary_reftable"
+reset role;
+create table test_partition_foreign_key
+(a int, b text, c int, d text,  foreign key (a, b) references temp_user.test_ordinary_reftable (a, b))
+partition by range (a, b)
+(
+	partition test_partition_foreign_key_p1 values less than (1, 'b'),
+	partition test_partition_foreign_key_p2 values less than (4, 'e'),
+	partition test_partition_foreign_key_p3 values less than (7, 'h')
+);
+ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+-- failed
+drop user temp_user;
+ERROR:  cannot drop schema temp_user because other objects depend on it
+DETAIL:  table temp_user.test_ordinary_reftable depends on schema temp_user
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+-- failed
+drop owned by temp_user;
+-- failed
+drop owned by temp_user restrict;
+-- success 
+drop owned by temp_user cascade;
+select relname, rolname from pg_class, pg_roles where relname='test_ordinary_reftable' and pg_class.relowner=pg_roles.oid;
+ relname | rolname 
+---------+---------
+(0 rows)
+
+-- success
+insert into test_partition_foreign_key values (0, 'a', 0, 'a');
+ERROR:  relation "test_partition_foreign_key" does not exist
+LINE 1: insert into test_partition_foreign_key values (0, 'a', 0, 'a...
+                    ^
+-- success
+drop user temp_user;
+-- clean
+drop table test_partition_foreign_key;
+ERROR:  table "test_partition_foreign_key" does not exist
+----------------------
+-- test alter table set tablespace on ordinary table
+\! rm -fr '@testtablespace@/hw_partition_sql_adapt_ts1'
+\! mkdir '@testtablespace@/hw_partition_sql_adapt_ts1'
+create tablespace hw_partition_sql_adapt_ts1 location '@testtablespace@/hw_partition_sql_adapt_ts1';
+create table test_tablespace (a int) tablespace hw_partition_sql_adapt_ts1;
+select tablename, tablespace from pg_tables where tablename = 'test_tablespace';
+    tablename    |         tablespace         
+-----------------+----------------------------
+ test_tablespace | hw_partition_sql_adapt_ts1
+(1 row)
+
+alter table test_tablespace set tablespace hw_partition_sql_adapt_ts1;
+select tablename, tablespace from pg_tables where tablename = 'test_tablespace';
+    tablename    |         tablespace         
+-----------------+----------------------------
+ test_tablespace | hw_partition_sql_adapt_ts1
+(1 row)
+
+-- clean
+drop table test_tablespace;
+drop tablespace hw_partition_sql_adapt_ts1;

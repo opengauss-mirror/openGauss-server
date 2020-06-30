@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_uninstall is a utility to uninstall a Gauss200 server.
+#############################################################################
+
+import subprocess
+import os
+import sys
+import pwd
+
+sys.path.append(sys.path[0] + "/../")
+
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.Common import DefaultValue
+from gspylib.common.OMCommand import OMCommand
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.common.ParameterParsecheck import Parameter
+from gspylib.os.gsfile import g_file
+from impl.uninstall.OLAP.UninstallImplOLAP import UninstallImplOLAP
+
+#####################################################
+# Ation type
+#####################################################
+ACTION_CLEAN_TEMP_DIR = "clean_tmp_dir"
+
+
+class Uninstall(ParallelBaseOM):
+    """
+    class about cmd options
+    """
+
+    def __init__(self):
+        """
+        function: init function
+        """
+        ParallelBaseOM.__init__(self)
+        self.cleanInstance = False
+
+    def usage(self):
+        """
+gs_uninstall is a utility to uninstall a cluster.
+
+Usage:
+  gs_uninstall -? | --help
+  gs_uninstall -V | --version
+  gs_uninstall [--delete-data] [-L] [-l LOGFILE]
+
+General options:
+      --delete-data                 Clean up instance data files.
+  -L                                Only uninstall local nodes.
+  -l                                Path of log file.
+  -?, --help                        Show help information for this utility,
+                                    and exit the command line mode.
+  -V, --version                     Show version information.
+        """
+        print(self.usage.__doc__)
+
+    def parseCommandLine(self):
+        """
+        function: Parse command line and save to global variable
+        """
+        ParaObj = Parameter()
+        # Parse the parameter with uninstall
+        ParaDict = ParaObj.ParameterCommandLine("uninstall")
+
+        # check if helpFlag exists
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(0)
+        # check if -l parameter exists
+        if (ParaDict.__contains__("logFile")):
+            self.logFile = ParaDict.get("logFile")
+        # check if -L parameter exists
+        if (ParaDict.__contains__("localMode")):
+            self.localMode = ParaDict.get("localMode")
+        # check if need clean instances
+        if (ParaDict.__contains__("cleanInstance")):
+            self.cleanInstance = True
+
+    def checkParameter(self):
+        """
+        function: Check parameter from command line
+        """
+        # check user
+        self.user = pwd.getpwuid(os.getuid()).pw_name
+        # if no user info, throw error
+        if (self.user == ""):
+            GaussLog.exitWithError(ErrorCode.GAUSS_503["GAUSS_50308"])
+        # else check user
+        try:
+            DefaultValue.checkUser(self.user, False)
+        except Exception as e:
+            GaussLog.exitWithError(str(e))
+
+        # check log file
+        if (self.logFile == ""):
+            self.logFile = DefaultValue.getOMLogPath(
+                DefaultValue.UNINSTALL_LOG_FILE, self.user, "")
+        if (not os.path.isabs(self.logFile)):
+            GaussLog.exitWithError(ErrorCode.GAUSS_502["GAUSS_50213"] % "log")
+
+        # get user env info
+        self.mpprcFile = DefaultValue.getMpprcFile()
+
+    def initGlobals(self):
+        """
+        function: init global parameters
+        """
+        # init log file for uninstall
+        self.initLogger("gs_uninstall")
+        try:
+            # OLAP
+            self.initClusterInfoFromStaticFile(self.user)
+            # Initialize the self.sshTool variable
+            self.initSshTool(self.clusterInfo.getClusterNodeNames(),
+                             DefaultValue.TIMEOUT_PSSH_UNINSTALL)
+        except Exception as e:
+            self.logger.logExit(str(e))
+
+    def checkLogFilePath(self):
+        """
+        function: Check log file path
+        """
+        clusterPath = []
+        try:
+            # get tool path
+            clusterPath.append(DefaultValue.getClusterToolPath())
+            # get tmp path
+            tmpDir = DefaultValue.getTmpDirFromEnv()
+            clusterPath.append(tmpDir)
+            # get cluster path
+            hostName = DefaultValue.GetHostIpOrName()
+            dirs = self.clusterInfo.getClusterDirectorys(hostName, False)
+            # loop all cluster path
+            for checkdir in dirs.values():
+                clusterPath.extend(checkdir)
+            self.logger.debug("Cluster paths %s." % clusterPath)
+
+            # check directory
+            g_file.checkIsInDirectory(self.logFile, clusterPath)
+        except Exception as e:
+            self.logger.logExit(str(e))
+
+
+if __name__ == '__main__':
+    """
+    main function
+    """
+    # check if user is root
+    if (os.getuid() == 0):
+        GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50105"])
+
+    try:
+        # Objectize class
+        uninstall = Uninstall()
+        uninstall.parseCommandLine()
+        uninstall.checkParameter()
+        uninstall.initGlobals()
+
+        if (uninstall.xmlFile):
+            pass
+        impl = UninstallImplOLAP(uninstall)
+
+        # Perform the whole extand process
+        impl.run()
+
+    except Exception as e:
+        GaussLog.exitWithError(str(e))

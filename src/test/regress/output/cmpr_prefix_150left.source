@@ -1,0 +1,30 @@
+--
+-- case 1: prefix test
+--
+CREATE TABLE cmpr_prefix_150left (
+	RS_ID int,
+	R8_ID text PREFIX
+) COMPRESS;
+COPY cmpr_prefix_150left FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_prefix_150left.data';
+CREATE TABLE cmpr_prefix_150left_01 (
+	RS_ID int,
+	R8_ID text
+);
+COPY cmpr_prefix_150left_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_prefix_150left.data';
+(SELECT COUNT(*) FROM cmpr_prefix_150left) MINUS (SELECT COUNT(*) FROM cmpr_prefix_150left_01);
+ count 
+-------
+(0 rows)
+
+(SELECT * FROM cmpr_prefix_150left) MINUS ALL (SELECT * FROM cmpr_prefix_150left_01);
+ rs_id | r8_id 
+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_prefix_150left_01) MINUS ALL (SELECT * FROM cmpr_prefix_150left);
+ rs_id | r8_id 
+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_prefix_150left;
+DROP TABLE cmpr_prefix_150left_01;

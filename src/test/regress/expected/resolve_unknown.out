@@ -1,0 +1,277 @@
+explain (verbose on, costs off) select pg_typeof('vasya'), 'vasya' is of (unknown);
+             QUERY PLAN             
+------------------------------------
+ Result
+   Output: pg_typeof('vasya'), true
+(2 rows)
+
+select pg_typeof('vasya'), 'vasya' is of (unknown);
+ pg_typeof | ?column? 
+-----------+----------
+ unknown   | t
+(1 row)
+
+explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1);
+               QUERY PLAN                
+-----------------------------------------
+ Result
+   Output: 1
+   One-Time Filter: ('vasya'::text = $0)
+   InitPlan 1 (returns $0)
+     ->  Result
+           Output: 'vasya'::text
+(6 rows)
+
+explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1 where col1 <> 'aaa');
+               QUERY PLAN                
+-----------------------------------------
+ Result
+   Output: 1
+   One-Time Filter: ('vasya'::text = $0)
+   InitPlan 1 (returns $0)
+     ->  Result
+           Output: 'vasya'::text
+(6 rows)
+
+explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1 from dual where col1 <> 'aaa');
+               QUERY PLAN                
+-----------------------------------------
+ Result
+   Output: 1
+   One-Time Filter: ('vasya'::text = $0)
+   InitPlan 1 (returns $0)
+     ->  Subquery Scan on dual
+           Output: 'vasya'::text
+           ->  Result
+                 Output: 'X'::text
+(8 rows)
+
+select 1 where 'vasya' = (select 'vasya' as col1);
+ ?column? 
+----------
+        1
+(1 row)
+
+select 1 where 'vasya' = (select 'vasya' as col1 where col1 <> 'aaa');
+ ?column? 
+----------
+        1
+(1 row)
+
+select 1 where 'vasya' = (select 'vasya' as col1 from dual where col1 <> 'aaa');
+ ?column? 
+----------
+        1
+(1 row)
+
+explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) order by col1;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Output: (pg_typeof(col1)), col1, (false), (true)
+   Sort Key: __unnamed_subquery__.col1
+   ->  Subquery Scan on __unnamed_subquery__
+         Output: pg_typeof(col1), col1, false, true
+         ->  Result
+               Output: 'vasya'::text
+(7 rows)
+
+explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) group by col1;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ HashAggregate
+   Output: pg_typeof(('vasya'::text)), ('vasya'::text), false, true
+   Group By Key: 'vasya'::text
+   ->  Result
+         Output: 'vasya'::text
+(5 rows)
+
+explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) group by col1 having col1 <> 'aaa';
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ HashAggregate
+   Output: pg_typeof(('vasya'::text)), ('vasya'::text), false, true
+   Group By Key: 'vasya'::text
+   ->  Result
+         Output: 'vasya'::text
+(5 rows)
+
+explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) where col1 <> 'aaa';
+                  QUERY PLAN                  
+----------------------------------------------
+ Subquery Scan on __unnamed_subquery__
+   Output: pg_typeof(col1), col1, false, true
+   ->  Result
+         Output: 'vasya'::text
+(4 rows)
+
+select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) order by col1;
+ pg_typeof | col1  | ?column? | ?column? 
+-----------+-------+----------+----------
+ text      | vasya | f        | t
+(1 row)
+
+select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) group by col1;
+ pg_typeof | col1  | ?column? | ?column? 
+-----------+-------+----------+----------
+ text      | vasya | f        | t
+(1 row)
+
+select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) group by col1 having col1 <> 'aaa';
+ pg_typeof | col1  | ?column? | ?column? 
+-----------+-------+----------+----------
+ text      | vasya | f        | t
+(1 row)
+
+select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) where col1 <> 'aaa';
+ pg_typeof | col1  | ?column? | ?column? 
+-----------+-------+----------+----------
+ text      | vasya | f        | t
+(1 row)
+
+explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where substr(col1, 1, 2) <> 'a';
+                  QUERY PLAN                   
+-----------------------------------------------
+ CTE Scan on t
+   Output: pg_typeof(col1), col1, false, true
+   Filter: (substr(t.col1, 1, 2) <> 'a'::text)
+   CTE t
+     ->  Result
+           Output: 'vasya'::text
+(6 rows)
+
+explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where col1 <> 'aaa';
+                  QUERY PLAN                  
+----------------------------------------------
+ CTE Scan on t
+   Output: pg_typeof(col1), col1, false, true
+   Filter: (t.col1 <> 'aaa'::text)
+   CTE t
+     ->  Result
+           Output: 'vasya'::text
+(6 rows)
+
+with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where substr(col1, 1, 2) <> 'a';
+ pg_typeof | col1  | ?column? | ?column? 
+-----------+-------+----------+----------
+ text      | vasya | f        | t
+(1 row)
+
+with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where col1 <> 'aaa';
+ pg_typeof | col1  | ?column? | ?column? 
+-----------+-------+----------+----------
+ text      | vasya | f        | t
+(1 row)
+
+explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1 union all select 'vasya1' as col order by 1) where col1 <> 'aaa';
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Subquery Scan on __unnamed_subquery__
+   Output: pg_typeof(__unnamed_subquery__.col1), __unnamed_subquery__.col1, false, true
+   ->  Sort
+         Output: ('vasya'::text)
+         Sort Key: ('vasya'::text)
+         ->  Result
+               Output: ('vasya'::text)
+               ->  Append
+                     ->  Result
+                           Output: 'vasya'::text
+                     ->  Result
+                           Output: 'vasya1'::text
+(12 rows)
+
+select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1 union all select 'vasya1' as col order by 1) where col1 <> 'aaa';
+ pg_typeof |  col1  | ?column? | ?column? 
+-----------+--------+----------+----------
+ text      | vasya  | f        | t
+ text      | vasya1 | f        | t
+(2 rows)
+
+CREATE SCHEMA resolve_unknown;
+SET search_path to resolve_unknown;
+CREATE TABLE normal_table_count1
+(
+    sc character varying,
+    tb character varying,
+    cnt bigint,
+    daate text,
+    ssize character varying,
+    pretty_size character varying
+)
+WITH (orientation=column, compression=low)
+;
+CREATE TABLE cities1
+(
+    city character varying(80),
+    location1 integer
+)
+WITH (orientation=column, compression=low)
+;
+TRUNCATE normal_table_count1;
+INSERT INTO normal_table_count1(tb,cnt)
+SELECT
+    'cities1' as tablename,
+    count(*) as cnt
+FROM cities1;
+INSERT INTO normal_table_count1(tb,cnt) VALUES ('beijing', 1);
+INSERT INTO normal_table_count1(tb,cnt) VALUES ('shenzhen', 2), ('shanghai', 3);
+INSERT INTO normal_table_count1(tb,cnt) VALUES ('suzhou', 4), ('hangzhou', 5) ORDER BY 2 LIMIT 1;
+TABLE normal_table_count1 ORDER BY cnt;
+ sc |    tb    | cnt | daate | ssize | pretty_size 
+----+----------+-----+-------+-------+-------------
+    | cities1  |   0 |       |       | 
+    | beijing  |   1 |       |       | 
+    | shenzhen |   2 |       |       | 
+    | shanghai |   3 |       |       | 
+    | suzhou   |   4 |       |       | 
+(5 rows)
+
+CREATE TABLE test_unknown(a int, b unknown, c int);
+WARNING:  column "b" has type "unknown"
+DETAIL:  Proceeding with relation creation anyway.
+INSERT INTO test_unknown(a, b) VALUES (1, 'beijing');
+INSERT INTO test_unknown(a, b) VALUES (1, 'beijing') LIMIT 1;
+ERROR:  column "b" is of type unknown but expression is of type text
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: b
+INSERT INTO test_unknown(a, b) VALUES (2, 'shenzhen'),  (3, 'shanghai');
+INSERT INTO test_unknown(a, b) VALUES (4, 'suzhou'),  (5, 'hangzhou') ORDER BY 1 LIMIT 1;
+ERROR:  column "b" is of type unknown but expression is of type text
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: b
+INSERT INTO test_unknown(a, b) SELECT 6, 'xian' FROM DUAL;
+TABLE test_unknown ORDER BY a;
+ a |    b     | c 
+---+----------+---
+ 1 | beijing  |  
+ 2 | shenzhen |  
+ 3 | shanghai |  
+ 6 | xian     |  
+(4 rows)
+
+TRUNCATE test_unknown;
+INSERT INTO test_unknown(a, b) VALUES (1, 'beijing');
+INSERT INTO test_unknown(a, b) VALUES (1, 'beijing') LIMIT 1;
+ERROR:  column "b" is of type unknown but expression is of type text
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: b
+INSERT INTO test_unknown(a, b) VALUES (2, 'shenzhen'),  (3, 'shanghai');
+INSERT INTO test_unknown(a, b) VALUES (4, 'suzhou'),  (5, 'hangzhou') ORDER BY 1 LIMIT 1;
+ERROR:  column "b" is of type unknown but expression is of type text
+HINT:  You will need to rewrite or cast the expression.
+CONTEXT:  referenced column: b
+INSERT INTO test_unknown(a, b) SELECT 6, 'xian' FROM DUAL;
+TABLE test_unknown ORDER BY a;
+ a |    b     | c 
+---+----------+---
+ 1 | beijing  |  
+ 2 | shenzhen |  
+ 3 | shanghai |  
+ 6 | xian     |  
+(4 rows)
+
+DROP SCHEMA resolve_unknown CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table normal_table_count1
+drop cascades to table cities1
+drop cascades to table test_unknown

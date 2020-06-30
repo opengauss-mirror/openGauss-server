@@ -1,0 +1,4 @@
+<func> init_tsvector_parser
+<func> reset_tsvector_parser
+<func> gettoken_tsvector
+<func> close_tsvector_parser

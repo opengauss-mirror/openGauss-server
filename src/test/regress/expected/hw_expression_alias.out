@@ -1,0 +1,153 @@
+create table t1(a int, b int, c int, d int);
+insert into t1 values(1, 2 ,3 ,4),(5, 6 ,7, 8);
+select a + b + current_timestamp as col1  from t1 where col1 = 1;
+ col1 
+------
+(0 rows)
+
+ 
+select a + b as col1, b + c + d  as col2, c + col2 as col3 from t1 order by 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+    3 |    9 |   12
+   11 |   21 |   28
+(2 rows)
+
+select a + b as col1, a + c + col1 as col2, b + c + d  as col3, c + col3 as col4 from t1 order by 1, 2 ,3 ,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    3 |    7 |    9 |   12
+   11 |   23 |   21 |   28
+(2 rows)
+
+select a + b as col1, a + c + col1 as col2 from t1 group by col1, col2 having col1 < 10;
+ col1 | col2 
+------+------
+    3 |    7
+(1 row)
+
+select case when a = 1 then a else b end as col1,  c + col1 as col2, sum(c) as col3 from t1 group by col1, col2  having col2 < 10;
+ col1 | col2 | col3 
+------+------+------
+    1 |    4 |    3
+(1 row)
+
+create table t2(a int, b varchar, c text);
+insert into t2 values(1, 'varchar123', 'varchar123');
+select substr(b, 8, 3) as col1,  substr(c, 8, 3) || col1 as col2, a + col2 as col3 from t2 where a + col1 = 124 and col2 = 123123 and col3 = 123124;
+ col1 |  col2  |  col3  
+------+--------+--------
+ 123  | 123123 | 123124
+(1 row)
+
+insert into t1 values(123, 4, 5, 6);
+insert into t1 values(1, 4, 5, 6);
+select substr(b, 8, 3) as col1 from t1 join t2 on( col1 = t1.a) order by 1;
+ERROR:  column "col1" does not exist
+LINE 1: ...elect substr(b, 8, 3) as col1 from t1 join t2 on( col1 = t1....
+                                                             ^
+drop table t1;
+drop table t2;
+--column
+create table t1_col(a int, b int, c int, d int) with (orientation=column);
+COPY t1_col(a, b, c, d) FROM stdin;
+select a + b + current_timestamp as col1  from t1_col where col1 = 1;
+ col1 
+------
+(0 rows)
+
+ 
+select a + b as col1, b + c + d  as col2, c + col2 as col3 from t1_col order by 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+    3 |    9 |   12
+    5 |   15 |   20
+   11 |   21 |   28
+  127 |   15 |   20
+(4 rows)
+
+select a + b as col1, a + c + col1 as col2, b + c + d  as col3, c + col3 as col4 from t1_col order by 1, 2, 3, 4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    3 |    7 |    9 |   12
+    5 |   11 |   15 |   20
+   11 |   23 |   21 |   28
+  127 |  255 |   15 |   20
+(4 rows)
+
+select a + b as col1, a + c + col1 as col2 from t1_col group by col1, col2 having col1 < 10 order by 1, 2;
+ col1 | col2 
+------+------
+    3 |    7
+    5 |   11
+(2 rows)
+
+select case when a = 1 then a else b end as col1,  c + col1 as col2, sum(c) as col3 from t1_col group by col1, col2 having col2 < 10 order by 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+    1 |    4 |    3
+    1 |    6 |    5
+    4 |    9 |    5
+(3 rows)
+
+create table t2_col(a int, b varchar, c text)with (orientation=column);
+copy t2_col FROM stdin;
+select substr(b, 8, 3) as col1,  substr(c, 8, 3) || col1 as col2, a + col2 as col3 from t2_col where 
+a + col1 = 126 and col2 = 123123 and col3 < 123129 order by 1,2,3;
+ col1 |  col2  |  col3  
+------+--------+--------
+ 123  | 123123 | 123126
+(1 row)
+
+select substr(t2_col.b, 8, 3) as col1 from t1_col, t2_col where col1 = t1_col.a order by 1;
+ col1 
+------
+ 1
+ 1
+ 123
+(3 rows)
+
+select substr(t2_col.b, 8, 3) as col1, ROW_NUMBER() OVER(PARTITION BY col1) AS QUA_ROW_NUM_1 from t1_col, t2_col where col1 = t1_col.a order by 1, 2;
+ col1 | qua_row_num_1 
+------+---------------
+ 1    |             1
+ 1    |             2
+ 123  |             1
+(3 rows)
+
+select substr(t2_col.b, 8, 3) as col1, ROW_NUMBER() OVER(PARTITION BY col1) AS QUA_ROW_NUM_1 from t1_col, t2_col where col1 = t1_col.a and QUA_ROW_NUM_1 < 10 order by 1;
+ERROR:  Alias "qua_row_num_1" reference with window function included is not supported.
+LINE 1: ...M_1 from t1_col, t2_col where col1 = t1_col.a and QUA_ROW_NU...
+                                                             ^
+select '1' col1 from t1_col where col1 + 5 = 6 order by 1; 
+ col1 
+------
+ 1
+ 1
+ 1
+ 1
+(4 rows)
+
+select a + b col1, col1 || col1 from t1_col order by 1, 2;
+ col1 | ?column? 
+------+----------
+    3 | 33
+    5 | 55
+   11 | 1111
+  127 | 127127
+(4 rows)
+
+select a as col1, b as col1 from t1_col where col1 = 1;
+ERROR:  Alias "col1" is ambiguous.
+LINE 1: select a as col1, b as col1 from t1_col where col1 = 1;
+                                                      ^
+select a as col1, b as col1, c + col1 from t1_col;
+ERROR:  Alias "col1" is ambiguous.
+LINE 1: select a as col1, b as col1, c + col1 from t1_col;
+                                         ^
+select a as col1, c + col10 from t1_col;
+ERROR:  column "col10" does not exist
+LINE 1: select a as col1, c + col10 from t1_col;
+                              ^
+drop table t1_col;
+drop table t2_col;

@@ -1,0 +1,95 @@
+-- problem:
+--   test every supporting datatype
+CREATE TABLE cstore_cmpr_test_bool
+(
+	b1 BOOL,
+	b2 BOOL,
+	b3 BOOL,
+	b4 BOOL
+)
+with ( orientation = column, compression = high);
+COPY cstore_cmpr_test_bool FROM STDIN NULL 'null';
+SELECT COUNT(*) FROM cstore_cmpr_test_bool;
+ count 
+-------
+    81
+(1 row)
+
+SELECT DISTINCT b1 FROM cstore_cmpr_test_bool ORDER BY 1;
+ b1 
+----
+ f
+ t
+ 
+(3 rows)
+
+SELECT DISTINCT b3 FROM cstore_cmpr_test_bool ORDER BY 1;
+ b3 
+----
+ f
+ t
+ 
+(3 rows)
+
+SELECT * FROM cstore_cmpr_test_bool WHERE b1 and b4 ORDER BY 1, 2, 3, 4;
+ b1 | b2 | b3 | b4 
+----+----+----+----
+ t  | f  | f  | t
+ t  | f  | t  | t
+ t  | f  |    | t
+ t  | t  | f  | t
+ t  | t  | t  | t
+ t  | t  |    | t
+ t  |    | f  | t
+ t  |    | t  | t
+ t  |    |    | t
+(9 rows)
+
+DROP TABLE cstore_cmpr_test_bool;
+-- problem: test tinyint && smallint && int && bigint datatype
+CREATE TABLE cstore_cmpr_test_each_int
+(
+	a1 varchar(32),
+	a2 tinyint,
+	a3 smallint,
+	a4 int,
+	a5 bigint,
+	a7 int,
+	a8 bigint,
+	a9 "char"
+) with ( orientation = column, compression = low )  ;
+COPY cstore_cmpr_test_each_int FROM STDIN NULL 'null';
+SELECT COUNT(*) FROM cstore_cmpr_test_each_int;
+ count 
+-------
+    21
+(1 row)
+
+-- SELECT MIN(a2), MAX(a2) FROM cstore_cmpr_test_each_int;
+SELECT a3, a4 FROM cstore_cmpr_test_each_int WHERE a5 > 10005 and a5 < 10010 ORDER BY 1, 2;
+ a3  |  a4  
+-----+------
+ 106 | 1006
+ 107 | 1007
+ 108 | 1008
+ 109 | 1009
+(4 rows)
+
+SELECT a9 FROM cstore_cmpr_test_each_int WHERE a9 > 13 ORDER BY 1;
+ a9 
+----
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+ a
+ b
+ y
+ z
+(12 rows)
+
+DROP TABLE cstore_cmpr_test_each_int;

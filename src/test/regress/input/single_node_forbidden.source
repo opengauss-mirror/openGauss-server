@@ -1,0 +1,21 @@
+-- fenced function is forbidden
+CREATE FUNCTION oldstyle_length(int4, text)
+	RETURNS int4
+	AS '@libdir@/regress@DLSUFFIX@'
+	LANGUAGE C FENCED;
+-- not fenced function is ok
+-- cannot be tested right now, because not fenced c udf is not ready yet.
+--CREATE FUNCTION oldstyle_length(int4, text)
+--	RETURNS int4
+--	AS '@libdir@/regress@DLSUFFIX@'
+--	LANGUAGE C NOT FENCED;
+--SELECT oldstyle_length(5, 'abc');
+-- java udf is forbidden
+CREATE FUNCTION java_getSystemProperty(VARCHAR)
+	RETURNS VARCHAR
+	AS 'java.lang.System.getProperty'
+	LANGUAGE java NOT FENCED;
+CREATE FUNCTION java_getSystemProperty(VARCHAR)
+	RETURNS VARCHAR
+	AS 'java.lang.System.getProperty'
+	LANGUAGE java FENCED;

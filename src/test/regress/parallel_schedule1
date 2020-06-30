@@ -1,0 +1,24 @@
+test: partiton_pathkey_col_plan partiton_pathkey_col_randomexec partiton_pathkey_row_plan partiton_pathkey_row_randomexec
+#test the locales setting expect not affacted each other
+test: pg_session_locale
+# ----------
+# These four each depend on the previous one(duplicate)
+# duplicated create_function_1 create_type create_table copy
+# ----------
+test: create_function_1
+test: create_table
+test: temp__4 copy
+
+# ----------
+# More groups of parallel tests
+# duplicated create_misc
+# ----------
+test: hw_hashagg_start
+#test: create_misc hw_hashagg_writefile hw_hashagg_expand
+test: create_misc
+test: create_view1 create_view2 create_view3 create_view4 create_view5 int8
+
+#dupliacated select int8
+test: select
+test: misc
+test: stats

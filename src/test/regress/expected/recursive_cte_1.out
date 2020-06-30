@@ -1,0 +1,1976 @@
+CREATE SCHEMA distribute_recursive_cte_1;
+SET current_schema = distribute_recursive_cte_1;
+CREATE TABLE recursive_001 (
+    id_int integer NOT NULL,
+    name_int text NOT NULL,
+    pid_int integer NOT NULL,
+    pname_int text NOT NULL,
+    time_int timestamp without time zone NOT NULL,
+    id_date timestamp(0) without time zone NOT NULL,
+    name_date text,
+    pid_date timestamp(0) without time zone,
+    pname_date text,
+    time_date timestamp without time zone,
+    id_string character varying,
+    name_string text,
+    pid_string character varying,
+    pname_string text,
+    time_string timestamp without time zone,
+    id_number numeric,
+    name_number text,
+    pid_number numeric,
+    pname_number text,
+    time_number timestamp without time zone
+)
+WITH (orientation=row, compression=no)
+;
+ALTER TABLE recursive_001 ADD PRIMARY KEY (id_int, name_int, pid_int);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "recursive_001_pkey" for table "recursive_001"
+--
+---- case 1: REPLICATION + COLUMN
+--
+CREATE TABLE test_int_rep (
+    id integer,
+    name text,
+    pid integer,
+    pname text,
+    "time" timestamp without time zone
+)
+WITH (orientation=column, compression=low)
+;
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 ORDER BY 10,11
+);
+                                                                                                                                                                                                                                                                    QUERY PLAN                                                                                                                                                                                                                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (1), (1), (1), (1), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), (count(DISTINCT tmp1.pid_date)), (count(DISTINCT tmp1.id_string))
+   Sort Key: (count(DISTINCT tmp1.pid_date)), (count(DISTINCT tmp1.id_string))
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: recursive_001.id_int, recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number
+                 Filter: (recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Aggregate
+         Output: 1, 1, 1, 1, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, count(DISTINCT tmp1.pid_date), count(DISTINCT tmp1.id_string)
+         ->  CTE Scan on tmp1
+               Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+(23 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 ORDER BY 10,11
+);
+ ?column? | ?column? | ?column? | ?column? |  ?column?  |  ?column?  |  ?column?  |  ?column?  |  ?column?  | count | count 
+----------+----------+----------+----------+------------+------------+------------+------------+------------+-------+-------
+        1 |        1 |        1 |        1 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 |     0 |     0
+(1 row)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 group by  name_int, pname_int ORDER BY 10,11
+);
+ ?column? | ?column? | ?column? | ?column? | ?column? | ?column? | ?column? | ?column? | ?column? | count | count 
+----------+----------+----------+----------+----------+----------+----------+----------+----------+-------+-------
+(0 rows)
+
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: distribute_recursive_cte_1.recursive_001.id_int, distribute_recursive_cte_1.recursive_001.name_int, distribute_recursive_cte_1.recursive_001.pid_int, distribute_recursive_cte_1.recursive_001.pname_int, distribute_recursive_cte_1.recursive_001.time_int, distribute_recursive_cte_1.recursive_001.id_date, distribute_recursive_cte_1.recursive_001.name_date, distribute_recursive_cte_1.recursive_001.pid_date, distribute_recursive_cte_1.recursive_001.pname_date, distribute_recursive_cte_1.recursive_001.time_date, distribute_recursive_cte_1.recursive_001.id_string, distribute_recursive_cte_1.recursive_001.name_string, distribute_recursive_cte_1.recursive_001.pid_string, distribute_recursive_cte_1.recursive_001.pname_string, distribute_recursive_cte_1.recursive_001.time_string, distribute_recursive_cte_1.recursive_001.id_number, distribute_recursive_cte_1.recursive_001.name_number, distribute_recursive_cte_1.recursive_001.pid_number, distribute_recursive_cte_1.recursive_001.pname_number, distribute_recursive_cte_1.recursive_001.time_number
+                 Filter: (distribute_recursive_cte_1.recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, "*SELECT*".max, "*SELECT*".min, NULL::text, NULL::character varying, NULL::text, NULL::timestamp without time zone, NULL::numeric, NULL::text, NULL::numeric, NULL::text, NULL::timestamp without time zone
+         ->  Aggregate
+               Output: 1, 1, 1, 1, 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, max(DISTINCT tmp1.pid_date), min(DISTINCT (tmp1.id_string)::text)
+               ->  CTE Scan on tmp1
+                     Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+(23 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1;
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1 group by name_int, pname_int;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: distribute_recursive_cte_1.recursive_001.id_int, distribute_recursive_cte_1.recursive_001.name_int, distribute_recursive_cte_1.recursive_001.pid_int, distribute_recursive_cte_1.recursive_001.pname_int, distribute_recursive_cte_1.recursive_001.time_int, distribute_recursive_cte_1.recursive_001.id_date, distribute_recursive_cte_1.recursive_001.name_date, distribute_recursive_cte_1.recursive_001.pid_date, distribute_recursive_cte_1.recursive_001.pname_date, distribute_recursive_cte_1.recursive_001.time_date, distribute_recursive_cte_1.recursive_001.id_string, distribute_recursive_cte_1.recursive_001.name_string, distribute_recursive_cte_1.recursive_001.pid_string, distribute_recursive_cte_1.recursive_001.pname_string, distribute_recursive_cte_1.recursive_001.time_string, distribute_recursive_cte_1.recursive_001.id_number, distribute_recursive_cte_1.recursive_001.name_number, distribute_recursive_cte_1.recursive_001.pid_number, distribute_recursive_cte_1.recursive_001.pname_number, distribute_recursive_cte_1.recursive_001.time_number
+                 Filter: (distribute_recursive_cte_1.recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, "*SELECT*".max, "*SELECT*".min, NULL::text, NULL::character varying, NULL::text, NULL::timestamp without time zone, NULL::numeric, NULL::text, NULL::numeric, NULL::text, NULL::timestamp without time zone
+         ->  GroupAggregate
+               Output: 1, 1, 1, 1, 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, max(DISTINCT tmp1.pid_date), min(DISTINCT (tmp1.id_string)::text), tmp1.name_int, tmp1.pname_int
+               Group By Key: tmp1.name_int, tmp1.pname_int
+               ->  Sort
+                     Output: tmp1.name_int, tmp1.pname_int, tmp1.pid_date, tmp1.id_string
+                     Sort Key: tmp1.name_int, tmp1.pname_int
+                     ->  CTE Scan on tmp1
+                           Output: tmp1.name_int, tmp1.pname_int, tmp1.pid_date, tmp1.id_string
+(27 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1 group by name_int, pname_int;
+ERROR:  duplicate key value violates unique constraint "recursive_001_pkey"
+DETAIL:  Key (id_int, name_int, pid_int)=(1, 1, 1) already exists.
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: recursive_001.ctid, tmp1.*, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+         ->  Nested Loop
+               Output: recursive_001.ctid, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+               ->  Aggregate
+                     Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))
+                     ->  CTE Scan on tmp1
+                           Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+               ->  Index Scan using recursive_001_pkey on distribute_recursive_cte_1.recursive_001
+                     Output: recursive_001.ctid, recursive_001.id_int
+                     Index Cond: (recursive_001.id_int = ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))))
+         ->  CTE Scan on tmp1
+               Output: tmp1.*
+(32 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: recursive_001.ctid, tmp1.*
+         ->  CTE Scan on tmp1
+               Output: tmp1.*
+         ->  Materialize
+               Output: recursive_001.ctid
+               ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                     Output: recursive_001.ctid
+                     Filter: (SubPlan 2)
+                     SubPlan 2
+                       ->  GroupAggregate
+                             Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)), ($2), ($3)
+                             Group By Key: recursive_001.name_int, recursive_001.pname_int
+                             ->  CTE Scan on tmp1
+                                   Output: recursive_001.name_int, recursive_001.pname_int, tmp1.pid, tmp1.id
+(34 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+                                                                                                                                                                                                                                                                                                       QUERY PLAN                                                                                                                                                                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: (recursive_001.id_int + 1), recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+         ->  Aggregate
+               Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))
+               ->  CTE Scan on tmp1
+                     Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+         ->  Index Scan using recursive_001_pkey on distribute_recursive_cte_1.recursive_001
+               Output: recursive_001.id_int, recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid
+               Index Cond: (recursive_001.id_int = ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))))
+(28 rows)
+
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+                                                                                                                                                                                                                                                                             QUERY PLAN                                                                                                                                                                                                                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+         Output: (recursive_001.id_int + 1), recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid
+         Filter: (SubPlan 2)
+         SubPlan 2
+           ->  GroupAggregate
+                 Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)), ($2), ($3)
+                 Group By Key: recursive_001.name_int, recursive_001.pname_int
+                 ->  CTE Scan on tmp1
+                       Output: recursive_001.name_int, recursive_001.pname_int, tmp1.pid, tmp1.id
+(28 rows)
+
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+--
+---- case 2: REPLICATION + ROW
+--
+CREATE TABLE test_int_rep (
+    id integer,
+    name text,
+    pid integer,
+    pname text,
+    "time" timestamp without time zone
+)
+WITH (orientation=row, compression=low)
+;
+ERROR:  Value "low" of option "compression" is invalid for row table
+DETAIL:  Valid values are "yes" and "no"
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 ORDER BY 10,11
+);
+                                                                                                                                                                                                                                                                    QUERY PLAN                                                                                                                                                                                                                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (1), (1), (1), (1), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), (count(DISTINCT tmp1.pid_date)), (count(DISTINCT tmp1.id_string))
+   Sort Key: (count(DISTINCT tmp1.pid_date)), (count(DISTINCT tmp1.id_string))
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: recursive_001.id_int, recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number
+                 Filter: (recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Aggregate
+         Output: 1, 1, 1, 1, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, count(DISTINCT tmp1.pid_date), count(DISTINCT tmp1.id_string)
+         ->  CTE Scan on tmp1
+               Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+(23 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 ORDER BY 10,11
+);
+ ?column? | ?column? | ?column? | ?column? |  ?column?  |  ?column?  |  ?column?  |  ?column?  |  ?column?  | count | count 
+----------+----------+----------+----------+------------+------------+------------+------------+------------+-------+-------
+        1 |        1 |        1 |        1 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 |     1 |     0
+(1 row)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 group by  name_int, pname_int ORDER BY 10,11
+);
+ ?column? | ?column? | ?column? | ?column? |  ?column?  |  ?column?  |  ?column?  |  ?column?  |  ?column?  | count | count 
+----------+----------+----------+----------+------------+------------+------------+------------+------------+-------+-------
+        1 |        1 |        1 |        1 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 |     1 |     0
+(1 row)
+
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: distribute_recursive_cte_1.recursive_001.id_int, distribute_recursive_cte_1.recursive_001.name_int, distribute_recursive_cte_1.recursive_001.pid_int, distribute_recursive_cte_1.recursive_001.pname_int, distribute_recursive_cte_1.recursive_001.time_int, distribute_recursive_cte_1.recursive_001.id_date, distribute_recursive_cte_1.recursive_001.name_date, distribute_recursive_cte_1.recursive_001.pid_date, distribute_recursive_cte_1.recursive_001.pname_date, distribute_recursive_cte_1.recursive_001.time_date, distribute_recursive_cte_1.recursive_001.id_string, distribute_recursive_cte_1.recursive_001.name_string, distribute_recursive_cte_1.recursive_001.pid_string, distribute_recursive_cte_1.recursive_001.pname_string, distribute_recursive_cte_1.recursive_001.time_string, distribute_recursive_cte_1.recursive_001.id_number, distribute_recursive_cte_1.recursive_001.name_number, distribute_recursive_cte_1.recursive_001.pid_number, distribute_recursive_cte_1.recursive_001.pname_number, distribute_recursive_cte_1.recursive_001.time_number
+                 Filter: (distribute_recursive_cte_1.recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, "*SELECT*".max, "*SELECT*".min, NULL::text, NULL::character varying, NULL::text, NULL::timestamp without time zone, NULL::numeric, NULL::text, NULL::numeric, NULL::text, NULL::timestamp without time zone
+         ->  Aggregate
+               Output: 1, 1, 1, 1, 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, max(DISTINCT tmp1.pid_date), min(DISTINCT (tmp1.id_string)::text)
+               ->  CTE Scan on tmp1
+                     Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+(23 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1;
+ERROR:  duplicate key value violates unique constraint "recursive_001_pkey"
+DETAIL:  Key (id_int, name_int, pid_int)=(1, 1, 1) already exists.
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1 group by name_int, pname_int;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: distribute_recursive_cte_1.recursive_001.id_int, distribute_recursive_cte_1.recursive_001.name_int, distribute_recursive_cte_1.recursive_001.pid_int, distribute_recursive_cte_1.recursive_001.pname_int, distribute_recursive_cte_1.recursive_001.time_int, distribute_recursive_cte_1.recursive_001.id_date, distribute_recursive_cte_1.recursive_001.name_date, distribute_recursive_cte_1.recursive_001.pid_date, distribute_recursive_cte_1.recursive_001.pname_date, distribute_recursive_cte_1.recursive_001.time_date, distribute_recursive_cte_1.recursive_001.id_string, distribute_recursive_cte_1.recursive_001.name_string, distribute_recursive_cte_1.recursive_001.pid_string, distribute_recursive_cte_1.recursive_001.pname_string, distribute_recursive_cte_1.recursive_001.time_string, distribute_recursive_cte_1.recursive_001.id_number, distribute_recursive_cte_1.recursive_001.name_number, distribute_recursive_cte_1.recursive_001.pid_number, distribute_recursive_cte_1.recursive_001.pname_number, distribute_recursive_cte_1.recursive_001.time_number
+                 Filter: (distribute_recursive_cte_1.recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, "*SELECT*".max, "*SELECT*".min, NULL::text, NULL::character varying, NULL::text, NULL::timestamp without time zone, NULL::numeric, NULL::text, NULL::numeric, NULL::text, NULL::timestamp without time zone
+         ->  GroupAggregate
+               Output: 1, 1, 1, 1, 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, max(DISTINCT tmp1.pid_date), min(DISTINCT (tmp1.id_string)::text), tmp1.name_int, tmp1.pname_int
+               Group By Key: tmp1.name_int, tmp1.pname_int
+               ->  Sort
+                     Output: tmp1.name_int, tmp1.pname_int, tmp1.pid_date, tmp1.id_string
+                     Sort Key: tmp1.name_int, tmp1.pname_int
+                     ->  CTE Scan on tmp1
+                           Output: tmp1.name_int, tmp1.pname_int, tmp1.pid_date, tmp1.id_string
+(27 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1 group by name_int, pname_int;
+ERROR:  duplicate key value violates unique constraint "recursive_001_pkey"
+DETAIL:  Key (id_int, name_int, pid_int)=(1, 1, 1) already exists.
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: recursive_001.ctid, tmp1.*, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+         ->  Nested Loop
+               Output: recursive_001.ctid, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+               ->  Aggregate
+                     Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))
+                     ->  CTE Scan on tmp1
+                           Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+               ->  Index Scan using recursive_001_pkey on distribute_recursive_cte_1.recursive_001
+                     Output: recursive_001.ctid, recursive_001.id_int
+                     Index Cond: (recursive_001.id_int = ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))))
+         ->  CTE Scan on tmp1
+               Output: tmp1.*
+(32 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: recursive_001.ctid, tmp1.*
+         ->  CTE Scan on tmp1
+               Output: tmp1.*
+         ->  Materialize
+               Output: recursive_001.ctid
+               ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                     Output: recursive_001.ctid
+                     Filter: (SubPlan 2)
+                     SubPlan 2
+                       ->  GroupAggregate
+                             Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)), ($2), ($3)
+                             Group By Key: recursive_001.name_int, recursive_001.pname_int
+                             ->  CTE Scan on tmp1
+                                   Output: recursive_001.name_int, recursive_001.pname_int, tmp1.pid, tmp1.id
+(34 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+                                                                                                                                                                                                                                                                                                       QUERY PLAN                                                                                                                                                                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: (recursive_001.id_int + 1), recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+         ->  Aggregate
+               Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))
+               ->  CTE Scan on tmp1
+                     Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+         ->  Index Scan using recursive_001_pkey on distribute_recursive_cte_1.recursive_001
+               Output: recursive_001.id_int, recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid
+               Index Cond: (recursive_001.id_int = ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))))
+(28 rows)
+
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+                                                                                                                                                                                                                                                                             QUERY PLAN                                                                                                                                                                                                                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+         Output: (recursive_001.id_int + 1), recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid
+         Filter: (SubPlan 2)
+         SubPlan 2
+           ->  GroupAggregate
+                 Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)), ($2), ($3)
+                 Group By Key: recursive_001.name_int, recursive_001.pname_int
+                 ->  CTE Scan on tmp1
+                       Output: recursive_001.name_int, recursive_001.pname_int, tmp1.pid, tmp1.id
+(28 rows)
+
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+--
+---- case 3: HASH + ROW
+--
+DROP TABLE test_int_rep;
+CREATE TABLE test_int_rep (
+    id integer,
+    name text,
+    pid integer,
+    pname text,
+    "time" timestamp without time zone
+)
+WITH (orientation=row, compression=no)
+;
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 ORDER BY 10,11
+);
+                                                                                                                                                                                                                                                                    QUERY PLAN                                                                                                                                                                                                                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (1), (1), (1), (1), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), (count(DISTINCT tmp1.pid_date)), (count(DISTINCT tmp1.id_string))
+   Sort Key: (count(DISTINCT tmp1.pid_date)), (count(DISTINCT tmp1.id_string))
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: recursive_001.id_int, recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number
+                 Filter: (recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Seq Scan on distribute_recursive_cte_1.test_int_rep t1
+                       Output: t1.id, t1.name, t1.pid, t1.pname, t1."time"
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Aggregate
+         Output: 1, 1, 1, 1, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, count(DISTINCT tmp1.pid_date), count(DISTINCT tmp1.id_string)
+         ->  CTE Scan on tmp1
+               Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+(21 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 ORDER BY 10,11
+);
+ ?column? | ?column? | ?column? | ?column? |  ?column?  |  ?column?  |  ?column?  |  ?column?  |  ?column?  | count | count 
+----------+----------+----------+----------+------------+------------+------------+------------+------------+-------+-------
+        1 |        1 |        1 |        1 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 |     1 |     0
+(1 row)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 group by  name_int, pname_int ORDER BY 10,11
+);
+ ?column? | ?column? | ?column? | ?column? |  ?column?  |  ?column?  |  ?column?  |  ?column?  |  ?column?  | count | count 
+----------+----------+----------+----------+------------+------------+------------+------------+------------+-------+-------
+        1 |        1 |        1 |        1 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 |     1 |     0
+(1 row)
+
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: distribute_recursive_cte_1.recursive_001.id_int, distribute_recursive_cte_1.recursive_001.name_int, distribute_recursive_cte_1.recursive_001.pid_int, distribute_recursive_cte_1.recursive_001.pname_int, distribute_recursive_cte_1.recursive_001.time_int, distribute_recursive_cte_1.recursive_001.id_date, distribute_recursive_cte_1.recursive_001.name_date, distribute_recursive_cte_1.recursive_001.pid_date, distribute_recursive_cte_1.recursive_001.pname_date, distribute_recursive_cte_1.recursive_001.time_date, distribute_recursive_cte_1.recursive_001.id_string, distribute_recursive_cte_1.recursive_001.name_string, distribute_recursive_cte_1.recursive_001.pid_string, distribute_recursive_cte_1.recursive_001.pname_string, distribute_recursive_cte_1.recursive_001.time_string, distribute_recursive_cte_1.recursive_001.id_number, distribute_recursive_cte_1.recursive_001.name_number, distribute_recursive_cte_1.recursive_001.pid_number, distribute_recursive_cte_1.recursive_001.pname_number, distribute_recursive_cte_1.recursive_001.time_number
+                 Filter: (distribute_recursive_cte_1.recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Seq Scan on distribute_recursive_cte_1.test_int_rep t1
+                       Output: t1.id, t1.name, t1.pid, t1.pname, t1."time"
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, "*SELECT*".max, "*SELECT*".min, NULL::text, NULL::character varying, NULL::text, NULL::timestamp without time zone, NULL::numeric, NULL::text, NULL::numeric, NULL::text, NULL::timestamp without time zone
+         ->  Aggregate
+               Output: 1, 1, 1, 1, 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, max(DISTINCT tmp1.pid_date), min(DISTINCT (tmp1.id_string)::text)
+               ->  CTE Scan on tmp1
+                     Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+(21 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1;
+ERROR:  duplicate key value violates unique constraint "recursive_001_pkey"
+DETAIL:  Key (id_int, name_int, pid_int)=(1, 1, 1) already exists.
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1 group by name_int, pname_int;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: distribute_recursive_cte_1.recursive_001.id_int, distribute_recursive_cte_1.recursive_001.name_int, distribute_recursive_cte_1.recursive_001.pid_int, distribute_recursive_cte_1.recursive_001.pname_int, distribute_recursive_cte_1.recursive_001.time_int, distribute_recursive_cte_1.recursive_001.id_date, distribute_recursive_cte_1.recursive_001.name_date, distribute_recursive_cte_1.recursive_001.pid_date, distribute_recursive_cte_1.recursive_001.pname_date, distribute_recursive_cte_1.recursive_001.time_date, distribute_recursive_cte_1.recursive_001.id_string, distribute_recursive_cte_1.recursive_001.name_string, distribute_recursive_cte_1.recursive_001.pid_string, distribute_recursive_cte_1.recursive_001.pname_string, distribute_recursive_cte_1.recursive_001.time_string, distribute_recursive_cte_1.recursive_001.id_number, distribute_recursive_cte_1.recursive_001.name_number, distribute_recursive_cte_1.recursive_001.pid_number, distribute_recursive_cte_1.recursive_001.pname_number, distribute_recursive_cte_1.recursive_001.time_number
+                 Filter: (distribute_recursive_cte_1.recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Seq Scan on distribute_recursive_cte_1.test_int_rep t1
+                       Output: t1.id, t1.name, t1.pid, t1.pname, t1."time"
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, "*SELECT*".max, "*SELECT*".min, NULL::text, NULL::character varying, NULL::text, NULL::timestamp without time zone, NULL::numeric, NULL::text, NULL::numeric, NULL::text, NULL::timestamp without time zone
+         ->  GroupAggregate
+               Output: 1, 1, 1, 1, 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, max(DISTINCT tmp1.pid_date), min(DISTINCT (tmp1.id_string)::text), tmp1.name_int, tmp1.pname_int
+               Group By Key: tmp1.name_int, tmp1.pname_int
+               ->  Sort
+                     Output: tmp1.name_int, tmp1.pname_int, tmp1.pid_date, tmp1.id_string
+                     Sort Key: tmp1.name_int, tmp1.pname_int
+                     ->  CTE Scan on tmp1
+                           Output: tmp1.name_int, tmp1.pname_int, tmp1.pid_date, tmp1.id_string
+(25 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1 group by name_int, pname_int;
+ERROR:  duplicate key value violates unique constraint "recursive_001_pkey"
+DETAIL:  Key (id_int, name_int, pid_int)=(1, 1, 1) already exists.
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.test_int_rep
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Seq Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+   ->  Nested Loop
+         Output: recursive_001.ctid, tmp1.*, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+         ->  Nested Loop
+               Output: recursive_001.ctid, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+               ->  Aggregate
+                     Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))
+                     ->  CTE Scan on tmp1
+                           Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+               ->  Index Scan using recursive_001_pkey on distribute_recursive_cte_1.recursive_001
+                     Output: recursive_001.ctid, recursive_001.id_int
+                     Index Cond: (recursive_001.id_int = ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))))
+         ->  CTE Scan on tmp1
+               Output: tmp1.*
+(28 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.test_int_rep
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Seq Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+   ->  Nested Loop
+         Output: recursive_001.ctid, tmp1.*
+         ->  CTE Scan on tmp1
+               Output: tmp1.*
+         ->  Materialize
+               Output: recursive_001.ctid
+               ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                     Output: recursive_001.ctid
+                     Filter: (SubPlan 2)
+                     SubPlan 2
+                       ->  GroupAggregate
+                             Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)), ($2), ($3)
+                             Group By Key: recursive_001.name_int, recursive_001.pname_int
+                             ->  CTE Scan on tmp1
+                                   Output: recursive_001.name_int, recursive_001.pname_int, tmp1.pid, tmp1.id
+(30 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+                                                                                                                                                                                                                                                                                                       QUERY PLAN                                                                                                                                                                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.test_int_rep
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Seq Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+   ->  Nested Loop
+         Output: (recursive_001.id_int + 1), recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+         ->  Aggregate
+               Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))
+               ->  CTE Scan on tmp1
+                     Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+         ->  Index Scan using recursive_001_pkey on distribute_recursive_cte_1.recursive_001
+               Output: recursive_001.id_int, recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid
+               Index Cond: (recursive_001.id_int = ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))))
+(24 rows)
+
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+                                                                                                                                                                                                                                                                             QUERY PLAN                                                                                                                                                                                                                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.test_int_rep
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Seq Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+   ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+         Output: (recursive_001.id_int + 1), recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid
+         Filter: (SubPlan 2)
+         SubPlan 2
+           ->  GroupAggregate
+                 Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)), ($2), ($3)
+                 Group By Key: recursive_001.name_int, recursive_001.pname_int
+                 ->  CTE Scan on tmp1
+                       Output: recursive_001.name_int, recursive_001.pname_int, tmp1.pid, tmp1.id
+(24 rows)
+
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+--
+---- case 4: HASH + COLUMN
+--
+DROP TABLE test_int_rep;
+CREATE TABLE test_int_rep (
+    id integer,
+    name text,
+    pid integer,
+    pname text,
+    "time" timestamp without time zone
+)
+WITH (orientation=column, compression=no)
+;
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 ORDER BY 10,11
+);
+                                                                                                                                                                                                                                                                    QUERY PLAN                                                                                                                                                                                                                                                                     
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: (1), (1), (1), (1), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), ('2017-01-02'::text), (count(DISTINCT tmp1.pid_date)), (count(DISTINCT tmp1.id_string))
+   Sort Key: (count(DISTINCT tmp1.pid_date)), (count(DISTINCT tmp1.id_string))
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: recursive_001.id_int, recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number
+                 Filter: (recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Aggregate
+         Output: 1, 1, 1, 1, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, '2017-01-02'::text, count(DISTINCT tmp1.pid_date), count(DISTINCT tmp1.id_string)
+         ->  CTE Scan on tmp1
+               Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+(23 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 ORDER BY 10,11
+);
+ ?column? | ?column? | ?column? | ?column? |  ?column?  |  ?column?  |  ?column?  |  ?column?  |  ?column?  | count | count 
+----------+----------+----------+----------+------------+------------+------------+------------+------------+-------+-------
+        1 |        1 |        1 |        1 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 |     1 |     0
+(1 row)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+SELECT * FROM 
+(
+    SELECT   
+        1,
+        1,
+        1, 
+        1,
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02',
+        '2017-01-02'
+        ,count(distinct tmp1.pid_date)
+        ,count(distinct tmp1.id_string)
+    FROM tmp1 group by  name_int, pname_int ORDER BY 10,11
+);
+ ?column? | ?column? | ?column? | ?column? |  ?column?  |  ?column?  |  ?column?  |  ?column?  |  ?column?  | count | count 
+----------+----------+----------+----------+------------+------------+------------+------------+------------+-------+-------
+        1 |        1 |        1 |        1 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 | 2017-01-02 |     1 |     0
+(1 row)
+
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: distribute_recursive_cte_1.recursive_001.id_int, distribute_recursive_cte_1.recursive_001.name_int, distribute_recursive_cte_1.recursive_001.pid_int, distribute_recursive_cte_1.recursive_001.pname_int, distribute_recursive_cte_1.recursive_001.time_int, distribute_recursive_cte_1.recursive_001.id_date, distribute_recursive_cte_1.recursive_001.name_date, distribute_recursive_cte_1.recursive_001.pid_date, distribute_recursive_cte_1.recursive_001.pname_date, distribute_recursive_cte_1.recursive_001.time_date, distribute_recursive_cte_1.recursive_001.id_string, distribute_recursive_cte_1.recursive_001.name_string, distribute_recursive_cte_1.recursive_001.pid_string, distribute_recursive_cte_1.recursive_001.pname_string, distribute_recursive_cte_1.recursive_001.time_string, distribute_recursive_cte_1.recursive_001.id_number, distribute_recursive_cte_1.recursive_001.name_number, distribute_recursive_cte_1.recursive_001.pid_number, distribute_recursive_cte_1.recursive_001.pname_number, distribute_recursive_cte_1.recursive_001.time_number
+                 Filter: (distribute_recursive_cte_1.recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, "*SELECT*".max, "*SELECT*".min, NULL::text, NULL::character varying, NULL::text, NULL::timestamp without time zone, NULL::numeric, NULL::text, NULL::numeric, NULL::text, NULL::timestamp without time zone
+         ->  Aggregate
+               Output: 1, 1, 1, 1, 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, max(DISTINCT tmp1.pid_date), min(DISTINCT (tmp1.id_string)::text)
+               ->  CTE Scan on tmp1
+                     Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+(23 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1;
+ERROR:  duplicate key value violates unique constraint "recursive_001_pkey"
+DETAIL:  Key (id_int, name_int, pid_int)=(1, 1, 1) already exists.
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1 group by name_int, pname_int;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                 Output: distribute_recursive_cte_1.recursive_001.id_int, distribute_recursive_cte_1.recursive_001.name_int, distribute_recursive_cte_1.recursive_001.pid_int, distribute_recursive_cte_1.recursive_001.pname_int, distribute_recursive_cte_1.recursive_001.time_int, distribute_recursive_cte_1.recursive_001.id_date, distribute_recursive_cte_1.recursive_001.name_date, distribute_recursive_cte_1.recursive_001.pid_date, distribute_recursive_cte_1.recursive_001.pname_date, distribute_recursive_cte_1.recursive_001.time_date, distribute_recursive_cte_1.recursive_001.id_string, distribute_recursive_cte_1.recursive_001.name_string, distribute_recursive_cte_1.recursive_001.pid_string, distribute_recursive_cte_1.recursive_001.pname_string, distribute_recursive_cte_1.recursive_001.time_string, distribute_recursive_cte_1.recursive_001.id_number, distribute_recursive_cte_1.recursive_001.name_number, distribute_recursive_cte_1.recursive_001.pid_number, distribute_recursive_cte_1.recursive_001.pname_number, distribute_recursive_cte_1.recursive_001.time_number
+                 Filter: (distribute_recursive_cte_1.recursive_001.pid_int < 50)
+           ->  Hash Join
+                 Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                 Hash Cond: (t1.pid = tmp1.pid_int)
+                 ->  Row Adapter
+                       Output: t1.pid
+                       ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                             Output: t1.pid
+                 ->  Hash
+                       Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+                       ->  WorkTable Scan on tmp1
+                             Output: tmp1.id_int, tmp1.name_int, tmp1.pid_int, tmp1.pname_int, tmp1.time_int, tmp1.id_date, tmp1.name_date, tmp1.pid_date, tmp1.pname_date, tmp1.time_date, tmp1.id_string, tmp1.name_string, tmp1.pid_string, tmp1.pname_string, tmp1.time_string, tmp1.id_number, tmp1.name_number, tmp1.pid_number, tmp1.pname_number, tmp1.time_number
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", "*SELECT*"."?column?", 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, "*SELECT*".max, "*SELECT*".min, NULL::text, NULL::character varying, NULL::text, NULL::timestamp without time zone, NULL::numeric, NULL::text, NULL::numeric, NULL::text, NULL::timestamp without time zone
+         ->  GroupAggregate
+               Output: 1, 1, 1, 1, 'Mon Jan 02 00:00:00 2017'::timestamp without time zone, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, 'Mon Jan 02 00:00:00 2017'::timestamp(0) without time zone, '2017-01-02'::text, max(DISTINCT tmp1.pid_date), min(DISTINCT (tmp1.id_string)::text), tmp1.name_int, tmp1.pname_int
+               Group By Key: tmp1.name_int, tmp1.pname_int
+               ->  Sort
+                     Output: tmp1.name_int, tmp1.pname_int, tmp1.pid_date, tmp1.id_string
+                     Sort Key: tmp1.name_int, tmp1.pname_int
+                     ->  CTE Scan on tmp1
+                           Output: tmp1.name_int, tmp1.pname_int, tmp1.pid_date, tmp1.id_string
+(27 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+   SELECT  * FROM recursive_001 WHERE pid_int <50 
+   union 
+   SELECT   tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid_int
+)
+insert into recursive_001
+SELECT   
+    1,
+    1,
+    1, 
+    1,
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02',
+    '2017-01-02'
+    ,max(distinct tmp1.pid_date)
+    ,min(distinct tmp1.id_string)
+FROM tmp1 group by name_int, pname_int;
+ERROR:  duplicate key value violates unique constraint "recursive_001_pkey"
+DETAIL:  Key (id_int, name_int, pid_int)=(1, 1, 1) already exists.
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: recursive_001.ctid, tmp1.*, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+         ->  Nested Loop
+               Output: recursive_001.ctid, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+               ->  Aggregate
+                     Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))
+                     ->  CTE Scan on tmp1
+                           Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+               ->  Index Scan using recursive_001_pkey on distribute_recursive_cte_1.recursive_001
+                     Output: recursive_001.ctid, recursive_001.id_int
+                     Index Cond: (recursive_001.id_int = ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))))
+         ->  CTE Scan on tmp1
+               Output: tmp1.*
+(32 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Delete on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: recursive_001.ctid, tmp1.*
+         ->  CTE Scan on tmp1
+               Output: tmp1.*
+         ->  Materialize
+               Output: recursive_001.ctid
+               ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+                     Output: recursive_001.ctid
+                     Filter: (SubPlan 2)
+                     SubPlan 2
+                       ->  GroupAggregate
+                             Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)), ($2), ($3)
+                             Group By Key: recursive_001.name_int, recursive_001.pname_int
+                             ->  CTE Scan on tmp1
+                                   Output: recursive_001.name_int, recursive_001.pname_int, tmp1.pid, tmp1.id
+(34 rows)
+
+WITH RECURSIVE tmp1 AS 
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+delete FROM recursive_001 using tmp1 WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+                                                                                                                                                                                                                                                                                                       QUERY PLAN                                                                                                                                                                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Nested Loop
+         Output: (recursive_001.id_int + 1), recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid, ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)))
+         ->  Aggregate
+               Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))
+               ->  CTE Scan on tmp1
+                     Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+         ->  Index Scan using recursive_001_pkey on distribute_recursive_cte_1.recursive_001
+               Output: recursive_001.id_int, recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid
+               Index Cond: (recursive_001.id_int = ((max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id))))
+(28 rows)
+
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1);
+explain (costs off, verbose ON)
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+                                                                                                                                                                                                                                                                             QUERY PLAN                                                                                                                                                                                                                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on distribute_recursive_cte_1.recursive_001
+   CTE tmp1
+     ->  Recursive Union
+           ->  Row Adapter
+                 Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                 ->  CStore Scan on distribute_recursive_cte_1.test_int_rep
+                       Output: test_int_rep.id, test_int_rep.name, test_int_rep.pid, test_int_rep.pname, test_int_rep."time"
+                       Filter: (test_int_rep.id < 50)
+           ->  Hash Join
+                 Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 Hash Cond: (tmp1.pid = t1.pid)
+                 ->  WorkTable Scan on tmp1
+                       Output: tmp1.id, tmp1.name, tmp1.pid, tmp1.pname, tmp1."time"
+                 ->  Hash
+                       Output: t1.pid
+                       ->  Row Adapter
+                             Output: t1.pid
+                             ->  CStore Scan on distribute_recursive_cte_1.test_int_rep t1
+                                   Output: t1.pid
+   ->  Seq Scan on distribute_recursive_cte_1.recursive_001
+         Output: (recursive_001.id_int + 1), recursive_001.name_int, recursive_001.pid_int, recursive_001.pname_int, recursive_001.time_int, recursive_001.id_date, recursive_001.name_date, recursive_001.pid_date, recursive_001.pname_date, recursive_001.time_date, recursive_001.id_string, recursive_001.name_string, recursive_001.pid_string, recursive_001.pname_string, recursive_001.time_string, recursive_001.id_number, recursive_001.name_number, recursive_001.pid_number, recursive_001.pname_number, recursive_001.time_number, recursive_001.ctid
+         Filter: (SubPlan 2)
+         SubPlan 2
+           ->  GroupAggregate
+                 Output: (max(DISTINCT tmp1.pid) + max(DISTINCT tmp1.id)), ($2), ($3)
+                 Group By Key: recursive_001.name_int, recursive_001.pname_int
+                 ->  CTE Scan on tmp1
+                       Output: recursive_001.name_int, recursive_001.pname_int, tmp1.pid, tmp1.id
+(28 rows)
+
+WITH RECURSIVE tmp1 AS
+(
+    SELECT  * FROM test_int_rep WHERE id <50 
+    union 
+    SELECT tmp1.* FROM tmp1 JOIN  test_int_rep t1 ON t1.pid = tmp1.pid
+)
+update recursive_001 set id_int = id_int +1  WHERE recursive_001.id_int in (SELECT max(distinct tmp1.pid)+max(distinct tmp1.id) FROM tmp1 group by name_int, pname_int);
+create table test_date(id date,name text,pid date, pname text,time timestamp)  ;
+COPY test_date (id, name, pid, pname, "time") FROM stdin(DELIMITER  ',', NULL '');
+;
+create index test_date_1 on test_date (id);
+create index test_date_2 on test_date (pid); 
+create index test_date_3 on test_date (id,pid);
+create table test_date_rep_par(id date,name text,pid date, pname text,time timestamp)  
+partition by range(id)	
+(
+PARTITION P1 VALUES LESS THAN('1991-08-16'),
+PARTITION P2 VALUES LESS THAN('1991-09-11'),	
+PARTITION P3 VALUES LESS THAN('1991-10-11'),	
+PARTITION P4 VALUES LESS THAN('1992-01-01'),	
+PARTITION P5 VALUES LESS THAN('1992-02-01'),
+PARTITION P6 VALUES LESS THAN('1992-05-01'),	
+PARTITION P7 VALUES LESS THAN('1992-08-23'),
+PARTITION P8 VALUES LESS THAN(MAXVALUE));
+insert into test_date_rep_par select * from test_date;
+create index test_date_rep_par_1 on test_date_rep_par (id) local;
+create index test_date_rep_par_2 on test_date_rep_par (pid) local;
+create table test_date_hash_par(id date,name text,pid date, pname text,time timestamp)  
+partition by range(id)
+(
+PARTITION P1 VALUES LESS THAN('1991-08-16'),
+PARTITION P2 VALUES LESS THAN('1991-09-11'),
+PARTITION P3 VALUES LESS THAN('1991-10-11'),	
+PARTITION P4 VALUES LESS THAN('1992-01-01'),	
+PARTITION P5 VALUES LESS THAN('1992-02-01'),	
+PARTITION P6 VALUES LESS THAN('1992-05-01'),	
+PARTITION P7 VALUES LESS THAN('1992-08-23'),
+PARTITION P8 VALUES LESS THAN(MAXVALUE)); 
+insert into test_date_hash_par select * from test_date; 
+CREATE OR REPLACE PROCEDURE test_retry(max in integer) 
+AS
+DECLARE
+    count int := 1;
+    result timestamp;
+    seed_sql text;
+BEGIN
+    seed_sql := 'set plan_mode_seed = ' || -1;
+    EXECUTE IMMEDIATE  seed_sql;
+    LOOP 
+        IF count >= max THEN 
+            RAISE INFO '% times retry with correct result' ,max;
+            EXIT;
+        ELSE
+            with recursive  tmp1 as (
+            select t1.id, t1.pname ,t1.pid ,count(8)
+            from test_date_rep_par t1
+            where  id in (select id from test_date where id in (select id from test_date_hash_par where id in (select id from test_date_rep_par )))
+            group by 3,1,2
+            union all
+            select test_date_hash_par.id,test_date_hash_par.pname ,test_date_hash_par.pid,2
+            from test_date_hash_par
+            join tmp1
+            on test_date_hash_par.id = tmp1.pid
+             )
+            select max(id) into result from tmp1
+            where exists ( select id from test_date where id in (select id from test_date_hash_par where id in (select id from test_date_rep_par  where id in ( with recursive  tmp1 as (
+            select t1.id, t1.pname ,t1.pid ,count(8)
+            from test_date_rep_par t1
+            where  id in (select id from test_date where id in (select id from test_date_hash_par where id not in (select id from test_date_rep_par where id between '1998-09-08' and '1999-09-10')))        
+            group by 3,1,2
+            union all
+            select test_date_hash_par.id,test_date_hash_par.pname ,test_date_hash_par.pid,2
+            from test_date_hash_par
+            join tmp1
+            on test_date_hash_par.id = tmp1.pid
+             )select id from tmp1 t1 where t1.id = tmp1.id  ))))
+            or id =(select max(id) from tmp1 as t1 where t1.id = tmp1.id group by t1.pname) order by 1 ;
+
+            IF result <> '2018-12-30 00:00:00'::timestamp THEN
+                RAISE INFO 'incorrect result with plan_mode_seed = %', count;  
+                EXIT;
+            END IF;
+            count:=count+1; 
+        END IF; 
+    END LOOP; 
+END;
+/
+call test_retry(10);
+INFO:  10 times retry with correct result
+ test_retry 
+------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_retry(max in integer) 
+AS
+DECLARE
+    count int := 1;
+    result timestamp;
+    seed_sql text;
+BEGIN
+    seed_sql := 'set plan_mode_seed = ' || -1;
+    EXECUTE IMMEDIATE  seed_sql;
+    LOOP 
+        IF count >= max THEN 
+            RAISE INFO '% times retry with correct result' ,max;
+            EXIT;
+        ELSE
+            with recursive  tmp1 as 
+            (
+                select t1.id, t1.pname ,t1.pid ,count(8) from test_date_rep_par t1  where  id in (select id from test_date where id in (select id from test_date_hash_par where id in (select id from test_date_rep_par ))) group by 3,1,2
+                union all
+                select test_date_hash_par.id,test_date_hash_par.pname ,test_date_hash_par.pid,2 from test_date_hash_par join tmp1 on test_date_hash_par.id = tmp1.pid
+            )
+            
+            select
+                max(id) into result
+            from tmp1 where  id =(select max(id) from tmp1 as t1 where t1.id = tmp1.id group by t1.pname) order by 1 ;
+
+            IF result <> '2018-12-30 00:00:00'::timestamp THEN
+                RAISE INFO 'incorrect result with plan_mode_seed = %', count;  
+                EXIT;
+            END IF;
+            count:=count+1;
+        END IF; 
+    END LOOP; 
+END;
+/
+call test_retry(10);
+INFO:  10 times retry with correct result
+ test_retry 
+------------
+ 
+(1 row)
+
+RESET search_path;
+DROP SCHEMA distribute_recursive_cte_1 CASCADE;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table distribute_recursive_cte_1.recursive_001
+drop cascades to table distribute_recursive_cte_1.test_int_rep
+drop cascades to table distribute_recursive_cte_1.test_date
+drop cascades to table distribute_recursive_cte_1.test_date_rep_par
+drop cascades to table distribute_recursive_cte_1.test_date_hash_par
+drop cascades to function distribute_recursive_cte_1.test_retry(integer)

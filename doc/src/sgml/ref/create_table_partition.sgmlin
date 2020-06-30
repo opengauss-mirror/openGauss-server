@@ -1,0 +1,62 @@
+<refentry id="SQL-CREATE_TABLE_PARTITION">
+<refmeta>
+<refentrytitle>CREATE TABLE PARTITION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE TABLE PARTITION</refname>
+<refpurpose>define a new table partition</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE TABLE [ IF NOT EXISTS ] partition_table_name 
+( [
+  { column_name data_type [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | table_constraint 
+    | LIKE source_table [ like_option [...] ] }
+    [, ... ]
+] )
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ COMPRESS | NOCOMPRESS ]
+[ TABLESPACE tablespace_name ]
+[ DISTRIBUTE BY { REPLICATION | { [ HASH ] ( column_name ) } } ]
+[ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
+PARTITION BY { 
+	{VALUES (partition_key)} | 
+	{RANGE (partition_key) ( partition_less_than_item [, ... ] )} |
+	{RANGE (partition_key) ( partition_start_end_item [, ... ] )}
+} [ { ENABLE | DISABLE } ROW MOVEMENT ];
+
+where column_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ NOT NULL |
+  NULL |
+  CHECK ( expression ) |
+  DEFAULT default_expr |
+  UNIQUE index_parameters |
+  PRIMARY KEY index_parameters }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where table_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ CHECK ( expression ) |
+  UNIQUE ( column_name [, ... ] ) index_parameters |
+  PRIMARY KEY ( column_name [, ... ] ) index_parameters}
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where index_parameters can be:
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ USING INDEX TABLESPACE tablespace_name ]
+where like_option can be:
+{ INCLUDING | EXCLUDING } { DEFAULTS | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | RELOPTIONS | DISTRIBUTION | ALL }
+where partition_less_than_item can be:
+PARTITION partition_name VALUES LESS THAN ( { partition_value | MAXVALUE } ) [TABLESPACE tablespace_name]
+where partition_start_end_item can be:
+PARTITION partition_name {
+	{START(partition_value) END (partition_value) EVERY (interval_value)} |
+	{START(partition_value) END ({partition_value | MAXVALUE})} |
+	{START(partition_value)} |
+	{END({partition_value | MAXVALUE})}
+} [TABLESPACE tablespace_name]
+</synopsis>
+</refsynopsisdiv>
+</refentry>

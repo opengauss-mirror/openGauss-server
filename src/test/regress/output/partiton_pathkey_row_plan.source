@@ -1,0 +1,554 @@
+CREATE TABLE part
+(
+  a int,
+  b int,
+  c int,
+  d int
+)WITH(orientation=row)
+PARTITION BY RANGE (a, b)
+(
+  PARTITION P_050_BEFORE VALUES LESS THAN (100, 100),
+  PARTITION P_100 VALUES LESS THAN (100, 200),
+  PARTITION P_150 VALUES LESS THAN (200, 100),
+  PARTITION P_200 VALUES LESS THAN (200, 200)
+);
+COPY part FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/partition_pathkey.dat';
+analyze part;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+-- case 1
+create index idx_a on part(a) local;
+explain(costs off) select * from part order by a limit 10; -- OK
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using idx_a on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a desc limit 10; -- OK
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 4
+         ->  Partitioned Index Scan Backward using idx_a on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part where b = 10 order by a, b limit 10; -- OK
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Index Scan using idx_a on part
+               Filter: (b = 10)
+               Selected Partitions:  1,3
+(6 rows)
+
+explain(costs off) select * from part where b = 10 order by a desc, b desc limit 10; -- OK
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 2
+         ->  Partitioned Index Scan Backward using idx_a on part
+               Filter: (b = 10)
+               Selected Partitions:  1,3
+(6 rows)
+
+explain(costs off) select * from part order by a asc  nulls first limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a NULLS FIRST
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by a desc nulls last limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a DESC NULLS LAST
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by b limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: b
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part where b = 10 order by a desc nulls last, b desc limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a DESC NULLS LAST
+         ->  Partition Iterator
+               Iterations: 2
+               ->  Partitioned Seq Scan on part
+                     Filter: (b = 10)
+                     Selected Partitions:  1,3
+(8 rows)
+
+explain(costs off) select * from part where b = 10 order by a desc, b desc nulls last limit 10; -- OK
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 2
+         ->  Partitioned Index Scan Backward using idx_a on part
+               Filter: (b = 10)
+               Selected Partitions:  1,3
+(6 rows)
+
+-- case 2
+drop index idx_a;
+create index idx_a_b on part(a,b) local;
+explain(costs off) select * from part order by a limit 10; -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using idx_a_b on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a desc limit 10; -- OK
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 4
+         ->  Partitioned Index Scan Backward using idx_a_b on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a, b limit 10; -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using idx_a_b on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a desc, b desc limit 10; -- OK
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 4
+         ->  Partitioned Index Scan Backward using idx_a_b on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part where c = 10 order by a, b, c limit 10; -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using idx_a_b on part
+               Filter: (c = 10)
+               Selected Partitions:  1..4
+(6 rows)
+
+explain(costs off) select * from part where c = 10 order by a desc, b desc, c desc limit 10; -- OK
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 4
+         ->  Partitioned Index Scan Backward using idx_a_b on part
+               Filter: (c = 10)
+               Selected Partitions:  1..4
+(6 rows)
+
+explain(costs off) select * from part order by a asc, b desc limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a, b DESC
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by a desc, b asc limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a DESC, b
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by a desc, b desc nulls last limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a DESC, b DESC NULLS LAST
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by a desc nulls last, b desc limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a DESC NULLS LAST, b DESC
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by a desc nulls last limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a DESC NULLS LAST
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by a asc nulls first limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a NULLS FIRST
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by b limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: b
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+explain(costs off) select * from part order by a, b, c limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: a, b, c
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+drop index idx_a_b;
+create index idx_a_b_c on part(a,b,c) local;
+explain(costs off) select * from part order by a limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a desc limit 10; -- OK
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 4
+         ->  Partitioned Index Scan Backward using idx_a_b_c on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a, b limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a desc, b desc limit 10; -- OK
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 4
+         ->  Partitioned Index Scan Backward using idx_a_b_c on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a, b, c limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part order by a desc, b desc, c desc limit 10; -- OK
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 4
+         ->  Partitioned Index Scan Backward using idx_a_b_c on part
+               Selected Partitions:  1..4
+(5 rows)
+
+explain(costs off) select * from part where a = 50 order by b, c limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Index Cond: (a = 50)
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part where a < 100 order by a, b, c limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Index Cond: (a < 100)
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part where a = 10 and b = 10 order by a, b, c limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Index Cond: ((a = 10) AND (b = 10))
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part order by b, c limit 10;
+                   QUERY PLAN                   
+------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: b, c
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+drop index idx_a_b_c;
+create index idx_a_b_c on part(a desc,b,c desc) local;
+explain(costs off) select * from part where a < 100 order by a desc, b, c desc limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Index Cond: (a < 100)
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part where a < 100 and b < 100 order by a desc, b, c desc limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Index Cond: ((a < 100) AND (b < 100))
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part where a < 100 and b < 100 order by a , b desc, c limit 10;  -- OK
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan Backward using idx_a_b_c on part
+               Index Cond: ((a < 100) AND (b < 100))
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part where b = 10 order by a desc, c desc limit 10; -- OK
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 2
+         ->  Partitioned Index Scan using idx_a_b_c on part
+               Index Cond: (b = 10)
+               Selected Partitions:  1,3
+(6 rows)
+
+drop index idx_a_b_c;
+create index idx_b_c on part(b,c) local;
+explain(costs off) select * from part where a = 80 order by b,c limit 10;  -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_b_c on part
+               Filter: (a = 80)
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part where a < 80 order by b,c limit 10;  -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_b_c on part
+               Filter: (a < 80)
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part where a = 80 order by b desc,c desc limit 10;  -- OK
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan Backward using idx_b_c on part
+               Filter: (a = 80)
+               Selected Partitions:  1
+(6 rows)
+
+explain(costs off) select * from part where a = 80 and b = 10 order by c limit 10;  -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_b_c on part
+               Index Cond: (b = 10)
+               Filter: (a = 80)
+               Selected Partitions:  1
+(7 rows)
+
+explain(costs off) select * from part where a = 80 and c = 10 order by b limit 10;  -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_b_c on part
+               Index Cond: (c = 10)
+               Filter: (a = 80)
+               Selected Partitions:  1
+(7 rows)
+
+explain(costs off) select * from part where a < 200 and a > 100 order by b,c limit 10; -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_b_c on part
+               Filter: ((a < 200) AND (a > 100))
+               Selected Partitions:  3
+(6 rows)
+
+explain(costs off) select * from part order by b,c limit 10;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: b, c
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Index Scan using idx_b_c on part
+                     Selected Partitions:  1..4
+(7 rows)
+
+drop index idx_b_c;
+create index idx_a_d on part(a,d) local;
+explain(costs off) select * from part where b = 10 order by a, d limit 10;  -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Index Scan using idx_a_d on part
+               Filter: (b = 10)
+               Selected Partitions:  1,3
+(6 rows)
+
+explain(costs off) select * from part where b = 10 order by a desc, d desc limit 10;  -- OK
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Limit
+   ->  Partition Iterator Scan Backward
+         Iterations: 2
+         ->  Partitioned Index Scan Backward using idx_a_d on part
+               Filter: (b = 10)
+               Selected Partitions:  1,3
+(6 rows)
+
+explain(costs off) select * from part where a < 80 order by a, d limit 10;  -- OK
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Partition Iterator
+         Iterations: 1
+         ->  Partitioned Index Scan using idx_a_d on part
+               Index Cond: (a < 80)
+               Selected Partitions:  1
+(6 rows)
+
+DROP TABLE part;

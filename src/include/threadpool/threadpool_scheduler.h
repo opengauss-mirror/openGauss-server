@@ -1,0 +1,50 @@
+/*
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ *---------------------------------------------------------------------------------------
+ *
+ * threadpool_scheduler.h
+ *
+ *
+ * IDENTIFICATION
+ *        src/include/threadpool/threadpool_scheduler.h
+ *
+ *---------------------------------------------------------------------------------------
+ */
+
+#ifndef THREAD_POOL_SCHEDULER_CONTROL_H
+#define THREAD_POOL_SCHEDULER_CONTROL_H
+
+class ThreadPoolScheduler : public BaseObject{
+public:
+    ThreadPoolScheduler(int groupNum, ThreadPoolGroup** groups);
+    int StartUp();
+    void DynamicAdjustThreadPool();
+
+private:
+    void ReduceWorkerIfNecessary(int groupIdx);
+    void EnlargeWorkerIfNecessage(int groupIdx);
+
+private:
+    ThreadId m_tid;
+    int m_groupNum;
+    ThreadPoolGroup** m_groups;
+    uint* m_hangTestCount;
+    uint* m_freeTestCount;
+};
+
+#define THREAD_SCHEDULER_STEP 8
+
+extern void TpoolSchedulerMain(ThreadPoolScheduler* scheduler);
+
+#endif

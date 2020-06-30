@@ -1,0 +1,670 @@
+--
+--FOR BLACKLIST FEATURE: INHERITS、SEQUENCE、RULE is not supported.
+--
+set client_min_messages=warning;
+-- Lets not reuse int4_tbl & int8_tbl
+-- so that this test could be run independently
+create table xc_int8_tbl(q1 int8, q2 int8);
+INSERT INTO xc_int8_tbl VALUES('  123   ','  456');
+INSERT INTO xc_int8_tbl VALUES('123   ','4567890123456789');
+INSERT INTO xc_int8_tbl VALUES('4567890123456789','123');
+INSERT INTO xc_int8_tbl VALUES(+4567890123456789,'4567890123456789');
+INSERT INTO xc_int8_tbl VALUES('+4567890123456789','-4567890123456789');
+create table xc_int4_tbl(f1 int4);
+INSERT INTO xc_int4_tbl(f1) VALUES ('   0  ');
+INSERT INTO xc_int4_tbl(f1) VALUES ('123456     ');
+INSERT INTO xc_int4_tbl(f1) VALUES ('    -123456');
+INSERT INTO xc_int4_tbl(f1) VALUES ('2147483647');
+INSERT INTO xc_int4_tbl(f1) VALUES ('-2147483647');
+-- The tables have to be created on a well defined set of nodes
+-- independent of the nodes available in the cluster
+-- so that ctid returning tests produce predictable tests
+CREATE TABLE foo (f1 serial, f2 text, f3 int default 42);
+CREATE TABLE parent(a int, b int);
+select create_table_nodes('child (c int) INHERITS (parent)', 'hash(a)', NULL);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+CONTEXT:  SQL statement "CREATE TABLE child (c int) INHERITS (parent) DISTRIBUTE BY hash(a)"
+PL/pgSQL function create_table_nodes(character varying,character varying,character varying) line 9 at EXECUTE statement
+referenced column: create_table_nodes
+select create_table_nodes('grand_child (d int) INHERITS (child)', 'hash(a)', NULL);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+CONTEXT:  SQL statement "CREATE TABLE grand_child (d int) INHERITS (child) DISTRIBUTE BY hash(a)"
+PL/pgSQL function create_table_nodes(character varying,character varying,character varying) line 9 at EXECUTE statement
+referenced column: create_table_nodes
+CREATE TABLE fp(f1 int, f2 varchar(255), f3 int);
+select create_table_nodes('fp_child (fc int) INHERITS (fp)', 'hash(f1)', NULL);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+CONTEXT:  SQL statement "CREATE TABLE fp_child (fc int) INHERITS (fp) DISTRIBUTE BY hash(f1)"
+PL/pgSQL function create_table_nodes(character varying,character varying,character varying) line 9 at EXECUTE statement
+referenced column: create_table_nodes
+CREATE TABLE bar(c1 int, c2 int);
+-------------------------------------------------------------
+-- insert returning the colum that was not inserted
+-------------------------------------------------------------
+insert into foo values(1,'One') returning f3, ctid;
+ f3 | ctid  
+----+-------
+ 42 | (0,1)
+(1 row)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- single insert & multi-insert returning misc values
+-------------------------------------------------------------
+insert into bar values(8,9) 
+returning c2, c1, c2, c2, c1+c2, c2-c1 as diff, 
+c2-1 as minus1, ctid, least(c1,c2);
+ c2 | c1 | c2 | c2 | ?column? | diff | minus1 | ctid  | least 
+----+----+----+----+----------+------+--------+-------+-------
+  9 |  8 |  9 |  9 |       17 |    1 |      8 | (0,1) |     8
+(1 row)
+
+with t as 
+(
+  insert into bar values(1,2), (3,4),(5,6)
+  returning c2, c1, c2, c2, c1+c2, c2-c1 as diff,
+    c2-1 as minus1, ctid, least(c1,c2)
+) select * from t order by 1,2;
+ c2 | c1 | c2 | c2 | ?column? | diff | minus1 | ctid  | least 
+----+----+----+----+----------+------+--------+-------+-------
+  2 |  1 |  2 |  2 |        3 |    1 |      1 | (0,2) |     1
+  4 |  3 |  4 |  4 |        7 |    1 |      3 | (0,3) |     3
+  6 |  5 |  6 |  6 |       11 |    1 |      5 | (0,4) |     5
+(3 rows)
+
+truncate table bar;
+-------------------------------------------------------------
+-- sub-plan and init-plan in returning list
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9) returning *, ctid;
+ f1 |  f2  | f3 | ctid  
+----+------+----+-------
+  1 | test | 42 | (0,1)
+  2 | More | 11 | (0,2)
+  3 | MORE | 16 | (0,3)
+(3 rows)
+
+with t as
+(
+INSERT INTO foo SELECT f1+10, f2, f3+99 FROM foo
+RETURNING *, f3-f1, f1+112 IN (SELECT q1 FROM xc_int8_tbl) AS subplan, 
+EXISTS(SELECT * FROM xc_int4_tbl) AS initplan
+)
+select * from t order by 1,2,3;
+ f1 |  f2  | f3  | ?column? | subplan | initplan 
+----+------+-----+----------+---------+----------
+ 11 | test | 141 |      130 | t       | t
+ 12 | More | 110 |       98 | f       | t
+ 13 | MORE | 115 |      102 | f       | t
+(3 rows)
+
+select * from foo order by 1,2;
+ f1 |  f2  | f3  
+----+------+-----
+  1 | test |  42
+  2 | More |  11
+  3 | MORE |  16
+ 11 | test | 141
+ 12 | More | 110
+ 13 | MORE | 115
+(6 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- Make sure returning implementation works in case of inheritance
+-------------------------------------------------------------
+with t as
+(
+INSERT INTO fp VALUES (1,'test', 42), (2,'More', 11), (3,upper('more'), 7+9) returning ctid, f3, f2, f1, f3-f1
+)
+select * from t order by 4,3,2;
+ ctid  | f3 |  f2  | f1 | ?column? 
+-------+----+------+----+----------
+ (0,1) | 42 | test |  1 |       41
+ (0,2) | 11 | More |  2 |        9
+ (0,3) | 16 | MORE |  3 |       13
+(3 rows)
+
+INSERT INTO fp_child VALUES(123,'child',999,-123) returning ctid, *;
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: INSERT INTO fp_child VALUES(123,'child',999,-123) returning ...
+                    ^
+truncate table fp_child;
+ERROR:  relation "fp_child" does not exist
+truncate table fp;
+-------------------------------------------------------------
+-- insert returning in case of an insert rule defined on table
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+create VIEW voo AS SELECT f1, f2 FROM foo;
+create OR REPLACE RULE voo_i AS ON INSERT TO voo DO INSTEAD
+  INSERT INTO foo VALUES(new.*, 57) RETURNING f1, f2;
+ERROR:  RULE is not yet supported.
+INSERT INTO voo VALUES(11,'zit');
+ERROR:  cannot insert into view "voo"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+INSERT INTO voo VALUES(12,'zoo') RETURNING *, f1*2;
+ERROR:  cannot insert into view "voo"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+drop view voo;
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+--------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------
+-- UPDATE Returning
+--------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------
+-------------------------------------------------------------
+-- update more rows in one go and return updated values
+-------------------------------------------------------------
+insert into bar values(1,2), (3,4),(5,6);
+with t as
+(
+update bar set c2=c2+1 returning c2, c1, c2, c2, c1+c2, c2-c1, c2-1, ctid
+)
+select * from t order by 1,2;
+ c2 | c1 | c2 | c2 | ?column? | ?column? | ?column? | ctid  
+----+----+----+----+----------+----------+----------+-------
+  3 |  1 |  3 |  3 |        4 |        2 |        2 | (0,4)
+  5 |  3 |  5 |  5 |        8 |        2 |        4 | (0,5)
+  7 |  5 |  7 |  7 |       12 |        2 |        6 | (0,6)
+(3 rows)
+
+truncate table bar;
+-------------------------------------------------------------
+-- use a function in returning clause
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+update foo set f3 = f3+1 WHERE f1 < 2 RETURNING f3, f2, f1, f3-f1, least(f1,f3), ctid;
+ f3 | f2 | f1 | ?column? | least | ctid 
+----+----+----+----------+-------+------
+(0 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- An example of a join where returning list contains columns from both tables
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+update foo set f3=f3*2 from xc_int4_tbl i WHERE (foo.f1 + (123456-1)) = i.f1 RETURNING foo.*, foo.f3-foo.f1,  i.f1 as "i.f1", foo.ctid, i.ctid;
+ f1 | f2 | f3 | ?column? | i.f1 | ctid | ctid 
+----+----+----+----------+------+------+------
+(0 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- sub-plan and init-plan in returning list
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+update foo set f3=f3*2 WHERE f1 < 2 RETURNING *, f3-f1, ctid, f1+112 IN (SELECT q1 FROM xc_int8_tbl) AS subplan, EXISTS(SELECT * FROM xc_int4_tbl) AS initplan;
+ f1 | f2 | f3 | ?column? | ctid | subplan | initplan 
+----+----+----+----------+------+---------+----------
+(0 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- Test * in a join case when used in returning
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+update foo set f3=f3*2 from xc_int8_tbl i  WHERE foo.f1+122 = i.q1  RETURNING *, foo.ctid;
+ f1 | f2 | f3 | q1 | q2 | ctid 
+----+----+----+----+----+------
+(0 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- Make sure returning implementation did not break update in case of inheritance
+-------------------------------------------------------------
+INSERT INTO fp VALUES (1,'test',42), (2,'More', 11), (3,upper('more'), 7+9);
+INSERT INTO fp_child VALUES(123,'child',999,-123);
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: INSERT INTO fp_child VALUES(123,'child',999,-123);
+                    ^
+ALTER table fp ADD COLUMN f4 int8 DEFAULT 99;
+explain (costs off, num_nodes off, nodes off, verbose on)
+UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99;
+                 QUERY PLAN                  
+---------------------------------------------
+ Update on public.fp
+   ->  Seq Scan on public.fp
+         Output: f1, f2, f3, (f4 + f3), ctid
+         Filter: (fp.f4 = 99)
+(4 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)
+UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Update on public.fp
+   ->  Hash Join
+         Output: fp.f1, fp.f2, (fp.f3 * 2), fp.f4, fp.ctid, i.ctid
+         Hash Cond: (i.q2 = fp.f1)
+         ->  Seq Scan on public.xc_int8_tbl i
+               Output: i.ctid, i.q2
+         ->  Hash
+               Output: fp.f1, fp.f2, fp.f3, fp.f4, fp.ctid
+               ->  Seq Scan on public.fp
+                     Output: fp.f1, fp.f2, fp.f3, fp.f4, fp.ctid
+(10 rows)
+
+explain (costs off, num_nodes off, nodes off, verbose on)
+update fp_child set fc=fc+2 returning *, f4-f1;
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 2: update fp_child set fc=fc+2 returning *, f4-f1;
+               ^
+explain (costs off, num_nodes off, nodes off, verbose on)
+update fp set f3 = f3 + 1 where f1<2 returning *, f3-f1;
+                 QUERY PLAN                 
+--------------------------------------------
+ Update on public.fp
+   Output: f1, f2, f3, f4, (f3 - f1)
+   ->  Seq Scan on public.fp
+         Output: f1, f2, (f3 + 1), f4, ctid
+         Filter: (fp.f1 < 2)
+(5 rows)
+
+UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99;
+UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2;
+update fp_child set fc=fc+2 returning *, f4-f1;
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: update fp_child set fc=fc+2 returning *, f4-f1;
+               ^
+update fp set f3 = f3 + 1 where f1<2 returning *, f3-f1;
+ f1 |  f2  | f3 | f4  | ?column? 
+----+------+----+-----+----------
+  1 | test | 43 | 141 |       42
+(1 row)
+
+select * from fp order by 1,2,3;
+ f1 |  f2  | f3 | f4  
+----+------+----+-----
+  1 | test | 43 | 141
+  2 | More | 11 | 110
+  3 | MORE | 16 | 115
+(3 rows)
+
+truncate table fp_child;
+ERROR:  relation "fp_child" does not exist
+truncate table fp;
+-------------------------------------------------------------
+-- Update parent with returning in case of a join
+-------------------------------------------------------------
+INSERT INTO fp VALUES (1, 'test', 42), (2, 'More', 11), (3, upper('more'), 7+9);
+INSERT INTO fp_child VALUES(123,'child',999,-123);
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: INSERT INTO fp_child VALUES(123,'child',999,-123);
+                    ^
+with t as
+(
+UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99 returning ctid, *
+)
+select * from t order by 1,2,3;
+ ctid  | f1 |  f2  | f3 | f4  
+-------+----+------+----+-----
+ (0,4) |  1 | test | 42 | 141
+ (0,5) |  2 | More | 11 | 110
+ (0,6) |  3 | MORE | 16 | 115
+(3 rows)
+
+with t as
+(
+UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2 returning *, fp.ctid, i.ctid
+)
+select * from t order by 1,2,3;
+ f1 | f2 | f3 | f4 | q1 | q2 | ctid | ctid 
+----+----+----+----+----+----+------+------
+(0 rows)
+
+with t as
+(
+update fp set f3=i.q1 from xc_int8_tbl i  WHERE fp.f1 = i.q1  RETURNING *, fp.f1-fp.f3
+)
+select * from t order by 1,2,3;
+ f1 | f2 | f3 | f4 | q1 | q2 | ?column? 
+----+----+----+----+----+----+----------
+(0 rows)
+
+truncate table fp_child;
+ERROR:  relation "fp_child" does not exist
+truncate table fp;
+-------------------------------------------------------------
+-- update child with returning in case of a join
+-------------------------------------------------------------
+INSERT INTO fp VALUES (1, 'test', 42), (2, 'More', 11), (3, upper('more'), 7+9);
+INSERT INTO fp_child VALUES(123,'child',999,-123);
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: INSERT INTO fp_child VALUES(123,'child',999,-123);
+                    ^
+with t as
+(
+UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99 returning *
+)
+select * from t order by 1,2,3;
+ f1 |  f2  | f3 | f4  
+----+------+----+-----
+  1 | test | 42 | 141
+  2 | More | 11 | 110
+  3 | MORE | 16 | 115
+(3 rows)
+
+with t as
+(
+UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2 returning *
+)
+select * from t order by 1,2,3;
+ f1 | f2 | f3 | f4 | q1 | q2 
+----+----+----+----+----+----
+(0 rows)
+
+with t as
+(
+update fp_child set f4 = f4 + 1 from xc_int8_tbl i  WHERE fp_child.f1 = i.q1  RETURNING *, fp_child.f1-fp_child.f3
+)
+select * from t order by 1,2,3;
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 3: update fp_child set f4 = f4 + 1 from xc_int8_tbl i  WHERE fp...
+               ^
+truncate table fp_child;
+ERROR:  relation "fp_child" does not exist
+truncate table fp;
+-------------------------------------------------------------
+-- Returning in case of a rule defined on table
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+create VIEW voo AS SELECT f1, f3 FROM foo;
+create OR REPLACE RULE voo_u AS ON UPDATE TO voo DO INSTEAD UPDATE foo SET f3 = new.f3 WHERE f1 = old.f1 RETURNING f3, f1;
+ERROR:  RULE is not yet supported.
+update voo set f3 = f1 + 1;
+ERROR:  cannot update view "voo"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+update voo set f3 = f1 + 1 where f1 < 2 RETURNING *;
+ERROR:  cannot update view "voo"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+drop view voo;
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- returning in case of 3 levels of inheritance
+-------------------------------------------------------------
+insert into parent values(1,2),(3,4),(5,6),(7,8);
+insert into child values(11,22,33),(44,55,66);
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: insert into child values(11,22,33),(44,55,66);
+                    ^
+insert into grand_child values(111,222,333,444),(555,666,777,888);
+ERROR:  relation "grand_child" does not exist on datanode1
+LINE 1: insert into grand_child values(111,222,333,444),(555,666,777...
+                    ^
+update parent set b = a + 1 from xc_int8_tbl i WHERE parent.a + 455 = i.q2  RETURNING *, b-i.q2;
+ a | b | q1  | q2  | ?column? 
+---+---+-----+-----+----------
+ 1 | 2 | 123 | 456 |     -454
+(1 row)
+
+update child set c=c+1 from xc_int8_tbl i  WHERE child.a + (456-44) = i.q2  RETURNING *, b-a;
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: update child set c=c+1 from xc_int8_tbl i  WHERE child.a + (...
+               ^
+update grand_child set d=d+2 from xc_int8_tbl i  WHERE grand_child.a + (456-111) = i.q2  RETURNING *, b-a;
+ERROR:  relation "grand_child" does not exist on datanode1
+LINE 1: update grand_child set d=d+2 from xc_int8_tbl i  WHERE grand...
+               ^
+truncate table grand_child;
+ERROR:  relation "grand_child" does not exist
+truncate table child;
+ERROR:  relation "child" does not exist
+truncate table parent;
+-------------------------------------------------------------
+-- Return system columns 
+-------------------------------------------------------------
+insert into bar values(1,2),(3,4),(5,6),(7,8),(9,0);
+update bar  set c2=c2 where c1 = 1 returning c2, c1, c2-c1, ctid, cmin, xmax, cmax;
+ c2 | c1 | ?column? | ctid  | cmin | xmax | cmax 
+----+----+----------+-------+------+------+------
+  2 |  1 |        1 | (0,6) |    0 |    0 |    0
+(1 row)
+
+truncate table bar;
+-------------------------------------------------------------
+-- Returning from both the tables in case of an update using from clause
+-------------------------------------------------------------
+insert into bar values(1,2);
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT);
+update foo set f3=f3*2 from bar i RETURNING foo.*, foo.ctid foo_ctid, i.ctid i_ctid;
+ f1 |  f2  | f3 | foo_ctid | i_ctid 
+----+------+----+----------+--------
+ 22 | test | 84 | (0,2)    | (0,1)
+(1 row)
+
+truncate table bar;
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+---------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
+-- DELETE Returning
+---------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
+-------------------------------------------------------------
+-- delete more rows in one go and return deleted values
+-------------------------------------------------------------
+insert into bar values(1,2), (3,4),(5,6);
+with t as
+(
+delete from bar returning c2, c1, c2, c2, c1+c2, c2-c1, c2-1
+)
+select * from t order by 1,2;
+ c2 | c1 | c2 | c2 | ?column? | ?column? | ?column? 
+----+----+----+----+----------+----------+----------
+  2 |  1 |  2 |  2 |        3 |        1 |        1
+  4 |  3 |  4 |  4 |        7 |        1 |        3
+  6 |  5 |  6 |  6 |       11 |        1 |        5
+(3 rows)
+
+truncate table bar;
+-------------------------------------------------------------
+-- use a function in returning clause
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+DELETE FROM foo WHERE f1 < 2 RETURNING f3, f2, f1, f3-f1, least(f1,f3);
+ f3 | f2 | f1 | ?column? | least 
+----+----+----+----------+-------
+(0 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- An example of a join where returning list contains columns from both tables
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+DELETE FROM foo USING xc_int4_tbl i WHERE (foo.f1 + (123456-1)) = i.f1 RETURNING foo.*, foo.f3-foo.f1,  i.f1 as "i.f1";
+ f1 | f2 | f3 | ?column? | i.f1 
+----+----+----+----------+------
+(0 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- sub-plan and init-plan in returning list
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+DELETE FROM foo WHERE f1 < 2 RETURNING *, f3-f1,  f1+112 IN (SELECT q1 FROM xc_int8_tbl) AS subplan, EXISTS(SELECT * FROM xc_int4_tbl) AS initplan;
+ f1 | f2 | f3 | ?column? | subplan | initplan 
+----+----+----+----------+---------+----------
+(0 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- Test * in a join case when used in returning
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+DELETE FROM foo  USING xc_int8_tbl i  WHERE foo.f1+122 = i.q1  RETURNING *;
+ f1 | f2 | f3 | q1 | q2 
+----+----+----+----+----
+(0 rows)
+
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- Test delete returning in case of child tables and parent tables
+-------------------------------------------------------------
+INSERT INTO fp VALUES (1,'test',42), (2,'More', 11), (3,upper('more'), 7+9);
+INSERT INTO fp_child VALUES(123,'child',999,-123);
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: INSERT INTO fp_child VALUES(123,'child',999,-123);
+                    ^
+INSERT INTO fp_child VALUES(456,'child',999,-456);
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: INSERT INTO fp_child VALUES(456,'child',999,-456);
+                    ^
+UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99;
+UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2;
+DELETE FROM fp_child where fc = -123 returning *, f4-f1;
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: DELETE FROM fp_child where fc = -123 returning *, f4-f1;
+                    ^
+DELETE FROM fp where f1 < 2 returning *, f3-f1;
+ f1 |  f2  | f3 | f4  | ?column? 
+----+------+----+-----+----------
+  1 | test | 42 | 141 |       41
+(1 row)
+
+truncate table fp_child;
+ERROR:  relation "fp_child" does not exist
+truncate table fp;
+-------------------------------------------------------------
+-- Delete from parent with returning in case of a join
+-------------------------------------------------------------
+INSERT INTO fp VALUES (1,'test',42), (2,'More', 11), (3,upper('more'), 7+9);
+INSERT INTO fp_child VALUES(123,'child',999,-123);
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: INSERT INTO fp_child VALUES(123,'child',999,-123);
+                    ^
+UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99;
+UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2;
+DELETE FROM fp  USING xc_int8_tbl i  WHERE fp.f1 = i.q1  RETURNING *, fp.f1-fp.f3;
+ f1 | f2 | f3 | f4 | q1 | q2 | ?column? 
+----+----+----+----+----+----+----------
+(0 rows)
+
+truncate table fp_child;
+ERROR:  relation "fp_child" does not exist
+truncate table fp;
+-------------------------------------------------------------
+-- Delete from child with returning in case of a join
+-------------------------------------------------------------
+INSERT INTO fp VALUES (1,'test',42), (2,'More', 11), (3,upper('more'), 7+9);
+INSERT INTO fp_child VALUES(123,'child',999,-123);
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: INSERT INTO fp_child VALUES(123,'child',999,-123);
+                    ^
+UPDATE fp SET f4 = f4 + f3 WHERE f4 = 99;
+UPDATE fp SET f3 = f3*2  FROM xc_int8_tbl i  WHERE fp.f1 = i.q2;
+DELETE FROM fp_child USING xc_int8_tbl i  WHERE fp_child.f1 = i.q1  RETURNING *, fp_child.f1-fp_child.f3;
+ERROR:  relation "fp_child" does not exist on datanode1
+LINE 1: DELETE FROM fp_child USING xc_int8_tbl i  WHERE fp_child.f1 ...
+                    ^
+truncate table fp_child;
+ERROR:  relation "fp_child" does not exist
+truncate table fp;
+-------------------------------------------------------------
+-- delete returning in case of a delete rule defined on table
+-------------------------------------------------------------
+INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
+create VIEW voo AS SELECT f1, f2 FROM foo;
+create OR REPLACE RULE voo_d AS ON DELETE TO voo DO INSTEAD  DELETE FROM foo WHERE f1 = old.f1  RETURNING f1, f2;
+ERROR:  RULE is not yet supported.
+DELETE FROM foo WHERE f1 = 1;
+DELETE FROM foo WHERE f1 < 2 RETURNING *, f3-f1;
+ f1 | f2 | f3 | ?column? 
+----+----+----+----------
+(0 rows)
+
+drop view voo;
+truncate table foo;
+alter sequence foo_f1_seq restart with 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+-------------------------------------------------------------
+-- delete returning in case of 3 levels of inheritance
+-------------------------------------------------------------
+insert into parent values(1,2),(3,4),(5,6),(7,8);
+insert into child values(11,22,33),(44,55,66);
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: insert into child values(11,22,33),(44,55,66);
+                    ^
+insert into grand_child values(111,222,333,444),(555,666,777,888);
+ERROR:  relation "grand_child" does not exist on datanode1
+LINE 1: insert into grand_child values(111,222,333,444),(555,666,777...
+                    ^
+DELETE FROM parent  USING xc_int8_tbl i  WHERE parent.a + 455 = i.q2  RETURNING *, b-a;
+ a | b | q1  | q2  | ?column? 
+---+---+-----+-----+----------
+ 1 | 2 | 123 | 456 |        1
+(1 row)
+
+DELETE FROM child  USING xc_int8_tbl i  WHERE child.a + (456-44) = i.q2  RETURNING *, b-a;
+ERROR:  relation "child" does not exist on datanode1
+LINE 1: DELETE FROM child  USING xc_int8_tbl i  WHERE child.a + (456...
+                    ^
+DELETE FROM grand_child  USING xc_int8_tbl i  WHERE grand_child.a + (456-111) = i.q2  RETURNING *, b-a;
+ERROR:  relation "grand_child" does not exist on datanode1
+LINE 1: DELETE FROM grand_child  USING xc_int8_tbl i  WHERE grand_ch...
+                    ^
+truncate table grand_child;
+ERROR:  relation "grand_child" does not exist
+truncate table child;
+ERROR:  relation "child" does not exist
+truncate table parent;
+-------------------------------------------------------------
+-- Return system columns while deleting
+-------------------------------------------------------------
+insert into bar values(1,2),(3,4),(5,6),(7,8),(9,0);
+with t as
+(
+delete from bar returning c2, c1, c2-c1
+)
+select * from t order by 1,2;
+ c2 | c1 | ?column? 
+----+----+----------
+  0 |  9 |       -9
+  2 |  1 |        1
+  4 |  3 |        1
+  6 |  5 |        1
+  8 |  7 |        1
+(5 rows)
+
+truncate table bar;
+-------------------------------------------------------------
+-- clean up
+-------------------------------------------------------------
+drop table bar;
+drop table fp_child;
+ERROR:  table "fp_child" does not exist
+drop table fp;
+drop table grand_child;
+ERROR:  table "grand_child" does not exist
+drop table child;
+ERROR:  table "child" does not exist
+drop table parent;
+drop table foo;
+drop table xc_int8_tbl;
+drop table xc_int4_tbl;
+reset client_min_messages;

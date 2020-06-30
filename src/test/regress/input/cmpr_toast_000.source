@@ -1,0 +1,20 @@
+-- fix bug: after compress, a toast tuple repeats two times because it's written again
+create table cmpr_toast_000_tmp
+(
+    id int delta,
+    f1 varchar(10000)
+);
+insert into cmpr_toast_000_tmp select generate_series(1,30), repeat('^_^ Kenyon is not God,Remark here!!',240);
+copy cmpr_toast_000_tmp TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_toast_000_tmp.data';
+
+create table cmpr_toast_000
+(
+    id int delta,
+    f1 varchar(10000)
+) compress;
+copy cmpr_toast_000 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_toast_000_tmp.data';
+(select * from cmpr_toast_000) minus all (select * from cmpr_toast_000_tmp);
+(select * from cmpr_toast_000_tmp) minus all (select * from cmpr_toast_000);
+DROP TABLE cmpr_toast_000;
+DROP TABLE cmpr_toast_000_tmp;
+\! rm '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_toast_000_tmp.data'

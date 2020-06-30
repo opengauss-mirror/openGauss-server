@@ -1,0 +1,18 @@
+<refentry id="SQL-ALTER_SYNONYM">
+<refmeta>
+<refentrytitle>ALTER SYNONYM</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER SYNONYM</refname>
+<refpurpose>change a synonym</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER SYNONYM synonym_name
+    OWNER TO new_owner;
+</synopsis>
+</refsynopsisdiv>
+</refentry>
+

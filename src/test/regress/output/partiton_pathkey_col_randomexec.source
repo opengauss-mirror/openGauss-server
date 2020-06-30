@@ -1,0 +1,591 @@
+CREATE TABLE part_col_exec
+(
+  a int,
+  b int,
+  c int,
+  d int
+)WITH(orientation=column)
+PARTITION BY RANGE (a, b)
+(
+  PARTITION P_050_BEFORE VALUES LESS THAN (100, 100),
+  PARTITION P_100 VALUES LESS THAN (100, 200),
+  PARTITION P_150 VALUES LESS THAN (200, 100),
+  PARTITION P_200 VALUES LESS THAN (200, 200)
+);
+COPY part_col_exec FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/partition_pathkey.dat';
+analyze part_col_exec;
+set plan_mode_seed = -1;
+-- case 1
+create index idx_part_col_exe_a on part_col_exec(a) local;
+select * from part_col_exec order by a limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a desc limit 10; -- OK
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec where b = 10 order by a, b limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 10 | 10 | 10 | 10
+(1 row)
+
+select * from part_col_exec where b = 10 order by a desc, b desc limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 10 | 10 | 10 | 10
+(1 row)
+
+select * from part_col_exec order by a asc  nulls first limit 10;
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a desc nulls last limit 10;
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec order by b,c limit 10;
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+-- case 2
+drop index idx_part_col_exe_a;
+create index idx_part_col_exe_a_b on part_col_exec(a,b) local;
+select * from part_col_exec order by a limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a desc limit 10; -- OK
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec order by a, b limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a desc, b desc limit 10; -- OK
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec where c = 10 order by a, b, c limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 10 | 10 | 10 | 10
+(1 row)
+
+select * from part_col_exec where c = 10 order by a desc, b desc, c desc limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 10 | 10 | 10 | 10
+(1 row)
+
+select * from part_col_exec order by a asc, b desc limit 10;
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a desc, b asc limit 10;
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec order by a desc, b desc nulls last limit 10;
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec order by a desc nulls last, b desc limit 10;
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec order by a desc nulls last limit 10;
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec order by a asc nulls first limit 10;
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by b,c limit 10;
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a, b, c limit 10;
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+drop index idx_part_col_exe_a_b;
+create index idx_part_col_exe_a_b_c on part_col_exec(a,b,c) local;
+select * from part_col_exec order by a limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a desc limit 10; -- OK
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec order by a, b limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a desc, b desc limit 10; -- OK
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec order by a, b, c limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec order by a desc, b desc, c desc limit 10; -- OK
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 199 | 199 | 199 | 199
+ 198 | 198 | 198 | 198
+ 197 | 197 | 197 | 197
+ 196 | 196 | 196 | 196
+ 195 | 195 | 195 | 195
+ 194 | 194 | 194 | 194
+ 193 | 193 | 193 | 193
+ 192 | 192 | 192 | 192
+ 191 | 191 | 191 | 191
+ 190 | 190 | 190 | 190
+(10 rows)
+
+select * from part_col_exec where a = 50 order by b, c limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 50 | 50 | 50 | 50
+(1 row)
+
+select * from part_col_exec where a < 100 order by a, b, c limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec where a = 10 and b = 10 order by a, b, c limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 10 | 10 | 10 | 10
+(1 row)
+
+select * from part_col_exec order by b, c limit 10;
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+drop index idx_part_col_exe_a_b_c;
+create index idx_part_col_exe_a_b_c on part_col_exec(a desc,b,c desc) local;
+ERROR:  access method "psort" does not support ASC/DESC options
+select * from part_col_exec where a < 100 order by a desc, b, c desc limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 99 | 99 | 99 | 99
+ 98 | 98 | 98 | 98
+ 97 | 97 | 97 | 97
+ 96 | 96 | 96 | 96
+ 95 | 95 | 95 | 95
+ 94 | 94 | 94 | 94
+ 93 | 93 | 93 | 93
+ 92 | 92 | 92 | 92
+ 91 | 91 | 91 | 91
+ 90 | 90 | 90 | 90
+(10 rows)
+
+select * from part_col_exec where a < 100 and b < 100 order by a desc, b, c desc limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 99 | 99 | 99 | 99
+ 98 | 98 | 98 | 98
+ 97 | 97 | 97 | 97
+ 96 | 96 | 96 | 96
+ 95 | 95 | 95 | 95
+ 94 | 94 | 94 | 94
+ 93 | 93 | 93 | 93
+ 92 | 92 | 92 | 92
+ 91 | 91 | 91 | 91
+ 90 | 90 | 90 | 90
+(10 rows)
+
+select * from part_col_exec where a < 100 and b < 100 order by a , b desc, c limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec where b = 10 order by a desc, c desc limit 10; -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 10 | 10 | 10 | 10
+(1 row)
+
+drop index idx_part_col_exe_a_b_c;
+ERROR:  index "idx_part_col_exe_a_b_c" does not exist
+create index idx_part_col_exe_b_c on part_col_exec(b,c) local;
+select * from part_col_exec where a = 80 order by b,c limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 80 | 80 | 80 | 80
+(1 row)
+
+select * from part_col_exec where a < 80 order by b,c limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+select * from part_col_exec where a = 80 order by b desc,c desc limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 80 | 80 | 80 | 80
+(1 row)
+
+select * from part_col_exec where a = 80 and b = 80 order by c limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 80 | 80 | 80 | 80
+(1 row)
+
+select * from part_col_exec where a = 80 and c = 80 order by b limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 80 | 80 | 80 | 80
+(1 row)
+
+select * from part_col_exec where a < 200 and a > 100 order by b,c limit 10; -- OK
+  a  |  b  |  c  |  d  
+-----+-----+-----+-----
+ 101 | 101 | 101 | 101
+ 102 | 102 | 102 | 102
+ 103 | 103 | 103 | 103
+ 104 | 104 | 104 | 104
+ 105 | 105 | 105 | 105
+ 106 | 106 | 106 | 106
+ 107 | 107 | 107 | 107
+ 108 | 108 | 108 | 108
+ 109 | 109 | 109 | 109
+ 110 | 110 | 110 | 110
+(10 rows)
+
+select * from part_col_exec order by b,c limit 10;
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+drop index idx_part_col_exe_b_c;
+create index idx_part_col_exe_a_d on part_col_exec(a,d) local;
+select * from part_col_exec where b = 10 order by a, d limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 10 | 10 | 10 | 10
+(1 row)
+
+select * from part_col_exec where b = 10 order by a desc, d desc limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+ 10 | 10 | 10 | 10
+(1 row)
+
+select * from part_col_exec where a < 80 order by a, d limit 10;  -- OK
+ a  | b  | c  | d  
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |  3 |  3 |  3
+  4 |  4 |  4 |  4
+  5 |  5 |  5 |  5
+  6 |  6 |  6 |  6
+  7 |  7 |  7 |  7
+  8 |  8 |  8 |  8
+  9 |  9 |  9 |  9
+ 10 | 10 | 10 | 10
+(10 rows)
+
+DROP TABLE part_col_exec;

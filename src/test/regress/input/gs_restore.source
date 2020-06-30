@@ -1,0 +1,398 @@
+--
+\! @abs_bindir@/gs_restore --help
+\! @abs_bindir@/gs_restore -?
+\! @abs_bindir@/gs_restore -V
+----------------
+\! @abs_bindir@/gs_restore -l -F t -c -f multishema.sql multishema -d postgres -p @portstring@
+------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -l -F c -c -f multishema.sql multishema -d postgres -p @portstring@
+------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -l -F d -c -f multishema.sql multishema -d postgres -p @portstring@
+------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -l -F t -c -f multishema.sql multishema
+\! @abs_bindir@/gs_restore -l -F c -c -f multishema.sql multishema
+\! @abs_bindir@/gs_restore -l -F d -c -f multishema.sql multishema
+-------------------
+\! @abs_bindir@/gs_restore -l -F t -c -v multishema
+\! @abs_bindir@/gs_restore -l -F c -c -v multishema
+\! @abs_bindir@/gs_restore -l -F d -c -v multishema
+-------------------
+\! @abs_bindir@/gs_restore -l -F t -c multishema
+\! @abs_bindir@/gs_restore -l -F c -c multishema
+\! @abs_bindir@/gs_restore -l -F d -c multishema
+---------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c multishema
+\! @abs_bindir@/gs_dump music -p @portstring@ -F c -f musicmultischema
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database music;"
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F c musicmultischema -C -v
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+---------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c multishema
+\! @abs_bindir@/gs_dump music -p @portstring@ -F c -f musicmultischema
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database music;"
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F c musicmultischema -C -v -n zcl
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dn"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+---------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d multishema
+\! @abs_bindir@/gs_dump music -p @portstring@ -F d -f musicmultischema
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database music;"
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F d musicmultischema -C -v -n cy
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dn"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+---------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create role zcl with CREATEDB createrole inherit login replication password 'data_123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "grant all PRIVILEGES to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE SCHEMA AUTHORIZATION zcl;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl -t tb1
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl -P 'insert_4_tb1()'
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl --function='insert_4_tb1_column()'
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl -t tb1_column -P 'insert_4_tb1_partition()'
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema zcl cascade;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE SCHEMA AUTHORIZATION zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create role cy with CREATEDB createrole inherit login replication password 'data_123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "grant all PRIVILEGES to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE SCHEMA AUTHORIZATION cy;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl -t tb1_partition -n zcl -P 'insert_4_tb1_partition()' -n cy -t tb1 -n cy -t tb1_column -n cy -P 'insert_4_tb1_column()' -n cy -P 'insert_4_tb1()'
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s -c
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -a -s
+----------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema --schema-only
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema --clean -s
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema --data-only
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema --schema-only --data-only
+--------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s -v
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s -c
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -a -v
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s --data-only
+-----------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -n zcl -s
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s -e
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+----------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema -n cy -s
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema -s -e
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema -a -n cy
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+-----------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create tablespace tbs_user_default  LOCATION '@abs_srcdir@/data/tbs_user_default_01';"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dn"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create schema AUTHORIZATION zcl;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl -t tb1
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dn"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl -t tb1 -I idx_tbl_global_01 -I idx_tbl_global_02 -I idx_tbl_global_03 -c
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl -t tb1 -I idx_tbl_global_01 -I idx_tbl_global_02 -I idx_tbl_global_03  -P 'insert_4_tb1()' -P 'insert_4_tb1_partition()' -c
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create schema AUTHORIZATION cy;"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl -t tb1 -I idx_tbl_global_01 -I idx_tbl_global_02 -I idx_tbl_global_03  -P 'insert_4_tb1()' -P 'insert_4_tb1_partition()' -c -n cy -t tb1 -I idx_tbl_global_01 -I idx_tbl_global_02 -I idx_tbl_global_03  -P 'insert_4_tb1()' -P 'insert_4_tb1_partition()'
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+----------------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create tablespace tbs_user_default  LOCATION '@abs_srcdir@/data/tbs_user_default_01';"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 1
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 3 -c --±¨´í
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+---------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create tablespace tbs_user_default  LOCATION '/usr1/gaussdb/data/tbs_user_default_01';"
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema --no-owner -c
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema --no-owner -c -S omm
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -O --sysadmin=cy -c
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O -S omm
+------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema --no-owner -c -S omm -T b
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -O --sysadmin=cy -c --trigger=a
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O -S omm -T b -c
+-------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema --no-owner -c -S omm -x -v
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -O --sysadmin=cy --no-privileges -v -c
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O -S omm --no-acl -v -c
+--------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema --no-owner  -S omm -x -v -1
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -O --sysadmin=cy --no-privileges -v --single-transaction
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O -S omm --no-acl -v -1 -c
+-------------------------------------------------------------------------------------------------------
+--disable-triggers
+--------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner  -S omm -x -v --disable-triggers -c
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O --sysadmin=cy --no-privileges -v --disable-triggers -c
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O -S omm --no-acl -v --disable-triggers -c
+----------------------------------------------------------------------------------------------------------
+--no-data-for-failed-tables
+---------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner  -S omm -x -v --disable-triggers --no-data-for-failed-tables
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+------------------------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O --sysadmin=cy --no-privileges -v --disable-triggers --no-data-for-failed-tables
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+----------------------------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O -S omm --no-acl -v --disable-triggers --no-data-for-failed-tables
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+---------------------------------------------------------------------------------------------------------
+--no-security-labels
+----------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner  -S omm -x -v --disable-triggers -c --no-security-labels 
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O --sysadmin=cy --no-privileges -v --disable-triggers -c --no-security-labels
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O -S omm --no-acl -v --disable-triggers -c --no-security-labels
+----------------------------------------------------------------------------------------------------------
+--no-tablespace
+----------------------------------------------------------------------------------------------------------
+--section=SECTION
+-----------------------------------------------------------------------------------------------------------
+--use-set-session-authorization
+-----------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner  -S omm -x -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O --sysadmin=cy --no-privileges -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O -S omm --no-acl -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+--------------------------------------------------------------------------------------------------------------
+--with-key=KEY
+-------------------------------------------------------------------------------------------------------------------
+-w/--no-password
+----------------------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner   -x -v --disable-triggers -c --no-security-labels --use-set-session-authorization -w
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O  --no-privileges -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O  --no-acl -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+-------------------------------------------------------------------------------------------------------------------
+--role=ROLENAME/--rolepassword=ROLEPASSWORD
+--------------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -v -e
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 --no-tablespaces -v
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -v
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -e
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -c
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user createdatabase PASSWORD 'data_123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create database createdatabase owner createdatabase;"
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -C
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "createdatabase=# set current_schema to zcl;"
+----clean up
+\! rm -rf @abs_srcdir@/tb1*
+\! rm -rf @abs_srcdir@/*.sql
+\! rm -rf @abs_srcdir@/tb50*
+\! rm -rf @abs_srcdir@/withpassword*
+\! rm -rf @abs_srcdir@/test*
+\! rm -rf @abs_srcdir@/1000wdump*
+\! rm -rf @abs_srcdir@/multishema*
+\! rm -rf @abs_srcdir@/musicmultischema*
+\! rm -rf @abs_srcdir@/tbs_user_default_01
+\! rm -rf @abs_srcdir@/p
+\! rm -rf @abs_srcdir@/d
+\! rm -rf @abs_srcdir@/c
+\! rm -rf @abs_srcdir@/t

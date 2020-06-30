@@ -1,0 +1,29 @@
+--
+---- 前置操作
+--
+1. 需要把当前文件夹 DBCheck 拷贝到任意有Coordinator的cluster节点
+2. 进入文件夹 DBCheck
+3. 给文件夹内的 DBCheck.sh 添加执行权限 chmod +x DBCheck.sh
+4. 给文件夹内的 ExecuteSQLOnAllDB.sh 添加执行权限 chmod +x ExecuteSQLOnAllDB.sh
+5. 初始化环境变量source /opt/huawei/Bigdata/mppdb/.mppdbgs_profile
+6. 确认当前物理节点的Coordinator的端口，此处设定为25308,(现场需要根据实际情况进行修改)
+7. 执行操作./DBCheck.sh -p 25308
+
+
+--
+----工具介绍
+--
+1. 执行./ExecuteSQLOnAllDB.sh -f blacklist_check.sql -p 25308
+
+2. 第一步执行的输出结果共计五列
+	a) 第一列 checkitem ： 检查项分类
+	b) 第二列 result    ： 数据结果
+	c) 第三列 expected  ： 预期输出结果
+	d) 第四列 status    ： 检查结果输出，如果通过则为SUCESS，如果失败则为FAILED。如果输出结果为FAILED，那么需要掉对应的第五列的脚本进一步获取具体信息
+	d) 第五列 failed_process_script ： 黑名单check失败时，进一步获取信息的脚本
+
+3. 检测到有黑名单失败项之后，会自动调用第五项查询具体信息
+
+
+
+

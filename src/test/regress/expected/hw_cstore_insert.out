@@ -1,0 +1,44 @@
+--case 1: before insert, do coerce process in quallist and targetlist
+create schema colstore_engine;
+create table  colstore_engine.target(
+        c_id    varchar,
+        c_street_1      varchar(20),
+        c_city  text,
+        c_zip   varchar(9),
+        c_d_id  numeric,
+        c_w_id  text)
+with(orientation=column);
+create table  colstore_engine.source(
+        c_id    integer,
+        c_street_1      varchar(20),
+        c_city  character varying(20),
+        c_zip   varchar(9),
+        c_d_id  integer,
+        c_w_id  integer)
+with(orientation=column);
+COPY colstore_engine.source(c_id, c_street_1, c_city, c_zip, c_d_id, c_w_id) FROM stdin;
+explain (verbose, costs off, nodes off) insert into colstore_engine.target select c_id,c_street_1,c_city,c_zip,c_d_id,c_w_id from colstore_engine.source where c_d_id != 9 and c_w_id != 8 and (c_street_1  like '%cyx%' or c_street_1 like '%ced%' or c_street_1 like '%fty%');
+                                                                                                        QUERY PLAN                                                                                                        
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Insert on colstore_engine.target
+         ->  CStore Scan on colstore_engine.source
+               Output: source.c_id, source.c_street_1, source.c_city, source.c_zip, source.c_d_id, source.c_w_id
+               Filter: ((source.c_d_id <> 9) AND (source.c_w_id <> 8) AND (((source.c_street_1)::text ~~ '%cyx%'::text) OR ((source.c_street_1)::text ~~ '%ced%'::text) OR ((source.c_street_1)::text ~~ '%fty%'::text)))
+(5 rows)
+
+insert into colstore_engine.target select c_id,c_street_1,c_city,c_zip,c_d_id,c_w_id from colstore_engine.source where c_d_id != 9 and c_w_id != 8 and (c_street_1  like '%cyx%' or c_street_1 like '%ced%' or c_street_1 like '%fty%');
+select * from colstore_engine.target order by c_id;
+ c_id |   c_street_1    |       c_city        |   c_zip   | c_d_id | c_w_id 
+------+-----------------+---------------------+-----------+--------+--------
+ 15   | ftyjkjkdjkdjkgd |                     |           |     11 | 3
+ 3    | cyxkjkgdn       | ceddkjgakdgkjg      | 480211111 |      1 | 1
+ 5    | ftyjkjkdjkdjkgd | dyfaoptppzdfgjrvyqa | 480211111 |     11 | 3
+ 7    | cedjkjgdakj     | frgfptppzjcgjrvyqa  | 480211111 |      2 | 3
+ 9    | cyxjkjkgaj      | creoptppzjcgjrvyqa  | 480211111 |      1 | 1
+(5 rows)
+
+drop schema colstore_engine cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table colstore_engine.target
+drop cascades to table colstore_engine.source

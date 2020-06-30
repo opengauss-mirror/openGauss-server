@@ -1,0 +1,92 @@
+\! rm -fr '@testtablespace@/test_toast_tsp1'
+\! rm -fr '@testtablespace@/test_toast_tsp2'
+\! rm -fr '@testtablespace@/test_toast_tsp3'
+\! rm -fr '@testtablespace@/test_toast_tsp4'
+\! rm -fr '@testtablespace@/test_toast_tsp5'
+\! rm -fr '@testtablespace@/test_toast_tsp6'
+\! mkdir '@testtablespace@/test_toast_tsp1'
+\! mkdir '@testtablespace@/test_toast_tsp2'
+\! mkdir '@testtablespace@/test_toast_tsp3'
+\! mkdir '@testtablespace@/test_toast_tsp4'
+\! mkdir '@testtablespace@/test_toast_tsp5'
+\! mkdir '@testtablespace@/test_toast_tsp6'
+create tablespace test_toast_tsp1 location '@testtablespace@/test_toast_tsp1';
+create tablespace test_toast_tsp2 location '@testtablespace@/test_toast_tsp2';
+create tablespace test_toast_tsp3 location '@testtablespace@/test_toast_tsp3';
+create tablespace test_toast_tsp4 location '@testtablespace@/test_toast_tsp4';
+create tablespace test_toast_tsp5 location '@testtablespace@/test_toast_tsp5';
+create tablespace test_toast_tsp6 location '@testtablespace@/test_toast_tsp6';
+--
+--  test toast table with partition
+--
+-- create schema
+create schema dfm;
+-- range partition
+create table dfm.test_toast_without_intreval(a int, b varchar) 
+tablespace test_toast_tsp1
+partition by range(a) 
+(
+	partition test_toast_tsp1_p1 values less than (-30) tablespace test_toast_tsp2, 
+	partition test_toast_tsp1_p2 values less than (-20) tablespace test_toast_tsp3,
+	partition test_toast_tsp1_p3 values less than (-10) tablespace test_toast_tsp4
+);
+select p.relname, p.parttype, ts.spcname, p.boundaries, c.relname as parentname , (p.reltoastrelid > 0) as hastoast
+from pg_partition p
+left join pg_class c on (p.parentid = c.oid)
+left join pg_tablespace ts on (p.reltablespace = ts.oid)
+where c.relname = 'test_toast_without_intreval'
+order by p.relname;
+
+alter table dfm.test_toast_without_intreval add partition test_toast_tsp1_p4 values less than (0) tablespace test_toast_tsp5;
+select p.relname, p.parttype, ts.spcname, p.boundaries, c.relname as parentname , (p.reltoastrelid > 0) as hastoast
+from pg_partition p
+left join pg_class c on (p.parentid = c.oid)
+left join pg_tablespace ts on (p.reltablespace = ts.oid)
+where c.relname = 'test_toast_without_intreval'
+order by p.relname;
+
+alter table dfm.test_toast_without_intreval drop partition test_toast_tsp1_p1;
+select p.relname, p.parttype, ts.spcname, p.boundaries, c.relname as parentname , (p.reltoastrelid > 0) as hastoast
+from pg_partition p
+left join pg_class c on (p.parentid = c.oid)
+left join pg_tablespace ts on (p.reltablespace = ts.oid)
+where c.relname = 'test_toast_without_intreval'
+order by p.relname;
+
+alter table dfm.test_toast_without_intreval drop partition for (-15);
+select p.relname, p.parttype, ts.spcname, p.boundaries, c.relname as parentname , (p.reltoastrelid > 0) as hastoast
+from pg_partition p
+left join pg_class c on (p.parentid = c.oid)
+left join pg_tablespace ts on (p.reltablespace = ts.oid)
+where c.relname = 'test_toast_without_intreval'
+order by p.relname;
+
+--interval partition
+--create table dfm.test_toast_with_intreval(a int, b varchar)
+--tablespace test_toast_tsp1
+--partition by range(a)
+--interval (10) store in (test_toast_tsp1,test_toast_tsp2,test_toast_tsp3,test_toast_tsp4,test_toast_tsp5, test_toast_tsp6)
+--(
+--	partition test_toast_with_intreval_p1 values less than (-30) tablespace test_toast_tsp2, 
+--	partition test_toast_with_intreval_p2 values less than (-20) tablespace test_toast_tsp3,
+--	partition test_toast_with_intreval_p3 values less than (-10) tablespace test_toast_tsp4
+--);
+
+--insert into dfm.test_toast_with_intreval values  (-10);
+--insert into dfm.test_toast_with_intreval values  (0);
+--insert into dfm.test_toast_with_intreval values  (10);
+--insert into dfm.test_toast_with_intreval values  (20);
+--insert into dfm.test_toast_with_intreval values  (30);
+--insert into dfm.test_toast_with_intreval values  (40);
+--select p.relname, p.parttype, ts.spcname, p.boundaries, c.relname as parentname , (p.reltoastrelid > 0) as hastoast
+--from pg_partition p
+--left join pg_class c on (p.parentid = c.oid)
+--left join pg_tablespace ts on (p.reltablespace = ts.oid) order by p.relname;
+drop schema dfm cascade;
+--clean up
+drop tablespace test_toast_tsp1;
+drop tablespace test_toast_tsp2;
+drop tablespace test_toast_tsp3;
+drop tablespace test_toast_tsp4;
+drop tablespace test_toast_tsp5;
+drop tablespace test_toast_tsp6;

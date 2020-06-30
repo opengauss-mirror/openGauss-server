@@ -1,0 +1,32 @@
+<refentry id="SQL-FETCH">
+<refmeta>
+<refentrytitle>FETCH</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>FETCH</refname>
+<refpurpose>retrieve rows from a query using a cursor</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+FETCH [ direction { FROM | IN } ] cursor_name;
+
+where direction can be:
+NEXT
+   | PRIOR
+   | FIRST
+   | LAST
+   | ABSOLUTE count
+   | RELATIVE count
+   | count
+   | ALL
+   | FORWARD
+   | FORWARD count
+   | FORWARD ALL
+   | BACKWARD
+   | BACKWARD count
+   | BACKWARD ALL
+</synopsis>
+</refsynopsisdiv>
+</refentry>

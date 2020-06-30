@@ -1,0 +1,1106 @@
+--
+\! @abs_bindir@/gs_restore --help
+gs_restore restores a PostgreSQL database from an archive created by gs_dump.
+
+Usage:
+  gs_restore [OPTION]... FILE
+
+General options:
+  -d, --dbname=NAME                       connect to database name
+  -f, --file=FILENAME                     output file name
+  -F, --format=c|d|t                      backup file format (should be automatic)
+  -l, --list                              print summarized TOC of the archive
+  -v, --verbose                           verbose mode
+  -V, --version                           output version information, then exit
+  -?, --help                              show this help, then exit
+
+Options controlling the restore:
+  -a, --data-only                       restore only the data, no schema
+  -c, --clean                           clean (drop) database objects before recreating
+  -C, --create                          create the target database
+  -e, --exit-on-error                   exit on error, default is to continue
+  -I, --index=NAME                      restore named index(s)
+  -j, --jobs=NUM                        use this many parallel jobs to restore
+  -L, --use-list=FILENAME               use table of contents from this file for
+                                        selecting/ordering output
+  -n, --schema=NAME                     restore only objects in this schema(s)
+  -O, --no-owner                        skip restoration of object ownership
+  -P, --function=NAME(args)             restore named function(s)
+  -s, --schema-only                     restore only the schema, no data
+  -S, --sysadmin=NAME                   system admin user name to use for disabling triggers
+  -t, --table=NAME                      restore named table(s)
+  -T, --trigger=NAME                    restore named trigger(s)
+  -x, --no-privileges/--no-acl          skip restoration of access privileges (grant/revoke)
+  -1, --single-transaction              restore as a single transaction
+  --disable-triggers                    disable triggers during data-only restore
+  --no-data-for-failed-tables           do not restore data of tables that could not be
+                                        created
+  --no-security-labels                  do not restore security labels
+  --no-tablespaces                      do not restore tablespace assignments
+  --section=SECTION                     restore named section (pre-data, data, or post-data)
+  --use-set-session-authorization       use SET SESSION AUTHORIZATION commands instead of
+                                        ALTER OWNER commands to set ownership
+  --with-key=KEY                        AES128 decryption key, must be 16 bytes in length
+
+Connection options:
+  -h, --host=HOSTNAME                   database server host or socket directory
+  -p, --port=PORT                       database server port number
+  -U, --username=NAME                   connect as specified database user
+  -w, --no-password                     never prompt for password
+  -W, --password=PASSWORD               the password of specified database user
+  --role=ROLENAME                       do SET ROLE before restore
+  --rolepassword=ROLEPASSWORD           the password for role
+\! @abs_bindir@/gs_restore -?
+gs_restore restores a PostgreSQL database from an archive created by gs_dump.
+
+Usage:
+  gs_restore [OPTION]... FILE
+
+General options:
+  -d, --dbname=NAME                       connect to database name
+  -f, --file=FILENAME                     output file name
+  -F, --format=c|d|t                      backup file format (should be automatic)
+  -l, --list                              print summarized TOC of the archive
+  -v, --verbose                           verbose mode
+  -V, --version                           output version information, then exit
+  -?, --help                              show this help, then exit
+
+Options controlling the restore:
+  -a, --data-only                       restore only the data, no schema
+  -c, --clean                           clean (drop) database objects before recreating
+  -C, --create                          create the target database
+  -e, --exit-on-error                   exit on error, default is to continue
+  -I, --index=NAME                      restore named index(s)
+  -j, --jobs=NUM                        use this many parallel jobs to restore
+  -L, --use-list=FILENAME               use table of contents from this file for
+                                        selecting/ordering output
+  -n, --schema=NAME                     restore only objects in this schema(s)
+  -O, --no-owner                        skip restoration of object ownership
+  -P, --function=NAME(args)             restore named function(s)
+  -s, --schema-only                     restore only the schema, no data
+  -S, --sysadmin=NAME                   system admin user name to use for disabling triggers
+  -t, --table=NAME                      restore named table(s)
+  -T, --trigger=NAME                    restore named trigger(s)
+  -x, --no-privileges/--no-acl          skip restoration of access privileges (grant/revoke)
+  -1, --single-transaction              restore as a single transaction
+  --disable-triggers                    disable triggers during data-only restore
+  --no-data-for-failed-tables           do not restore data of tables that could not be
+                                        created
+  --no-security-labels                  do not restore security labels
+  --no-tablespaces                      do not restore tablespace assignments
+  --section=SECTION                     restore named section (pre-data, data, or post-data)
+  --use-set-session-authorization       use SET SESSION AUTHORIZATION commands instead of
+                                        ALTER OWNER commands to set ownership
+  --with-key=KEY                        AES128 decryption key, must be 16 bytes in length
+
+Connection options:
+  -h, --host=HOSTNAME                   database server host or socket directory
+  -p, --port=PORT                       database server port number
+  -U, --username=NAME                   connect as specified database user
+  -w, --no-password                     never prompt for password
+  -W, --password=PASSWORD               the password of specified database user
+  --role=ROLENAME                       do SET ROLE before restore
+  --rolepassword=ROLEPASSWORD           the password for role
+\! @abs_bindir@/gs_restore -V
+--?gs_restore.*
+----------------
+\! @abs_bindir@/gs_restore -l -F t -c -f multishema.sql multishema -d postgres -p @portstring@
+Either one of dbname or list option need to be specified for gs_restore
+------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -l -F c -c -f multishema.sql multishema -d postgres -p @portstring@
+Either one of dbname or list option need to be specified for gs_restore
+------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -l -F d -c -f multishema.sql multishema -d postgres -p @portstring@
+Either one of dbname or list option need to be specified for gs_restore
+------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -l -F t -c -f multishema.sql multishema
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gs_restore -l -F c -c -f multishema.sql multishema
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -l -F d -c -f multishema.sql multishema
+changing permissions for file "@abs_srcdir@/multishema/toc.dat" failed with: Not a directory
+-------------------
+\! @abs_bindir@/gs_restore -l -F t -c -v multishema
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gs_restore -l -F c -c -v multishema
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -l -F d -c -v multishema
+changing permissions for file "@abs_srcdir@/multishema/toc.dat" failed with: Not a directory
+-------------------
+\! @abs_bindir@/gs_restore -l -F t -c multishema
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gs_restore -l -F c -c multishema
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -l -F d -c multishema
+changing permissions for file "@abs_srcdir@/multishema/toc.dat" failed with: Not a directory
+---------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c multishema
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_dump music -p @portstring@ -F c -f musicmultischema
+--?gs_dump[port='@portstring@'][music][.*]: The total objects number is 337.
+--?gs_dump[port='@portstring@'][music][.*]: [100.00%] 337 objects have been dumped.
+--?gs_dump[port='@portstring@'][music][.*]: dump database music successfully
+--?gs_dump[port='@portstring@'][music][.*]: total time: .*  ms
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database music;"
+DROP DATABASE
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F c musicmultischema -C -v
+connecting to database for restore
+start restore operation ...
+creating DATABASE "music"
+connecting to new database "music"
+connecting to database "music" as user "tester2"
+creating SCHEMA "public"
+creating COMMENT "SCHEMA public"
+Finish reading 6 SQL statements!
+end restore operation ...
+setting owner and privileges for DATABASE "music"
+setting owner and privileges for SCHEMA "public"
+setting owner and privileges for COMMENT "SCHEMA public"
+setting owner and privileges for ACL "public"
+restore operation successful
+--?total time: .*  ms
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+---------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c multishema
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_dump music -p @portstring@ -F c -f musicmultischema
+--?gs_dump[port='@portstring@'][music][.*]: The total objects number is 337.
+--?gs_dump[port='@portstring@'][music][.*]: [100.00%] 337 objects have been dumped.
+--?gs_dump[port='@portstring@'][music][.*]: dump database music successfully
+--?gs_dump[port='@portstring@'][music][.*]: total time: .*  ms
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database music;"
+DROP DATABASE
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F c musicmultischema -C -v -n zcl
+connecting to database for restore
+start restore operation ...
+creating DATABASE "music"
+connecting to new database "music"
+connecting to database "music" as user "tester2"
+creating COMMENT "SCHEMA public"
+Finish reading 6 SQL statements!
+end restore operation ...
+setting owner and privileges for DATABASE "music"
+setting owner and privileges for COMMENT "SCHEMA public"
+setting owner and privileges for ACL "public"
+restore operation successful
+--?total time: .*  ms
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dn"
+  List of schemas
+   Name   |  Owner  
+----------+---------
+ cstore   | tester2
+ dbe_perf | tester2
+ dump     | dump
+ jim      | jim
+ public   | tester2
+ snapshot | tester2
+ zcl      | zcl
+(7 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+---------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d multishema
+changing permissions for file "@abs_srcdir@/multishema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_dump music -p @portstring@ -F d -f musicmultischema
+could not create directory "@abs_srcdir@/musicmultischema": File exists
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database music;"
+DROP DATABASE
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F d musicmultischema -C -v -n cy
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dn"
+  List of schemas
+   Name   |  Owner  
+----------+---------
+ cstore   | tester2
+ dbe_perf | tester2
+ dump     | dump
+ jim      | jim
+ public   | tester2
+ snapshot | tester2
+ zcl      | zcl
+(7 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+---------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+NOTICE:  database "music" does not exist, skipping
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create role zcl with CREATEDB createrole inherit login replication password 'data_123';"
+ERROR:  role "zcl" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "grant all PRIVILEGES to zcl;"
+ALTER ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE SCHEMA AUTHORIZATION zcl;"
+ERROR:  schema "zcl" already exists
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl -t tb1
+connecting to database for restore
+implied data-only restore
+start restore operation ...
+Finish reading 6 SQL statements!
+end restore operation ...
+restore operation successful
+--?total time: .*  ms
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl -P 'insert_4_tb1()'
+connecting to database for restore
+implied data-only restore
+start restore operation ...
+Finish reading 6 SQL statements!
+end restore operation ...
+restore operation successful
+--?total time: .*  ms
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl --function='insert_4_tb1_column()'
+connecting to database for restore
+implied data-only restore
+start restore operation ...
+Finish reading 6 SQL statements!
+end restore operation ...
+restore operation successful
+--?total time: .*  ms
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl -t tb1_column -P 'insert_4_tb1_partition()'
+connecting to database for restore
+implied data-only restore
+start restore operation ...
+Finish reading 6 SQL statements!
+end restore operation ...
+restore operation successful
+--?total time: .*  ms
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema zcl cascade;"
+NOTICE:  drop cascades to 22 other objects
+DETAIL:  drop cascades to table zcl.tb1
+drop cascades to table zcl.tb1_column
+drop cascades to table zcl.tb1_partition
+drop cascades to table zcl.tb2_empty
+drop cascades to table zcl.test_trigger_des_tbl
+drop cascades to sequence zcl.dump_seq_1
+drop cascades to function zcl.tri_insert_func()
+drop cascades to table zcl.test_trigger_des_tbl_2
+drop cascades to sequence zcl.dump_seq_2
+drop cascades to function zcl.tri_insert_func_2()
+drop cascades to table zcl.test_trigger_des_tbl_partition
+drop cascades to sequence zcl.dump_seq_3
+drop cascades to function zcl.tri_insert_func_3()
+drop cascades to function zcl.insert_4_tb1()
+drop cascades to function zcl.insert_4_tb1_column()
+drop cascades to function zcl.insert_4_tb1_partition()
+drop cascades to view zcl.tb1_view
+drop cascades to view zcl.tb1_column_view
+drop cascades to view zcl.tb1_partition_view
+drop cascades to view zcl.tb1_view_1
+drop cascades to view zcl.tb1_column_view_1
+drop cascades to view zcl.tb1_partition_view_1
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE SCHEMA AUTHORIZATION zcl;"
+CREATE SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create role cy with CREATEDB createrole inherit login replication password 'data_123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "grant all PRIVILEGES to cy;"
+ALTER ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE SCHEMA AUTHORIZATION cy;"
+CREATE SCHEMA
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F c musicmultischema -v -n zcl -t tb1_partition -n zcl -P 'insert_4_tb1_partition()' -n cy -t tb1 -n cy -t tb1_column -n cy -P 'insert_4_tb1_column()' -n cy -P 'insert_4_tb1()'
+connecting to database for restore
+implied data-only restore
+start restore operation ...
+Finish reading 6 SQL statements!
+end restore operation ...
+restore operation successful
+--?total time: .*  ms
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s -c
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+ERROR:  relation "tb1" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+ERROR:  relation "tb1_partition" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+ERROR:  relation "tb1" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+ERROR:  relation "tb1_partition" does not exist
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -a
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -a -s
+gs_restore: options -s/--schema-only and -a/--data-only cannot be used together
+----------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema --schema-only
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema --clean -s
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+ERROR:  relation "tb1" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+ERROR:  relation "tb1_partition" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+ERROR:  relation "tb1" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+ERROR:  relation "tb1_partition" does not exist
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema --data-only
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema --schema-only --data-only
+gs_restore: options -s/--schema-only and -a/--data-only cannot be used together
+--------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s -v
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s -c
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+ERROR:  relation "tb1" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+ERROR:  relation "tb1_partition" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+ERROR:  relation "tb1" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+ERROR:  relation "tb1_partition" does not exist
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -a -v
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s --data-only
+gs_restore: options -s/--schema-only and -a/--data-only cannot be used together
+-----------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -n zcl -s
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+ERROR:  relation "tb1" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+ERROR:  relation "tb1_partition" does not exist
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -s -e
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F t musicmultischema -a
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+----------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema -n cy -s
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger on tb1;"
+ERROR:  relation "tb1" does not exist
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop trigger insert_trigger_3 on tb1_partition;"
+ERROR:  relation "tb1_partition" does not exist
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema -s -e
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -F d musicmultischema -a -n cy
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+-----------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create tablespace tbs_user_default  LOCATION '@abs_srcdir@/data/tbs_user_default_01';"
+ERROR:  tablespace "tbs_user_default" already exists
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE USER jim PASSWORD 'Bigdata@123';"
+ERROR:  role "jim" already exists
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dn"
+  List of schemas
+   Name   |  Owner  
+----------+---------
+ cstore   | tester2
+ cy       | cy
+ dbe_perf | tester2
+ dump     | dump
+ jim      | jim
+ public   | tester2
+ snapshot | tester2
+ zcl      | zcl
+(8 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create schema AUTHORIZATION zcl;"
+ERROR:  schema "zcl" already exists
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl -t tb1
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dn"
+  List of schemas
+   Name   |  Owner  
+----------+---------
+ cstore   | tester2
+ cy       | cy
+ dbe_perf | tester2
+ dump     | dump
+ jim      | jim
+ public   | tester2
+ snapshot | tester2
+ zcl      | zcl
+(8 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl -t tb1 -I idx_tbl_global_01 -I idx_tbl_global_02 -I idx_tbl_global_03 -c
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl -t tb1 -I idx_tbl_global_01 -I idx_tbl_global_02 -I idx_tbl_global_03  -P 'insert_4_tb1()' -P 'insert_4_tb1_partition()' -c
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create schema AUTHORIZATION cy;"
+ERROR:  schema "cy" already exists
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -n zcl -t tb1 -I idx_tbl_global_01 -I idx_tbl_global_02 -I idx_tbl_global_03  -P 'insert_4_tb1()' -P 'insert_4_tb1_partition()' -c -n cy -t tb1 -I idx_tbl_global_01 -I idx_tbl_global_02 -I idx_tbl_global_03  -P 'insert_4_tb1()' -P 'insert_4_tb1_partition()'
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+----------------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create tablespace tbs_user_default  LOCATION '@abs_srcdir@/data/tbs_user_default_01';"
+ERROR:  tablespace "tbs_user_default" already exists
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 1
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 3 -c --±¨´í
+@abs_bindir@/gs_restore: unrecognized option '--±¨´í'
+Try "gs_restore --help" for more information.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+---------------------------------------------------------------------------------------------------
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop database if exists music;"
+DROP DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE DATABASE music ENCODING 'UTF-8' template = template0;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
+ALTER DATABASE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create tablespace tbs_user_default  LOCATION '/usr1/gaussdb/data/tbs_user_default_01';"
+ERROR:  tablespace "tbs_user_default" already exists
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema --no-owner -c
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
+                                    List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage 
+--------+------+------------------+---------------------+------+------------+------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\di"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select * from pg_trigger;"
+ tgrelid | tgname | tgfoid | tgtype | tgenabled | tgisinternal | tgconstrrelid | tgconstrindid | tgconstraint | tgdeferrable | tginitdeferred | tgnargs | tgattr | tgargs | tgqual | tgowner 
+---------+--------+--------+--------+-----------+--------------+---------------+---------------+--------------+--------------+----------------+---------+--------+--------+--------+---------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1;"
+ERROR:  relation "tb1" does not exist on datanode1
+LINE 1: select count(*) from tb1;
+                             ^
+------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema --no-owner -c -S omm
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -O --sysadmin=cy -c
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O -S omm
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema --no-owner -c -S omm -T b
+@abs_bindir@/gs_restore: invalid option -- 'T'
+Try "gs_restore --help" for more information.
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -O --sysadmin=cy -c --trigger=a
+@abs_bindir@/gs_restore: unrecognized option '--trigger=a'
+Try "gs_restore --help" for more information.
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O -S omm -T b -c
+@abs_bindir@/gs_restore: invalid option -- 'T'
+Try "gs_restore --help" for more information.
+-------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema --no-owner -c -S omm -x -v
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -O --sysadmin=cy --no-privileges -v -c
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O -S omm --no-acl -v -c
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+--------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema --no-owner  -S omm -x -v -1
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L multishema.sql -F c multishema -O --sysadmin=cy --no-privileges -v --single-transaction
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F t musicmultischema -O -S omm --no-acl -v -1 -c
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+-------------------------------------------------------------------------------------------------------
+--disable-triggers
+--------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner  -S omm -x -v --disable-triggers -c
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O --sysadmin=cy --no-privileges -v --disable-triggers -c
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O -S omm --no-acl -v --disable-triggers -c
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+----------------------------------------------------------------------------------------------------------
+--no-data-for-failed-tables
+---------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner  -S omm -x -v --disable-triggers --no-data-for-failed-tables
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+------------------------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O --sysadmin=cy --no-privileges -v --disable-triggers --no-data-for-failed-tables
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+----------------------------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O -S omm --no-acl -v --disable-triggers --no-data-for-failed-tables
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to cy;"
+SET
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
+No relations found.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "select count(*) from tb1_column;"
+ERROR:  relation "tb1_column" does not exist on datanode1
+LINE 1: select count(*) from tb1_column;
+                             ^
+---------------------------------------------------------------------------------------------------------
+--no-security-labels
+----------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner  -S omm -x -v --disable-triggers -c --no-security-labels 
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O --sysadmin=cy --no-privileges -v --disable-triggers -c --no-security-labels
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O -S omm --no-acl -v --disable-triggers -c --no-security-labels
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+----------------------------------------------------------------------------------------------------------
+--no-tablespace
+----------------------------------------------------------------------------------------------------------
+--section=SECTION
+-----------------------------------------------------------------------------------------------------------
+--use-set-session-authorization
+-----------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner  -S omm -x -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O --sysadmin=cy --no-privileges -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O -S omm --no-acl -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+--------------------------------------------------------------------------------------------------------------
+--with-key=KEY
+-------------------------------------------------------------------------------------------------------------------
+-w/--no-password
+----------------------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F d musicmultischema --no-owner   -x -v --disable-triggers -c --no-security-labels --use-set-session-authorization -w
+changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F c multishema -O  --no-privileges -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -d music -p @portstring@  -F t musicmultischema -O  --no-acl -v --disable-triggers -c --no-security-labels --use-set-session-authorization
+ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL pointer or the invalid parameter handle is invoked..
+-------------------------------------------------------------------------------------------------------------------
+--role=ROLENAME/--rolepassword=ROLEPASSWORD
+--------------------------------------------------------------------------------------------------------------------
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -v -e
+could not find header for file "toc.dat" in tar archive
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 --no-tablespaces -v
+could not find header for file "toc.dat" in tar archive
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -v
+could not find header for file "toc.dat" in tar archive
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a
+could not find header for file "toc.dat" in tar archive
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -e
+could not find header for file "toc.dat" in tar archive
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -c
+gs_restore: options -c/--clean and -a/--data-only cannot be used together
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user createdatabase PASSWORD 'data_123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create database createdatabase owner createdatabase;"
+CREATE DATABASE
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -C
+could not find header for file "toc.dat" in tar archive
+gsql
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "createdatabase=# set current_schema to zcl;"
+ERROR:  syntax error at or near "createdatabase"
+LINE 1: createdatabase=# set current_schema to zcl;
+        ^
+----clean up
+\! rm -rf @abs_srcdir@/tb1*
+\! rm -rf @abs_srcdir@/*.sql
+\! rm -rf @abs_srcdir@/tb50*
+\! rm -rf @abs_srcdir@/withpassword*
+\! rm -rf @abs_srcdir@/test*
+\! rm -rf @abs_srcdir@/1000wdump*
+\! rm -rf @abs_srcdir@/multishema*
+\! rm -rf @abs_srcdir@/musicmultischema*
+\! rm -rf @abs_srcdir@/tbs_user_default_01
+\! rm -rf @abs_srcdir@/p
+\! rm -rf @abs_srcdir@/d
+\! rm -rf @abs_srcdir@/c
+\! rm -rf @abs_srcdir@/t
+ERROR:  syntax error at or near "gsql"
+LINE 1: gsql
+        ^

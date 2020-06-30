@@ -1,0 +1,767 @@
+create schema package_schema;
+set current_schema= package_schema;
+--test package function defination
+create or replace function get_sal(NAME VARCHAR2) RETURN NUMBER package
+IS
+  BEGIN
+    RETURN 1;
+  END;
+  /
+create or replace function get_sal(NAME int) RETURN NUMBER package
+IS
+  BEGIN
+    RETURN 1;
+  END;
+  /
+select proname, propackage from pg_proc where proname='get_sal';
+ proname | propackage 
+---------+------------
+ get_sal | t
+ get_sal | t
+(2 rows)
+
+create or replace function test_package_function(col int, col2  out int)
+returns integer package as $$
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+$$ language plpgsql;
+select proname, propackage from pg_proc where proname='test_package_function';
+        proname        | propackage 
+-----------------------+------------
+ test_package_function | t
+(1 row)
+
+--test function overload
+create or replace function package_func_overload(col int, col2  int)
+return integer package
+as
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+/
+create or replace function package_func_overload(col int, col2 smallint)
+return integer package
+as
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+/
+create or replace function package_func_overload(col int, col2  bigint)
+return integer package
+as
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+/
+--exception case
+create or replace function package_func_overload(col int, col2 out int)
+return integer  package
+as
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+/
+ERROR:  Package function does not support function overload which has the same type argument.
+create or replace procedure package_func_overload(col int, col2 out varchar)
+package
+as
+declare
+    col_type text;
+begin
+     col2 := '122';
+end;
+/
+select proname, propackage from pg_proc where proname='package_func_overload';
+        proname        | propackage 
+-----------------------+------------
+ package_func_overload | t
+ package_func_overload | t
+ package_func_overload | t
+ package_func_overload | t
+(4 rows)
+
+DECLARE
+	resut  int;
+	para1  int = 1;
+	para2  smallint = 0;
+	para3  bigint = 2;
+	para4  varchar;
+BEGIN
+   package_func_overload(1, 1);
+   package_func_overload(1, para1);
+   package_func_overload(1, para2);
+   package_func_overload(1, para3);
+   package_func_overload(1, para4);
+END;
+/
+DECLARE
+	resut  int;
+	para1  int = 1;
+	para2  smallint = 0;
+BEGIN
+   resut = package_func_overload(1, 1);
+   package_func_overload(1, para1);
+   package_func_overload(1, para2);
+END;
+/
+--test named args
+DECLARE
+	resut  int;
+	para1  int = 1;
+	para2  smallint = 0;
+BEGIN
+   package_func_overload(col => 1, col2 => para1);
+   package_func_overload(col2 => 1, col => para2);
+   package_func_overload(col2 => para2, col => para1);
+END;
+/
+call package_func_overload(1, 1);
+ package_func_overload 
+-----------------------
+                     0
+(1 row)
+
+call package_func_overload(1, '1');
+ col2 
+------
+ 122
+(1 row)
+
+select package_func_overload(1, 1);
+ package_func_overload 
+-----------------------
+                     0
+(1 row)
+
+--package function and none package function can not overload
+create or replace procedure package_func_overload_1(col int, col2  varchar)
+package
+as
+declare
+    col_type text;
+begin
+     col2 := '122';
+end;
+/
+ create or replace function package_func_overload_1(col int, col2  int)
+ returns integer  as $$
+ declare
+     col_type text;
+ begin
+      col := 122;
+  return 0;
+ end;
+ $$ language plpgsql;
+ERROR:  Do not allow package function overload not package function.
+ --test function replace
+ create or replace function package_func_overload_2(col int, col2  bigint, col3 out int)
+returns integer as $$
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+$$ language plpgsql;
+create or replace function package_func_overload_2(col int, col2  bigint)
+returns integer package as $$
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+$$ language plpgsql;
+ERROR:  Do not allow package function replace not package function.
+--test case for none overload function
+create or replace function package_func_overload_3(col int, col2 out int)
+return integer package
+as
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+/
+create or replace function package_func_overload_3(col int, col2 int)
+return integer package
+as
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+/
+ERROR:  Package function does not support function overload which has the same type argument.
+--none package function overload
+create or replace function package_func_overload_4(col int, col2 out int)
+returns integer as $$
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+$$ language plpgsql;
+create or replace function package_func_overload_4(col int, col2  int)
+returns integer as $$
+declare
+    col_type text;
+begin
+     col := 122;
+	 return 0;
+end;
+$$ language plpgsql;
+--test not enough parameter
+create or replace function test_para1(col int)
+returns integer package as $$
+declare
+begin
+     col := 122;
+	 return 0;
+end;
+$$ language plpgsql;
+create or replace function test_para1(col smallint)
+returns integer package as $$
+declare
+begin
+     col := 122;
+	 return 0;
+end;
+$$ language plpgsql;
+DECLARE
+	resut  int;
+	para1  int = 1;
+	para2  smallint = 0;
+BEGIN
+   test_para1();
+END;
+/
+ERROR:  function test_para1() does not exist
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 3
+--do not support VARIADIC parameter for package function
+CREATE OR REPLACE FUNCTION test_select(i IN INTEGER, VARIADIC arr INTEGER[])
+RETURN INTEGER package
+AS
+	temp INTEGER :=0;
+BEGIN
+	temp:= arr[i];
+	RETURN temp;
+END;
+/
+ERROR:  package function does not support variadic parameter.
+CREATE OR REPLACE FUNCTION read_file(arg1 integer, arg3 integer  default 1 , out arg2 text)
+RETURNS text package
+ AS $$
+DECLARE
+  t1 text;
+BEGIN
+  t1 := 'abc1';
+  return t1;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION read_file(arg1 integer, arg4 integer, arg3 integer  default 1 , out arg2 text)
+RETURNS text package
+AS $$
+DECLARE
+  t1 text;
+BEGIN
+  t1 := 'abc2';
+  return t1;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION read_file1(arg1 integer ) RETURNS void AS $$
+declare
+	t2 text;
+	t3 text;
+begin
+	t2 := read_file(10);
+	raise notice 'this value: %',t2;
+	return;
+end;
+$$ LANGUAGE plpgsql;
+call read_file1(1);
+NOTICE:  this value: abc1
+ read_file1 
+------------
+ 
+(1 row)
+
+--test inout parameter
+create or replace function test_proc_define
+(
+	in_1  	IN VARCHAR2,
+	in_2    VARCHAR2,
+	out_1  	OUT VARCHAR2,
+	inout_1  IN OUT VARCHAR
+)
+returns integer package as $$
+declare
+    col_type text;
+BEGIN
+	out_1 	:= in_1;
+	inout_1 := inout_1 || in_2;
+	return 0;
+END;
+$$ language plpgsql;
+create or replace function test_proc_define
+(
+   in_1  IN VARCHAR2,
+   in_2    VARCHAR2,
+   out_1  OUT VARCHAR2
+)
+returns integer package as $$
+declare
+    col_type text;
+BEGIN
+	out_1 := in_1;
+	return 1;
+END;
+$$ language plpgsql;
+ERROR:  Package function does not support function overload which has the same type argument.
+select  test_proc_define('hello', 'world', 'NO BIND');
+ test_proc_define 
+------------------
+                0
+(1 row)
+
+--test alter function
+alter function package_func_overload(int, smallint) package;
+ERROR:  Do not support package for ALTER FUNCTION.
+--test diffent namspace
+create schema package_nps;
+set current_schema = package_nps;
+CREATE OR REPLACE FUNCTION read_file(arg1 integer, arg3 integer  default 1 , out arg2 text)
+RETURNS text package
+ AS $$
+DECLARE
+  t1 text;
+BEGIN
+  t1 := 'abc1';
+  return t1;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION read_file(arg1 integer, arg4 integer, arg3 integer  default 1 , out arg2 text)
+RETURNS text package
+AS $$
+DECLARE
+  t1 text;
+BEGIN
+  t1 := 'abc2';
+  return t1;
+END;
+$$ LANGUAGE plpgsql;
+--get function defination
+select pg_get_functiondef(f.oid) from (select oid , pronargs from pg_proc where proname='read_file' and pronargs = 2) f;
+                                              pg_get_functiondef                                              
+--------------------------------------------------------------------------------------------------------------
+ (4,"CREATE OR REPLACE FUNCTION package_schema.read_file(arg1 integer, arg3 integer DEFAULT 1, OUT arg2 text)+
+  RETURNS text                                                                                               +
+  LANGUAGE plpgsql                                                                                           +
+  NOT FENCED NOT SHIPPABLE PACKAGE                                                                           +
+ AS $function$                                                                                               +
+ DECLARE                                                                                                     +
+   t1 text;                                                                                                  +
+ BEGIN                                                                                                       +
+   t1 := 'abc1';                                                                                             +
+   return t1;                                                                                                +
+ END;                                                                                                        +
+ $function$                                                                                                  +
+ ")
+ (4,"CREATE OR REPLACE FUNCTION package_nps.read_file(arg1 integer, arg3 integer DEFAULT 1, OUT arg2 text)   +
+  RETURNS text                                                                                               +
+  LANGUAGE plpgsql                                                                                           +
+  NOT FENCED NOT SHIPPABLE PACKAGE                                                                           +
+ AS $function$                                                                                               +
+ DECLARE                                                                                                     +
+   t1 text;                                                                                                  +
+ BEGIN                                                                                                       +
+   t1 := 'abc1';                                                                                             +
+   return t1;                                                                                                +
+ END;                                                                                                        +
+ $function$                                                                                                  +
+ ")
+(2 rows)
+
+--test call
+ call read_file(1,2,3,'ee');
+ arg2 
+------
+ abc2
+(1 row)
+
+ select read_file(1,2,3,'ee');
+ERROR:  function read_file(integer, integer, integer, unknown) does not exist
+LINE 1: select read_file(1,2,3,'ee');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: read_file
+ select read_file(1,2,3);
+ read_file 
+-----------
+ abc2
+(1 row)
+
+ call read_file(1,2,3);
+ arg2 
+------
+ abc2
+(1 row)
+
+ select read_file(1,2,'eer');
+ERROR:  invalid input syntax for integer: "eer"
+LINE 1: select read_file(1,2,'eer');
+                             ^
+CONTEXT:  referenced column: read_file
+ call  read_file(1,2,'eer');
+ arg2 
+------
+ abc1
+(1 row)
+
+ call  read_file(1,2);
+ERROR:  function read_file(integer, integer) is not unique
+HINT:  Could not choose a best candidate function. You might need to add explicit type casts.
+ call read_file(arg1=>1, arg3=>3, arg4=>2, arg2=>'dd');
+ arg2 
+------
+ abc2
+(1 row)
+
+DECLARE
+	resut  text;
+	ds     text;
+BEGIN
+   resut = read_file(arg1=>1, arg3=>3, arg4=>2, arg2=>ds);
+END;
+/
+ERROR:  function read_file(arg1 := integer, arg3 := integer, arg4 := integer, arg2 := text) does not exist
+LINE 1: SELECT read_file(arg1=>1, arg3=>3, arg4=>2, arg2=>ds)
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+QUERY:  SELECT read_file(arg1=>1, arg3=>3, arg4=>2, arg2=>ds)
+CONTEXT:  referenced column: read_file
+PL/pgSQL function inline_code_block line 4 at assignment
+drop function read_file(arg1 integer, arg3 integer  , out arg2 text) ;
+DECLARE
+	resut  text;
+	ds     text;
+BEGIN
+   resut = read_file(arg1=>1, arg3=>3, arg4=>2, arg2=>ds);
+END;
+/
+DECLARE
+	resut  text;
+	ds     text;
+BEGIN
+   read_file(arg1=>1, arg3=>3, arg4=>2, arg2=>ds);
+END;
+/
+ERROR:  subprogram body is not ended correctly at end of input
+LINE 8: 
+        ^
+create or replace function test_inout_para1(col inout int, col2 int)
+returns integer package as $$
+declare
+begin
+     col := 122;
+end;
+$$ language plpgsql;
+create or replace function test_inout_para1(col inout text, col2 int)
+returns text package as $$
+declare
+begin
+     col := 123;
+end;
+$$ language plpgsql;
+DECLARE
+	resut  int;
+	resut1  text;
+	para1  int = 1;
+	para2  smallint = 0;
+BEGIN
+    test_inout_para1(resut,2);
+    test_inout_para1(resut1,2);
+END;
+/
+CREATE OR REPLACE PROCEDURE func_inner()
+package
+as
+begin
+end;
+/
+CREATE OR REPLACE PROCEDURE func_inner(id OUT NUMERIC, sex IN CHAR default 'f', name OUT varchar2, age IN INTEGER default 20)
+package
+AS
+	temp_age INTEGER := 0;
+	temp_sex INTEGER := 2;
+	temp_num INTEGER := 0;
+	name_dafault1 varchar2(100) := 'chao';
+	name_dafault2 varchar2(100) := 'dfm';
+	id_dafault1 NUMERIC := 1;
+	id_dafault2 NUMERIC := 2;
+BEGIN
+	temp_age :=  age;
+	id := id_dafault1;
+	IF temp_age > 40 THEN
+		id := id_dafault2;
+	END IF;
+	IF sex <> 'f' THEN
+		temp_sex := 1;
+	END IF;
+	temp_num := temp_sex;
+	IF temp_num > 0 THEN
+		name := name_dafault1;
+	END IF;
+	IF temp_num > 1 THEN
+		name := name_dafault2;
+	END IF;
+END;
+/
+CALL func_inner(id, age=>80,name=>'dfm');
+ERROR:  column "id" does not exist
+LINE 1: CALL func_inner(id, age=>80,name=>'dfm');
+                        ^
+CALL func_inner(id, sex=>'f',age=>40);
+ERROR:  column "id" does not exist
+LINE 1: CALL func_inner(id, sex=>'f',age=>40);
+                        ^
+CREATE OR REPLACE PROCEDURE func_outter1(sex IN CHAR default 'f',age IN INTEGER default 20)
+AS
+	temp_id NUMERIC;
+	temp_name varchar2(100);
+	temp_sex char;
+	temp_age NUMERIC;
+BEGIN
+	temp_sex := sex;
+	temp_age := age;
+	func_inner(temp_id,temp_sex,name=>temp_name,age=>temp_age);
+END;
+/
+CALL func_outter1();
+ func_outter1 
+--------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE func_outter3(sex IN CHAR default 'f',age IN INTEGER default 20)
+AS
+	temp_id NUMERIC;
+	temp_name varchar2(100);
+	temp_sex char;
+	temp_age NUMERIC;
+BEGIN
+	temp_sex := sex;
+	temp_age := age;
+	func_inner(temp_id,name=>temp_name);
+END;
+/
+CALL func_outter3();
+ func_outter3 
+--------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE func_outter4(sex IN CHAR default 'f',age IN INTEGER default 20)
+AS
+	temp_id NUMERIC;
+	temp_name varchar2(100);
+	temp_sex char;
+	temp_age NUMERIC;
+BEGIN
+	temp_sex := sex;
+	temp_age := age;
+	func_inner(temp_id,temp_sex,name=>temp_name);
+END;
+/
+CALL func_outter4();
+ func_outter4 
+--------------
+ 
+(1 row)
+
+CALL func_outter4(age=>20);
+ func_outter4 
+--------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE func_outter5(sex IN CHAR default 'f',age IN INTEGER default 20)
+AS
+	temp_id NUMERIC;
+	temp_name varchar2(100);
+	temp_sex char;
+	temp_age NUMERIC;
+BEGIN
+	temp_sex := sex;
+	temp_age := age;
+	func_inner(temp_id,age=>temp_age,name=>temp_name);
+END;
+/
+CALL func_outter5();
+ func_outter5 
+--------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE func_outter6(sex IN CHAR default 'f',age IN INTEGER default 20)
+AS
+	temp_id NUMERIC;
+	temp_name varchar2(100);
+	temp_sex char;
+	temp_age NUMERIC;
+BEGIN
+	temp_sex := sex;
+	temp_age := age;
+	func_inner(sex=>temp_sex,id=>temp_id,age=>temp_age,name=>temp_name);
+END;
+/
+CALL func_outter6();
+ func_outter6 
+--------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE func_outter7(sex IN CHAR default 'f',age IN INTEGER default 20)
+AS
+	temp_id NUMERIC;
+	temp_name varchar2(100);
+	temp_sex char;
+	temp_age NUMERIC;
+BEGIN
+	temp_sex := sex;
+	temp_age := age;
+	func_inner(temp_id,temp_sex,temp_name,temp_age);
+END;
+/
+CALL func_outter7();
+ func_outter7 
+--------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE test_default_out()
+package
+as
+begin
+end;
+/
+CREATE OR REPLACE PROCEDURE test_default_out( i in integer, j out integer, k out integer, m in integer default 1, n in integer default 1, o out integer)
+package
+AS
+	BEGIN
+		j:=i;
+		k := j + i;
+		o := i + j + k + m + n;
+		RETURN;
+    END;
+/
+declare
+a int := 1;
+b int := 1;
+c int := 1;
+begin
+	test_default_out(1, k=>a, n=>1, j=>b, o=>c);
+end;
+/
+--error test
+declare
+a int := 1;
+b int := 1;
+c int := 1;
+begin
+	test_default_out(1, k=>a, n=>1, j=>b, j=>c);
+end;
+/
+ERROR:  argument name "j" used more than once
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 4
+declare
+a int := 1;
+b int := 1;
+c int := 1;
+begin
+	test_default_out(1, k=>a, n=>1, j=>1, o=>c);
+end;
+/
+ERROR:  Named argument "j" can not be a const
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 6
+create or replace function test_para2(col in text, col2 out int)
+returns text package as $$
+declare
+begin
+     col2 := 123;
+end;
+$$ language plpgsql;
+create or replace function test_para2(col in text, col2  varchar)
+returns text package as $$
+declare
+begin
+     col2 := 123;
+end;
+$$ language plpgsql;
+declare
+	varcl clob;
+	buffer int;
+	tr text;
+begin
+	test_para2(1, buffer);
+	raise info 'buffer: %', buffer;
+end;
+/
+INFO:  buffer: 123
+drop schema package_schema cascade;
+NOTICE:  drop cascades to 18 other objects
+DETAIL:  drop cascades to function package_schema.get_sal(character varying)
+drop cascades to function package_schema.get_sal(integer)
+drop cascades to function package_schema.test_package_function(integer)
+drop cascades to function package_schema.package_func_overload(integer,integer)
+drop cascades to function package_schema.package_func_overload(integer,smallint)
+drop cascades to function package_schema.package_func_overload(integer,bigint)
+drop cascades to function package_schema.package_func_overload(integer)
+drop cascades to function package_schema.package_func_overload_1(integer,character varying)
+drop cascades to function package_schema.package_func_overload_2(integer,bigint)
+drop cascades to function package_schema.package_func_overload_3(integer)
+drop cascades to function package_schema.package_func_overload_4(integer)
+drop cascades to function package_schema.package_func_overload_4(integer,integer)
+drop cascades to function package_schema.test_para1(integer)
+drop cascades to function package_schema.test_para1(smallint)
+drop cascades to function package_schema.read_file(integer,integer)
+drop cascades to function package_schema.read_file(integer,integer,integer)
+drop cascades to function package_schema.read_file1(integer)
+drop cascades to function package_schema.test_proc_define(character varying,character varying,character varying)
+drop schema package_nps cascade;
+NOTICE:  drop cascades to 15 other objects
+DETAIL:  drop cascades to function read_file(integer,integer,integer)
+drop cascades to function test_inout_para1(integer,integer)
+drop cascades to function test_inout_para1(text,integer)
+drop cascades to function func_inner()
+drop cascades to function func_inner(character,integer)
+drop cascades to function func_outter1(character,integer)
+drop cascades to function func_outter3(character,integer)
+drop cascades to function func_outter4(character,integer)
+drop cascades to function func_outter5(character,integer)
+drop cascades to function func_outter6(character,integer)
+drop cascades to function func_outter7(character,integer)
+drop cascades to function test_default_out()
+drop cascades to function test_default_out(integer,integer,integer)
+drop cascades to function test_para2(text)
+drop cascades to function test_para2(text,character varying)

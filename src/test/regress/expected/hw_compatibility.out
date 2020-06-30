@@ -1,0 +1,685 @@
+--test datatype date
+create database td_db dbcompatibility 'C';
+select datname, datcompatibility from pg_database where datname = 'td_db';
+ datname | datcompatibility 
+---------+------------------
+ td_db   | C
+(1 row)
+
+\c td_db
+show sql_compatibility;
+ sql_compatibility 
+-------------------
+ C
+(1 row)
+
+set datestyle = 'iso, ymd';
+create table date_t1(a date);
+insert into date_t1 values('19851012'), ('19861012'), ('20121213'),('20121231');
+\d date_t1
+  Table "public.date_t1"
+ Column | Type | Modifiers 
+--------+------+-----------
+ a      | date | 
+
+select a from date_t1 order by 1;
+     a      
+------------
+ 1985-10-12
+ 1986-10-12
+ 2012-12-13
+ 2012-12-31
+(4 rows)
+
+select cast(a as char(10)) as result from date_t1 order by 1;
+   result   
+------------
+ 1985-10-12
+ 1986-10-12
+ 2012-12-13
+ 2012-12-31
+(4 rows)
+
+select cast(a as varchar(10)) as result from date_t1 order by 1;
+   result   
+------------
+ 1985-10-12
+ 1986-10-12
+ 2012-12-13
+ 2012-12-31
+(4 rows)
+
+select cast(a as text) as result from date_t1 order by 1;
+   result   
+------------
+ 1985-10-12
+ 1986-10-12
+ 2012-12-13
+ 2012-12-31
+(4 rows)
+
+create table date_t2(a int, b varchar(10), c char(10), d text);
+insert into date_t2 values (1, '20121216', '20151216', '19851216');
+select * from date_t2;
+ a |    b     |     c      |    d     
+---+----------+------------+----------
+ 1 | 20121216 | 20151216   | 19851216
+(1 row)
+
+select a, cast(b as date), cast(c as date), cast(d as date) from date_t2;
+ a |     b      |     c      |     d      
+---+------------+------------+------------
+ 1 | 2012-12-16 | 2015-12-16 | 1985-12-16
+(1 row)
+
+drop table date_t1;
+drop table date_t2;
+reset datestyle;
+--test function return empty string
+select substr('123',4,1) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select substr('123',4,1) = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr('123',4) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select substr('123',4) = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr('123'::bytea,4,1) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select substr('123'::bytea,4,1) = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr('123'::bytea,4) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select substr('123'::bytea,4) = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+select substrb('123',4,1) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select substrb('123',4,1) = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+select substrb('123',4) is null;
+ ?column? 
+----------
+ f
+(1 row)
+
+select substrb('123',4) = '';
+ ?column? 
+----------
+ t
+(1 row)
+
+-- null and whitespace convert to 0
+CREATE TABLE INT_TBL(id int4, f1 int2, f2 int4, f3 int8, f4 numeric(12,4), f5 char, f6 varchar(10), f7 text);
+INSERT INTO INT_TBL(id, f1, f2, f3, f4, f5, f6, f7) VALUES (0, 0, 0, 0, 0, '  ', '    ', '    ');
+INSERT INTO INT_TBL(id, f1, f2, f3, f4, f5, f6, f7) VALUES (1, 0, 0, 0, 0, '', '', '');
+SELECT * FROM INT_TBL order by 1;
+ id | f1 | f2 | f3 |   f4   | f5 |  f6  |  f7  
+----+----+----+----+--------+----+------+------
+  0 |  0 |  0 |  0 | 0.0000 |    |      |     
+  1 |  0 |  0 |  0 | 0.0000 |    |      | 
+(2 rows)
+
+SELECT * FROM INT_TBL WHERE f1=f5 AND f1=f6 AND f1=f7 order by 1;
+ id | f1 | f2 | f3 |   f4   | f5 |  f6  |  f7  
+----+----+----+----+--------+----+------+------
+  0 |  0 |  0 |  0 | 0.0000 |    |      |     
+  1 |  0 |  0 |  0 | 0.0000 |    |      | 
+(2 rows)
+
+SELECT * FROM INT_TBL WHERE f2=f6 AND f2=f5 AND f2=f7 order by 1;
+ id | f1 | f2 | f3 |   f4   | f5 |  f6  |  f7  
+----+----+----+----+--------+----+------+------
+  0 |  0 |  0 |  0 | 0.0000 |    |      |     
+  1 |  0 |  0 |  0 | 0.0000 |    |      | 
+(2 rows)
+
+SELECT * FROM INT_TBL WHERE f3=f6 AND f3=f5 AND f3=f7 order by 1;
+ id | f1 | f2 | f3 |   f4   | f5 |  f6  |  f7  
+----+----+----+----+--------+----+------+------
+  0 |  0 |  0 |  0 | 0.0000 |    |      |     
+  1 |  0 |  0 |  0 | 0.0000 |    |      | 
+(2 rows)
+
+SELECT * FROM INT_TBL WHERE f4=f6 AND f4=f5 AND f4=f7 order by 1;
+ id | f1 | f2 | f3 |   f4   | f5 |  f6  |  f7  
+----+----+----+----+--------+----+------+------
+  0 |  0 |  0 |  0 | 0.0000 |    |      |     
+  1 |  0 |  0 |  0 | 0.0000 |    |      | 
+(2 rows)
+
+CREATE TABLE TBL_EMPTY_STR(
+A INT,
+B VARCHAR,
+C NVARCHAR2,
+D TEXT,
+E TSVECTOR,
+F BPCHAR,
+G RAW,
+H OIDVECTOR,
+I INT2VECTOR,
+J BYTEA,
+K CLOB,
+L BLOB,
+M NAME,
+N "char"
+);
+--copy empty string
+COPY TBL_EMPTY_STR FROM STDIN DELIMITER '|' NULL 'NULL';
+SELECT * FROM TBL_EMPTY_STR where b = '';
+ a | b | c | d | e | f | g | h | i | j  | k | l | m | n 
+---+---+---+---+---+---+---+---+---+----+---+---+---+---
+   |   |   |   |   |   |   |   |   | \x |   |   |   | 
+   |   |   |   |   |   |   |   |   | \x |   |   |   | 
+(2 rows)
+
+DROP TABLE TBL_EMPTY_STR;
+-- testcase: empty string
+CREATE TABLE alter_addcols_89 ( a int , b varchar(10) not null) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_89 VALUES(1, '');
+ALTER TABLE alter_addcols_89 ALTER COLUMN b SET DATA TYPE varchar(5);
+SELECT DISTINCT * FROM alter_addcols_89 ORDER BY a;
+ a | b 
+---+---
+ 1 | 
+(1 row)
+
+DROP TABLE alter_addcols_89;
+--function to_date return date type
+create table test_to_date as select to_date('2012-12-16 10:11:15') as col;
+\d test_to_date;
+Table "public.test_to_date"
+ Column | Type | Modifiers 
+--------+------+-----------
+ col    | date | 
+
+drop table test_to_date;
+create table test_to_date as select to_date('05 Dec 2000', 'DD Mon YYYY') as col;
+\d test_to_date;
+Table "public.test_to_date"
+ Column | Type | Modifiers 
+--------+------+-----------
+ col    | date | 
+
+drop table test_to_date;
+--function to_date/to_timestamp with multi blank space
+select to_Date('2015 01   01','yyyy mm   dd');
+  to_date   
+------------
+ 01-01-2015
+(1 row)
+
+select to_Date('2015   01 01','yyyy   mm   dd');
+  to_date   
+------------
+ 01-01-2015
+(1 row)
+
+select to_timestamp('23  01  01','hh24  mi  ss');
+        to_timestamp         
+-----------------------------
+ Sat Jan 01 23:01:01 0001 BC
+(1 row)
+
+select to_timestamp('20150101  232323','yyyymmdd  hh24miss');
+       to_timestamp       
+--------------------------
+ Thu Jan 01 23:23:23 2015
+(1 row)
+
+select to_timestamp('20150101 232323','yyyymmdd          hh24miss');
+       to_timestamp       
+--------------------------
+ Thu Jan 01 23:23:23 2015
+(1 row)
+
+create table tbl1(a int, b float8, c numeric(10, 0), d varchar(10), e char(5), f text, g date, h timestamp, i interval);
+explain (verbose on, costs off) 
+select coalesce(a, b), coalesce(a, c), coalesce(a, d), coalesce(c, d), coalesce(c, f) from tbl1;
+                                                                                QUERY PLAN                                                                                 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Seq Scan on public.tbl1
+   Output: COALESCE((a)::double precision, b), COALESCE((a)::numeric, c), COALESCE((a)::character varying, d), COALESCE((c)::character varying, d), COALESCE((c)::text, f)
+(2 rows)
+
+explain (verbose on, costs off) select coalesce(a, c) from tbl1;
+             QUERY PLAN              
+-------------------------------------
+ Seq Scan on public.tbl1
+   Output: COALESCE((a)::numeric, c)
+(2 rows)
+
+explain (verbose on, costs off) select coalesce(a, b, c, d, e, f) from tbl1;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Seq Scan on public.tbl1
+   Output: COALESCE((a)::text, (b)::text, (c)::text, (d)::text, (e)::text, f)
+(2 rows)
+
+explain (verbose on, costs off) select coalesce(a, '123') from tbl1;
+                 QUERY PLAN                 
+--------------------------------------------
+ Seq Scan on public.tbl1
+   Output: COALESCE((a)::text, '123'::text)
+(2 rows)
+
+explain (verbose on, costs off) select coalesce(c, '123') from tbl1;
+                 QUERY PLAN                 
+--------------------------------------------
+ Seq Scan on public.tbl1
+   Output: COALESCE((c)::text, '123'::text)
+(2 rows)
+
+explain (verbose on, costs off) select coalesce(d, '123') from tbl1;
+                 QUERY PLAN                 
+--------------------------------------------
+ Seq Scan on public.tbl1
+   Output: COALESCE((d)::text, '123'::text)
+(2 rows)
+
+explain (verbose on, costs off) select coalesce(e, '123') from tbl1;
+                 QUERY PLAN                 
+--------------------------------------------
+ Seq Scan on public.tbl1
+   Output: COALESCE((e)::text, '123'::text)
+(2 rows)
+
+explain (verbose on, costs off) select coalesce('abc', '123') from tbl1;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.tbl1
+   Output: 'abc'::text
+(2 rows)
+
+explain (verbose on, costs off) select case when 1 = 1 then a else b end from tbl1;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.tbl1
+   Output: a
+(2 rows)
+
+explain (verbose on, costs off) select case when 1 = 1 then a else c end from tbl1;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.tbl1
+   Output: a
+(2 rows)
+
+explain (verbose on, costs off) select case when 1 = 1 then a else d end from tbl1;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.tbl1
+   Output: a
+(2 rows)
+
+explain (verbose on, costs off) select case when 1 = 1 then c else f end from tbl1;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.tbl1
+   Output: c
+(2 rows)
+
+--ERROR
+explain (verbose on, costs off) select coalesce(g, '123') from tbl1;
+ERROR:  COALESCE types date and text cannot be matched
+LINE 1: ...xplain (verbose on, costs off) select coalesce(g, '123') fro...
+                                                             ^
+CONTEXT:  referenced column: coalesce
+explain (verbose on, costs off) select coalesce(h, '123') from tbl1;
+ERROR:  COALESCE types timestamp without time zone and text cannot be matched
+LINE 1: ...xplain (verbose on, costs off) select coalesce(h, '123') fro...
+                                                             ^
+CONTEXT:  referenced column: coalesce
+explain (verbose on, costs off) select coalesce(i, '123') from tbl1;
+ERROR:  COALESCE types interval and text cannot be matched
+LINE 1: ...xplain (verbose on, costs off) select coalesce(i, '123') fro...
+                                                             ^
+CONTEXT:  referenced column: coalesce
+explain (verbose on, costs off) select coalesce(a, g) from tbl1;
+ERROR:  COALESCE types integer and date cannot be matched
+LINE 1: ...xplain (verbose on, costs off) select coalesce(a, g) from tb...
+                                                             ^
+CONTEXT:  referenced column: coalesce
+explain (verbose on, costs off) select coalesce(a, h) from tbl1;
+ERROR:  COALESCE types integer and timestamp without time zone cannot be matched
+LINE 1: ...xplain (verbose on, costs off) select coalesce(a, h) from tb...
+                                                             ^
+CONTEXT:  referenced column: coalesce
+explain (verbose on, costs off) select coalesce(a, i) from tbl1;
+ERROR:  COALESCE types integer and interval cannot be matched
+LINE 1: ...xplain (verbose on, costs off) select coalesce(a, i) from tb...
+                                                             ^
+CONTEXT:  referenced column: coalesce
+explain (verbose on, costs off) select coalesce(d, g) from tbl1;
+ERROR:  COALESCE types character varying and date cannot be matched
+LINE 1: ...xplain (verbose on, costs off) select coalesce(d, g) from tb...
+                                                             ^
+CONTEXT:  referenced column: coalesce
+explain (verbose on, costs off) select coalesce(c, h) from tbl1;
+ERROR:  COALESCE types numeric and timestamp without time zone cannot be matched
+LINE 1: ...xplain (verbose on, costs off) select coalesce(c, h) from tb...
+                                                             ^
+CONTEXT:  referenced column: coalesce
+explain (verbose on, costs off) select case when 1 = 1 then coalesce(c, d) else coalesce(a, f) end from tbl1;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Seq Scan on public.tbl1
+   Output: COALESCE((c)::character varying, d)
+(2 rows)
+
+drop table tbl1;
+create table cast_impl_date_0011(val int ,t_tinyint tinyint, s_small SMALLINT,b_big bigint,f_float4  float4, f_float8 float8,
+n_numeric numeric,c_char  char(20) ,c_bpchar bpchar(20),c_varchar varchar(10),c_nvarchar nvarchar2,t_text text);
+insert into cast_impl_date_0011 values(1,2,12,89,21.2,0.12,0.22,'gauss','ap','hahh','xixi','dang');
+analyze cast_impl_date_0011;
+explain (verbose on, costs off)select coalesce(t_tinyint, c_char) from cast_impl_date_0011;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on public.cast_impl_date_0011
+   Output: COALESCE((t_tinyint)::bpchar, c_char)
+(2 rows)
+
+select coalesce(t_tinyint,c_char) from cast_impl_date_0011;
+ coalesce 
+----------
+ 2
+(1 row)
+
+explain (verbose on, costs off)select coalesce(t_tinyint, c_varchar) from cast_impl_date_0011;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Seq Scan on public.cast_impl_date_0011
+   Output: COALESCE((t_tinyint)::character varying, c_varchar)
+(2 rows)
+
+select coalesce(t_tinyint,c_varchar) from cast_impl_date_0011;
+ coalesce 
+----------
+ 2
+(1 row)
+
+explain(verbose on, costs off)select coalesce(t_tinyint, c_nvarchar) from cast_impl_date_0011;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Seq Scan on public.cast_impl_date_0011
+   Output: COALESCE((t_tinyint)::nvarchar2, c_nvarchar)
+(2 rows)
+
+select coalesce(t_tinyint,c_nvarchar) from cast_impl_date_0011;
+ coalesce 
+----------
+ 2
+(1 row)
+
+explain(verbose on, costs off) select coalesce(s_small, c_char) from cast_impl_date_0011;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Seq Scan on public.cast_impl_date_0011
+   Output: COALESCE((s_small)::bpchar, c_char)
+(2 rows)
+
+select coalesce(s_small,c_char) from cast_impl_date_0011;
+ coalesce 
+----------
+ 12
+(1 row)
+
+explain(verbose on, costs off)select coalesce(b_big, c_char) from cast_impl_date_0011;
+                 QUERY PLAN                  
+---------------------------------------------
+ Seq Scan on public.cast_impl_date_0011
+   Output: COALESCE((b_big)::bpchar, c_char)
+(2 rows)
+
+select coalesce(b_big,c_char) from cast_impl_date_0011;
+ coalesce 
+----------
+ 89
+(1 row)
+
+explain(verbose on, costs off)select coalesce(f_float4, c_char) from cast_impl_date_0011;
+                   QUERY PLAN                   
+------------------------------------------------
+ Seq Scan on public.cast_impl_date_0011
+   Output: COALESCE((f_float4)::bpchar, c_char)
+(2 rows)
+
+select coalesce(f_float4,c_char) from cast_impl_date_0011;
+ coalesce 
+----------
+ 21.2
+(1 row)
+
+explain(verbose on, costs off) select coalesce(f_float8, c_char) from cast_impl_date_0011;
+                   QUERY PLAN                   
+------------------------------------------------
+ Seq Scan on public.cast_impl_date_0011
+   Output: COALESCE((f_float8)::bpchar, c_char)
+(2 rows)
+
+select coalesce(f_float8,c_char) from cast_impl_date_0011;
+ coalesce 
+----------
+ .12
+(1 row)
+
+explain(verbose on, costs off)select coalesce(n_numeric, c_char) from cast_impl_date_0011;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Seq Scan on public.cast_impl_date_0011
+   Output: COALESCE((n_numeric)::bpchar, c_char)
+(2 rows)
+
+select coalesce(n_numeric,c_char) from cast_impl_date_0011;
+ coalesce 
+----------
+ .22
+(1 row)
+
+create table date_timestamp1(a date, b timestamp, c int);
+create table date_timestamp2(a timestamp, b date, c int);
+explain (verbose on, costs off)select t1.a from date_timestamp1 as t1, date_timestamp2 as t2 where t1.a = t2.a;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Merge Join
+   Output: t1.a
+   Merge Cond: (t1.a = t2.a)
+   ->  Sort
+         Output: t1.a
+         Sort Key: t1.a
+         ->  Seq Scan on public.date_timestamp1 t1
+               Output: t1.a
+   ->  Sort
+         Output: t2.a
+         Sort Key: t2.a
+         ->  Seq Scan on public.date_timestamp2 t2
+               Output: t2.a
+(13 rows)
+
+explain (verbose on, costs off)select t1.a from date_timestamp1 as t1, date_timestamp2 as t2 where t1.b = t2.b;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Merge Join
+   Output: t1.a
+   Merge Cond: (t1.b = t2.b)
+   ->  Sort
+         Output: t1.a, t1.b
+         Sort Key: t1.b
+         ->  Seq Scan on public.date_timestamp1 t1
+               Output: t1.a, t1.b
+   ->  Sort
+         Output: t2.b
+         Sort Key: t2.b
+         ->  Seq Scan on public.date_timestamp2 t2
+               Output: t2.b
+(13 rows)
+
+explain (verbose on, costs off)select t1.a from date_timestamp1 as t1, date_timestamp2 as t2 where t1.a = t2.a and t1.b = t2.b and t1.c = t2.c;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Merge Join
+   Output: t1.a
+   Merge Cond: ((t1.a = t2.a) AND (t1.b = t2.b) AND (t1.c = t2.c))
+   ->  Sort
+         Output: t1.a, t1.b, t1.c
+         Sort Key: t1.a, t1.b, t1.c
+         ->  Seq Scan on public.date_timestamp1 t1
+               Output: t1.a, t1.b, t1.c
+   ->  Sort
+         Output: t2.a, t2.b, t2.c
+         Sort Key: t2.a, t2.b, t2.c
+         ->  Seq Scan on public.date_timestamp2 t2
+               Output: t2.a, t2.b, t2.c
+(13 rows)
+
+drop table date_timestamp1;
+drop table date_timestamp2;
+create database test dbcompatibility = '123';
+ERROR:  Compatibility args 123 is invalid
+
+/*SQL_COMPATIBILITY can not be seted*/
+SET SQL_COMPATIBILITY = C;
+WARNING:  parameter "sql_compatibility" cannot be changed. Compatibility can only be specified when creating database
+\c regression
+--add testcase for to_date compatibility test.
+select to_Date('2016-01-01 24:00:00');
+         to_date          
+--------------------------
+ Sat Jan 02 00:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 24:00:00','yyyy-mm-dd hh24:mi:ss');
+         to_date          
+--------------------------
+ Sat Jan 02 00:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 00:60:00');
+         to_date          
+--------------------------
+ Fri Jan 01 01:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 00:60:00','yyyy-mm-dd hh24:mi:ss');
+         to_date          
+--------------------------
+ Fri Jan 01 01:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 00:00:60');
+         to_date          
+--------------------------
+ Fri Jan 01 00:01:00 2016
+(1 row)
+
+select to_Date('2016-01-01 00:00:60','yyyy-mm-dd hh24:mi:ss');
+         to_date          
+--------------------------
+ Fri Jan 01 00:01:00 2016
+(1 row)
+
+select to_Date('2016-01-01 00:59:60');
+         to_date          
+--------------------------
+ Fri Jan 01 01:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 00:59:60','yyyy-mm-dd hh24:mi:ss');
+         to_date          
+--------------------------
+ Fri Jan 01 01:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 24:00:60');
+         to_date          
+--------------------------
+ Sat Jan 02 00:01:00 2016
+(1 row)
+
+select to_Date('2016-01-01 24:00:60','yyyy-mm-dd hh24:mi:ss');
+         to_date          
+--------------------------
+ Sat Jan 02 00:01:00 2016
+(1 row)
+
+select to_Date('2016-01-01 24:60:00');
+         to_date          
+--------------------------
+ Sat Jan 02 01:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 24:60:00','yyyy-mm-dd hh24:mi:ss');
+         to_date          
+--------------------------
+ Sat Jan 02 01:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 24:59:60');
+         to_date          
+--------------------------
+ Sat Jan 02 01:00:00 2016
+(1 row)
+
+select to_Date('2016-01-01 24:59:60','yyyy-mm-dd hh24:mi:ss');
+         to_date          
+--------------------------
+ Sat Jan 02 01:00:00 2016
+(1 row)
+
+create database icbc_td_db_x template template0 encoding 'SQL_ASCII' dbcompatibility 'C';
+\c icbc_td_db_x
+create table a (c1 int, c2 text);
+insert into a values (55, 'gauss'), (120, 'gauss'), (150, 'icbc');
+select max(case when c2='gauss' then c1 end) from a;
+ max 
+-----
+ 120
+(1 row)
+
+select max((case when c2='gauss' then c1 end)::int) from a;
+ max 
+-----
+ 120
+(1 row)
+
+\c regression
+drop database icbc_td_db_x;

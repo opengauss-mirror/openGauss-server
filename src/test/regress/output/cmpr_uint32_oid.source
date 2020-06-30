@@ -1,0 +1,110 @@
+--
+-- case 1: unsigned integer type
+--
+CREATE TABLE cmpr_uint32_raw (
+	RS_ID oid,
+	R0_ID oid NOT NULL,
+	R1_ID oid NOT NULL,
+	R2_ID oid NOT NULL,
+	R3_ID oid NOT NULL,
+	R4_ID oid NOT NULL,
+	R5_ID oid NOT NULL,
+	R6_ID oid NOT NULL,
+	R7_ID oid NOT NULL,
+	R8_ID oid NOT NULL,
+	R9_ID oid NOT NULL
+);
+COPY cmpr_uint32_raw FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+CREATE TABLE cmpr_uint32_auto (
+	RS_ID oid,
+	R0_ID oid NOT NULL,
+	R1_ID oid NOT NULL,
+	R2_ID oid NOT NULL,
+	R3_ID oid NOT NULL,
+	R4_ID oid NOT NULL,
+	R5_ID oid NOT NULL,
+	R6_ID oid NOT NULL,
+	R7_ID oid NOT NULL,
+	R8_ID oid NOT NULL,
+	R9_ID oid NOT NULL
+)  COMPRESS;
+COPY cmpr_uint32_auto FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_uint32_raw) - (SELECT COUNT(*) FROM cmpr_uint32_auto);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_uint32_raw) MINUS ALL (SELECT * FROM cmpr_uint32_auto);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_uint32_auto) MINUS ALL (SELECT * FROM cmpr_uint32_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_uint32_auto;
+CREATE TABLE cmpr_uint32_dict (
+	RS_ID oid dictionary,
+	R0_ID oid dictionary NOT NULL,
+	R1_ID oid dictionary NOT NULL,
+	R2_ID oid dictionary NOT NULL,
+	R3_ID oid dictionary NOT NULL,
+	R4_ID oid dictionary NOT NULL,
+	R5_ID oid dictionary NOT NULL,
+	R6_ID oid dictionary NOT NULL,
+	R7_ID oid dictionary NOT NULL,
+	R8_ID oid dictionary NOT NULL,
+	R9_ID oid dictionary NOT NULL
+)  COMPRESS;
+COPY cmpr_uint32_dict FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_uint32_raw) - (SELECT COUNT(*) FROM cmpr_uint32_dict);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_uint32_raw) MINUS ALL (SELECT * FROM cmpr_uint32_dict);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_uint32_dict) MINUS ALL (SELECT * FROM cmpr_uint32_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_uint32_dict;
+CREATE TABLE cmpr_uint32_delta (
+	RS_ID oid delta,
+	R0_ID oid delta NOT NULL,
+	R1_ID oid delta NOT NULL,
+	R2_ID oid delta NOT NULL,
+	R3_ID oid delta NOT NULL,
+	R4_ID oid delta NOT NULL,
+	R5_ID oid delta NOT NULL,
+	R6_ID oid delta NOT NULL,
+	R7_ID oid delta NOT NULL,
+	R8_ID oid delta NOT NULL,
+	R9_ID oid delta NOT NULL
+)  COMPRESS;
+COPY cmpr_uint32_delta FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_int_raw.data';
+SELECT (SELECT COUNT(*) FROM cmpr_uint32_raw) - (SELECT COUNT(*) FROM cmpr_uint32_delta);
+ ?column? 
+----------
+        0
+(1 row)
+
+(SELECT * FROM cmpr_uint32_raw) MINUS ALL (SELECT * FROM cmpr_uint32_delta);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+(SELECT * FROM cmpr_uint32_delta) MINUS ALL (SELECT * FROM cmpr_uint32_raw);
+ rs_id | r0_id | r1_id | r2_id | r3_id | r4_id | r5_id | r6_id | r7_id | r8_id | r9_id 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------
+(0 rows)
+
+DROP TABLE cmpr_uint32_delta;

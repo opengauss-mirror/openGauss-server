@@ -1,0 +1,73 @@
+--
+-- RANDOM
+-- Test the random function
+--
+-- count the number of tuples originally, should be 1000
+SELECT count(*) FROM onek;
+ count 
+-------
+  1000
+(1 row)
+
+-- pick three random rows, they shouldn't match
+(SELECT unique1 AS random
+  FROM onek ORDER BY random() LIMIT 1)
+INTERSECT
+(SELECT unique1 AS random
+  FROM onek ORDER BY random() LIMIT 1)
+INTERSECT
+(SELECT unique1 AS random
+  FROM onek ORDER BY random() LIMIT 1);
+ random 
+--------
+(0 rows)
+
+-- count roughly 1/10 of the tuples
+SELECT count(*) AS random INTO RANDOM_TBL
+  FROM onek WHERE random() < 1.0/10;
+-- select again, the count should be different
+INSERT INTO RANDOM_TBL (random)
+  SELECT count(*)
+  FROM onek WHERE random() < 1.0/10;
+-- select again, the count should be different
+INSERT INTO RANDOM_TBL (random)
+  SELECT count(*)
+  FROM onek WHERE random() < 1.0/10;
+-- select again, the count should be different
+INSERT INTO RANDOM_TBL (random)
+  SELECT count(*)
+  FROM onek WHERE random() < 1.0/10;
+-- now test that they are different counts
+SELECT random, count(random) FROM RANDOM_TBL
+  GROUP BY random HAVING count(random) > 3;
+ random | count 
+--------+-------
+(0 rows)
+
+SELECT AVG(random) FROM RANDOM_TBL
+  HAVING AVG(random) NOT BETWEEN 80 AND 120;
+ avg 
+-----
+(0 rows)
+
+--disable random_function_shippable when inserting random value into a distribution column
+drop table if exists random_test;
+NOTICE:  table "random_test" does not exist, skipping
+create table random_test (a int, b int);
+explain (verbose on, costs off) insert into random_test values (1, random()*100);
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Insert on public.random_test
+   ->  Result
+         Output: 1, (random() * 100::double precision)
+(3 rows)
+
+explain (verbose on, costs off) insert into random_test values (random()*100, 1);
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Insert on public.random_test
+   ->  Result
+         Output: (random() * 100::double precision), 1
+(3 rows)
+
+drop table random_test;

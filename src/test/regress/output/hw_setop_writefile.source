@@ -1,0 +1,1186 @@
+create schema setop_writefile;
+set current_schema=setop_writefile;
+create table setop_hash_table_01( a int, b int ,c text) ;
+create table setop_hash_table_02( a int, b numeric ,c text) ;
+copy setop_hash_table_01 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hw_setop_writefile_data1.txt' delimiter as ' ';
+copy setop_hash_table_02 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hw_setop_writefile_data2.txt' delimiter as ' ';
+analyze setop_hash_table_01;
+analyze setop_hash_table_02;
+--test row table
+set work_mem=64;
+\o hw_setop_writefile.out
+explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+\o
+select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2 limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+set work_mem='128MB';
+\o hw_setop_writefile.out
+explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+\o
+select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+--test col table
+create table vec_setop_hash_table_01( a int, b int ,c text) with (orientation=column) ;
+create table vecsetop_hash_table_02( a int, b numeric ,c text) with (orientation=column) ;
+insert into vec_setop_hash_table_01 select * from setop_hash_table_01;
+insert into vecsetop_hash_table_02 select * from setop_hash_table_02;
+analyze vec_setop_hash_table_01;
+analyze vecsetop_hash_table_02;
+set work_mem=64;
+\o hw_setop_writefile.out
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+\o
+select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+set enable_compress_spill = false;
+select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+reset enable_compress_spill;
+set work_mem='128MB';
+\o hw_setop_writefile.out
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+\o
+\! rm hw_setop_writefile.out
+select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+  a  |   b   
+-----+-------
+   1 | 14384
+   5 | 12794
+   7 | 10387
+   8 |  5493
+  10 |  6422
+  11 |  7363
+  13 | 13691
+  14 |  5060
+  17 |  5541
+  18 |  8427
+  19 | 14173
+  21 | 10212
+  23 |  7568
+  25 | 10783
+  26 |  6531
+  27 |  7863
+  28 | 10124
+  30 |  8136
+  34 |  8059
+  37 |  6394
+  43 |  9422
+  44 |  9920
+  50 |  9371
+  51 | 11414
+  52 |  8527
+  54 | 13981
+  56 |  6874
+  57 | 11863
+  59 | 11997
+  61 |  7306
+  62 |  5926
+  65 |  5337
+  66 | 11506
+  68 |  6730
+  69 |  6314
+  70 | 10858
+  74 |  5546
+  79 |  9044
+  82 | 11809
+  84 | 12179
+  87 | 10404
+  88 |  7652
+  93 | 14677
+  95 | 12740
+  99 | 13095
+ 101 |  5796
+ 102 |  5571
+ 104 |  5379
+ 106 | 11602
+ 111 | 11653
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
+ a  |   b   
+----+-------
+  2 |  5887
+  3 |  7778
+  4 | 11916
+  6 | 13336
+  9 | 11650
+ 12 |  5028
+ 15 | 12764
+ 16 |  8927
+ 20 | 10737
+ 22 | 10369
+ 24 | 11430
+ 29 |  9068
+ 31 |  8930
+ 32 | 14803
+ 33 |  9023
+ 35 |  8070
+ 36 | 13168
+ 38 | 13457
+ 39 | 10012
+ 40 | 13043
+ 41 | 11230
+ 42 | 12374
+ 45 |  8785
+ 46 | 13538
+ 47 | 10199
+ 48 |  9325
+ 49 | 13316
+ 53 | 11092
+ 55 | 14957
+ 58 | 14171
+ 60 | 12282
+ 63 | 12085
+ 64 | 11328
+ 67 |  5847
+ 71 | 11125
+ 72 |  8896
+ 73 | 14583
+ 75 | 13815
+ 76 |  8368
+ 77 | 10435
+ 78 |  5365
+ 80 |  8751
+ 81 |  6088
+ 83 | 12277
+ 85 | 10789
+ 86 |  8585
+ 89 |  7755
+ 90 |  7400
+ 91 | 14933
+ 92 | 10061
+(50 rows)
+
+CREATE TABLE  APPEND_BATCH_2_015_1(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_INT))
+WITH (ORIENTATION=COLUMN) ;
+CREATE TABLE  APPEND_BATCH_2_015_2(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_CHAR))
+WITH (ORIENTATION=COLUMN);
+CREATE TABLE  APPEND_BATCH_2_015_3(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_VARCHAR))
+WITH (ORIENTATION=COLUMN);
+CREATE TABLE  APPEND_BATCH_2_015_4(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_NUMERIC))
+WITH (ORIENTATION=COLUMN) ;
+CREATE TABLE  APPEND_BATCH_2_015_5(C_INT INTEGER,C_CHAR CHAR(10),C_VARCHAR VARCHAR(20),C_NUMERIC NUMERIC,C_TS_WITHOUT TIMESTAMP , PARTIAL CLUSTER KEY(C_TS_WITHOUT))
+WITH (ORIENTATION=COLUMN);
+INSERT INTO  APPEND_BATCH_2_015_2 VALUES (1365,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_3 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_3 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_4 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_4 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_4 VALUES (1388,'TGET','APPEND',100.321,'2013-08-17');
+INSERT INTO  APPEND_BATCH_2_015_5 VALUES (1386,'TGET','APPEND',100.321,'2013-08-17');
+SELECT* FROM  APPEND_BATCH_2_015_1 UNION SELECT * FROM   APPEND_BATCH_2_015_2 INTERSECT SELECT * FROM   APPEND_BATCH_2_015_3 MINUS SELECT * FROM
+APPEND_BATCH_2_015_4 UNION SELECT * FROM   APPEND_BATCH_2_015_5 order by 1,2,3,4,5;
+ c_int |   c_char   | c_varchar | c_numeric |       c_ts_without       
+-------+------------+-----------+-----------+--------------------------
+  1386 | TGET       | APPEND    |   100.321 | Sat Aug 17 00:00:00 2013
+(1 row)
+
+drop schema setop_writefile cascade;
+NOTICE:  drop cascades to 9 other objects
+DETAIL:  drop cascades to table setop_hash_table_01
+drop cascades to table setop_hash_table_02
+drop cascades to table vec_setop_hash_table_01
+drop cascades to table vecsetop_hash_table_02
+drop cascades to table append_batch_2_015_1
+drop cascades to table append_batch_2_015_2
+drop cascades to table append_batch_2_015_3
+drop cascades to table append_batch_2_015_4
+drop cascades to table append_batch_2_015_5

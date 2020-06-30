@@ -1,0 +1,59 @@
+--
+-- TEST CASE: define index before COPY FROM is called, TIDs of compressed tuples are unvalid, so that tuples cann't be accessed randomly.
+--
+SET DATESTYLE TO ISO;
+CREATE TABLE cmpr_index_before_copy(
+        c_char_1 VARCHAR2(128) NOT NULL,
+        c_char_2 VARCHAR2(128) NOT NULL,
+        c_char_3 VARCHAR2(128) NOT NULL,
+        c_char_4 VARCHAR2(128) NOT NULL,
+        c_char_5 VARCHAR2(128) NOT NULL,
+        c_char_6 VARCHAR2(128) NOT NULL,
+        c_char_7 VARCHAR2(128) NOT NULL,
+        c_char_8 VARCHAR2(128) NOT NULL,
+        c_char_9 VARCHAR2(128) NOT NULL,
+        c_char_10 VARCHAR2(128) NOT NULL,
+        c_char_11 VARCHAR2(128) NOT NULL,
+        c_char_12 VARCHAR2(128) NOT NULL);
+INSERT INTO cmpr_index_before_copy VALUES ('abc'||generate_series(1,10000,10),'ABC'||generate_series(1,10000,10),'压缩VC2'||generate_series(1,10000,10),'abc'||generate_series(1,10000,10),'ABC'||generate_series(1,10000,10),'压缩VC2'||generate_series(1,10000,10),REPEAT(CHR(ASCII('a')+MOD(generate_series(1,10000,10),26)),125),REPEAT(CHR(ASCII('a')+MOD(generate_series(1,10000,10),26)),127),REPEAT(CHR(ASCII('a')+MOD(generate_series(1,10000,10),26)),126),REPEAT(CHR(ASCII('a')+MOD(generate_series(1,10000,10),26)),127),REPEAT(CHR(ASCII('a')+MOD(generate_series(1,10000,10),26)),126),REPEAT(CHR(ASCII('a')+MOD(generate_series(1,10000,10),26)),125));
+CREATE TABLE cmpr_index_before_copy_01(
+        c_char_1 VARCHAR2(128) NOT NULL,
+        c_char_2 VARCHAR2(128) NOT NULL,
+        c_char_3 VARCHAR2(128) NOT NULL,
+        c_char_4 VARCHAR2(128) NOT NULL,
+        c_char_5 VARCHAR2(128) NOT NULL,
+        c_char_6 VARCHAR2(128) NOT NULL,
+        c_char_7 VARCHAR2(128) NOT NULL,
+        c_char_8 VARCHAR2(128) NOT NULL,
+        c_char_9 VARCHAR2(128) NOT NULL,
+        c_char_10 VARCHAR2(128) NOT NULL,
+        c_char_11 VARCHAR2(128) NOT NULL,
+        c_char_12 VARCHAR2(128) NOT NULL) COMPRESS;
+-- define index before copy from 
+CREATE INDEX cmpr_index_before_copy_index01 ON cmpr_index_before_copy_01(C_CHAR_11) WHERE C_CHAR_11>REPEAT('c',126);
+CREATE INDEX cmpr_index_before_copy_index02 ON cmpr_index_before_copy_01(C_CHAR_7,C_CHAR_8,C_CHAR_9);
+COPY cmpr_index_before_copy TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_index_before_copy.data';
+COPY cmpr_index_before_copy_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_index_before_copy.data';
+(SELECT * FROM cmpr_index_before_copy) MINUS ALL (SELECT * FROM cmpr_index_before_copy_01);
+ c_char_1 | c_char_2 | c_char_3 | c_char_4 | c_char_5 | c_char_6 | c_char_7 | c_char_8 | c_char_9 | c_char_10 | c_char_11 | c_char_12 
+----------+----------+----------+----------+----------+----------+----------+----------+----------+-----------+-----------+-----------
+(0 rows)
+
+(SELECT * FROM cmpr_index_before_copy_01) MINUS ALL (SELECT * FROM cmpr_index_before_copy);
+ c_char_1 | c_char_2 | c_char_3 | c_char_4 | c_char_5 | c_char_6 | c_char_7 | c_char_8 | c_char_9 | c_char_10 | c_char_11 | c_char_12 
+----------+----------+----------+----------+----------+----------+----------+----------+----------+-----------+-----------+-----------
+(0 rows)
+
+(SELECT * FROM cmpr_index_before_copy WHERE C_CHAR_11=REPEAT('b',126)) MINUS ALL (SELECT * FROM cmpr_index_before_copy_01 WHERE C_CHAR_11=REPEAT('b',126));
+ c_char_1 | c_char_2 | c_char_3 | c_char_4 | c_char_5 | c_char_6 | c_char_7 | c_char_8 | c_char_9 | c_char_10 | c_char_11 | c_char_12 
+----------+----------+----------+----------+----------+----------+----------+----------+----------+-----------+-----------+-----------
+(0 rows)
+
+(SELECT * FROM cmpr_index_before_copy_01 WHERE C_CHAR_11=REPEAT('b',126)) MINUS ALL (SELECT * FROM cmpr_index_before_copy WHERE C_CHAR_11=REPEAT('b',126));
+ c_char_1 | c_char_2 | c_char_3 | c_char_4 | c_char_5 | c_char_6 | c_char_7 | c_char_8 | c_char_9 | c_char_10 | c_char_11 | c_char_12 
+----------+----------+----------+----------+----------+----------+----------+----------+----------+-----------+-----------+-----------
+(0 rows)
+
+DROP TABLE IF EXISTS cmpr_index_before_copy;
+DROP TABLE IF EXISTS cmpr_index_before_copy_01;
+\! rm -fr @abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_index_before_copy.data

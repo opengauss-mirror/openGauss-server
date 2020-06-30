@@ -1,0 +1,17 @@
+<refentry id="SQL-DROP_FOREIGN_TABLE">
+<refmeta>
+<refentrytitle>DROP FOREIGN TABLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP FOREIGN TABLE</refname>
+<refpurpose>remove a foreign table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP FOREIGN TABLE [ IF EXISTS ] 
+table_name [, ...] [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<scene name="upgrade" desc="check cluster parameters before upgrade.">
+    <configuration/>
+
+    <allowitems>
+        <item name="CheckClusterState"/>
+        <item name="CheckProcessStatus"/>
+        <item name="CheckGaussVer"/>
+        <item name="CheckDirPermissions"/>
+        <item name="CheckEnvProfile"/>
+        <item name="CheckCrondService"/>
+        <item name="CheckSshdService"/>
+        <item name="CheckPortRange"/>
+        <item name="CheckCatchup"/>
+        <item name="CheckArchiveParameter"/>
+        <item name="CheckReadonlyMode"/>
+        <item name="CheckIdleSession"/>
+        <item name="CheckPgxcgroup"/>
+        <item name="CheckPgPreparedXacts"/>
+        <item name="CheckTableSpace"/>
+        <item name="CheckSysParams">
+            <threshold>
+                version=V1R7C00
+            </threshold>
+        </item>
+        <item name="CheckNoCheckSum"/>
+        <item name="CheckGUCValue"/>
+        <item name="CheckStack"/>
+        <item name="CheckDiskFormat"/>
+        <item name="CheckPMKData"/>
+        <item name="CheckTimeZone"/>
+        <item name="CheckEncoding"/>
+        <item name="CheckKernelVer"/>
+        <item name="CheckMaxHandle"/>
+        <item name="CheckNTPD"/>
+        <item name="CheckOSVer"/>
+        <item name="CheckTHP"/>
+
+        <item name="CheckSpaceUsage"/>
+        <item name="CheckInodeUsage"/>
+        <item name="CheckSwapMemory"/>
+        <item name="CheckLogicalBlock"/>
+        <item name="CheckIOrequestqueue"/>
+        <item name="CheckIOConfigure"/>
+        <item name="CheckMaxAsyIOrequests"/>
+        <item name="CheckBlockdev"/>
+        <item name="CheckMemInfo"/>
+        <item name="CheckMTU"/>
+        <item name="CheckBond"/>
+        <item name="CheckMultiQueue"/>
+        <item name="CheckGUCConsistent"/>
+        <item name="CheckBootItems"/>
+        <item name="CheckDilateSysTab"/>
+        <item name="CheckHashIndex"/>
+        <item name="CheckTDDate"/>
+        <item name="CheckReturnType"/>
+        <item name="CheckCreateView"/>
+        <item name="CheckMpprcFile"/>
+    </allowitems>
+</scene>

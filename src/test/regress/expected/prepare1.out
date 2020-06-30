@@ -1,0 +1,356 @@
+create schema distribute_prepare;
+set current_schema = distribute_prepare;
+create table prepare_table_01(a int, b numeric) ;
+create table prepare_table_02(a int, b int) ;
+insert into prepare_table_01 values(1, 1),(1, 1),(1, 1);
+insert into prepare_table_02 values(1, 1),(1, 1),(1, 1);
+analyze prepare_table_01;
+analyze prepare_table_02;
+prepare p1 as select * from prepare_table_01, prepare_table_02 where prepare_table_01.a = prepare_table_02.a;
+prepare p2(int) as select * from prepare_table_01, prepare_table_02 where prepare_table_01.a = prepare_table_02.a and prepare_table_01.b = $1;
+prepare p3 as select * from prepare_table_01, prepare_table_02 where prepare_table_01.a = prepare_table_02.a;
+prepare p4(int) as select * from prepare_table_01, prepare_table_02 where prepare_table_01.a = prepare_table_02.a and prepare_table_01.b = $1;
+--stream plan and stream exec.
+explain (costs off, verbose on, nodes off) execute p1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   Join Filter: (prepare_table_01.a = prepare_table_02.a)
+   ->  Seq Scan on distribute_prepare.prepare_table_01
+         Output: prepare_table_01.a, prepare_table_01.b
+   ->  Materialize
+         Output: prepare_table_02.a, prepare_table_02.b
+         ->  Seq Scan on distribute_prepare.prepare_table_02
+               Output: prepare_table_02.a, prepare_table_02.b
+(9 rows)
+
+execute p1;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p1;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+explain (costs off, verbose on, nodes off) execute p2(1);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   Join Filter: (prepare_table_01.a = prepare_table_02.a)
+   ->  Seq Scan on distribute_prepare.prepare_table_01
+         Output: prepare_table_01.a, prepare_table_01.b
+         Filter: (prepare_table_01.b = ($1)::numeric)
+   ->  Materialize
+         Output: prepare_table_02.a, prepare_table_02.b
+         ->  Seq Scan on distribute_prepare.prepare_table_02
+               Output: prepare_table_02.a, prepare_table_02.b
+(10 rows)
+
+execute p2(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p2(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p2(2);
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+execute p2(2);
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+--remote plan and stream exec.
+explain (costs off, verbose on, nodes off) execute p3;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   Join Filter: (prepare_table_01.a = prepare_table_02.a)
+   ->  Seq Scan on distribute_prepare.prepare_table_01
+         Output: prepare_table_01.a, prepare_table_01.b
+   ->  Materialize
+         Output: prepare_table_02.a, prepare_table_02.b
+         ->  Seq Scan on distribute_prepare.prepare_table_02
+               Output: prepare_table_02.a, prepare_table_02.b
+(9 rows)
+
+execute p3;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+explain (costs off, verbose on, nodes off) execute p4(1);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   Join Filter: (prepare_table_01.a = prepare_table_02.a)
+   ->  Seq Scan on distribute_prepare.prepare_table_01
+         Output: prepare_table_01.a, prepare_table_01.b
+         Filter: (prepare_table_01.b = ($1)::numeric)
+   ->  Materialize
+         Output: prepare_table_02.a, prepare_table_02.b
+         ->  Seq Scan on distribute_prepare.prepare_table_02
+               Output: prepare_table_02.a, prepare_table_02.b
+(10 rows)
+
+execute p4(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+--stream plan and remote exec.
+explain (costs off, verbose on, nodes off) execute p1;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   Join Filter: (prepare_table_01.a = prepare_table_02.a)
+   ->  Seq Scan on distribute_prepare.prepare_table_01
+         Output: prepare_table_01.a, prepare_table_01.b
+   ->  Materialize
+         Output: prepare_table_02.a, prepare_table_02.b
+         ->  Seq Scan on distribute_prepare.prepare_table_02
+               Output: prepare_table_02.a, prepare_table_02.b
+(9 rows)
+
+execute p1;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p1;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+explain (costs off, verbose on, nodes off) execute p2(1);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   Join Filter: (prepare_table_01.a = prepare_table_02.a)
+   ->  Seq Scan on distribute_prepare.prepare_table_01
+         Output: prepare_table_01.a, prepare_table_01.b
+         Filter: (prepare_table_01.b = ($1)::numeric)
+   ->  Materialize
+         Output: prepare_table_02.a, prepare_table_02.b
+         ->  Seq Scan on distribute_prepare.prepare_table_02
+               Output: prepare_table_02.a, prepare_table_02.b
+(10 rows)
+
+execute p2(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p2(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+execute p2(2);
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+--remote plan and remote exec.
+explain (costs off, verbose on, nodes off) execute p3;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   Join Filter: (prepare_table_01.a = prepare_table_02.a)
+   ->  Seq Scan on distribute_prepare.prepare_table_01
+         Output: prepare_table_01.a, prepare_table_01.b
+   ->  Materialize
+         Output: prepare_table_02.a, prepare_table_02.b
+         ->  Seq Scan on distribute_prepare.prepare_table_02
+               Output: prepare_table_02.a, prepare_table_02.b
+(9 rows)
+
+execute p3;
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+explain (costs off, verbose on, nodes off) execute p4(1);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: prepare_table_01.a, prepare_table_01.b, prepare_table_02.a, prepare_table_02.b
+   Join Filter: (prepare_table_01.a = prepare_table_02.a)
+   ->  Seq Scan on distribute_prepare.prepare_table_01
+         Output: prepare_table_01.a, prepare_table_01.b
+         Filter: (prepare_table_01.b = ($1)::numeric)
+   ->  Materialize
+         Output: prepare_table_02.a, prepare_table_02.b
+         ->  Seq Scan on distribute_prepare.prepare_table_02
+               Output: prepare_table_02.a, prepare_table_02.b
+(10 rows)
+
+execute p4(1);
+ a | b | a | b 
+---+---+---+---
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+ 1 | 1 | 1 | 1
+(9 rows)
+
+prepare p5 as select a from prepare_table_01 INTERSECT select a from prepare_table_02 order by 1 limit 1;
+explain (costs off, verbose on, nodes off) execute p5;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Limit
+   Output: "*SELECT* 1".a, (0)
+   ->  Sort
+         Output: "*SELECT* 1".a, (0)
+         Sort Key: "*SELECT* 1".a
+         ->  HashSetOp Intersect
+               Output: "*SELECT* 1".a, (0)
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           Output: "*SELECT* 1".a, 0
+                           ->  Seq Scan on distribute_prepare.prepare_table_01
+                                 Output: prepare_table_01.a
+                     ->  Subquery Scan on "*SELECT* 2"
+                           Output: "*SELECT* 2".a, 1
+                           ->  Seq Scan on distribute_prepare.prepare_table_02
+                                 Output: prepare_table_02.a
+(16 rows)
+
+prepare p6 as (select * from prepare_table_01) union (select * from prepare_table_02); 
+explain (costs off, verbose on, nodes off) execute p6;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ HashAggregate
+   Output: prepare_table_01.a, prepare_table_01.b
+   Group By Key: prepare_table_01.a, prepare_table_01.b
+   ->  Append
+         ->  Seq Scan on distribute_prepare.prepare_table_01
+               Output: prepare_table_01.a, prepare_table_01.b
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".a, "*SELECT* 2".b
+               ->  Seq Scan on distribute_prepare.prepare_table_02
+                     Output: prepare_table_02.a, prepare_table_02.b
+(10 rows)
+
+drop table prepare_table_01;
+drop table prepare_table_02;
+drop schema distribute_prepare cascade;

@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_OWNED">
+<refmeta>
+<refentrytitle>DROP OWNED</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP OWNED</refname>
+<refpurpose>remove database objects owned by a database role</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP OWNED BY name [, ...] [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

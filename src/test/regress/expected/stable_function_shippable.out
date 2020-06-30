@@ -1,0 +1,780 @@
+set DateStyle to ISO, MDY;
+set TimeZone to 'UTC';
+set IntervalStyle to postgres;
+set lc_monetary to 'en_US.UTF-8';
+--
+--- abstime
+--
+--prepare
+create table test(a int , b abstime);
+--test abstimein
+explain (costs off, verbose on) select * from test where b < abstimein('12-25-2001');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < abstimein('12-25-2001'::cstring))
+(3 rows)
+
+--test abstimeout
+explain (costs off, verbose on) select abstimeout(b) from test;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.test
+   Output: abstimeout(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- reltime
+--
+--prepare
+create table test(a int , b reltime);
+--test reltimein
+explain (costs off, verbose on) select * from test where b < reltimein('@ 14 seconds ago');
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < reltimein('@ 14 seconds ago'::cstring))
+(3 rows)
+
+--test reltimeout
+explain (costs off, verbose on) select reltimeout(b) from test;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.test
+   Output: reltimeout(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- tinterval
+--
+--prepare
+create table test(a int , b tinterval);
+--test reltimein
+explain (costs off, verbose on) select * from test where b < tintervalin('["Aug 15 14:23:19 1980" "Sep 16 14:23:19 1990"]');
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < tintervalin('["Aug 15 14:23:19 1980" "Sep 16 14:23:19 1990"]'::cstring))
+(3 rows)
+
+--test reltimeout
+explain (costs off, verbose on) select tintervalout(b) from test;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on public.test
+   Output: tintervalout(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- money
+--
+--prepare
+create table test(a int , b money);
+--test reltimein
+explain (costs off, verbose on) select * from test where b < cash_in('$12.123');
+                    QUERY PLAN                    
+--------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < cash_in('$12.123'::cstring))
+(3 rows)
+
+--test reltimeout
+explain (costs off, verbose on) select cash_out(b) from test;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.test
+   Output: cash_out(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+---- money & figure
+--
+--prepare
+create table test(a int , b money);
+--test money(numeric_cash)
+explain (costs off, verbose on) select * from test where b < money('12.123'::numeric);
+             QUERY PLAN             
+------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < money(12.123))
+(3 rows)
+
+--test numeric(cash_numeric)
+explain (costs off, verbose on) select * from test where b::numeric <> 12.23;
+               QUERY PLAN               
+----------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: ((test.b)::numeric <> 12.23)
+(3 rows)
+
+--test money(int4_cash)
+explain (costs off, verbose on) select * from test where b < money('12'::int4);
+           QUERY PLAN           
+--------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < money(12))
+(3 rows)
+
+--test money(int8_cash)
+explain (costs off, verbose on) select * from test where b < money('12'::int8);
+               QUERY PLAN               
+----------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < money(12::bigint))
+(3 rows)
+
+--clean up
+drop table test;
+--
+--- date
+--
+--prepare
+create table test(a int , b date);
+--test date_in
+explain (costs off, verbose on) select * from test where b < date_in('12-25-2001');
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < date_in('12-25-2001'::cstring))
+(3 rows)
+
+--test date_out
+explain (costs off, verbose on) select date_out(date_in('12-25-2001')) from test;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: date_out(date_in('12-25-2001'::cstring))
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- time
+--
+--prepare
+create table test(a int , b time);
+--test time_in
+explain (costs off, verbose on) select * from test where b < time_in('12:25:55', 0 , -1);
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < time_in('12:25:55'::cstring, 0::oid, (-1)))
+(3 rows)
+
+--test time_out
+explain (costs off, verbose on) select time_out(b) from test;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.test
+   Output: time_out(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- timetz
+--
+--prepare
+create table test(a int , b timetz);
+--test timezt_in
+explain (costs off, verbose on) select * from test where b < timetz_in('12:25:55 + 02', 0 , -1);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < timetz_in('12:25:55 + 02'::cstring, 0::oid, (-1)))
+(3 rows)
+
+--test timezt_out
+explain (costs off, verbose on) select timetz_out(b) from test;
+       QUERY PLAN        
+-------------------------
+ Seq Scan on public.test
+   Output: timetz_out(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- timestamptz
+--
+--prepare
+create table test(a int , b timestamptz);
+--test timestamptz_in
+explain (costs off, verbose on) select * from test where b < timestamptz_in('2015-03-26 14:51:45.489334+00', 0 , -1);
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < timestamptz_in('2015-03-26 14:51:45.489334+00'::cstring, 0::oid, (-1)))
+(3 rows)
+
+--test timestamptz_out
+explain (costs off, verbose on) select timestamptz_out(b) from test;
+          QUERY PLAN          
+------------------------------
+ Seq Scan on public.test
+   Output: timestamptz_out(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- timestamp
+--
+--prepare
+create table test(a int , b timestamp);
+--test timestamp_in
+explain (costs off, verbose on) select * from test where b < timestamp_in('2015-03-26 14:51:45.489334', 0 , -1);
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < timestamp_in('2015-03-26 14:51:45.489334'::cstring, 0::oid, (-1)))
+(3 rows)
+
+--test timestamp_out
+explain (costs off, verbose on) select timestamp_out(b) from test;
+         QUERY PLAN         
+----------------------------
+ Seq Scan on public.test
+   Output: timestamp_out(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- interval
+--
+--prepare
+create table test(a int , b interval);
+--test interval_in
+explain (costs off, verbose on) select * from test where b < interval_in('3 4:05:06.7', 0 , -1);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < interval_in('3 4:05:06.7'::cstring, 0::oid, (-1)))
+(3 rows)
+
+--test interval_out
+explain (costs off, verbose on) select interval_out(b) from test;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on public.test
+   Output: interval_out(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+--- smalldatetime
+--
+--prepare
+create table test(a int , b smalldatetime);
+--test smalldatetime_in
+explain (costs off, verbose on) select * from test where b < smalldatetime_in('2015-03-26 14:51:45.489334', 0 , -1);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: (test.b < smalldatetime_in('2015-03-26 14:51:45.489334'::cstring, 0::oid, (-1)))
+(3 rows)
+
+--test smalldatetime_out
+explain (costs off, verbose on) select smalldatetime_out(b) from test;
+           QUERY PLAN           
+--------------------------------
+ Seq Scan on public.test
+   Output: smalldatetime_out(b)
+(2 rows)
+
+--clean up
+drop table test;
+--
+----extract field from XXXX
+--
+--prepare
+create table test(a int , b interval, c timestamptz, d abstime, e reltime);
+--extract field from timestamp with time zone
+explain (costs off, verbose on) select * from test where date_part('year', c) > 1009;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: (date_part('year'::text, test.c) > 1009::double precision)
+(3 rows)
+
+--extract field from abstime
+explain (costs off, verbose on) select * from test where date_part('year', d) > 1009;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: (date_part('year'::text, (test.d)::timestamp with time zone) > 1009::double precision)
+(3 rows)
+
+--extract field from reltime
+explain (costs off, verbose on) select * from test where date_part('year', e) > 1009;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: (date_part('year'::text, (test.e)::interval) > 1009::double precision)
+(3 rows)
+
+--clean up
+drop table test;
+--
+----convert: abstime timestamp timestamptz time date
+--
+--prepare
+create table test(a int, b date, c time, d timetz, e timestamp, f timestamptz, g abstime);
+--convert date to timestamp with time zone
+explain (costs off, verbose on) select * from test where timestamptz(date_in('12-25-2001')) > f;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: (timestamptz(date_in('12-25-2001'::cstring)) > test.f)
+(3 rows)
+
+--convert date and time to timestamp with time zone
+explain (costs off, verbose on) select * from test where timestamptz(date_in('12-25-2001'), c) > f;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: (((date_in('12-25-2001'::cstring) + test.c))::timestamp with time zone > test.f)
+(3 rows)
+
+--convert timestamp with time zone to date
+explain (costs off, verbose on) select * from test where e > date_in('12-25-2001');
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: (test.e > date_in('12-25-2001'::cstring))
+(3 rows)
+
+--convert abstime to date
+explain (costs off, verbose on) select * from test where g > date_in('12-25-2001');
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: ((test.g)::timestamp with time zone > date_in('12-25-2001'::cstring))
+(3 rows)
+
+--convert abstime to time
+explain (costs off, verbose on) select * from test where g::time>c;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: (((test.g)::timestamp without time zone)::time without time zone > test.c)
+(3 rows)
+
+--convert timestamp with time zone to time with time zone
+explain (costs off, verbose on) select * from test where f::timetz>d;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: ((test.f)::time with time zone > test.d)
+(3 rows)
+
+--convert text to timestamp with time zone
+explain (costs off, verbose on) select * from test where to_timestamp('23-12-2012', 'DD-MM-YYYY HH:MI:SS.FF AM')>e;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: (to_timestamp('23-12-2012'::text, 'DD-MM-YYYY HH:MI:SS.FF AM'::text) > test.e)
+(3 rows)
+
+--to_date
+explain (costs off, verbose on) select * from test where to_date('23-12-2012', 'DD-MM-YYYY HH:MI:SS.FF AM')>e;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: (to_date('23-12-2012'::text, 'DD-MM-YYYY HH:MI:SS.FF AM'::text) > test.e)
+(3 rows)
+
+--convert timestamp with time zone to time
+explain (costs off, verbose on) select * from test where f::time>c;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: ((test.f)::time without time zone > test.c)
+(3 rows)
+
+--convert abstime to timestamp
+explain (costs off, verbose on) select * from test where g::timestamp>e;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: ((test.g)::timestamp without time zone > test.e)
+(3 rows)
+
+--convert timestamp with time zone to timestamp
+explain (costs off, verbose on) select * from test where f::timestamp>e;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: ((test.f)::timestamp without time zone > test.e)
+(3 rows)
+
+--convert timestamp to timestamp with time zone
+explain (costs off, verbose on) select * from test where e::timestamptz>f;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: ((test.e)::timestamp with time zone > test.f)
+(3 rows)
+
+--convert timestamp to abstime
+explain (costs off, verbose on) select * from test where e::abstime>g;
+               QUERY PLAN               
+----------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: ((test.e)::abstime > test.g)
+(3 rows)
+
+--convert time to time with time zone
+explain (costs off, verbose on) select * from test where c::timetz>d;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e, f, g
+   Filter: ((test.c)::time with time zone > test.d)
+(3 rows)
+
+--clean up
+drop table test;
+--
+----operation: interval reltime timestamptz
+--
+--prepare
+create table test(a int, b interval, c timestamptz, d reltime, e timestamp);
+--timestamptz plus interval
+explain (costs off, verbose on) select * from test where timestamptz_pl_interval(c, b) > c;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: (timestamptz_pl_interval(test.c, test.b) > test.c)
+(3 rows)
+
+--timestamptz minus interval
+explain (costs off, verbose on) select * from test where timestamptz_mi_interval(c, b) > c;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: (timestamptz_mi_interval(test.c, test.b) > test.c)
+(3 rows)
+
+--interval plus timestamptz
+explain (costs off, verbose on) select * from test where interval_pl_timestamptz(b, c) > c;
+               QUERY PLAN               
+----------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: ((test.c + test.b) > test.c)
+(3 rows)
+
+--crosstype operations for date vs. timestamptz lt
+explain (costs off, verbose on) select * from test where date_lt_timestamptz(date_in('12-25-2001'), c);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: date_lt_timestamptz(date_in('12-25-2001'::cstring), test.c)
+(3 rows)
+
+--crosstype operations for date vs. timestamptz le
+explain (costs off, verbose on) select * from test where date_le_timestamptz(date_in('12-25-2001'), c);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: date_le_timestamptz(date_in('12-25-2001'::cstring), test.c)
+(3 rows)
+
+--crosstype operations for date vs. timestamptz eq
+explain (costs off, verbose on) select * from test where date_eq_timestamptz(date_in('12-25-2001'), c);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: date_eq_timestamptz(date_in('12-25-2001'::cstring), test.c)
+(3 rows)
+
+--crosstype operations for date vs. timestamptz gt
+explain (costs off, verbose on) select * from test where date_gt_timestamptz(date_in('12-25-2001'), c);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: date_gt_timestamptz(date_in('12-25-2001'::cstring), test.c)
+(3 rows)
+
+--crosstype operations for date vs. timestamptz ge
+explain (costs off, verbose on) select * from test where date_ge_timestamptz(date_in('12-25-2001'), c);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: date_ge_timestamptz(date_in('12-25-2001'::cstring), test.c)
+(3 rows)
+
+--crosstype operations for date vs. timestamptz ne
+explain (costs off, verbose on) select * from test where date_ne_timestamptz(date_in('12-25-2001'), c);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: date_ne_timestamptz(date_in('12-25-2001'::cstring), test.c)
+(3 rows)
+
+--crosstype operations for date vs. timestamptz cmp
+explain (costs off, verbose on) select * from test where date_cmp_timestamptz(date_in('12-25-2001'), c);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: date_cmp_timestamptz(date_in('12-25-2001'::cstring), test.c)
+(3 rows)
+
+--crosstype operations for timestamptz vs. date lt
+explain (costs off, verbose on) select * from test where timestamptz_lt_date(c, date_in('12-25-2001'));
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_lt_date(test.c, date_in('12-25-2001'::cstring))
+(3 rows)
+
+--crosstype operations for timestamptz vs. date le            ,
+explain (costs off, verbose on) select * from test where timestamptz_le_date(c, date_in('12-25-2001'));
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_le_date(test.c, date_in('12-25-2001'::cstring))
+(3 rows)
+
+--crosstype operations for timestamptz vs. date eq            ,
+explain (costs off, verbose on) select * from test where timestamptz_eq_date(c, date_in('12-25-2001'));
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_eq_date(test.c, date_in('12-25-2001'::cstring))
+(3 rows)
+
+--crosstype operations for timestamptz vs. date gt            ,
+explain (costs off, verbose on) select * from test where timestamptz_gt_date(c, date_in('12-25-2001'));
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_gt_date(test.c, date_in('12-25-2001'::cstring))
+(3 rows)
+
+--crosstype operations for timestamptz vs. date ge            ,
+explain (costs off, verbose on) select * from test where timestamptz_ge_date(c, date_in('12-25-2001'));
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_ge_date(test.c, date_in('12-25-2001'::cstring))
+(3 rows)
+
+--crosstype operations for timestamptz vs. date ne            ,
+explain (costs off, verbose on) select * from test where timestamptz_ne_date(c, date_in('12-25-2001'));
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_ne_date(test.c, date_in('12-25-2001'::cstring))
+(3 rows)
+
+--crosstype operations for timestamptz vs. date cmp
+explain (costs off, verbose on) select * from test where timestamptz_cmp_date(c, date_in('12-25-2001'));
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_cmp_date(test.c, date_in('12-25-2001'::cstring))
+(3 rows)
+
+--crosstype operations for timestamp vs. timestamptz lt
+explain (costs off, verbose on) select * from test where timestamp_lt_timestamptz(e, c);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamp_lt_timestamptz(test.e, test.c)
+(3 rows)
+
+--crosstype operations for timestamp vs. timestamptz le
+explain (costs off, verbose on) select * from test where timestamp_le_timestamptz(e, c);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamp_le_timestamptz(test.e, test.c)
+(3 rows)
+
+--crosstype operations for timestamp vs. timestamptz eq
+explain (costs off, verbose on) select * from test where timestamp_eq_timestamptz(e, c);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamp_eq_timestamptz(test.e, test.c)
+(3 rows)
+
+--crosstype operations for timestamp vs. timestamptz gt
+explain (costs off, verbose on) select * from test where timestamp_gt_timestamptz(e, c);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamp_gt_timestamptz(test.e, test.c)
+(3 rows)
+
+--crosstype operations for timestamp vs. timestamptz ge
+explain (costs off, verbose on) select * from test where timestamp_ge_timestamptz(e, c);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamp_ge_timestamptz(test.e, test.c)
+(3 rows)
+
+--crosstype operations for timestamp vs. timestamptz ne
+explain (costs off, verbose on) select * from test where timestamp_ne_timestamptz(e, c);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamp_ne_timestamptz(test.e, test.c)
+(3 rows)
+
+--crosstype operations for timestamp vs. timestamptz cmp
+explain (costs off, verbose on) select * from test where timestamp_cmp_timestamptz(e, c);
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamp_cmp_timestamptz(test.e, test.c)
+(3 rows)
+
+--crosstype operations for timestamptz vs. timestamp lt
+explain (costs off, verbose on) select * from test where timestamptz_lt_timestamp(c, e);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_lt_timestamp(test.c, test.e)
+(3 rows)
+
+--crosstype operations for timestamptz vs. timestamp le
+explain (costs off, verbose on) select * from test where timestamptz_le_timestamp(c, e);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_le_timestamp(test.c, test.e)
+(3 rows)
+
+--crosstype operations for timestamptz vs. timestamp eq
+explain (costs off, verbose on) select * from test where timestamptz_eq_timestamp(c, e);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_eq_timestamp(test.c, test.e)
+(3 rows)
+
+--crosstype operations for timestamptz vs. timestamp gt
+explain (costs off, verbose on) select * from test where timestamptz_gt_timestamp(c, e);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_gt_timestamp(test.c, test.e)
+(3 rows)
+
+--crosstype operations for timestamptz vs. timestamp ge
+explain (costs off, verbose on) select * from test where timestamptz_ge_timestamp(c, e);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_ge_timestamp(test.c, test.e)
+(3 rows)
+
+--crosstype operations for timestamptz vs. timestamp ne
+explain (costs off, verbose on) select * from test where timestamptz_ne_timestamp(c, e);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_ne_timestamp(test.c, test.e)
+(3 rows)
+
+--crosstype operations for timestamptz vs. timestamp cmp
+explain (costs off, verbose on) select * from test where timestamptz_cmp_timestamp(c, e);
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b, c, d, e
+   Filter: timestamptz_cmp_timestamp(test.c, test.e)
+(3 rows)
+
+--clean up
+drop table test;
+--
+----truncate: XXX to XXX
+--
+--prepare
+create table test(a int, b timestamptz);
+--truncate timestamp with time zone to specified units
+explain (costs off, verbose on) select * from test where date_trunc('year', b) > 2015;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Seq Scan on public.test
+   Output: a, b
+   Filter: ((date_trunc('year'::text, test.b))::text > '2015'::text)
+(3 rows)
+
+--clean up
+drop table test;

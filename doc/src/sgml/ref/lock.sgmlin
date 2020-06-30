@@ -1,0 +1,18 @@
+<refentry id="SQL-LOCK">
+<refmeta>
+<refentrytitle>LOCK</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>LOCK</refname>
+<refpurpose>lock a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+LOCK [ TABLE ] {[ ONLY ] name [, ...]| {name [ * ]} [, ...]}
+    [ IN {ACCESS SHARE | ROW SHARE | ROW EXCLUSIVE | SHARE UPDATE EXCLUSIVE | SHARE | SHARE ROW EXCLUSIVE | EXCLUSIVE | ACCESS EXCLUSIVE} MODE ]
+    [ NOWAIT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

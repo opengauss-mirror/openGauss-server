@@ -1,0 +1,41 @@
+--
+-- BULK LOAD START
+--
+
+---
+-- Create Foreign Table Like Grammar Check
+---
+
+--1. Create the table that our foreign table like_clauses will inherit column def from
+CREATE TABLESPACE CREATE_FOREIGN_TABLE_LIKE_tblsp1 LOCATION '@abs_srcdir@/tblsp';
+DROP TABLE IF EXISTS CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO;
+CREATE TABLE CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO 
+(
+U_ID        VARCHAR(10)   NOT NULL
+,U_FNAME        VARCHAR(80) 
+,U_SNAME        VARCHAR(80) 
+,ZIPCODE        VARCHAR(20)   
+,PHONE        VARCHAR(40) 
+,AGE        DECIMAL(8,0) 
+,RANK        DECIMAL(8,0)
+,PRIMARY KEY    (U_ID)
+)
+COMPRESS
+TABLESPACE CREATE_FOREIGN_TABLE_LIKE_tblsp1;
+
+
+
+
+
+
+
+
+ 
+ 
+---
+--Create foreign table like grammar check over, cleaning up
+---
+
+DROP TABLE IF EXISTS CREATE_FOREIGN_TABLE_LIKE_BASIC_INFO;
+
+DROP TABLESPACE CREATE_FOREIGN_TABLE_LIKE_tblsp1;

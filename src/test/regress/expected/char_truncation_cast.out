@@ -1,0 +1,107 @@
+set td_compatible_truncation=on;
+set td_compatible_truncation=off;
+drop database if exists td_db_char_cast;
+NOTICE:  database "td_db_char_cast" does not exist, skipping
+create database td_db_char_cast DBCOMPATIBILITY 'C';
+\c td_db_char_cast
+set client_encoding='UTF8'; 
+--test cast char type data the result should pad blank space.
+set td_compatible_truncation=off;
+show td_compatible_truncation;
+ td_compatible_truncation 
+--------------------------
+ off
+(1 row)
+
+create table t1(id int, info char(5));
+create table t1_col(id int, info char(5)) with(orientation = column);
+delete from t1;
+insert into t1 values(3,  cast('一二' as char(5)));
+insert into t1 select 4, cast('一二' as char(5));
+insert into t1 values(5,  cast('一二' as char(6)));
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: info
+insert into t1 select 6, cast('一二' as char(6));
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: info
+select * from t1 order by id;
+ id | info 
+----+------
+  3 | 一  
+  4 | 一  
+(2 rows)
+
+select id, length(info), lengthb(info) from t1 order by id;
+ id | length | lengthb 
+----+--------+---------
+  3 |      3 |       5
+  4 |      3 |       5
+(2 rows)
+
+delete from t1_col;
+insert into t1_col values(7,  cast('一二' as char(5)));
+insert into t1_col select 8, cast('一二' as char(5));
+insert into t1_col values(9,  cast('一二' as char(6)));
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: info
+insert into t1_col select 10, cast('一二' as char(6));
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: info
+select * from t1_col order by id;
+ id | info 
+----+------
+  7 | 一  
+  8 | 一  
+(2 rows)
+
+select id, length(info), lengthb(info) from t1_col order by id;
+ id | length | lengthb 
+----+--------+---------
+  7 |      3 |       5
+  8 |      3 |       5
+(2 rows)
+
+set td_compatible_truncation=on;
+delete from t1;
+insert into t1 values(1,'一');
+insert into t1 values(2,  '一二');
+insert into t1 values(5,  cast('一二' as char(6)));
+insert into t1 select 6, cast('一二' as char(6));
+select * from t1 order by id;
+ id | info 
+----+------
+  1 | 一  
+  2 | 一  
+  5 | 一  
+  6 | 一  
+(4 rows)
+
+select id, length(info), lengthb(info) from t1 order by id;
+ id | length | lengthb 
+----+--------+---------
+  1 |      3 |       5
+  2 |      3 |       5
+  5 |      3 |       5
+  6 |      3 |       5
+(4 rows)
+
+delete from t1_col;
+insert into t1_col values(11,  '一二');
+insert into t1_col select 12, '一二';
+select * from t1_col order by id;
+ id | info 
+----+------
+ 11 | 一  
+ 12 | 一  
+(2 rows)
+
+select id, length(info), lengthb(info) from t1_col order by id;
+ id | length | lengthb 
+----+--------+---------
+ 11 |      3 |       5
+ 12 |      3 |       5
+(2 rows)
+
+commit;
+WARNING:  there is no transaction in progress
+\c regression

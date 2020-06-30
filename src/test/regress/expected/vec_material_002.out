@@ -1,0 +1,182 @@
+/*
+ * This file is used to test the function of ExecVecMaterial()
+ */
+----
+--- Create Table and Insert Data
+----
+create schema vector_material_engine_002;
+set current_schema=vector_material_engine_002;
+SET TIME ZONE 'PRC';set datestyle to iso;
+SET log_min_messages=debug1;
+set current_schema=vector_material_engine_002;
+-- add llt test for mergejoin + material
+set convert_string_to_digit =false;
+\parallel on
+create table  vector_material_engine_002.fvt_distribute_query_tables_01(
+        w_name  char(10),
+        w_street_1      character varying(20),
+        w_zip   char(9),
+        w_id    integer , partial cluster key(w_name)) with (orientation=column) 
+partition by range (w_id)
+(
+        partition fvt_distribute_query_tables_01_p1 values less than (6),
+        partition fvt_distribute_query_tables_01_p2 values less than (8),
+        partition fvt_distribute_query_tables_01_p3 values less than (maxvalue)
+);
+create table  vector_material_engine_002.fvt_distribute_query_tables_02(
+        c_id    varchar,
+        c_street_1      varchar(20),
+        c_city  text,
+        c_zip   varchar(9),
+        c_d_id  numeric,
+        c_w_id  text , partial cluster key(c_id)) with (orientation=column)
+;
+create table  vector_material_engine_002.fvt_distribute_query_tables_03(
+        d_w_id  integer,
+        d_name  character varying(10),
+        d_street_2      character varying(20),
+        d_city  character varying(20),
+        d_id    integer) with (orientation=column)
+;
+create table  vector_material_engine_002.fvt_distribute_query_tables_04(
+        w_id    integer,
+        w_name  varchar(20),
+        w_zip   integer, partial cluster key(w_id)) with (orientation=column) ;
+create table  vector_material_engine_002.fvt_distribute_query_tables_05(
+        c_w_id  integer,
+        c_street_1      varchar(20),
+        c_city  varchar(20),
+        c_zip   char(9),
+        c_d_id  integer,
+      c_id    integer, partial cluster key(c_w_id,c_id,c_d_id)) with (orientation=column) 
+partition by range (c_w_id)
+(
+        partition fvt_distribute_query_tables_05_p1 values less than (6),
+        partition fvt_distribute_query_tables_05_p2 values less than (8),
+        partition fvt_distribute_query_tables_05_p3 values less than (maxvalue)
+);
+create table  vector_material_engine_002.fvt_distribute_query_tables_06(
+        d_id    integer,
+        d_street_1      character varying(20),
+        d_street_2      character varying(20),
+        d_name  character varying(10),
+        d_w_id  integer,
+        d_city  character varying(20)
+ ) with (orientation=column)
+;
+create table  vector_material_engine_002.fvt_distribute_query_tables_07(
+        c_id    integer,
+        c_first         varchar(20),
+        c_middle        character(2),
+        c_zip   char(9),
+        c_d_id  integer,
+        c_street_1      character varying(20),
+        c_city  character varying(20),
+        c_w_id  integer,
+        c_street_2      character varying(20)
+        ) with (orientation=column)
+;
+\parallel off
+\parallel on
+create index fvt_distribute_query_indexes_01 on vector_material_engine_002.fvt_distribute_query_tables_01(w_id) local;
+create index fvt_distribute_query_indexes_02 on vector_material_engine_002.fvt_distribute_query_tables_02(c_d_id,c_id);
+create index fvt_distribute_query_indexes_03 on vector_material_engine_002.fvt_distribute_query_tables_03(d_w_id,d_id);
+create index fvt_distribute_query_indexes_04 on vector_material_engine_002.fvt_distribute_query_tables_04(w_id);
+create index fvt_distribute_query_indexes_04_02 on vector_material_engine_002.fvt_distribute_query_tables_04(w_zip);
+create index fvt_distribute_query_indexes_05 on vector_material_engine_002.fvt_distribute_query_tables_05(c_id,c_w_id) local;
+create index fvt_distribute_query_indexes_05_02 on vector_material_engine_002.fvt_distribute_query_tables_05(c_d_id,c_w_id,c_id) local;
+create index fvt_distribute_query_indexes_06 on vector_material_engine_002.fvt_distribute_query_tables_06(d_id,d_w_id);
+create index fvt_distribute_query_indexes_07 on vector_material_engine_002.fvt_distribute_query_tables_07(c_id,c_d_id,c_w_id);
+\parallel off
+COPY fvt_distribute_query_tables_01 (w_name, w_street_1, w_zip, w_id) FROM stdin;
+;
+COPY fvt_distribute_query_tables_02 (c_id, c_street_1, c_city, c_zip, c_d_id, c_w_id) FROM stdin;
+;
+COPY fvt_distribute_query_tables_03 (d_w_id, d_name, d_street_2, d_city, d_id) FROM stdin;
+;
+COPY fvt_distribute_query_tables_04 (w_id, w_name, w_zip) FROM stdin;
+;
+COPY fvt_distribute_query_tables_05 (c_w_id, c_street_1, c_city, c_zip, c_d_id, c_id) FROM stdin;
+;
+COPY fvt_distribute_query_tables_06 (d_id, d_street_1, d_street_2, d_name, d_w_id, d_city) FROM stdin;
+;
+COPY fvt_distribute_query_tables_07 (c_id, c_first, c_middle, c_zip, c_d_id, c_street_1, c_city, c_w_id, c_street_2) FROM stdin;
+;
+\parallel on
+analyze fvt_distribute_query_tables_01;
+analyze fvt_distribute_query_tables_02;
+analyze fvt_distribute_query_tables_03;
+analyze fvt_distribute_query_tables_04;
+analyze fvt_distribute_query_tables_05;
+analyze fvt_distribute_query_tables_06;
+analyze fvt_distribute_query_tables_07;
+\parallel off
+set enable_seqscan =  off   ;
+set enable_hashjoin =  off  ;
+set enable_nestloop =  off  ;
+set work_mem =  64        ;
+select all max(table_01.w_id),
+           min(table_02.c_d_id),
+           sum(table_03.d_w_id),
+           count(table_04.w_id),
+           min(table_05.c_id),
+           max(table_06.d_id),
+           table_07.c_d_id
+  from vector_material_engine_002.fvt_distribute_query_tables_01 as table_01
+  left outer join vector_material_engine_002.fvt_distribute_query_tables_02 as table_02 on coalesce(table_01.w_id,
+                                                                                          1) =
+                                                                                 table_02.c_w_id
+ right outer join vector_material_engine_002.fvt_distribute_query_tables_03 as table_03 on table_02.c_w_id =
+                                                                                 table_03.d_w_id
+                                                                             and table_02.c_d_id =
+                                                                                 table_03.d_id
+ right outer join vector_material_engine_002.fvt_distribute_query_tables_04 as table_04 on table_04.w_id =
+                                                                                 table_03.d_w_id
+                                                                             and table_04.w_id <
+                                                                                 table_02.c_id
+ right outer join vector_material_engine_002.fvt_distribute_query_tables_05 as table_05 on table_05.c_w_id =
+                                                                                 table_04.w_id
+  left outer join vector_material_engine_002.fvt_distribute_query_tables_06 as table_06 on table_06.d_id =
+                                                                                 table_05.c_d_id
+                                                                             and table_06.d_w_id =
+                                                                                 table_05.c_w_id
+                                                                             and table_05.c_id < 200
+  left outer join vector_material_engine_002.fvt_distribute_query_tables_07 as table_07 on table_07.c_w_id =
+                                                                                 table_04.w_id
+                                                                             and table_07.c_id < 20
+ group by table_07.c_d_id
+having table_07.c_d_id < 10 or table_07.c_d_id is null
+ order by max(table_01.w_id),
+          min(table_02.c_d_id),
+          sum(table_03.d_w_id),
+          count(table_04.w_id),
+          min(table_05.c_id),
+          max(table_06.d_id),
+          table_07.c_d_id NULLS FIRST;
+WARNING:  [VecSonicHashAgg(0)]:The minimum memory needed is 911104, but only have 65536.
+ max | min |  sum   | count  | min | max | c_d_id 
+-----+-----+--------+--------+-----+-----+--------
+   7 |   1 | 166992 |  47140 |   4 |  10 |      1
+   7 |   1 | 571308 | 226286 |   4 |  10 |      2
+   7 |   1 | 571308 | 226286 |   4 |  10 |      3
+   7 |   1 | 571308 | 226286 |   4 |  10 |      4
+   7 |   1 | 571308 | 226286 |   4 |  10 |      5
+   7 |   1 | 571308 | 226286 |   4 |  10 |      6
+   7 |   1 | 571308 | 226286 |   4 |  10 |      7
+   7 |   1 | 571308 | 226286 |   4 |  10 |      8
+   7 |   1 | 571308 | 226286 |   4 |  10 |      9
+     |     |        |      0 |  29 |     |       
+(10 rows)
+
+----
+--- Clean Table and Resource 
+----
+RESET log_min_messages;
+drop table if exists fvt_distribute_query_tables_01  cascade;
+drop table if exists  fvt_distribute_query_tables_02 cascade;
+drop table if exists  fvt_distribute_query_tables_03 cascade;
+drop table if exists  fvt_distribute_query_tables_04 cascade;
+drop table if exists  fvt_distribute_query_tables_05 cascade;
+drop table if exists  fvt_distribute_query_tables_06 cascade;
+drop table if exists  fvt_distribute_query_tables_07 cascade;
+drop schema if exists  vector_material_engine_002    cascade;

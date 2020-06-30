@@ -1,0 +1,25 @@
+<refentry id="SQL-ALTER_TABLESPACE">
+<refmeta>
+<refentrytitle>ALTER TABLESPACE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER TABLESPACE</refname>
+<refpurpose>change the definition of a tablespace</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER TABLESPACE tablespace_name
+    RENAME TO new_tablespace_name;
+ALTER TABLESPACE tablespace_name
+    OWNER TO new_owner;
+ALTER TABLESPACE tablespace_name
+    SET ( {tablespace_option = value} [, ... ] );
+ALTER TABLESPACE tablespace_name
+    RESET ( tablespace_option [, ... ] );
+ALTER TABLESPACE tablespace_name
+    RESIZE MAXSIZE { UNLIMITED | 'space_size' };
+</synopsis>
+</refsynopsisdiv>
+</refentry>

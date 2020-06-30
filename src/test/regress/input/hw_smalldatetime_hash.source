@@ -1,0 +1,23 @@
+-- problem:
+-- test function compute_hash()
+SET DATESTYLE=ISO;
+CREATE TABLE hw_smalldatetime_hash
+(
+	a00 int,
+	a01 smalldatetime,
+	a02 smalldatetime,
+	a03 smalldatetime,
+	a04 smalldatetime,
+	a05 smalldatetime,
+	a06 smalldatetime,
+	a07 smalldatetime,
+	a08 smalldatetime,
+	a09 smalldatetime,
+	a10 smalldatetime,
+	a11 smalldatetime,
+	a12 smalldatetime,
+	a13 smalldatetime
+);
+COPY hw_smalldatetime_hash FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_datetime.data';
+SELECT a00, a01 FROM hw_smalldatetime_hash ORDER BY 1, 2 LIMIT 10;
+DROP TABLE hw_smalldatetime_hash;

@@ -1,0 +1,174 @@
+--for LLT
+--test gs_dumpall -V&help
+\! @abs_bindir@/gs_dumpall -?
+gs_dumpall extracts a PostgreSQL database cluster into an SQL script file.
+
+Usage:
+  gs_dumpall [OPTION]...
+
+General options:
+  -f, --file=FILENAME                         output file name
+  -v, --verbose                               verbose mode
+  -V, --version                               output version information, then exit
+  --lock-wait-timeout=TIMEOUT                 fail after waiting TIMEOUT for a table lock
+  -?, --help                                  show this help, then exit
+
+Options controlling the output content:
+  -a, --data-only                             dump only the data, not the schema
+  -c, --clean                                 clean (drop) databases before recreating
+  -g, --globals-only                          dump only global objects, no databases
+  -o, --oids                                  include OIDs in dump
+  -O, --no-owner                              skip restoration of object ownership
+  -r, --roles-only                            dump only roles, no databases or tablespaces
+  -s, --schema-only                           dump only the schema, no data
+  -S, --sysadmin=NAME                         system admin user name to use in the dump
+  -t, --tablespaces-only                      dump only tablespaces, no databases or roles
+  -x, --no-privileges                         do not dump privileges (grant/revoke)
+  --column-inserts/--attribute-inserts        dump data as INSERT commands with column names
+  --disable-dollar-quoting                    disable dollar quoting, use SQL standard quoting
+  --disable-triggers                          disable triggers during data-only restore
+  --inserts                                   dump data as INSERT commands, rather than COPY
+  --no-security-labels                        do not dump security label assignments
+  --no-tablespaces                            do not dump tablespace assignments
+  --no-unlogged-table-data                    do not dump unlogged table data
+  --include-alter-table                       dump the table delete column
+  --quote-all-identifiers                     quote all identifiers, even if not key words
+  --dont-overwrite-file                       do not overwrite the existing file
+  --use-set-session-authorization             use SET SESSION AUTHORIZATION commands instead of
+                                              ALTER OWNER commands to set ownership
+  --with-encryption=AES128                    dump data is encrypted using AES128
+  --with-key=KEY                              AES128 encryption key ,must be 16 bytes in length
+  --include-templatedb                        include dumping of template database also 
+  --binary-upgrade                            for use by upgrade utilities only
+  --binary-upgrade-usermap="USER1=USER2"      to be used only by upgrade utility for mapping usernames
+  --non-lock-table                            for use by OM tools utilities only
+  --tablespaces-postfix                       to be used only by upgrade utility for adding the postfix name specified for all the tablespaces
+  --parallel-jobs                             number of parallel jobs to dump databases
+
+Connection options:
+  -h, --host=HOSTNAME                         database server host or socket directory
+  -l, --database=DBNAME                       alternative default database
+  -p, --port=PORT                             database server port number
+  -U, --username=NAME                         connect as specified database user
+  -w, --no-password                           never prompt for password
+  -W, --password=PASSWORD                     the password of specified database user
+  --role=ROLENAME                             do SET ROLE before dump
+  --rolepassword=ROLEPASSWORD                 the password for role
+\! @abs_bindir@/gs_dumpall --help
+gs_dumpall extracts a PostgreSQL database cluster into an SQL script file.
+
+Usage:
+  gs_dumpall [OPTION]...
+
+General options:
+  -f, --file=FILENAME                         output file name
+  -v, --verbose                               verbose mode
+  -V, --version                               output version information, then exit
+  --lock-wait-timeout=TIMEOUT                 fail after waiting TIMEOUT for a table lock
+  -?, --help                                  show this help, then exit
+
+Options controlling the output content:
+  -a, --data-only                             dump only the data, not the schema
+  -c, --clean                                 clean (drop) databases before recreating
+  -g, --globals-only                          dump only global objects, no databases
+  -o, --oids                                  include OIDs in dump
+  -O, --no-owner                              skip restoration of object ownership
+  -r, --roles-only                            dump only roles, no databases or tablespaces
+  -s, --schema-only                           dump only the schema, no data
+  -S, --sysadmin=NAME                         system admin user name to use in the dump
+  -t, --tablespaces-only                      dump only tablespaces, no databases or roles
+  -x, --no-privileges                         do not dump privileges (grant/revoke)
+  --column-inserts/--attribute-inserts        dump data as INSERT commands with column names
+  --disable-dollar-quoting                    disable dollar quoting, use SQL standard quoting
+  --disable-triggers                          disable triggers during data-only restore
+  --inserts                                   dump data as INSERT commands, rather than COPY
+  --no-security-labels                        do not dump security label assignments
+  --no-tablespaces                            do not dump tablespace assignments
+  --no-unlogged-table-data                    do not dump unlogged table data
+  --include-alter-table                       dump the table delete column
+  --quote-all-identifiers                     quote all identifiers, even if not key words
+  --dont-overwrite-file                       do not overwrite the existing file
+  --use-set-session-authorization             use SET SESSION AUTHORIZATION commands instead of
+                                              ALTER OWNER commands to set ownership
+  --with-encryption=AES128                    dump data is encrypted using AES128
+  --with-key=KEY                              AES128 encryption key ,must be 16 bytes in length
+  --include-templatedb                        include dumping of template database also 
+  --binary-upgrade                            for use by upgrade utilities only
+  --binary-upgrade-usermap="USER1=USER2"      to be used only by upgrade utility for mapping usernames
+  --non-lock-table                            for use by OM tools utilities only
+  --tablespaces-postfix                       to be used only by upgrade utility for adding the postfix name specified for all the tablespaces
+  --parallel-jobs                             number of parallel jobs to dump databases
+
+Connection options:
+  -h, --host=HOSTNAME                         database server host or socket directory
+  -l, --database=DBNAME                       alternative default database
+  -p, --port=PORT                             database server port number
+  -U, --username=NAME                         connect as specified database user
+  -w, --no-password                           never prompt for password
+  -W, --password=PASSWORD                     the password of specified database user
+  --role=ROLENAME                             do SET ROLE before dump
+  --rolepassword=ROLEPASSWORD                 the password for role
+\! @abs_bindir@/gs_dumpall -V
+--?gs_dumpall.*
+\! @abs_bindir@/gs_dumpall --version
+--?gs_dumpall.*
+create database test_dumpall;
+create user dumpallzz with sysadmin identified by '1234@abcd';
+create table tbl_dumpall(id int);
+insert into tbl_dumpall values (0),(1),(2),(3);
+--test -v
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/all.sql -l test_dumpall -p @portstring@ -v | grep test_dumpall | grep running
+--?gs_dumpall: running .*
+\! rm @abs_bindir@/all.sql
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/all.sql -l test_dumpall -p @portstring@ --verbose | grep test_dumpall | grep running
+--?gs_dumpall: running .*
+\! rm @abs_bindir@/all.sql
+--test -f
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/all.sql -l test_dumpall -p @portstring@ | grep test_dumpall
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: The total objects number is 337.
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: [100.00%] 337 objects have been dumped.
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: dump database dbname='test_dumpall' successfully
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: total time: .*  ms
+\! rm @abs_bindir@/all.sql
+--test -U&W
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall.sql --database test_dumpall --port @portstring@ --username dumpallzz -W 1234@abcd | grep test_dumpall
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: The total objects number is 337.
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: [100.00%] 337 objects have been dumped.
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: dump database dbname='test_dumpall' successfully
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: total time: .*  ms
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall_1.sql -l test_dumpall -p @portstring@ -U dumpallzz -w
+gs_dumpall: could not connect to database "test_dumpall"
+\! rm @abs_bindir@/test_dumpall.sql
+--test -s&-a
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall_s.sql -l test_dumpall -p @portstring@ -s | grep test_dumpall | grep running
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall_a.sql -l postgres -p @portstring@ -a --column-insert | grep test_dumpall
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: dump database dbname='test_dumpall' successfully
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: total time: .*  ms
+\! rm @abs_bindir@/test_dumpall_s.sql
+\! rm @abs_bindir@/test_dumpall_a.sql
+--test -c
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall_clean.sql -l test_dumpall -p @portstring@ -c | grep test_dumpall
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: The total objects number is 337.
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: [100.00%] 337 objects have been dumped.
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: dump database dbname='test_dumpall' successfully
+--?gs_dump[port='@portstring@'][dbname='test_dumpall'][.*]: total time: .*  ms
+\! rm @abs_bindir@/test_dumpall_clean.sql
+--test -g
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall_g.sql -l test_dumpall -p @portstring@ -g
+--?gs_dumpall[port='@portstring@'][.*]: dumpall operation successful
+--?gs_dumpall[port='@portstring@'][.*]: total time: .*  ms
+--test --dont-overwrite-file
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall_g.sql -l test_dumpall -p @portstring@ --dont-overwrite-file
+Dumpall File specified already exists.
+Perform dumpall again by: 
+1) specifying a different file or 
+2) removing the specified file or 
+3) Not specifying dont-overwrite-file option
+\! rm @abs_bindir@/test_dumpall_g.sql
+--test exclusive
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall_g.sql -l test_dumpall -p @portstring@ -g -r
+gs_dumpall: options -g/--globals-only and -r/--roles-only cannot be used together
+Try "gs_dumpall --help" for more information.
+\! @abs_bindir@/gs_dumpall -f @abs_bindir@/test_dumpall_g.sql -l test_dumpall -p @portstring@ -s -a
+gs_dumpall: options -s/--schema-only and -a/--data-only cannot be used together
+Try "gs_dumpall --help" for more information.

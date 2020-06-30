@@ -1,0 +1,18 @@
+<refentry id="SQL-CREATE_TEXT_SEARCH_CONFIGURATION">
+<refmeta>
+<refentrytitle>CREATE TEXT SEARCH CONFIGURATION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE TEXT SEARCH CONFIGURATION</refname>
+<refpurpose>define a new text search configuration</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE TEXT SEARCH CONFIGURATION name 
+     ( { PARSER = parser_name | COPY = source_config } )
+     [ WITH ( {configuration_option = value} [, ...] )];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

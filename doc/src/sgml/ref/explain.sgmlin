@@ -1,0 +1,31 @@
+<refentry id="SQL-EXPLAIN">
+<refmeta>
+<refentrytitle>EXPLAIN</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>EXPLAIN</refname>
+<refpurpose>show the execution plan of a statement</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+EXPLAIN [ (  option  [, ...] )  ] statement;
+EXPLAIN  { [  { ANALYZE  | ANALYSE  }  ] [ VERBOSE  ]  | PERFORMANCE  } statement;
+
+where option can be:
+ANALYZE [ boolean ] |
+    ANALYSE [ boolean ] |
+    VERBOSE [ boolean ] |
+    COSTS [ boolean ] |
+    CPU [ boolean ] |
+    DETAIL [ boolean ] |
+    NODES [ boolean ] |
+    NUM_NODES [ boolean ] |
+    BUFFERS [ boolean ] |
+    TIMING [ boolean ] |
+    PLAN [ boolean ] |
+    FORMAT { TEXT | XML | JSON | YAML }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

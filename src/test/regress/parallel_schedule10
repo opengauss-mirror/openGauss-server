@@ -1,0 +1,76 @@
+# ----------
+# The first group of parallel tests
+# ----------
+test: boolean char name varchar text int2 int4 int8 oid float4 float8 bit numeric numeric_2 txid uuid money
+
+# Depends on things setup during char, varchar and text
+# Depends on int2, int4, int8, float4, float8
+test: strings numerology
+
+# ----------
+# The second group of parallel tests
+# ----------
+test: point lseg box path polygon circle date time timetz timestamp timestamptz interval abstime reltime tinterval inet macaddr tstypes comments
+
+# ----------
+# Another group of parallel tests
+# geometry depends on point, lseg, box, path, polygon and circle
+# horology depends on interval, timetz, timestamp, timestamptz, reltime and abstime
+# ----------
+test: geometry horology type_sanity
+
+# ----------
+# These four each depend on the previous one(duplicate)
+# ----------
+test: create_function_1
+#test: create_type
+test: create_table
+
+# ----------
+# Load huge amounts of data
+# We should split the data files into single files and then
+# execute two copy tests parallel, to check that copy itself
+# is concurrent safe.(duplicate)
+# ----------
+test: copy copyselect copy_error_log copy_eol
+
+# ----------
+# More groups of parallel tests
+# ----------
+test: create_misc
+# These depend on the above two
+test: create_index
+
+#this case of gin_test is dispatched, for more details u can look for schedule23
+#test: gin_test
+
+# Postgres-XC : Removed this test from the parallel group of tests since it used to give inconsistent plan outputs.
+#test: inherit
+# ----------
+# Another group of parallel tests
+# ----------
+test: create_function_3 constraints vacuum drop_if_exists
+#test:  create_table_like
+
+# ----------
+# sanity_check does a vacuum, affecting the sort order of SELECT *
+# results. So it should not run parallel to other tests.
+# ----------
+test: sanity_check
+
+test: errors subplan_base
+test: subplan_new
+test: select
+test: col_subplan_base_1 col_subplan_new
+test: join
+test: select_into select_distinct subselect_part1 subselect_part2 transactions random btree_index select_distinct_on union  gs_aggregate arrays hash_index 
+test: aggregates
+test: portals_p2 window tsearch temp__6 holdable_cursor col_subplan_base_2
+
+test: alter_table_000 alter_table_001 alter_table_002 alter_table_003
+
+test: with 
+#test: col_subplan_extend
+
+# run alter object to test pg_object
+#test: pg_object_test

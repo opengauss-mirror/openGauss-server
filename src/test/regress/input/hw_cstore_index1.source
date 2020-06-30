@@ -1,0 +1,255 @@
+
+----
+---case 4: different data type with index
+----
+create table row_index_tbl(
+  id1 int1
+ ,id2 int2
+ ,id4 int4
+ ,id8 int8
+ ,int1 int
+ ,bint bigint
+ ,f1   float
+ ,flag char
+ ,name1 varchar(20)
+ ,name2 varchar2(20)
+ ,name3 nvarchar2(20)
+ ,name4 text
+ ,name5 bytea
+ ,time1 date
+ ,time2 timetz
+ ,time3 time
+ ,num1 float8
+ ,num2 decimal
+ ,serial1 int 
+ ,interval1 interval
+ ,interval2 tinterval) ;
+
+insert into row_index_tbl values(10,400,2000,40000,1,111111,1.1,'a','aa','bb','cc','dd','ff','1996-02-12','1984-2-6 01:00:30+8','02:05:36',30.12,0.03,2147483647,'2 day 13:34:56','["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]');
+insert into row_index_tbl values(20,300,3000,10000,2,222222,2.2,'b','ee','cc','dd','aa','hh','1998-03-24','1986-2-6 03:00:30+8','04:36:25',20.15,0.06,-2147483647,'1 day 18:34:56','["May 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]');
+insert into row_index_tbl values(30,200,4000,30000,3,333333,3.3,'c','cc','bb','aa','ee','gg','1997-05-26','1987-2-6 08:00:30+8','06:36:18',34.36,0.07,2136483647,'18 day 14:34:56','["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]');
+insert into row_index_tbl values(40,100,1000,20000,4,444444,4.4,'d','cc','bb','aa','ee','dd','1992-01-30','1989-2-6 06:00:30+8','08:21:56',25.12,0.05,-2136483647,'7 day 16:34:56','["epoch" "Mon May 1 00:30:30 1995"]');
+
+create table cstore_index_tbl(
+  id1 int1
+ ,id2 int2
+ ,id4 int4
+ ,id8 int8
+ ,int1 int
+ ,bint bigint
+ ,f1   float
+ ,flag char
+ ,name1 varchar(20)
+ ,name2 varchar2(20)
+ ,name3 nvarchar2(20)
+ ,name4 text
+ ,name5 bytea
+ ,time1 date
+ ,time2 timetz
+ ,time3 time
+ ,num1 float8
+ ,num2 decimal
+ ,serial1 int
+ ,interval1 interval
+ ,interval2 tinterval)with(orientation=column) ;
+
+insert into cstore_index_tbl select * from row_index_tbl;
+select ctid from cstore_index_tbl order by 1;
+
+create index idx_int1 on cstore_index_tbl(id1);
+create index idx_int2 on cstore_index_tbl(id2);
+create index idx_int4 on cstore_index_tbl(id4);
+create index idx_int8 on cstore_index_tbl(id8);
+create index idx_int on cstore_index_tbl(int1);
+create index idx_bigint on cstore_index_tbl(bint);
+create index idx_float on cstore_index_tbl(flag);
+create index idx_varchar on cstore_index_tbl(name1);
+create index idx_varchar2 on cstore_index_tbl(name2);
+create index idx_nvarchar2 on cstore_index_tbl(name3);
+create index idx_text on cstore_index_tbl(name4);
+create index idx_date on cstore_index_tbl(time1);
+create index idx_timetz on cstore_index_tbl(time2);
+create index idx_time on cstore_index_tbl(time3);
+create index idx_float8 on cstore_index_tbl(num1);
+create index idx_decimal on cstore_index_tbl(num2);
+create index idx_serial on cstore_index_tbl(serial1);
+create index idx_interval on cstore_index_tbl(interval1);
+create index idx_tinterval on cstore_index_tbl(interval2);
+
+create index idx_id4_name1 on cstore_index_tbl(id4,name1);
+create index idx_id4_name2 on cstore_index_tbl(id4,name2);
+create index idx_id4_name3 on cstore_index_tbl(id4,name3);
+create index idx_id4_name4 on cstore_index_tbl(id4,name4);
+create index idx_bint_flag on cstore_index_tbl(bint,flag);
+create index idx_int1_time on cstore_index_tbl(int1,time3);
+create index idx_time1_name2 on cstore_index_tbl(time1,name2);
+create index idx_id4_time2 on cstore_index_tbl(id4,time2);
+create index idx_num1_time2 on cstore_index_tbl(num1,time2);
+create index idx_id4_num2 on cstore_index_tbl(id4,num2);
+create index idx_name1_name2 on cstore_index_tbl(name1,name2);
+create index idx_time1_interval1 on cstore_index_tbl(time1,interval1);
+
+set enable_seqscan=off;
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 > 100;
+select * from cstore_index_tbl where id2 > 100 order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000;
+select * from cstore_index_tbl where id4 > 1000 order by id4;
+explain (verbose on, costs off) select * from cstore_index_tbl where id8 > 10000;
+select * from cstore_index_tbl where id8 > 10000 order by id8;
+explain (verbose on, costs off) select * from cstore_index_tbl where name1 > 'aa';
+select * from cstore_index_tbl where name1 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where name2 > 'aa';
+select * from cstore_index_tbl where name2 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where name3 > 'aa';
+select * from cstore_index_tbl where name3 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where name4 > 'aa';
+select * from cstore_index_tbl where name4 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where time1 > '1992-01-30';
+select * from cstore_index_tbl where time1 > '1992-01-30' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where time2 > '1984-2-6 01:00:30+8';
+select * from cstore_index_tbl where time2 > '1984-2-6 01:00:30+8' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where num1 > 20.20;
+select * from cstore_index_tbl where num1 > 20.20 order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where num2 > 0.05;
+select * from cstore_index_tbl where num2 > 0.05 order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where serial1 > -2136483647;
+select * from cstore_index_tbl where serial1 > -2136483647 order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where interval1 > '1 day 18:34:56';
+select * from cstore_index_tbl where interval1 > '1 day 18:34:56' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where interval2 > '["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]';
+select * from cstore_index_tbl where interval2 > '["Sep 4, 1983 23:59:12" "Oct 4, 1983 23:59:12"]' order by id2;
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 > 100 and name1 > 'aa';
+select * from cstore_index_tbl where id2 > 100 and name1 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000 and name2 > 'aa';
+select * from cstore_index_tbl where id4 > 1000 and name2 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where num1 > 20.5 and name3 > 'aa';
+select * from cstore_index_tbl where num1 > 20.5 and name3 > 'aa' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where id4 > 1000 and time1 > '1992-01-30';
+select * from cstore_index_tbl where id4 > 1000 and time1 > '1992-01-30' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where flag > 'a' and time3 < '08:21:53' order by id2;
+select * from cstore_index_tbl where flag > 'a' and time3 < '08:21:53' order by id2;
+
+explain (verbose on, costs off) select * from cstore_index_tbl where name1 > 'aa' and name2 > 'bb';
+select * from cstore_index_tbl where name1 > 'aa' and name2 > 'bb' order by id2;
+explain (verbose on, costs off) select * from cstore_index_tbl where time1 > '1996-02-12' and interval1 < '2 day 13:34:56';
+select * from cstore_index_tbl where time1 > '1996-02-12' and interval1 < '2 day 13:34:56' order by id2;
+
+----
+---case 5: mix indexed and un-indexed(use the table in case 6)
+----
+drop index idx_int1;
+drop index idx_int4;
+drop index idx_int8;
+drop index idx_int;
+drop index idx_bigint;
+drop index idx_float;
+drop index idx_varchar;
+drop index idx_varchar2;
+drop index idx_nvarchar2;
+drop index idx_text;
+drop index idx_date;
+drop index idx_timetz;
+drop index idx_time;
+drop index idx_float8;
+drop index idx_decimal;
+drop index idx_serial;
+drop index idx_interval;
+drop index idx_tinterval;
+drop index idx_id4_name1;
+drop index idx_id4_name2;
+drop index idx_id4_name3;
+drop index idx_id4_name4;
+drop index idx_time1_name2;
+drop index idx_id4_time2;
+drop index idx_num1_time2;
+drop index idx_id4_num2;
+drop index idx_name1_name2;
+drop index idx_time1_interval1;
+drop index idx_bint_flag;
+
+set enable_seqscan=off;
+
+explain (verbose on, costs off) select * from cstore_index_tbl where id2 >100  and name1 < 'dd' and num1=30.12;
+select * from cstore_index_tbl where id2 >100  and name1 < 'dd' and num1=30.12;
+drop index idx_int2;
+drop table row_index_tbl;
+drop table cstore_index_tbl;
+
+
+----
+--- case 7: two indexes with the same column
+----
+create table row_index_tbl(c1 int,c2 int,c3 int) ;
+
+insert into row_index_tbl values(0,1,2);
+insert into row_index_tbl values(3,4,5);
+insert into row_index_tbl values(6,7,8);
+insert into row_index_tbl values(9,10,11);
+
+create table cstore_index_tbl(c1 int,c2 int,c3 int) with (orientation = column) ;
+insert into cstore_index_tbl select * from row_index_tbl;
+
+create index idx_c2 on cstore_index_tbl(c2);
+
+explain (verbose on, costs off) SELECT c2  FROM cstore_index_tbl WHERE c2 > 2 and  c2 < 9;
+SELECT c2  FROM cstore_index_tbl WHERE c2 > 2 and  c2 < 9 order by c2;
+drop table row_index_tbl;
+drop table cstore_index_tbl;
+
+-------
+--- case 8: index scan with none partition hit
+-------
+CREATE TABLE partition_none (
+    a1 character varying(1000),
+    a2 integer,
+    a3 character varying(1000),
+    a4 integer,
+    a5 character varying(1000),
+    a6 integer,
+    a7 character varying(1000),
+    a8 integer,
+    a9 character varying(1000),
+    a10 integer
+)
+WITH (orientation=column)
+
+PARTITION BY RANGE (a2)
+(
+    PARTITION p1 VALUES LESS THAN (1),
+    PARTITION p50001 VALUES LESS THAN (50001),
+    PARTITION p100001 VALUES LESS THAN (100001),
+    PARTITION p150001 VALUES LESS THAN (150001),
+    PARTITION p200001 VALUES LESS THAN (200001),
+    PARTITION p250001 VALUES LESS THAN (250001));
+create index aii on partition_none(a9) local;
+SELECT a1, a9 FROM /*TaRgET*/ partition_none  WHERE a5='ata l' AND 6793839=a2 AND a2=6159730 AND a9='da' ORDER BY a1, a9;
+drop table partition_none;
+
+----
+--- case 9: index scan with partition number be zero
+----
+CREATE TABLE COMPRESS_TABLE_INDEX(
+c_int_1 BIGINT,
+c_char_1 CHAR(50),
+c_int_2 BIGINT,
+c_dec_1 DECIMAL(10,4),
+c_char_2 CHAR(50),
+c_text_1 text,
+c_date_1 DATE,
+c_date_2 DATE,
+c_text_2 text,
+c_dec_2 DECIMAL(10,4)) with(orientation=column)
+PARTITION BY RANGE(c_date_1)
+(
+    PARTITION COMPRESS_TABLE_INTEVAL_1  VALUES LESS THAN('2012-8-23')
+);
+
+CREATE INDEX INDEX_COMPRESS_1 ON COMPRESS_TABLE_INDEX(C_INT_2) LOCAL;
+CREATE INDEX INDEX_COMPRESS_2 ON COMPRESS_TABLE_INDEX(C_DATE_1) LOCAL;
+CREATE INDEX INDEX_COMPRESS_3 ON COMPRESS_TABLE_INDEX(C_INT_1) LOCAL;
+
+SELECT COUNT(*) FROM COMPRESS_TABLE_INDEX WHERE C_DATE_1>='2012-09-01' AND C_DATE_1<'2012-9-20';
+drop table COMPRESS_TABLE_INDEX;
+

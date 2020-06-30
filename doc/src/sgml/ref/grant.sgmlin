@@ -1,0 +1,79 @@
+<refentry id="SQL-GRANT">
+<refmeta>
+<refentrytitle>GRANT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>GRANT</refname>
+<refpurpose>define access privileges</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES }
+    [, ...] | ALL [ PRIVILEGES ] }
+    ON { [ TABLE ] table_name [, ...]
+         | ALL TABLES IN SCHEMA schema_name [, ...] }
+    TO { [ GROUP ] role_name | PUBLIC } [, ...] 
+    [ WITH GRANT OPTION ];
+GRANT { {{ SELECT | INSERT | UPDATE | REFERENCES } ( column_name [, ...] )}
+    [, ...] | ALL [ PRIVILEGES ] ( column_name [, ...] ) }
+    ON [ TABLE ] table_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { { CREATE | CONNECT | TEMPORARY | TEMP } [, ...] | ALL [ PRIVILEGES ] }
+    ON DATABASE database_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON DOMAIN domain_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON FOREIGN DATA WRAPPER fdw_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON FOREIGN SERVER server_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { EXECUTE | ALL [ PRIVILEGES ] }
+    ON { FUNCTION {function_name ( [ {[ argmode ] [ arg_name ] arg_type} [, ...] ] )} [, ...]
+         | ALL FUNCTIONS IN SCHEMA schema_name [, ...] }
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON LANGUAGE lang_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { { SELECT | UPDATE } [, ...] | ALL [ PRIVILEGES ] }
+    ON LARGE OBJECT loid [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { { CREATE | USAGE } [, ...] | ALL [ PRIVILEGES ] }
+    ON SCHEMA schema_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { CREATE | ALL [ PRIVILEGES ] }
+    ON TABLESPACE tablespace_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { USAGE | ALL [ PRIVILEGES ] }
+    ON TYPE type_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { CREATE | USAGE | COMPUTE | ALL [ PRIVILEGES ] }
+    ON NODE GROUP group_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT role_name [, ...]
+   TO role_name [, ...]
+   [ WITH ADMIN OPTION ];
+GRANT ALL { PRIVILEGES | PRIVILEGE }
+   TO role_name;
+GRANT {USAGE | ALL [PRIVILEGES]}
+   ON DATA SOURCE src_name [, ...]
+   TO {[GROUP] role_name | PUBLIC]} [, ...] [WITH GRANT OPTION];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,16 @@
+CREATE FOREIGN TABLE table_with_comments (id SERIAL, num INTEGER);
+NOTICE:  CREATE FOREIGN TABLE will create implicit sequence "table_with_comments_id_seq" for serial column "table_with_comments.id"
+COMMENT ON FOREIGN TABLE table_with_comments IS 'How can I view this comments?';
+COMMENT ON COLUMN table_with_comments.id IS 'This is the table''s ID';
+COMMENT ON COLUMN table_with_comments.num IS 'This is the table''s number';
+\d+ table_with_comments
+                                                       Foreign table "public.table_with_comments"
+ Column |  Type   |                            Modifiers                             | FDW Options | Storage | Stats target |        Description         
+--------+---------+------------------------------------------------------------------+-------------+---------+--------------+----------------------------
+ id     | integer | not null default nextval('table_with_comments_id_seq'::regclass) |             | plain   |              | This is the table's ID
+ num    | integer |                                                                  |             | plain   |              | This is the table's number
+Server: mot_server
+FDW permition: read/write
+Has OIDs: no
+
+DROP FOREIGN TABLE table_with_comments;

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" ?>
+
+<root>
+	<dn>
+	    <PARAM KEY='comm_tcp_mode' VALUE='on' />
+	    <PARAM KEY='comm_quota_size' VALUE='1024kB' />
+	    <!-- Do not set max_process_memory in dummy datanodes -->
+	    <PARAM KEY='log_line_prefix' VALUE='%x %a %m %u %d %h %p %S' />
+	    <PARAM KEY='enable_wdr_snapshot' VALUE='on' />
+	    <PARAM KEY='use_workload_manager' VALUE='off' />
+	    <PARAM KEY='bypass_workload_manager' VALUE='on' />
+	    <PARAM KEY='enable_dynamic_workload' VALUE='off' />
+	    <PARAM KEY='enable_gtm_free' VALUE='on' />
+	    <PARAM KEY='checkpoint_segments' VALUE='1024' />
+	    <PARAM KEY='wal_buffers' VALUE='1GB' />
+	    <PARAM KEY='xloginsert_locks' VALUE='16' />
+	    <PARAM KEY='max_process_memory' VALUE='80GB' />
+	    <PARAM KEY='shared_buffers' VALUE='40GB' />
+	    <PARAM KEY='max_prepared_transactions' VALUE='2048' />
+	    <PARAM KEY='work_mem' VALUE='1GB' />
+	    <PARAM KEY='maintenance_work_mem' VALUE='512MB' />
+	    <PARAM KEY='standby_shared_buffers_fraction' VALUE='1' />
+	    <PARAM KEY='max_files_per_process' VALUE='1024' />
+	    <PARAM KEY='recovery_max_workers' VALUE='4' />
+	    <PARAM KEY='enable_data_replicate' VALUE='off' />
+	    <PARAM KEY='recovery_time_target' VALUE='60' />
+	    <PARAM KEY='ssl' VALUE='off' />
+	    <PARAM KEY='ssl_renegotiation_limit' VALUE='0' />
+	    <PARAM KEY='session_timeout' VALUE='30min' />
+	    <PARAM KEY='password_effect_time' VALUE='0' />
+	    <PARAM KEY='password_encryption_type' VALUE='2' />
+	    <PARAM KEY='enable_stream_operator' VALUE='off' />
+	    <PARAM KEY='max_connections' VALUE='4096' />
+	    <PARAM KEY='enable_thread_pool' VALUE='on' />
+	    <PARAM KEY='thread_pool_attr' VALUE='1024,2,(nobind)' />
+	    <PARAM KEY='log_min_duration_statement' VALUE='60s' />
+	    <PARAM KEY='vacuum_cost_delay' VALUE='20ms' />
+	</dn>
+</root>

@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_checkperf is a utility to check the Gauss200 cluster
+#               performance and SSD performance.
+#
+# PMK: database performance collecting and displaying,which only can be run with
+# cluster user.it depends on many PL/SQL procedures and tables/views(installed
+# in pmk schema of postgres database).pmk supports display streamline information
+# and detailed information.
+#
+# SSD: SSD disk performance checking,
+# which only can be run with root permission user.
+# it depends on binary of SSD disk.
+#############################################################################
+
+import subprocess
+import os
+import sys
+import pwd
+import grp
+import time
+import threading
+import glob
+import shutil
+
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.DbClusterInfo import dbClusterInfo
+from gspylib.threads.SshTool import SshTool
+from gspylib.common.Common import ClusterCommand, DefaultValue
+from gspylib.common.OMCommand import OMCommand
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParameterParsecheck import Parameter
+from gspylib.os.gsfile import g_file
+from gspylib.os.gsOSlib import g_OSlib
+from impl.checkperf.OLAP.CheckperfImplOLAP import CheckperfImplOLAP
+from multiprocessing.dummy import Pool as ThreadPool
+
+#############################################################################
+# Global variables
+#   g_opts: global option
+#   g_logger: global logger
+#   g_sshTool: global ssh interface
+#############################################################################
+g_opts = None
+g_logger = None
+g_sshTool = None
+
+
+class CmdOptions():
+    """
+    init the command options
+    """
+
+    def __init__(self):
+        # initialize variable
+        self.show_detail = False
+        self.outFile = ""
+        self.outFile_tmp = ""
+        self.logFile = ""
+        self.localLog = ""
+        self.user = ""
+        self.mpprcFile = ""
+        self.checkItem = []
+        self.databaseSizeFile = ""
+        self.databaseSize = 0
+
+
+class Checkperf():
+    """
+    
+    """
+
+    def __init__(self):
+        self.clusterInfo = dbClusterInfo()
+        self.DWS_mode = False
+
+    def usage(self):
+        """
+gs_checkperf is a utility to check the cluster performance and SSD performance.
+
+Usage:
+  gs_checkperf -? | --help
+  gs_checkperf -V | --version
+  gs_checkperf [-U USER] [-o OUTPUT] [-i ITEM] [--detail] [-l LOGFILE]
+
+General options:
+  -U                                Cluster user.
+  -o                                Save the result to the specified file.
+  -i                                PMK or SSD performance check items.
+                                    Example: -i PMK -i SSD.
+  --detail                          Show detailed information about the PMK check.
+  -l                                Path of log files.
+  -?, --help                        Show help information for this utility,
+                                    and exit the command line mode.
+  -V, --version                     Show version information. 
+        """
+
+        print(self.usage.__doc__)
+
+    def parseItem(self, value):
+        """
+        function: parse items by value
+        input : value
+        output: NA
+        """
+        # parse the parameter '-i' value
+        items = value
+        for val in items:
+            # remove space
+            val = val.strip()
+            # invert val into uppercase
+            item = val.upper()
+            if item in ("PMK", "SSD"):
+                if item not in g_opts.checkItem:
+                    g_opts.checkItem.append(item)
+            else:
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"]
+                                       % "i" + " Error: %s." % value)
+
+    def parseCommandLine(self):
+        """
+        function: do parse command line
+        get user input and save to variable
+        input : NA
+        output: NA
+        """
+        global g_opts
+        g_opts = CmdOptions()
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("checkperf")
+        if ("helpFlag" in ParaDict.keys()):
+            self.usage()
+            sys.exit(0)
+        # get parameter value
+        if ("logFile" in list(ParaDict.keys())):
+            g_opts.logFile = ParaDict.get("logFile")
+        if ("user" in list(ParaDict.keys())):
+            g_opts.user = ParaDict.get("user")
+        if ("outFile" in list(ParaDict.keys())):
+            g_opts.outFile = ParaDict.get("outFile")
+        if ("itemstr" in list(ParaDict.keys())):
+            self.parseItem(ParaDict.get("itemstr"))
+        if ("show_detail" in list(ParaDict.keys())):
+            g_opts.show_detail = ParaDict.get("show_detail")
+
+    def checkParameter(self):
+        """
+        function: Check parameter from command line
+        input : NA
+        output: NA
+        """
+        # check outputFile if the parameter '-o' value is not none
+        if (g_opts.outFile != ''):
+            DefaultValue.checkOutputFile(g_opts.outFile)
+        # check mpprc file path
+        g_opts.mpprcFile = DefaultValue.getMpprcFile()
+
+        # cannot check SSD by cluster user,
+        # and cannot check PMK by root permission user.
+        if (os.getuid() != 0):
+            # check if SSD exists
+            if ('SSD' in g_opts.checkItem):
+                GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50109"])
+        else:
+            if ("PMK" in g_opts.checkItem):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50011"]
+                                       % ("-i", "PMK") +
+                                       " Only cluster user can check the PMK.")
+
+        # default check PMK in cluster user or check SSD in root Permission user
+        # if the parameter '-i' value is none
+        if (not g_opts.checkItem):
+            if (os.getuid() == 0):
+                g_opts.checkItem.append('SSD')
+            else:
+                g_opts.checkItem.append('PMK')
+
+        # check user is the right user
+        if (g_opts.user == ""):
+            # the parameter '-U' is required when
+            # the script is executed by root user
+            if (os.getuid() == 0):
+                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                       % "U" +
+                                       " for a user with the root permission.")
+            else:
+                # get user
+                g_opts.user = pwd.getpwuid(os.getuid()).pw_name
+
+        # check if user exists and if is the right user
+        DefaultValue.checkUser(g_opts.user)
+
+        # Get the temporary directory from PGHOST
+        tmpDir = DefaultValue.getTmpDirFromEnv(g_opts.user)
+
+        # check if tmpDir exists
+        if (not os.path.exists(tmpDir)):
+            raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"]
+                            % ("temporary directory[" + tmpDir + "]"))
+
+        # check log file
+        if (g_opts.logFile == ""):
+            g_opts.logFile = DefaultValue.getOMLogPath(
+                DefaultValue.GS_CHECKPERF_LOG_FILE, g_opts.user, "")
+
+        # PMK is required if the parameter '--detail' exists
+        if (g_opts.show_detail and "PMK" not in g_opts.checkItem):
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_500["GAUSS_50002"] % "-detail" + ".")
+
+    def initGlobal(self):
+        """
+        function: Init logger
+        input : NA
+        output: NA
+        """
+        # state global variable
+        try:
+            global g_logger
+            global g_sshTool
+            # initialize log
+            g_logger = GaussLog(g_opts.logFile, "gs_checkperf")
+            # modify the file's owner
+            if (os.getuid() == 0):
+                g_file.changeOwner(g_opts.user, g_logger.logFile)
+            # Init cluster from static configuration file
+            self.clusterInfo.initFromStaticConfig(g_opts.user)
+            # get directory name
+            dirName = os.path.dirname(g_opts.logFile)
+            g_opts.localLog = os.path.join(dirName,
+                                           DefaultValue.LOCAL_LOG_FILE)
+            # check if appPath exists
+            if (not os.path.exists(self.clusterInfo.appPath)):
+                raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"]
+                                % ("local install path[" +
+                                   self.clusterInfo.appPath + "]"))
+            # initialize sshTool
+            g_sshTool = SshTool(self.clusterInfo.getClusterNodeNames(),
+                                g_logger.logFile,
+                                DefaultValue.TIMEOUT_PSSH_CHECK)
+
+            binPath = os.path.join(self.clusterInfo.appPath, "bin")
+            g_opts.databaseSizeFile = os.path.join(binPath,
+                                                   DefaultValue.DB_SIZE_FILE)
+        except Exception as e:
+            g_logger.logExit(str(e))
+
+    def checkUserInfo(self):
+        """
+        function: Check user information
+        input : NA
+        output: NA
+        """
+        # get user and group
+        (user, group) = g_file.getfileUser(self.clusterInfo.appPath)
+        # check if user right
+        if (user != g_opts.user):
+            g_logger.logExit(
+                ErrorCode.GAUSS_503["GAUSS_50304"] % (g_opts.user, user))
+
+
+if __name__ == '__main__':
+    # main function
+    try:
+        checkperf = Checkperf()
+        # do parse command line
+        checkperf.parseCommandLine()
+        # Check parameter from command line
+        checkperf.checkParameter()
+        # Init logger
+        checkperf.initGlobal()
+    except Exception as e:
+        GaussLog.exitWithError(str(e))
+
+    try:
+        # Check user information
+        checkperf.checkUserInfo()
+
+        impl = CheckperfImplOLAP()
+        impl.opts = g_opts
+        impl.logger = g_logger
+        impl.clusterInfo = checkperf.clusterInfo
+        impl.sshTool = g_sshTool
+        impl.DWS_mode = checkperf.DWS_mode
+        # Perform the whole extand process
+        impl.run()
+    except Exception as e:
+        g_logger.error(str(e))
+        sys.exit(1)
+
+    sys.exit(0)

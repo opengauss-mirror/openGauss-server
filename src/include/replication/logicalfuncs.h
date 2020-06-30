@@ -1,0 +1,30 @@
+/* ---------------------------------------------------------------------------------------
+ * 
+ * logicalfuncs.h
+ *         PostgreSQL WAL to logical transformation support functions
+ * 
+ * Copyright (c) 2012-2014, PostgreSQL Global Development Group
+ * 
+ * 
+ * IDENTIFICATION
+ *        src/include/replication/logicalfuncs.h
+ *
+ * ---------------------------------------------------------------------------------------
+ */
+#ifndef LOGICALFUNCS_H
+#define LOGICALFUNCS_H
+
+#include "replication/logical.h"
+
+extern int logical_read_local_xlog_page(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen,
+    XLogRecPtr targetRecPtr, char* cur_page, TimeLineID* pageTLI);
+
+extern bool AssignLsn(XLogRecPtr* lsn_ptr, const char* input);
+extern Datum pg_logical_slot_get_changes(PG_FUNCTION_ARGS);
+extern Datum pg_logical_slot_get_binary_changes(PG_FUNCTION_ARGS);
+extern Datum pg_logical_slot_peek_changes(PG_FUNCTION_ARGS);
+extern Datum pg_logical_slot_peek_binary_changes(PG_FUNCTION_ARGS);
+extern Datum pg_logical_peek_changes(PG_FUNCTION_ARGS);
+
+#endif
+

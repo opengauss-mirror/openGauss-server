@@ -1,0 +1,16 @@
+<refentry id="SQL-SET_CONSTRAINTS">
+<refmeta>
+<refentrytitle>SET CONSTRAINTS</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SET CONSTRAINTS</refname>
+<refpurpose>set constraint check timing for the current transaction</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE };
+</synopsis>
+</refsynopsisdiv>
+</refentry>

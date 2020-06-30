@@ -1,0 +1,20 @@
+<refentry id="SQL-CREATE_NODE_GROUP">
+<refmeta>
+<refentrytitle>CREATE NODE GROUP</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE NODE GROUP</refname>
+<refpurpose>create a group of cluster nodes</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE NODE GROUP groupname
+    WITH ( nodename [, ... ] )
+    [BUCKETS (0,1,2,...)]
+    [VCGROUP]
+    [DISTRIBUTE FROM src_group_name];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,32 @@
+-- problem:
+-- raw datatype hash test
+CREATE TABLE hw_rawtype_hash
+(
+	a raw,
+	b int,
+	c int
+);
+INSERT INTO hw_rawtype_hash VALUES('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1);
+INSERT INTO hw_rawtype_hash VALUES('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 2, 2);
+INSERT INTO hw_rawtype_hash VALUES('ccccccccccccccccccccccccccccccccc', 3, 3);
+INSERT INTO hw_rawtype_hash VALUES('ddddddddddddddddddddddddddddddddd', 4, 4);
+INSERT INTO hw_rawtype_hash VALUES('eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5, 5);
+INSERT INTO hw_rawtype_hash VALUES('fffffffffffffffffffffffffffffffff', 6, 6);
+INSERT INTO hw_rawtype_hash VALUES('222222222222222222222222222222222', 7, 7);
+INSERT INTO hw_rawtype_hash VALUES('333333333333333333333333333333333', 8, 8);
+INSERT INTO hw_rawtype_hash VALUES('111111111111111111111111111111111', 9, 9);
+SELECT * FROM hw_rawtype_hash ORDER BY 2, 3, 1;
+                 a                  | b | c 
+------------------------------------+---+---
+ 0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA | 1 | 1
+ 0BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB | 2 | 2
+ 0CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC | 3 | 3
+ 0DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD | 4 | 4
+ 0EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE | 5 | 5
+ 0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF | 6 | 6
+ 0222222222222222222222222222222222 | 7 | 7
+ 0333333333333333333333333333333333 | 8 | 8
+ 0111111111111111111111111111111111 | 9 | 9
+(9 rows)
+
+DROP TABLE hw_rawtype_hash;

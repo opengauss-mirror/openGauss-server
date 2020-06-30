@@ -1,0 +1,7 @@
+--for LLT
+--test pg_resetxlog -V&help
+\! @abs_bindir@/pg_resetxlog -?
+\! @abs_bindir@/pg_resetxlog --help
+\! @abs_bindir@/pg_resetxlog -V
+\! @abs_bindir@/pg_resetxlog --version
+

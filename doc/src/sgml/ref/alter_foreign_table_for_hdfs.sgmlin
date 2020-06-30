@@ -1,0 +1,30 @@
+<refentry id="SQL-ALTER_FOREIGN_TABLE_FOR_HDFS">
+<refmeta>
+<refentrytitle>ALTER FOREIGN TABLE FOR HDFS</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER FOREIGN TABLE FOR HDFS</refname>
+<refpurpose>change the definition of a foreign table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    OWNER TO new_owner;
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    action [, ... ];
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    ADD [CONSTRAINT constraint_name]
+{PRIMARY KEY | UNIQUE} (column_name)
+[NOT ENFORCED [ENABLE QUERY OPTIMIZATION | DISABLE QUERY OPTIMIZATION] | ENFORCED];
+ALTER FOREIGN TABLE [ IF EXISTS ] tablename
+    DROP CONSTRAINT constraint_name ;
+
+where action can be:
+ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type
+|    ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+|    ALTER [ COLUMN ] column_name SET STATISTICS [PERCENT] integer
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,31 @@
+-- create type: ok
+CREATE TYPE person_type AS (age int, name text);
+--  create table: fail
+CREATE TABLE persons OF person_type
+PARTITION BY RANGE (AGE)
+(
+	PARTITION persons_p1 VALUES LESS THAN (10),
+	PARTITION persons_p2 VALUES LESS THAN (20),
+	PARTITION persons_p3 VALUES LESS THAN (30)
+);
+ERROR:  syntax error at or near "PARTITION BY"
+LINE 2: PARTITION BY RANGE (AGE)
+        ^
+-- create table: ok
+CREATE TABLE persons_test OF person_type;
+-- create table 
+CREATE TABLE persons (age int, name text)
+PARTITION BY RANGE (age)
+(
+	PARTITION persons_p1 VALUES LESS THAN (10),
+	PARTITION persons_p2 VALUES LESS THAN (20),
+	PARTITION persons_p3 VALUES LESS THAN (30)
+);
+alter table persons of person_type;
+ERROR:  relation "persons" is a partitioned table
+DETAIL:  can not add of_type for partitioned table
+alter table persons not of;
+ERROR:  "persons" is not a typed table
+DROP TYPE person_type CASCADE;
+NOTICE:  drop cascades to table persons_test
+DROP TABLE persons;

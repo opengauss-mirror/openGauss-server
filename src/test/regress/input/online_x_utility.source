@@ -1,0 +1,321 @@
+/*
+ * Checkpoint 1
+ * basic
+ */
+
+create table t1(x int, y int) ;  
+insert into t1 select v, v from generate_series(1,40) as v;
+
+-- index
+create index i1 on t1(x);
+
+alter table t1 set (append_mode=off);
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+-- cluster
+cluster t1 using i1;
+alter table t1 set (append_mode=off);
+cluster t1 using i1;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+
+-- reindex
+reindex index i1;
+
+drop index i1;
+
+-- view
+create view v1 as select * from t1 where x%2=0;
+
+drop view v1;
+
+-- analyze  succeed
+analyze t1;
+
+-- vacuum
+vacuum t1;
+
+vacuum full t1;
+alter table t1 set (append_mode=off);
+vacuum full t1;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+
+-- sequence
+
+create sequence s1
+	increment by 1
+	minvalue 1 maxvalue 30
+	start 1
+	cache 5
+	owned by t1.x;
+
+
+-- cursor
+CURSOR cursor1 for SELECT * FROM t1;
+
+alter table t1 set (append_mode=off);
+
+drop table t1;
+
+
+/*
+ * Checkpoint 2
+ * alter table
+ */
+
+create table a(x int, y int , z int);
+insert into a select v, v, v from generate_series(1, 10) as v;
+select * from a order by 1;
+
+alter table a set (append_mode=on,rel_cn_oid=16391);
+
+-- add column
+/* alter table a add column zz int;
+alter table a set (append_mode=off);
+alter table a add column zz int;
+*/
+update a set zz = 1;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+-- set not null
+alter table a alter column zz set not null;
+alter table a set (append_mode=off);
+alter table a alter column zz set not null;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+-- drop not null
+alter table a alter column zz drop not null;
+alter table a set (append_mode=off);
+alter table a alter column zz drop not null;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+-- set default
+alter table a alter column zz set default 10;
+alter table a set (append_mode=off);
+alter table a alter column zz set default 10;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+-- set statistics
+alter table a alter column zz set statistics -1;
+alter table a set (append_mode=off);
+alter table a alter column zz set statistics -1;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+
+-- set options
+alter table a alter column x set(attribute_option=n_distinct);
+
+-- reset options
+alter table a alter column zz reset(attribute_option);
+
+-- set rel options
+alter table a set(compression=no);
+
+-- reset rel options
+alter table a reset(compression=no);
+
+-- set storage
+alter table a alter column zz set storage plain;
+
+-- alter column type
+alter table a alter column zz type varchar(20);
+alter table a set (append_mode=off);
+alter table a alter column zz type varchar(20);
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+-- rename column
+alter table a rename column zz to zzz;
+alter table a set (append_mode=off);
+alter table a rename column zz to zzz;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+-- drop column
+alter table a drop column zzz;
+alter table a set (append_mode=off);
+alter table a drop column zzz;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+
+-- add oids
+alter table a set with oids;
+alter table a set (append_mode=off);
+alter table a set with oids;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+
+-- drop oids
+alter table a set without oids;
+alter table a set (append_mode=off);
+alter table a set with oids;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+
+-- cluster on
+create unique index i1 on a(x);
+alter table a cluster on i1;
+alter table a set (append_mode=off);
+alter table a cluster on i1;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+
+-- drop cluster
+alter table a set without cluster;
+alter table a set (append_mode=off);
+alter table a set without cluster;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+
+-- add constraint
+alter table a add constraint a_key primary key(x);
+alter table a set (append_mode=off);
+alter table a add constraint a_key primary key(x);
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+-- drop constraint
+alter table a drop constraint a_key;
+alter table a set (append_mode=off);
+alter table a drop constraint a_key;
+alter table a set (append_mode=on,rel_cn_oid=16391);
+\d+ a;
+
+alter table a set (append_mode=on,rel_cn_oid=16391);
+-- validate constraint
+alter table a validate constraint a_key;
+
+-- add of
+alter table a of int;
+-- drop of
+alter table a not of;
+
+-- change owner
+alter table a owner to xue;
+
+-- set compress
+alter table a set compress;
+
+alter table a  ;  
+
+-- inherit
+alter table a inherit in1;
+alter table a no inherit in1;
+
+-- sub cluster
+alter table a to group ng1;
+
+-- trigger
+alter table a disable trigger t1;
+alter table a enable trigger t1;
+alter table a enable replica trigger t1;
+alter table a enable always trigger t1;
+
+-- rule
+alter table a disable rule t1;
+alter table a enable rule t1;
+alter table a enable replica rule t1;
+alter table a enable always rule t1;
+
+-- set tablespace
+alter table a set tablespace pg_default;
+
+-- table rename
+alter table a rename to aa;
+alter table a set (append_mode=off);
+alter table a rename to aa;
+
+drop table aa;
+
+-- partition table
+create table t1
+(
+    x int,
+    y int,
+    z int
+) 
+PARTITION BY RANGE(x)
+(
+    PARTITION x1 VALUES LESS THAN(60),
+    PARTITION x2 VALUES LESS THAN(80),
+    PARTITION x3 VALUES LESS THAN(100)
+);
+
+create schema data_redis;
+CREATE TABLE data_redis.data_redis_tmp_16391 (LIKE t1 INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING PARTITION, nodeid int,partitionoid int,tupleblocknum bigint,tupleoffset int);
+
+create unlogged table data_redis.pg_delete_delta_16391
+(
+        xcnodeid int,
+        dnrelid int,
+        block_number bigint,
+        block_offset int
+);
+
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+
+-- truncate partition
+ALTER TABLE t1 truncate PARTITION x3;
+
+-- add partition
+alter table t1 add partition x4 values less than(120);
+alter table t1 set (append_mode=off);
+alter table t1 add partition x4 values less than(120);
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+
+-- drop partition
+alter table t1 drop partition x4;
+alter table t1 set (append_mode=off);
+alter table t1 drop partition x4;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+
+-- split
+alter table t1 split partition x2 into
+(
+	PARTITION x2_1 VALUES LESS THAN(70),
+	PARTITION x2_2 VALUES LESS THAN(80)
+);
+alter table t1 set (append_mode=off);
+alter table t1 split partition x2 into
+(
+	PARTITION x2_1 VALUES LESS THAN(70),
+	PARTITION x2_2 VALUES LESS THAN(80)
+);
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+
+-- merge
+alter table t1 merge partitions x2_1, x2_2 into partition x2;
+alter table t1 set (append_mode=off);
+alter table t1 merge partitions x2_1, x2_2 into partition x2;
+alter table t1 set (append_mode=on,rel_cn_oid=16391);
+
+-- unnsable all index
+alter table t1 modify partition x1 unusable local indexes;
+
+
+alter table t1 set (append_mode=off);
+drop table data_redis.data_redis_tmp_16391;
+drop table data_redis.pg_delete_delta_16391;
+drop schema data_redis;
+drop table t1;
+
+-- verify skip analyze in read-only mode
+create table t1(c1 int, c2 int);
+insert into t1 select v,v from generate_series(1,100) as v;
+select reltuples from pg_class where relname = 't1';
+alter table t1 set (append_mode=read_only);
+analyze t1;
+select reltuples from pg_class where relname = 't1';
+alter table t1 set (append_mode=off);
+analyze t1;
+select reltuples from pg_class where relname = 't1';
+drop table t1;
+
+create table t1(c1 int, c2 int);
+insert into t1 select v,v from generate_series(1,100) as v;
+select reltuples from pg_class where relname = 't1';
+alter table t1 set (append_mode=read_only);
+set enable_cluster_resize=on;
+analyze t1;
+alter table t1 set (append_mode=off);
+select reltuples from pg_class where relname = 't1';
+reset enable_cluster_resize;
+drop table t1;

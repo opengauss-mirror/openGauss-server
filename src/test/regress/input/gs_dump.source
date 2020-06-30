@@ -1,0 +1,493 @@
+--pre
+----create database user
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists zcl cascade;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user if exists zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create role zcl with CREATEDB createrole inherit login replication password 'TestPwd@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "grant all PRIVILEGES to zcl;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE SCHEMA AUTHORIZATION zcl;"
+----Create a logical backup user
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists dump cascade;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user if exists dump;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create role dump with CREATEDB createrole inherit login replication password 'TestPwd@123';"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "grant all PRIVILEGES to dump;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "CREATE SCHEMA AUTHORIZATION dump;"
+----create a tablespace
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -c "drop tablespace if exists tbs_user_default;"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -c "create tablespace tbs_user_default  LOCATION '@abs_srcdir@/tbs_user_default_01';"
+----Creating Tables and Indexes - Modifying the Execution File Path
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1.sql"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_temp.sql"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_column.sql"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_partition.sql"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb2_empty.sql"
+----Creating a trigger
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_trigger.sql"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_column_trigger.sql"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_partition_trigger.sql"
+----Creating a Stored Procedure and Importing Data
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_procedure.sql"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_column_procedure.sql"
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/tb1_partition_procedure.sql"
+----create view
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f "@abs_srcdir@/sql/view.sql"
+
+--Basic Functions
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -v
+\! @abs_bindir@/gs_dump -V
+\! @abs_bindir@/gs_dump --version
+\! @abs_bindir@/gs_dump --help
+\! @abs_bindir@/gs_dump -?
+--Export all information in a schema and insert statements in SQL format in insert mode.
+\! @abs_bindir@/gs_dump -p @portstring@ postgres --file=@abs_srcdir@/tb1_zcl_shcema.sql -f @abs_srcdir@/p  -n zcl --inserts
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -f @abs_srcdir@/tb1_zcl_shcema_f.sql -f @abs_srcdir@/p  -n zcl --inserts
+--Export all information in a schema. Insert statements in SQL format in insert mode. Do not use $$ before the function body.
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -f @abs_srcdir@/tb1_insert_no$$.sql -f @abs_srcdir@/p -n zcl --disable-dollar-quoting --inserts
+--Compressed text
+\! @abs_bindir@/gs_dump -p @portstring@ postgres --file=@abs_srcdir@/tb1_zcl_shcema_z9.sql -f @abs_srcdir@/d -n zcl --inserts -Z 9
+--Only data is exported.Do not export other Statement.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -a -n zcl -f @abs_srcdir@/p --disable-triggers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql --data-only -n zcl -f @abs_srcdir@/p
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql --table=zcl.tb1_column -f @abs_srcdir@/p -a
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.dump_seq_1 -f @abs_srcdir@/p -a
+--Only object definitions are exported.Do not export data.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/create.sql -s -n zcl -f @abs_srcdir@/p
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/create.sql -s -c -n zcl -f @abs_srcdir@/p
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_create.sql --table=zcl.tb1_column -f @abs_srcdir@/p -c -s
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_create.sql --table=zcl.tb1_column -t zcl.tb1 -f @abs_srcdir@/p -c -s
+--To verify that -b does not affect functions.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -b -n zcl -f @abs_srcdir@/p
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql --blobs -c -n zcl -f @abs_srcdir@/p
+--To verify that -S does not affect functions.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -S -c -n zcl -f @abs_srcdir@/p
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql --sysadmin=NAME -c -n zcl -f @abs_srcdir@/p
+--With the cleanup function
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql --clean -n zcl -f @abs_srcdir@/p
+--Only one table, sequence, or view is exported.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1.sql -t zcl.tb1 -f @abs_srcdir@/p                              
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql --table=zcl.tb1_column -f @abs_srcdir@/p -c        
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.dump_seq_1 -f @abs_srcdir@/p -c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.tb1_partition_view_1 -f @abs_srcdir@/p -c
+--Export multiple tables, sequences, and views with data.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition -f @abs_srcdir@/p -c                                     
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.dump_seq_1 -t zcl.dump_seq_2 -t zcl.dump_seq_2 -f @abs_srcdir@/p -c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/p -c
+----disable-triggers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -b --disable-triggers -n zcl -f @abs_srcdir@/p --inserts
+-- verify -o
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -b --disable-triggers -n zcl -f @abs_srcdir@/p -o -c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -b --disable-triggers -n zcl -f @abs_srcdir@/p --oids -c
+-- verify dont-overwrite-file
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column1.sql -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/p -c --dont-overwrite-file
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column1.sql -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/p -c --dont-overwrite-file
+-- exclude-self
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition -f @abs_srcdir@/p -c --dont-overwrite-file --exclude-self
+---- tablename content:tb1,tb1_column,tb1_partition,tb2_empty
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/p -c --dont-overwrite-file --exclude-self --include-table-file=@abs_srcdir@/data/tb1.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/p --exclude-self --include-table-file=@abs_srcdir@/data/tb1_column.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/p --include-table-file=@abs_srcdir@/data/tb1_partition.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/p -t zcl.tb1 -t zcl.tb1_* --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/p -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-depend-objs --exclude-self
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/p -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-extensions
+----use-set-session-authorization
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p  --use-set-session-authorization
+----serializable-deferrable
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p  --use-set-session-authorization --serializable-deferrable
+----quote-all-identifiers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p --use-set-session-authorization --serializable-deferrable --quote-all-identifiers
+----non-lock-table
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p --use-set-session-authorization --serializable-deferrable  --non-lock-table
+--no-unlogged-table-data
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data
+--no-tablespaces
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p  --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces
+--column-inserts
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p  --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --column-inserts
+--attribute-inserts
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/p  --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --attribute-inserts
+--binary-upgrade-usermap="USER1=USER2"--Not effective
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data_cy.sql -c -n zcl -f @abs_srcdir@/p 
+--binary-upgrade
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data_cy.sql -c -n zcl -f @abs_srcdir@/p --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --attribute-inserts --binary-upgrade-usermap="zcl=cy" --binary-upgrade 
+---x
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -x -f @abs_srcdir@/p
+--no-privileges
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datanp.sql --no-privileges -f @abs_srcdir@/p -c
+--no-acl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datana.sql -x -f @abs_srcdir@/p --no-acl -c
+-- exclude-table-file=FILENAME
+-- tablename content:tb1
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datana.sql -x -f @abs_srcdir@/p --no-acl -c --exclude-table-file=@abs_srcdir@/data/tb1.sql --include-depend-objs
+---T/--exclude-table=TABLE
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datantb1.sql -x -f @abs_srcdir@/p --no-acl -c -T zcl.tb1
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datantb2.sql -x -f @abs_srcdir@/p --no-acl -c -T zcl.tb1_column -T zcl.tb2_empty
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datantb1.sql -x -f @abs_srcdir@/p --no-acl -c --exclude-table=zcl.tb1 -n zcl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datantb2.sql -x -f @abs_srcdir@/p --no-acl -c --exclude-table=zcl.tb1 --exclude-table=zcl.tb2_empty
+--Remote backup
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --no-password -f @abs_srcdir@/a.sql -c -n zcl 
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -w -f @abs_srcdir@/a.sql -c -n zcl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -w -f @abs_srcdir@/a.sql -c -n zcl
+connection to database "postgres" failed: FATAL:  Invalid username/password,login denied.
+--role=/--rolepassword=
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --role=zcl --rolepassword=TestPwd@123 -f @abs_srcdir@/role.sql -f @abs_srcdir@/p -n zcl -c
+--create/-C
+\! @abs_bindir@/gs_dump tpcc -p @portstring@ -f @abs_srcdir@/p -c -f @abs_srcdir@/ctestnew.sql -C ----Database-related statements exist, which are the same as those in the PG.
+\! @abs_bindir@/gs_dump tpcc -p @portstring@ -f @abs_srcdir@/p -n tpcc -c -f @abs_srcdir@/ctestnew.sql -C  ----(If -n is added, the SQL file does not contain database-related statements, which are the same as those in the PG.)
+-------------------------------------------------------------------------------------------
+---f @abs_srcdir@/ c test
+\! @abs_bindir@/gs_dump -p @portstring@ postgres --file=@abs_srcdir@/tb1_zcl_shcema -f @abs_srcdir@/c  -n zcl --inserts
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -f @abs_srcdir@/tb1_zcl_shcema_f.sql -f @abs_srcdir@/c  -n zcl --inserts
+--Export all information in a schema. Insert statements in SQL format in insert mode. Do not use $$ before the function body.
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -f @abs_srcdir@/tb1_insert_no$$.sql -f @abs_srcdir@/c -n zcl --disable-dollar-quoting 
+--Compressed text
+\! @abs_bindir@/gs_dump -p @portstring@ postgres --file=@abs_srcdir@/tb1_zcl_shcema_z9.sql -f @abs_srcdir@/c  -n zcl  -Z 9
+--Only data is exported.Do not export other Statement.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -a -n zcl -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql --data-only -n zcl -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql --table=zcl.tb1_column -f @abs_srcdir@/c -a
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.dump_seq_1 -f @abs_srcdir@/c -s
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.dump_seq_1 -f @abs_srcdir@/c -a
+--Only object definitions are exported.Do not export data.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/create.sql -s -n zcl -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/create.sql -s -c -n zcl -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_create.sql --table=zcl.tb1_column -f @abs_srcdir@/c -c -s
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_create.sql --table=zcl.tb1_column -t zcl.tb1 -f @abs_srcdir@/c -c -s
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_create.sql --table=zcl.tb1_column -t zcl.tb1 -f @abs_srcdir@/c -c -a
+--To verify that -b does not affect functions.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -b -n zcl -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql --blobs -c -n zcl -f @abs_srcdir@/c
+--To verify that -S does not affect functions.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -S cy -c -n zcl -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql --sysadmin=NAME -c -n zcl -f @abs_srcdir@/c
+--With the cleanup function
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -c -n tpcc -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql --clean -n zcl -f @abs_srcdir@/c
+--Only one table, sequence, or view is exported.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1.sql -t zcl.tb1 -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql --table=zcl.tb1_column -f @abs_srcdir@/c     
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.dump_seq_1 -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.tb1_partition_view_1 -f @abs_srcdir@/c
+--Export multiple tables, sequences, and views with data.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition -f @abs_srcdir@/c                                    
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.dump_seq_1 -t zcl.dump_seq_2 -t zcl.dump_seq_2 -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/c
+----disable-triggers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -b --disable-triggers -n zcl -f @abs_srcdir@/c
+----test -o
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -b --disable-triggers -n zcl -f @abs_srcdir@/c -o
+----test dont-overwrite-file
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column1.sql -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/c --dont-overwrite-file
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column1.sql -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/c --dont-overwrite-file
+----test exclude-self
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition -f @abs_srcdir@/c --dont-overwrite-file --exclude-self
+---- tablename content:tb1,tb1_column,tb1_partition,tb2_empty
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/c --dont-overwrite-file --exclude-self --include-table-file=@abs_srcdir@/data/tb1.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/c --exclude-self --include-table-file=@abs_srcdir@/data/tb1_column.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/c --include-table-file=@abs_srcdir@/data/tb1_partition.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/c -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/c -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-depend-objs --exclude-self
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_partition.sql  -f @abs_srcdir@/c -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-extensions
+--include-nodes
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/c --include-nodes
+----use-set-session-authorization
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/c  --use-set-session-authorization
+--serializable-deferrable
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/c  --use-set-session-authorization --serializable-deferrable
+--quote-all-identifiers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/c  --use-set-session-authorization --serializable-deferrable --quote-all-identifiers
+--non-lock-table
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/c  --use-set-session-authorization --serializable-deferrable  --non-lock-table
+--no-unlogged-table-data
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data.sql -c -n zcl -f @abs_srcdir@/c  --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data
+--no-tablespaces
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data1.sql -c -n zcl -f @abs_srcdir@/c --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces
+--column-inserts
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data1.sql -c -n zcl -f @abs_srcdir@/c --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --column-inserts
+--attribute-inserts
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data1.sql -c -n zcl -f @abs_srcdir@/c --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --attribute-inserts
+--binary-upgrade-usermap="USER1=USER2"--Not effective
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data_cy.sql -c -n zcl -f @abs_srcdir@/c --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --binary-upgrade-usermap="zcl=cy"
+--binary-upgrade
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data_cy.sql -c -n zcl -f @abs_srcdir@/p --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces  --binary-upgrade-usermap="zcl=cy" --binary-upgrade 
+---x
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data1.sql -x -f @abs_srcdir@/c
+--no-privileges
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datanp.sql --no-privileges -f @abs_srcdir@/c 
+--no-acl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datana.sql -x -f @abs_srcdir@/c --no-acl 
+--exclude-table-file=FILENAME
+---- tablename content:tb1
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datana.sql -x -f @abs_srcdir@/c --no-acl  --exclude-table-file=@abs_srcdir@/data/tb1.sql --include-depend-objs
+---T/--exclude-table=TABLE
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datantb1.sql -x -f @abs_srcdir@/c --no-acl -T zcl.tb1
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datantb2.sql -x -f @abs_srcdir@/c --no-acl -T zcl.tb1_column -T zcl.tb2_empty
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datantb1.sql -x -f @abs_srcdir@/c --no-acl --exclude-table=zcl.tb1 -n zcl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/datantb2.sql -x -f @abs_srcdir@/c --no-acl --exclude-table=zcl.tb1 --exclude-table=zcl.tb2_empty
+--Remote backup
+\! @abs_bindir@/gs_dump -U zcl -W TestPwd@123 -f @abs_srcdir@/b.sql -f @abs_srcdir@/c -c -n zcl
+export PGUSER=zcl
+\! @abs_bindir@/gs_dump -W TestPwd@123 -f @abs_srcdir@/b.sql -f @abs_srcdir@/c -c -n zcl
+
+---w, --no-password
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --no-password -f @abs_srcdir@/a.sql -c -n zcl -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -w -f @abs_srcdir@/a.sql -f @abs_srcdir@/c -n zcl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -w -f @abs_srcdir@/a.sql -c -n zcl
+----connection to database "postgres" failed: FATAL:  Invalid username/password,login denied.
+--role=ROLENAME
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --role=zcl --rolepassword=TestPwd@123 -f @abs_srcdir@/role.sql -f @abs_srcdir@/c -n zcl -c
+===============================================================================================================================
+---f @abs_srcdir@/d test 
+\! @abs_bindir@/gs_dump -p @portstring@ tgres --file=@abs_srcdir@/tb1_zcl_shcema -f @abs_srcdir@/d  -n zcl --inserts
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -f @abs_srcdir@/tb1_zcl_shcema_f -f @abs_srcdir@/d  -n zcl --inserts
+--Export all information in a schema and insert statements in SQL format in insert mode.
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -f @abs_srcdir@/tb1_insert_no$$ -f @abs_srcdir@/d -n zcl --disable-dollar-quoting 
+--Compressed text
+\! @abs_bindir@/gs_dump -p @portstring@ postgres --file=@abs_srcdir@/tb1_zcl_shcema_z9 -f @abs_srcdir@/d  -n zcl  -Z 9
+--Only data is exported.Do not export other Statement.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data1 -a -n zcl -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data2 --data-only -n zcl -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column3 --table=zcl.tb1_column -f @abs_srcdir@/d -a
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column4 -t zcl.dump_seq_1 -f @abs_srcdir@/d -a
+--nly object definitions are exported.Do not export data.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/create1 -s -n zcl -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/create2 -s -c -n zcl -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_create3 --table=zcl.tb1_column -f @abs_srcdir@/d  -s
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column_create4 --table=zcl.tb1_column -t zcl.tb1 -f @abs_srcdir@/d -c -s
+--To verify that -b does not affect functions.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data1 -b -n zcl -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data2 --blobs -c -n zcl -f @abs_srcdir@/d
+--To verify that -S does not affect functions.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data3 -S -c -n zcl -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data4 --sysadmin=NAME -c -n zcl -f @abs_srcdir@/d
+--With the cleanup function
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data5 -c -n tpcc -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/data6 --clean -n zcl -f @abs_srcdir@/d
+--Only one table, sequence, or view is exported.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1 -t zcl.tb1 -f @abs_srcdir@/d                               
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb2 --table=zcl.tb1_column -f @abs_srcdir@/d          
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb3 -t zcl.dump_seq_1 -f @abs_srcdir@/d 
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb4 -t zcl.tb1_partition_view_1 -f @abs_srcdir@/d 
+--Export multiple tables, sequences, and views with data.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb5 -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition -f @abs_srcdir@/d                                    
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb6 -t zcl.dump_seq_1 -t zcl.dump_seq_2 -t zcl.dump_seq_2 -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb7 -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/d
+----disable-triggers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb8 -b --disable-triggers -n zcl -f @abs_srcdir@/d
+----test -o
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb9 -b --disable-triggers -n zcl -f @abs_srcdir@/d -o
+----test dont-overwrite-file
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb10 -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/d --dont-overwrite-file
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb11 -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/d --dont-overwrite-file
+----test exclude-self
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb12 -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition -f @abs_srcdir@/d --dont-overwrite-file --exclude-self
+----tablename content:tb1,tb1_column,tb1_partition,tb2_empty
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb13  -f @abs_srcdir@/d --dont-overwrite-file --exclude-self --include-table-file=@abs_srcdir@/data/tb1.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb14  -f @abs_srcdir@/d --exclude-self --include-table-file=@abs_srcdir@/data/tb1_column.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb15  -f @abs_srcdir@/d --include-table-file=@abs_srcdir@/data/tb1_partition.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb16  -f @abs_srcdir@/d -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb17  -f @abs_srcdir@/d -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-depend-objs --exclude-self
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb18  -f @abs_srcdir@/d -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-extensions
+--include-nodes
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb19 -c -n zcl -f @abs_srcdir@/d --include-nodes
+----use-set-session-authorization
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb20 -c -n zcl -f @abs_srcdir@/d  --use-set-session-authorization
+--serializable-deferrable
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb21 -c -n zcl -f @abs_srcdir@/d  --use-set-session-authorization --serializable-deferrable
+--quote-all-identifiers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb22 -c -n zcl -f @abs_srcdir@/d  --use-set-session-authorization --serializable-deferrable --quote-all-identifiers
+--non-lock-table
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb23 -c -n zcl -f @abs_srcdir@/d  --use-set-session-authorization --serializable-deferrable  --non-lock-table
+--no-unlogged-table-data
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb24 -c -n zcl -f @abs_srcdir@/d  --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data
+--no-tablespaces
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb25 -c -n zcl -f @abs_srcdir@/d --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces
+--column-inserts
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb26 -c -n zcl -f @abs_srcdir@/d --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --column-inserts
+--attribute-inserts
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb27 -c -n zcl -f @abs_srcdir@/d --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --attribute-inserts
+--binary-upgrade-usermap="USER1=USER2"--Not effective
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb28 -c -n zcl -f @abs_srcdir@/d --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --binary-upgrade-usermap="zcl=cy"
+--binary-upgrade
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/tb29 -c -n zcl -f @abs_srcdir@/d --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces  --binary-upgrade-usermap="zcl=cy" --binary-upgrade 
+---x
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb30 -x -f @abs_srcdir@/d
+--no-privileges
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb31 --no-privileges -f @abs_srcdir@/d 
+--no-acl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb32 -x -f @abs_srcdir@/d --no-acl 
+--exclude-table-file=FILENAME
+----tablename content:tb1
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb33 -x -f @abs_srcdir@/d --no-acl  --exclude-table-file=@abs_srcdir@/data/tb1.sql --include-depend-objs
+---T/--exclude-table=TABLE
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb34 -x -f @abs_srcdir@/d --no-acl -T zcl.tb1
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb35 -x -f @abs_srcdir@/d --no-acl -T zcl.tb1_column -T zcl.tb2_empty
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb36 -x -f @abs_srcdir@/d --no-acl --exclude-table=zcl.tb1 -n zcl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb37 -x -f @abs_srcdir@/d --no-acl --exclude-table=zcl.tb1 --exclude-table=zcl.tb2_empty
+--Remote backup
+\! @abs_bindir@/gs_dump -U zcl -W TestPwd@123 -f @abs_srcdir@/tb41 -f @abs_srcdir@/d -c -n zcl
+export PGUSER=zcl
+\! @abs_bindir@/gs_dump -W TestPwd@123 -f @abs_srcdir@/tb42 -f @abs_srcdir@/d -c -n zcl
+
+---w, --no-password
+----unset PGUSER
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --no-password -f @abs_srcdir@/tb46 -c -n zcl -f @abs_srcdir@/d
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -w -f @abs_srcdir@/tb47 -f @abs_srcdir@/d -n zcl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -w -f @abs_srcdir@/tb48 -f @abs_srcdir@/d -n zcl
+----connection to database "postgres" failed: FATAL:  Invalid username/password,login denied.
+--role=ROLENAME
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --role=zcl --rolepassword=TestPwd@123 -f @abs_srcdir@/tb49 -f @abs_srcdir@/d -n zcl -c
+================================================================================================================================================================
+---f @abs_srcdir@/t test
+\! @abs_bindir@/gs_dump -p @portstring@ postgres --file='@abs_srcdir@/tb1_zcl_shcema' -f @abs_srcdir@/t  -n zcl --inserts
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/t '@abs_srcdir@/tb1_zcl_shcema' -c
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -f '@abs_srcdir@/tb1_zcl_shcema1' -f @abs_srcdir@/t  -n zcl --inserts
+--Export all information in a schema and insert statements in SQL format in insert mode.
+\! @abs_bindir@/gs_dump -p @portstring@ postgres -f '@abs_srcdir@/tb1_zcl_shcema2' -f @abs_srcdir@/t -n zcl --disable-dollar-quoting 
+--Compressed text
+\! @abs_bindir@/gs_dump -p @portstring@ postgres --file='@abs_srcdir@/tb1_zcl_shcema3' -f @abs_srcdir@/t  -n zcl  -Z 9
+--Only data is exported.Do not export other Statement.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema4' -a -n zcl -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema5' --data-only -n zcl -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema6' --table=zcl.tb1_column -f @abs_srcdir@/t -a
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema7' -t zcl.dump_seq_1 -f @abs_srcdir@/t -a   ----Obtains the current value of a sequence.
+--nly object definitions are exported.Do not export data.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema8' -s -n zcl -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema9' -s -c -n zcl -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema10' --table=zcl.tb1_column -f @abs_srcdir@/t  -s
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema11' --table=zcl.tb1_column -t zcl.tb1 -f @abs_srcdir@/t -c -s
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema71' -t zcl.dump_seq_1 -f @abs_srcdir@/t -s  ---Initial value of the sequence.
+--To verify that -b does not affect functions.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema12' -b -n zcl -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema13' --blobs -c -n zcl -f @abs_srcdir@/t
+--To verify that -S does not affect functions.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema14' -S -c -n zcl -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema15' --sysadmin=NAME -c -n zcl -f @abs_srcdir@/t
+--With the cleanup function
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema16' -c -n tpcc -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema17' --clean -n zcl -f @abs_srcdir@/t
+--Only one table, sequence, or view is exported.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema18' -t zcl.tb1 -f @abs_srcdir@/t                               
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema19' --table=zcl.tb1_column -f @abs_srcdir@/t          
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema20' -t zcl.dump_seq_1 -f @abs_srcdir@/t 
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema21' -t zcl.tb1_partition_view_1 -f @abs_srcdir@/t 
+--Export multiple tables, sequences, and views with data.
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema22' -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition -f @abs_srcdir@/t                                    
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema23' -t zcl.dump_seq_1 -t zcl.dump_seq_2 -t zcl.dump_seq_2 -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema24' -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/t
+----disable-triggers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema25' -b --disable-triggers -n zcl -f @abs_srcdir@/t
+----test -o
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema26' -b --disable-triggers -n zcl -f @abs_srcdir@/t -o
+----test dont-overwrite-file
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema27' -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/t --dont-overwrite-file
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema27' -t zcl.tb1_partition_view_1 -t zcl.tb1_column_view -t zcl.tb1_column_view_1 -t zcl.tb1_partition_view -f @abs_srcdir@/t --dont-overwrite-file
+----test exclude-self
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema29' -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition -f @abs_srcdir@/t --dont-overwrite-file --exclude-self
+----tablename content:tb1,tb1_column,tb1_partition,tb2_empty
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema30'  -f @abs_srcdir@/t --dont-overwrite-file --exclude-self --include-table-file=@abs_srcdir@/data/tb1.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema31'  -f @abs_srcdir@/t --exclude-self --include-table-file=@abs_srcdir@/data/tb1_column.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema32'  -f @abs_srcdir@/t --include-table-file=@abs_srcdir@/data/tb1_partition.sql --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema33'  -f @abs_srcdir@/t -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-depend-objs
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema34'  -f @abs_srcdir@/t -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-depend-objs --exclude-self
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema35'  -f @abs_srcdir@/t -t zcl.tb1 -t zcl.tb1_column -t zcl.tb1_partition --include-extensions
+--include-nodes
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema36' -c -n zcl -f @abs_srcdir@/t --include-nodes
+----use-set-session-authorization
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema37' -c -n zcl -f @abs_srcdir@/t  --use-set-session-authorization
+--serializable-deferrable
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema38' -c -n zcl -f @abs_srcdir@/t  --use-set-session-authorization --serializable-deferrable
+--quote-all-identifiers
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema39' -c -n zcl -f @abs_srcdir@/t  --use-set-session-authorization --serializable-deferrable --quote-all-identifiers
+--non-lock-table
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema40' -c -n zcl -f @abs_srcdir@/t  --use-set-session-authorization --serializable-deferrable  --non-lock-table
+--no-unlogged-table-data
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema41' -c -n zcl -f @abs_srcdir@/t  --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data
+--no-tablespaces
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema42' -c -n zcl -f @abs_srcdir@/t --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces
+--column-inserts
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema43' -c -n zcl -f @abs_srcdir@/t --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --column-inserts
+--attribute-inserts
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema44' -c -n zcl -f @abs_srcdir@/t --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --attribute-inserts
+--binary-upgrade-usermap="USER1=USER2"--Not effective
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema45' -c -n zcl -f @abs_srcdir@/t --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --binary-upgrade-usermap="zcl=cy"
+--binary-upgrade
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema46' -c -n zcl -f @abs_srcdir@/t --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces  --binary-upgrade-usermap="zcl=cy" --binary-upgrade 
+---x
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema47' -x -f @abs_srcdir@/t
+--no-privileges
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema48' --no-privileges -f @abs_srcdir@/t 
+--no-acl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema49' -x -f @abs_srcdir@/t --no-acl 
+--exclude-table-file=FILENAME
+----tablename content:tb1
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema50' -x -f @abs_srcdir@/t --no-acl  --exclude-table-file=@abs_srcdir@/data/tb1_column.sql --include-depend-objs
+---T/--exclude-table=TABLE
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema51' -x -f @abs_srcdir@/t --no-acl -T zcl.tb1
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema52' -x -f @abs_srcdir@/t --no-acl -T zcl.tb1_column -T zcl.tb2_empty
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema53' -x -f @abs_srcdir@/t --no-acl --exclude-table=zcl.tb1 -n zcl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f '@abs_srcdir@/tb1_zcl_shcema54' -x -f @abs_srcdir@/t --no-acl --exclude-table=zcl.tb1 --exclude-table=zcl.tb2_empty
+--Remote backup
+\! @abs_bindir@/gs_dump -U zcl -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema59' -f @abs_srcdir@/t -c -n zcl
+export PGUSER=zcl
+\! @abs_bindir@/gs_dump -W TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema60' -f @abs_srcdir@/t -c -n zcl
+
+---w, --no-password
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --no-password -f '@abs_srcdir@/tb1_zcl_shcema64' -c -n zcl -f @abs_srcdir@/t
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -w -f '@abs_srcdir@/tb1_zcl_shcema65' -f @abs_srcdir@/t -n zcl
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -w -f '@abs_srcdir@/tb1_zcl_shcema66' -f @abs_srcdir@/t -n zcl
+-------connection to database "postgres" failed: FATAL:  Invalid username/password,login denied.
+--role=ROLENAME
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --role=zcl --rolepassword=TestPwd@123 -f '@abs_srcdir@/tb1_zcl_shcema67' -f @abs_srcdir@/t -n zcl -c
+--E/--encoding=ENCODING
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/p -n zcl -c -f @abs_srcdir@/test.sql -E GBK
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/t -n zcl -c -f @abs_srcdir@/test --encoding=UTF-8
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/c -n zcl -c -f @abs_srcdir@/test -E GBK
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/d -n zcl -c -f @abs_srcdir@/test --encoding=UTF-8
+----Multiple-n tests
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/d -n zcl -n cy -f @abs_srcdir@/multishema
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/p -n zcl -n cy -f @abs_srcdir@/multishema.sql -c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/t -n zcl -n cy -f @abs_srcdir@/multishema -c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/c -n zcl -n cy -f @abs_srcdir@/multishema -c
+---- -n test
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/c -N cy -f @abs_srcdir@/multishema -c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/d -N zcl -f @abs_srcdir@/multishemaN
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/p -N cy -f @abs_srcdir@/multishemaN.sql
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/t -N zcl -f @abs_srcdir@/multishemaN
+--with-encryption=AES128
+--with-key=KEY
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/p -f @abs_srcdir@/withpassword -n zcl -c --with-encryption=AES128 --with-key=zzzzccccllll5678
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/c -f @abs_srcdir@/withpassword -n zcl -c --with-encryption=AES128 --with-key=zzzzccccllll5678
+--------------------------------------------
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/t -f @abs_srcdir@/withpasswordt -n zcl -c --with-encryption=AES128 --with-key=zzzzccccllll5678
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -f @abs_srcdir@/t -c withpasswordt
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -f @abs_srcdir@/t -c withpasswordt --with-key=zzzzccccllll
+----The key is illegal,the length must be 16
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -f @abs_srcdir@/t -c withpasswordt --with-key=zzzzccccllll1234
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/d -f @abs_srcdir@/withpassword -n zcl -c --with-encryption=AES128 --with-key=zzzzccccllll5678
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -f @abs_srcdir@/d -c withpassword/
+----did not find magic string in file header, the archive may be encrypted
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -f @abs_srcdir@/d -c withpassword/ --with-key=zzzzccccllll
+----The key is illegal,the length must be 16
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -f @abs_srcdir@/d -c withpassword/ --with-key=zzzzccccllll1234
+----decrypt cipher text to plain text failed.
+----Decryption failed.
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -f @abs_srcdir@/d -c withpassword/ --with-key=zzzzccccllll5678
+--error
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.tb1_partition_view_1 -f @abs_srcdir@/p -c -a  
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/tb1_column.sql -t zcl.tb1_partition_view_1 -f @abs_srcdir@/p -a
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/data_cy.sql -c -n zcl -f @abs_srcdir@/p --include-nodes --use-set-session-authorization --serializable-deferrable  --non-lock-table --no-unlogged-table-data --no-tablespaces --attribute-inserts --binary-upgrade-usermap="zcl=cy"
+\! @abs_bindir@/gs_dump: options --binary-upgrade-usermap should be used with --binary-upgrade option
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/err.sql -s -a -n zcl -f @abs_srcdir@/p 
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/err.sql -s -a -n zcl -f @abs_srcdir@/c
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/err.sql -c -a -n zcl -f @abs_srcdir@/p
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/err.sql -c --inserts -o -f @abs_srcdir@/p
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/err.sql  -c -f @abs_srcdir@/c --inserts -o 
+\! @abs_bindir@/gs_dump postgres -p @portstring@ -f @abs_srcdir@/nointb1.sql -c -f @abs_srcdir@/p -t zcl.tb1 --exclude-self 
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --role=zcl -W TestPwd@123 -f @abs_srcdir@/tb50 -f @abs_srcdir@/d -n zcl
+----options --role --rolepassword need use together
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --role=zcl  -f @abs_srcdir@/tb50 -f @abs_srcdir@/d -n zcl
+----options --role --rolepassword need use together
+\! @abs_bindir@/gs_dump postgres -p @portstring@ --role=zcl  -w -f @abs_srcdir@/tb50 -f @abs_srcdir@/d -n zcl
+----options --role --rolepassword need use together
+\! @abs_bindir@/gs_dump -p @portstring@ postgres --file='@abs_srcdir@/tb1_zcl_shcema3' -f @abs_srcdir@/t  -n zcl  -Z 9
+

@@ -1,0 +1,20 @@
+<refentry id="SQL-INSERT">
+<refmeta>
+<refentrytitle>INSERT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>INSERT</refname>
+<refpurpose>create new rows in a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+INSERT INTO table_name [ ( column_name [, ...] ) ]
+    { DEFAULT VALUES | VALUES {( { expression | DEFAULT } [, ...] ) }[, ...] | query }
+    [ ON DUPLICATE KEY UPDATE { column_name = { expression | DEFAULT } } [, ...] ]
+    [ RETURNING {* | {output_expression [ [ AS ] output_name ] }[, ...]} ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

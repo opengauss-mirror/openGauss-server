@@ -1,0 +1,7 @@
+--
+--	gsql configuration file
+--
+--  This file is read before the .gsqlrc file in the user's home directory.
+--
+--  Copy this to your sysconf directory (typically @PROGRAM_PATH@/etc/postgresql) and
+--  rename it gsqlrc.

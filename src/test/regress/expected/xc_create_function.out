@@ -1,0 +1,157 @@
+--
+-- XC_CREATE_FUNCTIONS
+--
+-- Create a couple of functions used by Postgres-XC tests
+-- A function to create table on specified nodes
+create or replace function create_table_nodes(tab_schema varchar, distribution varchar, cmd_suffix varchar)
+returns void language plpgsql as $$
+declare
+	cr_command	varchar;
+begin
+	cr_command := 'CREATE TABLE ' || tab_schema || ' DISTRIBUTE BY ' || distribution;
+	if (cmd_suffix is not null) then
+		cr_command := cr_command  || ' ' || cmd_suffix;
+	end if;
+	execute cr_command;
+end;
+$$;
+-- Add/Delete/change node list of a table
+CREATE OR REPLACE FUNCTION alter_table_change_nodes(tab_schema varchar, nodenums int[], command varchar, distribution varchar)
+RETURNS BOOLEAN LANGUAGE plpgsql as $$
+declare
+	cr_command	varchar;
+	nodes		varchar[];
+	nodename	varchar;
+	nodenames_query varchar;
+	nodenames	varchar;
+	sep		varchar;
+	nodenum_new	int[];
+	nodenum_res	int[];
+	tmp_node	int;
+	num_nodes	int;
+	node		int;
+	check_num	boolean;
+	enforce_to	boolean;
+BEGIN
+	-- Check the command type, only delete/add/to are allowed
+	IF command != 'delete' AND command != 'add' AND command != 'to' THEN
+		RETURN FALSE;
+	END IF;
+	nodenames_query := 'SELECT node_name FROM pgxc_node WHERE node_type = ''D'' ORDER BY oid';
+	FOR nodename IN EXECUTE nodenames_query LOOP
+		nodes := array_append(nodes, nodename);
+	END LOOP;
+	nodenames := '(';
+	sep := '';
+	num_nodes := array_length(nodes, 1);
+	enforce_to := FALSE;
+
+	-- Adjust node array according to total number of nodes
+	FOREACH node IN ARRAY nodenums LOOP
+		tmp_node := node;
+		IF (node < 1 OR node > num_nodes) THEN
+			-- Enforce the usage of TO here, only safe method
+			enforce_to := TRUE;
+			tmp_node := node % num_nodes;
+			nodenum_new := array_append(nodenum_new, tmp_node);
+		END IF;
+		nodenum_new := array_append(nodenum_new, tmp_node);
+	END LOOP;
+	-- Eliminate duplicates
+	nodenum_res := array_append(nodenum_res, nodenum_new[1]);
+	FOREACH node IN ARRAY nodenum_new LOOP
+		check_num := TRUE;
+		FOREACH tmp_node IN ARRAY nodenum_res LOOP
+			IF (tmp_node = node) THEN
+				check_num := FALSE;
+			END IF;
+		END LOOP;
+		-- Fill in result array only if not replicated
+		IF check_num THEN
+			nodenum_res := array_append(nodenum_res, node);
+		END IF;
+	END LOOP;
+
+	-- If there is a unique Datanode in cluster, enforce the use of 'TO NODE'
+	-- This will avoid any consistency problems
+	IF (num_nodes = 1 OR enforce_to) THEN
+		command := 'TO';
+	END IF;
+
+	-- Finally build query
+	cr_command := 'ALTER TABLE ' || tab_schema || ' ' || command || ' NODE ';
+	FOREACH node IN ARRAY nodenum_res LOOP
+		IF (node > 0 AND node <= num_nodes) THEN
+			nodenames := nodenames || sep || nodes[node];
+			sep := ', ';
+		END IF;
+	END LOOP;
+	nodenames := nodenames || ')';
+	cr_command := cr_command || nodenames;
+
+	-- Add distribution if necessary
+	IF (distribution IS NOT NULL) then
+		cr_command := cr_command  || ', DISTRIBUTE BY ' || distribution;
+	END IF;
+
+	-- Launch it
+	EXECUTE cr_command;
+	RETURN TRUE;
+END;
+$$;
+-- A function to return data node name given a node number
+CREATE OR REPLACE FUNCTION get_xc_node_name(node_num int) RETURNS varchar LANGUAGE plpgsql AS $$
+DECLARE
+	r		pgxc_node%rowtype;
+	node		int;
+	nodenames_query	varchar;
+BEGIN
+	nodenames_query := 'SELECT * FROM pgxc_node  WHERE node_type = ''D'' ORDER BY oid';
+
+	node := 1;
+	FOR r IN EXECUTE nodenames_query LOOP
+		IF node = node_num THEN
+			RETURN r.node_name;
+		END IF;
+		node := node + 1;
+	END LOOP;
+	RETURN 'NODE_?';
+END;
+$$;
+--test multi-query executed in function
+create or replace function multi_query_func(rownums integer) returns boolean as $$
+declare
+query_string text;
+begin
+for i in 1..rownums loop
+query_string := query_string ||' ; create table multi_query_table_'||i||'(id int /*number;*/,info numeric(20,3)) /*;info*/ ; /*empty*/ ;insert into multi_query_table_'||i||' values(1,1.1);';
+end loop;
+execute immediate query_string;
+return true;
+end;
+$$ language plpgsql;
+call multi_query_func(2);
+ multi_query_func 
+------------------
+ t
+(1 row)
+
+select * from multi_query_table_1;
+ id | info  
+----+-------
+  1 | 1.100
+(1 row)
+
+select * from multi_query_table_2;
+ id | info  
+----+-------
+  1 | 1.100
+(1 row)
+
+drop table multi_query_table_1,multi_query_table_2;
+/
+declare i integer :=5; begin << label1 >> while i>0 loop i := i-1; end loop label1; end;end;declare begin drop table if exists anonymous_block_tbl;create table anonymous_block_tbl(col_integer integer); end; end;
+/
+ERROR:  syntax error at or near "/"
+LINE 1: /
+        ^

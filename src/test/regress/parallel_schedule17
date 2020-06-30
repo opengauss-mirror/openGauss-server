@@ -1,0 +1,10 @@
+test: gsql
+test: gs_dump
+test: gs_dumpall
+test: gs_restore
+test: pg_config
+test: pg_controldata
+test: pg_resetxlog
+test: gstrace
+test: gs_guc
+

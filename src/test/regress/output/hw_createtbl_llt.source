@@ -1,0 +1,50 @@
+--prepare for test                                                                                                                                    
+\! rm -fr '@testtablespace@/hw_createtbl_llt_tablespace'
+\! mkdir '@testtablespace@/hw_createtbl_llt_tablespace'
+create tablespace hw_createtbl_llt_tablespace location '@testtablespace@/hw_createtbl_llt_tablespace';
+--start for test
+create user hw_createtbl_llt_user001 with sysadmin password "ttest@123";
+show current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+set current_schema = hw_createtbl_llt_user001;
+create table hw_createtbl_llt_table001 (id int) tablespace hw_createtbl_llt_tablespace;
+show current_schema;
+      current_schema      
+--------------------------
+ hw_createtbl_llt_user001
+(1 row)
+
+reset current_schema;
+show current_schema;
+ current_schema 
+----------------
+ "$user",public
+(1 row)
+
+--test create table tablesapce as select
+create table ts_t1(id int,info text) tablespace hw_createtbl_llt_tablespace;
+insert into ts_t1 values(generate_series(1,1000),'sadadsa');
+create table ts_t2 tablespace hw_createtbl_llt_tablespace as select * from ts_t1;
+select relname,reltablespace from pg_class where relname in('ts_t1','ts_t2') order by 1;
+ relname | reltablespace 
+---------+---------------
+--? ts_t1   |.*         
+--? ts_t2   |.*         
+(2 rows)
+
+select relname,relfilenode,reltablespace from pg_class where relname='ts_t2';
+ relname | relfilenode | reltablespace 
+---------+-------------+---------------
+--? ts_t2   |.*                   
+(1 row)
+
+drop table ts_t1;
+drop table ts_t2;
+-- clean enviroment
+drop user hw_createtbl_llt_user001 cascade;
+drop tablespace hw_createtbl_llt_tablespace;
+\! rm -fr '@testtablespace@/hw_createtbl_llt_tablespace'

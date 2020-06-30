@@ -1,0 +1,21 @@
+<refentry id="SQL-ALTER_GROUP">
+<refmeta>
+<refentrytitle>ALTER GROUP</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER GROUP</refname>
+<refpurpose>change role name or membership</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER GROUP group_name
+    ADD USER user_name [, ... ];
+ALTER GROUP group_name
+    DROP USER user_name [, ... ];
+ALTER GROUP group_name
+   RENAME TO new_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

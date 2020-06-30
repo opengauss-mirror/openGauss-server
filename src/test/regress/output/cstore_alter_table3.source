@@ -1,0 +1,460 @@
+CREATE SCHEMA cstore_alter_table3;
+SET SEARCH_PATH TO cstore_alter_table3;
+SET INTERVALsTYLE = POSTGRES;
+-- Add column for not-empty table
+CREATE TABLE alter_addcols_56 (initial int4) with(orientation = column);
+insert into alter_addcols_56 values(1);
+insert into alter_addcols_56 values(2);
+ALTER TABLE alter_addcols_56 ADD COLUMN xmin integer;
+ERROR:  column name "xmin" conflicts with a system column name
+ALTER TABLE alter_addcols_56 ADD COLUMN a int4 default 3;
+ALTER TABLE alter_addcols_56 ADD COLUMN b tinyint default 1;
+ALTER TABLE alter_addcols_56 ADD COLUMN c smallint default 2;
+ALTER TABLE alter_addcols_56 ADD COLUMN d bigint;
+ALTER TABLE alter_addcols_56 ADD COLUMN e decimal(5,2);
+ALTER TABLE alter_addcols_56 ADD COLUMN f numeric(10,5);
+ALTER TABLE alter_addcols_56 ADD COLUMN g float4;
+ALTER TABLE alter_addcols_56 ADD COLUMN h float8;
+ALTER TABLE alter_addcols_56 ADD COLUMN i char;
+ALTER TABLE alter_addcols_56 ADD COLUMN j varchar(10);
+ALTER TABLE alter_addcols_56 ADD COLUMN k char(5);
+ALTER TABLE alter_addcols_56 ADD COLUMN l text;
+ALTER TABLE alter_addcols_56 ADD COLUMN m nvarchar2;
+ALTER TABLE alter_addcols_56 ADD COLUMN o timestamptz;
+ALTER TABLE alter_addcols_56 ADD COLUMN p timestamp;
+ALTER TABLE alter_addcols_56 ADD COLUMN q date;
+ALTER TABLE alter_addcols_56 ADD COLUMN r timetz;
+ALTER TABLE alter_addcols_56 ADD COLUMN s time;
+ALTER TABLE alter_addcols_56 ADD COLUMN t tinterval;
+ALTER TABLE alter_addcols_56 ADD COLUMN u interval;
+ALTER TABLE alter_addcols_56 ADD COLUMN v smalldatetime;
+ALTER TABLE alter_addcols_56 ADD COLUMN w oid;
+ALTER TABLE alter_addcols_56 ADD COLUMN x bit(8);
+ALTER TABLE alter_addcols_56 ADD COLUMN y varbit(8);
+INSERT INTO alter_addcols_56 (initial, a, b, c, d, e, f, g, h, i, j, k, l, m, o, p, q, r, s, u,
+	v, w, x, y)
+   VALUES (1, 2, 3, 4, 5, 6.1, 7.2, 8.3, 9.4, 'a', 'b', 'c', 'd', 'e', '2015-04-10 09:00:00 PST', '2015-04-10 09:00:00', 
+   '2015-04-10 09:00:00', '2015-04-10 09:00:00', '2015-04-10 09:00:00','02:30:00','2015-04-10',1,'01010101','0101');
+SELECT * FROM alter_addcols_56;
+ initial | a | b | c | d |  e   |    f    |  g  |  h  | i | j |   k   | l | m |              o               |            p             |            q             |      r      |    s     | t |    u     |            v             | w |    x     |  y   
+---------+---+---+---+---+------+---------+-----+-----+---+---+-------+---+---+------------------------------+--------------------------+--------------------------+-------------+----------+---+----------+--------------------------+---+----------+------
+       1 | 3 | 1 | 2 |   |      |         |     |     |   |   |       |   |   |                              |                          |                          |             |          |   |          |                          |   |          | 
+       2 | 3 | 1 | 2 |   |      |         |     |     |   |   |       |   |   |                              |                          |                          |             |          |   |          |                          |   |          | 
+       1 | 2 | 3 | 4 | 5 | 6.10 | 7.20000 | 8.3 | 9.4 | a | b | c     | d | e | Fri Apr 10 10:00:00 2015 PDT | Fri Apr 10 09:00:00 2015 | Fri Apr 10 09:00:00 2015 | 09:00:00-07 | 09:00:00 |   | 02:30:00 | Fri Apr 10 00:00:00 2015 | 1 | 01010101 | 0101
+(3 rows)
+
+DROP TABLE alter_addcols_56;
+-- Add mutliple column 
+CREATE TABLE alter_addcols_57 (initial int4) with(orientation = column);
+insert into alter_addcols_57 values(1);
+ALTER TABLE alter_addcols_57 ADD(mychar char default 'a', mychar1 varchar(10) NOT NULL default 'ab', id integer NULL);
+select * from alter_addcols_57;
+ initial | mychar | mychar1 | id 
+---------+--------+---------+----
+       1 | a      | ab      |   
+(1 row)
+
+insert into alter_addcols_57 values(2,'b','abc',2);
+select * from alter_addcols_57;
+ initial | mychar | mychar1 | id 
+---------+--------+---------+----
+       1 | a      | ab      |   
+       2 | b      | abc     |  2
+(2 rows)
+
+drop table alter_addcols_57;
+-- Add column for patitioned table
+CREATE TABLE alter_addcols_58(a int, b int) with ( orientation = column )  partition by range(b)
+(
+	partition p1 values less than (3),
+	partition p2 values less than (6),
+	partition p3 values less than (10)
+);
+insert into alter_addcols_58 values(1,1);
+insert into alter_addcols_58 values(2,4);
+insert into alter_addcols_58 values(3,9);
+select * from alter_addcols_58 order by a;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 4
+ 3 | 9
+(3 rows)
+
+Alter table alter_addcols_58 add column c int default 2;
+select * from alter_addcols_58 order by a;
+ a | b | c 
+---+---+---
+ 1 | 1 | 2
+ 2 | 4 | 2
+ 3 | 9 | 2
+(3 rows)
+
+insert into alter_addcols_58 values(2,5,4);
+select * from alter_addcols_58 order by a, b;
+ a | b | c 
+---+---+---
+ 1 | 1 | 2
+ 2 | 4 | 2
+ 2 | 5 | 4
+ 3 | 9 | 2
+(4 rows)
+
+DROP TABLE alter_addcols_58;
+--------------------------------------------------------- ALTER TABLE SET DATA TYPE
+-- unsupported datatype
+CREATE TABLE alter_addcols_58( a int , b int) WITH ( ORIENTATION = COLUMN);
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE name;
+ERROR:  type "name" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE tid;
+ERROR:  type "tid" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE xid;
+ERROR:  type "xid" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE oidvector;
+ERROR:  type "oidvector" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE smgr;
+ERROR:  type "smgr" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE point;
+ERROR:  type "point" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE lseg;
+ERROR:  type "lseg" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE path;
+ERROR:  type "path" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE box;
+ERROR:  type "box" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE polygon;
+ERROR:  type "polygon" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float8[];
+ERROR:  type "double precision[]" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE float4[];
+ERROR:  type "real[]" is not supported in column store
+ALTER TABLE alter_addcols_58 ALTER COLUMN b SET DATA TYPE int2[];
+ERROR:  type "smallint[]" is not supported in column store
+-- test: cannot change data type of DISTRIBUTE column.
+ALTER TABLE alter_addcols_58 ALTER COLUMN a SET DATA TYPE varchar(100);
+DROP TABLE alter_addcols_58;
+-- char,char(n),varchar(n),integer
+CREATE TABLE alter_addcols_61(id1 integer, mychar char, name char(5), name2 varchar(5)) WITH(ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_61 VALUES(1,'1','12','1234');
+INSERT INTO alter_addcols_61 VALUES(1,'a','ab','abcd');
+SELECT * FROM alter_addcols_61;
+ id1 | mychar | name  | name2 
+-----+--------+-------+-------
+   1 | 1      | 12    | 1234
+   1 | a      | ab    | abcd
+(2 rows)
+
+\d+ alter_addcols_61;
+                   Table "cstore_alter_table3.alter_addcols_61"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | integer              |           | plain    |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(5)         |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+--can't alter distributed key
+ALTER TABLE alter_addcols_61 ALTER id1 TYPE char;
+-- CHAR->INT, failed
+ALTER TABLE alter_addcols_61 ALTER mychar TYPE int;
+ERROR:  invalid input syntax for integer: "a"
+-- char(n) extended
+ALTER TABLE alter_addcols_61 ALTER name TYPE char(10);
+\d+ alter_addcols_61;
+                   Table "cstore_alter_table3.alter_addcols_61"
+ Column |         Type         | Modifiers | Storage  | Stats target | Description 
+--------+----------------------+-----------+----------+--------------+-------------
+ id1    | character(1)         |           | extended |              | 
+ mychar | character(1)         |           | extended |              | 
+ name   | character(10)        |           | extended |              | 
+ name2  | character varying(5) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+SELECT * FROM alter_addcols_61;
+ id1 | mychar |    name    | name2 
+-----+--------+------------+-------
+ 1   | 1      | 12         | 1234
+ 1   | a      | ab         | abcd
+(2 rows)
+
+--test altered column char extended
+UPDATE alter_addcols_61 SET name = 'abcdefg' WHERE id1=2;
+SELECT * FROM alter_addcols_61;
+ id1 | mychar |    name    | name2 
+-----+--------+------------+-------
+ 1   | 1      | 12         | 1234
+ 1   | a      | ab         | abcd
+(2 rows)
+
+UPDATE alter_addcols_61 SET name = 'abcdefg' WHERE mychar='a';
+SELECT * FROM alter_addcols_61;
+ id1 | mychar |    name    | name2 
+-----+--------+------------+-------
+ 1   | 1      | 12         | 1234
+ 1   | a      | abcdefg    | abcd
+(2 rows)
+
+DELETE FROM alter_addcols_61 WHERE mychar='a';
+SELECT * FROM alter_addcols_61;
+ id1 | mychar |    name    | name2 
+-----+--------+------------+-------
+ 1   | 1      | 12         | 1234
+(1 row)
+
+-- char->int, succeed
+ALTER TABLE alter_addcols_61 ALTER COLUMN mychar SET DATA TYPE int;
+SELECT * FROM alter_addcols_61;
+ id1 | mychar |    name    | name2 
+-----+--------+------------+-------
+ 1   |      1 | 12         | 1234
+(1 row)
+
+-- int-->char after deleting
+INSERT INTO alter_addcols_61 VALUES (1, 3, 'cc', 'dd');
+INSERT INTO alter_addcols_61 VALUES (1, 4, '34', 'dd');
+DELETE FROM alter_addcols_61 WHERE name = 'cc';
+ALTER TABLE alter_addcols_61 ALTER COLUMN name SET DATA TYPE int;
+SELECT * FROM alter_addcols_61;
+ id1 | mychar | name | name2 
+-----+--------+------+-------
+ 1   |      1 |   12 | 1234
+ 1   |      4 |   34 | dd
+(2 rows)
+
+-- test altered column char->int, can't insert succeed
+INSERT INTO alter_addcols_61 VALUES(1, 'b', 'abcdef', '1234');
+ERROR:  invalid input syntax for integer: "b"
+LINE 1: INSERT INTO alter_addcols_61 VALUES(1, 'b', 'abcdef', '1234'...
+                                               ^
+CONTEXT:  referenced column: mychar
+-- varchar(n) extended
+ALTER TABLE alter_addcols_61 ALTER name2 TYPE varchar(20);
+\d+ alter_addcols_61;
+                    Table "cstore_alter_table3.alter_addcols_61"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ id1    | character(1)          |           | extended |              | 
+ mychar | integer               |           | plain    |              | 
+ name   | integer               |           | plain    |              | 
+ name2  | character varying(20) |           | extended |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+SELECT * FROM alter_addcols_61;
+ id1 | mychar | name | name2 
+-----+--------+------+-------
+ 1   |      1 |   12 | 1234
+ 1   |      4 |   34 | dd
+(2 rows)
+
+ALTER TABLE alter_addcols_61 ALTER name TYPE varchar(20);
+INSERT INTO alter_addcols_61 VALUES(1, 3, 'abcdef', '1234567');
+SELECT * FROM alter_addcols_61;
+ id1 | mychar |  name  |  name2  
+-----+--------+--------+---------
+ 1   |      1 | 12     | 1234
+ 1   |      4 | 34     | dd
+ 1   |      3 | abcdef | 1234567
+(3 rows)
+
+-- test the FULL NULL cu
+CREATE TABLE alter_addcols_64(a int, b int) WITH ( ORIENTATION = COLUMN);
+INSERT INTO alter_addcols_64 VALUES(1), (1), (1), (1), (1);
+VACUUM FULL alter_addcols_64;
+ALTER TABLE alter_addcols_64 ALTER COLUMN b SET DATA TYPE char;
+SELECT COUNT(*) FROM alter_addcols_64;
+ count 
+-------
+     5
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_64;
+ a | b 
+---+---
+ 1 | 
+(1 row)
+
+-- forbit alter the same column within a sql clause.
+CREATE TABLE alter_addcols_79(a int, b int) WITH ( ORIENTATION = COLUMN);
+ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE bigint;
+ERROR:  cannot alter type of column "b" twice
+ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl';
+ERROR:  cannot alter type of column "b" twice
+-- test multiple SET DATA TYPE within one sql clause.
+CREATE TABLE alter_addcols_80(a int, b int, c varchar(10)) WITH ( ORIENTATION = COLUMN);
+create table base_alter_addcols(a int, b int, c varchar(10));
+insert into base_alter_addcols values(1, generate_series(1,10), 'hello');
+insert into base_alter_addcols values(1,generate_series(1,10), 'love');
+insert into base_alter_addcols values(1, generate_series(1,10), 'pig');
+insert into base_alter_addcols values(1, generate_series(1,10), 'dog');
+insert into base_alter_addcols values(1, generate_series(1,10), 'kitty');
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 SELECT * FROM base_alter_addcols;
+INSERT INTO alter_addcols_80 VALUES(1, 6), (1, 7), (1, 8);
+INSERT INTO alter_addcols_80 SELECT * FROM alter_addcols_80;
+VACUUM FULL alter_addcols_80;
+DELETE FROM alter_addcols_80 WHERE b > 6;
+DELETE FROM alter_addcols_80 WHERE b = 2;
+ALTER TABLE alter_addcols_80 ALTER COLUMN b SET DATA TYPE varchar(7) USING b::char || 'zcw', ALTER COLUMN c SET DATA TYPE varchar(8);
+SELECT COUNT(*) FROM alter_addcols_80;
+ count 
+-------
+   352
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '1zcw';
+ count 
+-------
+    70
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '2zcw';
+ count 
+-------
+     0
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '3zcw';
+ count 
+-------
+    70
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '4zcw';
+ count 
+-------
+    70
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '5zcw';
+ count 
+-------
+    70
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '6zcw';
+ count 
+-------
+    72
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_80 ORDER BY b;
+ a |  b   |   c   
+---+------+-------
+ 1 | 1zcw | dog
+ 1 | 1zcw | love
+ 1 | 1zcw | pig
+ 1 | 1zcw | hello
+ 1 | 1zcw | kitty
+ 1 | 3zcw | love
+ 1 | 3zcw | dog
+ 1 | 3zcw | kitty
+ 1 | 3zcw | hello
+ 1 | 3zcw | pig
+ 1 | 4zcw | kitty
+ 1 | 4zcw | love
+ 1 | 4zcw | hello
+ 1 | 4zcw | pig
+ 1 | 4zcw | dog
+ 1 | 5zcw | pig
+ 1 | 5zcw | hello
+ 1 | 5zcw | love
+ 1 | 5zcw | dog
+ 1 | 5zcw | kitty
+ 1 | 6zcw | pig
+ 1 | 6zcw | love
+ 1 | 6zcw | hello
+ 1 | 6zcw | 
+ 1 | 6zcw | kitty
+ 1 | 6zcw | dog
+(26 rows)
+
+ALTER TABLE alter_addcols_80 ALTER COLUMN b SET DATA TYPE varchar(10), ALTER COLUMN c SET DATA TYPE varchar(10);
+SELECT COUNT(*) FROM alter_addcols_80;
+ count 
+-------
+   352
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '1zcw';
+ count 
+-------
+    70
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '2zcw';
+ count 
+-------
+     0
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '3zcw';
+ count 
+-------
+    70
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '4zcw';
+ count 
+-------
+    70
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '5zcw';
+ count 
+-------
+    70
+(1 row)
+
+SELECT COUNT(*) FROM alter_addcols_80 WHERE b = '6zcw';
+ count 
+-------
+    72
+(1 row)
+
+SELECT DISTINCT * FROM alter_addcols_80 ORDER BY b;
+ a |  b   |   c   
+---+------+-------
+ 1 | 1zcw | dog
+ 1 | 1zcw | love
+ 1 | 1zcw | pig
+ 1 | 1zcw | hello
+ 1 | 1zcw | kitty
+ 1 | 3zcw | love
+ 1 | 3zcw | dog
+ 1 | 3zcw | kitty
+ 1 | 3zcw | hello
+ 1 | 3zcw | pig
+ 1 | 4zcw | kitty
+ 1 | 4zcw | love
+ 1 | 4zcw | hello
+ 1 | 4zcw | pig
+ 1 | 4zcw | dog
+ 1 | 5zcw | pig
+ 1 | 5zcw | hello
+ 1 | 5zcw | love
+ 1 | 5zcw | dog
+ 1 | 5zcw | kitty
+ 1 | 6zcw | pig
+ 1 | 6zcw | love
+ 1 | 6zcw | hello
+ 1 | 6zcw | 
+ 1 | 6zcw | kitty
+ 1 | 6zcw | dog
+(26 rows)
+
+drop schema cstore_alter_table3 cascade;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to table alter_addcols_61
+drop cascades to table alter_addcols_64
+drop cascades to table alter_addcols_79
+drop cascades to table alter_addcols_80
+drop cascades to table base_alter_addcols

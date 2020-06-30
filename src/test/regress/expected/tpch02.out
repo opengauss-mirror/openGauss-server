@@ -1,0 +1,56 @@
+-- $ID$
+-- TPC-H/TPC-R Minimum Cost Supplier Query (Q2)
+-- Functional Query Definition
+-- Approved February 1998
+select
+	s_acctbal,
+	s_name,
+	n_name,
+	p_partkey,
+	p_mfgr,
+	s_address,
+	s_phone,
+	s_comment
+from
+	part,
+	supplier,
+	partsupp,
+	nation,
+	region
+where
+	p_partkey = ps_partkey
+	and s_suppkey = ps_suppkey
+	and p_size = 15
+	and p_type like 'SMALL%'
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'EUROPE '
+	and ps_supplycost = (
+		select
+			min(ps_supplycost)
+		from
+			partsupp,
+			supplier,
+			nation,
+			region
+		where
+			p_partkey = ps_partkey
+			and s_suppkey = ps_suppkey
+			and s_nationkey = n_nationkey
+			and n_regionkey = r_regionkey
+			and r_name = 'EUROPE '
+	)
+order by
+	s_acctbal desc,
+	n_name,
+	s_name,
+	p_partkey
+limit 100
+;
+ s_acctbal |          s_name           |          n_name           | p_partkey |          p_mfgr           |              s_address               |     s_phone     |                                    s_comment                                     
+-----------+---------------------------+---------------------------+-----------+---------------------------+--------------------------------------+-----------------+----------------------------------------------------------------------------------
+   3556.47 | Supplier#000000032        | UNITED KINGDOM            |       331 | Manufacturer#2            | yvoD3TtZSx1skQNCK8agk5bZlZLug        | 33-484-637-7873 | usly even depths. quickly ironic theodolites s
+   2972.26 | Supplier#000000016        | RUSSIA                    |       486 | Manufacturer#4            | YjP5C55zHDXL7LalK27zfQnwejdpin4AMpvh | 32-822-502-4215 | ously express ideas haggle quickly dugouts? fu
+   -963.79 | Supplier#000000065        | RUSSIA                    |      1192 | Manufacturer#4            | BsAnHUmSFArppKrM                     | 32-444-835-2434 | l ideas wake carefully around the regular packages. furiously ruthless pinto bea
+(3 rows)
+

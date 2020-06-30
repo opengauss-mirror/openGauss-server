@@ -1,0 +1,74 @@
+set enable_vector_engine=on;
+-- Problem:
+-- rle method has some defacts. when the repeats is bigger than 128, the runs data is written wrong.
+-- when decompressing dirty data is gotten.
+CREATE TABLE colcmpr_rle_2byte_runs
+(
+	distkey INT4,
+	a INT4
+) with (orientation = column, compression = low)  ;
+COPY colcmpr_rle_2byte_runs FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_rle_2byte_runs.data';
+CREATE TABLE colcmpr_rle_2byte_runs_01
+(
+	distkey INT4,
+	a INT4
+)  ;
+COPY colcmpr_rle_2byte_runs_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_rle_2byte_runs.data';
+SELECT COUNT(*) FROM colcmpr_rle_2byte_runs_01;
+SELECT COUNT(*) FROM colcmpr_rle_2byte_runs;
+(SELECT * FROM colcmpr_rle_2byte_runs_01) MINUS ALL (SELECT * FROM colcmpr_rle_2byte_runs);
+(SELECT * FROM colcmpr_rle_2byte_runs) MINUS ALL (SELECT * FROM colcmpr_rle_2byte_runs_01);
+DROP TABLE colcmpr_rle_2byte_runs;
+DROP TABLE colcmpr_rle_2byte_runs_01;
+-- problem: the max of repeating runs is 0x7fff, that is 32767. we now test this cases
+CREATE TABLE cstore_cmpr_rle_2byte_runs
+(
+	distkey INT4,
+	a INT4
+) with (orientation = 'row')  ;
+INSERT INTO cstore_cmpr_rle_2byte_runs VALUES (1, 254), (1, 254), (1, 254), (1, 254), (1, 254), (1, 254), (1, 254), (1, 254), (1, 254), (1, 254), (1, 254), (1, 254); 
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs SELECT * FROM cstore_cmpr_rle_2byte_runs;
+INSERT INTO cstore_cmpr_rle_2byte_runs VALUES(1, 0);
+COPY cstore_cmpr_rle_2byte_runs TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_2byte_runs.data';
+DROP TABLE cstore_cmpr_rle_2byte_runs;
+CREATE TABLE cstore_cmpr_rle_2byte_runs
+(
+	distkey INT4,
+	a INT4
+) with (orientation = column, compression = low )  ;
+COPY cstore_cmpr_rle_2byte_runs FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_2byte_runs.data';
+SELECT COUNT(*) FROM cstore_cmpr_rle_2byte_runs;
+SELECT DISTINCT * FROM cstore_cmpr_rle_2byte_runs ORDER BY 2;
+DROP TABLE cstore_cmpr_rle_2byte_runs;
+-- problem: test the above case with compression = middle
+CREATE TABLE cstore_cmpr_rle_2byte_runs
+(
+	distkey INT4,
+	a INT4
+) with (orientation = column, compression = middle )  ;
+COPY cstore_cmpr_rle_2byte_runs FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_2byte_runs.data';
+SELECT COUNT(*) FROM cstore_cmpr_rle_2byte_runs;
+SELECT DISTINCT * FROM cstore_cmpr_rle_2byte_runs ORDER BY 2;
+DROP TABLE cstore_cmpr_rle_2byte_runs;
+-- problem: test the above case with compression = high
+CREATE TABLE cstore_cmpr_rle_2byte_runs
+(
+	distkey INT4,
+	a INT4
+) with (orientation = column, compression = high )  ;
+COPY cstore_cmpr_rle_2byte_runs FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_2byte_runs.data';
+SELECT COUNT(*) FROM cstore_cmpr_rle_2byte_runs;
+SELECT DISTINCT * FROM cstore_cmpr_rle_2byte_runs ORDER BY 2;
+DROP TABLE cstore_cmpr_rle_2byte_runs;
+\! rm @abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_2byte_runs.data

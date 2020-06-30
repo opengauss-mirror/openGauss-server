@@ -1,0 +1,58 @@
+create schema hw_function_p_3;
+set search_path to hw_function_p_3;
+--pg_get_functiondef
+select * from pg_get_functiondef((select oid from pg_proc where proname='pg_table_size'));
+ headerlines |                          definition                           
+-------------+---------------------------------------------------------------
+           4 | CREATE OR REPLACE FUNCTION pg_catalog.pg_table_size(regclass)+
+             |  RETURNS bigint                                              +
+             |  LANGUAGE internal                                           +
+             |  STRICT NOT FENCED NOT SHIPPABLE                             +
+             | AS $function$pg_table_size$function$                         +
+             | 
+(1 row)
+
+--pg_stat_get_status, just for llt coverage
+select thread_name from pg_stat_get_status(pg_backend_pid());
+ thread_name 
+-------------
+ gsql
+(1 row)
+
+select thread_name from pg_stat_get_status(99001);  --invalid thread id
+ thread_name 
+-------------
+(0 rows)
+
+create user jack with password 'ttest@123';
+set role jack password 'ttest@123';
+select count(*) from pg_stat_get_thread();
+ count 
+-------
+--?.*
+(1 row)
+
+reset role;
+drop user jack;
+--pg_stat_get_backend_client_addr pg_stat_get_backend_client_port, just for llt coverage
+select * from pg_stat_get_backend_client_addr(1);
+--?.* 
+--?.*
+--?.*
+(1 row)
+
+select * from pg_stat_get_backend_client_port(1);
+--?.* 
+--?.*
+--?.*
+(1 row)
+
+create table t1(a int, b int, c int);
+select pg_table_size('t1');
+ pg_table_size 
+---------------
+             0
+(1 row)
+
+drop schema hw_function_p_3 cascade;
+NOTICE:  drop cascades to table t1

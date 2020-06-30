@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" ?>
+
+<root>
+	<dn>
+	    <PARAM KEY='checkpoint_segments' VALUE='64' />
+	    <PARAM KEY='comm_tcp_mode' VALUE='on' />
+	    <PARAM KEY='comm_quota_size' VALUE='1024kB' />
+	    <PARAM KEY='max_connections' VALUE='5000' />
+	    <PARAM KEY='max_prepared_transactions' VALUE='800' />
+	    <PARAM KEY='work_mem' VALUE='64MB' />
+	    <!-- Do not set max_process_memory in dummy datanodes -->
+	    <PARAM KEY='max_process_memory' VALUE='PHYSIC_MEMORY*0.665/(N+MAX_MASTER_DATANUM_IN_ONENODE)' />
+	    <PARAM KEY='shared_buffers' VALUE='1GB' />
+		
+		<PARAM KEY='audit_enabled' VALUE='on' />
+		<PARAM KEY='wal_keep_segments' VALUE='16' />
+		
+		<!-- parameters for parallel redo -->
+		<PARAM KEY='recovery_max_workers' VALUE='4' />
+		
+		<!-- parameters for incremental checkpoint -->
+		<PARAM KEY='enable_incremental_checkpoint' VALUE='on' />
+		<PARAM KEY='enable_double_write' VALUE='on' />
+		<PARAM KEY='use_workload_manager' VALUE='off' />
+	</dn>
+</root>

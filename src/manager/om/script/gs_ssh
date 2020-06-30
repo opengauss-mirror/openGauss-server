@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_ssh is a utility to execute one command on all nodes.
+#############################################################################
+import os
+import sys
+
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.Common import DefaultValue
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.DbClusterInfo import dbClusterInfo
+from gspylib.threads.SshTool import SshTool
+from gspylib.common.ParameterParsecheck import Parameter
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.os.gsOSlib import g_OSlib
+from gspylib.os.gsfile import g_file
+from gspylib.common.VersionInfo import VersionInfo
+
+class ParallelSsh(ParallelBaseOM):
+    """
+    The class is used to execute one command on all nodes.
+    """
+
+    def __init__(self):
+        """
+        function: initialize the parameters
+        input : NA
+        output: NA
+        """
+        ParallelBaseOM.__init__(self)
+        self.userInfo = ""
+        self.cmd = ""
+
+    def usage(self):
+        """
+gs_ssh is a utility to execute one command on all %s cluster nodes.
+
+Usage:
+  gs_ssh -? | --help
+  gs_ssh -V | --version
+  gs_ssh -c COMMAND
+
+General options:
+  -c                             Command to be executed in cluster.
+  -?, --help                     Show help information for this utility,
+                                 and exit the command line mode.
+  -V, --version                  Show version information.
+        """
+        print(self.usage.__doc__ % VersionInfo.PRODUCT_NAME)
+
+    def parseCommandLine(self):
+        """
+        function: parse command line
+        input : NA
+        output: NA
+        """
+        ##Parse command
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("ssh")
+        # If help is included in the parameter,
+        # the help message is printed and exited
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(0)
+        # Gets the cmd parameter
+        if (ParaDict.__contains__("cmd")):
+            self.cmd = ParaDict.get("cmd")
+            # The cmd parameter is required
+        if (self.cmd == ""):
+            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
+                                   % 'c' + ".")
+
+    def initGlobal(self):
+        """
+        function: Init global parameter
+        input : NA
+        output: NA
+        """
+        try:
+            # Get user information
+            self.user = g_OSlib.getUserInfo()["name"]
+            self.clusterInfo = dbClusterInfo()
+            self.clusterInfo.initFromStaticConfig(self.user)
+
+            nodeNames = self.clusterInfo.getClusterNodeNames()
+            self.sshTool = SshTool(nodeNames)
+        except Exception as e:
+            GaussLog.exitWithError(str(e))
+
+    def executeCommand(self):
+        """
+        function: execute command
+        input : NA
+        output: NA
+        """
+        failedNodes = ""
+        succeedNodes = ""
+        try:
+            # Queries the existence of objects that
+            # the command executes in all nodes
+            command = (self.cmd.strip()).split(" ")
+            checkCmd = g_file.SHELL_CMD_DICT["getFullPathForShellCmd"] % \
+                       command[0]
+            (status, output) = self.sshTool.getSshStatusOutput(checkCmd)
+            # Resolve all node execution results
+            for node in status.keys():
+                if (status[node] != DefaultValue.SUCCESS):
+                    failedNodes += "%s " % node
+                else:
+                    succeedNodes += "%s " % node
+            if (failedNodes != ""):
+                GaussLog.exitWithError(ErrorCode.GAUSS_524["GAUSS_52403"]
+                                       % (command[0], failedNodes))
+            failedNodes = ""
+            succeedNodes = ""
+            executeCmd = self.cmd
+            #############################################################
+            # Create a temporary shell file
+            cmdFile = "%s/ClusterCall_%d.sh"\
+                      % (DefaultValue.getTmpDirFromEnv(), os.getpid())
+
+            g_file.createFile(cmdFile, True, DefaultValue.FILE_MODE)
+
+            # Writes the cmd command to the shell
+            with open(cmdFile, "a") as fp:
+                fp.write("#!/bin/sh")
+                fp.write(os.linesep)
+                fp.write("%s" % executeCmd)
+                fp.write(os.linesep)
+                fp.flush()
+
+            ##############################################################
+            cmdDir = DefaultValue.getTmpDirFromEnv() + '/'
+            # Distribute the shell file to the temporary directory
+            # for each node
+            self.sshTool.scpFiles(cmdFile, cmdDir)
+            # Execute the shell file on all nodes
+            cmdExecute = g_file.SHELL_CMD_DICT["execShellFile"] % cmdFile
+            (status, output) = self.sshTool.getSshStatusOutput(cmdExecute)
+            # Resolve the execution results of all nodes
+            for node in status.keys():
+                if (status[node] != DefaultValue.SUCCESS):
+                    failedNodes += "%s " % node
+                else:
+                    succeedNodes += "%s " % node
+            # Some nodes fail to execute
+            if (failedNodes != "" and succeedNodes != ""):
+                GaussLog.printMessage(
+                    "Failed to execute command on %s." % failedNodes)
+                GaussLog.printMessage(
+                    "Successfully execute command on %s.\n" % succeedNodes)
+            # All nodes execute successfully
+            elif (failedNodes == ""):
+                GaussLog.printMessage(
+                    "Successfully execute command on all nodes.\n")
+            # All nodes fail to execute
+            elif (succeedNodes == ""):
+                GaussLog.printMessage(
+                    "Failed to execute command on all nodes.\n")
+            # Output Execution result
+            GaussLog.printMessage("Output:\n%s" % output)
+            # Delete the temporary shell file at all nodes
+            cmdFileRm = g_file.SHELL_CMD_DICT["deleteFile"]\
+                        % (cmdFile, cmdFile)
+            self.sshTool.executeCommand(cmdFileRm, "remove files")
+
+        except Exception as e:
+            cmdFileRm = g_file.SHELL_CMD_DICT["deleteFile"]\
+                        % (cmdFile, cmdFile)
+            self.sshTool.executeCommand(cmdFileRm, "remove files")
+            GaussLog.exitWithError(str(e))
+
+    def run(self):
+        """
+        function: Perform the whole process
+        input : NA
+        output: NA
+        """
+        # parse cmd lines
+        self.parseCommandLine()
+        # init globals
+        self.initGlobal()
+        # execute command
+        self.executeCommand()
+
+
+if __name__ == '__main__':
+    # main function
+    # Can not run as root
+    if (os.getuid() == 0):
+        GaussLog.exitWithError(ErrorCode.GAUSS_501["GAUSS_50105"])
+
+    try:
+        parallelSsh = ParallelSsh()
+        parallelSsh.run()
+    except Exception as e:
+        GaussLog.exitWithError(str(e))
+
+    sys.exit(0)

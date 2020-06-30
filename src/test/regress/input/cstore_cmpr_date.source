@@ -1,0 +1,28 @@
+set enable_vector_engine=on;
+SET DATESTYLE=ISO;
+-- Problem:
+-- basic DATE type data compression, including DELTA method, min/max computation.
+CREATE TABLE colcmpr_date
+(
+	distkey INT4,
+	a date,
+	b date,
+	c date
+) with (orientation = column)  ;
+COPY colcmpr_date FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_date.data';
+SELECT * FROM colcmpr_date;
+DROP TABLE colcmpr_date;
+
+-- problem:
+-- test the down-limit value and upmost value about DATE type data
+-- including DELTA/RLE/zlib compression methods
+CREATE TABLE colcmpr_date_01
+(
+	distKey int,
+	a date,
+	b date,
+	c date
+) with (orientation = column) ;
+COPY colcmpr_date_01 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/colcmpr_date_01.data';
+SELECT * FROM colcmpr_date_01;
+DROP TABLE colcmpr_date_01;

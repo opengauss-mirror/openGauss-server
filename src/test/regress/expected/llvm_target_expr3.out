@@ -1,0 +1,238 @@
+/* 
+ * This file is used to test the LLVM Optimization in target list expression.
+ * It's purpose is to  cover the basic functionality about expressions.
+ */
+/********************************
+Expression Type:
+    T_Var,
+    T_Const,
+    T_Case,
+    T_OpExpr,
+    T_ScalarArrayOp
+    T_FuncExpr,
+    T_BoolExpr,
+    T_BoolenTest,
+    T_NullTest
+Using Tye:
+    targetlist
+********************************/
+----
+--- Create Table and Insert Data
+----
+drop schema if exists llvm_target_engine3 cascade ;
+NOTICE:  schema "llvm_target_engine3" does not exist, skipping
+create schema llvm_target_engine3;
+set current_schema = llvm_target_engine3;
+set time zone 'PRC';
+set codegen_cost_threshold=0;
+CREATE TABLE llvm_target_engine3.LLVM_VECEXPR_TABLE_05(
+    col_int	int,
+	col_char1 char(1)	default ' ',
+	col_char2 char(16)	not null,
+	col_varchar1 varchar(20),
+	col_varchar2 varchar,
+	col_text	text
+)with(orientation=column);
+copy LLVM_VECEXPR_TABLE_05 from stdin;
+CREATE TABLE llvm_target_engine3.LLVM_VECEXPR_TABLE_06(
+    col_int	int not null,
+    col_num1	numeric(9,0),
+    col_num2	numeric(18,18),
+    col_num3	numeric(20,2),
+    col_num4	numeric(20,18),
+    col_num5	numeric(21,20)
+)with(orientation=column);
+copy LLVM_VECEXPR_TABLE_06 from stdin;
+CREATE TABLE llvm_target_engine3.LLVM_VECEXPR_TABLE_07(
+    col_int	int not null,
+    col_text	text
+)with(orientation=column);
+copy LLVM_VECEXPR_TABLE_07 from stdin;
+analyze llvm_vecexpr_table_05;
+analyze llvm_vecexpr_table_06;
+analyze llvm_vecexpr_table_07;
+-----
+---  orc compatability with substr , rtrim , btrim
+-----
+select col_char1, col_char2,
+        rtrim(col_char1),
+        btrim(col_char2),
+        rtrim(col_char1) is null and substr(col_char2, 1, 2) is not null
+    from llvm_vecexpr_table_05
+    order by 1, 2, 3, 4, 5;
+ col_char1 |    col_char2     | rtrim | btrim | ?column? 
+-----------+------------------+-------+-------+----------
+           |                  |       |       | f
+           | aa               |       | aa    | t
+           | AAA              |       | AAA   | t
+ a         |  bb              | a     | bb    | f
+(4 rows)
+
+select col_varchar1, col_varchar2, col_text,
+        btrim(col_varchar2),
+        rtrim(col_text)
+    from llvm_vecexpr_table_05
+    order by 1, 2, 3, 4, 5;
+ col_varchar1 | col_varchar2 | col_text |  btrim   |  rtrim   
+--------------+--------------+----------+----------+----------
+              | nanjing      | timeon   | nanjing  | timeon
+              |              |          |          | 
+ BBtextBB     | tianjing     | timeisok | tianjing | timeisok
+  cc          |              |          |          | 
+(4 rows)
+
+-----
+---  nulltest + bool expr + booleantest + opCodgen + funCodegen
+-----
+select col_num1, col_num1 < 500, col_num2 >= 0.75 from llvm_vecexpr_table_06 order by 1, 2, 3;
+ col_num1 | ?column? | ?column? 
+----------+----------+----------
+       45 | t        | 
+      123 | t        | t
+      245 | t        | t
+      758 | f        | f
+     6897 | f        | f
+          |          | f
+(6 rows)
+
+-----
+---  lpad + substring
+-----
+select col_int, substr(col_text, 3, 5) from llvm_vecexpr_table_07 order by 1, 2;
+ col_int | substr 
+---------+--------
+       1 | cdqui
+       2 | 789dd
+       3 | HJdgd
+       4 | gbfas
+       5 | CDSDJ
+(5 rows)
+
+select col_int, substr(col_text, 7, 2) from llvm_vecexpr_table_07 order by 1, 2;
+ col_int | substr 
+---------+--------
+       1 | iA
+       2 | dJ
+       3 | dg
+       4 | sd
+       5 | JK
+(5 rows)
+
+----
+--- concat
+----
+select col_char1||col_char2 from llvm_vecexpr_table_05 order by 1;
+ ?column? 
+----------
+ aa
+ AAA
+ a bb
+ 
+(4 rows)
+
+select length(col_varchar1||col_varchar2) from llvm_vecexpr_table_05 order by 1;
+ length 
+--------
+      3
+      5
+      9
+     16
+(4 rows)
+
+----
+----
+select col_int, col_num2 + 9 from llvm_vecexpr_table_06 order by 1, 2;
+ col_int |       ?column?       
+---------+----------------------
+       1 | 9.980000000000000000
+       2 | 9.750000000000000000
+       3 |                     
+       4 | 9.640000000000000000
+       5 | 9.670000000000000000
+       9 | 9.350000000000000000
+(6 rows)
+
+select col_int, col_num2 - (-9) from llvm_vecexpr_table_06 order by 1, 2;
+ col_int |       ?column?       
+---------+----------------------
+       1 | 9.980000000000000000
+       2 | 9.750000000000000000
+       3 |                     
+       4 | 9.640000000000000000
+       5 | 9.670000000000000000
+       9 | 9.350000000000000000
+(6 rows)
+
+----
+--- clean table and resource
+----
+drop schema llvm_target_engine3 cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table llvm_vecexpr_table_05
+drop cascades to table llvm_vecexpr_table_06
+drop cascades to table llvm_vecexpr_table_07
+----
+--- create database with encoding SQL-ASCII
+----
+create database asciitest template template0 encoding 'SQL_ASCII' lc_ctype 'C' lc_collate 'C';
+\c asciitest
+create schema llvm_vectar_ascii_engine;
+set current_schema = llvm_vectar_ascii_engine;
+CREATE TABLE LLVM_VECTAR_TABLE_01(
+    col_int	int not null,
+    col_text	text
+)with(orientation=column);
+copy LLVM_VECTAR_TABLE_01 from stdin;
+select col_int, substr(col_text, 3, 6) from LLVM_VECTAR_TABLE_01 order by 1;
+ col_int | substr 
+---------+--------
+       1 | cddgaA
+       2 | 789$J*
+       3 | HJ*&^8
+       4 | 34djgk
+       5 | CDSDJK
+(5 rows)
+
+select col_int, substr(col_text, 5, 2) from LLVM_VECTAR_TABLE_01 order by 1;
+ col_int | substr 
+---------+--------
+       1 | dg
+       2 | 9$
+       3 | *&
+       4 | dj
+       5 | SD
+(5 rows)
+
+select col_int, substr(col_text, 6, 3) from LLVM_VECTAR_TABLE_01 order by 1;
+ col_int | substr 
+---------+--------
+       1 | gaA
+       2 | $J*
+       3 | &^8
+       4 | jgk
+       5 | DJK
+(5 rows)
+
+select col_int, substr(col_text, 11, 3) from LLVM_VECTAR_TABLE_01 order by 1;
+ col_int | substr 
+---------+--------
+       1 | D
+       2 | I
+       3 | ijh
+       4 | uit
+       5 | 7Ug
+(5 rows)
+
+select col_int, substr(col_text, 12, 5) from LLVM_VECTAR_TABLE_01 order by 1;
+ col_int | substr 
+---------+--------
+       1 | 
+       2 | 
+       3 | jhhIJ
+       4 | itl$d
+       5 | Ugdss
+(5 rows)
+
+drop schema llvm_vectar_ascii_engine cascade;
+NOTICE:  drop cascades to table llvm_vectar_table_01
+\c postgres

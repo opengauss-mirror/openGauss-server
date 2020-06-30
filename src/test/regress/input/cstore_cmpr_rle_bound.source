@@ -1,0 +1,104 @@
+-- problem: test function CompressGetBound()
+CREATE TABLE cstore_cmpr_rle_bound
+(
+	a1 bigint,
+	a2 bigint,
+	a3 bigint,
+	a4 bigint,
+	a5 bigint,
+	a6 bigint,
+	a7 bigint,
+	a8 bigint,
+	a9 bigint
+) with ( orientation = column, compression = low );
+COPY cstore_cmpr_rle_bound FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_bound.data';
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 254;
+SELECT DISTINCT a2 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a3 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a3 = 65278;
+
+SELECT DISTINCT a3 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a4 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a4 = 16711422;
+SELECT DISTINCT a4 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a5 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a5 = 4278124286;
+SELECT DISTINCT a5 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a6 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a6 = 1095199817470;
+SELECT DISTINCT a6 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a7 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a7 = 280371153272574;
+SELECT DISTINCT a7 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a8 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a8 = 71775015237779198;
+SELECT DISTINCT a8 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a9 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a9 = -72340172838076674;
+SELECT DISTINCT a9 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT DISTINCT * FROM cstore_cmpr_rle_bound ORDER BY 2;
+DROP TABLE cstore_cmpr_rle_bound;
+
+-- problem: test rle bound case with compression = middle
+CREATE TABLE cstore_cmpr_rle_bound
+(
+	a1 bigint,
+	a2 bigint,
+	a3 bigint,
+	a4 bigint,
+	a5 bigint,
+	a6 bigint,
+	a7 bigint,
+	a8 bigint,
+	a9 bigint
+) with ( orientation = column, compression = middle);
+COPY cstore_cmpr_rle_bound FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_cmpr_rle_bound.data';
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a2 = 254;
+SELECT DISTINCT a2 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a3 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a3 = 65278;
+
+SELECT DISTINCT a3 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a4 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a4 = 16711422;
+SELECT DISTINCT a4 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a5 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a5 = 4278124286;
+SELECT DISTINCT a5 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a6 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a6 = 1095199817470;
+SELECT DISTINCT a6 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a7 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a7 = 280371153272574;
+SELECT DISTINCT a7 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a8 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a8 = 71775015237779198;
+SELECT DISTINCT a8 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a9 = 0;
+SELECT COUNT(*) FROM cstore_cmpr_rle_bound WHERE a9 = -72340172838076674;
+SELECT DISTINCT a9 FROM cstore_cmpr_rle_bound ORDER BY 1;
+
+SELECT DISTINCT * FROM cstore_cmpr_rle_bound ORDER BY 2;
+DROP TABLE cstore_cmpr_rle_bound;
+

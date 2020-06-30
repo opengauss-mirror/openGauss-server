@@ -1,0 +1,61 @@
+<refentry id="SQL-ALTER_TABLE_PARTITION">
+<refmeta>
+<refentrytitle>ALTER TABLE PARTITION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER TABLE PARTITION</refname>
+<refpurpose>change the definition of a partition</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    action [, ... ];
+ALTER TABLE [ IF EXISTS ] { table_name [*] | ONLY table_name | ONLY ( table_name  )}
+    RENAME PARTITION { partion_name | FOR ( partition_value [, ...] ) } TO partition_new_name;
+
+where action can be:
+move_clause  |
+    exchange_clause  |
+    row_clause  |
+    merge_clause  |
+    modify_clause  |
+    split_clause  |
+    add_clause  |
+    drop_clause
+where move_clause can be:
+MOVE PARTITION { partion_name | FOR ( partition_value [, ...] ) } TABLESPACE tablespacename
+where exchange_clause can be:
+EXCHANGE PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } 
+    WITH TABLE {[ ONLY ] ordinary_table_name | ordinary_table_name * | ONLY ( ordinary_table_name )} 
+    [ { WITH | WITHOUT } VALIDATION ] [ VERBOSE ]
+where row_clause can be:
+{ ENABLE | DISABLE } ROW MOVEMENT
+where merge_clause can be:
+MERGE PARTITIONS { partition_name } [, ...] INTO PARTITION partition_name
+    [ TABLESPACE tablespacename ]
+where modify_clause can be:
+MODIFY PARTITION partition_name { UNUSABLE LOCAL INDEXES | REBUILD UNUSABLE LOCAL INDEXES }
+where split_clause can be:
+SPLIT PARTITION { partition_name | FOR ( partition_value [, ...] ) } { split_point_clause | no_split_point_clause }
+where split_point_clause can be:
+AT ( partition_value ) INTO ( PARTITION partition_name [ TABLESPACE tablespacename ] , PARTITION partition_name [ TABLESPACE tablespacename ] )
+where no_split_point_clause can be:
+INTO {(partition_less_than_item [, ...] ) | (partition_start_end_item [, ...] )}
+where add_clause can be:
+ADD {partition_less_than_item | partition_start_end_item}
+where partition_less_than_item can be:
+PARTITION partition_name VALUES LESS THAN ( { partition_value | MAXVALUE }	[, ...] ) [ TABLESPACE tablespacename ]
+where partition_start_end_item can be:
+PARTITION partition_name {
+	{START(partition_value) END (partition_value) EVERY (interval_value)} |
+	{START(partition_value) END ({partition_value | MAXVALUE})} |
+	{START(partition_value)} |
+	{END({partition_value | MAXVALUE})}
+} [TABLESPACE tablespace_name]
+where drop_clause can be:
+DROP PARTITION  { partition_name  | FOR (  partition_value [, ...] )  }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

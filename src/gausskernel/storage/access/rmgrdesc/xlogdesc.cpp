@@ -1,0 +1,132 @@
+/* -------------------------------------------------------------------------
+ *
+ * xlogdesc.cpp
+ *	  rmgr descriptor routines for access/transam/xlog.cpp
+ *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1994, Regents of the University of California
+ *
+ *
+ * IDENTIFICATION
+ *	  src/gausskernel/storage/access/rmgrdesc/xlogdesc.cpp
+ *
+ * -------------------------------------------------------------------------
+ */
+#include "postgres.h"
+#include "knl/knl_variable.h"
+#include "access/xlog.h"
+#include "access/xlog_internal.h"
+#include "catalog/pg_control.h"
+#include "utils/guc.h"
+#include "utils/timestamp.h"
+#ifdef FRONTEND
+#include "common/fe_memutils.h"
+#endif
+
+/*
+ * GUC support
+ */
+struct config_enum_entry wal_level_options[] = {{"minimal", WAL_LEVEL_MINIMAL, false},
+    {"archive", WAL_LEVEL_ARCHIVE, false},
+    {"hot_standby", WAL_LEVEL_HOT_STANDBY, false},
+    {"logical", WAL_LEVEL_LOGICAL, false},
+    {NULL, 0, false}};
+
+void xlog_desc(StringInfo buf, XLogReaderState* record)
+{
+    char* rec = XLogRecGetData(record);
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    errno_t rc = EOK;
+
+    if (info == XLOG_CHECKPOINT_SHUTDOWN || info == XLOG_CHECKPOINT_ONLINE) {
+        CheckPoint* checkpoint = (CheckPoint*)rec;
+        time_t time_tmp;
+        char ckpttime_str[128];
+        const char* strftime_fmt = "%c";
+
+        /* covert checkpoint time to string */
+        time_tmp = (time_t)checkpoint->time;
+        struct tm* timeStamp = localtime(&time_tmp);
+        if (timeStamp == NULL) {
+            securec_check(EINVAL_AND_RESET, "\0", "\0");
+        } else {
+            strftime(ckpttime_str, sizeof(ckpttime_str), strftime_fmt, timeStamp);
+        }
+
+        appendStringInfo(buf,
+            "checkpoint: redo %X/%X; "
+            "tli %u; fpw %s; xid " XID_FMT "; oid %u; multi %lu; offset " UINT64_FORMAT "; "
+            "oldest xid " XID_FMT " in DB %u; oldest running xid " XID_FMT "; %s at %s; remove_seg %X/%X",
+            (uint32)(checkpoint->redo >> 32),
+            (uint32)checkpoint->redo,
+            checkpoint->ThisTimeLineID,
+            checkpoint->fullPageWrites ? "true" : "false",
+            checkpoint->nextXid,
+            checkpoint->nextOid,
+            checkpoint->nextMulti,
+            checkpoint->nextMultiOffset,
+            checkpoint->oldestXid,
+            checkpoint->oldestXidDB,
+            checkpoint->oldestActiveXid,
+            (info == XLOG_CHECKPOINT_SHUTDOWN) ? "shutdown" : "online",
+            ckpttime_str,
+            (uint32)(checkpoint->remove_seg >> 32),
+            (uint32)checkpoint->remove_seg);
+    } else if (info == XLOG_NOOP) {
+        appendStringInfo(buf, "xlog no-op");
+    } else if (info == XLOG_NEXTOID) {
+        Oid nextOid;
+
+        rc = memcpy_s(&nextOid, sizeof(Oid), rec, sizeof(Oid));
+        securec_check(rc, "\0", "\0");
+        appendStringInfo(buf, "nextOid: %u", nextOid);
+    } else if (info == XLOG_SWITCH) {
+        appendStringInfo(buf, "xlog switch");
+    } else if (info == XLOG_RESTORE_POINT) {
+        xl_restore_point* xlrec = (xl_restore_point*)rec;
+
+        appendStringInfo(buf, "restore point: %s", xlrec->rp_name);
+    } else if (info == XLOG_FPI) {
+        /* no further information to print */
+    } else if (info == XLOG_FPI_FOR_HINT) {
+        appendStringInfo(buf, "page hint");
+    } else if (info == XLOG_BACKUP_END) {
+        XLogRecPtr startpoint;
+
+        rc = memcpy_s(&startpoint, sizeof(XLogRecPtr), rec, sizeof(XLogRecPtr));
+        securec_check(rc, "\0", "\0");
+        appendStringInfo(buf, "backup end: %X/%X", (uint32)(startpoint >> 32), (uint32)startpoint);
+    } else if (info == XLOG_PARAMETER_CHANGE) {
+        xl_parameter_change xlrec;
+        const char* wal_level_str = NULL;
+        const struct config_enum_entry* entry = NULL;
+
+        rc = memcpy_s(&xlrec, sizeof(xl_parameter_change), rec, sizeof(xl_parameter_change));
+        securec_check(rc, "\0", "\0");
+
+        /* Find a string representation for wal_level */
+        wal_level_str = "?";
+        for (entry = wal_level_options; entry->name; entry++) {
+            if (entry->val == xlrec.wal_level) {
+                wal_level_str = entry->name;
+                break;
+            }
+        }
+
+        appendStringInfo(buf,
+            "parameter change: max_connections=%d max_prepared_xacts=%d max_locks_per_xact=%d wal_level=%s",
+            xlrec.MaxConnections,
+            xlrec.max_prepared_xacts,
+            xlrec.max_locks_per_xact,
+            wal_level_str);
+    } else if (info == XLOG_FPW_CHANGE) {
+        bool fpw = false;
+
+        rc = memcpy_s(&fpw, sizeof(bool), rec, sizeof(bool));
+        securec_check(rc, "\0", "\0");
+        appendStringInfo(buf, "full_page_writes: %s", fpw ? "true" : "false");
+    } else
+        appendStringInfo(buf, "UNKNOWN");
+}
+

@@ -1,0 +1,77 @@
+create schema sonic_hashjoin_test_number;
+set current_schema = sonic_hashjoin_test_number;
+
+CREATE TABLE sonic_hashjoin_test_number.VEC_HASHJOIN_TABLE_01_NUM(
+C_INT INT,
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+a FLOAT,
+b FLOAT4,
+c FLOAT8,
+d numeric,
+e numeric(20,2),
+f decimal,
+g decimal(40,2),
+h real,
+i double precision,
+j boolean
+) with(orientation = column) 
+partition by range (C_INT)
+(
+partition location_1 values less than (0),
+partition location_2 values less than (1000),
+partition location_3 values less than (2000),
+partition location_4 values less than (5000),
+partition location_5 values less than (7000),
+partition location_7 values less than (maxvalue)
+);
+
+CREATE TABLE sonic_hashjoin_test_number.VEC_HASHJOIN_TABLE_02_NUM(
+C_INT INT,
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+a FLOAT,
+b FLOAT4,
+c FLOAT8,
+d numeric,
+e numeric(20,2),
+f decimal,
+g decimal(40,2),
+h real,
+i double precision,
+j boolean
+) with(orientation = column) ;
+
+CREATE TABLE sonic_hashjoin_test_number.VEC_HASHJOIN_TABLE_03_NUM(
+C_INT INT
+) with(orientation = column) ;
+
+CREATE TABLE sonic_hashjoin_test_number.VEC_HASHJOIN_TABLE_04_NUM(
+C_INT INT,
+C_BIGINT BIGINT,
+C_SMALLINT SMALLINT,
+a FLOAT,
+b FLOAT4,
+c FLOAT8,
+d numeric,
+e numeric(20,2),
+f decimal,
+g decimal(40,2),
+h real,
+i double precision,
+j boolean
+) with(orientation = column) ;
+
+\parallel on 4
+copy VEC_HASHJOIN_TABLE_01_NUM from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_sonic_hashjoin_number_1.data' delimiter as '|';
+copy VEC_HASHJOIN_TABLE_02_NUM from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vec_sonic_hashjoin_number_2.data' delimiter as '|';
+INSERT INTO VEC_HASHJOIN_TABLE_03_NUM values(1);
+INSERT INTO VEC_HASHJOIN_TABLE_04_NUM values(generate_series(2,4),1,1,1,1,1,1,1,1,1,1,1,'t');
+\parallel off
+
+\parallel on 4
+analyze VEC_HASHJOIN_TABLE_01_NUM;
+analyze VEC_HASHJOIN_TABLE_02_NUM;
+analyze VEC_HASHJOIN_TABLE_03_NUM;
+analyze VEC_HASHJOIN_TABLE_04_NUM;
+\parallel off

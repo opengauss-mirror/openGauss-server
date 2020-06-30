@@ -1,0 +1,17 @@
+<refentry id="SQL-DROP_INDEX">
+<refmeta>
+<refentrytitle>DROP INDEX</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP INDEX</refname>
+<refpurpose>remove an index</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP INDEX [ CONCURRENTLY ] [ IF EXISTS ] 
+index_name [, ...] [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

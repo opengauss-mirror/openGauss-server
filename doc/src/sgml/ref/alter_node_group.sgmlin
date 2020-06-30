@@ -1,0 +1,29 @@
+<refentry id="SQL-ALTER_NODE_GROUP">
+<refmeta>
+<refentrytitle>ALTER NODE GROUP</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER NODE GROUP</refname>
+<refpurpose>alter a group of cluster nodes</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER NODE GROUP groupname [ option ]
+
+where option can be:
+SET DEFAULT
+    | RENAME TO new_group_name
+    | SET VCGROUP RENAME TO new_group_name
+    | SET NOT VCGROUP
+    | SET TABLE GROUP new_group_name
+    | COPY BUCKETS FROM src_group_name
+    | ADD NODE ( nodename [, ... ] ) 
+    | DELETE NODE ( nodename [, ... ] )
+    | RESIZE TO dest_group_name
+    | SET VCGROUP WITH GROUP new_group_name
+
+</synopsis>
+</refsynopsisdiv>
+</refentry>

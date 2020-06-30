@@ -1,0 +1,36 @@
+set current_schema=vector_engine;
+set enable_vector_engine=on;
+set enable_nestloop=off;
+explain (costs off) select
+	sum(l_extendedprice * l_discount) as revenue
+from
+	lineitem
+where
+	l_shipdate >= '1994-01-01'::date 
+	and l_shipdate < '1994-01-01'::date + interval '1 year'
+	and l_discount >= 0.06 - 0.01
+    and l_discount <= 0.06 + 0.01
+	and l_quantity < 24;
+                                                                                                                          QUERY PLAN                                                                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Aggregate
+         ->  CStore Scan on lineitem
+               Filter: ((l_shipdate >= 'Sat Jan 01 00:00:00 1994'::timestamp(0) without time zone) AND (l_shipdate < 'Sun Jan 01 00:00:00 1995'::timestamp without time zone) AND (l_discount >= .05) AND (l_discount <= .07) AND (l_quantity < 24::numeric))
+(4 rows)
+
+select
+	sum(l_extendedprice * l_discount) as revenue
+from
+	lineitem
+where
+	l_shipdate >= '1994-01-01'::date 
+	and l_shipdate < '1994-01-01'::date + interval '1 year'
+	and l_discount >= 0.06 - 0.01
+    and l_discount <= 0.06 + 0.01
+	and l_quantity < 24;
+   revenue    
+--------------
+ 1193053.2253
+(1 row)
+

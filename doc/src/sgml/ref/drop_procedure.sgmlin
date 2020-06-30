@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_PROCEDURE">
+<refmeta>
+<refentrytitle>DROP PROCEDURE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP PROCEDURE</refname>
+<refpurpose>drop a defined procedure</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP PROCEDURE [ IF EXISTS ] procedure_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

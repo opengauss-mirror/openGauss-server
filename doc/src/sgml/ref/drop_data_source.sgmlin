@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_DATA_SOURCE">
+<refmeta>
+<refentrytitle>DROP DATA SOURCE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP DATA SOURCE</refname>
+<refpurpose>remove a data source</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP DATA SOURCE [IF EXISTS] src_name [CASCADE | RESTRICT];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

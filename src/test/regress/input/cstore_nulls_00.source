@@ -1,0 +1,13 @@
+set enable_vector_engine=on;
+-- problem:
+-- if this CU has two values: NULL value and the other is not NULL value, then flag CU_HAS_SAME_VALUE will be set.
+-- this is wrong because NULLs bitmap must be stored for querying correctly.
+CREATE TABLE cstore_nulls_00
+(
+	a int,
+	b int,
+	c int
+) with ( orientation = column, compression = no )  ;
+copy cstore_nulls_00 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_nulls_00.data' with (delimiter '|', null '');
+SELECT * FROM cstore_nulls_00 ORDER BY 1, 2, 3;
+DROP TABLE cstore_nulls_00;

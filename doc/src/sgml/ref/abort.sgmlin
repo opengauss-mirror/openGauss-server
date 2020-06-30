@@ -1,0 +1,16 @@
+<refentry id="SQL-ABORT">
+<refmeta>
+<refentrytitle>ABORT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ABORT</refname>
+<refpurpose>abort the current transaction</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ABORT [ WORK | TRANSACTION ] ;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

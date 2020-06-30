@@ -1,0 +1,19 @@
+<refentry id="SQL-START_TRANSACTION">
+<refmeta>
+<refentrytitle>START TRANSACTION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>START TRANSACTION</refname>
+<refpurpose>start a transaction block</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+START TRANSACTION
+   [ { ISOLATION LEVEL { READ COMMITTED | READ UNCOMMITTED }
+   | { READ WRITE | READ ONLY | SERIALIZABLE | REPEATABLE READ }
+   } [, ...] ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

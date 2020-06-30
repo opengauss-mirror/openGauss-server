@@ -1,0 +1,319 @@
+
+create schema verifycheck;
+set current_schema to verifycheck;
+
+-- test1: unsupport feature
+-- 1.1 temp table
+create temp table t1_temp(a int, b int);
+analyse verify fast t1_temp;
+drop table t1_temp;
+
+-- 1.2 view
+create view t1_view as select * from pg_tablespace where spcname = 'pg_default';
+analyse verify fast t1_view;
+drop view t1_view;
+
+-- 1.2 sequence
+create sequence t1_serial start 101;
+analyse verify fast t1_serial;
+drop sequence t1_serial;
+
+-- test2: ordinary table (row | column | system table) and its index
+CREATE TABLE SUPPLIER_base
+(
+    S_SUPPKEY     BIGINT NOT NULL
+  , S_NAME        CHAR(25) NOT NULL
+  , S_ADDRESS     VARCHAR(40) NOT NULL
+  , S_NATIONKEY   INT NOT NULL
+  , S_PHONE       CHAR(15) NOT NULL
+  , S_ACCTBAL     DECIMAL(15,2) NOT NULL
+  , S_COMMENT     VARCHAR(101) NOT NULL
+  --, primary key (S_SUPPKEY)
+); 
+copy SUPPLIER_base from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/supplier.tbl' delimiter as '|'null as '';
+
+-- 2.1 row ordinary table
+drop index if exists t2_row_idx;
+drop table if exists t2_row;
+CREATE TABLE t2_row
+(
+    S_SUPPKEY     BIGINT NOT NULL
+  , S_NAME        CHAR(25) NOT NULL
+  , S_ADDRESS     VARCHAR(40) NOT NULL
+  , S_NATIONKEY   INT NOT NULL
+  , S_PHONE       CHAR(15) NOT NULL
+  , S_ACCTBAL     DECIMAL(15,2) NOT NULL
+  , S_COMMENT     VARCHAR(101) NOT NULL
+  --, primary key (S_SUPPKEY)
+);
+
+insert into t2_row select * from SUPPLIER_base;
+create index t2_row_idx on t2_row(S_SUPPKEY);
+checkpoint;
+
+analyse verify fast t2_row;
+analyse verify complete t2_row cascade;
+analyse verify fast t2_row;
+analyse verify complete t2_row cascade;
+analyse verify fast t2_row_idx;
+analyse verify complete t2_row_idx;
+analyse verify fast t2_row_idx cascade;
+
+-- 2.2 col ordinary table
+drop index if exists t2_col_idx;
+drop table if exists t2_col;
+CREATE TABLE t2_col
+(
+    S_SUPPKEY     BIGINT NOT NULL
+  , S_NAME        CHAR(25) NOT NULL
+  , S_ADDRESS     VARCHAR(40) NOT NULL
+  , S_NATIONKEY   INT NOT NULL
+  , S_PHONE       CHAR(15) NOT NULL
+  , S_ACCTBAL     DECIMAL(15,2) NOT NULL
+  , S_COMMENT     VARCHAR(101) NOT NULL
+  --, primary key (S_SUPPKEY)
+)with (orientation = column) ;
+
+insert into t2_col select * from SUPPLIER_base;
+create index t2_col_idx on t2_col(S_SUPPKEY);
+checkpoint;
+
+analyse verify fast t2_col;
+analyse verify complete t2_col cascade;
+analyse verify fast t2_col;
+analyse verify complete t2_col cascade;
+analyse verify fast t2_col_idx;
+analyse verify complete t2_col_idx;
+analyse verify complete t2_col_idx cascade;
+
+-- test3: partition table | its partition | its index
+
+--3.1 row partition table 
+drop index if exists t3_row_p_idx_01;
+drop index if exists t3_row_p_idx_02;
+drop table if exists t3_row_p;
+CREATE TABLE t3_row_p
+(
+    S_SUPPKEY     BIGINT NOT NULL
+  , S_NAME        CHAR(25) NOT NULL
+  , S_ADDRESS     VARCHAR(40) NOT NULL
+  , S_NATIONKEY   INT NOT NULL
+  , S_PHONE       CHAR(15) NOT NULL
+  , S_ACCTBAL     DECIMAL(15,2) NOT NULL
+  , S_COMMENT     VARCHAR(101) NOT NULL
+  --, primary key (S_SUPPKEY)
+) 
+PARTITION BY RANGE(S_NATIONKEY)
+(
+	PARTITION S_NATIONKEY_1 VALUES LESS THAN(1),
+    PARTITION S_NATIONKEY_2 VALUES LESS THAN(2),
+    PARTITION S_NATIONKEY_3 VALUES LESS THAN(3),
+    PARTITION S_NATIONKEY_4 VALUES LESS THAN(4),
+    PARTITION S_NATIONKEY_5 VALUES LESS THAN(5),
+    PARTITION S_NATIONKEY_6 VALUES LESS THAN(6),
+    PARTITION S_NATIONKEY_7 VALUES LESS THAN(7),
+    PARTITION S_NATIONKEY_8 VALUES LESS THAN(8),
+    PARTITION S_NATIONKEY_9 VALUES LESS THAN(9),
+    PARTITION S_NATIONKEY_10 VALUES LESS THAN(10),
+    PARTITION S_NATIONKEY_11 VALUES LESS THAN(11),
+    PARTITION S_NATIONKEY_12 VALUES LESS THAN(12),
+    PARTITION S_NATIONKEY_13 VALUES LESS THAN(13),
+    PARTITION S_NATIONKEY_14 VALUES LESS THAN(14),
+    PARTITION S_NATIONKEY_15 VALUES LESS THAN(15),
+    PARTITION S_NATIONKEY_16 VALUES LESS THAN(16),
+    PARTITION S_NATIONKEY_17 VALUES LESS THAN(17),
+    PARTITION S_NATIONKEY_18 VALUES LESS THAN(18),
+    PARTITION S_NATIONKEY_19 VALUES LESS THAN(19),
+    PARTITION S_NATIONKEY_20 VALUES LESS THAN(20),
+    PARTITION S_NATIONKEY_21 VALUES LESS THAN(21),
+    PARTITION S_NATIONKEY_22 VALUES LESS THAN(22),
+    PARTITION S_NATIONKEY_23 VALUES LESS THAN(23),
+    PARTITION S_NATIONKEY_24 VALUES LESS THAN(24),
+    PARTITION S_NATIONKEY_25 VALUES LESS THAN(25)
+);
+insert into t3_row_p select * from SUPPLIER_base;
+insert into t3_row_p select * from SUPPLIER_base;
+create index t3_row_p_idx_01 on t3_row_p(S_SUPPKEY) local;
+create index t3_row_p_idx_02 on t3_row_p(S_SUPPKEY) local
+(
+PARTITION S_NATIONKEY_1_idx,
+PARTITION S_NATIONKEY_2_idx,
+PARTITION S_NATIONKEY_3_idx,
+PARTITION S_NATIONKEY_4_idx,
+PARTITION S_NATIONKEY_5_idx,
+PARTITION S_NATIONKEY_6_idx,
+PARTITION S_NATIONKEY_7_idx,
+PARTITION S_NATIONKEY_8_idx,
+PARTITION S_NATIONKEY_9_idx,
+PARTITION S_NATIONKEY_10_idx,
+PARTITION S_NATIONKEY_11_idx,
+PARTITION S_NATIONKEY_12_idx,
+PARTITION S_NATIONKEY_13_idx,
+PARTITION S_NATIONKEY_14_idx,
+PARTITION S_NATIONKEY_15_idx,
+PARTITION S_NATIONKEY_16_idx,
+PARTITION S_NATIONKEY_17_idx,
+PARTITION S_NATIONKEY_18_idx,
+PARTITION S_NATIONKEY_19_idx,
+PARTITION S_NATIONKEY_20_idx,
+PARTITION S_NATIONKEY_21_idx,
+PARTITION S_NATIONKEY_22_idx,
+PARTITION S_NATIONKEY_23_idx,
+PARTITION S_NATIONKEY_24_idx,
+PARTITION S_NATIONKEY_25_idx
+);
+checkpoint;
+
+analyse verify fast t3_row_p partition (S_NATIONKEY_13);
+analyse verify fast t3_row_p partition (S_NATIONKEY_13) cascade;
+analyse verify complete t3_row_p partition (S_NATIONKEY_2);
+analyse verify complete t3_row_p partition (S_NATIONKEY_2) cascade;
+
+analyse verify fast t3_row_p;
+analyse verify complete t3_row_p cascade;
+analyse verify fast t3_row_p;
+analyse verify complete t3_row_p cascade;
+
+analyse verify fast t3_row_p_idx_01;
+analyse verify complete t3_row_p_idx_02;
+
+analyse verify fast t3_row_p_idx_02 partition (S_NATIONKEY_2_idx);
+analyse verify complete t3_row_p_idx_02 partition (S_NATIONKEY_2_idx) cascade;
+
+-- 3.2 column table 
+
+drop index if exists t3_col_p_idx_01;
+drop index if exists t3_col_p_idx_02;
+drop table if exists t3_col_p;
+CREATE TABLE t3_col_p
+(
+    S_SUPPKEY     BIGINT NOT NULL
+  , S_NAME        CHAR(25) NOT NULL
+  , S_ADDRESS     VARCHAR(40) NOT NULL
+  , S_NATIONKEY   INT NOT NULL
+  , S_PHONE       CHAR(15) NOT NULL
+  , S_ACCTBAL     DECIMAL(15,2) NOT NULL
+  , S_COMMENT     VARCHAR(101) NOT NULL
+  --, primary key (S_SUPPKEY)
+) with (orientation = column) 
+PARTITION BY RANGE(S_NATIONKEY)
+(
+    PARTITION S_NATIONKEY_1 VALUES LESS THAN(1),
+    PARTITION S_NATIONKEY_2 VALUES LESS THAN(2),
+    PARTITION S_NATIONKEY_3 VALUES LESS THAN(3),
+    PARTITION S_NATIONKEY_4 VALUES LESS THAN(4),
+    PARTITION S_NATIONKEY_5 VALUES LESS THAN(5),
+    PARTITION S_NATIONKEY_6 VALUES LESS THAN(6),
+    PARTITION S_NATIONKEY_7 VALUES LESS THAN(7),
+    PARTITION S_NATIONKEY_8 VALUES LESS THAN(8),
+    PARTITION S_NATIONKEY_9 VALUES LESS THAN(9),
+    PARTITION S_NATIONKEY_10 VALUES LESS THAN(10),
+    PARTITION S_NATIONKEY_11 VALUES LESS THAN(11),
+    PARTITION S_NATIONKEY_12 VALUES LESS THAN(12),
+    PARTITION S_NATIONKEY_13 VALUES LESS THAN(13),
+    PARTITION S_NATIONKEY_14 VALUES LESS THAN(14),
+    PARTITION S_NATIONKEY_15 VALUES LESS THAN(15),
+    PARTITION S_NATIONKEY_16 VALUES LESS THAN(16),
+    PARTITION S_NATIONKEY_17 VALUES LESS THAN(17),
+    PARTITION S_NATIONKEY_18 VALUES LESS THAN(18),
+    PARTITION S_NATIONKEY_19 VALUES LESS THAN(19),
+    PARTITION S_NATIONKEY_20 VALUES LESS THAN(20),
+    PARTITION S_NATIONKEY_21 VALUES LESS THAN(21),
+    PARTITION S_NATIONKEY_22 VALUES LESS THAN(22),
+    PARTITION S_NATIONKEY_23 VALUES LESS THAN(23),
+    PARTITION S_NATIONKEY_24 VALUES LESS THAN(24),
+    PARTITION S_NATIONKEY_25 VALUES LESS THAN(25)
+);
+insert into t3_col_p select * from SUPPLIER_base;
+insert into t3_col_p select * from SUPPLIER_base;
+
+create index t3_col_p_idx_01 on t3_col_p(S_SUPPKEY) local;
+create index t3_col_p_idx_02 on t3_col_p(S_SUPPKEY) local
+(
+PARTITION S_NATIONKEY_1_idx,
+PARTITION S_NATIONKEY_2_idx,
+PARTITION S_NATIONKEY_3_idx,
+PARTITION S_NATIONKEY_4_idx,
+PARTITION S_NATIONKEY_5_idx,
+PARTITION S_NATIONKEY_6_idx,
+PARTITION S_NATIONKEY_7_idx,
+PARTITION S_NATIONKEY_8_idx,
+PARTITION S_NATIONKEY_9_idx,
+PARTITION S_NATIONKEY_10_idx,
+PARTITION S_NATIONKEY_11_idx,
+PARTITION S_NATIONKEY_12_idx,
+PARTITION S_NATIONKEY_13_idx,
+PARTITION S_NATIONKEY_14_idx,
+PARTITION S_NATIONKEY_15_idx,
+PARTITION S_NATIONKEY_16_idx,
+PARTITION S_NATIONKEY_17_idx,
+PARTITION S_NATIONKEY_18_idx,
+PARTITION S_NATIONKEY_19_idx,
+PARTITION S_NATIONKEY_20_idx,
+PARTITION S_NATIONKEY_21_idx,
+PARTITION S_NATIONKEY_22_idx,
+PARTITION S_NATIONKEY_23_idx,
+PARTITION S_NATIONKEY_24_idx,
+PARTITION S_NATIONKEY_25_idx
+);  
+checkpoint;
+
+analyse verify fast t3_row_p partition (S_NATIONKEY_13);
+analyse verify fast t3_row_p partition (S_NATIONKEY_13) cascade;
+analyse verify complete t3_row_p partition (S_NATIONKEY_2);
+analyse verify complete t3_row_p partition (S_NATIONKEY_2) cascade;
+
+analyse verify fast t3_row_p;
+analyse verify complete t3_row_p cascade;
+analyse verify fast t3_row_p;
+analyse verify complete t3_row_p cascade;
+
+analyse verify fast t3_col_p_idx_01;
+analyse verify complete t3_col_p_idx_02;
+
+analyse verify fast t3_col_p_idx_02 partition (S_NATIONKEY_2_idx);
+analyse verify complete t3_col_p_idx_02 partition (S_NATIONKEY_2_idx) cascade;   
+
+-- 3.3 gin index 
+create table t3_gin(id INT, info INT[]);
+CREATE INDEX  t3_gin_idx ON t3_gin USING GIN(info);
+INSERT INTO t3_gin SELECT g, ARRAY[1, g % 5, g] FROM generate_series(1, 200) g;
+checkpoint;
+
+analyse verify fast t3_gin_idx;
+analyse verify complete t3_gin_idx;
+
+-- 3.4 system table
+
+analyse verify fast pg_catalog.pgxc_node;
+analyse verify complete pg_catalog.pgxc_node;
+analyse verify fast pg_catalog.pg_tablespace cascade;
+analyse verify complete pg_catalog.pg_tablespace;
+
+-- test4: parallel test
+
+-- 4.1 parallel 
+\parallel on
+analyse verify fast t2_row;
+analyse verify complete t2_row;
+analyse verify fast t2_col;
+analyse verify complete t2_col;
+analyse verify fast t2_row_idx;
+analyse verify fast t2_col_idx;
+analyse verify complete t2_row_idx;
+analyse verify complete t2_col_idx;
+\parallel off
+
+drop schema verifycheck cascade;
+
+-- test5: database test
+create database t5_verify_database;
+\c t5_verify_database
+create table t5_test(a int, b int);
+insert into t5_test values(generate_series(1, 200),1);
+checkpoint;
+
+analyse verify fast t5_test;
+analyse verify complete t5_test;
+\c postgres
+drop database t5_verify_database;

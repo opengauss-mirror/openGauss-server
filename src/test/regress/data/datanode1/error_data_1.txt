@@ -1,0 +1,10 @@
+a,1,0.5,,abcd
+b,2,0.5,,efgh
+c,3,0.5,,ijkl
+d,4,0.5,,mnop
+d,5,0.5,,qrst
+f,6,0.5,,uvwx
+g,7,0.5,,yzab
+h,8,0.5,,cdef
+i,9,0.5,,ghij
+g,10,0.5,,klmn

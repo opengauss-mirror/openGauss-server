@@ -1,0 +1,109 @@
+-- test permition default: read only
+create foreign table dist_permition( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '/home/gaussdb/tmp/*', delimiter '|', mode 'private');
+\d dist_permition
+   Foreign table "public.dist_permition"
+ Column |  Type   | Modifiers | FDW Options 
+--------+---------+-----------+-------------
+ a      | integer |           | 
+ b      | integer |           | 
+ c      | integer |           | 
+ d      | integer |           | 
+Server: gsmpp_server
+FDW Options: (format 'text', location '/home/gaussdb/tmp/*', delimiter '|', mode 'private')
+FDW permition: read only
+
+-- test permition explict: read only
+create foreign table dist_permition2( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '/home/gaussdb/tmp/*', delimiter '|', mode 'private')
+read only;
+\d dist_permition2
+   Foreign table "public.dist_permition2"
+ Column |  Type   | Modifiers | FDW Options 
+--------+---------+-----------+-------------
+ a      | integer |           | 
+ b      | integer |           | 
+ c      | integer |           | 
+ d      | integer |           | 
+Server: gsmpp_server
+FDW Options: (format 'text', location '/home/gaussdb/tmp/*', delimiter '|', mode 'private')
+FDW permition: read only
+
+-- test permition explict: write only
+create foreign table dist_permition3( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '/home/gaussdb/tmp/*', delimiter '|', mode 'private')
+write only;
+ERROR:  MODE only available on READ ONLY foreign table
+create foreign table dist_permition3( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '/home/gaussdb/tmp/*', delimiter '|')
+write only;
+\d dist_permition3
+   Foreign table "public.dist_permition3"
+ Column |  Type   | Modifiers | FDW Options 
+--------+---------+-----------+-------------
+ a      | integer |           | 
+ b      | integer |           | 
+ c      | integer |           | 
+ d      | integer |           | 
+Server: gsmpp_server
+FDW Options: (format 'text', location '/home/gaussdb/tmp/*', delimiter '|')
+FDW permition: write only
+
+create table normal_table (a int , b int, c int, d int);
+insert into normal_table values (1, 2, 3, 4), (2, 2, 3, 4), (3, 2, 3, 4), (4, 2, 3, 4), (5, 2, 3, 4),(6, 2, 3, 4), (7, 2, 3, 4), (8, 2, 3, 4),(9, 2, 3, 4), (10, 2, 3, 4);
+-- test read-only foreign table insert
+insert into dist_permition select * from normal_table;
+ERROR:  foreign table "dist_permition" does not allow inserts
+insert into dist_permition2 select * from normal_table;
+ERROR:  foreign table "dist_permition2" does not allow inserts
+drop table normal_table;
+drop foreign table dist_permition;
+drop foreign table dist_permition2;
+drop foreign table dist_permition3;
+-- ERROR TABLE option make nosense to write-only foreign table
+create foreign table dist_permition4( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '@abs_srcdir@/', delimiter '|') 
+write only
+with error_loading_table_011_0123456789_012345678;
+ERROR:  LOG INTO only available on READ ONLY foreign table
+-- REJECT_LIMIT TABLE option make nosense to write-only foreign table
+create foreign table dist_permition4( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '@abs_srcdir@/', delimiter '|', reject_limit '100') 
+write only;
+ERROR:  PER NODE REJECT LIMIT only available on READ ONLY foreign table
+-- FILL_MISSING_FIELDS TABLE option make nosense to write-only foreign table
+create foreign table dist_permition4( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '@abs_srcdir@/', delimiter '|', fill_missing_fields 'true') 
+write only;
+ERROR:  FILL_MISSING_FIELDS only available on READ ONLY foreign table
+create foreign table dist_permition4( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '@abs_srcdir@/', delimiter '|', ignore_extra_data 'true') 
+write only;
+ERROR:  IGNORE_EXTRA_DATA only available on READ ONLY foreign table
+-- MODE TABLE option make nosense to write-only foreign table
+create foreign table dist_permition4( a int , b int, c int, d int) 
+server gsmpp_server
+options( format 'text', location '@abs_srcdir@/', delimiter '|', mode 'private') 
+write only;
+ERROR:  MODE only available on READ ONLY foreign table
+-- can not specify relative local locations
+CREATE FOREIGN TABLE invalid_ft5 (col1 int, col2 text) SERVER gsmpp_server OPTIONS (location './tmp', format 'text', delimiter ',') WRITE ONLY;
+ERROR:  can not specify relative local locations
+-- can not specify multiple local locations
+CREATE FOREIGN TABLE invalid_ft5 (col1 int, col2 text) SERVER gsmpp_server OPTIONS (location 'file://@abs_srcdir@/ | @abs_srcdir@/data/parallel_export/', format 'text', delimiter ',') WRITE ONLY;
+ERROR:  can not specify multiple local locations
+-- normal file:// path
+CREATE FOREIGN TABLE invalid_ft5 (col1 int, col2 text) SERVER gsmpp_server OPTIONS (location 'file://@abs_srcdir@/data/parallel_export/', format 'text', delimiter ',') WRITE ONLY;
+CREATE TABLE sourceTable (col1 int, col2 text) ;
+INSERT INTO sourceTable VALUES ( 1, 'hello'), (2, 'world');
+INSERT INTO invalid_ft5 SELECT * FROM sourceTable;
+DROP TABLE sourceTable;
+DROP FOREIGN TABLE invalid_ft5;

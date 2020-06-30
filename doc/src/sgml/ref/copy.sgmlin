@@ -1,0 +1,83 @@
+<refentry id="SQL-COPY">
+<refmeta>
+<refentrytitle>COPY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>COPY</refname>
+<refpurpose>copy data between a file and a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+COPY table_name [ ( column_name [, ...] ) ]
+    FROM { 'filename' | STDIN }
+    [ [ USING ] DELIMITERS 'delimiters' ]
+    [ WITHOUT ESCAPING ]
+    [ LOG ERRORS ]
+    [ LOG ERRORS DATA ]
+    [ REJECT LIMIT 'limit' ]
+    [ [ WITH ] ( option [, ...] ) ]
+    | copy_option
+    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
+COPY table_name [ ( column_name [, ...] ) ]
+    TO { 'filename' | STDOUT }
+    [ [ USING ] DELIMITERS 'delimiters' ]
+    [ WITHOUT ESCAPING ]
+    [ [ WITH ] ( option [, ...] ) ]
+    | copy_option
+    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
+COPY query
+    TO { 'filename' | STDOUT }
+    [ WITHOUT ESCAPING ]
+    [ [ WITH ] ( option [, ...] ) ]
+    | copy_option
+    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
+
+where option can be:
+FORMAT 'format_name'
+| OIDS [ boolean ]
+| DELIMITER 'delimiter_character'
+| NULL 'null_string'
+| HEADER [ boolean ]
+| FILEHEADER 'header_file_string'
+| FREEZE [ boolean ]
+| QUOTE 'quote_character'
+| ESCAPE 'escape_character'
+| EOL 'newline_character'
+| NOESCAPING [ boolean ]
+| FORCE_QUOTE { ( column_name [, ...] ) | * }
+| FORCE_NOT_NULL ( column_name [, ...] )
+| ENCODING 'encoding_name'
+| IGNORE_EXTRA_DATA [ boolean ]
+| FILL_MISSING_FIELDS [ boolean ]
+| COMPATIBLE_ILLEGAL_CHARS [ boolean ]
+| DATE_FORMAT 'date_format_string'
+| TIME_FORMAT 'time_format_string'
+| TIMESTAMP_FORMAT 'timestamp_format_string'
+| SMALLDATETIME_FORMAT 'smalldatetime_format_string'
+
+and copy_option can be:
+OIDS
+| NULL 'null_string'
+| HEADER
+| FILEHEADER 'header_file_string'
+| FREEZE
+| FORCE NOT NULL column_name [, ...]
+| FORCE QUOTE { column_name [, ...] | * }
+| BINARY
+| CSV
+| QUOTE [ AS ] 'quote_character'
+| ESCAPE [ AS ] 'escape_character'
+| EOL 'newline_character'
+| ENCODING 'encoding_name'
+| IGNORE_EXTRA_DATA
+| FILL_MISSING_FIELDS
+| COMPATIBLE_ILLEGAL_CHARS
+| DATE_FORMAT 'date_format_string'
+| TIME_FORMAT 'time_format_string'
+| TIMESTAMP_FORMAT 'timestamp_format_string'
+| SMALLDATETIME_FORMAT 'smalldatetime_format_string'
+</synopsis>
+</refsynopsisdiv>
+</refentry>

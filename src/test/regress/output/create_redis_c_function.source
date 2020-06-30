@@ -1,0 +1,484 @@
+------------------------------------------------------------------------
+/* test funciton pg_tupleid_get_blocknum and pg_tupleid_get_offset*/
+CREATE OR REPLACE FUNCTION pg_tupleid_get_blocknum(tid) RETURNS int8 AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_tupleid_get_blocknum' LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_tupleid_get_offset(tid) RETURNS int AS '@abs_bindir@/../lib/postgresql/gsredistribute.so', 'pg_tupleid_get_offset' LANGUAGE C STABLE not fenced;
+create table a(x int);
+insert into a select generate_series(1, 50);
+select ctid, pg_tupleid_get_blocknum(ctid),pg_tupleid_get_offset(ctid), x from a order by x;
+ ctid  | pg_tupleid_get_blocknum | pg_tupleid_get_offset | x  
+-------+-------------------------+-----------------------+----
+ (0,1) |                       0 |                     1 |  1
+ (0,2) |                       0 |                     2 |  2
+ (0,1) |                       0 |                     1 |  3
+ (0,1) |                       0 |                     1 |  4
+ (0,1) |                       0 |                     1 |  5
+ (0,1) |                       0 |                     1 |  6
+ (0,1) |                       0 |                     1 |  7
+ (0,2) |                       0 |                     2 |  8
+ (0,3) |                       0 |                     3 |  9
+ (0,2) |                       0 |                     2 | 10
+ (0,2) |                       0 |                     2 | 11
+ (0,3) |                       0 |                     3 | 12
+ (0,1) |                       0 |                     1 | 13
+ (0,1) |                       0 |                     1 | 14
+ (0,4) |                       0 |                     4 | 15
+ (0,3) |                       0 |                     3 | 16
+ (0,2) |                       0 |                     2 | 17
+ (0,1) |                       0 |                     1 | 18
+ (0,3) |                       0 |                     3 | 19
+ (0,4) |                       0 |                     4 | 20
+ (0,1) |                       0 |                     1 | 21
+ (0,3) |                       0 |                     3 | 22
+ (0,4) |                       0 |                     4 | 23
+ (0,4) |                       0 |                     4 | 24
+ (0,5) |                       0 |                     5 | 25
+ (0,5) |                       0 |                     5 | 26
+ (0,2) |                       0 |                     2 | 27
+ (0,6) |                       0 |                     6 | 28
+ (0,5) |                       0 |                     5 | 29
+ (0,3) |                       0 |                     3 | 30
+ (0,4) |                       0 |                     4 | 31
+ (0,5) |                       0 |                     5 | 32
+ (0,6) |                       0 |                     6 | 33
+ (0,2) |                       0 |                     2 | 34
+ (0,1) |                       0 |                     1 | 35
+ (0,6) |                       0 |                     6 | 36
+ (0,3) |                       0 |                     3 | 37
+ (0,7) |                       0 |                     7 | 38
+ (0,2) |                       0 |                     2 | 39
+ (0,2) |                       0 |                     2 | 40
+ (0,3) |                       0 |                     3 | 41
+ (0,7) |                       0 |                     7 | 42
+ (0,4) |                       0 |                     4 | 43
+ (0,4) |                       0 |                     4 | 44
+ (0,2) |                       0 |                     2 | 45
+ (0,2) |                       0 |                     2 | 46
+ (0,3) |                       0 |                     3 | 47
+ (0,5) |                       0 |                     5 | 48
+ (0,8) |                       0 |                     8 | 49
+ (0,1) |                       0 |                     1 | 50
+(50 rows)
+
+drop table a;
+drop function pg_tupleid_get_blocknum;
+drop function pg_tupleid_get_offset;
+------------------------------------------------------------------------
+DROP TABLE IF EXISTS tbl;
+NOTICE:  table "tbl" does not exist, skipping
+DROP TABLE IF EXISTS data_redis_tmp_54321;
+NOTICE:  table "data_redis_tmp_54321" does not exist, skipping
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_end_ctid(text, name)
+RETURNS tid
+AS '@abs_bindir@/../lib/postgresql/gsredistribute.so','pg_get_redis_rel_end_ctid'
+LANGUAGE C STABLE not fenced;
+CREATE OR REPLACE FUNCTION pg_get_redis_rel_start_ctid(text, name)
+RETURNS tid
+AS '@abs_bindir@/../lib/postgresql/gsredistribute.so','pg_get_redis_rel_start_ctid'
+LANGUAGE C STABLE not fenced;
+CREATE TABLE tbl(i int, j int);
+CREATE TABLE data_redis_tmp_54321(LIKE tbl INCLUDING STORAGE INCLUDING RELOPTIONS INCLUDING DISTRIBUTION INCLUDING CONSTRAINTS, nodeid int, tupleid tid);
+INSERT INTO tbl VALUES (generate_series(1, 200), 5);
+-- phase 1
+ALTER TABLE tbl SET(append_mode=on, rel_cn_oid=16389);
+\d+ tbl
+                         Table "public.tbl"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ i      | integer |           | plain   |              | 
+ j      | integer |           | plain   |              | 
+Has OIDs: no
+Distribute By: HASH(i)
+Location Nodes: ALL DATANODES
+Options: orientation=row, compression=no, append_mode=on, rel_cn_oid=16389, append_mode_internal=1, start_ctid_internal=(0.0), end_ctid_internal=(0.0)
+
+INSERT INTO data_redis_tmp_54321
+	SELECT *, xc_node_id, ctid
+	FROM ONLY tbl
+	WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('tbl', NULL) AND pg_get_redis_rel_end_ctid('tbl', NULL);
+SELECT count(*) FROM data_redis_tmp_54321;
+ count 
+-------
+   200
+(1 row)
+
+SELECT 'Check result return code: ' || count(*)
+FROM
+(
+   SELECT i, j, ctid FROM  tbl
+   MINUS ALL
+   SELECT i, j, tupleid FROM data_redis_tmp_54321
+);
+          ?column?           
+-----------------------------
+ Check result return code: 0
+(1 row)
+
+-- phase 2
+CREATE SCHEMA data_redis;
+DELETE FROM tbl;
+ERROR:  delete delta table pg_delete_delta_16389 is not found when do cluster resizing table "tbl"
+DELETE FROM data_redis_tmp_54321;
+INSERT INTO tbl VALUES (generate_series(201, 500), 5);
+ALTER TABLE tbl SET(append_mode=on, rel_cn_oid=16389);
+INSERT INTO data_redis_tmp_54321
+	SELECT *, xc_node_id, ctid FROM ONLY tbl
+	WHERE ctid BETWEEN pg_get_redis_rel_start_ctid('tbl', NULL)
+			AND pg_get_redis_rel_end_ctid('tbl', NULL);
+SELECT count(*) FROM data_redis_tmp_54321;
+ count 
+-------
+   300
+(1 row)
+
+SELECT count(*) FROM tbl;
+ count 
+-------
+   500
+(1 row)
+
+SELECT 'Check result return code: ' || count(*)
+FROM
+(
+   SELECT i, j, ctid FROM tbl
+   MINUS all
+   SELECT i, j, tupleid FROM data_redis_tmp_54321
+);
+           ?column?            
+-------------------------------
+ Check result return code: 200
+(1 row)
+
+SELECT i, j, tupleid FROM data_redis_tmp_54321 ORDER BY i;
+  i  | j | tupleid 
+-----+---+---------
+ 201 | 5 | (1,1)
+ 202 | 5 | (1,1)
+ 203 | 5 | (1,1)
+ 204 | 5 | (1,1)
+ 205 | 5 | (1,2)
+ 206 | 5 | (1,1)
+ 207 | 5 | (1,1)
+ 208 | 5 | (1,1)
+ 209 | 5 | (1,3)
+ 210 | 5 | (1,1)
+ 211 | 5 | (1,2)
+ 212 | 5 | (1,2)
+ 213 | 5 | (1,2)
+ 214 | 5 | (1,2)
+ 215 | 5 | (1,1)
+ 216 | 5 | (1,2)
+ 217 | 5 | (1,2)
+ 218 | 5 | (1,3)
+ 219 | 5 | (1,1)
+ 220 | 5 | (1,1)
+ 221 | 5 | (1,2)
+ 222 | 5 | (1,1)
+ 223 | 5 | (1,3)
+ 224 | 5 | (1,2)
+ 225 | 5 | (1,2)
+ 226 | 5 | (1,4)
+ 227 | 5 | (1,3)
+ 228 | 5 | (1,2)
+ 229 | 5 | (1,3)
+ 230 | 5 | (1,3)
+ 231 | 5 | (1,4)
+ 232 | 5 | (1,3)
+ 233 | 5 | (1,4)
+ 234 | 5 | (1,4)
+ 235 | 5 | (1,4)
+ 236 | 5 | (1,3)
+ 237 | 5 | (1,5)
+ 238 | 5 | (1,6)
+ 239 | 5 | (1,5)
+ 240 | 5 | (1,3)
+ 241 | 5 | (1,3)
+ 242 | 5 | (1,4)
+ 243 | 5 | (1,5)
+ 244 | 5 | (1,5)
+ 245 | 5 | (1,4)
+ 246 | 5 | (1,7)
+ 247 | 5 | (1,6)
+ 248 | 5 | (1,7)
+ 249 | 5 | (1,5)
+ 250 | 5 | (1,8)
+ 251 | 5 | (1,3)
+ 252 | 5 | (1,4)
+ 253 | 5 | (1,5)
+ 254 | 5 | (1,4)
+ 255 | 5 | (1,6)
+ 256 | 5 | (1,8)
+ 257 | 5 | (1,4)
+ 258 | 5 | (1,5)
+ 259 | 5 | (1,6)
+ 260 | 5 | (1,9)
+ 261 | 5 | (1,10)
+ 262 | 5 | (1,6)
+ 263 | 5 | (1,5)
+ 264 | 5 | (1,6)
+ 265 | 5 | (1,11)
+ 266 | 5 | (1,5)
+ 267 | 5 | (1,12)
+ 268 | 5 | (1,4)
+ 269 | 5 | (1,9)
+ 270 | 5 | (1,13)
+ 271 | 5 | (1,6)
+ 272 | 5 | (1,2)
+ 273 | 5 | (1,3)
+ 274 | 5 | (1,7)
+ 275 | 5 | (1,6)
+ 276 | 5 | (1,4)
+ 277 | 5 | (1,7)
+ 278 | 5 | (1,7)
+ 279 | 5 | (1,7)
+ 280 | 5 | (1,6)
+ 281 | 5 | (1,5)
+ 282 | 5 | (1,8)
+ 283 | 5 | (1,9)
+ 284 | 5 | (1,14)
+ 285 | 5 | (1,7)
+ 286 | 5 | (1,8)
+ 287 | 5 | (1,6)
+ 288 | 5 | (1,10)
+ 289 | 5 | (1,10)
+ 290 | 5 | (1,9)
+ 291 | 5 | (1,7)
+ 292 | 5 | (1,8)
+ 293 | 5 | (1,7)
+ 294 | 5 | (1,15)
+ 295 | 5 | (1,8)
+ 296 | 5 | (1,5)
+ 297 | 5 | (1,5)
+ 298 | 5 | (1,10)
+ 299 | 5 | (1,11)
+ 300 | 5 | (1,11)
+ 301 | 5 | (1,8)
+ 302 | 5 | (1,12)
+ 303 | 5 | (1,9)
+ 304 | 5 | (1,6)
+ 305 | 5 | (1,7)
+ 306 | 5 | (1,9)
+ 307 | 5 | (1,13)
+ 308 | 5 | (1,9)
+ 309 | 5 | (1,10)
+ 310 | 5 | (1,7)
+ 311 | 5 | (1,8)
+ 312 | 5 | (1,12)
+ 313 | 5 | (1,8)
+ 314 | 5 | (1,8)
+ 315 | 5 | (1,9)
+ 316 | 5 | (1,10)
+ 317 | 5 | (1,11)
+ 318 | 5 | (1,8)
+ 319 | 5 | (1,9)
+ 320 | 5 | (1,12)
+ 321 | 5 | (1,11)
+ 322 | 5 | (1,12)
+ 323 | 5 | (1,10)
+ 324 | 5 | (1,6)
+ 325 | 5 | (1,7)
+ 326 | 5 | (1,13)
+ 327 | 5 | (1,13)
+ 328 | 5 | (1,9)
+ 329 | 5 | (1,13)
+ 330 | 5 | (1,9)
+ 331 | 5 | (1,11)
+ 332 | 5 | (1,14)
+ 333 | 5 | (1,14)
+ 334 | 5 | (1,12)
+ 335 | 5 | (1,14)
+ 336 | 5 | (1,11)
+ 337 | 5 | (1,14)
+ 338 | 5 | (1,8)
+ 339 | 5 | (1,15)
+ 340 | 5 | (1,9)
+ 341 | 5 | (1,12)
+ 342 | 5 | (1,15)
+ 343 | 5 | (1,16)
+ 344 | 5 | (1,15)
+ 345 | 5 | (1,17)
+ 346 | 5 | (1,10)
+ 347 | 5 | (1,10)
+ 348 | 5 | (1,16)
+ 349 | 5 | (1,17)
+ 350 | 5 | (1,13)
+ 351 | 5 | (1,10)
+ 352 | 5 | (1,11)
+ 353 | 5 | (1,18)
+ 354 | 5 | (1,16)
+ 355 | 5 | (1,10)
+ 356 | 5 | (1,12)
+ 357 | 5 | (1,11)
+ 358 | 5 | (1,16)
+ 359 | 5 | (1,18)
+ 360 | 5 | (1,17)
+ 361 | 5 | (1,13)
+ 362 | 5 | (1,18)
+ 363 | 5 | (1,15)
+ 364 | 5 | (1,16)
+ 365 | 5 | (1,19)
+ 366 | 5 | (1,19)
+ 367 | 5 | (1,19)
+ 368 | 5 | (1,17)
+ 369 | 5 | (1,10)
+ 370 | 5 | (1,13)
+ 371 | 5 | (1,18)
+ 372 | 5 | (1,20)
+ 373 | 5 | (1,11)
+ 374 | 5 | (1,14)
+ 375 | 5 | (1,11)
+ 376 | 5 | (1,15)
+ 377 | 5 | (1,12)
+ 378 | 5 | (1,21)
+ 379 | 5 | (1,16)
+ 380 | 5 | (1,11)
+ 381 | 5 | (1,20)
+ 382 | 5 | (1,13)
+ 383 | 5 | (1,12)
+ 384 | 5 | (1,14)
+ 385 | 5 | (1,17)
+ 386 | 5 | (1,22)
+ 387 | 5 | (1,19)
+ 388 | 5 | (1,15)
+ 389 | 5 | (1,12)
+ 390 | 5 | (1,16)
+ 391 | 5 | (1,14)
+ 392 | 5 | (1,23)
+ 393 | 5 | (1,17)
+ 394 | 5 | (1,18)
+ 395 | 5 | (1,19)
+ 396 | 5 | (1,17)
+ 397 | 5 | (1,15)
+ 398 | 5 | (1,12)
+ 399 | 5 | (1,16)
+ 400 | 5 | (1,13)
+ 401 | 5 | (1,20)
+ 402 | 5 | (1,18)
+ 403 | 5 | (1,13)
+ 404 | 5 | (1,17)
+ 405 | 5 | (1,20)
+ 406 | 5 | (1,13)
+ 407 | 5 | (1,21)
+ 408 | 5 | (1,18)
+ 409 | 5 | (1,21)
+ 410 | 5 | (1,14)
+ 411 | 5 | (1,19)
+ 412 | 5 | (1,14)
+ 413 | 5 | (1,14)
+ 414 | 5 | (1,18)
+ 415 | 5 | (1,20)
+ 416 | 5 | (1,22)
+ 417 | 5 | (1,15)
+ 418 | 5 | (1,15)
+ 419 | 5 | (1,21)
+ 420 | 5 | (1,15)
+ 421 | 5 | (1,16)
+ 422 | 5 | (1,22)
+ 423 | 5 | (1,16)
+ 424 | 5 | (1,17)
+ 425 | 5 | (1,22)
+ 426 | 5 | (1,21)
+ 427 | 5 | (1,20)
+ 428 | 5 | (1,23)
+ 429 | 5 | (1,19)
+ 430 | 5 | (1,19)
+ 431 | 5 | (1,18)
+ 432 | 5 | (1,17)
+ 433 | 5 | (1,24)
+ 434 | 5 | (1,16)
+ 435 | 5 | (1,21)
+ 436 | 5 | (1,25)
+ 437 | 5 | (1,22)
+ 438 | 5 | (1,22)
+ 439 | 5 | (1,26)
+ 440 | 5 | (1,23)
+ 441 | 5 | (1,17)
+ 442 | 5 | (1,20)
+ 443 | 5 | (1,23)
+ 444 | 5 | (1,18)
+ 445 | 5 | (1,18)
+ 446 | 5 | (1,21)
+ 447 | 5 | (1,24)
+ 448 | 5 | (1,24)
+ 449 | 5 | (1,14)
+ 450 | 5 | (1,19)
+ 451 | 5 | (1,25)
+ 452 | 5 | (1,19)
+ 453 | 5 | (1,23)
+ 454 | 5 | (1,25)
+ 455 | 5 | (1,22)
+ 456 | 5 | (1,24)
+ 457 | 5 | (1,27)
+ 458 | 5 | (1,19)
+ 459 | 5 | (1,20)
+ 460 | 5 | (1,24)
+ 461 | 5 | (1,15)
+ 462 | 5 | (1,20)
+ 463 | 5 | (1,26)
+ 464 | 5 | (1,27)
+ 465 | 5 | (1,25)
+ 466 | 5 | (1,16)
+ 467 | 5 | (1,26)
+ 468 | 5 | (1,26)
+ 469 | 5 | (1,27)
+ 470 | 5 | (1,28)
+ 471 | 5 | (1,21)
+ 472 | 5 | (1,23)
+ 473 | 5 | (1,24)
+ 474 | 5 | (1,29)
+ 475 | 5 | (1,30)
+ 476 | 5 | (1,25)
+ 477 | 5 | (1,17)
+ 478 | 5 | (1,20)
+ 479 | 5 | (1,31)
+ 480 | 5 | (1,18)
+ 481 | 5 | (1,28)
+ 482 | 5 | (1,29)
+ 483 | 5 | (1,26)
+ 484 | 5 | (1,32)
+ 485 | 5 | (1,21)
+ 486 | 5 | (1,22)
+ 487 | 5 | (1,27)
+ 488 | 5 | (1,25)
+ 489 | 5 | (1,23)
+ 490 | 5 | (1,24)
+ 491 | 5 | (1,26)
+ 492 | 5 | (1,21)
+ 493 | 5 | (1,23)
+ 494 | 5 | (1,27)
+ 495 | 5 | (1,28)
+ 496 | 5 | (1,20)
+ 497 | 5 | (1,27)
+ 498 | 5 | (1,21)
+ 499 | 5 | (1,28)
+ 500 | 5 | (1,19)
+(300 rows)
+
+ALTER TABLE tbl SET(append_mode=off);
+drop schema if exists test cascade;
+NOTICE:  schema "test" does not exist, skipping
+create schema test;
+create table test.t1 (c1 int, c2 int);
+insert into test.t1 values(1,1);
+insert into test.t1 values(2,1);
+alter table test.t1 set (append_mode=on,rel_cn_oid=12345);
+select count(*) from test.t1;
+ count 
+-------
+     2
+(1 row)
+
+select count(*) from test.t1
+	where ctid between pg_get_redis_rel_start_ctid('test.t1', NULL)
+	and pg_get_redis_rel_end_ctid('test.t1',NULL);
+ count 
+-------
+     2
+(1 row)
+
+drop table test.t1;
+drop schema test;
+DROP SCHEMA data_redis CASCADE;
+DROP TABLE IF EXISTS tbl;
+DROP TABLE IF EXISTS data_redis_tmp_54321;
+DROP FUNCTION IF EXISTS pg_get_redis_rel_end_ctid(text, name);
+DROP FUNCTION IF EXISTS pg_get_redis_rel_start_ctid(text, name);

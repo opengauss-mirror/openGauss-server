@@ -1,0 +1,135 @@
+-- $ID$
+-- TPC-H/TPC-R Top Supplier Query (Q15)
+-- Functional Query Definition
+-- Approved February 1998
+with revenue (supplier_no, total_revenue) as
+(
+	select
+		l_suppkey,
+		sum(l_extendedprice * (1 - l_discount))
+	from
+		lineitem
+	where
+		l_shipdate >= date '1996-01-01'
+		and l_shipdate < date '1996-01-01' + interval '3 month'
+	group by
+		l_suppkey
+)
+select
+	s_suppkey,
+	s_name,
+	s_address,
+	s_phone,
+	total_revenue
+from
+	supplier,
+	revenue
+where
+	s_suppkey = supplier_no
+order by
+	s_suppkey
+;
+ s_suppkey |          s_name           |                s_address                 |     s_phone     | total_revenue 
+-----------+---------------------------+------------------------------------------+-----------------+---------------
+         1 | Supplier#000000001        |  N kD4on9OM Ipw3,gf0JBoQDd7tgrzrddZ      | 27-918-335-1736 |   848744.2033
+         2 | Supplier#000000002        | 89eJ5ksX3ImxJQBvxObC,                    | 15-679-861-2259 |   514960.0644
+         3 | Supplier#000000003        | q1,G3Pj6OjIuUYfUoH18BFTKP5aU9bEV3        | 11-383-516-1199 |   816896.7720
+         4 | Supplier#000000004        | Bk7ah4CK8SYQTepEmvMkkgMwg                | 25-843-787-7479 |   752122.1764
+         5 | Supplier#000000005        | Gcdm2rJRzl5qlTVzc                        | 21-151-690-3663 |   972144.1996
+         6 | Supplier#000000006        | tQxuVm7s7CnK                             | 24-696-997-4969 |   821357.0840
+         7 | Supplier#000000007        | s,4TicNGB4uO6PaSqNBUq                    | 33-990-965-2201 |   997177.6750
+         8 | Supplier#000000008        | 9Sq4bBH2FQEmaFOocY45sRTxo6yuoG           | 27-498-742-3860 |   652748.7731
+         9 | Supplier#000000009        | 1KhUgZegwM3ua7dsYmekYBsK                 | 20-403-398-8662 |   872053.1484
+        10 | Supplier#000000010        | Saygah3gYWMp72i PY                       | 34-852-489-8585 |   494531.8742
+        11 | Supplier#000000011        | JfwTs,LZrV, M,9C                         | 28-613-996-1505 |   712170.5359
+        12 | Supplier#000000012        | aLIW  q0HYd                              | 18-179-925-7181 |   618786.0190
+        13 | Supplier#000000013        | HK71HQyWoqRWOX8GI FpgAifW,2PoH           | 13-727-620-7813 |   870424.0163
+        14 | Supplier#000000014        | EXsnO5pTNj4iZRm                          | 25-656-247-5058 |   752893.6146
+        15 | Supplier#000000015        | olXVbNBfVzRqgokr1T,Ie                    | 18-453-357-6394 |   794926.2921
+        16 | Supplier#000000016        | YjP5C55zHDXL7LalK27zfQnwejdpin4AMpvh     | 32-822-502-4215 |   875815.8999
+        17 | Supplier#000000017        | c2d,ESHRSkK3WYnxpgw6aOqN0q               | 29-601-884-9219 |   849917.0971
+        18 | Supplier#000000018        | PGGVE5PWAMwKDZw                          | 26-729-551-1115 |   876214.2012
+        19 | Supplier#000000019        | edZT3es,nBFD8lBXTGeTl                    | 34-278-310-2731 |  1004953.5066
+        20 | Supplier#000000020        | iybAE,RmTymrZVYaFZva2SH,j                | 13-715-945-6730 |   695233.0479
+        21 | Supplier#000000021        | 81CavellcrJ0PQ3CPBID0Z0JwyJm0ka5igEs     | 12-253-590-5816 |  1161099.4636
+        22 | Supplier#000000022        | okiiQFk 8lm6EVX6Q0,bEcO                  | 14-144-830-2814 |   789507.0488
+        23 | Supplier#000000023        | ssetugTcXc096qlD7 2TL5crEEeS3zk          | 19-559-422-5776 |   725753.0612
+        24 | Supplier#000000024        | C4nPvLrVmKPPabFCj                        | 10-620-939-2254 |   592556.5878
+        25 | Supplier#000000025        | RCQKONXMFnrodzz6w7fObFVV6CUm2q           | 32-431-945-3541 |   728628.8726
+        26 | Supplier#000000026        | iV,MHzAx6Z939uzFNkq09M0a1 MBfH7          | 31-758-894-4436 |   687347.1291
+        27 | Supplier#000000027        | lC4CjKwNHUr6L4xIpzOBK4NlHkFTg            | 28-708-999-2028 |   882849.6947
+        28 | Supplier#000000028        | GBhvoRh,7YIN V                           | 10-538-384-8460 |   761611.1559
+        29 | Supplier#000000029        | 658tEqXLPvRd6xpFdqC2                     | 11-555-705-5922 |   592044.1495
+        30 | Supplier#000000030        | 84NmC1rmQfO0fj3zkobLT                    | 26-940-594-4852 |   719770.6567
+        31 | Supplier#000000031        | fRJimA7zchyApqRLHcQeocVpP                | 26-515-530-4159 |   954451.8659
+        32 | Supplier#000000032        | yvoD3TtZSx1skQNCK8agk5bZlZLug            | 33-484-637-7873 |   901022.6360
+        33 | Supplier#000000033        | gfeKpYw3400L0SDywXA6Ya1Qmq1w6YB9f3R      | 17-138-897-9374 |   867557.6400
+        34 | Supplier#000000034        | mYRe3KvA2O4lL4HhxDKkkrPUDPMKRCSp,Xpa     | 20-519-982-2343 |   602687.0344
+        35 | Supplier#000000035        | QymmGXxjVVQ5OuABCXVVsu,4eF gU0Qc6        | 31-720-790-5245 |   761113.4938
+        36 | Supplier#000000036        | mzSpBBJvbjdx3UKTW3bLFewRD78D91lAC879     | 23-273-493-3679 |   766047.7386
+        37 | Supplier#000000037        | cqjyB5h1nV                               | 10-470-144-1330 |   499652.3104
+        38 | Supplier#000000038        | xEcx45vD0FXHT7c9mvWFY                    | 14-361-296-6426 |   923407.4089
+        39 | Supplier#000000039        | ZM, nSYpEPWr1yAFHaC91qjFcijjeU5eH        | 18-851-856-5633 |   860103.0335
+        40 | Supplier#000000040        | zyIeWzbbpkTV37vm1nmSGBxSgd2Kp            | 32-231-247-6991 |   764986.3050
+        41 | Supplier#000000041        | G 1FKHR435 wMKFmyt                       | 28-739-447-2525 |   982516.4208
+        42 | Supplier#000000042        | 1Y5lwEgpe3j2vbUBYj3SwLhK62JlwEMtDC       | 32-698-298-6317 |   739875.6413
+        43 | Supplier#000000043        | Z5mLuAoTUEeKY5v22VnnA4D87Ao6jF2LvMYnlX8h | 22-421-568-4862 |   955106.0064
+        44 | Supplier#000000044        | kERxlLDnlIZJdN66zAPHklyL                 | 17-713-930-5667 |   556822.9774
+        45 | Supplier#000000045        | LcKnsa8XGtIO0WYSB7hkOrH rnzRg1           | 19-189-635-8862 |   787413.0672
+        46 | Supplier#000000046        | e0URUXfDOYMdKe16Z5h5StMRbzGmTs,D2cjap    | 34-748-308-3215 |  1066214.1999
+        47 | Supplier#000000047        | 3XM1x,Pcxqw,HK4XNlgbnZMbLhBHLA           | 24-810-354-4471 |   849744.2753
+        48 | Supplier#000000048        | jg0U FNPMQDuyuKvTnLXXaLf3Wl6OtONA6mQlWJ  | 24-722-551-9498 |   327352.3828
+        49 | Supplier#000000049        | Nvq 6macF4GtJvz                          | 34-211-567-6800 |  1110845.3528
+        50 | Supplier#000000050        | rGobqSMMYz0ErrPhCGS                      | 19-561-560-7437 |   961862.1784
+        51 | Supplier#000000051        | rDkBXb01POIKjOwrij62uM8O4                | 19-475-537-1368 |   710619.6431
+        52 | Supplier#000000052        | WCk XCHYzBA1dvJDSol4ZJQQcQN,             | 29-974-934-4713 |   946417.9267
+        53 | Supplier#000000053        | i9v3 EsYCfLKFU6PIt8iihBOHBB37yR7b3GD7Rt  | 17-886-101-6083 |   782425.1762
+        54 | Supplier#000000054        | J1s,Wxb5pg                               | 22-966-435-7200 |   486058.1539
+        55 | Supplier#000000055        | OqdYSiOQeG4eGi636Tj                      | 34-876-912-6007 |   485571.0036
+        56 | Supplier#000000056        | fUVtlUVal GiHBOuYoUQ XQ9NfNLQR3Gl        | 26-471-195-5486 |   984793.1773
+        57 | Supplier#000000057        | bEWqUVRR f0mb2o18Y                       | 27-681-514-6892 |   904820.5300
+        58 | Supplier#000000058        | 01dEADIZoCULZXg                          | 26-659-969-5586 |   793860.8095
+        59 | Supplier#000000059        | N8lKbYjMnVlEHmTPRmBgtLiX8rrJx            | 27-249-395-9123 |   787180.0590
+        60 | Supplier#000000060        | cb08ntDTARo47WmnBcYXu                    | 18-550-360-2464 |   768490.6458
+        61 | Supplier#000000061        | Oz0M1qBR9I                               | 18-396-489-9719 |   858207.8362
+        62 | Supplier#000000062        | bSmlFYUKBeRsqJxwC9 zS6xpFdEf5jNTb        | 29-603-653-2494 |   651756.6418
+        63 | Supplier#000000063        | NlV0OQyIoPvPkw5AYuWGomX,hgqm1            | 15-781-401-3047 |   941392.5249
+        64 | Supplier#000000064        | w80JjnIP lGoLdUjRutbv81gGlqqpW4PQBeOtSYU | 34-278-790-7004 |   433136.3758
+        65 | Supplier#000000065        | BsAnHUmSFArppKrM                         | 32-444-835-2434 |   853895.0382
+        66 | Supplier#000000066        | qYdruFJQJYYiKvnNVmYfCVydVB8bcW,AW,U6SOV3 | 33-300-836-9529 |   645606.3173
+        67 | Supplier#000000067        | 7YrEKJncHFk5D W7ZaqfAXV                  | 14-563-538-1657 |   656409.1252
+        68 | Supplier#000000068        | Ue6N50wH2CwE4PPgTGLmat,ibGYYlDoOb3xQwtgb | 31-267-327-4328 |   562019.2326
+        69 | Supplier#000000069        | T2Dl9,f97e333eRuMi2z                     | 14-491-707-8310 |   686633.8009
+        70 | Supplier#000000070        | INWNH2w,OOWgNDq0BRCcBwOMQc6PdFDc4        | 16-821-608-1166 |   545759.2152
+        71 | Supplier#000000071        | YFo8an7P6wi Q                            | 11-743-919-7272 |   656616.6192
+        72 | Supplier#000000072        | mKpAJojtawk2alqV4 ZEbJ3PH3wfYqy AM8rGq1  | 28-113-898-6643 |   671860.4486
+        73 | Supplier#000000073        | HBZA1NHvrswQCxTTjg 5XrfSOGgMRKNCe2ovE    | 26-758-310-7496 |   590416.4741
+        74 | Supplier#000000074        | uM3yV5NOc6b5wNdpxF69CW 8QvDxqvKubRJtA    | 30-166-486-1559 |   685696.3277
+        75 | Supplier#000000075        | 7f3gN4rP1livII                           | 28-716-704-8686 |  1082371.8483
+        76 | Supplier#000000076        | JBhSBa3cLYvNgHUYtUHmtECCD                | 24-228-763-7840 |  1160415.8477
+        77 | Supplier#000000077        | wVtcr0uH3CyrSiWMLsqnB09Syo,UuZxPMeBghlY  | 17-281-345-4863 |   984558.9847
+        78 | Supplier#000000078        | 9y3OZ2CV hGrsrQxzB7V3zTtygHVHlG3SD6yrz   | 15-670-998-6860 |   586682.3879
+        79 | Supplier#000000079        | p0u3tztSXUD2J8vFfLNFNKsrRRv7qyUtTBTA     | 24-402-227-9600 |   710037.8427
+        80 | Supplier#000000080        | cJ2MHSEJ13rIL2Wj3D5i6hRo30,ZiNUXhqn      | 31-646-289-1906 |   789730.7655
+        81 | Supplier#000000081        | SLlacbhgpKmVa,gF3saYv12e0                | 22-535-310-6971 |   761582.2869
+        82 | Supplier#000000082        | WyTKA7ZpF15t1aCNlT3                      | 28-177-572-9691 |  1118706.9353
+        83 | Supplier#000000083        | WRJUkzCn050seVz57oAfrbCuw                | 24-529-559-2461 |   720261.6538
+        84 | Supplier#000000084        | DcYjWMiZGQqEKOJi4wAmIV08ikx              | 34-869-118-7803 |   948541.2822
+        85 | Supplier#000000085        | Ckls9RtlzKSF                             | 17-167-806-8199 |   611358.5271
+        86 | Supplier#000000086        | J1fgg5QaqnN                              | 29-903-665-7065 |   703168.2393
+        87 | Supplier#000000087        | WCw7URDj8zoZ7tqC3cpm7                    | 34-860-229-1674 |   966848.2136
+        88 | Supplier#000000088        | yOshY8wwzMgS                             | 21-191-938-9469 |   745861.8666
+        89 | Supplier#000000089        | fhtzZcSorhud1                            | 19-259-876-1014 |   638996.1907
+        90 | Supplier#000000090        | bPE6Uhz1f2m3gwSGMrnRt,g,3gq37r5kxgphqss1 | 16-380-123-9217 |   896362.4239
+        91 | Supplier#000000091        | YV45D7TkfdQanOOZ7q9QxkyGUapU1oOWU6q3     | 13-604-986-9056 |   885115.7454
+        92 | Supplier#000000092        | n48Wy4QI3lml8T217rk                      | 12-701-432-8346 |  1133805.1938
+        93 | Supplier#000000093        | wd1djjKXT,4zBm                           | 26-528-528-1157 |   604412.6424
+        94 | Supplier#000000094        | lK,pLPjAMVGJOXN80zPZuNQjpChliE           | 14-728-888-8882 |   685953.0368
+        95 | Supplier#000000095        | p2 2hBfH5TD                              | 29-142-539-1403 |   698772.2823
+        96 | Supplier#000000096        | Lbxp3WIipye o2wZme1i9iJx,xTt1Mp          | 22-888-654-7193 |   486352.2080
+        97 | Supplier#000000097        | MrCQha2G6ndX1fp6CA                       | 14-618-678-1789 |   903542.9875
+        98 | Supplier#000000098        | ogHn8dpXB5Q                              | 31-914-775-1978 |   816274.0712
+        99 | Supplier#000000099        | 4SxkTHG28nZrtT0,MnVF9H                   | 28-272-909-1617 |   924158.2021
+       100 | Supplier#000000100        | rIlN li8zvW22l2slbcx ECP4fL              | 31-351-324-5062 |   796118.2782
+(100 rows)
+

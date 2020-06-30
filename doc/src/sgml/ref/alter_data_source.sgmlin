@@ -1,0 +1,24 @@
+<refentry id="SQL-ALTER_DATA_SOURCE">
+<refmeta>
+<refentrytitle>ALTER DATA SOURCE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER DATA SOURCE</refname>
+<refpurpose>alter the data source</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER DATA SOURCE src_name
+    [TYPE 'type_str']
+    [VERSION {'version_str' | NULL}] 
+    [OPTIONS ( { [ADD | SET | DROP] optname ['optvalue'] } [, ...] )];
+ALTER DATA SOURCE src_name RENAME TO src_new_name;
+ALTER DATA SOURCE src_name OWNER TO new_owner;
+
+Valid optname are:
+    DSN, USERNAME, PASSWORD, ENCODING
+</synopsis>
+</refsynopsisdiv>
+</refentry>

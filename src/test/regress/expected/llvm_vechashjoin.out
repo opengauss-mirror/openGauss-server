@@ -1,0 +1,302 @@
+/*
+ * This file is used to test the function of hashjoin with LLVM Optimization
+ */
+----
+--- Create Table and Insert Data
+----
+drop schema if exists llvm_hashjoin_engine cascade;
+NOTICE:  schema "llvm_hashjoin_engine" does not exist, skipping
+create schema llvm_hashjoin_engine;
+set current_schema = llvm_hashjoin_engine;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+set codegen_cost_threshold=0;
+CREATE TABLE llvm_hashjoin_engine.LLVM_HASHJOIN_TABLE_01(
+    col_int1    int,
+    col_int2    int,
+    col_bint    bigint,
+    col_char1   char(1),
+    col_char2 	char(10),
+    col_bchar1	bpchar(7),
+    col_bchar2	bpchar(12),
+    col_vchar1	varchar(18)
+)with(orientation=column)
+partition by range (col_int1)
+(
+    partition joinp1 values less than (100),
+    partition joinp2 values less than (200),
+    partition joinp3 values less than (500),
+    partition joinp4 values less than (1000)
+);
+copy llvm_hashjoin_table_01 from stdin;
+CREATE TABLE llvm_hashjoin_engine.LLVM_HASHJOIN_TABLE_02(
+    col_int1	int,
+    col_int2	int,
+    col_bint	bigint,
+    col_char1	char(3),
+    col_char2	char(10),
+    col_bchar1	bpchar(7),
+    col_bchar2	bpchar(12),
+    col_vchar	varchar(18)
+)with(orientation=column)
+partition by range (col_int1)
+(
+    partition joinp1 values less than (100),
+    partition joinp2 values less than (200),
+    partition joinp3 values less than (500),
+    partition joinp4 values less than (1000)
+);
+copy llvm_hashjoin_table_02 from stdin;
+analyze llvm_hashjoin_table_01;
+analyze llvm_hashjoin_table_02;
+----
+--- test1 : test hashjoin with partition table
+----
+--- inner join
+explain (verbose on, costs off) select A.col_int2, B.col_int2 from llvm_hashjoin_table_01 A inner join llvm_hashjoin_table_02 B on A.col_int1 = B.col_int1;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a.col_int2, b.col_int2
+   ->  Vector Sonic Hash Join
+         Output: a.col_int2, b.col_int2
+         Hash Cond: (a.col_int1 = b.col_int1)
+         ->  Vector Partition Iterator
+               Output: a.col_int2, a.col_int1
+               Iterations: 4
+               ->  Partitioned CStore Scan on llvm_hashjoin_engine.llvm_hashjoin_table_01 a
+                     Output: a.col_int2, a.col_int1
+                     Selected Partitions:  1..4
+         ->  Vector Partition Iterator
+               Output: b.col_int2, b.col_int1
+               Iterations: 4
+               ->  Partitioned CStore Scan on llvm_hashjoin_engine.llvm_hashjoin_table_02 b
+                     Output: b.col_int2, b.col_int1
+                     Selected Partitions:  1..4
+(17 rows)
+
+select A.col_int2, B.col_int2 from llvm_hashjoin_table_01 A inner join llvm_hashjoin_table_02 B on A.col_int1 = B.col_int1 order by 1, 2;
+ col_int2 | col_int2 
+----------+----------
+      -12 |      658
+        1 |        1
+        2 |        1
+        4 |       47
+        5 |       69
+        5 |       89
+       25 |       25
+       26 |       69
+       41 |       96
+       63 |       48
+       65 |       65
+       78 |        2
+       78 |       65
+       96 |       96
+       96 |      687
+      658 |        1
+      852 |      852
+          |       58
+(18 rows)
+
+select A.col_int2, A.col_bint, B.col_int2, B.col_bint from llvm_hashjoin_table_01 A inner join llvm_hashjoin_table_02 B on A.col_int2 = B.col_int2 and A.col_bint = B.col_bint order by 1, 2, 3, 4;
+ col_int2 | col_bint | col_int2 | col_bint 
+----------+----------+----------+----------
+        1 |      125 |        1 |      125
+       25 |      698 |       25 |      698
+       65 |       87 |       65 |       87
+       96 |       -2 |       96 |       -2
+       96 |       58 |       96 |       58
+      852 |      471 |      852 |      471
+(6 rows)
+
+select A.col_char1, A.col_char2, A.col_bchar1 from llvm_hashjoin_table_01 A inner join llvm_hashjoin_table_02 B on A.col_char1 = B.col_char1 order by 1, 2, 3;
+ col_char1 | col_char2  | col_bchar1 
+-----------+------------+------------
+ A         | TIAN       | GAUSS  
+ B         | DI         | euler  
+ B         | tian       | require
+ C         | jing       | data   
+ C         | JING       | soft   
+ C         | unit       | join   
+ D         | likey      | central
+ D         | nice       | enter  
+ E         | lab        | data   
+ F         | department | dep    
+ F         | department | dep    
+ F         | department | dep    
+ F         | ki         | opt    
+ F         | ki         | opt    
+ F         | ki         | opt    
+ h         | opt        | ment   
+ H         | no         | yes    
+ H         | no         | yes    
+ H         | unit       | warm   
+ K         | per        | perfect
+ L         | achole     | paper  
+ L         | nice       | nake   
+ L         | pi         | hook   
+ L         | pi         | pea    
+ L         | water      | paper  
+ m         | wa         | J      
+(26 rows)
+
+select A.col_char2, B.col_bchar2 from llvm_hashjoin_table_01 A inner join llvm_hashjoin_table_02 B on A.col_char2 = B.col_char2 and A.col_bchar1 = B.col_bchar1 order by 1, 2;
+ col_char2  |  col_bchar2  
+------------+--------------
+ ki         | play        
+ no         | good        
+ no         | good        
+ tian       | giveyou     
+ unit       | mouth       
+ unit       | mouth       
+(6 rows)
+
+select A.col_bchar1, B.col_bchar1, A.col_bint from llvm_hashjoin_table_01 A inner join llvm_hashjoin_table_02 B on A.col_bint = B.col_bint and A.col_bchar1 = B.col_bchar1 order by 1, 2, 3;
+ col_bchar1 | col_bchar1 | col_bint 
+------------+------------+----------
+ join       | join       |       87
+ opt        | opt        |       -2
+ require    | require    |      471
+ yes        | yes        |        6
+(4 rows)
+
+--- left/right join
+select A.col_char1, B.col_int2 from llvm_hashjoin_table_01 A left join llvm_hashjoin_table_02 B on A.col_char1 = B.col_char1 and A.col_int2 = B.col_int2 order by 1, 2;
+ col_char1 | col_int2 
+-----------+----------
+ a         |         
+ A         |        1
+ B         |      852
+ B         |         
+ C         |       65
+ C         |         
+ C         |         
+ d         |         
+ D         |         
+ D         |         
+ E         |         
+ F         |        2
+ F         |       96
+ h         |         
+ H         |         
+ H         |         
+ H         |         
+ I         |         
+ k         |         
+ K         |         
+ l         |         
+ L         |         
+ L         |         
+ L         |         
+ L         |         
+ L         |         
+ m         |         
+ N         |         
+ N         |         
+ P         |         
+ Y         |         
+           |         
+(32 rows)
+
+select A.col_char2, B.col_char2 from llvm_hashjoin_table_01 A right join llvm_hashjoin_table_02 B on A.col_char2 = B.col_char2 and A.col_int1 < 55 order by 1, 2;
+ col_char2  | col_char2  
+------------+------------
+ jump       | jump      
+ nice       | nice      
+ no         | no        
+ tian       | tian      
+ tian       | tian      
+ tian       | tian      
+ unit       | unit      
+ unit       | unit      
+ unit       | unit      
+ unit       | unit      
+ unit       | unit      
+ unit       | unit      
+ unit       | unit      
+ unit       | unit      
+ unit       | unit      
+            | achole    
+            | chair     
+            | coat      
+            | de        
+            | hook      
+            | ih        
+            | jing      
+            | JK        
+            | ki        
+            | light     
+            | lp        
+            | ope       
+            | P         
+            | skin      
+            | smooth    
+            | 
+(31 rows)
+
+select A.col_bchar2, B.col_bchar2 from llvm_hashjoin_table_01 A right join llvm_hashjoin_table_02 B on A.col_bchar2 = B.col_bchar2 where B.col_bchar2 is NULL order by 1, 2;
+ col_bchar2 | col_bchar2 
+------------+------------
+            | 
+(1 row)
+
+--- complicate hash keys 
+select A.col_bint, A.col_bchar1, B.col_bint, B.col_bchar1 from llvm_hashjoin_table_01 A join llvm_hashjoin_table_02 B on substr(A.col_bchar1, 1, 1) = substr(B.col_bchar1, 1, 1) and A.col_bint = B.col_bint order by 1, 2, 3, 4;
+ col_bint | col_bchar1 | col_bint | col_bchar1 
+----------+------------+----------+------------
+       -2 | opt        |       -2 | oper   
+       -2 | opt        |       -2 | opt    
+        6 | yes        |        6 | yes    
+       87 | join       |       87 | join   
+      471 | require    |      471 | require
+(5 rows)
+
+----
+--- test2 : text analysis_options with llvm dfx options
+----
+set analysis_options="on(LLVM_COMPILE, HASH_CONFLICT)";
+select A.col_char1, B.col_int2 from llvm_hashjoin_table_01 A left join llvm_hashjoin_table_02 B on A.col_char1 = B.col_char1 and A.col_bint = B.col_bint order by 1, 2;
+ col_char1 | col_int2 
+-----------+----------
+ a         |         
+ A         |        1
+ B         |      852
+ B         |         
+ C         |       65
+ C         |         
+ C         |         
+ d         |         
+ D         |         
+ D         |         
+ E         |         
+ F         |       96
+ F         |         
+ h         |         
+ H         |         
+ H         |         
+ H         |         
+ I         |         
+ k         |         
+ K         |         
+ l         |         
+ L         |        2
+ L         |         
+ L         |         
+ L         |         
+ L         |         
+ m         |         
+ N         |         
+ N         |         
+ P         |         
+ Y         |         
+           |         
+(32 rows)
+
+reset analysis_options;
+----
+---  clean table and resource
+----
+drop schema llvm_hashjoin_engine cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table llvm_hashjoin_table_01
+drop cascades to table llvm_hashjoin_table_02

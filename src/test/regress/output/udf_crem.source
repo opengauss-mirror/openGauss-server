@@ -1,0 +1,457 @@
+DROP FUNCTION IF EXISTS PUBLIC.trunc(int);
+NOTICE:  function public.trunc(pg_catalog.int4) does not exist, skipping
+CREATE FUNCTION PUBLIC.trunc(int) RETURNS int
+    AS 'select $1'
+LANGUAGE SQL strict IMMUTABLE;
+DROP FUNCTION IF EXISTS PUBLIC.trunc(int, int);
+NOTICE:  function public.trunc(pg_catalog.int4,pg_catalog.int4) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.trunc(int, int)
+RETURNS int
+AS '@libdir@/regress@DLSUFFIX@','truncInt'
+LANGUAGE c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.trunc(float4, int);
+NOTICE:  function public.trunc(float4,pg_catalog.int4) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.trunc(float4, int)
+RETURNS float8
+AS '@libdir@/regress@DLSUFFIX@','truncFloat'
+LANGUAGE c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS public.trunc(numeric, int);
+NOTICE:  function public.trunc(pg_catalog.numeric,pg_catalog.int4) does not exist, skipping
+CREATE OR REPLACE FUNCTION public.trunc(numeric, int default 0) RETURNS numeric
+	AS 'SELECT CASE WHEN $2<6 THEN pg_catalog.trunc($1, $2) ELSE pg_catalog.round(pg_catalog.trunc($1, $2), 5) END'
+LANGUAGE SQL strict IMMUTABLE;
+DROP FUNCTION IF EXISTS PUBLIC.TransDate(varchar(50), int, varchar(50));
+NOTICE:  function public.transdate(pg_catalog.varchar,pg_catalog.int4,pg_catalog.varchar) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.TransDate(varchar(50), int, varchar(50))
+RETURNS varchar(50)
+AS '@libdir@/regress@DLSUFFIX@','TransDate'
+LANGUAGE c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.TransTimestamp(varchar(50), int, varchar(50));
+NOTICE:  function public.transtimestamp(pg_catalog.varchar,pg_catalog.int4,pg_catalog.varchar) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.TransTimestamp(varchar(50), int, varchar(50))
+RETURNS varchar(50)
+AS '@libdir@/regress@DLSUFFIX@','TransTimestamp'
+LANGUAGE c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.sign(float4);
+NOTICE:  function public.sign(float4) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.sign(float4)
+RETURNS int
+AS '@libdir@/regress@DLSUFFIX@','signf'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.sign(int);
+NOTICE:  function public.sign(pg_catalog.int4) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.sign(int)
+RETURNS int
+AS '@libdir@/regress@DLSUFFIX@','signi'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.rpad(text, numeric, text);
+NOTICE:  function public.rpad(text,pg_catalog.numeric,text) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.rpad(text, numeric, text default ' ')
+RETURNS text
+AS '@libdir@/regress@DLSUFFIX@','rpad_f'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.round(int, int);
+NOTICE:  function public.round(pg_catalog.int4,pg_catalog.int4) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.round(int, int default 0)
+RETURNS int
+AS '@libdir@/regress@DLSUFFIX@','RoundInt'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.round(float, int);
+NOTICE:  function public.round(pg_catalog.float8,pg_catalog.int4) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.round(float, int default 0)
+RETURNS numeric
+AS 'select pg_catalog.round($1::numeric,$2)'
+LANGUAGE SQL IMMUTABLE;
+DROP FUNCTION IF EXISTS PUBLIC.round(numeric, int);
+NOTICE:  function public.round(pg_catalog.numeric,pg_catalog.int4) does not exist, skipping
+CREATE FUNCTION PUBLIC.round(numeric, int default 0) RETURNS numeric
+	AS 'SELECT CASE WHEN $2<6 THEN pg_catalog.round($1, $2) ELSE pg_catalog.round(pg_catalog.round($1, $2), 5) END'
+LANGUAGE SQL strict IMMUTABLE;
+DROP FUNCTION IF EXISTS PUBLIC.oreplace;
+NOTICE:  function public.oreplace() does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.oreplace(VARCHAR(16000), VARCHAR(512), VARCHAR(512) default '')
+RETURNS VARCHAR(16000)
+AS 'select pg_catalog.replace($1,$2, $3)'
+LANGUAGE SQL IMMUTABLE;
+DROP FUNCTION IF EXISTS PUBLIC.NormsDistInner;
+NOTICE:  function public.normsdistinner() does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.NormsDistInner(NUMERIC)
+RETURNS NUMERIC
+AS '@libdir@/regress@DLSUFFIX@','normsdist'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.NormsDist;
+NOTICE:  function public.normsdist() does not exist, skipping
+CREATE FUNCTION PUBLIC.NormsDist(NUMERIC(18,15)) RETURNS NUMERIC(18,15)
+    AS 'select public.NormsDistInner($1)::NUMERIC(18,15)'
+LANGUAGE SQL strict IMMUTABLE;
+ERROR:  function public.normsdistinner(numeric) does not exist
+LINE 2:     AS 'select public.NormsDistInner($1)::NUMERIC(18,15)'
+                       ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: normsdistinner
+--
+DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(date, date);
+NOTICE:  function public.months_between_inner(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.months_between_inner(date, date)
+RETURNS FLOAT4
+AS '@libdir@/regress@DLSUFFIX@','months_between_dd'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.months_between(date, date);
+NOTICE:  function public.months_between(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.months_between(date, date) RETURNS NUMERIC(18,2)
+    AS 'select (public.months_between_inner($1, $2)::float)::NUMERIC(18,2)'
+LANGUAGE SQL strict IMMUTABLE;
+ERROR:  function public.months_between_inner(timestamp without time zone, timestamp without time zone) does not exist
+LINE 2:     AS 'select (public.months_between_inner($1, $2)::float):...
+                        ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: months_between_inner
+--		
+DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(date, timestamp);
+NOTICE:  function public.months_between_inner(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.months_between_inner(date, timestamp)
+RETURNS FLOAT4
+AS '@libdir@/regress@DLSUFFIX@','months_between_dt'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.months_between(date, timestamp);
+NOTICE:  function public.months_between(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.months_between(date, timestamp) RETURNS NUMERIC(18,2)
+    AS 'select (public.months_between_inner($1, $2)::float)::NUMERIC(18,2)'
+LANGUAGE SQL strict IMMUTABLE;
+ERROR:  function public.months_between_inner(timestamp without time zone, timestamp without time zone) does not exist
+LINE 2:     AS 'select (public.months_between_inner($1, $2)::float):...
+                        ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: months_between_inner
+--
+DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(timestamp, date);
+NOTICE:  function public.months_between_inner(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.months_between_inner(timestamp, date)
+RETURNS FLOAT4
+AS '@libdir@/regress@DLSUFFIX@','months_between_td'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.months_between(timestamp, date);
+NOTICE:  function public.months_between(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.months_between(timestamp, date) RETURNS NUMERIC(18,2)
+    AS 'select (public.months_between_inner($1, $2)::float)::NUMERIC(18,2)'
+LANGUAGE SQL strict IMMUTABLE;
+ERROR:  function public.months_between_inner(timestamp without time zone, timestamp without time zone) does not exist
+LINE 2:     AS 'select (public.months_between_inner($1, $2)::float):...
+                        ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: months_between_inner
+--
+DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(timestamp, timestamp);
+NOTICE:  function public.months_between_inner(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.months_between_inner(timestamp, timestamp)
+RETURNS FLOAT4
+AS '@libdir@/regress@DLSUFFIX@','months_between_tt'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.months_between(timestamp, timestamp);
+NOTICE:  function public.months_between(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.months_between(timestamp, timestamp) RETURNS NUMERIC(18,2)
+    AS 'select (public.months_between_inner($1, $2)::float)::NUMERIC(18,2)'
+LANGUAGE SQL strict IMMUTABLE;
+ERROR:  function public.months_between_inner(timestamp without time zone, timestamp without time zone) does not exist
+LINE 2:     AS 'select (public.months_between_inner($1, $2)::float):...
+                        ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: months_between_inner
+DROP FUNCTION IF EXISTS PUBLIC.lpad(text, numeric, text);
+NOTICE:  function public.lpad(text,pg_catalog.numeric,text) does not exist, skipping
+CREATE OR REPLACE FUNCTION PUBLIC.lpad(text, numeric, text default ' ')
+RETURNS text
+AS '@libdir@/regress@DLSUFFIX@','lpad_f'
+LANGUAGE c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS public.FUNC_III_CS0507_3;
+NOTICE:  function public.func_iii_cs0507_3() does not exist, skipping
+CREATE  FUNCTION FUNC_III_CS0507_3(in NUMERIC(18,4))
+returns text
+as '@libdir@/regress@DLSUFFIX@','FUNC_III_CS0507_3'
+language c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS public.FUNC_III_CS0507;
+NOTICE:  function public.func_iii_cs0507() does not exist, skipping
+CREATE  FUNCTION FUNC_III_CS0507(in NUMERIC(18,4))
+returns text
+as '@libdir@/regress@DLSUFFIX@','FUNC_III_CS0507'
+language c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS public.FUNC_II_JUDGE_DF_AGE;
+NOTICE:  function public.func_ii_judge_df_age() does not exist, skipping
+CREATE  FUNCTION FUNC_II_JUDGE_DF_AGE(in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4), in NUMERIC(18,4))
+returns int
+as '@libdir@/regress@DLSUFFIX@','FUNC_II_JUDGE_DF_AGE'
+language c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+-- FUNC_TRANS_MOBCODE
+DROP FUNCTION IF EXISTS public.FUNC_TRANS_MOBCODE;
+NOTICE:  function public.func_trans_mobcode() does not exist, skipping
+CREATE  FUNCTION FUNC_TRANS_MOBCODE(in NUMERIC(18,4))
+returns text
+as '@libdir@/regress@DLSUFFIX@','FUNC_TRANS_MOBCODE'
+language c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+-- FUNC_TRANS_RISKCODE
+DROP FUNCTION IF EXISTS public.FUNC_TRANS_RISKCODE;
+NOTICE:  function public.func_trans_riskcode() does not exist, skipping
+CREATE  FUNCTION FUNC_TRANS_RISKCODE(in text, in NUMERIC(18,4))
+returns text
+as '@libdir@/regress@DLSUFFIX@','FUNC_TRANS_RISKCODE'
+language c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+-- FUNC_XW_FIX_DPD
+DROP FUNCTION IF EXISTS public.FUNC_XW_FIX_DPD;
+NOTICE:  function public.func_xw_fix_dpd() does not exist, skipping
+CREATE  FUNCTION FUNC_XW_FIX_DPD(in text, in NUMERIC(18,4))
+returns int
+as '@libdir@/regress@DLSUFFIX@','FUNC_XW_FIX_DPD'
+language c IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+-- FUNC_ZERO_NULL
+DROP FUNCTION IF EXISTS public.FUNC_ZERO_NULL;
+NOTICE:  function public.func_zero_null() does not exist, skipping
+CREATE  FUNCTION FUNC_ZERO_NULL(in NUMERIC(18,4))
+returns NUMERIC(18,4)
+as '@libdir@/regress@DLSUFFIX@','FUNC_ZERO_NULL'
+language c strict IMMUTABLE;
+ERROR:  C/JAVA UDF is not yet supported in current version.
+DROP FUNCTION IF EXISTS PUBLIC.trunc(int);
+DROP FUNCTION IF EXISTS PUBLIC.trunc(int, int);
+NOTICE:  function public.trunc(pg_catalog.int4,pg_catalog.int4) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.trunc(float4, int);
+NOTICE:  function public.trunc(float4,pg_catalog.int4) does not exist, skipping
+DROP FUNCTION IF EXISTS public.trunc(numeric, int);
+DROP FUNCTION IF EXISTS PUBLIC.TransDate(varchar(50), int, varchar(50));
+NOTICE:  function public.transdate(pg_catalog.varchar,pg_catalog.int4,pg_catalog.varchar) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.TransTimestamp(varchar(50), int, varchar(50));
+NOTICE:  function public.transtimestamp(pg_catalog.varchar,pg_catalog.int4,pg_catalog.varchar) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.sign(float4);
+NOTICE:  function public.sign(float4) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.sign(int);
+NOTICE:  function public.sign(pg_catalog.int4) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.rpad(text, numeric, text);
+NOTICE:  function public.rpad(text,pg_catalog.numeric,text) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.round(int, int);
+NOTICE:  function public.round(pg_catalog.int4,pg_catalog.int4) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.round(float, int);
+DROP FUNCTION IF EXISTS PUBLIC.round(numeric, int);
+DROP FUNCTION IF EXISTS PUBLIC.oreplace;
+DROP FUNCTION IF EXISTS PUBLIC.NormsDistInner;
+NOTICE:  function public.normsdistinner() does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.NormsDist;
+NOTICE:  function public.normsdist() does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(date, date);
+NOTICE:  function public.months_between_inner(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.months_between(date, date);
+NOTICE:  function public.months_between(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(date, timestamp);
+NOTICE:  function public.months_between_inner(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.months_between(date, timestamp);
+NOTICE:  function public.months_between(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(timestamp, date);
+NOTICE:  function public.months_between_inner(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.months_between(timestamp, date);
+NOTICE:  function public.months_between(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.months_between_inner(timestamp, timestamp);
+NOTICE:  function public.months_between_inner(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.months_between(timestamp, timestamp);
+NOTICE:  function public.months_between(pg_catalog.timestamp,pg_catalog.timestamp) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.lpad(text, numeric, text);
+NOTICE:  function public.lpad(text,pg_catalog.numeric,text) does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.FUNC_JUDGE_ACC;
+NOTICE:  function public.func_judge_acc() does not exist, skipping
+DROP FUNCTION IF EXISTS PUBLIC.FUNC_GREAST_MOB24;
+NOTICE:  function public.func_greast_mob24() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_AGE_JUDGE;
+NOTICE:  function public.func_age_judge() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_CAP;
+NOTICE:  function public.func_cap() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_COST_SERVICE;
+NOTICE:  function public.func_cost_service() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_CIIS_DATA_100_inner;
+NOTICE:  function public.func_div_ciis_data_100_inner() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_CIIS_DATA_100;
+NOTICE:  function public.func_div_ciis_data_100() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_CIIS_DATA_ZERO_inner;
+NOTICE:  function public.func_div_ciis_data_zero_inner() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_CIIS_DATA_ZERO;
+NOTICE:  function public.func_div_ciis_data_zero() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_DATA_inner;
+NOTICE:  function public.func_div_data_inner() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_DATA;
+NOTICE:  function public.func_div_data() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_MOB3;
+NOTICE:  function public.func_div_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_MOB6;
+NOTICE:  function public.func_div_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_MOB9;
+NOTICE:  function public.func_div_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DIV_MOB12;
+NOTICE:  function public.func_div_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DPT_MOB12;
+NOTICE:  function public.func_dpt_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_DPTADD_MOB6;
+NOTICE:  function public.func_dptadd_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_FOUR_SEG;
+NOTICE:  function public.func_four_seg() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_GREAST_MOB3;
+NOTICE:  function public.func_greast_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_GREAST_MOB6;
+NOTICE:  function public.func_greast_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_GREAST_MOB12;
+NOTICE:  function public.func_greast_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_CL_DPM_CAST;
+NOTICE:  function public.func_ii_cl_dpm_cast() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_MOB3;
+NOTICE:  function public.func_ii_div_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_MOB6;
+NOTICE:  function public.func_ii_div_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_MOB9;
+NOTICE:  function public.func_ii_div_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_MOB12;
+NOTICE:  function public.func_ii_div_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_NULL_MOB3;
+NOTICE:  function public.func_ii_div_null_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_NULL_MOB6;
+NOTICE:  function public.func_ii_div_null_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_NULL_MOB9;
+NOTICE:  function public.func_ii_div_null_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_NULL_MOB12;
+NOTICE:  function public.func_ii_div_null_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_CL_SUM_MOB3;
+NOTICE:  function public.func_ii_cl_sum_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_CL_SUM_MOB6;
+NOTICE:  function public.func_ii_cl_sum_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_CL_MOB3;
+NOTICE:  function public.func_ii_div_cl_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_CL_MOB6;
+NOTICE:  function public.func_ii_div_cl_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_GREAST_MOB3;
+NOTICE:  function public.func_ii_greast_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_GREAST_MOB6;
+NOTICE:  function public.func_ii_greast_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_GREAST_MOB9;
+NOTICE:  function public.func_ii_greast_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_GREAST_MOB12;
+NOTICE:  function public.func_ii_greast_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_GREAST_VAR_MOB3;
+NOTICE:  function public.func_ii_greast_var_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_GREAST_VAR_MOB6;
+NOTICE:  function public.func_ii_greast_var_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_GREAST_VAR_MOB9;
+NOTICE:  function public.func_ii_greast_var_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_CEIL_DATA_inner;
+NOTICE:  function public.func_ii_div_ceil_data_inner() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_CEIL_DATA;
+NOTICE:  function public.func_ii_div_ceil_data() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_DATA_inner;
+NOTICE:  function public.func_ii_div_data_inner() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_DATA;
+NOTICE:  function public.func_ii_div_data() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_DATA_NULL_inner;
+NOTICE:  function public.func_ii_div_data_null_inner() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DIV_DATA_NULL;
+NOTICE:  function public.func_ii_div_data_null() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_DPM_QC_MIN1;
+NOTICE:  function public.func_ii_dpm_qc_min1() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_FLOOR_ZERO;
+NOTICE:  function public.func_ii_floor_zero() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_III_CS0507_2;
+NOTICE:  function public.func_iii_cs0507_2() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_GREAST_VAR_MOB12;
+NOTICE:  function public.func_ii_greast_var_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_III_CS0507_3;
+NOTICE:  function public.func_iii_cs0507_3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_III_CS0507;
+NOTICE:  function public.func_iii_cs0507() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_JUDGE_DF_AGE;
+NOTICE:  function public.func_ii_judge_df_age() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_LEAST_CL_MOB6;
+NOTICE:  function public.func_ii_least_cl_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_LEAST_MOB12;
+NOTICE:  function public.func_ii_least_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_LEAST_MOB3;
+NOTICE:  function public.func_ii_least_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_LEAST_MOB6;
+NOTICE:  function public.func_ii_least_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_LEAST_MOB9;
+NOTICE:  function public.func_ii_least_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_LEAST_VAR_MOB3;
+NOTICE:  function public.func_ii_least_var_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_SUM_MOB12;
+NOTICE:  function public.func_ii_sum_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_SUM_MOB9;
+NOTICE:  function public.func_ii_sum_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_SUM_MOB6;
+NOTICE:  function public.func_ii_sum_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_II_SUM_MOB3;
+NOTICE:  function public.func_ii_sum_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_ACC_3;
+NOTICE:  function public.func_judge_acc_3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_ACC_6;
+NOTICE:  function public.func_judge_acc_6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_ACC_9;
+NOTICE:  function public.func_judge_acc_9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_ACC_12;
+NOTICE:  function public.func_judge_acc_12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_ACC_15;
+NOTICE:  function public.func_judge_acc_15() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_ACC_18;
+NOTICE:  function public.func_judge_acc_18() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_ACC_21;
+NOTICE:  function public.func_judge_acc_21() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_ACC_24;
+NOTICE:  function public.func_judge_acc_24() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_EAD;
+NOTICE:  function public.func_judge_ead() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_JUDGE_NUMBER;
+NOTICE:  function public.func_judge_number() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_LEAST_MOB3;
+NOTICE:  function public.func_least_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_LEAST_MOB6;
+NOTICE:  function public.func_least_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_LEAST_MOB9;
+NOTICE:  function public.func_least_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_MINROC_AMOUNT;
+NOTICE:  function public.func_minroc_amount() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_MINROC_NUM;
+NOTICE:  function public.func_minroc_num() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_MONTH_FLAG_BANNIAN;
+NOTICE:  function public.func_month_flag_bannian() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_MONTH_FLAG_JI;
+NOTICE:  function public.func_month_flag_ji() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_OVE_MONTH_CODE;
+NOTICE:  function public.func_ove_month_code() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_PRICE_CODE;
+NOTICE:  function public.func_price_code() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_SUM_MOB3;
+NOTICE:  function public.func_sum_mob3() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_SUM_MOB6;
+NOTICE:  function public.func_sum_mob6() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_SUM_MOB9;
+NOTICE:  function public.func_sum_mob9() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_SUM_MOB12;
+NOTICE:  function public.func_sum_mob12() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_TRANS_MOBCODE;
+NOTICE:  function public.func_trans_mobcode() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_TRANS_RISKCODE;
+NOTICE:  function public.func_trans_riskcode() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_XW_FIX_DPD;
+NOTICE:  function public.func_xw_fix_dpd() does not exist, skipping
+DROP FUNCTION IF EXISTS public.FUNC_ZERO_NULL;
+NOTICE:  function public.func_zero_null() does not exist, skipping

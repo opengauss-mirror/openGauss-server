@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_ROLE">
+<refmeta>
+<refentrytitle>DROP ROLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP ROLE</refname>
+<refpurpose>remove a database role</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP ROLE [ IF EXISTS ] role_name [, ...];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

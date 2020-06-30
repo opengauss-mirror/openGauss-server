@@ -1,0 +1,14 @@
+<func> make_parsestate
+<func> free_parsestate
+<func> parser_errposition
+<func> setup_parser_errposition_callback
+<func> cancel_parser_errposition_callback
+<func> make_var
+<func> transformArrayType
+<func> transformArraySubscripts
+<func> make_const
+<func> scanner_init
+<func> scanner_finish
+<func> core_yylex
+<func> scanner_errposition
+<func> scanner_yyerror

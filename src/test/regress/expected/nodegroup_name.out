@@ -1,0 +1,52 @@
+CREATE DATABASE "a$_$_GBK_TD" WITH TEMPLATE = template0  ENCODING= 'UTF8' dbcompatibility = 'TD' LC_CTYPE = 'C' lc_collate= 'C';
+\c "a$_$_GBK_TD"
+create node group 《aa》 with(datanode1);
+ERROR:  node group name is not allowed to contain multibyte characters
+create node group "《aa》" with(datanode1);
+ERROR:  node group name is not allowed to contain multibyte characters
+create node group 多字节aa with(datanode1);
+ERROR:  node group name is not allowed to contain multibyte characters
+create node group "多字节aa" with(datanode1);
+ERROR:  node group name is not allowed to contain multibyte characters
+create node group <aa with(datanode1);
+ERROR:  syntax error at or near "<"
+LINE 1: create node group <aa with(datanode1);
+                          ^
+create node group "<aa" with(datanode1);
+create node group aa with(datanode1);
+create node group "a123456789a123456789a123456789a123456789a123456789a123456789aa字" with(datanode1);
+NOTICE:  identifier "a123456789a123456789a123456789a123456789a123456789a123456789aa字" will be truncated to "a123456789a123456789a123456789a123456789a123456789a123456789aa"
+select group_name,group_members,is_installation from pgxc_group order by group_name;
+                           group_name                           |                              group_members                              | is_installation 
+----------------------------------------------------------------+-------------------------------------------------------------------------+-----------------
+ <aa                                                            | 16384                                                                   | f
+ a123456789a123456789a123456789a123456789a123456789a123456789aa | 16384                                                                   | f
+ aa                                                             | 16384                                                                   | f
+ group1                                                         | 16384 16393 16394 16395 16385 16386 16387 16388 16389 16390 16391 16392 | t
+(4 rows)
+
+\c postgres
+select group_name,group_members,is_installation from pgxc_group order by group_name;
+                           group_name                           |                              group_members                              | is_installation 
+----------------------------------------------------------------+-------------------------------------------------------------------------+-----------------
+ <aa                                                            | 16384                                                                   | f
+ a123456789a123456789a123456789a123456789a123456789a123456789aa | 16384                                                                   | f
+ aa                                                             | 16384                                                                   | f
+ group1                                                         | 16384 16393 16394 16395 16385 16386 16387 16388 16389 16390 16391 16392 | t
+(4 rows)
+
+drop node group <aa;
+ERROR:  syntax error at or near "<"
+LINE 1: drop node group <aa;
+                        ^
+drop node group "<aa";
+drop node group "a123456789a123456789a123456789a123456789a123456789a123456789aa字";
+NOTICE:  identifier "a123456789a123456789a123456789a123456789a123456789a123456789aa字" will be truncated to "a123456789a123456789a123456789a123456789a123456789a123456789aa"
+select group_name,group_members,is_installation from pgxc_group order by group_name;
+ group_name |                              group_members                              | is_installation 
+------------+-------------------------------------------------------------------------+-----------------
+ aa         | 16384                                                                   | f
+ group1     | 16384 16393 16394 16395 16385 16386 16387 16388 16389 16390 16391 16392 | t
+(2 rows)
+
+

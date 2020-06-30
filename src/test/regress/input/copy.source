@@ -1,0 +1,327 @@
+--
+-- COPY
+--
+-- CLASS POPULATION
+--	(any resemblance to real life is purely coincidental)
+--
+COPY aggtest FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/agg.data';
+
+COPY onek FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/onek.data';
+
+COPY onek TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/onek.data';
+
+DELETE FROM onek;
+
+COPY onek FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/onek.data';
+
+COPY tenk1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/tenk.data';
+
+COPY slow_emp4000 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/rect.data';
+
+COPY person FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/person.data';
+
+COPY emp FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/emp.data';
+
+COPY student FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/student.data';
+
+COPY stud_emp FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/stud_emp.data';
+
+COPY road FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/streets.data';
+
+COPY real_city FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/real_city.data';
+
+COPY hash_i4_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hash.data';
+
+COPY hash_name_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hash.data';
+
+COPY hash_txt_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hash.data';
+
+COPY hash_f8_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hash.data';
+
+COPY test_tsvector FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/tsearch.data';
+
+-- the data in this file has a lot of duplicates in the index key
+-- fields, leading to long bucket chains and lots of table expansion.
+-- this is therefore a stress test of the bucket overflow code (unlike
+-- the data in hash.data, which has unique index keys).
+--
+-- COPY hash_ovfl_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hashovfl.data';
+
+COPY bt_i4_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/desc.data';
+
+COPY bt_name_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hash.data';
+
+COPY bt_txt_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/desc.data';
+
+COPY bt_f8_heap FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hash.data';
+
+COPY array_op_test FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/array.data';
+
+COPY array_index_op_test FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/array.data';
+
+-- Enforce use of COMMIT instead of 2PC for temporary objects
+SET enforce_two_phase_commit TO off;
+
+--- test copying in CSV mode with various styles
+--- of embedded line ending characters
+
+create table copytest (
+	style	text,
+	test 	text,
+	filler	int);
+
+insert into copytest values('DOS',E'abc\r\ndef',1);
+insert into copytest values('Unix',E'abc\ndef',2);
+insert into copytest values('Mac',E'abc\rdef',3);
+insert into copytest values(E'esc\\ape',E'a\\r\\\r\\\n\\nb',4);
+
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copytest.csv' csv;
+
+create table copytest2 (like copytest);
+
+copy copytest2 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copytest.csv' csv;
+
+select * from copytest except select * from copytest2;
+
+truncate copytest2;
+
+--- same test but with an escape char different from quote char
+
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copytest.csv' csv quote '''' escape E'\\';
+
+copy copytest2 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copytest.csv' csv quote '''' escape E'\\';
+
+select * from copytest except select * from copytest2;
+
+--
+--test ProcessCopyOptions
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copy.data' with (freeze on,freeze off);
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copy.data' with (null ',.................................................................................................................................................kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkyyyyyyyy');
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copy.data' with (fill_missing_fields on,fill_missing_fields off);
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copy.data' with (ignore_extra_data on,ignore_extra_data off);
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copy.data' with (mode 'normal',mode 'share');
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copy.data' with (mode 'invalued');
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copy.data' with (format csv,mode 'shared');
+
+copy copytest to '@abs_srcdir@/tmp_check/datanode1/pg_copydir/results/copy.data' with (header on,header off);
+
+drop table copytest;
+
+drop table copytest2;
+
+-- test header line feature
+
+create temp table copytest3 (
+	c1 int,
+	"col with , comma" text,
+	"col with "" quote"  int);
+
+copy copytest3 from stdin csv header;
+this is just a line full of junk that would error out if parsed
+1,a,1
+2,b,2
+\.
+
+copy copytest3 to stdout csv header;
+
+--added for llt
+--test copy dist
+
+CREATE FOREIGN TABLE int4_extern_invalid_1(a INT4 ,b int4)  SERVER gsmpp_server OPTIONS(format 'binary', location '@abs_builddir@/data/hash.data',mode 'shared');
+select * from int4_extern_invalid_1 order by a limit 1;
+
+CREATE FOREIGN TABLE int4_extern_invalid_2(a INT4 ,b int4)  SERVER gsmpp_server OPTIONS(format 'text', location '@abs_builddir@/data/hash.data', mode 'shared');
+
+select * from int4_extern_invalid_2 order by a limit 1;
+
+DROP FOREIGN TABLE int4_extern_invalid_1;
+
+DROP FOREIGN TABLE int4_extern_invalid_2;
+
+CREATE TABLE ESCAPING (c1 int, c2 varchar, c3 int);
+copy escaping from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/load_escape.data' without escaping with delimiter '|';
+drop table escaping;
+
+create table TMP_CUST_ASSET_SUM_1
+(
+Party_Id                 VARCHAR(30)    NOT NULL,
+Zone_Num                 CHAR(5)        NOT NULL,
+Asset_Max_Belong_Org_Num VARCHAR(30)    NOT NULL
+);
+-- cancel COPY FROM and vacuum && free the space
+SET enable_data_replicate = off;
+TRUNCATE TMP_CUST_ASSET_SUM_1;
+START TRANSACTION;
+copy TMP_CUST_ASSET_SUM_1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hashagg_writefile.data' delimiter '|';
+CHECKPOINT;
+ROLLBACK;
+VACUUM TMP_CUST_ASSET_SUM_1;
+copy TMP_CUST_ASSET_SUM_1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hashagg_writefile.data' delimiter '|';
+copy TMP_CUST_ASSET_SUM_1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/hashagg_writefile.data' delimiter '|';
+
+create table base_tab_000 (
+col_tinyint		     tinyint,
+col_smallint	     smallint,
+col_int			     integer,
+col_bigint		     bigint,
+col_numeric		     numeric,
+col_real		     real,
+col_double		     double precision,
+col_decimal          decimal,
+col_varchar  	     varchar,
+col_char		     char(30),
+col_nvarchar2	     nvarchar2,
+col_text		     text,
+col_timestamptz		 timestamp with time zone,
+col_timestamp		 timestamp without time zone,
+col_date		     date,
+col_time		     time without time zone,
+col_timetz		     time with time zone,
+col_interval	     interval,
+col_smalldatetine	 smalldatetime
+) with (orientation=column)  
+partition by range (col_int)
+(
+partition vector_base_tab_000_1 values less than (10),
+partition vector_base_tab_000_2 values less than (77),
+partition vector_base_tab_000_3 values less than (337),
+partition vector_base_tab_000_4 values less than (573),
+partition vector_base_tab_000_5 values less than (1357),
+partition vector_base_tab_000_6 values less than (2033),
+partition vector_base_tab_000_7 values less than (2087),
+partition vector_base_tab_000_8 values less than (2387),
+partition vector_base_tab_000_9 values less than (2687),
+partition vector_base_tab_000_10 values less than (2987),
+partition vector_base_tab_000_11 values less than (maxvalue)
+);
+copy base_tab_000 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vecctor_base_tab.data'  DELIMITER as ',' NULL as '' ;
+create table base_type_tab_000 (
+col_tinyint		     tinyint,
+col_smallint	     smallint,
+col_int			     integer,
+col_bigint		     bigint,
+col_money            money,
+col_numeric		     numeric,
+col_real		     real,
+col_double		     double precision,
+col_decimal          decimal,
+col_varchar  	     varchar,
+col_char		     char(30),
+col_nvarchar2	     nvarchar2,
+col_text		     text,
+col_timestamp		 timestamp with time zone,
+col_timestamptz		 timestamp without time zone,
+col_date		     date,
+col_time		     time without time zone,
+col_timetz		     time with time zone,
+col_interval	     interval,
+col_tinterval        tinterval,
+col_smalldatetine	 smalldatetime,
+col_bytea			 bytea,
+col_boolean			 boolean,
+col_inet			 inet,
+col_cidr			 cidr,
+col_bit				 bit(10),
+col_varbit			 varbit(10),
+col_oid				 oid
+) with (orientation=column)   ;
+copy base_type_tab_000 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/vecctor_type_tab.data'  DELIMITER as ',' NULL as '' ;
+
+----
+---- check ignore_extra_data option
+----
+create table ignore_extra_data_test(a int, b int);
+copy ignore_extra_data_test from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/ignore_extra_data_test.data'  DELIMITER as '|' ignore_extra_data;
+select * from ignore_extra_data_test;
+drop table ignore_extra_data_test;
+
+----
+---- load data to oversize row/column table
+----
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -f @abs_srcdir@/tmp_check/datanode1/pg_copydir/create_oversize_row_table.sql > /dev/null 2>&1;
+copy lineitem_large_row from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/copy_oversize_tuple.data' delimiter '|';
+DROP TABLE lineitem_large_row;
+----
+---- set noescaping to be 'true' for copy to
+----
+CREATE TABLE NOESCAPING_TEST(id int,name text);
+COPY NOESCAPING_TEST FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_for_exporting_test.data' WITH(FORMAT 'csv', delimiter '|', ignore_extra_data 'true', noescaping 'true');
+COPY NOESCAPING_TEST FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_for_exporting_test.data' WITH(FORMAT 'binary', ignore_extra_data 'true', noescaping 'true');
+COPY NOESCAPING_TEST FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_for_exporting_test.data' WITHOUT ESCAPING FIXED FORMATTER(id (0, 10), name (10, 30));
+COPY NOESCAPING_TEST FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_for_exporting_test.data' WITH(FORMAT 'text', delimiter '|', ignore_extra_data 'true', noescaping 'true');
+SELECT * FROM NOESCAPING_TEST;
+COPY NOESCAPING_TEST TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_true_exporting.data'  WITH(FORMAT 'text', delimiter '|', noescaping 'true');
+\! cat @abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_true_exporting.data
+\! rm -f @abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_true_exporting.data
+COPY NOESCAPING_TEST TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_false_exporting.data'  WITH(FORMAT 'csv', delimiter '|', noescaping 'false');
+COPY NOESCAPING_TEST TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_false_exporting.data'  WITH(FORMAT 'binary', noescaping 'false');
+COPY NOESCAPING_TEST TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_false_exporting.data'  WITH(FORMAT 'text', delimiter '|', noescaping 'false');
+\! cat @abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_false_exporting.data
+\! rm -f @abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/noescaping_false_exporting.data
+DROP TABLE NOESCAPING_TEST;
+----
+---- copy bulkload backslash correct escaping
+----
+create table time_format_his_010_05
+(
+C_INT INT,
+c_time time ,
+c_time_w time without time zone,
+c_char varchar(1024)
+) partition by range(c_int)
+(
+partition c_int_1 values less than (5),
+partition c_int_2 values less than (maxvalue)
+);
+copy time_format_his_010_05 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/copy_backslash_escape.data' WITHOUT ESCAPING with( delimiter ',',time_format 'hh24\miss\');
+select * from time_format_his_010_05 order by C_INT;
+drop table time_format_his_010_05;
+----
+----
+create table openGauss2222222_tbl
+(
+dp_demo_sk                integer               not null,
+dp_gender                 char(3)                       ,
+dp_marital_status         char(3)                       ,
+dp_education_status       char(20)                      ,
+dp_purchase_estimate      integer                       ,
+dp_credit_rating          char(10)                      ,
+dp_dep_count              integer                       ,
+dp_dep_employed_count     integer                       ,
+dp_dep_college_count      integer                       ,
+dp_date                   integer                          ,
+dp_phone				  varchar(20)				     ,
+dp_id			          varchar(20)                    ,
+dp_num                    varchar(20)                    ,	
+dp_text                    varchar(20000)                    ,
+dp_text_tv tsvector,
+dp_text_ts tsquery
+)
+ 
+partition by range (dp_date)
+(
+partition openGauss2222222_tbl_1 values less than(1950),
+partition openGauss2222222_tbl_2 values less than(2000),
+partition openGauss2222222_tbl_3 values less than(2050),
+partition openGauss2222222_tbl_4 values less than(2100),
+partition openGauss2222222_tbl_5 values less than(3000),
+partition openGauss2222222_tbl_6 values less than(maxvalue)
+)
+;
+update openGauss2222222_tbl set dp_text_tv=to_tsvector('ngram',coalesce(dp_text,''));
+---- compressed row relation
+alter table openGauss2222222_tbl set  compress ;
+select count(*) from openGauss2222222_tbl;
+---- create compressed pages and compressed tuples 
+vacuum full openGauss2222222_tbl;
+---- copy to 1B/4B varlen values
+copy openGauss2222222_tbl (dp_text_ts) to  '@abs_srcdir@/tmp_check/datanode1/pg_copydir/datanode1/openGauss2222222_tbl.txt'  with (encoding 'utf8');
+drop table openGauss2222222_tbl;
+----
+----
+CREATE TABLE openGauss3333333_tbl( c int, d date)  ;
+COPY openGauss3333333_tbl FROM STDIN with(delimiter ',',timestamp_format 'yyyymondd');
+01,2000JAN01
+\.
+SELECT * FROM openGauss3333333_tbl;
+DROP TABLE openGauss3333333_tbl;

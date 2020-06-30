@@ -1,0 +1,16 @@
+<refentry id="SQL-PREPARE_TRANSACTION">
+<refmeta>
+<refentrytitle>PREPARE TRANSACTION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>PREPARE TRANSACTION</refname>
+<refpurpose>prepare the current transaction for two-phase commit</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+PREPARE TRANSACTION transaction_id;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

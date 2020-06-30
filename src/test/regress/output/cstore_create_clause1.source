@@ -1,0 +1,303 @@
+-- problem:
+-- SQL clause about CREATE TABLE for compression
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = 9999)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01;
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, deltarow_threshold=9999, compression=low
+
+DROP TABLE cstore_create_clause_01;
+-- problem:
+-- SQL clause about CREATE TABLE for compression
+-- case 1: default compress level
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+DROP TABLE cstore_create_clause_01;
+-- case 2: no compress
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = no )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ f
+(1 row)
+
+\dS+ cstore_create_clause_01
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=no
+
+DROP TABLE cstore_create_clause_01;
+-- case 3: compress yes
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = yes )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=yes
+
+DROP TABLE cstore_create_clause_01;
+-- case 4: compress low
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = low )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=low
+
+DROP TABLE cstore_create_clause_01;
+-- case 5: compress middle
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = middle )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=middle
+
+DROP TABLE cstore_create_clause_01;
+-- case 4: compress high
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = high )  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, compression=high
+
+DROP TABLE cstore_create_clause_01;
+-- case 5: invalid compress type
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , compression = zlib )  ;
+ERROR:  Invalid string for  "COMPRESSION" option
+DETAIL:  Valid string are "no", "yes", "low", "middle", "high" for non-dfs table.
+-- case 6: max_batchrow option test
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , max_batchrow = 10000)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, max_batchrow=10000, compression=low
+
+DROP TABLE cstore_create_clause_01;
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , max_batchrow = 60000)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, max_batchrow=60000, compression=low
+
+DROP TABLE cstore_create_clause_01;
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , max_batchrow = 65536)  ;
+ERROR:  value 65536 out of bounds for option "max_batchrow"
+DETAIL:  Valid values are between "10000" and "60000".
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , max_batchrow = 9999)  ;
+ERROR:  value 9999 out of bounds for option "max_batchrow"
+DETAIL:  Valid values are between "10000" and "60000".
+-- case 7: deltarow_threshold option test
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = 10000)  ;
+ERROR:  value 10000 out of bounds for option "deltarow_threshold"
+DETAIL:  Valid values are between "0" and "9999".
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = -1)  ;
+ERROR:  value -1 out of bounds for option "deltarow_threshold"
+DETAIL:  Valid values are between "0" and "9999".
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = 0)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01;
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, deltarow_threshold=0, compression=low
+
+DROP TABLE cstore_create_clause_01;
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column , deltarow_threshold = 9999)  ;
+SELECT pg_relation_with_compression('cstore_create_clause_01');
+ pg_relation_with_compression 
+------------------------------
+ t
+(1 row)
+
+\dS+ cstore_create_clause_01;
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, deltarow_threshold=9999, compression=low
+
+DROP TABLE cstore_create_clause_01;
+-- case 8: partial_cluster_rows
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column, partial_cluster_rows = 50000 )  ;
+ERROR:  PARTIAL_CLUSTER_ROWS cannot be less than MAX_BATCHROW.
+DETAIL:  PARTIAL_CLUSTER_ROWS must be greater than or equal to MAX_BATCHROW.
+HINT:  PARTIAL_CLUSTER_ROWS is MAX_BATCHROW multiplied by an integer.
+CREATE TABLE cstore_create_clause_01
+(
+	a int,
+	b int
+) with ( orientation = column, partial_cluster_rows = 60000 )  ;
+\dS+ cstore_create_clause_01;
+               Table "public.cstore_create_clause_01"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=column, partial_cluster_rows=60000, compression=low
+
+DROP TABLE cstore_create_clause_01;

@@ -1,0 +1,490 @@
+create schema subplan_new;
+set search_path=subplan_new;
+
+CREATE TABLE ROW_COMPARISON_018(INT1 INTEGER,INT2 INTEGER,BOL3 BOOLEAN)  ;
+CREATE TABLE ROW_COMPARISON_018_1(INT1 INTEGER,INT2 INTEGER,BOL3 BOOLEAN)  ;
+CREATE TABLE ROW_COMPARISON_018_2(INT1 INTEGER,INT2 INTEGER,BOL3 BOOLEAN)  ;
+INSERT INTO ROW_COMPARISON_018 VALUES(3,2,'TRUE');
+INSERT INTO ROW_COMPARISON_018 VALUES(1,4,'0');
+INSERT INTO ROW_COMPARISON_018 VALUES(2,1,'F');
+INSERT INTO ROW_COMPARISON_018 VALUES(4,1,'F');
+INSERT INTO ROW_COMPARISON_018_1 VALUES(3,2,'TRUE');
+INSERT INTO ROW_COMPARISON_018_2 VALUES(1,4,'0');
+explain (costs off, nodes off, verbose on)
+SELECT INT1 AS RESULT1,BOOL_AND(BOL3)AS RESULT2 FROM ROW_COMPARISON_018 WHERE (INT1,INT2,BOL3) = (SELECT INT1,INT2,BOL3 FROM ROW_COMPARISON_018_1)OR (INT1,INT2,BOL3) = (SELECT INT1,
+INT2,BOL3 FROM ROW_COMPARISON_018_2) GROUP BY INT1,BOL3 ORDER BY INT1,BOL3;
+
+SELECT INT1 AS RESULT1,BOOL_AND(BOL3)AS RESULT2 FROM ROW_COMPARISON_018 WHERE (INT1,INT2,BOL3) = (SELECT INT1,INT2,BOL3 FROM ROW_COMPARISON_018_1)OR (INT1,INT2,BOL3) = (SELECT INT1,
+INT2,BOL3 FROM ROW_COMPARISON_018_2) GROUP BY INT1,BOL3 ORDER BY INT1,BOL3;
+
+create table BOOLOR_006(COL_BOOLOR boolean primary key)  ;
+insert into BOOLOR_006 values(false),(true);
+explain (costs off, nodes off, verbose on)
+update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = (select bool_or(COL_BOOLOR) from BOOLOR_006);
+update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = (select bool_or(COL_BOOLOR) from BOOLOR_006);
+update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = not (select bool_or(COL_BOOLOR) from BOOLOR_006);
+select bool_or(COL_BOOLOR) as RESULT from BOOLOR_006;
+
+create table sub1(a int,b varchar(10));
+create table sub2(a int,b varchar(10));
+insert into sub1 values (generate_series(1, 20),'a');
+insert into sub2 values (generate_series(20, 30),'sub2-b');
+explain (costs off)
+select a,b
+from sub1 t1
+group by a,b
+having EXISTS (SELECT MIN(t1.a) ,count(t2.b) ,t2.a from sub2 t2 group by 3)
+order by 1,2;
+
+select a,b
+from sub1 t1
+group by a,b
+having EXISTS (SELECT MIN(t1.a) ,count(t2.b) ,t2.a from sub2 t2 group by 3)
+order by 1,2;
+
+explain (costs off)
+select a, b
+from sub1 t1
+where (a, b) in 
+(SELECT count(t2.b), t2.b from sub2 t2 where t1.a < t2.a group by 2)
+order by 1,2;
+
+select a, b
+from sub1 t1
+where (a, b) in 
+(SELECT count(t2.b), t2.b from sub2 t2 where t1.a < t2.a group by 2)
+order by 1,2;
+
+create table customer_demographics
+(
+    cd_demo_sk                integer               not null,
+    cd_gender                 char(1)                       ,
+    cd_marital_status         char(1)                       ,
+    cd_education_status       char(20)                      ,
+    cd_purchase_estimate      integer                       ,
+    cd_credit_rating          char(10)                      ,
+    cd_dep_count              integer                       ,
+    cd_dep_employed_count     integer                       ,
+    cd_dep_college_count      integer                       
+) 
+   
+partition by range (cd_demo_sk)
+(
+partition customer_demographics_1 values less than (1000),
+partition customer_demographics_2 values less than (7700),
+partition customer_demographics_3 values less than (33700),
+partition customer_demographics_4 values less than (57300),
+partition customer_demographics_5 values less than (135700),
+partition customer_demographics_6 values less than (203300),
+partition customer_demographics_7 values less than (208700),
+partition customer_demographics_8 values less than (238700),
+partition customer_demographics_9 values less than (268700),
+partition customer_demographics_10 values less than (298700),
+partition customer_demographics_11 values less than (338700),
+partition customer_demographics_12 values less than (368700),
+partition customer_demographics_13 values less than (398700),
+partition customer_demographics_14 values less than (438700),
+partition customer_demographics_15 values less than (maxvalue)
+);
+
+
+create table customer
+(
+    c_customer_sk             integer               not null,
+    c_customer_id             char(16)              not null,
+    c_current_cdemo_sk        integer                       ,
+    c_current_hdemo_sk        integer                       ,
+    c_current_addr_sk         integer                       ,
+    c_first_shipto_date_sk    integer                       ,
+    c_first_sales_date_sk     integer                       ,
+    c_salutation              char(10)                      ,
+    c_first_name              char(20)                      ,
+    c_last_name               char(30)                      ,
+    c_preferred_cust_flag     char(1)                       ,
+    c_birth_day               integer                       ,
+    c_birth_month             integer                       ,
+    c_birth_year              integer                       ,
+    c_birth_country           varchar(20)                   ,
+    c_login                   char(13)                      ,
+    c_email_address           char(50)                      ,
+    c_last_review_date        char(10)                      
+) 
+  ;
+ 
+ create table web_site
+(
+    web_site_sk               integer               not null,
+    web_site_id               char(16)              not null,
+    web_rec_start_date        date                          ,
+    web_rec_end_date          date                          ,
+    web_name                  varchar(50)                   ,
+    web_open_date_sk          varchar(50)                       ,
+    web_close_date_sk         varchar(50)                       ,
+    web_class                 varchar(50)                   ,
+    web_manager               varchar(40)                   ,
+    web_mkt_id                integer                       ,
+    web_mkt_class             varchar(50)                   ,
+    web_mkt_desc              varchar(100)                  ,
+    web_market_manager        varchar(40)                   ,
+    web_company_id            integer                       ,
+    web_company_name          char(50)                      ,
+    web_street_number         char(10)                      ,
+    web_street_name           varchar(60)                   ,
+    web_street_type           char(15)                      ,
+    web_suite_number          char(10)                      ,
+    web_city                  varchar(60)                   ,
+    web_county                varchar(30)                   ,
+    web_state                 char(2)                       ,
+    web_zip                   char(10)                      ,
+    web_country               varchar(20)                   ,
+    web_gmt_offset            decimal(5,2)                  ,
+    web_tax_percentage        decimal(5,2)                  
+) 
+   
+ partition by range(web_rec_start_date)
+(
+	partition p1 values less than('1990-01-01'),
+	partition p2 values less than('1995-01-01'),
+	partition p3 values less than('2000-01-01'),
+	partition p4 values less than('2005-01-01'),
+	partition p5 values less than('2010-01-01'),
+	partition p6 values less than('2015-01-01'),
+	partition p7 values less than(maxvalue)
+)
+;
+create table customer_address
+(
+    ca_address_sk             integer               not null,
+    ca_address_id             char(16)              not null,
+    ca_street_number          char(10)                      ,
+    ca_street_name            varchar(60)                   ,
+    ca_street_type            char(15)                      ,
+    ca_suite_number           char(10)                      ,
+    ca_city                   varchar(60)                   ,
+    ca_county                 varchar(30)                   ,
+    ca_state                  char(2)                       ,
+    ca_zip                    char(10)                      ,
+    ca_country                varchar(20)                   ,
+    ca_gmt_offset             decimal(5,2)                  ,
+    ca_location_type          char(20)                     
+) 
+   ;
+
+explain (verbose off, costs off, nodes off)
+select sum(cd_demo_sk),count(distinct cd_dep_count),max(cd_dep_employed_count) 
+from 
+ customer_demographics
+ intersect 
+ select sum(distinct(c_customer_sk)), count(distinct(c_birth_year)),(select max(distinct c_birth_month)
+             from customer
+             left join web_site
+               on c_birth_month = web_mkt_id
+              and c_birth_day - web_site_sk = 0
+            where c_birth_year < 2000)
+  from customer_address
+ inner join customer
+  on c_customer_sk = ca_address_sk
+ order by 1, 2;
+
+-- Skip early free consumer
+drop table if exists store;
+drop table if exists call_center;
+drop table if exists customer;
+drop table if exists web_site;
+drop table if exists web_page;
+
+create table store
+(
+    s_store_sk                integer               not null,
+    s_store_id                char(16)              not null,
+    s_rec_start_date          date                          ,
+    s_rec_end_date            date                          ,
+    s_closed_date_sk          integer                       ,
+    s_store_name              varchar(50)                   ,
+    s_number_employees        integer                       ,
+    s_floor_space             integer                       ,
+    s_hours                   char(20)                      ,
+    s_manager                 varchar(40)                   ,
+    s_market_id               integer                       ,
+    s_geography_class         varchar(100)                  ,
+    s_market_desc             varchar(100)                  ,
+    s_market_manager          varchar(40)                   ,
+    s_division_id             integer                       ,
+    s_division_name           varchar(50)                   ,
+    s_company_id              integer                       ,
+    s_company_name            varchar(50)                   ,
+    s_street_number           varchar(10)                   ,
+    s_street_name             varchar(60)                   ,
+    s_street_type             char(15)                      ,
+    s_suite_number            char(10)                      ,
+    s_city                    varchar(60)                   ,
+    s_county                  varchar(30)                   ,
+    s_state                   char(2)                       ,
+    s_zip                     char(10)                      ,
+    s_country                 varchar(20)                   ,
+    s_gmt_offset              decimal(5,2)                  ,
+    s_tax_precentage          decimal(5,2)                  
+) ;
+
+create table call_center
+(
+    cc_call_center_sk         integer               not null,
+    cc_call_center_id         char(16)              not null,
+    cc_rec_start_date         date                          ,
+    cc_rec_end_date           date                          ,
+    cc_closed_date_sk         integer                       ,
+    cc_open_date_sk           integer                       ,
+    cc_name                   varchar(50)                   ,
+    cc_class                  varchar(50)                   ,
+    cc_employees              integer                       ,
+    cc_sq_ft                  integer                       ,
+    cc_hours                  char(20)                      ,
+    cc_manager                varchar(40)                   ,
+    cc_mkt_id                 integer                       ,
+    cc_mkt_class              char(50)                      ,
+    cc_mkt_desc               varchar(100)                  ,
+    cc_market_manager         varchar(40)                   ,
+    cc_division               integer                       ,
+    cc_division_name          varchar(50)                   ,
+    cc_company                integer                       ,
+    cc_company_name           char(50)                      ,
+    cc_street_number          char(10)                      ,
+    cc_street_name            varchar(60)                   ,
+    cc_street_type            char(15)                      ,
+    cc_suite_number           char(10)                      ,
+    cc_city                   varchar(60)                   ,
+    cc_county                 varchar(30)                   ,
+    cc_state                  char(2)                       ,
+    cc_zip                    char(10)                      ,
+    cc_country                varchar(20)                   ,
+    cc_gmt_offset             decimal(5,2)                  ,
+    cc_tax_percentage         decimal(5,2)                  
+) ; 
+
+create table customer
+(
+    c_customer_sk             integer               not null,
+    c_customer_id             char(16)              not null,
+    c_current_cdemo_sk        integer                       ,
+    c_current_hdemo_sk        integer                       ,
+    c_current_addr_sk         integer                       ,
+    c_first_shipto_date_sk    integer                       ,
+    c_first_sales_date_sk     integer                       ,
+    c_salutation              char(10)                      ,
+    c_first_name              char(20)                      ,
+    c_last_name               char(30)                      ,
+    c_preferred_cust_flag     char(1)                       ,
+    c_birth_day               integer                       ,
+    c_birth_month             integer                       ,
+    c_birth_year              integer                       ,
+    c_birth_country           varchar(20)                   ,
+    c_login                   char(13)                      ,
+    c_email_address           char(50)                      ,
+    c_last_review_date        char(10)                      
+) ; 
+ 
+create table web_site
+(
+    web_site_sk               integer               not null,
+    web_site_id               char(16)              not null,
+    web_rec_start_date        date                          ,
+    web_rec_end_date          date                          ,
+    web_name                  varchar(50)                   ,
+    web_open_date_sk          integer                       ,
+    web_close_date_sk         integer                       ,
+    web_class                 varchar(50)                   ,
+    web_manager               varchar(40)                   ,
+    web_mkt_id                integer                       ,
+    web_mkt_class             varchar(50)                   ,
+    web_mkt_desc              varchar(100)                  ,
+    web_market_manager        varchar(40)                   ,
+    web_company_id            integer                       ,
+    web_company_name          char(50)                      ,
+    web_street_number         char(10)                      ,
+    web_street_name           varchar(60)                   ,
+    web_street_type           char(15)                      ,
+    web_suite_number          char(10)                      ,
+    web_city                  varchar(60)                   ,
+    web_county                varchar(30)                   ,
+    web_state                 char(2)                       ,
+    web_zip                   char(10)                      ,
+    web_country               varchar(20)                   ,
+    web_gmt_offset            decimal(5,2)                  ,
+    web_tax_percentage        decimal(5,2)                  
+) 
+partition by range(web_rec_start_date)
+(
+	partition p1 values less than('1990-01-01'),
+	partition p2 values less than('1995-01-01'),
+	partition p3 values less than('2000-01-01'),
+	partition p4 values less than('2005-01-01'),
+	partition p5 values less than('2010-01-01'),
+	partition p6 values less than('2015-01-01'),
+	partition p7 values less than(maxvalue)
+)
+;
+
+create table web_page
+(
+    wp_web_page_sk            integer               not null,
+    wp_web_page_id            char(16)              not null,
+    wp_rec_start_date         date                          ,
+    wp_rec_end_date           date                          ,
+    wp_creation_date_sk       integer                       ,
+    wp_access_date_sk         integer                       ,
+    wp_autogen_flag           char(1)                       ,
+    wp_customer_sk            integer                       ,
+    wp_url                    varchar(100)                  ,
+    wp_type                   char(50)                      ,
+    wp_char_count             integer                       ,
+    wp_link_count             integer                       ,
+    wp_image_count            integer                       ,
+    wp_max_ad_count           integer                       
+) 
+partition by range(wp_rec_start_date)
+(
+	partition p1 values less than('1990-01-01'),
+	partition p2 values less than('1995-01-01'),
+	partition p3 values less than('2000-01-01'),
+	partition p4 values less than('2005-01-01'),
+	partition p5 values less than('2010-01-01'),
+	partition p6 values less than('2015-01-01'),
+	partition p7 values less than(maxvalue)
+)
+; 
+
+explain (verbose off, costs off, nodes off)
+select distinct *  
+from ( 
+select max(s_manager), sum(c_birth_day%2), avg(s_tax_precentage) 
+  from store 
+ inner join customer 
+    on c_birth_day = s_market_id 
+        and s_manager like '%e%' 
+group by c_birth_day, c_birth_month,s_market_id ,s_company_id,c_birth_country 
+having (c_birth_day, c_birth_month) <> all 
+       (select web_rec_start_date, wp_customer_sk 
+          from web_page 
+         inner join web_site 
+            on extract(month from web_rec_end_date) = 
+               date_part('month', wp_rec_end_date) - 1 
+           and c_birth_month = web_mkt_id 
+           and (web_company_id + 2, s_company_id + 5) in 
+               (select s_market_id - 1, max(distinct cc_mkt_id) 
+                  from call_center 
+                 where s_company_id < 1000 
+                 group by 1) 
+         where c_birth_country like '%J%')) 
+order by 1,2,3;
+
+select distinct *  
+from ( 
+select max(s_manager), sum(c_birth_day%2), avg(s_tax_precentage) 
+  from store 
+ inner join customer 
+    on c_birth_day = s_market_id 
+        and s_manager like '%e%' 
+group by c_birth_day, c_birth_month,s_market_id ,s_company_id,c_birth_country 
+having (c_birth_day, c_birth_month) <> all 
+       (select web_rec_start_date, wp_customer_sk 
+          from web_page 
+         inner join web_site 
+            on extract(month from web_rec_end_date) = 
+               date_part('month', wp_rec_end_date) - 1 
+           and c_birth_month = web_mkt_id 
+           and (web_company_id + 2, s_company_id + 5) in 
+               (select s_market_id - 1, max(distinct cc_mkt_id) 
+                  from call_center 
+                 where s_company_id < 1000 
+                 group by 1) 
+         where c_birth_country like '%J%')) 
+order by 1,2,3;
+
+-- Tow or more combiners, one combiner finish early and handles are not reset properly
+DROP TABLE IF EXISTS work_shift CASCADE;
+CREATE TABLE work_shift
+(
+    work_shift_cd varchar(50) not null 
+) ;
+
+INSERT INTO work_shift VALUES ('a');
+INSERT INTO work_shift VALUES ('b');
+ANALYZE work_shift;
+
+EXPLAIN (COSTS OFF) SELECT (CASE WHEN (EXISTS( SELECT 1 FROM work_shift )) THEN ('W')  END) c1,
+       wos.work_shift_cd c2,lead(c1) OVER( PARTITION BY c1 ORDER BY c2) 
+FROM work_shift wos;
+
+SELECT (CASE WHEN (EXISTS( SELECT 1 FROM work_shift )) THEN ('W')  END) c1,
+       wos.work_shift_cd c2,lead(c1) OVER( PARTITION BY c1 ORDER BY c2) 
+FROM work_shift wos;
+
+
+create table web_site_1
+(
+    web_site_sk               integer               not null,
+    web_site_id               char(16)              not null,
+    web_rec_start_date        date                          ,
+    web_rec_end_date          date                          ,
+    web_name                  varchar(50)                   ,
+    web_open_date_sk          integer                       ,
+    web_close_date_sk         integer                       ,
+    web_class                 varchar(50)                   ,
+    web_manager               varchar(40)                   ,
+    web_mkt_id                integer                       ,
+    web_mkt_class             varchar(50)                   ,
+    web_mkt_desc              varchar(100)                  ,
+    web_market_manager        varchar(40)                   ,
+    web_company_id            integer                       ,
+    web_company_name          char(50)                      ,
+    web_street_number         char(10)                      ,
+    web_street_name           varchar(60)                   ,
+    web_street_type           char(15)                      ,
+    web_suite_number          char(10)                      ,
+    web_city                  varchar(60)                   ,
+    web_county                varchar(30)                   ,
+    web_state                 char(2)                       ,
+    web_zip                   char(10)                      ,
+    web_country               varchar(20)                   ,
+    web_gmt_offset            decimal(5,2)                  ,
+    web_tax_percentage        decimal(5,2)
+ )  
+ partition by range(web_rec_start_date)
+(
+        partition p1 values less than('1990-01-01'),
+        partition p2 values less than('1995-01-01'),
+        partition p3 values less than('2000-01-01'),
+        partition p4 values less than('2005-01-01'),
+        partition p5 values less than('2010-01-01'),
+        partition p6 values less than('2015-01-01'),
+        partition p7 values less than(maxvalue)
+);
+
+explain (verbose on, costs off, nodes off)
+select count(*) from customer where c_birth_day in (
+select max(web_mkt_id)
+from web_site_1
+where c_birth_day = web_mkt_id and web_site_sk = length(trim(c_birth_country))
+);
+
+-- test empty tuplestorestate in materialize
+with tmp1 as (select s_street_number, s_market_id, s_store_sk from store)
+select s_market_id, rank() over(partition by s_market_id, s_street_number < some (select sum(distinct cc_mkt_id - 1)
+from call_center full join store on cc_call_center_sk = s_store_sk + 1 where s_market_id < 10) order by s_market_id, s_store_sk)
+from tmp1 join customer on c_customer_sk = s_store_sk where s_market_id < 3 group by 1, s_store_sk, s_street_number
+order by 1,2;
+
+-- rebuild hashtable of hashjoin if hashkey has paramters
+create table a (c1 int, c2 int) with (orientation=column);
+create table b (c1 int, c2 int) with (orientation=column);
+create table c (c1 int, c2 int) with (orientation=column); 
+insert into a values (generate_series(998,1001), generate_series(998,1001));
+insert into b values (generate_series(999, 1000), generate_series(999, 1000));
+insert into c values (generate_series(9, 10), generate_series(9, 10));
+analyze c;
+set enable_nestloop=off;
+set enable_mergejoin=off;
+explain (costs off) select count(*) from a where a.c1 in (select b.c1 from b where b.c2 in (select nullif(a.c2, c.c2+990) from c));
+select count(*) from a where a.c1 in (select b.c1 from b where b.c2 in (select nullif(a.c2, c.c2+990) from c));
+
+drop schema subplan_new cascade;

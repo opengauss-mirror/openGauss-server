@@ -1,0 +1,59 @@
+-- case: R05 total values are NULLs, so that coredump happens when compress
+--
+CREATE TABLE cmpr_nulls_raw
+(
+	R00 int,
+	R01 int,
+	R02 int,
+	R03 int,
+	R04 int,
+	R05 int,
+	R06 int,
+	R07 int,
+	R08 int,
+	R09 int,
+	R10 int,
+	R11 int,
+	R12 int,
+	R13 int,
+	R14 int,
+	R15 int,
+	R16 int,
+	R17 int,
+	R18 int,
+	R19 int
+);
+insert into cmpr_nulls_raw(R00, R01, R02, R03, R04, R06, R07, R08, R09, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19) select generate_series(1,300),
+						     1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,  17,  18;
+COPY cmpr_nulls_raw TO '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls.data';
+
+CREATE TABLE cmpr_nulls
+(
+	R00 int DELTA,
+	R01 int DELTA,
+	R02 int DELTA,
+	R03 int DELTA,
+	R04 int DELTA,
+	R05 int DELTA,
+	R06 int DELTA,
+	R07 int DELTA,
+	R08 int DELTA,
+	R09 int DELTA,
+	R10 int DELTA,
+	R11 int DELTA,
+	R12 int DELTA,
+	R13 int DELTA,
+	R14 int DELTA,
+	R15 int DELTA,
+	R16 int DELTA,
+	R17 int DELTA,
+	R18 int DELTA,
+	R19 int DELTA
+) COMPRESS;
+COPY cmpr_nulls FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls.data';
+SELECT (SELECT COUNT(*) FROM cmpr_nulls) - (SELECT COUNT(*) FROM cmpr_nulls_raw);
+(SELECT * FROM cmpr_nulls) MINUS ALL (SELECT * FROM cmpr_nulls_raw);
+(SELECT * FROM cmpr_nulls_raw) MINUS ALL (SELECT * FROM cmpr_nulls);
+DROP TABLE cmpr_nulls;
+DROP TABLE cmpr_nulls_raw;
+\! rm '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cmpr_nulls.data';

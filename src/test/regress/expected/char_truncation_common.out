@@ -1,0 +1,442 @@
+set td_compatible_truncation=on;
+set td_compatible_truncation=off;
+drop database if exists td_db_char;
+NOTICE:  database "td_db_char" does not exist, skipping
+create database td_db_char DBCOMPATIBILITY 'C';
+\c td_db_char
+set client_encoding='GBK'; 
+show td_compatible_truncation;
+ td_compatible_truncation 
+--------------------------
+ off
+(1 row)
+
+drop table if exists testtd;
+NOTICE:  table "testtd" does not exist, skipping
+--Create table.
+create table testtd(
+c_nchar nchar(10),
+c_character1 character(10),
+c_character2 character varying(10),
+c_varchar2 varchar2(10)
+);
+drop table if exists testtdn;
+NOTICE:  table "testtdn" does not exist, skipping
+create table testtdn(
+c_nchar nchar(10),
+c_character1 character(10),
+c_character2 character varying(10),
+c_varchar2 varchar2(10),
+c_nvarchar2 nvarchar2(10)
+);
+--test not include nvarchar2 type.
+insert into testtd values('aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c_nchar
+select * from testtd order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 
+---------+--------------+--------------+------------
+(0 rows)
+
+insert into testtd values('aaa一二aaaaaa一二', 'aaaaaaaaa一二','aaaaaaaaa一二', 'aaaaaaaaa一二');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c_nchar
+insert into testtd values('aaaaaaaaa一二三','aaaaaaaaa一二三','aaaaaaaaa一二三', 'aaaaaaaaa一二三');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c_nchar
+insert into testtd values('aaaaaa一s二','aaaaaa一s二三','aaaaaa一s二三', 'aaaaaa一s二三');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c_nchar
+select * from testtd order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 
+---------+--------------+--------------+------------
+(0 rows)
+
+delete from testtd;
+insert into testtd values('aaaaaa已经aaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa'),
+('bbbbbbbbbbbbbbbb', 'bbbbb同意bbbbbbbbbbb','bbbbbbbbbbbbbbbb', 'bbbbbbbbbbbbbbbb'),
+('ccccccccccccccccc','ccccccccccccc','ccccc收获cccccccc','ccccccccccccccc');
+ERROR:  value too long for type character(10)
+select * from testtd order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 
+---------+--------------+--------------+------------
+(0 rows)
+
+--test include nvarchar2 type.
+insert into testtdn values('aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaa');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c_nchar
+select * from testtdn order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+insert into testtdn values('aaa一二aaaaaa一二', 'aaaaaaaaa一二','aaaaaaaaa一二', 'aaaaaaaaa一二','aaaaaaaaa一二');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c_nchar
+insert into testtdn values('aaaaaaaaa一二三','aaaaaaaaa一二三','aaaaaaaaa一二三', 'aaaaaaaaa一二三','aaaaaaaaa一二三');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c_nchar
+insert into testtdn values('aaaaaa一s二','aaaaaa一s二三','aaaaaa一s二三', 'aaaaaa一s二三','aaaaaa一s二三');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: c_nchar
+select * from testtdn order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+delete from testtdn;
+insert into testtdn values('aaaaaa已经aaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaa'),
+('bbbbbbbbbbbbbbbb', 'bbbbb同意bbbbbbbbbbb','bbbbbbbbbbbbbbbb', 'bbbbbbbbbbbbbbbb','bbbbbbbbbbbbbbbb'),
+('ccccccccccccccccc','ccccccccccccc','ccccc收获cccccccc','ccccccccccccccc', 'cccccccccccccc');
+ERROR:  value too long for type character(10)
+select * from testtdn order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+drop table if exists testtd1;
+NOTICE:  table "testtd1" does not exist, skipping
+create table testtd1(
+c_nchar nchar(8),
+c_character1 character(5),
+c_character2 character varying(5),
+c_varchar2 varchar2(5)
+);
+drop table if exists testtd1n;
+NOTICE:  table "testtd1n" does not exist, skipping
+create table testtd1n(
+c_nchar nchar(8),
+c_character1 character(5),
+c_character2 character varying(5),
+c_varchar2 varchar2(5),
+c_nvarchar2 nvarchar2(5)
+);
+insert into testtd1 select * from testtd;
+select * from testtd1 order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 
+---------+--------------+--------------+------------
+(0 rows)
+
+insert into testtd1n select * from testtdn;
+select * from testtd1n order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+drop table if exists testtd2 ;
+NOTICE:  table "testtd2" does not exist, skipping
+create table testtd2 (c_int int primary key,
+c_nchar nchar(6),
+c_character1 character(6),
+c_character2 character varying(6),
+c_varchar2 varchar2(6)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "testtd2_pkey" for table "testtd2"
+drop table if exists testtd2n ;
+NOTICE:  table "testtd2n" does not exist, skipping
+create table testtd2n (c_int int primary key,
+c_nchar nchar(6),
+c_character1 character(6),
+c_character2 character varying(6),
+c_varchar2 varchar2(6),
+c_nvarchar2 nvarchar2(20)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "testtd2n_pkey" for table "testtd2n"
+insert into testtd2 values(1, 'tttttt', 'tttttt','tttttt','tttttt');
+insert into testtd1 values((select c_varchar2 from testtd2 where c_int = 1), 'tttttt','tttttt','tttttt');
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: c_character1
+select * from testtd1 order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 
+---------+--------------+--------------+------------
+(0 rows)
+
+insert into testtd2n values(1, 'tttttt', 'tttttt','tttttt','tttttt','tttttt');
+insert into testtd1n values((select c_nvarchar2 from testtd2n where c_int = 1), 'tttttt','tttttt','tttttt','tttttt');
+ERROR:  value too long for type character(5)
+CONTEXT:  referenced column: c_character1
+select * from testtd1n order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+drop table if exists testtd_def1;
+NOTICE:  table "testtd_def1" does not exist, skipping
+drop table if exists testtd_def2;
+NOTICE:  table "testtd_def2" does not exist, skipping
+create table testtd_def1(
+c_nchar nchar(10) default 'aaaaaaaaaaaaaaaaaaaaaa',
+c_character1 character(10) default 'aaaaaaaaaaaaaaaaaaaaaa',
+c_character2 character varying(10) default 'aaaaaaaaaaaaaaaaaaaaaa',
+c_varchar2 varchar2(10) default 'aaaaaaaaaaaaaaaaaaaaaa'
+);
+create table testtd_def2(
+c_nvarchar2 nvarchar2(10) default 'aaaaaaaaaaaaaaaaaaaaaa'
+);
+drop table if exists testtd_def1;
+drop table if exists testtd_def2;
+set td_compatible_truncation=on;
+insert into testtd values('aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa');
+select * from testtd order by c_nchar;
+  c_nchar   | c_character1 | c_character2 | c_varchar2 
+------------+--------------+--------------+------------
+ aaaaaaaaaa | aaaaaaaaaa   | aaaaaaaaaa   | aaaaaaaaaa
+(1 row)
+
+insert into testtd values('aaa一二aaaaaa一二', 'aaaaaaaaa一二','aaaaaaaaa一二', 'aaaaaaaaa一二');
+insert into testtd values('aaaaaaaaa一二三','aaaaaaaaa一二三','aaaaaaaaa一二三', 'aaaaaaaaa一二三');
+insert into testtd values('aaaaaa一s二','aaaaaa一s二三','aaaaaa一s二三', 'aaaaaa一s二三');
+select * from testtd order by c_nchar;
+  c_nchar   | c_character1 | c_character2 | c_varchar2 
+------------+--------------+--------------+------------
+ aaaaaaaaa  | aaaaaaaaa    | aaaaaaaaa    | aaaaaaaaa
+ aaaaaaaaaa | aaaaaaaaaa   | aaaaaaaaaa   | aaaaaaaaaa
+ aaaaaa一s  | aaaaaa一s    | aaaaaa一s    | aaaaaa一s
+ aaa一二a   | aaaaaaaaa    | aaaaaaaaa    | aaaaaaaaa
+(4 rows)
+
+delete from testtd;
+insert into testtd values('aaaaaa已经aaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa'),
+('bbbbbbbbbbbbbbbb', 'bbbbb同意bbbbbbbbbbb','bbbbbbbbbbbbbbbb', 'bbbbbbbbbbbbbbbb'),
+('ccccccccccccccccc','ccccccccccccc','ccccc收获cccccccc','ccccccccccccccc');
+select * from testtd order by c_nchar;
+  c_nchar   | c_character1 | c_character2 | c_varchar2 
+------------+--------------+--------------+------------
+ aaaaaa已   | aaaaaaaaaa   | aaaaaaaaaa   | aaaaaaaaaa
+ bbbbbbbbbb | bbbbb同      | bbbbbbbbbb   | bbbbbbbbbb
+ cccccccccc | cccccccccc   | ccccc收      | cccccccccc
+(3 rows)
+
+insert into testtd1 select * from testtd;
+select * from testtd1 order by c_nchar;
+ c_nchar  | c_character1 | c_character2 | c_varchar2 
+----------+--------------+--------------+------------
+ aaaaaa   | aaaaa        | aaaaa        | aaaaa
+ bbbbbbbb | bbbbb        | bbbbb        | bbbbb
+ cccccccc | ccccc        | ccccc        | ccccc
+(3 rows)
+
+--insert into testtd2 values(1, 'tttttt', 'tttttt','tttttt','tttttt');
+insert into testtd1 values((select c_nvarchar2 from testtd2n where c_int = 1), 'tttttt','tttttt','tttttt');
+select * from testtd1 order by c_nchar;
+ c_nchar  | c_character1 | c_character2 | c_varchar2 
+----------+--------------+--------------+------------
+ aaaaaa   | aaaaa        | aaaaa        | aaaaa
+ bbbbbbbb | bbbbb        | bbbbb        | bbbbb
+ cccccccc | ccccc        | ccccc        | ccccc
+ tttttt   | ttttt        | ttttt        | ttttt
+(4 rows)
+
+--Include nvarchar2 
+insert into testtdn values('aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaa');
+ERROR:  value too long for type nvarchar2(10)
+CONTEXT:  referenced column: c_nvarchar2
+select * from testtdn order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+insert into testtdn values('aaa一二aaaaaa一二', 'aaaaaaaaa一二','aaaaaaaaa一二', 'aaaaaaaaa一二','aaaaaaaaa一二');
+ERROR:  value too long for type nvarchar2(10)
+CONTEXT:  referenced column: c_nvarchar2
+insert into testtdn values('aaaaaaaaa一二三','aaaaaaaaa一二三','aaaaaaaaa一二三', 'aaaaaaaaa一二三','aaaaaaaaa一二三');
+ERROR:  value too long for type nvarchar2(10)
+CONTEXT:  referenced column: c_nvarchar2
+insert into testtdn values('aaaaaa一s二','aaaaaa一s二三','aaaaaa一s二三', 'aaaaaa一s二三','aaaaaa一s二三');
+select * from testtdn order by c_nchar;
+  c_nchar  | c_character1 | c_character2 | c_varchar2 |  c_nvarchar2  
+-----------+--------------+--------------+------------+---------------
+ aaaaaa一s | aaaaaa一s    | aaaaaa一s    | aaaaaa一s  | aaaaaa一s二三
+(1 row)
+
+delete from testtdn;
+insert into testtdn values('aaaaaa已经aaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaa','aaaaaaaaaaaaaa'),
+('bbbbbbbbbbbbbbbb', 'bbbbb同意bbbbbbbbbbb','bbbbbbbbbbbbbbbb', 'bbbbbbbbbbbbbbbb','bbbbbbbbbbbbbbbb'),
+('ccccccccccccccccc','ccccccccccccc','ccccc收获cccccccc','ccccccccccccccc', 'cccccccccccccc');
+ERROR:  value too long for type nvarchar2(10)
+select * from testtdn order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+insert into testtd1n select * from testtdn;
+select * from testtd1n order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+--insert into testtd2n values(1, 'tttttt', 'tttttt','tttttt','tttttt','tttt@%$6666');
+insert into testtd1n values((select c_nvarchar2 from testtd2n where c_int = 1), 'tttttt','tttttt','tttttt','tttttt');
+ERROR:  value too long for type nvarchar2(5)
+CONTEXT:  referenced column: c_nvarchar2
+select * from testtd1n order by c_nchar;
+ c_nchar | c_character1 | c_character2 | c_varchar2 | c_nvarchar2 
+---------+--------------+--------------+------------+-------------
+(0 rows)
+
+drop table if exists testtd_def1;
+NOTICE:  table "testtd_def1" does not exist, skipping
+drop table if exists testtd_def2;
+NOTICE:  table "testtd_def2" does not exist, skipping
+create table testtd_def1(
+c_nchar nchar(10) default 'aaaaaaaaaaaaaaaaaaaaaa',
+c_character1 character(10) default 'aaaaaaaaaaaaaaaaaaaaaa',
+c_character2 character varying(10) default 'aaaaaaaaaaaaaaaaaaaaaa',
+c_varchar2 varchar2(10) default 'aaaaaaaaaaaaaaaaaaaaaa'
+);
+create table testtd_def2(
+c_nvarchar2 nvarchar2(10) default 'aaaaaaaaaaaaaaaaaaaaaa',
+c_nvarchar22 nvarchar2(10) default 'aaaaaaaaaaaaaaaaaaaaaa'
+);
+insert into testtd_def1 values(default,default,default,default);
+insert into testtd_def1 values(default,default,default,default),(default,default,default,default),(default,default,default,default);
+insert into testtd_def2 values(default,default),(default,default),(default,default);
+ERROR:  value too long for type nvarchar2(10)
+insert into testtd_def2 values(default,default);
+ERROR:  value too long for type nvarchar2(10)
+CONTEXT:  referenced column: c_nvarchar2
+insert into testtd_def1 values('111b',default,default,default);
+insert into testtd_def1 values(default,'adkjdkjgsd;uao;s','adkjdkjgsd;uao;s','adkjdkjgsd;uao;s');
+insert into testtd_def2 values('11111fdk',default);
+ERROR:  value too long for type nvarchar2(10)
+CONTEXT:  referenced column: c_nvarchar22
+insert into testtd_def2 values(default,'nldjfdlkf');
+ERROR:  value too long for type nvarchar2(10)
+CONTEXT:  referenced column: c_nvarchar2
+drop table if exists testtd_def1;
+drop table if exists testtd_def2;
+--stored procedure
+set td_compatible_truncation=off;
+drop table if exists inst_trc_t1_01;
+NOTICE:  table "inst_trc_t1_01" does not exist, skipping
+drop procedure if exists pro_insert_trunc;
+NOTICE:  function pro_insert_trunc() does not exist, skipping
+create table inst_trc_t1_01(
+c_char1 char(6),
+c_char2 char(6),
+c_varchar1 varchar(6),
+c_varchar2 varchar2(6),
+c_nvarchar nvarchar2(6));
+CREATE OR REPLACE PROCEDURE pro_insert_trunc(
+c_varchar2 varchar2(50),
+c_date date,
+c_timestamp_wztimezone timestamp with time zone,
+c_number number
+)
+AS 
+BEGIN 
+insert into inst_trc_t1_01 values(c_varchar2,c_date,c_timestamp_wztimezone,c_number,substr(c_date,3,6)); 
+insert into inst_trc_t1_01 values(cast(c_varchar2 as char(10)),cast(c_date as varchar),cast(c_timestamp_wztimezone as char(30)),cast(c_number as varchar),cast(c_date as char(6)));
+END;
+/
+show td_compatible_truncation;
+ td_compatible_truncation 
+--------------------------
+ off
+(1 row)
+
+call pro_insert_trunc(43947123894723895743728943.5425235,'2016-06-30','2013-12-11 pst',321548764546.154564);
+ERROR:  value too long for type character(6)
+CONTEXT:  referenced column: c_char1
+SQL statement "insert into inst_trc_t1_01 values(c_varchar2,c_date,c_timestamp_wztimezone,c_number,substr(c_date,3,6))"
+PL/pgSQL function pro_insert_trunc(character varying,date,timestamp with time zone,numeric) line 3 at SQL statement
+set td_compatible_truncation=on;
+show td_compatible_truncation;
+ td_compatible_truncation 
+--------------------------
+ on
+(1 row)
+
+call pro_insert_trunc(43947123894723895743728943.5425235,'2016-06-30','2013-12-11 pst',321548764546.154564);
+ pro_insert_trunc 
+------------------
+ 
+(1 row)
+
+set td_compatible_truncation=off;
+show td_compatible_truncation;
+ td_compatible_truncation 
+--------------------------
+ off
+(1 row)
+
+call pro_insert_trunc(43947123894723895743728943.5425235,'2016-06-30','2013-12-11 pst',321548764546.154564);
+ERROR:  value too long for type character(6)
+CONTEXT:  referenced column: c_char1
+SQL statement "insert into inst_trc_t1_01 values(c_varchar2,c_date,c_timestamp_wztimezone,c_number,substr(c_date,3,6))"
+PL/pgSQL function pro_insert_trunc(character varying,date,timestamp with time zone,numeric) line 3 at SQL statement
+drop table if exists inst_trc_t1_01;
+drop procedure if exists pro_insert_trunc;
+--Prepare stmt test
+drop table if exists pre_table;
+NOTICE:  table "pre_table" does not exist, skipping
+create table pre_table(a char(6), b varchar(6));
+show td_compatible_truncation;
+ td_compatible_truncation 
+--------------------------
+ off
+(1 row)
+
+prepare insert1(char(6), varchar(6)) as insert into pre_table values($1,$2);
+execute insert1('aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb');
+ERROR:  value too long for type character(6)
+CONTEXT:  referenced column: a
+set td_compatible_truncation=on;
+show td_compatible_truncation;
+ td_compatible_truncation 
+--------------------------
+ on
+(1 row)
+
+execute insert1('aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb');
+set td_compatible_truncation=off;
+show td_compatible_truncation;
+ td_compatible_truncation 
+--------------------------
+ off
+(1 row)
+
+execute insert1('aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb');
+ERROR:  value too long for type character(6)
+CONTEXT:  referenced column: a
+drop table if exists pre_table;
+drop table testtd;
+drop table testtdn;
+drop table testtd1;
+drop table testtd2;
+drop table testtd1n;
+drop table testtd2n;
+commit;
+WARNING:  there is no transaction in progress
+set td_compatible_truncation = on;
+create table error_callback_tbl(a int, b int);
+insert into error_callback_tbl values(generate_series(1, 1000),generate_series(1, 1000));
+CREATE or replace FUNCTION pro_refcursor_010(in i_num integer,in sum_num integer, OUT o_resultnum character varying, OUT o_result_cur refcursor) RETURNS record
+LANGUAGE plpgsql NOT SHIPPABLE
+AS $$
+declare
+    v_tmpsql    varchar(100);
+    v_num       integer;
+begin
+    v_tmpsql := 'select b from error_callback_tbl where a =' || i_num || '';
+    if i_num > 0 then
+        execute immediate v_tmpsql into v_num;
+        pro_refcursor_010(i_num-1.0,sum_num+i_num+0.0,o_resultnum,o_result_cur);
+        o_resultnum := sum_num;
+        o_result_cur := v_tmpsql;
+    else
+        o_resultnum := sum_num;
+        o_result_cur := v_tmpsql;
+    end if;
+end$$;
+call pro_refcursor_010(10.0,0.1,0,0);
+ o_resultnum |                 o_result_cur                 
+-------------+----------------------------------------------
+ 0           | select b from error_callback_tbl where a =10
+(1 row)
+
+drop function pro_refcursor_010;
+drop table error_callback_tbl;
+reset td_compatible_truncation;
+\c regression

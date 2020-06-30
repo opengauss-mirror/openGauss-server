@@ -1,0 +1,211 @@
+--test separation of privilege
+create user sysuser with sysadmin password 'ttest@123';
+create user secuser with createrole password 'ttest@123';
+create user auduser with auditadmin password 'ttest@123';
+create user independent_user with independent sysadmin password 'ttest@123';
+ERROR:  Independent user cannot have systemadmin, auditadmin, vcadmin and createrole attributes.
+create user independent_user with independent createrole password 'ttest@123';
+ERROR:  Independent user cannot have systemadmin, auditadmin, vcadmin and createrole attributes.
+create user independent_user with independent auditadmin password 'ttest@123';
+ERROR:  Independent user cannot have systemadmin, auditadmin, vcadmin and createrole attributes.
+create user independent_user with independent password 'ttest@123';
+WARNING:  Please carefully use independent user as it need more self-management.
+HINT:  Self-management include logical backup, password manage and so on.
+alter user independent_user with sysadmin;
+ERROR:  Independent user cannot have systemadmin, auditadmin and createrole attributes.
+alter user independent_user with createrole;
+ERROR:  Independent user cannot have systemadmin, auditadmin and createrole attributes.
+alter user independent_user with auditadmin;
+ERROR:  Independent user cannot have systemadmin, auditadmin and createrole attributes.
+alter user independent_user with noindependent;
+ERROR:  Only user himself can remove his own independent attribute.
+create user noindependent_user with noindependent password 'ttest@123';
+alter user independent_user with independent user noindependent_user;
+ERROR:  Only independent user himself can decide his own membership.
+alter user noindependent_user with sysadmin independent;
+ERROR:  Independent user cannot have systemadmin, auditadmin, vcadmin and createrole attributes.
+alter user noindependent_user with createrole independent;
+ERROR:  Independent user cannot have systemadmin, auditadmin, vcadmin and createrole attributes.
+alter user noindependent_user with auditadmin independent;
+ERROR:  Independent user cannot have systemadmin, auditadmin, vcadmin and createrole attributes.
+alter user noindependent_user with independent;
+WARNING:  Please carefully use independent user as it need more self-management.
+HINT:  Self-management include logical backup, password manage and so on.
+create user create_role_in_independent_role in role independent_user password 'ttest@123';
+ERROR:  Only independent user himself can decide his own membership.
+create user create_independent_role_to_role with independent role sysuser password 'ttest@123';
+ERROR:  Only independent user himself can decide his own membership.
+create user create_independent_role_to_role with independent admin sysuser password 'ttest@123';
+ERROR:  Only independent user himself can decide his own membership.
+alter user noindependent_user identified by 'ttest@789';
+ERROR:  Only independent user himself can alter his own password.
+grant independent_user to noindependent_user;
+ERROR:  Only independent user himself can decide his own membership.
+\! @gsqldir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'alter user noindependent_user with noindependent;'
+ALTER ROLE
+\! @gsqldir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'create table independent_tbl(id1 int,id2 int);insert into independent_tbl values(100,100);insert into independent_tbl values(300,300);'
+CREATE TABLE
+INSERT 0 1
+INSERT 0 1
+\! @gsqldir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'create view independent_user.myview as select * from independent_user.independent_tbl;'
+CREATE VIEW
+\! @gsqldir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'create table noindependent_tbl(id1 int,id2 int);insert into noindependent_tbl values(100,100);insert into noindependent_tbl values(300,300);'
+CREATE TABLE
+INSERT 0 1
+INSERT 0 1
+\! @gsqldir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'create view noindependent_user.myview as select * from noindependent_user.noindependent_tbl;'
+CREATE VIEW
+--independent
+insert into independent_user.independent_tbl values(100,100);
+ERROR:  permission denied for relation independent_tbl
+delete from independent_user.independent_tbl where id1=100;
+ERROR:  permission denied for relation independent_tbl
+update independent_user.independent_tbl set id2=500 where id1=300;
+ERROR:  permission denied for relation independent_tbl
+select * from independent_user.independent_tbl;
+ERROR:  permission denied for relation independent_tbl
+grant select on independent_user.independent_tbl to sysuser;
+ERROR:  permission denied for relation independent_tbl
+revoke select on independent_user.independent_tbl from sysuser;
+ERROR:  permission denied for relation independent_tbl
+copy independent_user.independent_tbl to STDOUT;
+ERROR:  permission denied for relation independent_tbl
+alter table independent_user.independent_tbl owner to sysuser;
+ERROR:  must be owner of relation independent_tbl
+truncate independent_user.independent_tbl;
+vacuum independent_user.independent_tbl;
+analyze independent_user.independent_tbl;
+select * from independent_user.myview;
+ERROR:  permission denied for relation myview
+select has_table_privilege('independent_user.independent_tbl','select');
+ has_table_privilege 
+---------------------
+ f
+(1 row)
+
+select has_table_privilege('independent_user.independent_tbl','insert');
+ has_table_privilege 
+---------------------
+ f
+(1 row)
+
+select has_table_privilege('independent_user.independent_tbl','delete');
+ has_table_privilege 
+---------------------
+ f
+(1 row)
+
+select has_table_privilege('independent_user.independent_tbl','update');
+ has_table_privilege 
+---------------------
+ f
+(1 row)
+
+select has_table_privilege('independent_user.independent_tbl','truncate');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+select has_table_privilege('independent_user.independent_tbl','references');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+select has_table_privilege('independent_user.independent_tbl','trigger');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+--noindependent
+insert into noindependent_user.noindependent_tbl values(100,100);
+delete from noindependent_user.noindependent_tbl where id1=100;
+update noindependent_user.noindependent_tbl set id2=500 where id1=300;
+select * from noindependent_user.noindependent_tbl order by id1;
+ id1 | id2 
+-----+-----
+ 300 | 500
+(1 row)
+
+grant select on noindependent_user.noindependent_tbl to sysuser;
+revoke select on noindependent_user.noindependent_tbl from sysuser;
+copy noindependent_user.noindependent_tbl to STDOUT;
+300	500
+alter table noindependent_user.noindependent_tbl owner to sysuser;
+truncate noindependent_user.noindependent_tbl;
+select * from noindependent_user.myview;
+ERROR:  permission denied for relation noindependent_tbl
+select has_table_privilege('noindependent_user.noindependent_tbl','select');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+select has_table_privilege('noindependent_user.noindependent_tbl','insert');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+select has_table_privilege('noindependent_user.noindependent_tbl','delete');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+select has_table_privilege('noindependent_user.noindependent_tbl','update');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+select has_table_privilege('noindependent_user.noindependent_tbl','truncate');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+select has_table_privilege('noindependent_user.noindependent_tbl','references');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+select has_table_privilege('noindependent_user.noindependent_tbl','trigger');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+--indirect access
+create table independent_user.like_independent_tbl(like independent_user.independent_tbl);
+create table independent_user.temp_create_tbl as select * from independent_user.independent_tbl;
+ERROR:  permission denied for relation temp_create_tbl
+select * into independent_user.temp_create_tbl from independent_user.independent_tbl;
+ERROR:  permission denied for relation temp_create_tbl
+create table public.temp_create_tbl as select * from independent_user.independent_tbl;
+ERROR:  permission denied for relation independent_tbl
+select * into public.temp_create_tbl from independent_user.independent_tbl;
+ERROR:  permission denied for relation independent_tbl
+create index indep_idx on independent_user.independent_tbl(id2);
+drop index independent_user.indep_idx;
+--test disable password for independent
+\! @gsqldir@/gsql -d regression -U independent_user -W 'ttest@123' -p @portstring@ -c 'alter user independent_user password disable;'
+ALTER ROLE
+\! @gsqldir@/gsql -d regression -U noindependent_user -W 'ttest@123' -p @portstring@ -c 'alter user noindependent_user password disable;'
+ERROR:  Only system admin can disable user's password.
+alter user independent_user password disable;
+ERROR:  Only independent user himself can disable his own password.
+alter user noindependent_user password disable;
+drop table independent_user.like_independent_tbl;
+drop table independent_user.independent_tbl cascade;
+NOTICE:  drop cascades to view independent_user.myview
+drop table noindependent_user.noindependent_tbl cascade;
+NOTICE:  drop cascades to view noindependent_user.myview
+drop user independent_user cascade;
+drop user noindependent_user cascade;
+drop user sysuser cascade;
+drop user secuser cascade;
+drop user auduser cascade;

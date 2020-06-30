@@ -1,0 +1,16 @@
+<refentry id="SQL-ROLLBACK">
+<refmeta>
+<refentrytitle>ROLLBACK</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ROLLBACK</refname>
+<refpurpose>abort the current transaction</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ROLLBACK [ WORK | TRANSACTION ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

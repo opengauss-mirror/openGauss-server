@@ -1,0 +1,20 @@
+<refentry id="SQL-ALTER_POLICY">
+<refmeta>
+<refentrytitle>ALTER ROW LEVEL SECURITY POLICY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER ROW LEVEL SECURITY POLICY</refname>
+<refpurpose>change the definition of a row level security policy</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER [ ROW LEVEL SECURITY ] POLICY [ IF EXISTS ] policy_name ON table_name RENAME TO new_policy_name
+
+ALTER [ ROW LEVEL SECURITY ] POLICY policy_name ON table_name
+    [ TO { role_name | PUBLIC } [, ...] ]
+    [ USING ( using_expression ) ]
+</synopsis>
+</refsynopsisdiv>
+</refentry>

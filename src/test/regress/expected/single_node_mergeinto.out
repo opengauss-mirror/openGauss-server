@@ -1,0 +1,114 @@
+drop table if exists row_ddl;
+NOTICE:  table "row_ddl" does not exist, skipping
+drop table if exists col_ddl;
+NOTICE:  table "col_ddl" does not exist, skipping
+create table row_ddl 
+(c1 int not null, 
+c2 varchar(200) not null, 
+c3 date default '2018-06-14', 
+c4 varchar(200) default '空的就用这个default', 
+c5 numeric(18,9) default 123456.000000009 check (c5>0), 
+c6 text default 'comments for row');
+create table col_ddl
+(c1 int not null, 
+c2 varchar(200) not null, 
+c3 date default '2018-06-14', 
+c4 varchar(200) default '空的就用这个default', 
+c5 numeric(18,9) default 123456.000000009 , 
+c6 text default 'comments for col');
+insert into row_ddl values(generate_series(1,10),'A'||(generate_series(1,10))||'Z', date'2000-03-01'+generate_series(1,10), 'c'||generate_series(1,10)||'我的２００４');
+insert into col_ddl values(generate_series(11,20),'A'||(generate_series(11,20))||'Z', date'2000-03-01'+generate_series(11,20), 'c'||generate_series(11,20)||'我的２００４');
+alter table row_ddl drop column c5;
+alter table row_ddl add column c5 int default 10;
+alter table col_ddl drop column c2;
+alter table col_ddl add column c2 int;
+merge into col_ddl t1 using row_ddl t2 on t1.c1=t2.c1
+when matched then update set t1.c6=t1.c6||t2.c6,c3=t2.c3+interval '1' day
+when not matched then insert values(t2.c1,t2.c3,t2.c4,t2.c5,t2.c6,length(t2.c2));
+drop table if exists row_ddl;
+drop table if exists col_ddl;
+create table row_ddl 
+(c1 int not null, 
+c2 varchar(200) not null, 
+c3 date default '2018-06-14', 
+c4 varchar(200) default '空的就用这个default', 
+c5 numeric(18,9) default 123456.000000009 check (c5>0), 
+c6 text default 'comments for row');
+create table col_ddl
+(c1 int not null, 
+c2 varchar(200) not null, 
+c3 date default '2018-06-14', 
+c4 varchar(200) default '空的就用这个default', 
+c5 numeric(18,9) default 123456.000000009 , 
+c6 text default 'comments for col');
+--表上建立索引
+create index i_row_ddl on row_ddl(c4,c2)local;
+ERROR:  non-partitioned table does not support local partitioned indexes 
+create index i_col_ddl on col_ddl(c1,c3)local;
+ERROR:  non-partitioned table does not support local partitioned indexes 
+insert into row_ddl values(generate_series(1,10),'A'||(generate_series(1,10))||'Z', date'2000-03-01'+generate_series(1,10), 'c'||generate_series(1,10)||'我的２００４');
+insert into col_ddl values(generate_series(11,20),'A'||(generate_series(11,20))||'Z', date'2000-03-01'+generate_series(11,20), 'c'||generate_series(11,20)||'我的２００４');
+alter table row_ddl drop column c5;
+alter table row_ddl add column c5 int default 10;
+alter table col_ddl drop column c2;
+alter table col_ddl add column c2 int;
+alter table row_ddl drop column c3;
+alter table row_ddl add column c3 bool default 't';
+merge into row_ddl t1 using col_ddl t2 on t1.c1=t2.c1
+when matched then update set t1.c6=t2.c6, t1.c3=case when t2.c3> date'2000-03-02' then 0 else 1 end
+when not matched then insert(c1,c4,c5,c6) values(t2.c1,t2.c4,t2.c5,t2.c6);
+ERROR:  null value in column "c2" violates not-null constraint
+DETAIL:  Failing row contains (11, null, c11我的２００４, comments for col, 123456, t).
+drop table if exists row_dml;
+NOTICE:  table "row_dml" does not exist, skipping
+drop table if exists col_dml;
+NOTICE:  table "col_dml" does not exist, skipping
+create temp table row_dml 
+(c1 int not null, 
+c2 varchar(200) not null, 
+c3 date default '2018-06-14', 
+c4 varchar(200) default '空的就用这个default', 
+c5 numeric(18,9) default 123456.000000009 check (c5>0), 
+c6 text default 'comments',
+unique(c2,c4));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "row_dml_c2_c4_key" for table "row_dml"
+create unlogged table col_dml
+(c1 int not null, 
+c2 varchar(200) not null, 
+c3 date default '2018-06-14', 
+c4 varchar(200) default '空的就用这个default', 
+c5 numeric(18,9) default 123456.000000009 , 
+c6 text default 'comments');
+create table web_page
+(
+wp_web_page_sk            integer               not null,
+wp_web_page_id            char(16)              not null,
+wp_rec_start_date         date                          ,
+wp_rec_end_date           date                          ,
+wp_creation_date_sk       integer                       ,
+wp_access_date_sk         integer                       ,
+wp_autogen_flag           char(1)                       ,
+wp_customer_sk            integer                       ,
+wp_url                    varchar(100)                  ,
+wp_type                   char(50)                      ,
+wp_char_count             integer                       ,
+wp_link_count             integer                       ,
+wp_image_count            integer                       ,
+wp_max_ad_count           integer                       
+ );
+ 
+--表上建立索引
+insert into row_dml values(generate_series(1,100),'A'||(generate_series(1,100))||'Z', date'2000-03-01'+generate_series(1,100), 'c'||generate_series(1,100)||'我的２００４');
+insert into col_dml select * from row_dml;
+copy web_page from STDIN (DELIMITER ',');
+merge into row_dml t1 using
+(
+select coalesce(wp_type, wp_web_page_id) c6,
+wp_type c1,
+nvl(wp_rec_start_date, wp_rec_end_date) c2 ,
+length(nullif(wp_type,wp_web_page_id)) c5
+from web_page ) t2
+on ( t1.c1=t2.c5+50 )
+when matched then update set t1.c6 = t2.c6
+when not matched then insert values(t2.c5, t2.c6, t2.c2);
+ERROR:  unable to get a stable set of rows in the source tables

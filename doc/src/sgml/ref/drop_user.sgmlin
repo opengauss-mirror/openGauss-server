@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_USER">
+<refmeta>
+<refentrytitle>DROP USER</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP USER</refname>
+<refpurpose>remove a database role</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP USER [ IF EXISTS ] user_name [, ...] [ CASCADE | RESTRICT ];
+</synopsis>
+</refsynopsisdiv>
+</refentry>

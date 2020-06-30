@@ -1,0 +1,247 @@
+/*
+ * This file is used to test the function of hashagg with LLVM Optimization
+ */
+----
+--- Create Table and Insert Data
+----
+drop schema if exists llvm_vecagg_engine2 cascade;
+NOTICE:  schema "llvm_vecagg_engine2" does not exist, skipping
+create schema llvm_vecagg_engine2;
+set current_schema = llvm_vecagg_engine2;
+set codegen_cost_threshold=0;
+CREATE TABLE llvm_vecagg_engine2.LLVM_VECAGG_TABLE_02(
+    col_int1	int,
+    col_int2	int,
+    col_bint1	bigint,
+    col_char1	char(10),
+    col_varchar1	varchar(17),
+    col_varchar2	varchar(40),
+    col_text	text,
+    col_num1	numeric(9,2),
+    col_num2	numeric(15,4),
+    col_num3	numeric(18,0),
+    col_num4	numeric(18,4),
+    col_num5	numeric(22,2),
+    col_num6	numeric(40,5)	
+)with(orientation=column);
+copy llvm_vecagg_table_02 from stdin;
+analyze llvm_vecagg_table_02;
+----
+--- test1 : test build hash table with date, timestamp, char, varchar
+----
+select sum(col_num1), substr(col_text, 1, 2), col_varchar2 from llvm_vecagg_table_02 group by substr(col_text, 1, 2), col_varchar2 order by 1, 2;
+   sum   | substr |    col_varchar2     
+---------+--------+---------------------
+   -2.70 | ha     | Iknowyou
+    2.70 | ha     | Iknoweoery
+    3.60 | gu     | todayisagoodaygofar
+   43.20 | gu     | whydayisnotsogood
+  301.80 | ya     | Iknowyou
+ 1147.50 | gu     | Iknowisgood
+         | ha     | Iknowevery
+(7 rows)
+
+----
+--- test2 : test sum(numeric) & avg(numeric) with different agg level
+----
+explain (verbose on, costs off) select sum(col_bint1), avg(col_num1), col_text from llvm_vecagg_table_02  group by col_text order by 1, 2;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (sum(col_bint1)), (avg(col_num1)), col_text
+   ->  Vector Sort
+         Output: (sum(col_bint1)), (avg(col_num1)), col_text
+         Sort Key: (sum(llvm_vecagg_table_02.col_bint1)), (avg(llvm_vecagg_table_02.col_num1))
+         ->  Vector Sonic Hash Aggregate
+               Output: sum(col_bint1), avg(col_num1), col_text
+               Group By Key: llvm_vecagg_table_02.col_text
+               ->  CStore Scan on llvm_vecagg_engine2.llvm_vecagg_table_02
+                     Output: col_text, col_bint1, col_num1
+(10 rows)
+
+select sum(col_bint1), avg(col_num1), col_text from llvm_vecagg_table_02  group by col_text order by 1, 2;
+       sum        |          avg           | col_text 
+------------------+------------------------+----------
+               36 |                        | hai
+              123 |   -12.7000000000000000 | ya
+          2476915 |    62.9000000000000000 | ya67y
+    3707161106568 | 0.00000000000000000000 | ha
+ 2233720368545807 |   199.0500000000000000 | guy
+(5 rows)
+
+select sum(col_bint1), sum(col_num1), col_text from llvm_vecagg_table_02  group by col_text order by 1, 2;
+       sum        |   sum   | col_text 
+------------------+---------+----------
+               36 |         | hai
+              123 |  -12.70 | ya
+          2476915 |  314.50 | ya67y
+    3707161106568 |    0.00 | ha
+ 2233720368545807 | 1194.30 | guy
+(5 rows)
+
+select avg(col_bint1), avg(col_num3), col_varchar1 from llvm_vecagg_table_02  group by col_varchar1 order by 1, 2;
+          avg          |          avg          | col_varchar1 
+-----------------------+-----------------------+--------------
+   -111686018427387886 | 408963923331.00000000 | ali 
+  123.0000000000000000 |                       | ala  
+   495383.000000000000 |     89348814741910358 | alaalaala  
+ 926790276611.25000000 | 817926587964.00000000 | ala 
+ 2233720368545808.0000 |   837936.000000000000 | alo 
+    223372036854775807 |    25869.000000000000 | ali
+(6 rows)
+
+select avg(col_num1), sum(col_num3), sum(col_num6), col_varchar1, col_varchar2 from llvm_vecagg_table_02  group by col_varchar1, col_varchar2 order by 1, 2;
+         avg          |        sum         |          sum          | col_varchar1 |    col_varchar2     
+----------------------+--------------------+-----------------------+--------------+---------------------
+  -7.7000000000000000 |                    |  -2846699370956.72508 | ala          | Iknowyou
+   2.7000000000000000 |      2453779763892 |       548748084.20500 | ala          | Iknoweoery
+   3.6000000000000000 |              25869 |        65778951.25000 | ali          | todayisagoodaygofar
+  21.2000000000000000 |            1258698 |        65778951.75000 | ali          | whydayisnotsogood
+  22.0000000000000000 |             857946 |        65778951.75587 | alo          | whydayisnotsogood
+  62.9000000000000000 | 446744073709551788 | 963412050314521.63746 | alaalaala    | Iknowyou
+ 382.5000000000000000 |            2493798 |         6985951.75587 | alo          | Iknowisgood
+                      |       817926587964 |                       | ali          | Iknowevery
+(8 rows)
+
+select avg(col_bint1), avg(col_num6), col_text, col_varchar2 from llvm_vecagg_table_02  group by col_text, col_varchar2 order by 1, 2;
+          avg          |          avg           | col_text |    col_varchar2     
+-----------------------+------------------------+----------+---------------------
+   -110569158243115000 |  65778951.752935000000 | guy      | whydayisnotsogood
+   36.0000000000000000 |                        | hai      | Iknowevery
+  123.0000000000000000 |   -2587949685478.36254 | ya       | Iknowyou
+  123.0000000000000000 | -258749685478.36254000 | ha       | Iknowyou
+   495383.000000000000 |  192682410062904.32749 | ya67y    | Iknowyou
+ 926790276611.25000000 |     137187021.05125000 | ha       | Iknoweoery
+    223372036854775807 |  65778951.250000000000 | guy      | todayisagoodaygofar
+                       |   6985951.755870000000 | guy      | Iknowisgood
+(8 rows)
+
+select avg(col_bint1), avg(col_num1 + col_num2 - 2), col_varchar2 from llvm_vecagg_table_02  group by col_varchar2 order by 1, 2;
+          avg          |          avg          |    col_varchar2     
+-----------------------+-----------------------+---------------------
+   -110569158243115000 |  194.8562000000000000 | whydayisnotsogood
+   36.0000000000000000 |                       | Iknowevery
+   353880.142857142857 |   312882.478000000000 | Iknowyou
+ 926790276611.25000000 |   312887.878000000000 | Iknoweoery
+    223372036854775807 |  126.8560000000000000 | todayisagoodaygofar
+                       | 7367.6613333333333333 | Iknowisgood
+(6 rows)
+
+select avg(col_bint1), avg(col_num1 * 1.5 + col_num3 - 2), col_varchar2 from llvm_vecagg_table_02  group by col_varchar2 order by 1, 2;
+          avg          |          avg          |    col_varchar2     
+-----------------------+-----------------------+---------------------
+   -110569158243115000 |  1058352.400000000000 | whydayisnotsogood
+   36.0000000000000000 |                       | Iknowevery
+   353880.142857142857 | 89348814741910449.950 | Iknowyou
+ 926790276611.25000000 |                       | Iknoweoery
+    223372036854775807 |    25872.400000000000 | todayisagoodaygofar
+                       |   831837.750000000000 | Iknowisgood
+(6 rows)
+
+select sum(col_num1 * 1.5 + col_num3 - 2), col_varchar2 from llvm_vecagg_table_02  group by col_varchar2 order by 1, 2;
+          sum           |    col_varchar2     
+------------------------+---------------------
+              25872.400 | todayisagoodaygofar
+            2116704.800 | whydayisnotsogood
+            2495513.250 | Iknowisgood
+ 446744073709552249.750 | Iknowyou
+                        | Iknoweoery
+                        | Iknowevery
+(6 rows)
+
+select sum(col_num1 * col_num2), col_varchar1 from llvm_vecagg_table_02  group by col_varchar1 order by 1, 2;
+      sum       | col_varchar1 
+----------------+--------------
+ -844795.380600 | ala  
+     450.921600 | ali
+    2655.431440 | ali 
+  844795.380600 | ala 
+ 8022676.849000 | alo 
+                | alaalaala  
+(6 rows)
+
+explain (verbose on, costs off) select sum(col_bint1), avg(col_num1), col_text from llvm_vecagg_table_02  group by col_text order by 1, 2;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (sum(col_bint1)), (avg(col_num1)), col_text
+   ->  Vector Sort
+         Output: (sum(col_bint1)), (avg(col_num1)), col_text
+         Sort Key: (sum(llvm_vecagg_table_02.col_bint1)), (avg(llvm_vecagg_table_02.col_num1))
+         ->  Vector Sonic Hash Aggregate
+               Output: sum(col_bint1), avg(col_num1), col_text
+               Group By Key: llvm_vecagg_table_02.col_text
+               ->  CStore Scan on llvm_vecagg_engine2.llvm_vecagg_table_02
+                     Output: col_text, col_bint1, col_num1
+(10 rows)
+
+select sum(col_bint1), avg(col_num1), col_text from llvm_vecagg_table_02  group by col_text order by 1, 2;
+       sum        |          avg           | col_text 
+------------------+------------------------+----------
+               36 |                        | hai
+              123 |   -12.7000000000000000 | ya
+          2476915 |    62.9000000000000000 | ya67y
+    3707161106568 | 0.00000000000000000000 | ha
+ 2233720368545807 |   199.0500000000000000 | guy
+(5 rows)
+
+select avg(col_bint1), avg(col_num3), col_varchar1 from llvm_vecagg_table_02  group by col_varchar1 order by 1, 2;
+          avg          |          avg          | col_varchar1 
+-----------------------+-----------------------+--------------
+   -111686018427387886 | 408963923331.00000000 | ali 
+  123.0000000000000000 |                       | ala  
+   495383.000000000000 |     89348814741910358 | alaalaala  
+ 926790276611.25000000 | 817926587964.00000000 | ala 
+ 2233720368545808.0000 |   837936.000000000000 | alo 
+    223372036854775807 |    25869.000000000000 | ali
+(6 rows)
+
+select avg(col_num1), sum(col_num3), col_varchar2 from llvm_vecagg_table_02  group by col_varchar2 order by 1, 2;
+         avg          |        sum         |    col_varchar2     
+----------------------+--------------------+---------------------
+   2.7000000000000000 |      2453779763892 | Iknoweoery
+   3.6000000000000000 |              25869 | todayisagoodaygofar
+  21.6000000000000000 |            2116644 | whydayisnotsogood
+  42.7285714285714286 | 446744073709551788 | Iknowyou
+ 382.5000000000000000 |            2493798 | Iknowisgood
+                      |       817926587964 | Iknowevery
+(6 rows)
+
+select avg(col_bint1), avg(col_num6), col_text, col_varchar2 from llvm_vecagg_table_02  group by col_text, col_varchar2 order by 1, 2;
+          avg          |          avg           | col_text |    col_varchar2     
+-----------------------+------------------------+----------+---------------------
+   -110569158243115000 |  65778951.752935000000 | guy      | whydayisnotsogood
+   36.0000000000000000 |                        | hai      | Iknowevery
+  123.0000000000000000 |   -2587949685478.36254 | ya       | Iknowyou
+  123.0000000000000000 | -258749685478.36254000 | ha       | Iknowyou
+   495383.000000000000 |  192682410062904.32749 | ya67y    | Iknowyou
+ 926790276611.25000000 |     137187021.05125000 | ha       | Iknoweoery
+    223372036854775807 |  65778951.250000000000 | guy      | todayisagoodaygofar
+                       |   6985951.755870000000 | guy      | Iknowisgood
+(8 rows)
+
+select avg(col_bint1), avg(col_num1 + col_num2 + 2), col_varchar2 from llvm_vecagg_table_02  group by col_varchar2 order by 1, 2;
+          avg          |          avg          |    col_varchar2     
+-----------------------+-----------------------+---------------------
+   -110569158243115000 |  198.8562000000000000 | whydayisnotsogood
+   36.0000000000000000 |                       | Iknowevery
+   353880.142857142857 |   312886.478000000000 | Iknowyou
+ 926790276611.25000000 |   312891.878000000000 | Iknoweoery
+    223372036854775807 |  130.8560000000000000 | todayisagoodaygofar
+                       | 7371.6613333333333333 | Iknowisgood
+(6 rows)
+
+select avg(col_bint1), sum(col_num1 - col_num2 - 1125.00), col_char1 from llvm_vecagg_table_02  group by col_char1 order by 1, 2;
+          avg           |     sum      | col_char1  
+------------------------+--------------+------------
+ -.50000000000000000000 |   -2475.7122 | shenmiwu  
+    309660.500000000000 | -628024.3560 | lihaile   
+  926790276589.50000000 |              | lihai     
+  2233720368545808.0000 |  -24517.2402 | shenmi    
+(4 rows)
+
+----
+--- clean table and resource
+----
+drop schema llvm_vecagg_engine2 cascade;
+NOTICE:  drop cascades to table llvm_vecagg_table_02
