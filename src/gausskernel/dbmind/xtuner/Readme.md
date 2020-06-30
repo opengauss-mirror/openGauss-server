@@ -27,7 +27,7 @@ pip install -r requirements.txt
 ## Dependencies
 
     python3.5+
-    tensorflow==1.14
+    tensorflow==1.15.2
     keras-rl
     keras
     paramiko
