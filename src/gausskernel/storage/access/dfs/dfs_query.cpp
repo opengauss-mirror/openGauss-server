@@ -299,7 +299,7 @@ static Oid GetOperatorByTypeId(Oid typeID, Oid accessMethodId, int16 strategyNum
 /*
  * Parse the fileNames string from the split List.
  * @_in_out param splitList: point to the original split List, which may contain multiple files.
- * @_in param currentFileName: point to the first file or the only file like '/user/file1.orc' (new buffer).
+ * @_in param currentFileName: point to the first file.
  * @return Return the split parsed from the list.
  */
 SplitInfo *ParseFileSplitList(List **splitList, char **currentFileName)

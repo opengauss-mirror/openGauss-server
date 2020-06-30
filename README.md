@@ -5,7 +5,7 @@
     - [Creating a Configuration File](#creating-a-configuration-file)
     - [Initializing the Installation Environment](#initializing-the-installation-environment)
 - [Executing Installation](#executing-installation)
-  [Uninstalling the opeinGauss](#uninstalling-the-openGauss)
+-  [Uninstalling the openGauss](#uninstalling-the-openGauss)
 - [Compilation](#compilation)
     - [Overview](#overview)
     - [OS and Software Dependency Requirements](#os-and-software-dependency-requirements)
