@@ -59,7 +59,7 @@ Under normal service loads, the RTO is less than 10 seconds, reducing the servic
 
 **Parallel Recovery**
 
-When the Xlog is transferred to the standby node, the standby node flushs the Xlog to storage medium. At the mean time, the Xlog is sent to the redo recovery dispatch thread. The dispatch thread sends the Xlog to multiple parallel recovery threads to replay. Ensure that the redo speed of the standby node keeps up with the generation speed of the primary host. The standby node is ready in real time, which can be promoted to primary instantly. 
+When the Xlog is transferred to the standby node, the standby node flushs the Xlog to storage medium. At the meantime, the Xlog is sent to the redo recovery dispatch thread. The dispatch thread sends the Xlog to multiple parallel recovery threads to replay. Ensure that the redo speed of the standby node keeps up with the generation speed of the primary host. The standby node is ready in real time, which can be promoted to primary instantly. 
 
 **Security**
 
