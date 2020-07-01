@@ -32,6 +32,8 @@ pip install -r requirements.txt
     keras>=2.4.0
     paramiko
 
+**Suggest:** Firstly, please upgrade your pip. ```python -m pip install --upgrade pip```
+
 ## Start tuning
 1. Start your database instance first;
 2. Choose a benchmark(TPC-C, TPC-H, etc.) and store data in your database;
