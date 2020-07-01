@@ -1,4 +1,4 @@
-tensorflow==1.15.2
-keras-rl
-keras<=2.2.5
+tensorflow>=2.2.0
+keras-rl2
+keras>=2.4.0
 paramiko
