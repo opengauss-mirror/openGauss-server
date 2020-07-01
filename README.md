@@ -47,7 +47,7 @@ Bind NIC interrupts to different cores and bind cores to different background th
 
 **ARM Optimization**
 
-Optimize atomic operations based on ARM platform LSE instructions, impletmenting efficient operation of critical sections.
+Optimize atomic operations based on ARM platform LSE instructions, implementing efficient operation of critical sections.
 
 **SQL Bypass**
 
@@ -208,7 +208,7 @@ After the openGauss configuration file is created, you need to run the gs_preins
    Execute gs_preinstall in interactive mode. During the execution, the mutual trust between users root and between clusteropenGauss users is automatically established.	
 
    ```
-   ./gs_preinstall -U omm -G dbgrp -X /opt/software/ openGauss/clusterconfig.xml
+   ./gs_preinstall -U omm -G dbgrp -X /opt/software/openGauss/clusterconfig.xml
    ```
 
    omm is the database administrator (also the OS user running the openGauss), dbgrp is the group name of the OS user running the openGauss, and /opt/software/ openGauss/clusterconfig.xml is the path of the openGauss configuration file. During the execution, you need to determine whether to establish mutual trust as prompted and enter the password of user root or the openGauss user.
@@ -241,7 +241,7 @@ After the openGauss installation environment is prepared by executing the pre-in
 3. Use gs_install to install the openGauss. If the openGauss is installed in environment variable separation mode, run the source command to obtain the environment variable separation file ENVFILE.
 
    ```
-   gs_install -X /opt/software/ openGauss/clusterconfig.xml
+   gs_install -X /opt/software/openGauss/clusterconfig.xml
    ```
 
    The password must meet the following complexity requirements:
@@ -404,13 +404,13 @@ build.sh in openGauss-server is an important script tool during compilation. It 
 
 The following table describes the parameters.
 
-| Option | Default Value                | Parameter                      | Description                              |
-| :----- | :--------------------------- | :----------------------------- | :--------------------------------------- |
-| -h     | Do not use this option.      | -                              | Help menu.                               |
-| -m     | release                      | [debug \| release \| memcheck] | Selects the target version.              |
-| -3rd   | ${Code directory}/binarylibs | [binarylibs path]              | Specifies the path of binarylibs. The path must be an absolute path. |
-| -pkg   | Do not use this option.      | -                              | Compresses the code compilation result into an installation package. |
-| -nopt  | Do not use this option.      | -                              | On kunpeng platform, like 1616 version, without LSE optimized. |
+| Option      | Default Value                | Parameter                      | Description                                                  |
+| :----- | :--------------------------- | :----------------------------- | :----------------------------------------------------------- |
+| -h      | Do not use this option.      | -                              | Help menu.                                                   |
+| -m      | release                      | [debug \| release \| memcheck] | Selects the target version.                                  |
+| -3rd      | ${Code directory}/binarylibs | [binarylibs path]              | Specifies the path of binarylibs. The path must be an absolute path. |
+| -pkg      | Do not use this option.      | -                              | Compresses the code compilation result into an installation package. |
+| -nopt      | Do not use this option.      | -                              | On kunpeng platform, like 1616 version, without LSE optimized. |
 
 > **NOTICE:** 
 >
@@ -533,7 +533,7 @@ Compilation log: **make_compile.log**
 
 Please read the chapter **Compiling by build.sh** first to understand the usage of build.sh and how to compile openGauss by using the script.
 
-Now you can compile the installation package with just adding a option `-pkg`.
+Now you can compile the installation package with just adding an option `-pkg`.
 
 ```
 [user@linux openGauss-server]$ sh build.sh -m [debug | release | memcheck] -3rd [binarylibs path] -pkg
