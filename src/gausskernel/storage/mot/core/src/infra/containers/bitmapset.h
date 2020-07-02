@@ -55,13 +55,11 @@ public:
     };
 
     BitmapSet();
-    explicit BitmapSet(uint16_t size);
     BitmapSet(uint8_t* data, uint16_t size);
     ~BitmapSet();
 
     void Init(uint8_t* data, uint16_t size);
     void Reset();
-    void Destroy();
     void Clear();
     void Reset(uint16_t size);
     void SetBit(uint16_t bit);

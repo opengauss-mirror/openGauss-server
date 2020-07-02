@@ -330,7 +330,7 @@ RC RedoLog::SerializeTransaction()
     if (m_txn->m_isLightSession)
         return RC_OK;
 
-    for (uint32_t index = 0; index < m_txn->m_accessMgr->m_rowCnt ; index++) {
+    for (uint32_t index = 0; index < m_txn->m_accessMgr->m_rowCnt; index++) {
         Access* access = m_txn->m_accessMgr->GetAccessPtr(index);
         if (access != nullptr) {
             switch (access->m_type) {

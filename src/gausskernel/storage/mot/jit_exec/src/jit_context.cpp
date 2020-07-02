@@ -166,9 +166,15 @@ extern bool PrepareJitContext(JitContext* jitContext)
         if (buf == NULL) {
             MOT_LOG_TRACE("Failed to allocate reusable bitmap set for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
-        } else {
-            jitContext->m_bitmapSet = new (buf) MOT::BitmapSet(fieldCount);
         }
+
+        uint8_t* bitmapData = (uint8_t*)palloc_top(MOT::BitmapSet::GetLength(fieldCount));
+        if (bitmapData == NULL) {
+            MOT_LOG_TRACE("Failed to allocate reusable bitmap set for JIT context, aborting jitted code execution");
+            pfree_top(buf);
+            return false;  // safe cleanup during destroy
+        }
+        jitContext->m_bitmapSet = new (buf) MOT::BitmapSet(bitmapData, fieldCount);
     }
 
     // allocate end-iterator key object when executing range UPDATE command or special SELECT commands
@@ -261,7 +267,7 @@ extern void DestroyJitContext(JitContext* jitContext)
 
         // cleanup bitmap set
         if (jitContext->m_bitmapSet != NULL) {
-            jitContext->m_bitmapSet->Destroy();
+            pfree_top(jitContext->m_bitmapSet->GetData());
             jitContext->m_bitmapSet->MOT::BitmapSet::~BitmapSet();
             pfree_top(jitContext->m_bitmapSet);
             jitContext->m_bitmapSet = NULL;

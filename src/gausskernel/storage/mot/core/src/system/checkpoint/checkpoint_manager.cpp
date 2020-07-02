@@ -783,6 +783,9 @@ bool CheckpointManager::CreateTpcRecoveryFile(uint64_t checkpointId)
             break;
         }
 
+        // this lock is held while serializing the in process transactions call by
+        // checkpoint. It prevents gs_clean removing entries from the in-process map
+        // while they are serialized
         GetRecoveryManager()->LockInProcessTxns();
         CheckpointUtils::TpcFileHeader tpcFileHeader;
         tpcFileHeader.m_magic = CP_MGR_MAGIC;
