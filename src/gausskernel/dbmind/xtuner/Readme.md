@@ -27,10 +27,12 @@ pip install -r requirements.txt
 ## Dependencies
 
     python3.5+
-    tensorflow==1.15.2
-    keras-rl
-    keras
+    tensorflow>=2.2.0
+    keras-rl2
+    keras>=2.4.0
     paramiko
+
+**Suggest:** Firstly, please upgrade your pip. ```python -m pip install --upgrade pip```
 
 ## Start tuning
 1. Start your database instance first;
