@@ -173,8 +173,8 @@ bool Table::AddSecondaryIndex(const string& indexName, Index* index, TxnManager*
 {
     // OA: Should we check for duplicate indices with same name?
     // first create secondary index data
-    bool createdIndexData = (txn != nullptr) ? CreateSecondaryIndexData(index, txn) :
-        CreateSecondaryIndexDataNonTransactional(index, tid);
+    bool createdIndexData =
+        (txn != nullptr) ? CreateSecondaryIndexData(index, txn) : CreateSecondaryIndexDataNonTransactional(index, tid);
     if (!createdIndexData) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
             "Add Secondary Index",

@@ -75,6 +75,8 @@ public:
         if (buf == nullptr) {
             return nullptr;
         }
+        errno_t erc = memset_s(buf, size, 0, size);
+        securec_check(erc, "\0", "\0");
         return reinterpret_cast<uint8_t*>(buf);
     }
 

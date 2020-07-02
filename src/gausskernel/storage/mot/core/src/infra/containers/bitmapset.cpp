@@ -39,9 +39,6 @@ BitmapSet::BitmapSet()
 BitmapSet::BitmapSet(uint8_t* data, uint16_t size) : m_data(data), m_size(size), m_init(true)
 {}
 
-BitmapSet::BitmapSet(uint16_t size) : m_data((uint8_t*)malloc(GetLength(size))), m_size(size), m_init(true)
-{}
-
 BitmapSet::~BitmapSet()
 {}
 
@@ -65,12 +62,6 @@ void BitmapSet::Reset(uint16_t size)
     m_size = size;
     errno_t erc = memset_s(m_data, GetLength(), 0, GetLength());
     securec_check(erc, "\0", "\0");
-}
-
-void BitmapSet::Destroy()
-{
-    free(m_data);
-    m_init = false;
 }
 
 void BitmapSet::Clear()

@@ -213,10 +213,8 @@ bool RedoLogWriter::AppendCommitPrepared(RedoLogBuffer& redoLogBuffer, TxnManage
 bool RedoLogWriter::AppendRollbackPrepared(RedoLogBuffer& redoLogBuffer, TxnManager* txn)
 {
     // buffer must have enough space for control entry
-    EndSegmentBlock block(OperationCode::ROLLBACK_PREPARED_TX,
-        0,
-        txn->GetTransactionId(),
-        txn->GetInternalTransactionId());
+    EndSegmentBlock block(
+        OperationCode::ROLLBACK_PREPARED_TX, 0, txn->GetTransactionId(), txn->GetInternalTransactionId());
     redoLogBuffer.Append(block);
     return true;
 }
@@ -232,10 +230,7 @@ bool RedoLogWriter::AppendRollback(RedoLogBuffer& redoLogBuffer, TxnManager* txn
 bool RedoLogWriter::AppendPartial(RedoLogBuffer& redoLogBuffer, TxnManager* txn)
 {
     // buffer must have enough space for control entry
-    EndSegmentBlock block(OperationCode::PARTIAL_REDO_TX,
-        0,
-        txn->GetTransactionId(),
-        txn->GetInternalTransactionId());
+    EndSegmentBlock block(OperationCode::PARTIAL_REDO_TX, 0, txn->GetTransactionId(), txn->GetInternalTransactionId());
     redoLogBuffer.Append(block);
     return true;
 }

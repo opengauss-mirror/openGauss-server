@@ -1026,10 +1026,6 @@ bool RecoveryManager::SerializeInProcessTxns(int fd)
         return false;
     }
 
-    // this lock is held while serializing the in process transactions call by
-    // checkpoint. It prevents gs_clean removing entries from the in-process map
-    // while they are serialized
-    std::lock_guard<std::mutex> lock(m_inProcessTxLock);
     map<uint64_t, RedoTransactionSegments*>::iterator it = m_inProcessTransactionMap.begin();
     while (it != m_inProcessTransactionMap.end()) {
         RedoTransactionSegments* segments = it->second;
