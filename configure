@@ -3318,7 +3318,6 @@ fi
 # this expression is set up to avoid unnecessary integer overflow
 # blocksize is already guaranteed to be a factor of 1024
 RELSEG_SIZE=`expr '(' 1024 / ${blocksize} ')' '*' ${segsize} '*' 1024`
-test $? -eq 0 || exit 1
 { $as_echo "$as_me:$LINENO: result: ${segsize}GB" >&5
 $as_echo "${segsize}GB" >&6; }
 
