@@ -137,10 +137,10 @@ The information of value is only an example. You can replace it as required. Eac
     <DEVICE sn="node2_hostname">
 	  <!-- Host name of node2 -->
       <PARAM name="name" value="node2_hostname"/>
-	  <!-- AZ where node1 is located and AZ priority -->
+	  <!-- AZ where node2 is located and AZ priority -->
       <PARAM name="azName" value="AZ1"/>
       <PARAM name="azPriority" value="1"/>
-	  <!-- IP address of node1. If only one NIC is available for the server, set backIP1 and sshIP1 to the same IP address. -->
+	  <!-- IP address of node2. If only one NIC is available for the server, set backIP1 and sshIP1 to the same IP address. -->
       <PARAM name="backIp1" value="192.168.0.2"/>
       <PARAM name="sshIp1" value="192.168.0.2"/>
     </DEVICE>
