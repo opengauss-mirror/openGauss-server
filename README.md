@@ -31,7 +31,7 @@ openGauss is an open source relational database management system. It has multi-
 
 **High Performance**
 
-openGauss breaks through the bottleneck of multi-core CPU, 2-way Kunpeng 128 core 1.5 million TPMC.
+openGauss breaks through the bottleneck of multi-core CPU, 2-way Kunpeng 128 core 1.5 million TPMC on disk-based row store and 3.5 million TPMC on MOT (Memory-Optimized Tables) Engine.
 
 **Partitions**
 
@@ -60,6 +60,10 @@ Under normal service loads, the RTO is less than 10 seconds, reducing the servic
 **Parallel Recovery**
 
 When the Xlog is transferred to the standby node, the standby node flushs the Xlog to storage medium. At the mean time, the Xlog is sent to the redo recovery dispatch thread. The dispatch thread sends the Xlog to multiple parallel recovery threads to replay. Ensure that the redo speed of the standby node keeps up with the generation speed of the primary host. The standby node is ready in real time, which can be promoted to primary instantly. 
+
+**MOT Engine (beta release)**
+
+The Memory-Optimized Tables (MOT) storage engine is a transactional rowstore optimized for many-core and large memory and delivering extreme OLTP performance and high resources utilization. With data and indexes stored totally in-memory, a NUMA-aware design, algorithms that eliminate lock and latch contention and query native compilation (JIT), MOT provides low latency data access and more efficient transaction execution. See MOT Engine documentation (https://opengauss.org/en/docs/1.0.0/docs/Developerguide/mot.html).
 
 **Security**
 
