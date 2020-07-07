@@ -375,13 +375,13 @@ CREATE OR REPLACE FUNCTION my_union(internal, internal)
 RETURNS test_func_user.internal
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+ERROR:  type "test_func_user.internal" does not exist
 set enforce_a_behavior=off;
 CREATE OR REPLACE FUNCTION my_union(internal, internal)
 RETURNS test_func_user.internal
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+ERROR:  type "test_func_user.internal" does not exist
 reset enforce_a_behavior;
 --function  CreateFunction
 revoke create on schema test_func_user from test_func_user;

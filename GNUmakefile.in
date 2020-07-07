@@ -26,8 +26,16 @@ world-contrib-recurse: world-src-recurse
 html man:
 	$(MAKE) -C doc $@
 
+
+ifeq ($(enable_mysql_fdw), yes)
+install_mysql_fdw:
+	$(MAKE) -C contrib/mysql_fdw install
+else
+install_mysql_fdw:
+endif
+
 ifeq ($(enable_multiple_nodes), yes)
-install:
+install: install_mysql_fdw
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C src/distribute/kernel/extension/packages $@
 	$(MAKE) -C contrib/pagehack $@
@@ -37,7 +45,7 @@ install:
 	$(MAKE) -C src/distribute/kernel/extension/tsdb $@
 	+@echo "PostgreSQL installation complete."
 else
-install:
+install: install_mysql_fdw
 	+@echo "openGauss installation complete."
 endif
 

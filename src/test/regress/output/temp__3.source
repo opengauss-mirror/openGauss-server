@@ -2,12 +2,12 @@ CREATE FUNCTION int44in(cstring)
    RETURNS city_budget
    AS '@libdir@/regress@DLSUFFIX@'
    LANGUAGE C STRICT;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+ERROR:  type "city_budget" does not exist
 CREATE FUNCTION int44out(city_budget)
    RETURNS cstring
    AS '@libdir@/regress@DLSUFFIX@'
    LANGUAGE C STRICT;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+ERROR:  type city_budget does not exist
    
 CREATE TYPE city_budget (
    internallength = 16,

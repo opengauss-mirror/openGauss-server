@@ -27,6 +27,10 @@ SUBDIRS = ../common/backend bootstrap cbb optimizer process  runtime  security  
 	$(top_builddir)/contrib/file_fdw $(top_builddir)/contrib/hdfs_fdw \
 	$(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/test_decoding $(top_builddir)/contrib/mppdb_decoding 
 
+ifeq ($(enable_mysql_fdw), yes)
+	SUBDIRS += $(top_builddir)/contrib/mysql_fdw
+endif
+
 ifeq ($(enable_multiple_nodes), yes)
 SUBDIRS +=  ../distribute/kernel ../distribute/kernel/extension/roach_api ../distribute/kernel/extension/dimsearch/main \
 	../distribute/kernel/extension/tsdb

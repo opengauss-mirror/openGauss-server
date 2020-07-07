@@ -7,54 +7,59 @@ CREATE FUNCTION vec_int4add_0()
    RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C IMMUTABLE not fenced;  
-ERROR:  C/JAVA UDF is not yet supported in current version.
    
 CREATE FUNCTION vec_int4add_0_strict()
    RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C strict  IMMUTABLE not fenced; 
-ERROR:  C/JAVA UDF is not yet supported in current version.
 select  * from test_vec_int4add  where vec_int4add_0() > 0 order by 1,2,3,4;
-ERROR:  function vec_int4add_0() does not exist
-LINE 1: select  * from test_vec_int4add  where vec_int4add_0() > 0 o...
-                                               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ t1 | t2 | t3 | t4 
+----+----+----+----
+  1 |  2 |  3 |  4
+  5 |  6 |  7 |  8
+(2 rows)
+
 select  * from test_vec_int4add  where vec_int4add_0_strict() > 0 order by 1,2,3,4;
-ERROR:  function vec_int4add_0_strict() does not exist
-LINE 1: select  * from test_vec_int4add  where vec_int4add_0_strict(...
-                                               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ t1 | t2 | t3 | t4 
+----+----+----+----
+  1 |  2 |  3 |  4
+  5 |  6 |  7 |  8
+(2 rows)
+
 CREATE FUNCTION vec_int4add_1(int)
    RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C IMMUTABLE not fenced;  
-ERROR:  C/JAVA UDF is not yet supported in current version.
 select  * from test_vec_int4add  where vec_int4add_1(t1) > 0 order by 1,2,3,4;
-ERROR:  function vec_int4add_1(integer) does not exist
-LINE 1: select  * from test_vec_int4add  where vec_int4add_1(t1) > 0...
-                                               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ t1 | t2 | t3 | t4 
+----+----+----+----
+  1 |  2 |  3 |  4
+  5 |  6 |  7 |  8
+(2 rows)
+
 CREATE FUNCTION vec_int4add_11(int4, int4,int4,int4,int4,int4,int4,int4,int4,int4,int4)
    RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C IMMUTABLE not fenced;  
-ERROR:  C/JAVA UDF is not yet supported in current version.
 CREATE FUNCTION vec_int4add_11_strict(int4, int4,int4,int4,int4,int4,int4,int4,int4,int4,int4)
    RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C  strict IMMUTABLE not fenced;  
-ERROR:  C/JAVA UDF is not yet supported in current version.
    
 select  * from test_vec_int4add  where vec_int4add_11(t1,t2,t3,t4,t1,t2,t3,t4,t1,t2,t3) > 0 order by 1,2,3,4;
-ERROR:  function vec_int4add_11(integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer) does not exist
-LINE 1: select  * from test_vec_int4add  where vec_int4add_11(t1,t2,...
-                                               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ t1 | t2 | t3 | t4 
+----+----+----+----
+  1 |  2 |  3 |  4
+  5 |  6 |  7 |  8
+(2 rows)
+
 select  * from test_vec_int4add  where vec_int4add_11_strict(t1,t2,t3,t4,t1,t2,t3,t4,t1,t2,t3) > 0 order by 1,2,3,4;
-ERROR:  function vec_int4add_11_strict(integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer) does not exist
-LINE 1: select  * from test_vec_int4add  where vec_int4add_11_strict...
-                                               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ t1 | t2 | t3 | t4 
+----+----+----+----
+  1 |  2 |  3 |  4
+  5 |  6 |  7 |  8
+(2 rows)
+
 CREATE FUNCTION vec_int4add_32
 (int4,int4,int4,int4,int4,int4,int4,int4
 ,int4,int4,int4,int4,int4,int4,int4,int4
@@ -63,7 +68,6 @@ CREATE FUNCTION vec_int4add_32
    RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C IMMUTABLE not fenced; 
-ERROR:  C/JAVA UDF is not yet supported in current version.
 CREATE FUNCTION vec_int4add_32_strict
 (int4,int4,int4,int4,int4,int4,int4,int4
 ,int4,int4,int4,int4,int4,int4,int4,int4
@@ -72,25 +76,28 @@ CREATE FUNCTION vec_int4add_32_strict
 RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C strict IMMUTABLE not fenced;
-ERROR:  C/JAVA UDF is not yet supported in current version.
 select  * from test_vec_int4add  where vec_int4add_32
 (t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4) > 0 order by 1,2,3,4;
-ERROR:  function vec_int4add_32(integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer) does not exist
-LINE 1: select  * from test_vec_int4add  where vec_int4add_32
-                                               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ t1 | t2 | t3 | t4 
+----+----+----+----
+  1 |  2 |  3 |  4
+  5 |  6 |  7 |  8
+(2 rows)
+
 select  * from test_vec_int4add  where vec_int4add_32
 (t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4) > 0 order by 1,2,3,4;
-ERROR:  function vec_int4add_32(integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer) does not exist
-LINE 1: select  * from test_vec_int4add  where vec_int4add_32
-                                               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ t1 | t2 | t3 | t4 
+----+----+----+----
+  1 |  2 |  3 |  4
+  5 |  6 |  7 |  8
+(2 rows)
+
 CREATE FUNCTION vec_int4add_33
 (int4,int4,int4,int4,int4,int4,int4,int4
 ,int4,int4,int4,int4,int4,int4,int4,int4
@@ -100,52 +107,51 @@ CREATE FUNCTION vec_int4add_33
    RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C IMMUTABLE not fenced;  
-ERROR:  C/JAVA UDF is not yet supported in current version.
 select  * from test_vec_int4add  where vec_int4add_33
 (t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4
 ,t1,t2,t3,t4,t1,t2,t3,t4
 ,t1) > 0 order by 1,2,3,4;
-ERROR:  function vec_int4add_33(integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer) does not exist
-LINE 1: select  * from test_vec_int4add  where vec_int4add_33
-                                               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+ t1 | t2 | t3 | t4 
+----+----+----+----
+  1 |  2 |  3 |  4
+  5 |  6 |  7 |  8
+(2 rows)
+
 CREATE FUNCTION test_int4add_0()
    RETURNS int4
    AS '@abs_srcdir@/regress.so', 'vec_int4add_0'
    LANGUAGE C IMMUTABLE not fenced; 
-ERROR:  C/JAVA UDF is not yet supported in current version.
 CREATE OR REPLACE FUNCTION func(text)
 RETURNS text AS '@abs_srcdir@/regress.so', 'funcA'
 LANGUAGE C STABLE not fenced;
-ERROR:  C/JAVA UDF is not yet supported in current version.
 CREATE OR REPLACE FUNCTION func(int)
 RETURNS text AS '@abs_srcdir@/regress.so', 'funcB'
 LANGUAGE C STABLE not fenced;
-ERROR:  C/JAVA UDF is not yet supported in current version.
 select func(1);
-ERROR:  function func(integer) does not exist
-LINE 1: select func(1);
-               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: func
+ func  
+-------
+ funcB
+(1 row)
+
 select func('1');
-ERROR:  function func(unknown) does not exist
-LINE 1: select func('1');
-               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: func
+ func  
+-------
+ funcA
+(1 row)
+
 CREATE OR REPLACE FUNCTION funcC(int)
 RETURNS text AS '@abs_srcdir@/regress.so', 'funcC'
 LANGUAGE C STABLE not fenced;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+WARNING:  Function "funcC" is not declared as PG_FUNCTION_INFO_V1()
+HINT:  SQL-callable C-functions recommends accompanying PG_FUNCTION_INFO_V1(funcC).
 select funcC(1);
-ERROR:  function funcc(integer) does not exist
-LINE 1: select funcC(1);
-               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: funcc
+ funcc 
+-------
+ funcC
+(1 row)
+
 --test for enable normal user create c function
 create user c_function_user1 password 'ttest@123';
 create user c_function_user2 password 'ttest@123';
@@ -154,18 +160,16 @@ CREATE OR REPLACE FUNCTION c_function_user1.funcA(text,name)
 RETURNS tid
 AS '@abs_srcdir@/regress.so', 'funcA'
 LANGUAGE C STABLE NOT FENCED;
-ERROR:  C/JAVA UDF is not yet supported in current version.
 CREATE OR REPLACE FUNCTION c_function_user2.funcA(text,name)
 RETURNS tid
 AS '@abs_srcdir@/regress.so', 'funcA'
 LANGUAGE C STABLE NOT FENCED;
-ERROR:  C/JAVA UDF is not yet supported in current version.
 set role c_function_user1 password 'ttest@123';
 CREATE OR REPLACE FUNCTION funcA(text,name)
 RETURNS tid
 AS '@abs_srcdir@/regress.so', 'funcA'
 LANGUAGE C STABLE NOT FENCED;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+ERROR:  permission denied for language c
 grant usage on language c to c_function_user1;
 ERROR:  permission denied for language c
 reset role;
@@ -188,12 +192,10 @@ CREATE OR REPLACE FUNCTION funcA(text,name)
 RETURNS tid
 AS '@abs_srcdir@/regress.so', 'funcA'
 LANGUAGE C STABLE NOT FENCED;
-ERROR:  C/JAVA UDF is not yet supported in current version.
 CREATE OR REPLACE FUNCTION c_function_user2.funcA(text,name)
 RETURNS tid
 AS '@abs_srcdir@/regress.so', 'funcA'
 LANGUAGE C STABLE NOT FENCED;
-ERROR:  C/JAVA UDF is not yet supported in current version.
 reset role;
 select proname,proowner,rolname from pg_proc a inner join pg_authid b on a.proowner = b.oid where proname = 'funcA';
  proname | proowner | rolname 
@@ -221,4 +223,17 @@ select has_language_privilege('c_function_user2','c','USAGE');
 drop user c_function_user1 cascade;
 drop user c_function_user2 cascade;
 drop schema vec_function_call cascade;
-NOTICE:  drop cascades to table test_vec_int4add
+NOTICE:  drop cascades to 13 other objects
+DETAIL:  drop cascades to table test_vec_int4add
+drop cascades to function vec_int4add_0()
+drop cascades to function vec_int4add_0_strict()
+drop cascades to function vec_int4add_1(integer)
+drop cascades to function vec_int4add_11(integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer)
+drop cascades to function vec_int4add_11_strict(integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer)
+drop cascades to function vec_int4add_32(integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer)
+drop cascades to function vec_int4add_32_strict(integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer)
+drop cascades to function vec_int4add_33(integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer,integer)
+drop cascades to function test_int4add_0()
+drop cascades to function func(text)
+drop cascades to function func(integer)
+drop cascades to function funcc(integer)

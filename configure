@@ -743,6 +743,7 @@ enable_jemalloc
 enable_jemalloc_debug
 enable_multiple_nodes
 enable_memory_check
+enable_mysql_fdw
 enable_thread_check
 enable_shared
 default_gs_version
@@ -819,6 +820,7 @@ enable_jemalloc
 enable_jemalloc_debug
 enable_multiple_nodes
 enable_memory_check
+enable_mysql_fdw
 enable_thread_check
 enable_spinlocks
 enable_debug
@@ -2842,6 +2844,28 @@ if test "$enable_memory_check" = yes; then
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_MEMORY_CHECK 1
 _ACEOF
+
+fi
+
+# Check whether --enable-mysql-fdw was given.
+if test "${enable_mysql_fdw+set}" = set; then
+  enableval=$enable_mysql_fdw;
+  case $enableval in
+    yes)
+      :
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-mysql-fdw option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-mysql-fdw option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_mysql_fdw=no
 
 fi
 

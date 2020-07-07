@@ -68,6 +68,7 @@ install-local: installdirs-local
 	$(INSTALL_DATA) Makefile.port '$(DESTDIR)$(pgxsdir)/$(subdir)/Makefile.port'
 	$(INSTALL_DATA) $(srcdir)/Makefile.shlib '$(DESTDIR)$(pgxsdir)/$(subdir)/Makefile.shlib'
 	$(INSTALL_DATA) $(srcdir)/nls-global.mk '$(DESTDIR)$(pgxsdir)/$(subdir)/nls-global.mk'
+	$(INSTALL_DATA) get_PlatForm_str.sh '$(DESTDIR)$(pgxsdir)/$(subdir)/get_PlatForm_str.sh'
 
 installdirs: installdirs-local
 
@@ -77,7 +78,7 @@ installdirs-local:
 uninstall: uninstall-local
 
 uninstall-local:
-	rm -f $(addprefix '$(DESTDIR)$(pgxsdir)/$(subdir)'/, Makefile.global Makefile.port Makefile.shlib nls-global.mk)
+	rm -f $(addprefix '$(DESTDIR)$(pgxsdir)/$(subdir)'/, Makefile.global Makefile.port Makefile.shlib nls-global.mk get_PlatForm_str.sh)
 
 distprep:
 	$(MAKE) -C test/isolation $@

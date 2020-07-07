@@ -2572,14 +2572,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateForeignTableStmt:
-            if (!IsInitdb && IS_SINGLE_NODE &&
-                !isMOTTableFromSrvName(((CreateForeignTableStmt*)parse_tree)->servername)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Current mode does not support FOREIGN table yet"),
-                        errdetail("The feature is not currently supported")));
-            }
-            /* fall through */
         case T_CreateStmt: {
 #ifdef PGXC
             CreateCommand((CreateStmt*)parse_tree, query_string, params, is_top_level, sent_to_remote);
@@ -2702,15 +2694,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateFdwStmt:
-#ifdef PGXC
-            /* enable CREATE FOREIGN DATA WRAPPER when initdb */
-            if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Postgres-XC does not support FOREIGN DATA WRAPPER yet"),
-                        errdetail("The feature is not currently supported")));
-            }
-#endif
             CreateForeignDataWrapper((CreateFdwStmt*)parse_tree);
 
 #ifdef PGXC
@@ -2720,22 +2703,10 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_AlterFdwStmt:
-#ifdef PGXC
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Postgres-XC does not support FOREIGN DATA WRAPPER yet"),
-                    errdetail("The feature is not currently supported")));
-#endif
             AlterForeignDataWrapper((AlterFdwStmt*)parse_tree);
             break;
 
         case T_CreateForeignServerStmt:
-            if (!IsInitdb && IS_SINGLE_NODE && (strcmp(((CreateForeignServerStmt*)parse_tree)->fdwname, MOT_FDW) != 0)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Current mode does not support FOREIGN server yet"),
-                        errdetail("The feature is not currently supported")));
-            }
             CreateForeignServer((CreateForeignServerStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && !IsInitdb)
@@ -2752,32 +2723,14 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateUserMappingStmt:
-#ifdef PGXC
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Postgres-XC does not support USER MAPPING yet"),
-                    errdetail("The feature is not currently supported")));
-#endif
             CreateUserMapping((CreateUserMappingStmt*)parse_tree);
             break;
 
         case T_AlterUserMappingStmt:
-#ifdef PGXC
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Postgres-XC does not support USER MAPPING yet"),
-                    errdetail("The feature is not currently supported")));
-#endif
             AlterUserMapping((AlterUserMappingStmt*)parse_tree);
             break;
 
         case T_DropUserMappingStmt:
-#ifdef PGXC
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Postgres-XC does not support USER MAPPING yet"),
-                    errdetail("The feature is not currently supported")));
-#endif
             RemoveUserMapping((DropUserMappingStmt*)parse_tree);
             break;
 
@@ -8664,7 +8617,7 @@ bool CheckExtensionInWhiteList(const char* extension_name, uint32 hash_value, bo
         }
     }
 
-    return false;
+    return true;
 }
 
 #ifdef ENABLE_MULTIPLE_NODES

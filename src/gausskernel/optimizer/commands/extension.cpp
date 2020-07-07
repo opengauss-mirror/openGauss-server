@@ -1087,15 +1087,9 @@ void CreateExtension(CreateExtensionStmt* stmt)
                     errmsg("extension \"%s\" already exists in schema \"%s\", skipping", stmt->extname, schemaName)));
             return;
         } else {
-            /*
-             * Currently extension only support postgis.
-             */
-            if (strstr(stmt->extname, "postgis"))
-                ereport(ERROR,
-                    (errcode(ERRCODE_DUPLICATE_OBJECT),
-                        errmsg("extension \"%s\" already exists in schema \"%s\"", stmt->extname, schemaName)));
-            else
-                FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
+            ereport(ERROR,
+                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                    errmsg("extension \"%s\" already exists in schema \"%s\"", stmt->extname, schemaName)));
         }
     }
 

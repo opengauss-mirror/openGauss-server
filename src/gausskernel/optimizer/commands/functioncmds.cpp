@@ -901,24 +901,6 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
                                             : 0)));
 
     languageOid = HeapTupleGetOid(languageTuple);
-    if (languageOid == JavalanguageId || (languageOid == ClanguageId && !IsInitdb)) {
-        /*
-         * single node dose not support Java UDF or other fenced functions.
-         * check it here because users may not know the Java UDF is fenced by default,
-         * so it's better to report detailed error messages for different senarios.
-         */
-        if (IS_SINGLE_NODE) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("C/JAVA UDF is not yet supported in current version.")));
-        }
-
-        /* only support fenced mode Java UDF */
-        if (!fenced) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("C/Java UDF dose not support NOT FENCED functions.")));
-        }
-    }
-
     languageStruct = (Form_pg_language)GETSTRUCT(languageTuple);
 
     /* Check user's privilege regardless of whether langugae is a trust type */

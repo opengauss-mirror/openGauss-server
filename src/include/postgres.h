@@ -74,6 +74,10 @@
 #define DIST_FDW "dist_fdw"
 #endif
 
+#ifndef MYSQL_FDW
+#define MYSQL_FDW "mysql_fdw"
+#endif
+
 #ifndef MOT_FDW
 #define MOT_FDW "mot_fdw"
 #endif

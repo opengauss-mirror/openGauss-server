@@ -18,11 +18,10 @@ CREATE VIEW iexit AS
 	interpt_pp(ih.thepath, r.thepath) AS exit
    FROM ihighway ih, ramp r
    WHERE ih.thepath ## r.thepath;
-ERROR:  function interpt_pp(path, path) does not exist
-LINE 3:  interpt_pp(ih.thepath, r.thepath) AS exit
-         ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: exit
+ERROR:  operator does not exist: path ## path
+LINE 5:    WHERE ih.thepath ## r.thepath;
+                            ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
 CREATE VIEW toyemp AS
    SELECT name, age, location, 12*salary AS annualsal
    FROM emp;

@@ -1,0 +1,743 @@
+diff --git a/code/mysql_fdw-REL-2_5_3/Makefile b/code/mysql_fdw-REL-2_5_3/Makefile
+index d5e7b36..157a6cf 100644
+--- a/code/mysql_fdw-REL-2_5_3/Makefile
++++ b/code/mysql_fdw-REL-2_5_3/Makefile
+@@ -31,6 +31,8 @@ else
+ MYSQL_LIB = mysqlclient
+ endif
+ 
++MYSQL_LIB = mariadb
++
+ UNAME = uname
+ OS := $(shell $(UNAME))
+ ifeq ($(OS), Darwin)
+@@ -39,7 +41,7 @@ else
+ DLSUFFIX = .so
+ endif
+ 
+-PG_CPPFLAGS += -D _MYSQL_LIBNAME=\"lib$(MYSQL_LIB)$(DLSUFFIX)\"
++PG_CPPFLAGS += -D _MYSQL_LIBNAME=\"lib$(MYSQL_LIB)$(DLSUFFIX)\" -Wno-parentheses
+ 
+ ifdef USE_PGXS
+ PG_CONFIG = pg_config
+@@ -48,8 +50,8 @@ include $(PGXS)
+ ifndef MAJORVERSION
+ MAJORVERSION := $(basename $(VERSION))
+ endif
+-ifeq (,$(findstring $(MAJORVERSION), 9.3 9.4 9.5 9.6 10 11 12))
+-$(error PostgreSQL 9.3, 9.4, 9.5, 9.6 10 11 12 is required to compile this extension)
++ifeq (,$(findstring $(MAJORVERSION), 9.2 9.3 9.4 9.5 9.6 10 11 12))
++$(error PostgreSQL 9.2 9.3, 9.4, 9.5, 9.6 10 11 12 is required to compile this extension)
+ endif
+ 
+ else
+diff --git a/code/mysql_fdw-REL-2_5_3/connection.cpp b/code/mysql_fdw-REL-2_5_3/connection.cpp
+index 6b18027..0a9e40f 100644
+--- a/code/mysql_fdw-REL-2_5_3/connection.cpp
++++ b/code/mysql_fdw-REL-2_5_3/connection.cpp
+@@ -22,6 +22,7 @@
+ #include "utils/hsearch.h"
+ #include "utils/memutils.h"
+ #include "utils/resowner.h"
++#include "storage/ipc.h"
+ 
+ /* Length of host */
+ #define HOST_LEN 256
+@@ -48,8 +49,13 @@ typedef struct ConnCacheEntry
+ /*
+  * Connection cache (initialized on first use)
+  */
+-static HTAB *ConnectionHash = NULL;
++static THR_LOCAL HTAB *ConnectionHash = NULL;
+ 
++static void
++mysql_fdw_exit(int code, Datum arg)
++{
++	mysql_cleanup_connection();
++}
+ /*
+  * mysql_get_connection:
+  * 			Get a connection which can be used to execute queries on
+@@ -73,10 +79,11 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+ 		ctl.hash = tag_hash;
+ 
+ 		/* allocate ConnectionHash in the cache context */
+-		ctl.hcxt = CacheMemoryContext;
++		ctl.hcxt = u_sess->cache_mem_cxt;
+ 		ConnectionHash = hash_create("mysql_fdw connections", 8,
+ 									&ctl,
+ 									HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
++		on_proc_exit(&mysql_fdw_exit, PointerGetDatum(NULL));
+ 	}
+ 
+ 	/* Create hash key for the entry.  Assume no pad bytes in key struct */
+@@ -86,7 +93,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+ 	/*
+ 	 * Find or create cached entry for requested connection.
+ 	 */
+-	entry = hash_search(ConnectionHash, &key, HASH_ENTER, &found);
++	entry = (ConnCacheEntry*)hash_search(ConnectionHash, &key, HASH_ENTER, &found);
+ 	if (!found)
+ 	{
+ 		/* initialize new hashtable entry (key is already filled in) */
+@@ -137,6 +144,9 @@ mysql_cleanup_connection(void)
+ 		_mysql_close(entry->conn);
+ 		entry->conn = NULL;
+ 	}
++	/* clean-up memory */
++	hash_destroy(ConnectionHash);
++	ConnectionHash = NULL;
+ }
+ 
+ /*
+diff --git a/code/mysql_fdw-REL-2_5_3/deparse.cpp b/code/mysql_fdw-REL-2_5_3/deparse.cpp
+index a75c270..94b1799 100644
+--- a/code/mysql_fdw-REL-2_5_3/deparse.cpp
++++ b/code/mysql_fdw-REL-2_5_3/deparse.cpp
+@@ -20,7 +20,7 @@
+ #include "pgtime.h"
+ 
+ #include "access/heapam.h"
+-#include "access/htup_details.h"
++#include "access/htup.h"
+ #include "access/sysattr.h"
+ #include "access/transam.h"
+ #include "catalog/pg_collation.h"
+@@ -169,7 +169,7 @@ mysql_deparse_relation(StringInfo buf, Relation rel)
+ static char *
+ mysql_quote_identifier(const char *s , char q)
+ {
+-	char  *result = palloc(strlen(s) * 2 + 3);
++	char  *result = (char*)palloc(strlen(s) * 2 + 3);
+ 	char  *r = result;
+ 
+ 	*r++ = q;
+@@ -451,7 +451,7 @@ mysql_deparse_string(StringInfo buf, const char *val, bool isstr)
+ 		 * Remove '{', '}' and \" character from the string. Because
+ 		 * this syntax is not recognize by the remote MySQL server.
+ 		 */
+-		if ((ch == '{' && i == 0) || (ch == '}' && (i == (strlen(val) - 1))) || ch == '\"')
++		if ((ch == '{' && i == 0) || (ch == '}' && ((unsigned int)i == (strlen(val) - 1))) || ch == '\"')
+ 			continue;
+ 
+ 		if (ch == ',' && isstr)
+@@ -869,11 +869,11 @@ mysql_deparse_array_ref(SubscriptingRef *node, deparse_expr_cxt *context)
+ 		appendStringInfoChar(buf, '[');
+ 		if (lowlist_item)
+ 		{
+-			deparseExpr(lfirst(lowlist_item), context);
++			deparseExpr((Expr*)lfirst(lowlist_item), context);
+ 			appendStringInfoChar(buf, ':');
+ 			lowlist_item = lnext(lowlist_item);
+ 		}
+-		deparseExpr(lfirst(uplist_item), context);
++		deparseExpr((Expr*)lfirst(uplist_item), context);
+ 		appendStringInfoChar(buf, ']');
+ 	}
+ 
+@@ -965,7 +965,7 @@ mysql_deparse_op_expr(OpExpr *node, deparse_expr_cxt *context)
+ 	if (oprkind == 'r' || oprkind == 'b')
+ 	{
+ 		arg = list_head(node->args);
+-		deparseExpr(lfirst(arg), context);
++		deparseExpr((Expr*)lfirst(arg), context);
+ 		appendStringInfoChar(buf, ' ');
+ 	}
+ 
+@@ -977,7 +977,7 @@ mysql_deparse_op_expr(OpExpr *node, deparse_expr_cxt *context)
+ 	{
+ 		arg = list_tail(node->args);
+ 		appendStringInfoChar(buf, ' ');
+-		deparseExpr(lfirst(arg), context);
++		deparseExpr((Expr*)lfirst(arg), context);
+ 	}
+ 
+ 	appendStringInfoChar(buf, ')');
+@@ -1056,9 +1056,9 @@ mysql_deparse_distinct_expr(DistinctExpr *node, deparse_expr_cxt *context)
+ 	Assert(list_length(node->args) == 2);
+ 
+ 	appendStringInfoChar(buf, '(');
+-	deparseExpr(linitial(node->args), context);
++	deparseExpr((Expr*)linitial(node->args), context);
+ 	appendStringInfoString(buf, " IS DISTINCT FROM ");
+-	deparseExpr(lsecond(node->args), context);
++	deparseExpr((Expr*)lsecond(node->args), context);
+ 	appendStringInfoChar(buf, ')');
+ }
+ 
+@@ -1089,7 +1089,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
+ 	Assert(list_length(node->args) == 2);
+ 
+ 	/* Deparse left operand. */
+-	arg1 = linitial(node->args);
++	arg1 = (Expr*)linitial(node->args);
+ 	deparseExpr(arg1, context);
+ 	appendStringInfoChar(buf, ' ');
+ 
+@@ -1101,7 +1101,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
+ 	appendStringInfo(buf, " IN (");
+ 
+ 	/* Deparse right operand. */
+-	arg2 = lsecond(node->args);
++	arg2 = (Expr*)lsecond(node->args);
+ 	switch (nodeTag((Node*)arg2))
+ 	{
+ 		case T_Const:
+@@ -1116,7 +1116,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
+ 				switch (c->consttype)
+ 				{
+ 					case INT4ARRAYOID:
+-					case OIDARRAYOID:
++					// case OIDARRAYOID:
+ 						mysql_deparse_string(buf, extval, false);
+ 						break;
+ 					default:
+@@ -1172,7 +1172,7 @@ mysql_deparse_bool_expr(BoolExpr *node, deparse_expr_cxt *context)
+ 			break;
+ 		case NOT_EXPR:
+ 			appendStringInfoString(buf, "(NOT ");
+-			deparseExpr(linitial(node->args), context);
++			deparseExpr((Expr*)linitial(node->args), context);
+ 			appendStringInfoChar(buf, ')');
+ 			return;
+ 	}
+@@ -1220,7 +1220,7 @@ mysql_deparse_array_expr(ArrayExpr *node, deparse_expr_cxt *context)
+ 	{
+ 		if (!first)
+ 			appendStringInfoString(buf, ", ");
+-		deparseExpr(lfirst(lc), context);
++		deparseExpr((Expr*)lfirst(lc), context);
+ 		first = false;
+ 	}
+ 	appendStringInfoChar(buf, ']');
+diff --git a/code/mysql_fdw-REL-2_5_3/mysql_fdw.cpp b/code/mysql_fdw-REL-2_5_3/mysql_fdw.cpp
+index f1e26c3..49243d1 100644
+--- a/code/mysql_fdw-REL-2_5_3/mysql_fdw.cpp
++++ b/code/mysql_fdw-REL-2_5_3/mysql_fdw.cpp
+@@ -53,7 +53,7 @@
+ #include "utils/timestamp.h"
+ #include "utils/formatting.h"
+ #include "utils/memutils.h"
+-#include "access/htup_details.h"
++#include "access/htup.h"
+ #include "access/sysattr.h"
+ #include "commands/defrem.h"
+ #include "commands/explain.h"
+@@ -108,15 +108,57 @@ typedef struct MySQLFdwRelationInfo
+ } MySQLFdwRelationInfo;
+ 
+ 
+-extern Datum mysql_fdw_handler(PG_FUNCTION_ARGS);
++extern "C" Datum mysql_fdw_handler(PG_FUNCTION_ARGS);
++extern "C" Datum mysql_fdw_version(PG_FUNCTION_ARGS);
+ extern PGDLLEXPORT void _PG_init(void);
+ 
+ bool mysql_load_library(void);
+-static void mysql_fdw_exit(int code, Datum arg);
+ 
+ PG_FUNCTION_INFO_V1(mysql_fdw_handler);
+ PG_FUNCTION_INFO_V1(mysql_fdw_version);
+ 
++int ((*_mysql_options)(MYSQL *mysql,enum mysql_option option, const void *arg));
++int ((*_mysql_stmt_execute)(MYSQL_STMT *stmt));
++int ((*_mysql_stmt_fetch)(MYSQL_STMT *stmt));
++int ((*_mysql_stmt_prepare)(MYSQL_STMT *stmt, const char *query, unsigned long length));
++int ((*_mysql_query)(MYSQL *mysql, const char *q));
++bool ((*_mysql_stmt_attr_set)(MYSQL_STMT *stmt, enum enum_stmt_attr_type attr_type, const void *attr));
++bool ((*_mysql_stmt_close)(MYSQL_STMT * stmt));
++bool ((*_mysql_stmt_reset)(MYSQL_STMT * stmt));
++bool ((*_mysql_free_result)(MYSQL_RES *result));
++bool ((*_mysql_stmt_bind_param)(MYSQL_STMT *stmt, MYSQL_BIND * bnd));
++bool ((*_mysql_stmt_bind_result)(MYSQL_STMT *stmt, MYSQL_BIND * bnd));
++
++MYSQL_STMT	*((*_mysql_stmt_init)(MYSQL *mysql));
++MYSQL_RES	*((*_mysql_stmt_result_metadata)(MYSQL_STMT *stmt));
++int ((*_mysql_stmt_store_result)(MYSQL *mysql));
++MYSQL_ROW	((*_mysql_fetch_row)(MYSQL_RES *result));
++MYSQL_FIELD	*((*_mysql_fetch_field)(MYSQL_RES *result));
++MYSQL_FIELD	*((*_mysql_fetch_fields)(MYSQL_RES *result));
++const char	*((*_mysql_error)(MYSQL *mysql));
++void	((*_mysql_close)(MYSQL *sock));
++MYSQL_RES* ((*_mysql_store_result)(MYSQL *mysql));
++
++MYSQL	*((*_mysql_init)(MYSQL *mysql));
++bool ((*_mysql_ssl_set)(MYSQL *mysql, const char *key, const char *cert, const char *ca, const char *capath, const char *cipher));
++MYSQL	*((*_mysql_real_connect)(MYSQL *mysql,
++								const char *host,
++								const char *user,
++								const char *passwd,
++								const char *db,
++								unsigned int port,
++								const char *unix_socket,
++								unsigned long clientflag));
++
++const char *((*_mysql_get_host_info)(MYSQL *mysql));
++const char *((*_mysql_get_server_info)(MYSQL *mysql));
++int ((*_mysql_get_proto_info)(MYSQL *mysql));
++
++unsigned int ((*_mysql_stmt_errno)(MYSQL_STMT *stmt));
++unsigned int ((*_mysql_errno)(MYSQL *mysql));
++unsigned int ((*_mysql_num_fields)(MYSQL_RES *result));
++unsigned int ((*_mysql_num_rows)(MYSQL_RES *result));
++
+ /*
+  * FDW callback routines
+  */
+@@ -219,36 +261,36 @@ mysql_load_library(void)
+ 	if(mysql_dll_handle == NULL)
+ 		return false;
+ 
+-	_mysql_stmt_bind_param = dlsym(mysql_dll_handle, "mysql_stmt_bind_param");
+-	_mysql_stmt_bind_result = dlsym(mysql_dll_handle, "mysql_stmt_bind_result");
+-	_mysql_stmt_init = dlsym(mysql_dll_handle, "mysql_stmt_init");
+-	_mysql_stmt_prepare = dlsym(mysql_dll_handle, "mysql_stmt_prepare");
+-	_mysql_stmt_execute = dlsym(mysql_dll_handle, "mysql_stmt_execute");
+-	_mysql_stmt_fetch = dlsym(mysql_dll_handle, "mysql_stmt_fetch");
+-	_mysql_query = dlsym(mysql_dll_handle, "mysql_query");
+-	_mysql_stmt_result_metadata = dlsym(mysql_dll_handle, "mysql_stmt_result_metadata");
+-	_mysql_stmt_store_result = dlsym(mysql_dll_handle, "mysql_stmt_store_result");
+-	_mysql_fetch_row = dlsym(mysql_dll_handle, "mysql_fetch_row");
+-	_mysql_fetch_field = dlsym(mysql_dll_handle, "mysql_fetch_field");
+-	_mysql_fetch_fields = dlsym(mysql_dll_handle, "mysql_fetch_fields");
+-	_mysql_stmt_close = dlsym(mysql_dll_handle, "mysql_stmt_close");
+-	_mysql_stmt_reset = dlsym(mysql_dll_handle, "mysql_stmt_reset");
+-	_mysql_free_result = dlsym(mysql_dll_handle, "mysql_free_result");
+-	_mysql_error = dlsym(mysql_dll_handle, "mysql_error");
+-	_mysql_options = dlsym(mysql_dll_handle, "mysql_options");
+-	_mysql_ssl_set = dlsym(mysql_dll_handle, "mysql_ssl_set");
+-	_mysql_real_connect = dlsym(mysql_dll_handle, "mysql_real_connect");
+-	_mysql_close = dlsym(mysql_dll_handle, "mysql_close");
+-	_mysql_init = dlsym(mysql_dll_handle, "mysql_init");
+-	_mysql_stmt_attr_set = dlsym(mysql_dll_handle, "mysql_stmt_attr_set");
+-	_mysql_store_result = dlsym(mysql_dll_handle, "mysql_store_result");
+-	_mysql_stmt_errno = dlsym(mysql_dll_handle, "mysql_stmt_errno");
+-	_mysql_errno = dlsym(mysql_dll_handle, "mysql_errno");
+-	_mysql_num_fields = dlsym(mysql_dll_handle, "mysql_num_fields");
+-	_mysql_num_rows = dlsym(mysql_dll_handle, "mysql_num_rows");
+-	_mysql_get_host_info = dlsym(mysql_dll_handle, "mysql_get_host_info");
+-	_mysql_get_server_info = dlsym(mysql_dll_handle, "mysql_get_server_info");
+-	_mysql_get_proto_info = dlsym(mysql_dll_handle, "mysql_get_proto_info");
++	_mysql_stmt_bind_param = (bool (*)(st_mysql_stmt*, st_mysql_bind*))dlsym(mysql_dll_handle, "mysql_stmt_bind_param");
++	_mysql_stmt_bind_result = (bool (*)(st_mysql_stmt*, st_mysql_bind*))dlsym(mysql_dll_handle, "mysql_stmt_bind_result");
++	_mysql_stmt_init = (st_mysql_stmt* (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_stmt_init");
++	_mysql_stmt_prepare = (int (*)(st_mysql_stmt*, const char*, long unsigned int))dlsym(mysql_dll_handle, "mysql_stmt_prepare");
++	_mysql_stmt_execute = (int (*)(st_mysql_stmt*))dlsym(mysql_dll_handle, "mysql_stmt_execute");
++	_mysql_stmt_fetch = (int (*)(st_mysql_stmt*))dlsym(mysql_dll_handle, "mysql_stmt_fetch");
++	_mysql_query = (int (*)(st_mysql*, const char*))dlsym(mysql_dll_handle, "mysql_query");
++	_mysql_stmt_result_metadata = (st_mysql_res* (*)(st_mysql_stmt*))dlsym(mysql_dll_handle, "mysql_stmt_result_metadata");
++	_mysql_stmt_store_result = (int (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_stmt_store_result");
++	_mysql_fetch_row = (char** (*)(st_mysql_res*))dlsym(mysql_dll_handle, "mysql_fetch_row");
++	_mysql_fetch_field = (st_mysql_field* (*)(st_mysql_res*))dlsym(mysql_dll_handle, "mysql_fetch_field");
++	_mysql_fetch_fields = (st_mysql_field* (*)(st_mysql_res*))dlsym(mysql_dll_handle, "mysql_fetch_fields");
++	_mysql_stmt_close = (bool (*)(st_mysql_stmt*))dlsym(mysql_dll_handle, "mysql_stmt_close");
++	_mysql_stmt_reset = (bool (*)(st_mysql_stmt*))dlsym(mysql_dll_handle, "mysql_stmt_reset");
++	_mysql_free_result = (bool (*)(st_mysql_res*))dlsym(mysql_dll_handle, "mysql_free_result");
++	_mysql_error = (const char* (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_error");
++	_mysql_options = (int (*)(st_mysql*, mysql_option, const void*))dlsym(mysql_dll_handle, "mysql_options");
++	_mysql_ssl_set = (bool (*)(st_mysql*, const char*, const char*, const char*, const char*, const char*))dlsym(mysql_dll_handle, "mysql_ssl_set");
++	_mysql_real_connect = (st_mysql* (*)(st_mysql*, const char*, const char*, const char*, const char*, unsigned int, const char*, long unsigned int))dlsym(mysql_dll_handle, "mysql_real_connect");
++	_mysql_close = (void (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_close");
++	_mysql_init = (st_mysql* (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_init");
++	_mysql_stmt_attr_set = (bool (*)(st_mysql_stmt*, enum_stmt_attr_type, const void*))dlsym(mysql_dll_handle, "mysql_stmt_attr_set");
++	_mysql_store_result = (st_mysql_res* (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_store_result");
++	_mysql_stmt_errno = (unsigned int (*)(st_mysql_stmt*))dlsym(mysql_dll_handle, "mysql_stmt_errno");
++	_mysql_errno = (unsigned int (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_errno");
++	_mysql_num_fields = (unsigned int (*)(st_mysql_res*))dlsym(mysql_dll_handle, "mysql_num_fields");
++	_mysql_num_rows = (unsigned int (*)(st_mysql_res*))dlsym(mysql_dll_handle, "mysql_num_rows");
++	_mysql_get_host_info = (const char* (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_get_host_info");
++	_mysql_get_server_info = (const char* (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_get_server_info");
++	_mysql_get_proto_info = (int (*)(st_mysql*))dlsym(mysql_dll_handle, "mysql_get_proto_info");
+ 	
+ 	if (_mysql_stmt_bind_param == NULL ||
+ 		_mysql_stmt_bind_result == NULL ||
+@@ -297,43 +339,37 @@ _PG_init(void)
+ 				errmsg("failed to load the mysql query: \n%s", dlerror()),
+ 				errhint("export LD_LIBRARY_PATH to locate the library")));
+ 
+-	DefineCustomIntVariable("mysql_fdw.wait_timeout",
+-							"Server-side wait_timeout",
+-							"Set the maximum wait_timeout"
+-							"use to set the MySQL session timeout",
+-							&wait_timeout,
+-							WAIT_TIMEOUT,
+-							0,
+-							INT_MAX,
+-							PGC_USERSET,
+-							0,
+-							NULL,
+-							NULL,
+-							NULL);
+-
+-	DefineCustomIntVariable("mysql_fdw.interactive_timeout",
+-							"Server-side interactive timeout",
+-							"Set the maximum interactive timeout"
+-							"use to set the MySQL session timeout",
+-							&interactive_timeout,
+-							INTERACTIVE_TIMEOUT,
+-							0,
+-							INT_MAX,
+-							PGC_USERSET,
+-							0,
+-							NULL,
+-							NULL,
+-							NULL);
+-	on_proc_exit(&mysql_fdw_exit, PointerGetDatum(NULL));
+-}
++	if (GetConfigOption("mysql_fdw.wait_timeout", true, true) == NULL) {
++		DefineCustomIntVariable("mysql_fdw.wait_timeout",
++								"Server-side wait_timeout",
++								"Set the maximum wait_timeout"
++								"use to set the MySQL session timeout",
++								&wait_timeout,
++								WAIT_TIMEOUT,
++								0,
++								INT_MAX,
++								PGC_USERSET,
++								0,
++								NULL,
++								NULL,
++								NULL);
++	}
+ 
+-/*
+- * mysql_fdw_exit: Exit callback function.
+- */
+-static void
+-mysql_fdw_exit(int code, Datum arg)
+-{
+-	mysql_cleanup_connection();
++	if (GetConfigOption("mysql_fdw.interactive_timeout", true, true) == NULL) {
++		DefineCustomIntVariable("mysql_fdw.interactive_timeout",
++								"Server-side interactive timeout",
++								"Set the maximum interactive timeout"
++								"use to set the MySQL session timeout",
++								&interactive_timeout,
++								INTERACTIVE_TIMEOUT,
++								0,
++								INT_MAX,
++								PGC_USERSET,
++								0,
++								NULL,
++								NULL,
++								NULL);
++	}
+ }
+ 
+ /*
+@@ -348,7 +384,7 @@ mysql_fdw_handler(PG_FUNCTION_ARGS)
+ 	/* Callback functions for readable FDW */
+ 	fdwroutine->GetForeignRelSize = mysqlGetForeignRelSize;
+ 	fdwroutine->GetForeignPaths = mysqlGetForeignPaths;
+-	fdwroutine->AnalyzeForeignTable = mysqlAnalyzeForeignTable;
++	fdwroutine->AnalyzeForeignTable = (bool (*)(Relation relation, AcquireSampleRowsFunc* func, BlockNumber* totalpages, void* additionalData, bool estimate_table_rownum))mysqlAnalyzeForeignTable;
+ 	fdwroutine->GetForeignPlan = mysqlGetForeignPlan;
+ 	fdwroutine->ExplainForeignScan = mysqlExplainForeignScan;
+ 	fdwroutine->BeginForeignScan = mysqlBeginForeignScan;
+@@ -427,7 +463,7 @@ mysqlBeginForeignScan(ForeignScanState *node, int eflags)
+ 
+ 	/* Stash away the state info we have already */
+ 	festate->query = strVal(list_nth(fsplan->fdw_private, 0));
+-	festate->retrieved_attrs = list_nth(fsplan->fdw_private, 1);
++	festate->retrieved_attrs = (List*)list_nth(fsplan->fdw_private, 1);
+ 	festate->conn = conn;
+ 	festate->cursor_exists = false;
+ 
+@@ -1047,12 +1083,12 @@ mysqlGetForeignPaths(PlannerInfo *root,RelOptInfo *baserel,Oid foreigntableid)
+ 	mysqlEstimateCosts(root, baserel, &startup_cost, &total_cost, foreigntableid);
+ 
+ 	/* Create a ForeignPath node and add it as only possible path */
+-	add_path(baserel, (Path *)
++	add_path(root, baserel, (Path *)
+ 			 create_foreignscan_path(root, baserel,
+ #if PG_VERSION_NUM >= 90600
+ 									 NULL,		/* default pathtarget */
+-#endif
+ 									 baserel->rows,
++#endif
+ 									 startup_cost,
+ 									 total_cost,
+ 									 NIL,	/* no pathkeys */
+@@ -1155,7 +1191,7 @@ mysqlGetForeignPlan(
+ 		mysql_append_where_clause(&sql, root, baserel, remote_conds,
+ 						  true, &params_list);
+ 
+-	if (baserel->relid == root->parse->resultRelation &&
++	if (baserel->relid == (unsigned int)root->parse->resultRelation &&
+ 		(root->parse->commandType == CMD_UPDATE ||
+ 		root->parse->commandType == CMD_DELETE))
+ 		{
+@@ -1319,7 +1355,7 @@ mysqlPlanForeignModify(PlannerInfo *root,
+ #if PG_VERSION_NUM >= 90500
+ 		Bitmapset *tmpset = bms_copy(rte->updatedCols);
+ #else
+-		Bitmapset *tmpset = bms_copy(rte->modifiedCols);
++		Bitmapset *tmpset = bms_copy(rte->updatedCols);
+ #endif
+ 		AttrNumber	col;
+ 
+@@ -1633,7 +1669,7 @@ mysqlExecForeignUpdate(EState *estate,
+ 	n_params = list_length(fmstate->retrieved_attrs);
+ 
+ 	mysql_bind_buffer = (MYSQL_BIND*) palloc0(sizeof(MYSQL_BIND) * n_params);
+-	isnull = palloc0(sizeof(bool) * n_params);
++	isnull = (bool*)palloc0(sizeof(bool) * n_params);
+ 
+ 	/* Bind the values */
+ 	foreach(lc, fmstate->retrieved_attrs)
+@@ -1822,7 +1858,7 @@ mysqlExecForeignDelete(EState *estate,
+ static void
+ mysqlEndForeignModify(EState *estate, ResultRelInfo *resultRelInfo)
+ {
+-	MySQLFdwExecState *festate = resultRelInfo->ri_FdwState;
++	MySQLFdwExecState *festate = (MySQLFdwExecState*)resultRelInfo->ri_FdwState;
+ 
+ 	if (festate && festate->stmt)
+ 	{
+diff --git a/code/mysql_fdw-REL-2_5_3/mysql_fdw.h b/code/mysql_fdw-REL-2_5_3/mysql_fdw.h
+index 5b543cd..b2a7011 100644
+--- a/code/mysql_fdw-REL-2_5_3/mysql_fdw.h
++++ b/code/mysql_fdw-REL-2_5_3/mysql_fdw.h
+@@ -135,31 +135,31 @@ extern bool is_foreign_expr(PlannerInfo *root,
+                                 Expr *expr);
+ 
+ 
+-int ((*_mysql_options)(MYSQL *mysql,enum mysql_option option, const void *arg));
+-int ((*_mysql_stmt_prepare)(MYSQL_STMT *stmt, const char *query, unsigned long length));
+-int ((*_mysql_stmt_execute)(MYSQL_STMT *stmt));
+-int ((*_mysql_stmt_fetch)(MYSQL_STMT *stmt));
+-int ((*_mysql_query)(MYSQL *mysql, const char *q));
+-bool ((*_mysql_stmt_attr_set)(MYSQL_STMT *stmt, enum enum_stmt_attr_type attr_type, const void *attr));
+-bool ((*_mysql_stmt_close)(MYSQL_STMT * stmt));
+-bool ((*_mysql_stmt_reset)(MYSQL_STMT * stmt));
+-bool ((*_mysql_free_result)(MYSQL_RES *result));
+-bool ((*_mysql_stmt_bind_param)(MYSQL_STMT *stmt, MYSQL_BIND * bnd));
+-bool ((*_mysql_stmt_bind_result)(MYSQL_STMT *stmt, MYSQL_BIND * bnd));
+-
+-MYSQL_STMT	*((*_mysql_stmt_init)(MYSQL *mysql));
+-MYSQL_RES	*((*_mysql_stmt_result_metadata)(MYSQL_STMT *stmt));
+-int ((*_mysql_stmt_store_result)(MYSQL *mysql));
+-MYSQL_ROW	((*_mysql_fetch_row)(MYSQL_RES *result));
+-MYSQL_FIELD	*((*_mysql_fetch_field)(MYSQL_RES *result));
+-MYSQL_FIELD	*((*_mysql_fetch_fields)(MYSQL_RES *result));
+-const char	*((*_mysql_error)(MYSQL *mysql));
+-void	((*_mysql_close)(MYSQL *sock));
+-MYSQL_RES* ((*_mysql_store_result)(MYSQL *mysql));
+-
+-MYSQL	*((*_mysql_init)(MYSQL *mysql));
+-bool ((*_mysql_ssl_set)(MYSQL *mysql, const char *key, const char *cert, const char *ca, const char *capath, const char *cipher));
+-MYSQL	*((*_mysql_real_connect)(MYSQL *mysql,
++extern int ((*_mysql_options)(MYSQL *mysql,enum mysql_option option, const void *arg));
++extern int ((*_mysql_stmt_execute)(MYSQL_STMT *stmt));
++extern int ((*_mysql_stmt_fetch)(MYSQL_STMT *stmt));
++extern int ((*_mysql_stmt_prepare)(MYSQL_STMT *stmt, const char *query, unsigned long length));
++extern int ((*_mysql_query)(MYSQL *mysql, const char *q));
++extern bool ((*_mysql_stmt_attr_set)(MYSQL_STMT *stmt, enum enum_stmt_attr_type attr_type, const void *attr));
++extern bool ((*_mysql_stmt_close)(MYSQL_STMT * stmt));
++extern bool ((*_mysql_stmt_reset)(MYSQL_STMT * stmt));
++extern bool ((*_mysql_free_result)(MYSQL_RES *result));
++extern bool ((*_mysql_stmt_bind_param)(MYSQL_STMT *stmt, MYSQL_BIND * bnd));
++extern bool ((*_mysql_stmt_bind_result)(MYSQL_STMT *stmt, MYSQL_BIND * bnd));
++
++extern MYSQL_STMT	*((*_mysql_stmt_init)(MYSQL *mysql));
++extern MYSQL_RES	*((*_mysql_stmt_result_metadata)(MYSQL_STMT *stmt));
++extern int ((*_mysql_stmt_store_result)(MYSQL *mysql));
++extern MYSQL_ROW	((*_mysql_fetch_row)(MYSQL_RES *result));
++extern MYSQL_FIELD	*((*_mysql_fetch_field)(MYSQL_RES *result));
++extern MYSQL_FIELD	*((*_mysql_fetch_fields)(MYSQL_RES *result));
++extern const char	*((*_mysql_error)(MYSQL *mysql));
++extern void	((*_mysql_close)(MYSQL *sock));
++extern MYSQL_RES* ((*_mysql_store_result)(MYSQL *mysql));
++
++extern MYSQL	*((*_mysql_init)(MYSQL *mysql));
++extern bool ((*_mysql_ssl_set)(MYSQL *mysql, const char *key, const char *cert, const char *ca, const char *capath, const char *cipher));
++extern MYSQL	*((*_mysql_real_connect)(MYSQL *mysql,
+ 								const char *host,
+ 								const char *user,
+ 								const char *passwd,
+@@ -168,14 +168,14 @@ MYSQL	*((*_mysql_real_connect)(MYSQL *mysql,
+ 								const char *unix_socket,
+ 								unsigned long clientflag));
+ 
+-const char *((*_mysql_get_host_info)(MYSQL *mysql));
+-const char *((*_mysql_get_server_info)(MYSQL *mysql));
+-int ((*_mysql_get_proto_info)(MYSQL *mysql));
++extern const char *((*_mysql_get_host_info)(MYSQL *mysql));
++extern const char *((*_mysql_get_server_info)(MYSQL *mysql));
++extern int ((*_mysql_get_proto_info)(MYSQL *mysql));
+ 
+-unsigned int ((*_mysql_stmt_errno)(MYSQL_STMT *stmt));
+-unsigned int ((*_mysql_errno)(MYSQL *mysql));
+-unsigned int ((*_mysql_num_fields)(MYSQL_RES *result));
+-unsigned int ((*_mysql_num_rows)(MYSQL_RES *result));
++extern unsigned int ((*_mysql_stmt_errno)(MYSQL_STMT *stmt));
++extern unsigned int ((*_mysql_errno)(MYSQL *mysql));
++extern unsigned int ((*_mysql_num_fields)(MYSQL_RES *result));
++extern unsigned int ((*_mysql_num_rows)(MYSQL_RES *result));
+ 
+ 
+ /* option.c headers */
+diff --git a/code/mysql_fdw-REL-2_5_3/mysql_query.cpp b/code/mysql_fdw-REL-2_5_3/mysql_query.cpp
+index 8c25f5c..6093a5a 100644
+--- a/code/mysql_fdw-REL-2_5_3/mysql_query.cpp
++++ b/code/mysql_fdw-REL-2_5_3/mysql_query.cpp
+@@ -21,7 +21,7 @@
+ #include <unistd.h>
+ 
+ #include <mysql.h>
+-#include <mysql_com.h>
++#include <mariadb_com.h>
+ 
+ #include "access/reloptions.h"
+ #include "catalog/pg_type.h"
+@@ -48,7 +48,7 @@
+ #include "utils/timestamp.h"
+ #include "utils/formatting.h"
+ #include "utils/memutils.h"
+-#include "access/htup_details.h"
++#include "access/htup.h"
+ #include "access/sysattr.h"
+ #include "commands/defrem.h"
+ #include "commands/explain.h"
+@@ -226,6 +226,7 @@ mysql_from_pgtyp(Oid type)
+ 			break;
+ 		}
+ 	}
++	return MAX_NO_FIELD_TYPES;
+ }
+ 
+ /*
+@@ -238,8 +239,8 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 	/* Clear the bind buffer and attributes */
+ 	memset(&binds[attnum], 0x0, sizeof(MYSQL_BIND));
+ 
+-	binds[attnum].buffer_type = mysql_from_pgtyp(type);
+-	binds[attnum].is_null = isnull;
++	binds[attnum].buffer_type = (enum_field_types)mysql_from_pgtyp(type);
++	binds[attnum].is_null = (my_bool*)isnull;
+ 
+ 	/* Avoid to bind buffer in case value is NULL */
+ 	if (*isnull)
+@@ -250,7 +251,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		case INT2OID:
+ 		{
+ 			int16 dat = DatumGetInt16(value);
+-			int16 *bufptr = palloc0(sizeof(int16));
++			int16 *bufptr = (int16*)palloc0(sizeof(int16));
+ 			memcpy(bufptr, (char*)&dat, sizeof(int16));
+ 
+ 			binds[attnum].buffer = bufptr;
+@@ -259,7 +260,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		case INT4OID:
+ 		{
+ 			int32 dat = DatumGetInt32(value);
+-			int32 *bufptr = palloc0(sizeof(int32));
++			int32 *bufptr = (int32*)palloc0(sizeof(int32));
+ 			memcpy(bufptr, (char*)&dat, sizeof(int32));
+ 
+ 			binds[attnum].buffer = bufptr;
+@@ -268,7 +269,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		case INT8OID:
+ 		{
+ 			int64 dat = DatumGetInt64(value);
+-			int64 *bufptr = palloc0(sizeof(int64));
++			int64 *bufptr = (int64*)palloc0(sizeof(int64));
+ 			memcpy(bufptr, (char*)&dat, sizeof(int64));
+ 
+ 			binds[attnum].buffer = bufptr;
+@@ -277,7 +278,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		case FLOAT4OID:
+ 		{
+ 			float4 dat = DatumGetFloat4(value);
+-			float4 *bufptr = palloc0(sizeof(float4));
++			float4 *bufptr = (float4*)palloc0(sizeof(float4));
+ 			memcpy(bufptr, (char*)&dat, sizeof(float4));
+ 
+ 			binds[attnum].buffer = bufptr;
+@@ -286,7 +287,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		case FLOAT8OID:
+ 		{
+ 			float8 dat = DatumGetFloat8(value);
+-			float8 *bufptr = palloc0(sizeof(float8));
++			float8 *bufptr = (float8*)palloc0(sizeof(float8));
+ 			memcpy(bufptr, (char*)&dat, sizeof(float8));
+ 
+ 			binds[attnum].buffer = bufptr;
+@@ -296,7 +297,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		{
+ 			Datum valueDatum = DirectFunctionCall1(numeric_float8, value);
+ 			float8 dat = DatumGetFloat8(valueDatum);
+-			float8 *bufptr = palloc0(sizeof(float8));
++			float8 *bufptr = (float8*)palloc0(sizeof(float8));
+ 			memcpy(bufptr, (char*)&dat, sizeof(float8));
+ 
+ 			binds[attnum].buffer = bufptr;
+@@ -305,7 +306,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		case BOOLOID:
+ 		{
+ 			int32 dat = DatumGetInt32(value);
+-			int32 *bufptr = palloc0(sizeof(int32));
++			int32 *bufptr = (int32*)palloc0(sizeof(int32));
+ 			memcpy(bufptr, (char*)&dat, sizeof(int32));
+ 
+ 			binds[attnum].buffer = bufptr;
+@@ -348,7 +349,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 
+ 			Datum valueDatum = DirectFunctionCall1(date_timestamp, value);
+ 			Timestamp valueTimestamp = DatumGetTimestamp(valueDatum);
+-			MYSQL_TIME* ts = palloc0(sizeof(MYSQL_TIME));
++			MYSQL_TIME* ts = (MYSQL_TIME*)palloc0(sizeof(MYSQL_TIME));
+ 
+ 			timestamp2tm(valueTimestamp, &tz, tm, &fsec, &tzn, pg_tzset("UTC"));
+ 
+@@ -364,7 +365,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		case TIMESTAMPTZOID:
+ 		{
+ 			Timestamp valueTimestamp = DatumGetTimestamp(value);
+-			MYSQL_TIME* ts = palloc0(sizeof(MYSQL_TIME));
++			MYSQL_TIME* ts = (MYSQL_TIME*)palloc0(sizeof(MYSQL_TIME));
+ 
+ 			int			tz;
+ 			struct pg_tm tt,
+@@ -384,7 +385,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 		case BITOID:
+ 		{
+ 			int32 dat;
+-			int32 *bufptr = palloc0(sizeof(int32));
++			int32 *bufptr = (int32*)palloc0(sizeof(int32));
+ 			char *outputString = NULL;
+ 			Oid outputFunctionId = InvalidOid;
+ 			bool typeVarLength = false;
+@@ -412,7 +413,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+ 				len = VARSIZE_4B(result) - VARHDRSZ;
+ 				dat = VARDATA_4B(result);
+ 			}
+-			bufptr = palloc0(len);
++			bufptr = (char*)palloc0(len);
+ 			memcpy(bufptr, (char*)dat, len);
+ 			binds[attnum].buffer = bufptr;
+ 			binds[attnum].buffer_length = len;
+@@ -438,9 +439,9 @@ void
+ mysql_bind_result(Oid pgtyp, int pgtypmod, MYSQL_FIELD *field, mysql_column *column)
+ {
+ 	MYSQL_BIND *mbind = column->_mysql_bind;
+-	mbind->is_null = &column->is_null;
++	mbind->is_null = (my_bool*)&column->is_null;
+ 	mbind->length = &column->length;
+-	mbind->error = &column->error;
++	mbind->error = (my_bool*)&column->error;
+ 
+ 	switch (pgtyp)
+ 	{
+diff --git a/code/mysql_fdw-REL-2_5_3/option.cpp b/code/mysql_fdw-REL-2_5_3/option.cpp
+index 880d984..f3b77f7 100644
+--- a/code/mysql_fdw-REL-2_5_3/option.cpp
++++ b/code/mysql_fdw-REL-2_5_3/option.cpp
+@@ -81,7 +81,7 @@ static struct MySQLFdwOption valid_options[] =
+ 	{ NULL,			InvalidOid }
+ };
+ 
+-extern Datum mysql_fdw_validator(PG_FUNCTION_ARGS);
++extern "C" Datum mysql_fdw_validator(PG_FUNCTION_ARGS);
+ 
+ PG_FUNCTION_INFO_V1(mysql_fdw_validator);
+ 
