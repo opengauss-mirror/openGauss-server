@@ -2690,6 +2690,12 @@ static bool _equalGroupingId(const GroupingId* a, const GroupingId* b)
     return true;
 }
 
+static bool _equalShutDown(const ShutdownStmt* a, const ShutdownStmt* b)
+{
+    COMPARE_STRING_FIELD(mode);
+    return true;
+}
+
 /*
  * equal
  *	  returns whether two nodes are equal
@@ -3297,6 +3303,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_AlterTSConfigurationStmt:
             retval = _equalAlterTSConfigurationStmt((AlterTSConfigurationStmt*)a, (AlterTSConfigurationStmt*)b);
+            break;
+        case T_ShutdownStmt:
+            retval = _equalShutDown((ShutdownStmt*)a, (ShutdownStmt*)b);
             break;
 
         case T_A_Expr:

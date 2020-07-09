@@ -54,6 +54,7 @@
 #include "commands/seclabel.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/sequence.h"
+#include "commands/shutdown.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
 #include "commands/directory.h"
@@ -4911,6 +4912,11 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
             GetPGVariable(n->name, dest);
         } break;
+        case T_ShutdownStmt: {
+            ShutdownStmt* n = (ShutdownStmt*)parse_tree;
+
+            DoShutdown(n);
+        } break;
 
         case T_DiscardStmt:
 #ifdef PGXC
@@ -7517,6 +7523,9 @@ const char* CreateCommandTag(Node* parse_tree)
         case T_DropDirectoryStmt:
             tag = "DROP DIRECTORY";
             break;
+        case T_ShutdownStmt:
+            tag = "SHUTDOWN";
+            break;
 
         default:
             elog(WARNING, "unrecognized node type: %d", (int)nodeTag(parse_tree));
@@ -8233,6 +8242,10 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
         case T_CreateSynonymStmt:
         case T_DropSynonymStmt:
             lev = LOGSTMT_DDL;
+            break;
+
+        case T_ShutdownStmt:
+            lev = LOGSTMT_ALL;
             break;
 
         default:

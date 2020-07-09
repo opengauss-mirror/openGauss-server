@@ -18,3 +18,4 @@ test: hw_procedure_define hw_anonymous_block hw_procedure
 test: hw_grant_all hw_dynamic_sql hw_func_return_out 
 #test: hw_show_tabledef
 test: hw_package_function
+test: shutdown

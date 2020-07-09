@@ -273,7 +273,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 		RuleActionStmt RuleActionStmtOrEmpty RuleStmt
 		SecLabelStmt SelectStmt TransactionStmt TruncateStmt CallFuncStmt
 		UnlistenStmt UpdateStmt VacuumStmt
-		VariableResetStmt VariableSetStmt VariableShowStmt VerifyStmt
+		VariableResetStmt VariableSetStmt VariableShowStmt VerifyStmt ShutdownStmt
 		ViewStmt CheckPointStmt CreateConversionStmt
 		DeallocateStmt PrepareStmt ExecuteStmt
 		DropOwnedStmt ReassignOwnedStmt
@@ -684,7 +684,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 	ROW ROWS RULE
 
 	SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
-	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW
+	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN
 	SIMILAR SIMPLE SIZE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START
 	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STRICT_P STRIP_P SUBSTRING
 	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR
@@ -976,6 +976,7 @@ stmt :
 			| RuleStmt
 			| SecLabelStmt
 			| SelectStmt
+                        | ShutdownStmt
 			| TransactionStmt
 			| TruncateStmt
 			| UnlistenStmt
@@ -2074,6 +2075,25 @@ constraints_set_mode:
 			| IMMEDIATE								{ $$ = FALSE; }
 		;
 
+/*****************************************************************************
+ *
+ * SHUTDOWN STATEMENT
+ *
+ *****************************************************************************/
+ShutdownStmt:
+                        SHUTDOWN
+                                {
+                                       ShutdownStmt *n = makeNode(ShutdownStmt);
+                                       n->mode = NULL;
+                                       $$ = (Node *) n;
+                                }
+                        | SHUTDOWN var_name
+                                {
+                                       ShutdownStmt *n = makeNode(ShutdownStmt);
+                                       n->mode = $2;
+                                       $$ = (Node *) n;
+                                }
+                ;
 
 /*
  * Checkpoint statement
@@ -17842,6 +17862,7 @@ unreserved_keyword:
 			| SHARE
 			| SHIPPABLE
 			| SHOW
+                        | SHUTDOWN
 			| SIMPLE
 			| SIZE
 			| SMALLDATETIME_FORMAT_P

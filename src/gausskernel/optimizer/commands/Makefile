@@ -24,6 +24,6 @@ OBJS = aggregatecmds.o alter.o analyze.o async.o cluster.o comment.o  \
 	portalcmds.o prepare.o proclang.o \
 	schemacmds.o seclabel.o sec_rls_cmds.o sequence.o tablecmds.o tablespace.o trigger.o \
 	tsearchcmds.o typecmds.o user.o vacuum.o vacuumlazy.o \
-	variable.o verify.o view.o gds_stream.o obs_stream.o formatter.o datasourcecmds.o directory.o
+	variable.o verify.o view.o gds_stream.o obs_stream.o formatter.o datasourcecmds.o directory.o shutdown.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
