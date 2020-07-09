@@ -1,0 +1,20 @@
+DROP ROLE IF EXISTS shutdown_test;
+NOTICE:  role "shutdown_test" does not exist, skipping
+CREATE USER shutdown_test WITH PASSWORD 'Shutdown@123';
+SET SESSION AUTHORIZATION shutdown_test PASSWORD 'Shutdown@123';
+shutdown;
+ERROR:  Only system admin can shutdown database.
+shutdown invalid_str;
+ERROR:  Only system admin can shutdown database.
+shutdown fast;
+ERROR:  Only system admin can shutdown database.
+shutdown smart;
+ERROR:  Only system admin can shutdown database.
+shutdown immediate;
+ERROR:  Only system admin can shutdown database.
+\c
+DROP USER shutdown_test;
+shutdown invalid_str;
+ERROR:  unknow parameter: invalid_str
+shutdown only support fast, smart and immediate mode.
+

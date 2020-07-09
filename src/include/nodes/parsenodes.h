@@ -1768,6 +1768,15 @@ typedef struct VariableShowStmt {
     char* name;
 } VariableShowStmt;
 
+/* ----------------------
+ * Shutdown Statement
+ * ----------------------
+ */
+typedef struct ShutdownStmt {
+    NodeTag type;
+    char* mode;
+} ShutdownStmt;
+
 /*
  * definition of a range partition.
  * range partition pattern:	PARTITION [partitionName] LESS THAN [boundary]

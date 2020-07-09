@@ -5713,6 +5713,13 @@ static BloomFilterSet* _copyBloomFilterSet(const BloomFilterSet* from)
     return newnode;
 }
 
+static ShutdownStmt* _copyShutdownStmt(const ShutdownStmt* from)
+{
+    ShutdownStmt* newnode = makeNode(ShutdownStmt);
+    COPY_STRING_FIELD(mode);
+    return newnode;
+}
+
 /*
  * copyObject
  *
@@ -6765,6 +6772,11 @@ void* copyObject(const void* from)
             break;
         case T_DropDirectoryStmt:
             retval = _copyDropDirectoryStmt((DropDirectoryStmt*)from);
+            break;
+
+           /* shutdown */
+        case T_ShutdownStmt:
+            retval = _copyShutdownStmt((ShutdownStmt*)from);
             break;
         default:
             ereport(ERROR,
