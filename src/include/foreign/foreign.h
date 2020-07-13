@@ -282,6 +282,9 @@ bool isWriteOnlyFt(Oid relid);
 #define isMOTTableFromSrvName(srvName) \
     (IsSpecifiedFDW(srvName, MOT_FDW))
 
+#define isMysqlFDWFromTblOid(relId) \
+    (IsSpecifiedFDWFromRelid(relId, MYSQL_FDW))
+
 #define IS_OBS_CSV_TXT_FOREIGN_TABLE(relId) \
     (IsSpecifiedFDWFromRelid(relId, DIST_FDW) && (is_obs_protocol(HdfsGetOptionValue(relId, optLocation))))
 

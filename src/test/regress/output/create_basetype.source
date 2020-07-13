@@ -3,22 +3,22 @@ CREATE FUNCTION complex_in(cstring)
     RETURNS complex
     AS '@libdir@/regress@DLSUFFIX@','complex_in'
     LANGUAGE C IMMUTABLE STRICT not fenced;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+NOTICE:  return type complex is only a shell
 CREATE FUNCTION complex_out(complex)
     RETURNS cstring
     AS '@libdir@/regress@DLSUFFIX@','complex_out'
     LANGUAGE C IMMUTABLE STRICT not fenced;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+NOTICE:  argument type complex is only a shell
 CREATE FUNCTION complex_recv(internal)
    RETURNS complex
    AS '@libdir@/regress@DLSUFFIX@','complex_recv'
    LANGUAGE C IMMUTABLE STRICT not fenced;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+NOTICE:  return type complex is only a shell
 CREATE FUNCTION complex_send(complex)
    RETURNS bytea
    AS '@libdir@/regress@DLSUFFIX@','complex_send'
    LANGUAGE C IMMUTABLE STRICT not fenced;
-ERROR:  C/JAVA UDF is not yet supported in current version.
+NOTICE:  argument type complex is only a shell
 CREATE TYPE complex (
    internallength = 16,
    input = complex_in,
@@ -27,73 +27,56 @@ CREATE TYPE complex (
    send = complex_send,
    alignment = double
 );
-ERROR:  function complex_in(cstring) does not exist
 create table t1 (
 sk int,
 a complex,
 b complex
 )
 WITH (orientation=row);
-ERROR:  type "complex" is only a shell
-LINE 3: a complex,
-          ^
 insert into t1 values(1,'(1,2)','(2,3)');
-ERROR:  relation "t1" does not exist on datanode1
-LINE 1: insert into t1 values(1,'(1,2)','(2,3)');
-                    ^
 insert into t1 values(1,'(3,4)','(4,5)');
-ERROR:  relation "t1" does not exist on datanode1
-LINE 1: insert into t1 values(1,'(3,4)','(4,5)');
-                    ^
 select * from t1;
-ERROR:  relation "t1" does not exist on datanode1
-LINE 1: select * from t1;
-                      ^
+ sk |   a   |   b   
+----+-------+-------
+  1 | (1,2) | (2,3)
+  1 | (3,4) | (4,5)
+(2 rows)
+
 create table t1_rep (
 sk int,
 a complex,
 b complex
 )
 WITH (orientation=row) ;
-ERROR:  type "complex" is only a shell
-LINE 3: a complex,
-          ^
 insert into t1_rep values(1,'(1,2)','(2,3)');
-ERROR:  relation "t1_rep" does not exist on datanode1
-LINE 1: insert into t1_rep values(1,'(1,2)','(2,3)');
-                    ^
 insert into t1_rep values(1,'(3,4)','(4,5)');
-ERROR:  relation "t1_rep" does not exist on datanode1
-LINE 1: insert into t1_rep values(1,'(3,4)','(4,5)');
-                    ^
 select * from t1_rep;
-ERROR:  relation "t1_rep" does not exist on datanode1
-LINE 1: select * from t1_rep;
-                      ^
+ sk |   a   |   b   
+----+-------+-------
+  1 | (1,2) | (2,3)
+  1 | (3,4) | (4,5)
+(2 rows)
+
 insert into t1 values(1,'(1,2)','(2,3)');
-ERROR:  relation "t1" does not exist on datanode1
-LINE 1: insert into t1 values(1,'(1,2)','(2,3)');
-                    ^
 insert into t1 values(1,'(3,4)','(4,5)');
-ERROR:  relation "t1" does not exist on datanode1
-LINE 1: insert into t1 values(1,'(3,4)','(4,5)');
-                    ^
 CREATE FUNCTION test_type(complex) RETURNS complex
 AS 'select $1;'
 LANGUAGE SQL;
-ERROR:  SQL function cannot accept shell type complex
 call test_type(cast('(1,2)' as complex));
-ERROR:  function "test_type" doesn't exist 
+ test_type 
+-----------
+ (1,2)
+(1 row)
+
 create schema schema1;
 alter type complex set schema schema1;
-ERROR:  type "complex" is only a shell
 create table t1_schema_test1 (
 sk int,
 a complex,
 b complex
 )
 WITH (orientation=row);
-ERROR:  type "complex" is only a shell
+ERROR:  type "complex" does not exist
 LINE 3: a complex,
           ^
 set current_schema = schema1;
@@ -103,22 +86,27 @@ a complex,
 b complex
 )
 WITH (orientation=row);
-ERROR:  type "complex" does not exist
-LINE 3: a complex,
-          ^
 alter type complex set schema public;
-ERROR:  type "complex" does not exist
 set current_schema = public;
 alter type complex rename to complex_1;
-ERROR:  type "complex" is only a shell
 alter type complex_1 rename to complex;
-ERROR:  type "complex_1" does not exist
 drop type complex cascade;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to function complex_in(cstring)
+drop cascades to function complex_out(complex)
+drop cascades to function complex_recv(internal)
+drop cascades to function complex_send(complex)
+drop cascades to table t1 column a
+drop cascades to table t1 column b
+drop cascades to table t1_rep column a
+drop cascades to table t1_rep column b
+drop cascades to function test_type(complex)
+drop cascades to table schema1.t1_schema_test2 column a
+drop cascades to table schema1.t1_schema_test2 column b
 drop schema schema1 cascade;
+NOTICE:  drop cascades to table schema1.t1_schema_test2
 drop table t1;
-ERROR:  table "t1" does not exist
 drop table t1_rep;
-ERROR:  table "t1_rep" does not exist
 \h create type
 Command:     CREATE TYPE
 Description: define a new data type

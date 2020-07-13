@@ -24,9 +24,10 @@ SUBDIRS = bootstrap catalog commands datatype executor foreign lib libpq mb \
 	port/win32/arpa port/win32/netinet port/win32/sys \
 	portability \
 	gtm \
-	storage vecexecutor access tsdb \
+	storage vecexecutor access access/obs tsdb \
 	hotpatch\
         gstrace\
+	knl knl/knl_guc threadpool workload\
 # Install all headers
 install: all installdirs
 # These headers are needed by the public headers of the interfaces.
@@ -48,6 +49,25 @@ install: all installdirs
 	$(INSTALL_DATA) pg_config_os.h '$(DESTDIR)$(includedir_server)'
 	$(INSTALL_DATA) utils/errcodes.h '$(DESTDIR)$(includedir_server)/utils'
 	$(INSTALL_DATA) utils/fmgroids.h '$(DESTDIR)$(includedir_server)/utils'
+# These headers are needed by fdw
+	$(INSTALL_DATA) gssignal/gs_signal.h '$(DESTDIR)$(includedir_server)/gssignal/gs_signal.h'
+	$(INSTALL_DATA) libcomm/libcomm.h '$(DESTDIR)$(includedir_server)/libcomm/libcomm.h'
+	$(INSTALL_DATA) cm/etcdapi.h '$(DESTDIR)$(includedir_server)/cm/etcdapi.h'
+	$(INSTALL_DATA) access/parallel_recovery/redo_item.h '$(DESTDIR)$(includedir_server)/access/parallel_recovery/redo_item.h'
+	$(INSTALL_DATA) access/parallel_recovery/posix_semaphore.h '$(DESTDIR)$(includedir_server)/access/parallel_recovery/posix_semaphore.h'
+	$(INSTALL_DATA) access/dfs/dfs_am.h '$(DESTDIR)$(includedir_server)/access/dfs/dfs_am.h'
+	$(INSTALL_DATA) alarm/alarm.h '$(DESTDIR)$(includedir_server)/alarm/alarm.h'
+	$(INSTALL_DATA) bulkload/dist_fdw.h '$(DESTDIR)$(includedir_server)/bulkload/dist_fdw.h'
+	$(INSTALL_DATA) bulkload/importerror.h '$(DESTDIR)$(includedir_server)/bulkload/importerror.h'
+	$(INSTALL_DATA) bulkload/utils.h '$(DESTDIR)$(includedir_server)/bulkload/utils.h'
+	$(INSTALL_DATA) ssl/gs_openssl_client.h '$(DESTDIR)$(includedir_server)/ssl/gs_openssl_client.h'
+	$(INSTALL_DATA) instruments/list.h '$(DESTDIR)$(includedir_server)/instruments/list.h'
+	$(INSTALL_DATA) instruments/instr_event.h '$(DESTDIR)$(includedir_server)/instruments/instr_event.h'
+	$(INSTALL_DATA) storage/dfs/dfs_connector.h '$(DESTDIR)$(includedir_server)/storage/dfs/dfs_connector.h'
+	$(INSTALL_DATA) distributelayer/streamConsumer.h '$(DESTDIR)$(includedir_server)/distributelayer/streamConsumer.h'
+	$(INSTALL_DATA) distributelayer/streamCore.h '$(DESTDIR)$(includedir_server)/distributelayer/streamCore.h'
+	$(INSTALL_DATA) distributelayer/streamProducer.h '$(DESTDIR)$(includedir_server)/distributelayer/streamProducer.h'
+	$(INSTALL_DATA) distributelayer/streamTransportCore.h '$(DESTDIR)$(includedir_server)/distributelayer/streamTransportCore.h'
 # We don't use INSTALL_DATA for performance reasons --- there are a lot of files
 	cp $(srcdir)/*.h '$(DESTDIR)$(includedir_server)'/ || exit; \
 	chmod $(INSTALL_DATA_MODE) '$(DESTDIR)$(includedir_server)'/*.h  || exit; \

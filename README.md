@@ -513,6 +513,7 @@ Compilation log: **make_compile.log**
    > 2. On the ARM-based platform, **-D__USE_NUMA** needs to be added to **CFLAGS**.
    > 3. On the **ARMv8.1** platform or a later version (for example, Kunpeng 920), **-D__ARM_LSE** needs to be added to **CFLAGS**.
    > 4. If **binarylibs** is moved to **openGauss-server** or a soft link to **binarylibs** is created in **openGauss-server**, you do not need to specify the **--3rd** parameter. However, if you do so, please note that the file is easy to be deleted by the `git clean` command.
+   > 5. To build with mysql_fdw, add **--enable-mysql-fdw** when configure. Note that before build mysql_fdw, MariaDB's C client library is needed.
 
 4. Run the following commands to compile openGauss:
 

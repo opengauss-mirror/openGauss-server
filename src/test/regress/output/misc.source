@@ -27,21 +27,11 @@ UPDATE tmp
    FROM onek
    WHERE onek.stringu1 = 'JBAAAA' and
 	  onek.stringu1 = tmp.stringu1;
-ERROR:  function reverse_name(name) does not exist
-LINE 2:    SET stringu1 = reverse_name(onek.stringu1)
-                          ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: stringu1
 UPDATE tmp
    SET stringu1 = reverse_name(onek2.stringu1)
    FROM onek2
    WHERE onek2.stringu1 = 'JCAAAA' and
 	  onek2.stringu1 = tmp.stringu1;
-ERROR:  function reverse_name(name) does not exist
-LINE 2:    SET stringu1 = reverse_name(onek2.stringu1)
-                          ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: stringu1
 DROP TABLE tmp;
 --UPDATE person*
 --   SET age = age + 1;
@@ -388,30 +378,30 @@ SELECT user_relns() AS user_relns
  onek
  onek2
  person
- pg_cudesc_17900
- pg_cudesc_part_17746
- pg_cudesc_part_17747
- pg_cudesc_part_17748
- pg_cudesc_part_17749
- pg_cudesc_part_17750
- pg_cudesc_part_17751
- pg_cudesc_part_17752
- pg_cudesc_part_17753
- pg_cudesc_part_17754
- pg_cudesc_part_17755
- pg_cudesc_part_17756
- pg_delta_17900
- pg_delta_part_17746
- pg_delta_part_17747
- pg_delta_part_17748
- pg_delta_part_17749
- pg_delta_part_17750
- pg_delta_part_17751
- pg_delta_part_17752
- pg_delta_part_17753
- pg_delta_part_17754
- pg_delta_part_17755
- pg_delta_part_17756
+ pg_cudesc_17913
+ pg_cudesc_part_17759
+ pg_cudesc_part_17760
+ pg_cudesc_part_17761
+ pg_cudesc_part_17762
+ pg_cudesc_part_17763
+ pg_cudesc_part_17764
+ pg_cudesc_part_17765
+ pg_cudesc_part_17766
+ pg_cudesc_part_17767
+ pg_cudesc_part_17768
+ pg_cudesc_part_17769
+ pg_delta_17913
+ pg_delta_part_17759
+ pg_delta_part_17760
+ pg_delta_part_17761
+ pg_delta_part_17762
+ pg_delta_part_17763
+ pg_delta_part_17764
+ pg_delta_part_17765
+ pg_delta_part_17766
+ pg_delta_part_17767
+ pg_delta_part_17768
+ pg_delta_part_17769
  ramp
  real_city
  road
@@ -487,11 +477,13 @@ SELECT person as hobbies_by_name from hobbies_r where name = 'basketball' order 
 (2 rows)
 
 SELECT name, overpaid(emp.*) FROM emp ORDER BY 1,2;
-ERROR:  function overpaid(emp) does not exist
-LINE 1: SELECT name, overpaid(emp.*) FROM emp ORDER BY 1,2;
-                     ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: overpaid
+  name  | overpaid 
+--------+----------
+ bill   | t
+ sam    | t
+ sharon | t
+(3 rows)
+
 --
 -- Try a few cases with SQL-spec row constructor expressions
 --
@@ -536,11 +528,14 @@ insert into oldstyle_test values(0,'12');
 insert into oldstyle_test values(1000,'12');
 insert into oldstyle_test values(0, repeat('x', 50000));
 select i, length(t), octet_length(t), oldstyle_length(i,t) from oldstyle_test ORDER BY 1,2,3;
-ERROR:  function oldstyle_length(integer, text) does not exist
-LINE 1: select i, length(t), octet_length(t), oldstyle_length(i,t) f...
-                                              ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: oldstyle_length
+  i   | length | octet_length | oldstyle_length 
+------+--------+--------------+-----------------
+    0 |      2 |            2 |          822333
+    0 |  50000 |        50000 |             581
+ 1000 |      2 |            2 |          823333
+      |        |              |                
+(4 rows)
+
 drop table oldstyle_test;
 select pg_terminate_backend(9999999999);
 WARNING:  PID 9999999999 is not a gaussdb server thread

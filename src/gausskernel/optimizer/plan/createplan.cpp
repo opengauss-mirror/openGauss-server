@@ -8462,7 +8462,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
             Plan* subplan = (Plan*)(linitial(subplans));
             ForeignScan* fscan = NULL;
             if ((fscan = (ForeignScan*)FindForeignScan(subplan)) != NULL) {
-                if (!isMOTFromTblOid(fscan->scan_relid))
+                if (!isMOTFromTblOid(fscan->scan_relid) && !isMysqlFDWFromTblOid(fscan->scan_relid))
                     ereport(ERROR,
                         (errmodule(MOD_OPT),
                             errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
