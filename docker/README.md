@@ -1,21 +1,21 @@
-# ARCHITECTURE AND OS VERSION
+# Architecture And Os Version
 
 x86-64 CentOS7.6  
 ARM64 openEuler 20.03 LTS
 
-# BUILD IMAGE
+# Build Image
 
 ```console
 docker build -t opengauss:1.0 .
 ```
 
-# START INSTANCE
+# Start Instance
 
 ```console
 $ docker run --name opengauss --privileged=true -d -e GS_PASSWORD=secretpassword@123 opengauss:1.0
 ```
 
-# CONNECT TO THE CONTAINER DATABASE FROM OS
+# Connect To The Container Database From Os
 
 ```console
 $ docker run −−name opengauss −−privileged=true −d −e GSPASSWORD=secretpassword@123 \
@@ -23,12 +23,12 @@ $ docker run −−name opengauss −−privileged=true −d −e GSPASSWORD=sec
   -h your-host-ip -p8888
 ```
 
-# PERSIST DATA
+# Persist Data
 
 ```console
 $ docker run --name opengauss --privileged=true -d -e GS_PASSWORD=secretpassword@123 \
   -v /opengauss:/var/lib/opengauss opengauss:1.0
 ```
 
-# TODO
+# Todo
 primary standby install
