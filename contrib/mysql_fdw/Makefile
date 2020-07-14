@@ -33,12 +33,11 @@ MYSQL_FDW_MEGRED_SOURCES_DIR=$(MYSQL_FDW_DIR)/code
 .PHONY: mysql_fdw_target
 mysql_fdw_target:
 	@$(call create_mysql_fdw_sources)
-	@make -C $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) USE_PGXS=1
+	@make -C $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE)
 
 .PHONY: install-data
-install-data:
-	@$(call create_mysql_fdw_sources)
-	@make -C $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) USE_PGXS=1 install
+install-data: mysql_fdw_target
+	@make -C $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) install
 
 uninstall distclean clean:
 	@rm -rf $(MYSQL_FDW_MEGRED_SOURCES_DIR)

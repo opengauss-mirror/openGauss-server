@@ -20,7 +20,7 @@ index d5e7b36..157a6cf 100644
  
  ifdef USE_PGXS
  PG_CONFIG = pg_config
-@@ -48,8 +50,8 @@ include $(PGXS)
+@@ -48,13 +50,12 @@ include $(PGXS)
  ifndef MAJORVERSION
  MAJORVERSION := $(basename $(VERSION))
  endif
@@ -31,6 +31,12 @@ index d5e7b36..157a6cf 100644
  endif
  
  else
+-subdir = contrib/mysql_fdw
+-top_builddir = ../..
++top_builddir = ../../../../../
+ include $(top_builddir)/src/Makefile.global
+ include $(top_srcdir)/contrib/contrib-global.mk
+ endif
 diff --git a/code/mysql_fdw-REL-2_5_3/connection.cpp b/code/mysql_fdw-REL-2_5_3/connection.cpp
 index 6b18027..0a9e40f 100644
 --- a/code/mysql_fdw-REL-2_5_3/connection.cpp
