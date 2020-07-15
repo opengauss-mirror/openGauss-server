@@ -49,7 +49,8 @@ CREATE TABLE unsupport_foreignkey (
     created_at timestamptz not null,
     foreign key(rank) references pg_attribute(attcacheoff)
 ) with (orientation=column) distribute by hash(rank);
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
 --6 index unusable
 --
 CREATE TABLE unsupport_index_unusable ( a int , b int ) with ( orientation = column );

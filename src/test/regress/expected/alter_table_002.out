@@ -748,13 +748,13 @@ ERROR:  relation "atacc1" does not exist
 create table atacc2 (id int4 unique);
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "atacc2_id_key" for table "atacc2"
 alter table atacc1 add foreign key (a) references atacc2(id);
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+ERROR:  relation "atacc1" does not exist
 alter table atacc1 add foreign key ("........pg.dropped.1........") references atacc2(id);
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+ERROR:  relation "atacc1" does not exist
 alter table atacc2 add foreign key (id) references atacc1(a);
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+ERROR:  relation "atacc1" does not exist
 alter table atacc2 add foreign key (id) references atacc1("........pg.dropped.1........");
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+ERROR:  relation "atacc1" does not exist
 drop table atacc2;
 create index "testing_idx" on atacc1(a);
 ERROR:  relation "atacc1" does not exist

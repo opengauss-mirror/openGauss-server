@@ -209,7 +209,11 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog", RelationGetRelationName(rel))));
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (stmt->isconstraint) {
+#else
     if (stmt->isconstraint && stmt->constrrel != NULL) {
+#endif
         /*
          * We must take a lock on the target relation to protect against
          * concurrent drop.  It's not clear that AccessShareLock is strong

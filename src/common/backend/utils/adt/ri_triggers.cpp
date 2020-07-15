@@ -269,9 +269,14 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
      * be entitled to change its xmin/xmax.
      */
     Assert(new_row_buf != InvalidBuffer);
+    /* must hold a buffer lock to call HeapTupleSatisfiesVisibility */
+    LockBuffer(new_row_buf, BUFFER_LOCK_SHARE);
     if (!HeapTupleSatisfiesVisibility(new_row, SnapshotSelf, new_row_buf)) {
+        LockBuffer(new_row_buf, BUFFER_LOCK_UNLOCK);
         return PointerGetDatum(NULL);
     }
+    LockBuffer(new_row_buf, BUFFER_LOCK_UNLOCK);
+
     /*
      * Get the relation descriptors of the FK and PK tables.
      *

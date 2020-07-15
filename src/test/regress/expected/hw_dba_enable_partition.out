@@ -30,7 +30,6 @@ CREATE TABLE test_check_enable(a INT CHECK(a<10) ENABLE);
 CREATE TABLE test_references_a(a INT UNIQUE);
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_references_a_a_key" for table "test_references_a"
 CREATE TABLE test_references_b(a INT REFERENCES test_references_a(a));
-ERROR:  REFERENCES constraint is not yet supported.
 CREATE TABLE test_references_b_enbale(a INT REFERENCES test_references_a(a) ENABLE);
 ERROR:  REFERENCES constraint is not yet supported.
 --constraint null
@@ -59,7 +58,6 @@ CREATE TABLE test_con_check_enable(a INT CONSTRAINT ck_enable CHECK(a<10) ENABLE
 CREATE TABLE test_con_references_a(a INT CONSTRAINT unq UNIQUE);
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "unq" for table "test_con_references_a"
 CREATE TABLE test_con_references_b(a INT CONSTRAINT rf REFERENCES test_con_references_a(a));
-ERROR:  REFERENCES constraint is not yet supported.
 CREATE TABLE test_con_references_b_enbale(a INT CONSTRAINT rf_enable REFERENCES test_con_references_a(a) ENABLE);
 ERROR:  REFERENCES constraint is not yet supported.
 --create table named enable and a column named enable
@@ -75,7 +73,6 @@ DROP TABLE test_primary_key_enable;
 DROP TABLE test_check;
 DROP TABLE test_check_enable;
 DROP TABLE test_references_b;
-ERROR:  table "test_references_b" does not exist
 DROP TABLE test_references_b_enbale;
 ERROR:  table "test_references_b_enbale" does not exist
 DROP TABLE test_references_a;
@@ -89,7 +86,6 @@ DROP TABLE test_con_primary_key_enable;
 DROP TABLE test_con_check;
 DROP TABLE test_con_check_enable;
 DROP TABLE test_con_references_b;
-ERROR:  table "test_con_references_b" does not exist
 DROP TABLE test_con_references_b_enbale;
 ERROR:  table "test_con_references_b_enbale" does not exist
 DROP TABLE test_con_references_a;
