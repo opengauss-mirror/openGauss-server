@@ -34,11 +34,11 @@ void DoShutdown(ShutdownStmt* stmt)
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("Only system admin can shutdown database."))));
     }
 
-    int signal;
+    int signal = SIGINT;
     char* shutdown_mode = stmt->mode;
 
     if (shutdown_mode == NULL || strcmp(shutdown_mode, "fast") == 0) {
-        signal = SIGINT;
+        /* default value is SIGINT, need to do nothing. */
     } else if (strcmp(shutdown_mode, "smart") == 0) {
         signal = SIGTERM;
     } else if (strcmp(shutdown_mode, "immediate") == 0) {
