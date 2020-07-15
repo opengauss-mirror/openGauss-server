@@ -23,6 +23,6 @@ create table check_table2(c1 int,c2 int,c3 varchar(10),check (c1 > c2))with (ori
 ERROR:  column/timeseries store unsupport constraint "CHECK"
 --4. foreign key
 CREATE TABLE xc_child_hash_to_rep (b int, FOREIGN KEY (b) REFERENCES xc_parent_rep(a)) with (orientation = column) ;-- error
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+ERROR:  column/timeseries store unsupport constraint "FOREIGN KEY"
 drop table source_table;
 drop table not_null;

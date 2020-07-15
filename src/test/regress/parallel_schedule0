@@ -131,7 +131,8 @@ test: single_node_privileges2
 # ----------
 #test: single_node_select_views 
 #test: single_node_portals_p2 
-#test: single_node_foreign_key single_node_cluster single_node_dependency
+test: single_node_foreign_key
+#test: single_node_cluster single_node_dependency
 #test: single_node_guc
 test: single_node_guc2
 test: single_node_bitmapops single_node_combocid 

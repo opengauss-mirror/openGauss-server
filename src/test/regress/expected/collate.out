@@ -550,22 +550,17 @@ CREATE TABLE collate_test20 (f1 text COLLATE "C" PRIMARY KEY);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "collate_test20_pkey" for table "collate_test20"
 INSERT INTO collate_test20 VALUES ('foo'), ('bar');
 CREATE TABLE collate_test21 (f2 text COLLATE "POSIX" REFERENCES collate_test20);
-ERROR:  REFERENCES constraint is not yet supported.
 INSERT INTO collate_test21 VALUES ('foo'), ('bar');
-ERROR:  relation "collate_test21" does not exist on datanode1
-LINE 1: INSERT INTO collate_test21 VALUES ('foo'), ('bar');
-                    ^
 INSERT INTO collate_test21 VALUES ('baz'); -- fail
-ERROR:  relation "collate_test21" does not exist on datanode1
-LINE 1: INSERT INTO collate_test21 VALUES ('baz');
-                    ^
+ERROR:  insert or update on table "collate_test21" violates foreign key constraint "collate_test21_f2_fkey"
+DETAIL:  Key (f2)=(baz) is not present in table "collate_test20".
 CREATE TABLE collate_test22 (f2 text COLLATE "POSIX");
 INSERT INTO collate_test22 VALUES ('foo'), ('bar'), ('baz');
 ALTER TABLE collate_test22 ADD FOREIGN KEY (f2) REFERENCES collate_test20; -- fail
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
+ERROR:  insert or update on table "collate_test22" violates foreign key constraint "collate_test22_f2_fkey"
+DETAIL:  Key (f2)=(baz) is not present in table "collate_test20".
 DELETE FROM collate_test22 WHERE f2 = 'baz';
 ALTER TABLE collate_test22 ADD FOREIGN KEY (f2) REFERENCES collate_test20;
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 RESET enable_seqscan;
 RESET enable_hashjoin;
 RESET enable_nestloop;
@@ -613,7 +608,7 @@ explain (verbose, costs off, nodes off) SELECT collation for ((SELECT b FROM col
 -- must get rid of them.
 --
 DROP SCHEMA collate_tests CASCADE;
-NOTICE:  drop cascades to 10 other objects
+NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table collate_test1
 drop cascades to table collate_test_like
 drop cascades to table collate_test2
@@ -623,4 +618,5 @@ drop cascades to view collview2
 drop cascades to view collview3
 drop cascades to function dup(anyelement)
 drop cascades to table collate_test20
+drop cascades to table collate_test21
 drop cascades to table collate_test22

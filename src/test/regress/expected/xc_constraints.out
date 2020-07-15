@@ -53,35 +53,35 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "xc_parent_rr_pke
 -- Test creation of child tables referencing to parents
 -- To replicated parent
 CREATE TABLE xc_child_rep_to_rep (b int, FOREIGN KEY (b) REFERENCES xc_parent_rep(a)); -- OK
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_rr_to_rep (b int, FOREIGN KEY (b) REFERENCES xc_parent_rep(a)); -- OK
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_modulo_to_rep (b int, FOREIGN KEY (b) REFERENCES xc_parent_rep(a)); -- OK
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_hash_to_rep (b int, FOREIGN KEY (b) REFERENCES xc_parent_rep(a)); -- OK
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 -- To hash parent
 CREATE TABLE xc_child_rep_to_hash (b int, FOREIGN KEY (b) REFERENCES xc_parent_hash(a)); -- error
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_rr_to_hash (b int, FOREIGN KEY (b) REFERENCES xc_parent_hash(a)); -- error
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_modulo_to_hash (b int, FOREIGN KEY (b) REFERENCES xc_parent_hash(a)); -- error
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_hash_to_hash (b int, FOREIGN KEY (b) REFERENCES xc_parent_hash(a)); -- OK
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 -- To modulo parent
 CREATE TABLE xc_child_rep_to_modulo (b int, FOREIGN KEY (b) REFERENCES xc_parent_modulo(a)); -- error
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_rr_to_modulo (b int, FOREIGN KEY (b) REFERENCES xc_parent_modulo(a)); -- error
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_modulo_to_modulo (b int, FOREIGN KEY (b) REFERENCES xc_parent_modulo(a)); -- OK
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 CREATE TABLE xc_child_hash_to_modulo (b int, FOREIGN KEY (b) REFERENCES xc_parent_modulo(a)); -- error
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 -- Clean up
 DROP SCHEMA xc_constraints_tests CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 16 other objects
 DETAIL:  drop cascades to table xc_parent_rep
 drop cascades to table xc_parent_hash
 drop cascades to table xc_parent_modulo
 drop cascades to table xc_parent_rr
+drop cascades to table xc_child_rep_to_rep
+drop cascades to table xc_child_rr_to_rep
+drop cascades to table xc_child_modulo_to_rep
+drop cascades to table xc_child_hash_to_rep
+drop cascades to table xc_child_rep_to_hash
+drop cascades to table xc_child_rr_to_hash
+drop cascades to table xc_child_modulo_to_hash
+drop cascades to table xc_child_hash_to_hash
+drop cascades to table xc_child_rep_to_modulo
+drop cascades to table xc_child_rr_to_modulo
+drop cascades to table xc_child_modulo_to_modulo
+drop cascades to table xc_child_hash_to_modulo
