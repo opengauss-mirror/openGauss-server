@@ -1,7 +1,7 @@
-diff --git a/code/mysql_fdw-REL-2_5_3/Makefile b/code/mysql_fdw-REL-2_5_3/Makefile
-index d5e7b36..157a6cf 100644
---- a/code/mysql_fdw-REL-2_5_3/Makefile
-+++ b/code/mysql_fdw-REL-2_5_3/Makefile
+diff --git Makefile Makefile
+index d5e7b36..4cd59e9 100644
+--- Makefile
++++ Makefile
 @@ -31,6 +31,8 @@ else
  MYSQL_LIB = mysqlclient
  endif
@@ -37,24 +37,26 @@ index d5e7b36..157a6cf 100644
  include $(top_builddir)/src/Makefile.global
  include $(top_srcdir)/contrib/contrib-global.mk
  endif
-diff --git a/code/mysql_fdw-REL-2_5_3/connection.cpp b/code/mysql_fdw-REL-2_5_3/connection.cpp
-index 6b18027..0a9e40f 100644
---- a/code/mysql_fdw-REL-2_5_3/connection.cpp
-+++ b/code/mysql_fdw-REL-2_5_3/connection.cpp
-@@ -22,6 +22,7 @@
- #include "utils/hsearch.h"
+diff --git connection.cpp connection.cpp
+index a517a73..3fc2f20 100644
+--- connection.cpp
++++ connection.cpp
+@@ -24,6 +24,7 @@
  #include "utils/memutils.h"
  #include "utils/resowner.h"
+ #include "utils/syscache.h"
 +#include "storage/ipc.h"
  
  /* Length of host */
  #define HOST_LEN 256
-@@ -48,8 +49,13 @@ typedef struct ConnCacheEntry
+@@ -53,10 +54,15 @@ typedef struct ConnCacheEntry
  /*
   * Connection cache (initialized on first use)
   */
 -static HTAB *ConnectionHash = NULL;
 +static THR_LOCAL HTAB *ConnectionHash = NULL;
+ 
+ static void mysql_inval_callback(Datum arg, int cacheid, uint32 hashvalue);
  
 +static void
 +mysql_fdw_exit(int code, Datum arg)
@@ -64,7 +66,7 @@ index 6b18027..0a9e40f 100644
  /*
   * mysql_get_connection:
   * 			Get a connection which can be used to execute queries on
-@@ -73,10 +79,11 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+@@ -80,7 +86,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
  		ctl.hash = tag_hash;
  
  		/* allocate ConnectionHash in the cache context */
@@ -73,11 +75,15 @@ index 6b18027..0a9e40f 100644
  		ConnectionHash = hash_create("mysql_fdw connections", 8,
  									&ctl,
  									HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+@@ -93,6 +99,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+ 									  mysql_inval_callback, (Datum) 0);
+ 		CacheRegisterSyscacheCallback(USERMAPPINGOID,
+ 									  mysql_inval_callback, (Datum) 0);
 +		on_proc_exit(&mysql_fdw_exit, PointerGetDatum(NULL));
  	}
  
  	/* Create hash key for the entry.  Assume no pad bytes in key struct */
-@@ -86,7 +93,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+@@ -102,7 +109,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
  	/*
  	 * Find or create cached entry for requested connection.
  	 */
@@ -86,7 +92,7 @@ index 6b18027..0a9e40f 100644
  	if (!found)
  	{
  		/* initialize new hashtable entry (key is already filled in) */
-@@ -137,6 +144,9 @@ mysql_cleanup_connection(void)
+@@ -196,6 +203,9 @@ mysql_cleanup_connection(void)
  		_mysql_close(entry->conn);
  		entry->conn = NULL;
  	}
@@ -96,10 +102,10 @@ index 6b18027..0a9e40f 100644
  }
  
  /*
-diff --git a/code/mysql_fdw-REL-2_5_3/deparse.cpp b/code/mysql_fdw-REL-2_5_3/deparse.cpp
+diff --git deparse.cpp deparse.cpp
 index a75c270..94b1799 100644
---- a/code/mysql_fdw-REL-2_5_3/deparse.cpp
-+++ b/code/mysql_fdw-REL-2_5_3/deparse.cpp
+--- deparse.cpp
++++ deparse.cpp
 @@ -20,7 +20,7 @@
  #include "pgtime.h"
  
@@ -216,10 +222,10 @@ index a75c270..94b1799 100644
  		first = false;
  	}
  	appendStringInfoChar(buf, ']');
-diff --git a/code/mysql_fdw-REL-2_5_3/mysql_fdw.cpp b/code/mysql_fdw-REL-2_5_3/mysql_fdw.cpp
-index f1e26c3..49243d1 100644
---- a/code/mysql_fdw-REL-2_5_3/mysql_fdw.cpp
-+++ b/code/mysql_fdw-REL-2_5_3/mysql_fdw.cpp
+diff --git mysql_fdw.cpp mysql_fdw.cpp
+index d518e2e..a56fae6 100644
+--- mysql_fdw.cpp
++++ mysql_fdw.cpp
 @@ -53,7 +53,7 @@
  #include "utils/timestamp.h"
  #include "utils/formatting.h"
@@ -448,7 +454,7 @@ index f1e26c3..49243d1 100644
  	festate->conn = conn;
  	festate->cursor_exists = false;
  
-@@ -1047,12 +1083,12 @@ mysqlGetForeignPaths(PlannerInfo *root,RelOptInfo *baserel,Oid foreigntableid)
+@@ -1052,12 +1088,12 @@ mysqlGetForeignPaths(PlannerInfo *root,RelOptInfo *baserel,Oid foreigntableid)
  	mysqlEstimateCosts(root, baserel, &startup_cost, &total_cost, foreigntableid);
  
  	/* Create a ForeignPath node and add it as only possible path */
@@ -463,7 +469,7 @@ index f1e26c3..49243d1 100644
  									 startup_cost,
  									 total_cost,
  									 NIL,	/* no pathkeys */
-@@ -1155,7 +1191,7 @@ mysqlGetForeignPlan(
+@@ -1160,7 +1196,7 @@ mysqlGetForeignPlan(
  		mysql_append_where_clause(&sql, root, baserel, remote_conds,
  						  true, &params_list);
  
@@ -472,7 +478,7 @@ index f1e26c3..49243d1 100644
  		(root->parse->commandType == CMD_UPDATE ||
  		root->parse->commandType == CMD_DELETE))
  		{
-@@ -1319,7 +1355,7 @@ mysqlPlanForeignModify(PlannerInfo *root,
+@@ -1330,7 +1366,7 @@ mysqlPlanForeignModify(PlannerInfo *root,
  #if PG_VERSION_NUM >= 90500
  		Bitmapset *tmpset = bms_copy(rte->updatedCols);
  #else
@@ -481,7 +487,7 @@ index f1e26c3..49243d1 100644
  #endif
  		AttrNumber	col;
  
-@@ -1633,7 +1669,7 @@ mysqlExecForeignUpdate(EState *estate,
+@@ -1644,7 +1680,7 @@ mysqlExecForeignUpdate(EState *estate,
  	n_params = list_length(fmstate->retrieved_attrs);
  
  	mysql_bind_buffer = (MYSQL_BIND*) palloc0(sizeof(MYSQL_BIND) * n_params);
@@ -490,7 +496,7 @@ index f1e26c3..49243d1 100644
  
  	/* Bind the values */
  	foreach(lc, fmstate->retrieved_attrs)
-@@ -1822,7 +1858,7 @@ mysqlExecForeignDelete(EState *estate,
+@@ -1833,7 +1869,7 @@ mysqlExecForeignDelete(EState *estate,
  static void
  mysqlEndForeignModify(EState *estate, ResultRelInfo *resultRelInfo)
  {
@@ -499,10 +505,10 @@ index f1e26c3..49243d1 100644
  
  	if (festate && festate->stmt)
  	{
-diff --git a/code/mysql_fdw-REL-2_5_3/mysql_fdw.h b/code/mysql_fdw-REL-2_5_3/mysql_fdw.h
-index 5b543cd..b2a7011 100644
---- a/code/mysql_fdw-REL-2_5_3/mysql_fdw.h
-+++ b/code/mysql_fdw-REL-2_5_3/mysql_fdw.h
+diff --git mysql_fdw.h mysql_fdw.h
+index 5b543cd..ea58af7 100644
+--- mysql_fdw.h
++++ mysql_fdw.h
 @@ -135,31 +135,31 @@ extern bool is_foreign_expr(PlannerInfo *root,
                                  Expr *expr);
  
@@ -533,9 +539,9 @@ index 5b543cd..b2a7011 100644
 -bool ((*_mysql_ssl_set)(MYSQL *mysql, const char *key, const char *cert, const char *ca, const char *capath, const char *cipher));
 -MYSQL	*((*_mysql_real_connect)(MYSQL *mysql,
 +extern int ((*_mysql_options)(MYSQL *mysql,enum mysql_option option, const void *arg));
++extern int ((*_mysql_stmt_prepare)(MYSQL_STMT *stmt, const char *query, unsigned long length));
 +extern int ((*_mysql_stmt_execute)(MYSQL_STMT *stmt));
 +extern int ((*_mysql_stmt_fetch)(MYSQL_STMT *stmt));
-+extern int ((*_mysql_stmt_prepare)(MYSQL_STMT *stmt, const char *query, unsigned long length));
 +extern int ((*_mysql_query)(MYSQL *mysql, const char *q));
 +extern bool ((*_mysql_stmt_attr_set)(MYSQL_STMT *stmt, enum enum_stmt_attr_type attr_type, const void *attr));
 +extern bool ((*_mysql_stmt_close)(MYSQL_STMT * stmt));
@@ -582,10 +588,10 @@ index 5b543cd..b2a7011 100644
  
  
  /* option.c headers */
-diff --git a/code/mysql_fdw-REL-2_5_3/mysql_query.cpp b/code/mysql_fdw-REL-2_5_3/mysql_query.cpp
+diff --git mysql_query.cpp mysql_query.cpp
 index 8c25f5c..6093a5a 100644
---- a/code/mysql_fdw-REL-2_5_3/mysql_query.cpp
-+++ b/code/mysql_fdw-REL-2_5_3/mysql_query.cpp
+--- mysql_query.cpp
++++ mysql_query.cpp
 @@ -21,7 +21,7 @@
  #include <unistd.h>
  
@@ -734,10 +740,10 @@ index 8c25f5c..6093a5a 100644
  
  	switch (pgtyp)
  	{
-diff --git a/code/mysql_fdw-REL-2_5_3/option.cpp b/code/mysql_fdw-REL-2_5_3/option.cpp
-index 880d984..f3b77f7 100644
---- a/code/mysql_fdw-REL-2_5_3/option.cpp
-+++ b/code/mysql_fdw-REL-2_5_3/option.cpp
+diff --git option.cpp option.cpp
+index 574cb24..5c92c50 100644
+--- option.cpp
++++ option.cpp
 @@ -81,7 +81,7 @@ static struct MySQLFdwOption valid_options[] =
  	{ NULL,			InvalidOid }
  };

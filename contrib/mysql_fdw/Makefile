@@ -48,6 +48,14 @@ define create_mysql_fdw_sources
 	rm -rf $(MYSQL_FDW_MEGRED_SOURCES_DIR); \
 	mkdir $(MYSQL_FDW_MEGRED_SOURCES_DIR); \
 	tar xfzv $(MYSQL_FDW_DIR)/$(MYSQL_FDW_PACKAGE).tar.gz -C $(MYSQL_FDW_MEGRED_SOURCES_DIR) &> /dev/null; \
+	for ((i=1;i<=99;i++)); \
+	do \
+        	file_name="$(MYSQL_FDW_DIR)/$$i-mysql_fdw-2.5.3_patch.patch"; \
+        	if [ ! -f "$$file_name" ]; then \
+                	exit 0; \
+        	fi; \
+		patch -p0 -d $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) < $$file_name &> /dev/null; \
+	done
 	rename ".c" ".cpp" $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE)/*.c; \
-	patch -d $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) < $(MYSQL_FDW_DIR)/$(MYSQL_FDW_PATCH).patch &> /dev/null;
+	patch -p0 -d $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) < $(MYSQL_FDW_DIR)/$(MYSQL_FDW_PATCH).patch &> /dev/null;
 endef
