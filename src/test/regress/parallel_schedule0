@@ -8,7 +8,7 @@
 test: analyze_commands
 #test: single_node_job
 test: single_node_ddl
-test: single_node_sqlbypass
+test: single_node_sqlbypass median
 
 # run tablespace by itself, and first, because it forces a checkpoint;
 # we'd prefer not to have checkpoints later in the tests because that
