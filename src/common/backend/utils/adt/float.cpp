@@ -61,7 +61,7 @@ static const uint32 nan[2] = {0xffffffff, 0x7fffffff};
 /* ========== USER I/O ROUTINES ========== */
 
 static int float4_cmp_internal(float4 a, float4 b);
-static int float8_cmp_internal(float8 a, float8 b);
+int float8_cmp_internal(float8 a, float8 b);
 
 #ifndef HAVE_CBRT
 /*
@@ -972,7 +972,7 @@ Datum btfloat4sortsupport(PG_FUNCTION_ARGS)
 /*
  *		float8{eq,ne,lt,le,gt,ge}		- float8/float8 comparison operations
  */
-static int float8_cmp_internal(float8 a, float8 b)
+int float8_cmp_internal(float8 a, float8 b)
 {
     /*
      * We consider all NANs to be equal and larger than any non-NAN. This is

@@ -2607,6 +2607,11 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5544 | int1send
  5548 | int1_avg_accum
  5549 | pg_stat_get_activity_ng
+ 5555 | median
+ 5556 | median
+ 5557 | median_float8_finalfn
+ 5558 | median_interval_finalfn
+ 5559 | median_transfn
  5560 | to_date
  5586 | smalldatetime_cmp
  5587 | smalldatetime_hash
@@ -2666,7 +2671,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
  9999 | pg_test_err_contain_err
-(2265 rows)
+(2270 rows)
 
 -- **************** pg_cast ****************
 -- Catch bogus values in pg_cast columns (other than cases detected by

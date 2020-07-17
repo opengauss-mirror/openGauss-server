@@ -438,10 +438,12 @@ DATA(insert ( 4508	interval_list_agg_noarg2_transfn			-	list_agg_finalfn			0	228
 #endif
 
 /* ordered-set aggregates XXX shall we add collect funcs? */
-#ifdef PGXC
 DATA(insert ( 4452 ordered_set_transition      -    percentile_cont_float8_final            0   2281    _null_   _null_ 	 o 1));
 DATA(insert ( 4454 ordered_set_transition      -    percentile_cont_interval_final          0   2281    _null_   _null_ 	 o 1));
-#endif
+
+DATA(insert (5555 median_transfn      -    median_float8_finalfn            0   2281    _null_   _null_ 	 n 0));
+DATA(insert (5556 median_transfn      -    median_interval_finalfn          0   2281    _null_   _null_ 	 n 0));
+
 
 /*
  * prototypes for functions in pg_aggregate.c

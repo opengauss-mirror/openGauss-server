@@ -75,7 +75,7 @@ static Datum regprocin_booststrap(char* procname)
     }
 
     if (matches == 0) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("function \"%s\" does not exist xxxx", procname)));
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("function \"%s\" does not exist", procname)));
     } else if (matches > 1) {
         ereport(ERROR,
             (errcode(ERRCODE_AMBIGUOUS_FUNCTION),
