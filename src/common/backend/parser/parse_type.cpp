@@ -759,7 +759,8 @@ bool IsTypeSupportedByCStore(_in_ Oid typeOid, _in_ int32 typeMod)
         CASHOID,
         CIDROID,
         BITOID,
-        VARBITOID};
+        VARBITOID,
+        CLOBOID};
 
     for (uint32 i = 0; i < sizeof(supportType) / sizeof(Oid); ++i) {
         if (supportType[i] == typeOid) {

@@ -58,7 +58,7 @@ CREATE TABLE s_latin1_utf8_001_01
  c_char_2  | character(100)          |           | extended |              | 
  c_varchar | character varying(1024) |           | extended |              | 
  c_text    | text                    |           | extended |              | 
- c_clob    | text                    |           | extended |              | 
+ c_clob    | clob                    |           | extended |              | 
  c_numeric | numeric(20,5)           |           | main     |              | 
  c_dp      | double precision        |           | plain    |              | 
 Has OIDs: no

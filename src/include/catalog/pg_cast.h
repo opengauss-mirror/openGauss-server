@@ -264,6 +264,7 @@ DATA(insert (	23 3769    0 i b ));
 DATA(insert ( 3769	 20 1288 a f ));
 DATA(insert ( 3769	 23    0 a b ));
 DATA(insert (	25 2205 1079 i f ));
+DATA(insert (	90 2205 1079 i f ));
 DATA(insert ( 1043 2205 1079 i f ));
 DATA(insert ( 3969 2205 1079 i f ));
 
@@ -273,31 +274,43 @@ DATA(insert ( 3969 2205 1079 i f ));
 DATA(insert (	25 1042    0 i b ));
 DATA(insert (	25 1043    0 i b ));
 DATA(insert (	25 3969    0 i b ));
+DATA(insert (	90 1042    0 i b ));
+DATA(insert (	90 1043    0 i b ));
+DATA(insert (	90 3969    0 i b ));
 DATA(insert ( 1042	 25  401 i f ));
+DATA(insert ( 1042	 90  401 i f ));
 DATA(insert ( 1042 1043  401 i f ));
 DATA(insert ( 1043	 25    0 i b ));
+DATA(insert ( 1043	 90    0 i b ));
 DATA(insert ( 1043 1042    0 i b ));
 DATA(insert ( 1042 3969  401 i f ));
 DATA(insert ( 3969	 25    0 i b ));
+DATA(insert ( 3969	 90    0 i b ));
 DATA(insert ( 3969 1042    0 i b ));
 DATA(insert ( 3969 1043    0 i b ));
 DATA(insert ( 1043 3969    0 i b ));
 DATA(insert (	18	 25  946 i f ));
+DATA(insert (	18	 90  946 i f ));
 DATA(insert (	18 1042  860 a f ));
 DATA(insert (	18 1043  946 a f ));
 DATA(insert (	18 3969  946 a f ));
 DATA(insert (	19	 25  406 i f ));
+DATA(insert (	19	 90  406 i f ));
 DATA(insert (	19 1042  408 a f ));
 DATA(insert (	19 1043 1401 a f ));
 DATA(insert (	19 3969 1401 a f ));
 DATA(insert (	25	 18  944 a f ));
+DATA(insert (	90	 18  944 a f ));
 DATA(insert ( 1042	 18  944 a f ));
 DATA(insert ( 1043	 18  944 a f ));
 DATA(insert ( 3969	 18  944 a f ));
 DATA(insert (	25	 19  407 i f ));
+DATA(insert (	90	 19  407 i f ));
 DATA(insert ( 1042	 19  409 i f ));
 DATA(insert ( 1043	 19 1400 i f ));
 DATA(insert ( 3969	 19 1400 i f ));
+
+
 
 /* Allow explicit coercions between int4 and "char" */
 DATA(insert (	18	 23   77 e f ));
@@ -305,6 +318,7 @@ DATA(insert (	23	 18   78 e f ));
 
 /* pg_node_tree can be coerced to, but not from, text */
 DATA(insert (  194	 25    0 i b ));
+DATA(insert (  194	 90    0 i b ));
 
 /*
  * Datetime category
@@ -331,6 +345,7 @@ DATA(insert ( 1186	703 1194 a f ));
 DATA(insert ( 1186 1083 1419 a f ));
 DATA(insert ( 1266 1083 2046 a f ));
 DATA(insert ( 25 1114 4073 i f ));
+DATA(insert ( 90 1114 4073 i f ));
 
 /* Cross-category casts between int4 and abstime, reltime */
 DATA(insert (	23	702    0 e b ));
@@ -391,6 +406,12 @@ DATA(insert (	16	 25 2971 a f ));
 DATA(insert (  142	 25    0 a b ));
 DATA(insert (	25	142 2896 e f ));
 
+DATA(insert (  650	 90  730 a f ));
+DATA(insert (  869	 90  730 a f ));
+DATA(insert (	16	 90 2971 a f ));
+DATA(insert (  142	 90    0 a b ));
+DATA(insert (	90	142 2896 e f ));
+
 /*
  * Cross-category casts to and from VARCHAR
  *
@@ -436,19 +457,30 @@ DATA(insert ( 1562 1562 1687 i f ));
 DATA(insert ( 1700 1700 1703 i f ));
 
 DATA(insert ( 1082 25 4159 i f ));
+DATA(insert ( 1082 90 4159 i f ));
 DATA(insert ( 1082 1042 4160 i f ));
 DATA(insert ( 1082 1043 4161 i f ));
 DATA(insert ( 1043 1082 4162 i f ));
 DATA(insert ( 1042 1082 4163 i f ));
 DATA(insert ( 25 1082 4164 i f ));
+DATA(insert ( 90 1082 4164 i f ));
 
 DATA(insert ( 5545 25 4165 i f ));
-DATA(insert ( 21 25 4166 i f ));
-DATA(insert ( 23 25 4167 i f ));
-DATA(insert ( 20 25 4168 i f ));
-DATA(insert ( 700 25 4169 i f ));
-DATA(insert ( 701 25 4170 i f ));
+DATA(insert ( 21   25 4166 i f ));
+DATA(insert ( 23   25 4167 i f ));
+DATA(insert ( 20   25 4168 i f ));
+DATA(insert ( 700  25 4169 i f ));
+DATA(insert ( 701  25 4170 i f ));
 DATA(insert ( 1700 25 4171 i f ));
+
+DATA(insert ( 5545 90 4165 i f ));
+DATA(insert ( 21   90 4166 i f ));
+DATA(insert ( 23   90 4167 i f ));
+DATA(insert ( 20   90 4168 i f ));
+DATA(insert ( 700  90 4169 i f ));
+DATA(insert ( 701  90 4170 i f ));
+DATA(insert ( 1700 90 4171 i f ));
+
 DATA(insert ( 1042 1700 4172 i f ));
 DATA(insert ( 1043 1700 4173 i f ));
 DATA(insert ( 1043 23 4174 i f ));
@@ -456,6 +488,8 @@ DATA(insert ( 1042 23 4175 i f ));
 DATA(insert ( 1043 20 4176 i f ));
 DATA(insert ( 1184 25 4177 i f ));
 DATA(insert ( 1114 25 4178 i f ));
+DATA(insert ( 1184 90 4177 i f ));
+DATA(insert ( 1114 90 4178 i f ));
 DATA(insert ( 1114 1043 4179 i f ));
 DATA(insert ( 21 1043 4180 i f ));
 DATA(insert ( 23 1043 4181 i f ));
@@ -473,6 +507,14 @@ DATA(insert ( 25 20 4191 i f ));
 DATA(insert ( 25 700 4192 i f ));
 DATA(insert ( 25 701 4193 i f ));
 DATA(insert ( 25 1700 4194 i f ));
+
+DATA(insert ( 90 5545 4188 i f ));
+DATA(insert ( 90 21 4189 i f ));
+DATA(insert ( 90 23 4190 i f ));
+DATA(insert ( 90 20 4191 i f ));
+DATA(insert ( 90 700 4192 i f ));
+DATA(insert ( 90 701 4193 i f ));
+DATA(insert ( 90 1700 4194 i f ));
 
 DATA(insert (5545 1043 4065 i f ));
 DATA(insert (5545 3969 4066 i f ));
