@@ -868,8 +868,10 @@ static void CheckUnsupportInsertSelectClause(Query* query)
 
     AssertEreport(query->commandType == CMD_INSERT, MOD_OPT, "Only deal with CMD_INSERT commondType here");
     if (result->relkind == RELKIND_FOREIGN_TABLE) {
-        if (isMOTFromTblOid(result->relid) || isMysqlFDWFromTblOid(result->relid))
+        if (isMOTFromTblOid(result->relid) || isMysqlFDWFromTblOid(result->relid) ||
+            isOracleFDWFromTblOid(result->relid)) {
             return;
+        }
 
         if (list_length(query->rtable) == 1)
             ereport(ERROR,
