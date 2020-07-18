@@ -2,8 +2,8 @@ diff --git connection.c connection.c
 index cb9b90d..0fdd890 100644
 --- connection.c
 +++ connection.c
-@@ -23,8 +23,10 @@
- #include "mpg_wchar.h"
+@@ -20,8 +20,10 @@
+ #include "mb/pg_wchar.h"
  #include "miscadmin.h"
  #include "utils/hsearch.h"
 +#include "utils/inval.h"
@@ -13,7 +13,7 @@ index cb9b90d..0fdd890 100644
  
  /* Length of host */
  #define HOST_LEN 256
-@@ -46,6 +48,9 @@ typedef struct ConnCacheEntry
+@@ -43,6 +45,9 @@ typedef struct ConnCacheEntry
  {
  	ConnCacheKey key;       /* hash key (must be first) */
  	MYSQL *conn;            /* connection to foreign server, or NULL */
@@ -23,7 +23,7 @@ index cb9b90d..0fdd890 100644
  } ConnCacheEntry;
  
  /*
-@@ -53,6 +58,8 @@ typedef struct ConnCacheEntry
+@@ -50,6 +55,8 @@ typedef struct ConnCacheEntry
   */
  static HTAB *ConnectionHash = NULL;
  
@@ -32,7 +32,7 @@ index cb9b90d..0fdd890 100644
  /*
   * mysql_get_connection:
   * 			Get a connection which can be used to execute queries on
-@@ -80,6 +87,15 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+@@ -77,6 +84,15 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
  		ConnectionHash = hash_create("mysql_fdw connections", 8,
  									&ctl,
  									HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
@@ -48,7 +48,7 @@ index cb9b90d..0fdd890 100644
  	}
  
  	/* Create hash key for the entry.  Assume no pad bytes in key struct */
-@@ -95,8 +111,22 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+@@ -92,8 +108,22 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
  		/* initialize new hashtable entry (key is already filled in) */
  		entry->conn = NULL;
  	}
@@ -71,7 +71,7 @@ index cb9b90d..0fdd890 100644
  		entry->conn = mysql_connect(
  			opt->svr_address,
  			opt->svr_username,
-@@ -113,6 +143,35 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+@@ -110,6 +140,35 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
  		);
  		elog(DEBUG3, "new mysql_fdw connection %p for server \"%s\"",
  			 entry->conn, server->servername);
@@ -107,7 +107,7 @@ index cb9b90d..0fdd890 100644
  	}
  	return entry->conn;
  }
-@@ -233,3 +292,36 @@ mysql_connect(
+@@ -230,3 +289,36 @@ mysql_connect(
  
  	return conn;
  }

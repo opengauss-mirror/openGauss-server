@@ -1,5 +1,5 @@
 diff --git Makefile Makefile
-index d5e7b36..4cd59e9 100644
+index d5e7b36..34667e1 100644
 --- Makefile
 +++ Makefile
 @@ -31,6 +31,8 @@ else
@@ -20,7 +20,7 @@ index d5e7b36..4cd59e9 100644
  
  ifdef USE_PGXS
  PG_CONFIG = pg_config
-@@ -48,13 +50,12 @@ include $(PGXS)
+@@ -48,14 +50,15 @@ include $(PGXS)
  ifndef MAJORVERSION
  MAJORVERSION := $(basename $(VERSION))
  endif
@@ -36,7 +36,10 @@ index d5e7b36..4cd59e9 100644
 +top_builddir = ../../../../../
  include $(top_builddir)/src/Makefile.global
  include $(top_srcdir)/contrib/contrib-global.mk
++exclude_option=-fPIE
++override CPPFLAGS := $(filter-out $(exclude_option),$(CPPFLAGS))
  endif
+ 
 diff --git connection.cpp connection.cpp
 index a517a73..3fc2f20 100644
 --- connection.cpp
