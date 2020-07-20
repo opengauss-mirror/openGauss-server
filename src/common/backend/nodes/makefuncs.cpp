@@ -449,18 +449,6 @@ TypeName* makeTypeName(char* typnam)
     return makeTypeNameFromNameList(list_make1(makeString(typnam)));
 }
 
-static void alter_clob_to_text(List* names)
-{
-    if (list_length(names) != 1) {
-        return;
-    } else {
-        char* type_name = strVal(linitial(names));
-        if (strcmp(type_name, "clob") == 0) {
-            errno_t rc = strcpy_s(type_name, sizeof("clob"), "text");
-            securec_check_c(rc, "\0", "\0");
-        }
-    }
-}
 /*
  * makeTypeNameFromNameList -
  *	build a TypeName node for a String list representing a qualified name.
@@ -470,7 +458,6 @@ static void alter_clob_to_text(List* names)
 TypeName* makeTypeNameFromNameList(List* names)
 {
     TypeName* n = makeNode(TypeName);
-    alter_clob_to_text(names);
 
     n->names = names;
     n->typmods = NIL;

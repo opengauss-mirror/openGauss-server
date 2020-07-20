@@ -4896,6 +4896,7 @@ Datum datalength(PG_FUNCTION_ARGS)
         case VARCHAROID:   /* for VARCHAR */
         case NVARCHAR2OID: /* for NVARCHAR */
         case TEXTOID:      /* for TEXT */
+        case CLOBOID:      /* for CLOB */
         {
             result = toast_raw_datum_size(value) - VARHDRSZ;
             break;
