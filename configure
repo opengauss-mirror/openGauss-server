@@ -744,6 +744,7 @@ enable_jemalloc_debug
 enable_multiple_nodes
 enable_memory_check
 enable_mysql_fdw
+enable_oracle_fdw
 enable_thread_check
 enable_shared
 default_gs_version
@@ -821,6 +822,7 @@ enable_jemalloc_debug
 enable_multiple_nodes
 enable_memory_check
 enable_mysql_fdw
+enable_oracle_fdw
 enable_thread_check
 enable_spinlocks
 enable_debug
@@ -2866,6 +2868,28 @@ $as_echo "$as_me: error: no argument expected for --enable-mysql-fdw option" >&2
 
 else
   enable_mysql_fdw=no
+
+fi
+
+# Check whether --enable-oracle-fdw was given.
+if test "${enable_oracle_fdw+set}" = set; then
+  enableval=$enable_oracle_fdw;
+  case $enableval in
+    yes)
+      :
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-oracle-fdw option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-oracle-fdw option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_oracle_fdw=no
 
 fi
 

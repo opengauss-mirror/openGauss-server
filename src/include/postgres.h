@@ -78,6 +78,10 @@
 #define MYSQL_FDW "mysql_fdw"
 #endif
 
+#ifndef ORACLE_FDW
+#define ORACLE_FDW "oracle_fdw"
+#endif
+
 #ifndef MOT_FDW
 #define MOT_FDW "mot_fdw"
 #endif
