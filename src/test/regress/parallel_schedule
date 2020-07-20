@@ -527,7 +527,7 @@ test: backtrace_log
 #test: global_stats
 test: bulkload_start
 test: bulkload_parallel_test_1 bulkload_parallel_test_2 bulkload_parallel_test_3 bulkload_parallel_test_4
-#test: bulkload_end bulkload_error_tbl
+#test: bulkload_end bulkload_error_tbl 
 
 
 #test: vec_prepare_001

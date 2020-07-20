@@ -56,10 +56,10 @@ endif
 
 ifeq ($(cpu_bit), aarch64)
 define exception_arm_cases
-	sed -i '/xc_copy/s/xc_copy/xc_copy_arm/g' $(srcdir)/parallel_schedule
-	sed -i '/hw_cstore_alter1/s/hw_cstore_alter1/hw_cstore_alter1_arm/g' $(srcdir)/parallel_schedule
-	sed -i '/bulkload_end/s/bulkload_end/bulkload_end_arm/g' $(srcdir)/parallel_schedule
-	sed -i '/bulkload_error_tbl/s/bulkload_error_tbl/bulkload_error_tbl_arm/g' $(srcdir)/parallel_schedule
+	sed -i '/xc_copy /s/xc_copy /xc_copy_arm /g' $(srcdir)/parallel_schedule
+	sed -i '/hw_cstore_alter1 /s/hw_cstore_alter1 /hw_cstore_alter1_arm /g' $(srcdir)/parallel_schedule
+	sed -i '/bulkload_end /s/bulkload_end /bulkload_end_arm /g' $(srcdir)/parallel_schedule
+	sed -i '/bulkload_error_tbl /s/bulkload_error_tbl /bulkload_error_tbl_arm /g' $(srcdir)/parallel_schedule
 endef
 else
 define exception_arm_cases
@@ -228,3 +228,8 @@ clean distclean maintainer-clean: clean-lib
 	rm -f $(output_files) $(input_files)
 	rm -rf testtablespace
 	rm -rf $(pg_regress_clean_files)
+	sed -i '/xc_copy_arm /s/xc_copy_arm /xc_copy /g' $(srcdir)/parallel_schedule
+	sed -i '/hw_cstore_alter1_arm /s/hw_cstore_alter1_arm /hw_cstore_alter1 /g' $(srcdir)/parallel_schedule
+	sed -i '/bulkload_end_arm /s/bulkload_end_arm /bulkload_end /g' $(srcdir)/parallel_schedule
+	sed -i '/bulkload_error_tbl_arm /s/bulkload_error_tbl_arm /bulkload_error_tbl /g' $(srcdir)/parallel_schedule
+
