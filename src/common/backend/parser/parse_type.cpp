@@ -826,7 +826,7 @@ bool IsTypeInBlacklist(Oid typoid)
 
     switch (typoid) {
         case LINEOID:
-        case XMLOID:
+       // case XMLOID:
         case PGNODETREEOID:
             isblack = true;
             break;

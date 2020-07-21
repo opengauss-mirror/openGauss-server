@@ -1421,12 +1421,12 @@ void xml_ereport(PgXmlErrorContext* errcxt, int level, int sqlcode, const char* 
 /*
  * Error handler for libxml errors and warnings
  */
-static void xml_errorHandler(void* data, xmlErrorPtr error)
+static void xml_error_handler(void* data, xmlErrorPtr error)
 {
     PgXmlErrorContext* xml_errcxt = (PgXmlErrorContext*)data;
     xmlParserCtxtPtr ctxt = (xmlParserCtxtPtr)error->ctxt;
     xmlParserInputPtr input = (ctxt != NULL) ? ctxt->input : NULL;
-    xmlNodePtr node = error->node;
+    xmlNodePtr node = (xmlNodePtr)error->node;
     const xmlChar* name = (node != NULL && node->type == XML_ELEMENT_NODE) ? node->name : NULL;
     int domain = error->domain;
     int level = error->level;
@@ -1915,7 +1915,7 @@ char* map_sql_value_to_xml_value(Datum value, Oid type, bool xml_escape_strings)
                     if (writer == NULL || xml_errcxt->err_occurred) {
                         xml_ereport(xml_errcxt, ERROR, ERRCODE_OUT_OF_MEMORY, "could not allocate xmlTextWriter");
                     }
-                    if (xmlbinary == XMLBINARY_BASE64) {
+                    if (u_sess->attr.attr_common.xmlbinary == XMLBINARY_BASE64) {
                         xmlTextWriterWriteBase64(writer, VARDATA_ANY(b_str), 0, VARSIZE_ANY_EXHDR(b_str));
                     } else {
                         xmlTextWriterWriteBinHex(writer, VARDATA_ANY(b_str), 0, VARSIZE_ANY_EXHDR(b_str));
