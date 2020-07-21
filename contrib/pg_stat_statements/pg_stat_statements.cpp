@@ -172,20 +172,20 @@ typedef struct pgssJumbleState {
 /*---- Local variables ----*/
 
 /* Current nesting depth of ExecutorRun+ProcessUtility calls */
-static int nested_level = 0;
+static THR_LOCAL int nested_level = 0;
 
 /* Saved hook values in case of unload */
-static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
-static post_parse_analyze_hook_type prev_post_parse_analyze_hook = NULL;
-static ExecutorStart_hook_type prev_ExecutorStart = NULL;
-static ExecutorRun_hook_type prev_ExecutorRun = NULL;
-static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
-static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
-static ProcessUtility_hook_type prev_ProcessUtility = NULL;
+static THR_LOCAL shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+static THR_LOCAL post_parse_analyze_hook_type prev_post_parse_analyze_hook = NULL;
+static THR_LOCAL ExecutorStart_hook_type prev_ExecutorStart = NULL;
+static THR_LOCAL ExecutorRun_hook_type prev_ExecutorRun = NULL;
+static THR_LOCAL ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
+static THR_LOCAL ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
+static THR_LOCAL ProcessUtility_hook_type prev_ProcessUtility = NULL;
 
 /* Links to shared memory state */
-static pgssSharedState* pgss = NULL;
-static HTAB* pgss_hash = NULL;
+static THR_LOCAL pgssSharedState* pgss = NULL;
+static THR_LOCAL HTAB* pgss_hash = NULL;
 
 /*---- GUC variables ----*/
 
@@ -210,8 +210,8 @@ static bool pgss_save;          /* whether to save stats across shutdown */
 void _PG_init(void);
 void _PG_fini(void);
 
-Datum pg_stat_statements_reset(PG_FUNCTION_ARGS);
-Datum pg_stat_statements(PG_FUNCTION_ARGS);
+extern "C" Datum pg_stat_statements_reset(PG_FUNCTION_ARGS);
+extern "C" Datum pg_stat_statements(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_stat_statements_reset);
 PG_FUNCTION_INFO_V1(pg_stat_statements);
@@ -260,7 +260,7 @@ void _PG_init(void)
      * module isn't active.  The functions must protect themselves against
      * being called then, however.)
      */
-    if (!process_shared_preload_libraries_in_progress)
+    if (!u_sess->misc_cxt.process_shared_preload_libraries_in_progress) 
         return;
 
     /*
@@ -389,7 +389,7 @@ static void pgss_shmem_startup(void)
 
     if (!found) {
         /* First time through ... */
-        pgss->lock = LWLockAssign();
+        pgss->lock = LWLockAssign(LWTRANCHE_BUFFER_CONTENT);
         pgss->query_size = g_instance.attr.attr_common.pgstat_track_activity_query_size;
         pgss->cur_median_usage = ASSUMED_MEDIAN_INIT;
     }
@@ -456,7 +456,7 @@ static void pgss_shmem_startup(void)
             buffer_size = temp.query_len + 1;
         }
 
-        if (fread(buffer, 1, temp.query_len, file) != temp.query_len)
+        if (fread(buffer, 1, temp.query_len, file) != (size_t)temp.query_len)
             goto error;
         buffer[temp.query_len] = '\0';
 
@@ -536,7 +536,7 @@ static void pgss_shmem_shutdown(int code, Datum arg)
     while ((entry = (pgssEntry*)hash_seq_search(&hash_seq)) != NULL) {
         int len = entry->query_len;
 
-        if (fwrite(entry, offsetof(pgssEntry, mutex), 1, file) != 1 || fwrite(entry->query, 1, len, file) != len)
+        if (fwrite(entry, offsetof(pgssEntry, mutex), 1, file) != 1 || fwrite(entry->query, 1, len, file) != (size_t)len)
             goto error;
     }
 
@@ -748,7 +748,8 @@ static void pgss_ProcessUtility(Node* parsetree, const char* queryString, ParamL
         BufferUsage bufusage_start, bufusage;
         uint32 queryId;
 
-        bufusage_start = u_sess->instr_cxt.pg_buffer_usage->INSTR_TIME_SET_CURRENT(start);
+        bufusage_start = *(u_sess->instr_cxt.pg_buffer_usage);
+        INSTR_TIME_SET_CURRENT(start);
 
         nested_level++;
         PG_TRY();
@@ -1935,3 +1936,4 @@ static int comp_location(const void* a, const void* b)
     else
         return 0;
 }
+

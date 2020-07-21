@@ -286,5 +286,5 @@ extern int LWLockTranchesAllocated;
  * to LWLocks.  New code should instead use LWLock *.  However, for the
  * convenience of third-party code, we include the following typedef.
  */
-// typedef LWLock *LWLockId; // Uncomment it later. Now should disable to find bugs
+typedef LWLock *LWLockId; // Uncomment it later. Now should disable to find bugs
 #endif /* LWLOCK_H */
