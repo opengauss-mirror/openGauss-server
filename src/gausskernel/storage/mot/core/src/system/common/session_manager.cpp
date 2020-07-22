@@ -38,7 +38,7 @@ DECLARE_LOGGER(SessionManager, System)
 
 static void PrintActiveSession(SessionId sessionId, SessionContext* sessionContext)
 {
-    MOT_LOG_ERROR("Still active session: %u", sessionId);
+    MOT_LOG_WARN("Still active session: %u", sessionId);
 }
 
 bool SessionManager::Initialize(uint32_t nodeCount, uint32_t threadCount)
@@ -359,7 +359,7 @@ void SessionManager::DestroySessionContext(SessionContext* sessionContext)
 void SessionManager::ReportActiveSessions()
 {
     if (!m_sessionContextMap.empty()) {
-        MOT_LOG_PANIC("Attempting to Destroy MOT Engine while there are still %u active sessions",
+        MOT_LOG_WARN("Attempting to Destroy MOT Engine while there are still %u active sessions",
             (unsigned)m_sessionContextMap.size());
         m_sessionContextMap.for_each(PrintActiveSession);
     }

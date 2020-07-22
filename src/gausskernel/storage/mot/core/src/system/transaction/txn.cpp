@@ -570,7 +570,7 @@ void TxnManager::WriteDDLChanges()
             case DDL_ACCESS_TRUNCATE_TABLE:
                 indexes = (Index**)ddl_access->GetEntry();
                 table = indexes[0]->GetTable();
-                table->Lock();
+                table->WrLock();
                 table->m_rowCount = 0;
                 for (int i = 0; i < table->GetNumIndexes(); i++) {
                     index = indexes[i];
@@ -589,7 +589,7 @@ void TxnManager::WriteDDLChanges()
                 if (index->IsPrimaryKey())
                     break;
                 table = index->GetTable();
-                table->Lock();
+                table->WrLock();
                 table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
                 table->Unlock();
                 break;
@@ -1232,7 +1232,7 @@ RC TxnManager::CreateIndex(Table* table, Index* index, bool is_primary)
         // is should only be added on successful commit. Assuming that if
         // a client did a create index, all other clients are waiting on a lock
         // until the changes are either commited or aborted
-        table->Lock();  // for concurrent access
+        table->WrLock();  // for concurrent access
         if (table->GetNumIndexes() == MAX_NUM_INDEXES) {
             table->Unlock();
             MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,

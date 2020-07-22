@@ -402,10 +402,6 @@ public:
         MOTFdwStateSt* festate, MatchIndexArr* marr, int numClauses, bool setLocal = true);
     inline static int32_t AddParam(List** params, Expr* expr);
 
-    // ddl <> checkpoint sync
-    static int DdlCpTryLock();
-    static int DdlCpUnlock();
-
     static MOT::MOTEngine* m_engine;
     static bool m_initialized;
     static bool m_callbacks_initialized;

@@ -67,10 +67,21 @@ Table::~Table()
     if (m_rowPool) {
         ObjAllocInterface::FreeObjPool(&m_rowPool);
     }
+
+    int destroyRc = pthread_rwlock_destroy(&m_rwLock);
+    if (destroyRc != 0) {
+        MOT_LOG_ERROR("~Table: rwlock destroy failed (%d)", destroyRc);
+    }
 }
 
 bool Table::Init(const char* tableName, const char* longName, unsigned int fieldCnt, uint64_t tableExId)
 {
+    int initRc = pthread_rwlock_init(&m_rwLock, NULL);
+    if (initRc != 0) {
+        MOT_LOG_ERROR("failed to initialize Table %s, could not init rwlock (%d)", tableName, initRc);
+        return false;
+    }
+
     m_tableName.assign(tableName);
     m_longTableName.assign(longName);
 
@@ -676,7 +687,7 @@ void Table::PrintSchema()
 void Table::Truncate(TxnManager* txn)
 {
     uint32_t pid = txn->GetThdId();
-    m_mutex.lock();
+    (void)pthread_rwlock_wrlock(&m_rwLock);
 
     // first destroy secondary index data
     for (int i = 1; i < m_numIndexes; i++) {
@@ -696,7 +707,7 @@ void Table::Truncate(TxnManager* txn)
             m_longTableName.c_str());
     }
 
-    m_mutex.unlock();
+    (void)pthread_rwlock_unlock(&m_rwLock);
 }
 
 void Table::Compact(TxnManager* txn)
@@ -1039,7 +1050,7 @@ RC Table::DropImpl()
     if (m_numIndexes == 0)
         return res;
 
-    m_mutex.lock();
+    (void)pthread_rwlock_wrlock(&m_rwLock);
     do {
         m_secondaryIndexes.clear();
         MOT_LOG_DEBUG("DropImpl numIndexes = %d \n", m_numIndexes);
@@ -1056,7 +1067,7 @@ RC Table::DropImpl()
         }
         m_numIndexes = 0;
     } while (0);
-    m_mutex.unlock();
+    (void)pthread_rwlock_unlock(&m_rwLock);
     return res;
 }
 

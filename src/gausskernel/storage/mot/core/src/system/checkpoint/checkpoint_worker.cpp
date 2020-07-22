@@ -146,11 +146,9 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
 
     do {
         if (statusBit == !m_na) { /* has stable version */
-            if (!deleted && stableRow == nullptr)
+            if (stableRow == nullptr) {
                 break;
-            if (deleted && stableRow == nullptr)
-                break;
-            if (stableRow != nullptr) {
+            } else {
                 if (!Write(buffer, stableRow, fd)) {
                     wrote = -1;
                 } else {
@@ -172,13 +170,13 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
                     break;
                 }
                 sentinel->SetStableStatus(!m_na);
-                if (!Write(buffer, mainRow, fd))
+                if (!Write(buffer, mainRow, fd)) {
                     wrote = -1;  // we failed to write, set error
-                else
+                } else {
                     wrote = 1;
+                }
                 break;
-            }
-            if (stableRow != nullptr) { /* should not happen! */
+            } else { /* should not happen! */
                 wrote = -1;
                 m_cpManager.OnError(ErrCodes::CALC, "Calc logic error - stable row");
             }
@@ -190,19 +188,18 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
     return wrote;
 }
 
-bool CheckpointWorkerPool::GetTask(uint32_t& task)
+Table* CheckpointWorkerPool::GetTask()
 {
-    bool ret = false;
+    Table* table = nullptr;
+    m_tasksLock.lock();
     do {
-        m_tasksLock.lock();
         if (m_tasksList.empty())
             break;
-        task = m_tasksList.front();
+        table = m_tasksList.front();
         m_tasksList.pop_front();
-        ret = true;
     } while (0);
     m_tasksLock.unlock();
-    return ret;
+    return table;
 }
 
 void CheckpointWorkerPool::WorkerFunc()
@@ -232,22 +229,17 @@ void CheckpointWorkerPool::WorkerFunc()
         bool taskSucceeded = false;
         Table* table = nullptr;
 
-        if (m_cpManager.ShouldStop())
+        if (m_cpManager.ShouldStop()) {
             break;
+        }
 
-        bool haveWork = GetTask(tableId);
-        if (haveWork) {
+        table = GetTask();
+        if (table != nullptr) {
             int fd = -1;
 
             do {
                 uint32_t overallOps = 0;
-                table = GetTableManager()->GetTableSafe(tableId);
-                if (table == nullptr) {
-                    MOT_LOG_INFO(
-                        "CheckpointWorkerPool::workerFunc:Table %u does not exist - probably deleted already", tableId);
-                    break;
-                }
-
+                tableId = table->GetTableId();
                 exId = table->GetTableExId();
                 size_t tableSize = table->SerializeSize();
                 char* tableBuf = new (std::nothrow) char[tableSize];
@@ -438,16 +430,7 @@ void CheckpointWorkerPool::WorkerFunc()
                 }
             }
 
-            if (table != nullptr) {
-                table->Unlock();
-                m_cpManager.TaskDone(tableId, seg, taskSucceeded);
-            } else {
-                /* taskSucceeded is false, so this table won't be added to the map file. */
-                m_cpManager.TaskDone(tableId, seg, taskSucceeded);
-
-                /* Table is dropped, but we need to continue processing other tables. */
-                taskSucceeded = true;
-            }
+            m_cpManager.TaskDone(table, seg, taskSucceeded);
 
             if (!taskSucceeded) {
                 break;
