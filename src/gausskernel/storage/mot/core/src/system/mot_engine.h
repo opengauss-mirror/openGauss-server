@@ -272,21 +272,6 @@ public:
         return nullptr;
     }
 
-    int LockDDLForCheckpoint()
-    {
-        return pthread_mutex_lock(&m_DDLCheckpointGuard);
-    }
-
-    int TryLockDDLForCheckpoint()
-    {
-        return pthread_mutex_trylock(&m_DDLCheckpointGuard);
-    }
-
-    int UnlockDDLForCheckpoint()
-    {
-        return pthread_mutex_unlock(&m_DDLCheckpointGuard);
-    }
-
     /**
      * @brief Order the engine to write all of its redo log records to the log file.
      */
@@ -524,9 +509,6 @@ private:
     /** @var The commit sequence number handler (CSN). */
     CSNManager m_csnManager;
 
-    /** ddl <> checkpoint sync */
-    pthread_mutex_t m_DDLCheckpointGuard;
-
     /** @var Global flag for soft memory limit. */
     uint32_t m_softMemoryLimitReached;
 
@@ -575,7 +557,6 @@ private:
         INIT_TABLE_MANAGER_PHASE,
         INIT_SURROGATE_KEY_MANAGER_PHASE,
         INIT_GC_PHASE,
-        INIT_DDL_LOCK_PHASE,
         INIT_DEBUG_UTILS,
         INIT_CORE_DONE
     };

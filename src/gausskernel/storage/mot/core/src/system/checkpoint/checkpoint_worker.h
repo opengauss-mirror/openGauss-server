@@ -47,11 +47,11 @@ public:
     /**
      * @brief Checkpoint task completion callback
      * @param checkpointId The checkpoint's id.
-     * @param tableId The table's id.
+     * @param table The table's pointer.
      * @param numSegs number of segments written.
      * @param success Indicates a success or a failure.
      */
-    virtual void TaskDone(uint32_t tableId, uint32_t numSegs, bool success) = 0;
+    virtual void TaskDone(Table* table, uint32_t numSegs, bool success) = 0;
 
     /**
      * @brief Checks if the thread should terminate it work
@@ -77,7 +77,7 @@ public:
  */
 class CheckpointWorkerPool {
 public:
-    CheckpointWorkerPool(int n, bool b, std::list<uint32_t>& l, uint32_t s, uint64_t id, CheckpointManagerCallbacks& m)
+    CheckpointWorkerPool(int n, bool b, std::list<Table*>& l, uint32_t s, uint64_t id, CheckpointManagerCallbacks& m)
         : m_numWorkers(n), m_tasksList(l), m_checkpointId(id), m_na(b), m_cpManager(m), m_checkpointSegsize(s)
     {
         Start();
@@ -117,10 +117,10 @@ private:
     int Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, int tid);
 
     /**
-     * @brief Pops a task (table id) from the tasks queue.
-     * @return true if a task was fetched, false if the queue was empty.
+     * @brief Pops a task (table pointer) from the tasks queue.
+     * @return the address of the pop'd table, or nullptr if the queue was empty.
      */
-    bool GetTask(uint32_t& task);
+    Table* GetTask();
 
     /**
      * @brief Creates a checkpoint id for the current checkpoint
@@ -153,8 +153,8 @@ private:
 
     volatile std::atomic<uint32_t> m_numWorkers;
 
-    // Holds table IDs to checkpoint
-    std::list<uint32_t>& m_tasksList;
+    // Holds tables to checkpoint
+    std::list<Table*>& m_tasksList;
 
     // Guards tasksList pops
     std::mutex m_tasksLock;

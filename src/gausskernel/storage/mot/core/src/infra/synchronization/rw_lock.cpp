@@ -14,7 +14,7 @@
  * -------------------------------------------------------------------------
  *
  * rw_lock.cpp
- *    Implements a reader/writer lock used in the checkpoint manager.
+ *    Implements a reader/writer lock using spinlock.
  *
  * IDENTIFICATION
  *    src/gausskernel/storage/mot/core/src/infra/synchronization/rw_lock.cpp

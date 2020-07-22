@@ -25,7 +25,7 @@
 #include "table_manager.h"
 
 namespace MOT {
-IMPLEMENT_CLASS_LOGGER(TableManager, System)
+IMPLEMENT_CLASS_LOGGER(TableManager, System);
 
 bool TableManager::AddTable(Table* table)
 {
@@ -33,7 +33,6 @@ bool TableManager::AddTable(Table* table)
         "Adding table %s with external id: %" PRIu64, table->GetLongTableName().c_str(), table->GetTableExId());
     m_rwLock.WrLock();
     InternalTableMap::iterator it = m_tablesById.find(table->GetTableId());
-
     if (it != m_tablesById.end()) {
         m_rwLock.WrUnlock();
         MOT_LOG_ERROR(
@@ -54,7 +53,7 @@ void TableManager::ClearTablesThreadMemoryCache()
     InternalTableMap::iterator it = m_tablesById.begin();
     while (it != m_tablesById.end()) {
         // lock table to prevent concurrent ddl and truncate operations
-        it->second->Lock();
+        it->second->RdLock();
         it->second->ClearThreadMemoryCache();
         it->second->Unlock();
         it++;

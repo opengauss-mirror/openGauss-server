@@ -50,7 +50,6 @@ constexpr const char* MOTConfiguration::DEFAULT_CHECKPOINT_DIR;
 constexpr const char* MOTConfiguration::DEFAULT_CHECKPOINT_SEGSIZE;
 constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_SEGSIZE_BYTES;
 constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_WORKERS;
-constexpr bool MOTConfiguration::DEFAULT_VALIDATE_CHECKPOINT;
 // recovery configuration members
 constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_RECOVERY_WORKERS;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_LOG_RECOVERY_STATS;
@@ -390,7 +389,6 @@ MOTConfiguration::MOTConfiguration()
       m_checkpointDir(DEFAULT_CHECKPOINT_DIR),
       m_checkpointSegThreshold(DEFAULT_CHECKPOINT_SEGSIZE_BYTES),
       m_checkpointWorkers(DEFAULT_CHECKPOINT_WORKERS),
-      m_validateCheckpoint(DEFAULT_VALIDATE_CHECKPOINT),
       m_checkpointRecoveryWorkers(DEFAULT_CHECKPOINT_RECOVERY_WORKERS),
       m_abortBufferEnable(true),
       m_preAbort(true),
@@ -485,7 +483,6 @@ bool MOTConfiguration::SetFlag(const std::string& name, const std::string& value
     } else if (ParseString(name, "checkpoint_dir", value, &m_checkpointDir)) {
     } else if (ParseUint32(name, "checkpoint_segsize", value, &m_checkpointSegThreshold)) {
     } else if (ParseUint32(name, "checkpoint_workers", value, &m_checkpointWorkers)) {
-    } else if (ParseBool(name, "validate_checkpoint", value, &m_validateCheckpoint)) {
     } else if (ParseUint32(name, "checkpoint_recovery_workers", value, &m_checkpointRecoveryWorkers)) {
     } else if (ParseBool(name, "abort_buffer_enable", value, &m_abortBufferEnable)) {
     } else if (ParseBool(name, "pre_abort", value, &m_preAbort)) {
@@ -647,7 +644,6 @@ void MOTConfiguration::LoadConfig()
     UPDATE_STRING_CFG(m_checkpointDir, "checkpoint_dir", DEFAULT_CHECKPOINT_DIR);
     UPDATE_MEM_CFG(m_checkpointSegThreshold, "checkpoint_segsize", DEFAULT_CHECKPOINT_SEGSIZE, 1);
     UPDATE_INT_CFG(m_checkpointWorkers, "checkpoint_workers", DEFAULT_CHECKPOINT_WORKERS);
-    UPDATE_CFG(m_validateCheckpoint, "validate_checkpoint", DEFAULT_VALIDATE_CHECKPOINT);
 
     // Recovery configuration
     UPDATE_INT_CFG(m_checkpointRecoveryWorkers, "checkpoint_recovery_workers", DEFAULT_CHECKPOINT_RECOVERY_WORKERS);

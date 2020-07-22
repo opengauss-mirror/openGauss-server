@@ -153,9 +153,6 @@ public:
     /** @var number of worker threads to spawn to perform checkpoint. */
     uint32_t m_checkpointWorkers;
 
-    /** @var Do checkpoints bit validations - use it for debugging only */
-    bool m_validateCheckpoint;
-
     /**********************************************************************/
     // Recovery configuration
     /**********************************************************************/
@@ -429,9 +426,6 @@ private:
 
     /** @var Default number of worker threads to spawn */
     static constexpr uint32_t DEFAULT_CHECKPOINT_WORKERS = 3;
-
-    /** @var Default enable checkpoint validation. */
-    static constexpr bool DEFAULT_VALIDATE_CHECKPOINT = false;
 
     // default recovery configuration
     /** @var Default number of workers used in recovery from checkpoint. */

@@ -63,11 +63,13 @@ public:
      */
     inline RC DropTable(Table* table, SessionContext* sessionContext)
     {
+        if (table == nullptr) {
+            return RC_ERROR;
+        }
+
         MOT_LOG_INFO("Dropping table %s", table->GetLongTableName().c_str());
         RC status = DropTableInternal(table, sessionContext);
-        if (table != nullptr) {
-            delete table;
-        }
+        delete table;
         return status;
     }
 
@@ -82,7 +84,6 @@ public:
         Table* table = nullptr;
         m_rwLock.RdLock();
         InternalTableMap::iterator it = m_tablesById.find(tableId);
-
         if (it != m_tablesById.end())
             table = it->second;
 
@@ -93,20 +94,19 @@ public:
     /**
      * @brief Retrieves a locked table from the engine. Caller is responsible for unlocking the table when done using
      * it, by calling @ref Table::Unlock.
-     * @param tableId The internal (engine-given) identifier of the table to retrieve.
+     * @param tableId The external (envelope) identifier of the table to retrieve.
      * @return The table object or null pointer if not found.
      * @note It is assumed that the envelope guards against concurrent removal of the table.
      */
-    inline Table* GetTableSafe(InternalTableId tableId)
+    inline Table* GetTableSafeByExId(ExternalTableId tableId)
     {
         Table* table = nullptr;
         m_rwLock.RdLock();
-        InternalTableMap::iterator it = m_tablesById.find(tableId);
-
-        if (it != m_tablesById.end()) {
+        ExternalTableMap::iterator it = m_tablesByExId.find(tableId);
+        if (it != m_tablesByExId.end()) {
             table = it->second;
             if (table != nullptr) {
-                table->Lock();
+                table->RdLock();
             }
         }
         m_rwLock.RdUnlock();
@@ -124,10 +124,10 @@ public:
         InternalTableId internalId, ExternalTableId externalId, const std::string& name, const std::string& longName)
     {
         bool ret = false;
-        Table* table = GetTableSafe(internalId);
+        Table* table = GetTableSafeByExId(externalId);
         if (table != nullptr) {
             ret = ((table->GetTableName() == name) && (table->GetLongTableName() == longName) &&
-                   (table->GetTableExId() == externalId));
+                   (table->GetTableId() == internalId));
             table->Unlock();
         }
         return ret;
@@ -179,18 +179,20 @@ public:
     }
 
     /**
-     * @brief Copies the internal identifiers of all tables into a list.
-     * @param[out] idQueue Receives all the table identifiers.
-     * @return The number of table identifiers copied.
+     * @brief Adds the pointers of all tables into a list.
+     * @param[out] tablesQueue Receives all the tables.
+     * @return The number of tables added.
      */
-    inline uint32_t AddTableIdsToList(std::list<uint32_t>& idQueue)
+    inline uint32_t AddTablesToList(std::list<Table*>& tablesQueue)
     {
         m_rwLock.RdLock();
         for (InternalTableMap::iterator it = m_tablesById.begin(); it != m_tablesById.end(); ++it) {
-            idQueue.push_back(it->first);
+            tablesQueue.push_back(it->second);
+            // lock the table, so it won't get deleted/truncated
+            it->second->RdLock();
         }
         m_rwLock.RdUnlock();
-        return (uint32_t)idQueue.size();
+        return (uint32_t)tablesQueue.size();
     }
 
     /** @brief Clears all object-pool table caches for the current thread. */

@@ -532,10 +532,10 @@ private:
     GcManager* m_gcSession;
 
     /** @var Checkpoint phase captured during transaction start. */
-    CheckpointPhase m_checkpointPhase;
+    volatile CheckpointPhase m_checkpointPhase;
 
     /** @var Checkpoint not available capture during being transaction. */
-    bool m_checkpointNABit;
+    volatile bool m_checkpointNABit;
 
     /** @var CSN taken at the commit stage. */
     uint64_t m_csn;

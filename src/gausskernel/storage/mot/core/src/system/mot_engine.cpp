@@ -367,11 +367,6 @@ bool MOTEngine::InitializeCoreServices()
         CHECK_INIT_STATUS(result, "Failed to Initialize garbage collection sub-system");
         m_initCoreStack.push(INIT_GC_PHASE);
 
-        int rc = pthread_mutex_init(&m_DDLCheckpointGuard, nullptr);
-        result = (rc == 0);
-        CHECK_SYS_INIT_STATUS(rc, pthread_mutex_init, "Failed to Initialize global DDL lock");
-        m_initCoreStack.push(INIT_DDL_LOCK_PHASE);
-
         result = InitializeDebugUtils();
         CHECK_INIT_STATUS(result, "Failed to Initialize debug utilities");
         m_initCoreStack.push(INIT_DEBUG_UTILS);
@@ -452,10 +447,6 @@ void MOTEngine::DestroyCoreServices()
         switch (m_initCoreStack.top()) {
             case INIT_DEBUG_UTILS:
                 DestroyDebugUtils();
-                break;
-
-            case INIT_DDL_LOCK_PHASE:
-                pthread_mutex_destroy(&m_DDLCheckpointGuard);
                 break;
 
             case INIT_GC_PHASE:
@@ -768,6 +759,13 @@ bool MOTEngine::InitializeCheckpointManager()
     if (m_checkpointManager == nullptr) {
         MOT_REPORT_ERROR(
             MOT_ERROR_OOM, "MOT Engine Startup", "Failed to allocate memory for checkpoint manager object");
+        return false;
+    }
+
+    if (!m_checkpointManager->Initialize()) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "MOT Engine Startup", "Failed to initialize checkpoint manager");
+        delete m_checkpointManager;
+        m_checkpointManager = nullptr;
         return false;
     }
 
