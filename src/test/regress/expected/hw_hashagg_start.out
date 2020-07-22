@@ -76,3 +76,27 @@ select count(*) from TMP_ASSET_MAX_BELONG;
  200000
 (1 row)
 
+explain (analyze on, detail on, costs off)
+SELECT Party_Id, Zone_Num, Asset_Max_Belong_Org_Num FROM(SELECT 
+   T1.Party_Id                                            
+  ,T1.Zone_Num                                            
+  ,T1.Asset_Max_Belong_Org_Num                                         
+   ,ROW_NUMBER() OVER(PARTITION BY T1.Party_Id) AS QUA_ROW_NUM_1 
+FROM TMP_CUST_ASSET_SUM_1 T1 group by 1,2,3
+)AA WHERE QUA_ROW_NUM_1 <= 1
+;
+--?.*QUERY PLAN.*
+--?------------------------------------------------------.*
+--? Subquery Scan on aa (actual time=.* rows=.* loops=.*)
+   Filter: (aa.qua_row_num_1 <= 1)
+--?   ->  WindowAgg (actual time=.* rows=.* loops=.*)
+--?         ->  Sort (actual time=.* rows=.* loops=.*)
+               Sort Key: t1.party_id
+               Sort Method: external merge  Memory: 4704kB
+--?               ->  HashAggregate (actual time=.* rows=.* loops=.*)
+                     Group By Key: t1.party_id, t1.zone_num, t1.asset_max_belong_org_num
+ Temp File Num: 512
+--?                     ->  Seq Scan on tmp_cust_asset_sum_1 t1 (actual time=.* rows=.* loops=.*)
+--? Total runtime: .* ms
+(11 rows)
+
