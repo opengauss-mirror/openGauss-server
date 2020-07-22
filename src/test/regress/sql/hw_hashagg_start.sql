@@ -59,3 +59,13 @@ FROM TMP_CUST_ASSET_SUM_1 T1 group by 1,2,3
 ;
 
 select count(*) from TMP_ASSET_MAX_BELONG;
+
+explain (analyze on, detail on, costs off)
+SELECT Party_Id, Zone_Num, Asset_Max_Belong_Org_Num FROM(SELECT 
+   T1.Party_Id                                            
+  ,T1.Zone_Num                                            
+  ,T1.Asset_Max_Belong_Org_Num                                         
+   ,ROW_NUMBER() OVER(PARTITION BY T1.Party_Id) AS QUA_ROW_NUM_1 
+FROM TMP_CUST_ASSET_SUM_1 T1 group by 1,2,3
+)AA WHERE QUA_ROW_NUM_1 <= 1
+;
