@@ -46,6 +46,7 @@ install: install_mysql_fdw install_oracle_fdw
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C src/distribute/kernel/extension/packages $@
 	$(MAKE) -C contrib/pagehack $@
+	$(MAKE) -C contrib/pg_stat_statements $@
 	$(MAKE) -C contrib/pg_xlogdump $@
 	$(MAKE) -C contrib/gsredistribute $@
 	$(MAKE) -C src/distribute/kernel/extension/dimsearch $@
@@ -53,6 +54,7 @@ install: install_mysql_fdw install_oracle_fdw
 	+@echo "PostgreSQL installation complete."
 else
 install: install_mysql_fdw install_oracle_fdw
+	$(MAKE) -C contrib/pg_stat_statements $@
 	+@echo "openGauss installation complete."
 endif
 
