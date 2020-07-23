@@ -81,12 +81,12 @@ my $funcName; #[1]
 my $nargs;   #[2]
 my $strict;  #[3]
 my $retset;  #[4]
-my $prosrc;  #[25]
+my $prosrc;  #[24]
 my $prorettype; #[6]
 		
 foreach my $row (@{ $catalog{builtindata} })
 {
-	if ($row =~ /_0\(([0-9A-Z]+)\),\s+_1\(\"(\S+)\"\),\s+_2\((\d+)\),\s+_3\((\w+)\),\s+_4\((\w+)\),\s+.+?_6\((\d+)\),.+?_25\(\"(\w+)\"\),/)
+	if ($row =~ /_0\(([0-9A-Z]+)\),\s+_1\(\"(\S+)\"\),\s+_2\((\d+)\),\s+_3\((\w+)\),\s+_4\((\w+)\),\s+.+?_6\((\d+)\),.+?_24\(\"(\w+)\"\),/)
 	{
 		$foid = $1;
 		$funcName = $2;

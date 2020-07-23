@@ -3198,7 +3198,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     proc = (Form_pg_proc)GETSTRUCT(proctup);
     name = NameStr(proc->proname);
 
-    if (proc->proisagg) {
+    if (PROC_IS_AGG(proc->prokind)) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("\"%s\" is an aggregate function", name)));
     }
     /* Need its pg_language tuple for the language name */
@@ -3223,7 +3223,7 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
     /* Emit some miscellaneous options on one line */
     oldlen = buf.len;
 
-    if (proc->proiswindow) {
+    if (PROC_IS_WIN(proc->prokind)) {
         appendStringInfoString(&buf, " WINDOW");
     }
     switch (proc->provolatile) {
@@ -3454,7 +3454,7 @@ static int print_function_arguments(StringInfo buf, HeapTuple proctup, bool prin
     }
 
     /* Check for special treatment of ordered-set aggregates */
-    if (proc->proisagg) {
+    if (PROC_IS_AGG(proc->prokind)) {
         Oid proc_tup_oid;
         HeapTuple agg_tup;
         Form_pg_aggregate agg_form;

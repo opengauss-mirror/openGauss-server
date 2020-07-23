@@ -54,31 +54,30 @@ typedef struct {
     float4 prorows;       /* [11] estimated # of rows out (if proretset) */
     Oid provariadic;      /* [12] element type of variadic array, or 0 */
     regproc protransform; /* [13] transforms calls to it during planning */
-    bool proisagg;        /* [14] is it an aggregate? */
-    bool proiswindow;     /* [15] is it a window function? */
-    bool prosecdef;       /* [16] security definer */
-    bool proleakproof;    /* [17] is it a leak-proof function? */
-    char provolatile;     /* [18] see PROVOLATILE_ categories below */
-    int2 pronargdefaults; /* [19] number of arguments with defaults */
+    char prokind;         /* [14] */
+    bool prosecdef;       /* [15] security definer */
+    bool proleakproof;    /* [16] is it a leak-proof function? */
+    char provolatile;     /* [17] see PROVOLATILE_ categories below */
+    int2 pronargdefaults; /* [18] number of arguments with defaults */
 
     /* variable-length fields start here */
-    ArrayOid proargtypes; /* [20] parameter types (excludes OUT params) */
+    ArrayOid proargtypes; /* [19] parameter types (excludes OUT params) */
 
     /* nullable fields start here, they are defined by pointer, if one of them
      * is null pointer, it means it has SQL NULL value */
-    ArrayOid* proallargtypes;    /* [21] all param types (NULL if IN only) */
-    ArrayChar* proargmodes;      /* [22] parameter modes (NULL if IN only) */
-    ArrayCStr* proargnames;      /* [23] parameter names (NULL if no names) */
-    const char* proargdefaults;  /* [24] list of expression trees for argument defaults (NULL if none) */
-    const char* prosrc;          /* [25] procedure source text */
-    const char* probin;          /* [26] secondary procedure info (can be NULL) */
-    ArrayCStr* proconfig;        /* [27] procedure-local GUC settings */
-    ArrayAcl* proacl;            /* [28] access permissions */
-    ArrayInt2* prodefaultargpos; /* [29] */
-    bool* fencedmode;            /* [30] */
-    bool* proshippable; /* [31] if provolatile is not 'i', proshippable will determine if the func can be shipped */
-    bool* propackage;   /* [32] */
-    const char* descr;  /* [33] description */
+    ArrayOid* proallargtypes;    /* [20] all param types (NULL if IN only) */
+    ArrayChar* proargmodes;      /* [21] parameter modes (NULL if IN only) */
+    ArrayCStr* proargnames;      /* [22] parameter names (NULL if no names) */
+    const char* proargdefaults;  /* [23] list of expression trees for argument defaults (NULL if none) */
+    const char* prosrc;          /* [24] procedure source text */
+    const char* probin;          /* [25] secondary procedure info (can be NULL) */
+    ArrayCStr* proconfig;        /* [26] procedure-local GUC settings */
+    ArrayAcl* proacl;            /* [27] access permissions */
+    ArrayInt2* prodefaultargpos; /* [28] */
+    bool* fencedmode;            /* [29] */
+    bool* proshippable; /* [30] if provolatile is not 'i', proshippable will determine if the func can be shipped */
+    bool* propackage;   /* [31] */
+    const char* descr;  /* [32] description */
 } Builtin_func;
 
 /* The function has the same names are put in one group */
@@ -114,20 +113,19 @@ static_assert(sizeof(NULL) == sizeof(void*), "NULL must be a 8 byte-length point
 #define _11(rows) _SetField(prorows, rows)
 #define _12(vari_oid) _SetField(provariadic, vari_oid)
 #define _13(tansf_oid) _SetField(protransform, tansf_oid)
-#define _14(is_agg) _SetField(proisagg, is_agg)
-#define _15(is_window) _SetField(proiswindow, is_window)
-#define _16(is_secdef) _SetField(prosecdef, is_secdef)
-#define _17(is_leakproof) _SetField(proleakproof, is_leakproof)
+#define _14(pro_kind) _SetField(prokind, pro_kind)
+#define _15(is_secdef) _SetField(prosecdef, is_secdef)
+#define _16(is_leakproof) _SetField(proleakproof, is_leakproof)
 
 /* the set provolatile field, 'i', 's', 'v' */
-#define _18(volt_type) _SetField(provolatile, volt_type)
+#define _17(volt_type) _SetField(provolatile, volt_type)
 
-#define _19(nargdefaults) _SetField(pronargdefaults, nargdefaults)
+#define _18(nargdefaults) _SetField(pronargdefaults, nargdefaults)
 
 /* Set the value for proargtypes, which is an array, The argument cnt of the Macro
  * means the number of elements that are used to initialize the array,
  * e.g., _20(3, oid1, oid2, oid3), means the array field hash 3 elements oid1, oid2, and oid3 */
-#define _20(cnt, ...) _SetField(proargtypes, MakeArrayOid(cnt, __VA_ARGS__))
+#define _19(cnt, ...) _SetField(proargtypes, MakeArrayOid(cnt, __VA_ARGS__))
 
 /* The following Macros are used for initializing nullable fields.
  * For an array field, its initializer is like _xx(ind_cnt, ...), e.g., _21, _22,
@@ -141,30 +139,30 @@ static_assert(sizeof(NULL) == sizeof(void*), "NULL must be a 8 byte-length point
  * _xx(fvalue): means the field has the value *fvalue*
  * */
 /* Set the proallargtypes field. The input must be an array of Oids, e.g., _21(4, oid1, oid2, oid3, oid4) */
-#define _21(ind_cnt, ...) _SetPointerField(proallargtypes, ind_cnt, MakeArrayOidPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
+#define _20(ind_cnt, ...) _SetPointerField(proallargtypes, ind_cnt, MakeArrayOidPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
 
 /* Set the proargmodes field, The input must be an array of chars: 'i', 'o', 'b', 'v', 't'
  * the usage is: _22(3, 'i', 'b', 'o') */
-#define _22(ind_cnt, ...) _SetPointerField(proargmodes, ind_cnt, MakeArrayCharPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
+#define _21(ind_cnt, ...) _SetPointerField(proargmodes, ind_cnt, MakeArrayCharPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
 
 /* The input must be an array of c-string, e.g., _23(3, "argname1", "argname2", "argname3") */
-#define _23(ind_cnt, ...) _SetPointerField(proargnames, ind_cnt, MakeArrayCStrPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
+#define _22(ind_cnt, ...) _SetPointerField(proargnames, ind_cnt, MakeArrayCStrPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
 
-#define _24(arg_default_expr_str) _SetField(proargdefaults, arg_default_expr_str)
-#define _25(proc_src) _SetField(prosrc, proc_src)
-#define _26(bin_info) _SetField(probin, bin_info)
+#define _23(arg_default_expr_str) _SetField(proargdefaults, arg_default_expr_str)
+#define _24(proc_src) _SetField(prosrc, proc_src)
+#define _25(bin_info) _SetField(probin, bin_info)
 
-#define _27(ind_cnt, ...) _SetPointerField(proconfig, ind_cnt, MakeArrayCStrPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
-#define _28(ind_cnt, ...) _SetPointerField(proacl, ind_cnt, MakeArrayInt4Ptr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
-#define _29(ind_cnt, ...) \
+#define _26(ind_cnt, ...) _SetPointerField(proconfig, ind_cnt, MakeArrayCStrPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
+#define _27(ind_cnt, ...) _SetPointerField(proacl, ind_cnt, MakeArrayInt4Ptr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
+#define _28(ind_cnt, ...) \
     _SetPointerField(prodefaultargpos, ind_cnt, MakeArrayInt2Ptr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
 
 /* .fencedmode = ((ind_fmode) == NVL ? NULL : (bool[1]) { ind_fmode })  */
-#define _30(ind_fmode) _SetPointerField(fencedmode, ind_fmode, MakeSingleValuePtr(bool, ind_fmode))
-#define _31(ind_shippable) _SetPointerField(proshippable, ind_shippable, MakeSingleValuePtr(bool, ind_shippable))
-#define _32(ind_is_pkg) _SetPointerField(propackage, ind_is_pkg, MakeSingleValuePtr(bool, ind_is_pkg))
+#define _29(ind_fmode) _SetPointerField(fencedmode, ind_fmode, MakeSingleValuePtr(bool, ind_fmode))
+#define _30(ind_shippable) _SetPointerField(proshippable, ind_shippable, MakeSingleValuePtr(bool, ind_shippable))
+#define _31(ind_is_pkg) _SetPointerField(propackage, ind_is_pkg, MakeSingleValuePtr(bool, ind_is_pkg))
 
-#define _33(desc_str) _SetField(descr, desc_str)
+#define _32(desc_str) _SetField(descr, desc_str)
 /* Use Marcos _index() to initialize a built-in function, the indices between 0 ~ 20 are necessary,
  * and indices between 21 ~ 32 are optional */
 #define AddBuiltinFunc(...) \

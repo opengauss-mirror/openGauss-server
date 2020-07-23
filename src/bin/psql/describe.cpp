@@ -101,7 +101,7 @@ bool describeAggregates(const char* pattern, bool verbose, bool showSystem)
         "  pg_catalog.obj_description(p.oid, 'pg_proc') as \"%s\"\n"
         "FROM pg_catalog.pg_proc p\n"
         "     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace\n"
-        "WHERE p.proisagg\n",
+        "WHERE p.prokind = 'a'\n",
         gettext_noop("Description"));
 
     if (!showSystem && (pattern == NULL))
@@ -264,8 +264,8 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
             "  pg_catalog.pg_get_function_result(p.oid) as \"%s\",\n"
             "  pg_catalog.pg_get_function_arguments(p.oid) as \"%s\",\n"
             " CASE\n"
-            "  WHEN p.proisagg THEN '%s'\n"
-            "  WHEN p.proiswindow THEN '%s'\n"
+            "  WHEN p.prokind = 'a' THEN '%s'\n"
+            "  WHEN p.prokind = 'w' THEN '%s'\n"
             "  WHEN p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype THEN '%s'\n"
             "  ELSE '%s'\n"
             "END as \"%s\"",
@@ -311,7 +311,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
             "    ), ', ')\n"
             "  END AS \"%s\",\n"
             "  CASE\n"
-            "    WHEN p.proisagg THEN '%s'\n"
+            "    WHEN p.prokind = 'a' THEN '%s'\n"
             "    WHEN p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype THEN '%s'\n"
             "    ELSE '%s'\n"
             "  END AS \"%s\"",
@@ -328,7 +328,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
             "  pg_catalog.format_type(p.prorettype, NULL) as \"%s\",\n"
             "  pg_catalog.oidvectortypes(p.proargtypes) as \"%s\",\n"
             "  CASE\n"
-            "    WHEN p.proisagg THEN '%s'\n"
+            "    WHEN p.prokind = 'a' THEN '%s'\n"
             "    WHEN p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype THEN '%s'\n"
             "    ELSE '%s'\n"
             "  END AS \"%s\"",
@@ -384,7 +384,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
                 appendPQExpBuffer(&buf, "WHERE ");
                 have_where = true;
             }
-            appendPQExpBuffer(&buf, "NOT p.proisagg\n");
+            appendPQExpBuffer(&buf, "p.prokind != 'a'\n");
         }
         if (!showTrigger) {
             if (have_where) {
@@ -402,7 +402,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
                 appendPQExpBuffer(&buf, "WHERE ");
                 have_where = true;
             }
-            appendPQExpBuffer(&buf, "NOT p.proiswindow\n");
+            appendPQExpBuffer(&buf, "p.prokind != 'w'\n");
         }
     } else {
         bool needs_or = false;
@@ -411,7 +411,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
         have_where = true;
         /* Note: at least one of these must be true ... */
         if (showAggregate) {
-            appendPQExpBuffer(&buf, "p.proisagg\n");
+            appendPQExpBuffer(&buf, "p.prokind = 'a'\n");
             needs_or = true;
         }
         if (showTrigger) {
@@ -425,7 +425,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
             if (needs_or) {
                 appendPQExpBuffer(&buf, "       OR ");
             }
-            appendPQExpBuffer(&buf, "p.proiswindow\n");
+            appendPQExpBuffer(&buf, "p.prokind = 'w'\n");
             needs_or = true;
         }
         appendPQExpBuffer(&buf, "      )\n");

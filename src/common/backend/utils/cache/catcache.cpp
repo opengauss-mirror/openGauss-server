@@ -1825,8 +1825,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     values[Anum_pg_proc_prorows - 1] = Float4GetDatum(func->prorows);
     values[Anum_pg_proc_provariadic - 1] = ObjectIdGetDatum(variadicType);
     values[Anum_pg_proc_protransform - 1] = ObjectIdGetDatum(func->protransform);
-    values[Anum_pg_proc_proisagg - 1] = BoolGetDatum(func->proisagg);
-    values[Anum_pg_proc_proiswindow - 1] = BoolGetDatum(func->proiswindow);
+    values[Anum_pg_proc_prokind - 1] = CharGetDatum(func->prokind);
     values[Anum_pg_proc_prosecdef - 1] = BoolGetDatum(func->prosecdef);
     values[Anum_pg_proc_proleakproof - 1] = BoolGetDatum(func->proleakproof);
     values[Anum_pg_proc_proisstrict - 1] = BoolGetDatum(func->strict);
@@ -2009,7 +2008,7 @@ List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, Li
 
 TupleDesc CreateTupDesc4BuiltinFuncWithOid()
 {
-    TupleDesc tupdesc = CreateTemplateTupleDesc(32, false);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(31, false);
 
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "proname", NAMEOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "pronamespace", OIDOID, -1, 0);
@@ -2019,30 +2018,29 @@ TupleDesc CreateTupDesc4BuiltinFuncWithOid()
     TupleDescInitEntry(tupdesc, (AttrNumber)6, "prorows", FLOAT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)7, "provariadic", OIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)8, "protransform", REGPROCOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)9, "proisagg", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)10, "proiswindow", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)11, "prosecdef", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)12, "proleakproof", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)13, "proisstrict", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)14, "proretset", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)15, "provolatile", CHAROID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)16, "pronargs", INT2OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)17, "pronargdefaults", INT2OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)18, "prorettype", OIDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)19, "proargtypes", OIDVECTOROID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)20, "proallargtypes", INT4ARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)21, "proargmodes", CHARARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)22, "proargnames", TEXTARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)23, "proargdefaults", PGNODETREEOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)24, "prosrc", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)25, "probin", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)26, "proconfig", TEXTARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)27, "proacl", ACLITEMARRAYOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)28, "prodefaultargpos", INT2VECTOROID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)29, "fencedmode", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)30, "proshippable", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)31, "propackage", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)32, "oid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)9, "prokind", CHAROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)10, "prosecdef", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)11, "proleakproof", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)12, "proisstrict", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)13, "proretset", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)14, "provolatile", CHAROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)15, "pronargs", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)16, "pronargdefaults", INT2OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)17, "prorettype", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)18, "proargtypes", OIDVECTOROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)19, "proallargtypes", INT4ARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)20, "proargmodes", CHARARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)21, "proargnames", TEXTARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)22, "proargdefaults", PGNODETREEOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)23, "prosrc", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)24, "probin", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)25, "proconfig", TEXTARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)26, "proacl", ACLITEMARRAYOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)27, "prodefaultargpos", INT2VECTOROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)28, "fencedmode", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)29, "proshippable", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)30, "propackage", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)31, "oid", OIDOID, -1, 0);
 
     return tupdesc;
 }

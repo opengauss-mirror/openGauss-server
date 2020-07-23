@@ -366,8 +366,8 @@ WHERE
 UNION ALL
 SELECT
 	l.objoid, l.classoid, l.objsubid,
-	CASE WHEN pro.proisagg = true THEN 'aggregate'::text
-	     WHEN pro.proisagg = false THEN 'function'::text
+	CASE WHEN pro.prokind = 'a' THEN 'aggregate'::text
+	     WHEN pro.prokind != 'a' THEN 'function'::text
 	END AS objtype,
 	pro.pronamespace AS objnamespace,
 	CASE WHEN pg_function_is_visible(pro.oid)

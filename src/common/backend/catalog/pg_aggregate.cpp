@@ -299,8 +299,7 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, Oid* aggArgTypes, in
         InvalidOid,                           /* no validator */
         "aggregate_dummy",                    /* placeholder proc */
         NULL,                                 /* probin */
-        true,                                 /* isAgg */
-        false,                                /* isWindowFunc */
+        PROKIND_AGGREGATE,                    /* prokind */
         false,                                /* security invoker (currently not
                                                * definable for agg) */
         false,                                /* isLeakProof */
