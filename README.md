@@ -472,6 +472,7 @@ Compilation log: **make_compile.log**
    export PATH=$GAUSSHOME/bin:$GCC_PATH/gcc/bin:$PATH
 
    ```
+   if you want to use xml data type,you also need to export LD_LIBRARY_PATH=$BINARYLIBS/dependency/***/libobs/comm/lib:$LD_LIBRARY_PATH
 
    For example, on CENTOS X86-64 platform, binarylibs directory is placed as the sibling directory of openGauss-server directory.
    The following command can be executed under openGauss-server directory.
@@ -515,6 +516,7 @@ Compilation log: **make_compile.log**
    > 4. If **binarylibs** is moved to **openGauss-server** or a soft link to **binarylibs** is created in **openGauss-server**, you do not need to specify the **--3rd** parameter. However, if you do so, please note that the file is easy to be deleted by the `git clean` command.
    > 5. To build with mysql_fdw, add **--enable-mysql-fdw** when configure. Note that before build mysql_fdw, MariaDB's C client library is needed.
    > 6. To build with oracle_fdw, add **--enable-oracle-fdw** when configure. Note that before build oracle_fdw, Oracle's C client library is needed.
+   > 7. To build with xml data type, add **--with-libxml** when configure. If this error occurs "configure: error: library 'xml2' (version >= 2.6.23) is required for XML support", you can fix it with command "yum install -y libxml2-devel".
 
 4. Run the following commands to compile openGauss:
 

@@ -1,3 +1,4 @@
+\set VERBOSITY terse
 CREATE TABLE xmltest (
     id int,
     data xml
@@ -38,8 +39,15 @@ SELECT xmlelement(name element,
                   xmlattributes ('unnamed and wrong'));
 
 SELECT xmlelement(name element, xmlelement(name nested, 'stuff'));
+CREATE TABLE xml_emp (name varchar(12),age int,salary int);
+INSERT INTO xml_emp VALUES ('sharon',25,1000);
+INSERT INTO xml_emp VALUES ('sam',30,2000);
+INSERT INTO xml_emp VALUES ('bill',20,1000);
+INSERT INTO xml_emp VALUES ('jeff',23,600);
+INSERT INTO xml_emp VALUES ('cim',30,400);
+INSERT INTO xml_emp VALUES ('linda',19,100);
 
-SELECT xmlelement(name employee, xmlforest(name, age, salary as pay)) FROM emp;
+SELECT xmlelement(name employee, xmlforest(name, age, salary as pay)) FROM xml_emp;
 
 SELECT xmlelement(name duplicate, xmlattributes(1 as a, 2 as b, 3 as a));
 
@@ -132,7 +140,7 @@ SELECT '<>' IS NOT DOCUMENT;
 
 SELECT xmlagg(data) FROM xmltest;
 SELECT xmlagg(data) FROM xmltest WHERE id > 10;
-SELECT xmlelement(name employees, xmlagg(xmlelement(name name, name))) FROM emp;
+SELECT xmlelement(name employees, xmlagg(xmlelement(name name, name))) FROM xml_emp;
 
 
 -- Check mapping SQL identifier to XML name
@@ -157,7 +165,7 @@ EXECUTE foo ('good');
 CREATE VIEW xmlview1 AS SELECT xmlcomment('test');
 CREATE VIEW xmlview2 AS SELECT xmlconcat('hello', 'you');
 CREATE VIEW xmlview3 AS SELECT xmlelement(name element, xmlattributes (1 as ":one:", 'deuce' as two), 'content&');
-CREATE VIEW xmlview4 AS SELECT xmlelement(name employee, xmlforest(name, age, salary as pay)) FROM emp;
+CREATE VIEW xmlview4 AS SELECT xmlelement(name employee, xmlforest(name, age, salary as pay)) FROM xml_emp;
 CREATE VIEW xmlview5 AS SELECT xmlparse(content '<abc>x</abc>');
 CREATE VIEW xmlview6 AS SELECT xmlpi(name foo, 'bar');
 CREATE VIEW xmlview7 AS SELECT xmlroot(xml '<foo/>', version no value, standalone yes);
@@ -171,11 +179,9 @@ SELECT table_name, view_definition FROM information_schema.views
 
 SELECT xpath('/value', data) FROM xmltest;
 SELECT xpath(NULL, NULL) IS NULL FROM xmltest;
-SELECT xpath('', '<!-- error -->');
+SELECT xpath(' ', '<!-- error -->');
 SELECT xpath('//text()', '<local:data xmlns:local="http://127.0.0.1"><local:piece id="1">number one</local:piece><local:piece id="2" /></local:data>');
 SELECT xpath('//loc:piece/@id', '<local:data xmlns:local="http://127.0.0.1"><local:piece id="1">number one</local:piece><local:piece id="2" /></local:data>', ARRAY[ARRAY['loc', 'http://127.0.0.1']]);
-SELECT xpath('//loc:piece', '<local:data xmlns:local="http://127.0.0.1"><local:piece id="1">number one</local:piece><local:piece id="2" /></local:data>', ARRAY[ARRAY['loc', 'http://127.0.0.1']]);
-SELECT xpath('//loc:piece', '<local:data xmlns:local="http://127.0.0.1" xmlns="http://127.0.0.2"><local:piece id="1"><internal>number one</internal><internal2/></local:piece><local:piece id="2" /></local:data>', ARRAY[ARRAY['loc', 'http://127.0.0.1']]);
 SELECT xpath('//b', '<a>one <b>two</b> three <b>etc</b></a>');
 SELECT xpath('//text()', '<root>&lt;</root>');
 SELECT xpath('//@value', '<root value="&lt;"/>');
