@@ -2579,7 +2579,7 @@ ObjectAddresses* PreCheckforRemoveObjects(
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
             }
 
-            if (((Form_pg_proc)GETSTRUCT(tup))->proisagg)
+            if (PROC_IS_AGG(((Form_pg_proc)GETSTRUCT(tup))->prokind))
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("\"%s\" is an aggregate function", NameListToString(objname)),

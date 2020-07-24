@@ -6765,7 +6765,7 @@ static Datum pl_coerce_type_typmod(Datum value, Oid targetTypeId, int32 targetTy
          * various binary-compatibility cases.
          */
         nargs = procstruct->pronargs;
-        AssertEreport(!procstruct->proretset && !procstruct->proisagg && !procstruct->proiswindow,
+        AssertEreport(!procstruct->proretset && !PROC_IS_AGG(procstruct->prokind) && !PROC_IS_WIN(procstruct->prokind),
             MOD_PLSQL,
             "It should not be null.");
         AssertEreport(nargs >= 1 && nargs <= 3, MOD_PLSQL, "Args num is out of range.");

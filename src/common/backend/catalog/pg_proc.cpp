@@ -106,7 +106,7 @@ static char* getCFunProbin(const char* probin, const char* fun_name, Oid procNam
 
 static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, Oid proowner, Oid returnType,
     Datum allParameterTypes, Datum parameterModes, Datum parameterNames, bool returnsSet, bool replace, bool isOraStyle,
-    bool isAgg, bool isWindowFunc);
+    char prokind);
 static bool user_define_func_check(Oid languageId, const char* probin, char** absolutePath, CFunType* function_type);
 static const char* get_file_name(const char* filePath, CFunType function_type);
 
@@ -677,12 +677,11 @@ static bool checkPackageFunctionConflicts(
  * @in returnsSet: Return type if is set.
  * @in replace: Is replace.
  * @in isOraStyle: Is a style.
- * @in isAgg: Is agg function.
- * @in isWindowFunc: Is windows function.
+ * @in prokind: Procedure kind.
  */
 static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, Oid proowner, Oid returnType,
     Datum allParameterTypes, Datum parameterModes, Datum parameterNames, bool returnsSet, bool replace, bool isOraStyle,
-    bool isAgg, bool isWindowFunc)
+    char prokind)
 {
     Datum proargnames;
     bool isnull = false;
@@ -778,8 +777,8 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
     }
 
     /* Can't change aggregate or window-function status, either */
-    if (oldproc->proisagg != isAgg) {
-        if (oldproc->proisagg) {
+    if (PROC_IS_AGG(oldproc->prokind) != PROC_IS_AGG(prokind)) {
+        if (PROC_IS_AGG(oldproc->prokind)) {
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("function \"%s\" is an aggregate function", procedureName)));
@@ -790,8 +789,8 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
         }
     }
 
-    if (oldproc->proiswindow != isWindowFunc) {
-        if (oldproc->proiswindow) {
+    if (PROC_IS_WIN(oldproc->prokind) != PROC_IS_WIN(prokind)) {
+        if (PROC_IS_WIN(oldproc->prokind)) {
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("function \"%s\" is a window function", procedureName)));
         } else {
@@ -897,7 +896,7 @@ static bool user_define_func_check(Oid languageId, const char* probin, char** ab
  */
 Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyle, bool replace, bool returnsSet,
     Oid returnType, Oid proowner, Oid languageObjectId, Oid languageValidator, const char* prosrc, const char* probin,
-    bool isAgg, bool isWindowFunc, bool security_definer, bool isLeakProof, bool isStrict, char volatility,
+    char prokind, bool security_definer, bool isLeakProof, bool isStrict, char volatility,
     oidvector* parameterTypes, Datum allParameterTypes, Datum parameterModes, Datum parameterNames,
     List* parameterDefaults, Datum proconfig, float4 procost, float4 prorows, int2vector* prodefaultargpos, bool fenced,
     bool shippable, bool package)
@@ -1145,8 +1144,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     values[Anum_pg_proc_prorows - 1] = Float4GetDatum(prorows);
     values[Anum_pg_proc_provariadic - 1] = ObjectIdGetDatum(variadicType);
     values[Anum_pg_proc_protransform - 1] = ObjectIdGetDatum(InvalidOid);
-    values[Anum_pg_proc_proisagg - 1] = BoolGetDatum(isAgg);
-    values[Anum_pg_proc_proiswindow - 1] = BoolGetDatum(isWindowFunc);
+    values[Anum_pg_proc_prokind - 1] = CharGetDatum(prokind);
     values[Anum_pg_proc_prosecdef - 1] = BoolGetDatum(security_definer);
     values[Anum_pg_proc_proleakproof - 1] = BoolGetDatum(isLeakProof);
     values[Anum_pg_proc_proisstrict - 1] = BoolGetDatum(isStrict);
@@ -1244,8 +1242,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
             returnsSet,
             replace,
             isOraStyle,
-            isAgg,
-            isWindowFunc);
+            prokind);
 
         bool isNull = false;
         Datum ispackage = SysCacheGetAttr(PROCOID, oldtup, Anum_pg_proc_package, &isNull);

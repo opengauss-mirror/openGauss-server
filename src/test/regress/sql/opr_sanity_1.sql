@@ -227,6 +227,12 @@ FROM pg_operator as p1 LEFT JOIN pg_description as d
      ON p1.tableoid = d.classoid and p1.oid = d.objoid and d.objsubid = 0
 WHERE d.classoid IS NULL AND p1.oid <= 9999;
 
+-- Check prokind
+select count(*) from pg_proc where prokind = 'a';
+select count(*) from pg_proc where prokind = 'w';
+select count(*) from pg_proc where prokind = 'f';
+select count(*) from pg_proc where prokind = 'p';
+
 -- Check that operators' underlying functions have suitable comments,
 -- namely 'implementation of XXX operator'.  In some cases involving legacy
 -- names for operators, there are multiple operators referencing the same
@@ -260,13 +266,13 @@ WHERE aggfnoid = 0 OR aggtransfn = 0 OR aggtranstype = 0;
 SELECT a.aggfnoid::oid, p.proname
 FROM pg_aggregate as a, pg_proc as p
 WHERE a.aggfnoid = p.oid AND
-    (NOT p.proisagg OR p.proretset);
+    (p.prokind != 'a' OR p.proretset);
 
--- Make sure there are no proisagg pg_proc entries without matches.
+-- Make sure there are no prokind = 'a' pg_proc entries without matches.
 
 SELECT oid, proname
 FROM pg_proc as p
-WHERE p.proisagg AND
+WHERE p.prokind = 'a' AND
     NOT EXISTS (SELECT 1 FROM pg_aggregate a WHERE a.aggfnoid = p.oid);
 
 -- If there is no finalfn then the output type must be the transtype.
@@ -374,7 +380,7 @@ ORDER BY 1, 2;
 SELECT p1.oid::regprocedure, p2.oid::regprocedure
 FROM pg_proc AS p1, pg_proc AS p2
 WHERE p1.oid < p2.oid AND p1.proname = p2.proname AND
-    p1.proisagg AND p2.proisagg AND
+    p1.prokind = 'a' AND p2.prokind = 'a' AND
     array_dims(p1.proargtypes) != array_dims(p2.proargtypes) AND
     p1.proname != 'listagg'
 ORDER BY 1;
@@ -383,4 +389,4 @@ ORDER BY 1;
 
 SELECT oid, proname
 FROM pg_proc AS p
-WHERE proisagg AND proargdefaults IS NOT NULL;
+WHERE prokind = 'a' AND proargdefaults IS NOT NULL;

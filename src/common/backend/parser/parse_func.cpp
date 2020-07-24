@@ -1700,9 +1700,9 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
             }
             *argdefaults = GetDefaultVale(*funcid, best_candidate->argnumbers, best_candidate->ndargs);
         }
-        if (pform->proisagg) {
+        if (PROC_IS_AGG(pform->prokind)) {
             result = FUNCDETAIL_AGGREGATE;
-        } else if (pform->proiswindow) {
+        } else if (PROC_IS_WIN(pform->prokind)) {
             result = FUNCDETAIL_WINDOWFUNC;
         } else {
             result = FUNCDETAIL_NORMAL;
@@ -2106,7 +2106,7 @@ Oid LookupAggNameTypeNames(List* aggname, List* argtypes, bool noError)
     }
 
     pform = (Form_pg_proc)GETSTRUCT(ftup);
-    if (!pform->proisagg) {
+    if (!PROC_IS_AGG(pform->prokind)) {
         ReleaseSysCache(ftup);
         if (noError)
             return InvalidOid;

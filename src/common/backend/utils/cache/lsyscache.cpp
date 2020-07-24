@@ -1520,7 +1520,7 @@ Oid get_func_lang(Oid funcid)
 
 /*
  * get_func_iswindow
- *		Given procedure id, return the function's proiswindow field.
+ *		Given procedure id, return the function is window or not.
  */
 bool get_func_iswindow(Oid funcid)
 {
@@ -1530,7 +1530,7 @@ bool get_func_iswindow(Oid funcid)
     if (!HeapTupleIsValid(tp)) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
     }
-    result = ((Form_pg_proc)GETSTRUCT(tp))->proiswindow;
+    result = PROC_IS_WIN(((Form_pg_proc)GETSTRUCT(tp))->prokind);
     ReleaseSysCache(tp);
     return result;
 }
@@ -4710,7 +4710,7 @@ bool is_not_strict_agg(Oid funcOid)
         return false;
     }
     func_form = (Form_pg_proc)GETSTRUCT(func_tuple);
-    if (func_form->proisstrict == false && func_form->proisagg == false) {
+    if (func_form->proisstrict == false && !PROC_IS_AGG(func_form->prokind)) {
         ReleaseSysCache(func_tuple);
         return true;
     }
