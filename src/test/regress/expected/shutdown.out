@@ -16,5 +16,5 @@ ERROR:  Only system admin can shutdown database.
 DROP USER shutdown_test;
 shutdown invalid_str;
 ERROR:  unknow parameter: invalid_str
-shutdown only support fast, smart and immediate mode.
+shutdown only support fast and immediate mode.
 

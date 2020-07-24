@@ -43,7 +43,6 @@ ACTION_REBUID = "generateconf"
 ACTION_CERT = "cert"
 STOP_MODE_FAST = "fast"
 STOP_MODE_IMMEDIATE = "immediate"
-STOP_MODE_SMART = "smart"
 ACTION_VIEW = "view"
 ACTION_QUERY = "query"
 ACTION_KERBEROS = "kerberos"
@@ -153,7 +152,7 @@ Options for start
 Options for stop
   -h                              Name of the host to be shut down.
   -m, --mode=MODE                 Shutdown mode. It can be f (fast),
-                                  i (immediate), or s (smart).
+                                  or i (immediate).
   -D                              Path of dn
     --time-out=SECS              Maximum waiting time when start the cluster
                                  or node.
@@ -572,15 +571,8 @@ Install options:
             self.g_opts.mode = STOP_MODE_FAST
         # Specifies that the stop type must be f, i or s
         if (self.g_opts.mode not in [STOP_MODE_FAST, STOP_MODE_IMMEDIATE,
-                                     STOP_MODE_SMART, "f", "i", "s"]):
+                                     "f", "i"]):
             GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"] % "m")
-
-        # cm_ctl: can't stop one node or instance with -m smart.
-        if (self.g_opts.nodeName != "" and self.g_opts.mode ==
-                STOP_MODE_SMART):
-            GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50010"] % \
-                                   "-m" + "Can't stop one node with -m smart "
-                                          "mode.")
 
     def checkOutFileParameter(self):
         """
