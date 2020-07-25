@@ -319,6 +319,17 @@ typedef struct WindowFunc {
     int location;    /* token location, or -1 if unknown */
 } WindowFunc;
 
+
+/*
+ * pseudo-column "ROWNUM"
+ */
+typedef struct Rownum {
+    Expr xpr;
+    Oid  rownumcollid;  /* OID of collation of result */
+    int  location;      /* token location, or -1 if unknown */
+} Rownum;
+
+
 /* ----------------
  *	ArrayRef: describes an array subscripting operation
  *

@@ -89,6 +89,8 @@ static Node* find_jointree_node_for_rel(Node* jtnode, int relid);
 static Node* deleteRelatedNullTest(Node* node, PlannerInfo* root);
 static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Node* jtnode);
 
+static bool find_rownum_in_quals(PlannerInfo *root);
+
 /*
  * pull_up_sublinks
  *		Attempt to pull up ANY and EXISTS SubLinks to be treated as
@@ -122,6 +124,11 @@ void pull_up_sublinks(PlannerInfo* root)
     Node* jtnode = NULL;
     Relids relids;
 
+    /* if quals include rownum, forbid pulling up sublinks */
+    if (find_rownum_in_quals(root)) {
+        return;
+    }
+    
     /* Begin recursion through the jointree */
     jtnode = pull_up_sublinks_jointree_recurse(root, (Node*)root->parse->jointree, &relids);
     /*
@@ -744,6 +751,12 @@ Node* pull_up_subqueries(
 {
     if (jtnode == NULL)
         return NULL;
+
+    /* if quals include rownum, set hasRownumQual to true */
+    if(find_rownum_in_quals(root)) {
+        root->hasRownumQual = true;
+    }
+
     if (IsA(jtnode, RangeTblRef)) {
         int varno = ((RangeTblRef*)jtnode)->rtindex;
         RangeTblEntry* rte = rt_fetch(varno, root->parse->rtable);
@@ -775,7 +788,7 @@ Node* pull_up_subqueries(
          * the branchs may be in different node group, we could not determine the
          * group for append path
          */
-        if (rte->rtekind == RTE_SUBQUERY && is_simple_union_all(rte->subquery) &&
+        if (rte->rtekind == RTE_SUBQUERY && is_simple_union_all(rte->subquery) && !root->hasRownumQual &&
             (!ng_is_multiple_nodegroup_scenario()))
             return pull_up_simple_union_all(root, jtnode, rte);
 
@@ -924,6 +937,7 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
     subroot->qualSecurityLevel = 0;
     subroot->wt_param_id = -1;
     subroot->non_recursive_plan = NULL;
+    subroot->hasRownumQual = root->hasRownumQual;
 
     /* No CTEs to worry about */
     AssertEreport(
@@ -2886,3 +2900,30 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
     return jtnode;
 }
 
+static bool find_rownum_in_quals(PlannerInfo *root)
+{
+    if (root->parse == NULL) {
+        return false;
+    }
+
+    if(root->hasRownumQual) {
+        return true;
+    }
+
+    bool hasRownum = false;
+    ListCell *qualcell = NULL;
+    List *quallist = get_quals_lists((Node *)root->parse->jointree);
+    foreach (qualcell, quallist) {
+        Node *clause = (Node *)lfirst(qualcell);
+        if (contain_rownum_walker(clause, NULL)) {
+            hasRownum = true;
+            break;
+        }
+    }
+
+    if (quallist) {
+        list_free(quallist);
+    }
+
+    return hasRownum;
+}

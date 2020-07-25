@@ -377,6 +377,8 @@ typedef struct PlannerInfo {
      */
     bool is_under_recursive_tree;
     bool has_recursive_correlated_rte; /* true if any RTE correlated with recursive cte */
+
+    bool hasRownumQual;
 } PlannerInfo;
 
 /*

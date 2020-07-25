@@ -970,6 +970,19 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
 }
 
 /* ----------------------------------------------------------------
+ * ExecEvalRownum: Returns the rownum
+ * ----------------------------------------------------------------
+ */
+static Datum ExecEvalRownum(RownumState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
+{
+    if (isDone != NULL)
+        *isDone = ExprSingleResult;
+    *isNull = false;
+
+    return Int8GetDatum(exprstate->ps->ps_rownum + 1);
+}
+
+/* ----------------------------------------------------------------
  *		ExecEvalParamExec
  *
  *		Returns the value of a PARAM_EXEC parameter.
@@ -5232,6 +5245,12 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             gstrace_exit(GS_TRC_ID_ExecInitExpr);
             return (ExprState*)outlist;
         }
+        case T_Rownum: {
+            RownumState* rnstate = (RownumState*)makeNode(RownumState);
+            rnstate->ps = parent;
+            state = (ExprState*)rnstate;
+            state->evalfunc = (ExprStateEvalFunc)ExecEvalRownum;
+        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

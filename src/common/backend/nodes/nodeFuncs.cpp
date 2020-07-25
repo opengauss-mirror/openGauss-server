@@ -223,6 +223,9 @@ Oid exprType(const Node* expr)
         case T_GroupingId:
             type = INT4OID;
             break;
+        case T_Rownum:
+            type = INT8OID;
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -673,6 +676,9 @@ Oid exprCollation(const Node* expr)
         case T_Const:
             coll = ((const Const*)expr)->constcollid;
             break;
+        case T_Rownum:
+            coll = ((const Rownum*)expr)->rownumcollid;
+            break;
         case T_Param:
             coll = ((const Param*)expr)->paramcollid;
             break;
@@ -899,6 +905,9 @@ void exprSetCollation(Node* expr, Oid collation)
             break;
         case T_Const:
             ((Const*)expr)->constcollid = collation;
+            break;
+        case T_Rownum:
+            ((Rownum*)expr)->rownumcollid = collation;
             break;
         case T_Param:
             ((Param*)expr)->paramcollid = collation;
@@ -1528,6 +1537,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_BitString:
         case T_Null:
         case T_PgFdwRemoteInfo:
+        case T_Rownum:
             /* primitive node types with no expression subnodes */
             break;
         case T_Aggref: {
@@ -2083,6 +2093,12 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             FLATCOPY(newnode, oldnode, Const, isCopy);
 
             /* XXX we don't bother with datumCopy; should we? */
+            return (Node*)newnode;
+        } break;
+        case T_Rownum: {
+            Rownum* oldnode = (Rownum*)node;
+            Rownum* newnode = NULL;
+            FLATCOPY(newnode, oldnode, Rownum, isCopy);
             return (Node*)newnode;
         } break;
         case T_Param:

@@ -7445,6 +7445,10 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
                 pfree_ext(tmp);
             }
             break;
+            
+        case T_Rownum:
+            appendStringInfo(buf, "ROWNUM");
+            break;
 
         case T_Const:
             get_const_expr((Const*)node, context, 0);

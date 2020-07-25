@@ -1542,6 +1542,18 @@ static Var* _readVar(void)
 }
 
 /*
+ * _readRownum
+ */
+static Rownum* _readRownum(void)
+{
+    READ_LOCALS(Rownum);
+
+    READ_OID_FIELD(rownumcollid);
+    READ_LOCATION_FIELD(location);
+    READ_DONE();
+}
+
+/*
  * _readConst
  */
 static Const* _readConst(void)
@@ -5182,6 +5194,8 @@ Node* parseNodeString(void)
         return_value = _readSplitPartitionState();
     } else if (MATCH("ADDPARTITIONSTATE", 17)) {
         return_value = _readAddPartitionState();
+    } else if (MATCH("ROWNUM", 6)) {
+        return_value = _readRownum();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

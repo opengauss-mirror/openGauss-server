@@ -218,6 +218,7 @@ typedef enum NodeTag {
 #endif
     T_HashFilter,
     T_EstSPNode,
+    T_Rownum,
 
     /*
      * TAGS FOR EXPRESSION STATE NODES (execnodes.h)
@@ -261,6 +262,7 @@ typedef enum NodeTag {
     T_SplitPartitionState,
     T_AddPartitionState,
     T_RangePartitionStartEndDefState,
+    T_RownumState,
 
     /*
      * TAGS FOR PLANNER NODES (relation.h)

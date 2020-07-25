@@ -269,6 +269,9 @@ void ExecReScan(PlanState* node)
         InstrEndLoop(node->instrument);
     }
 
+    /* reset the rownum */
+    node->ps_rownum = 0;
+
     /*
      * If we have changed parameters, propagate that info.
      *
