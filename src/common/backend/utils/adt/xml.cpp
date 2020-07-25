@@ -1862,12 +1862,12 @@ char* map_sql_value_to_xml_value(Datum value, Oid type, bool xml_escape_strings)
                 if (TIMESTAMP_NOT_FINITE(time_stamp)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
-                            errmsg("time_stamp out of range"),
-                            errdetail("XML does not support infinite time_stamp values.")));
+                            errmsg("timestamp out of range"),
+                            errdetail("XML does not support infinite timestamp values.")));
                 } else if (timestamp2tm(time_stamp, NULL, &tm, &fsec, NULL, NULL) == 0) {
                     EncodeDateTime(&tm, fsec, false, 0, NULL, USE_XSD_DATES, buf);
                 } else {
-                    ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("time_stamp out of range")));
+                    ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
                 }
                 return pstrdup(buf);
             }
@@ -1885,12 +1885,12 @@ char* map_sql_value_to_xml_value(Datum value, Oid type, bool xml_escape_strings)
                 if (TIMESTAMP_NOT_FINITE(time_stamp)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
-                            errmsg("time_stamp out of range"),
-                            errdetail("XML does not support infinite time_stamp values.")));
+                            errmsg("timestamp out of range"),
+                            errdetail("XML does not support infinite timestamp values.")));
                 } else if (timestamp2tm(time_stamp, &tz, &tm, &fsec, &tzn, NULL) == 0) {
                     EncodeDateTime(&tm, fsec, true, tz, tzn, USE_XSD_DATES, buf);
                 } else {
-                    ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("time_stamp out of range")));
+                    ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
                 }
                 return pstrdup(buf);
             }
