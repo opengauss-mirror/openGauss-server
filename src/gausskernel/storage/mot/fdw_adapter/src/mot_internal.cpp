@@ -702,7 +702,8 @@ static void WakeupWalWriter()
 void MOTAdaptor::Init()
 {
     if (m_initialized) {
-        return;
+        // This is highly unexpected, and should especially be guarded in scenario of switch-over to standby.
+        elog(FATAL, "Double attempt to initialize MOT engine, it is already initialized");
     }
 
     MOT::GetGlobalConfiguration().SetTotalMemoryMb(g_instance.attr.attr_memory.max_process_memory / KILO_BYTE);
@@ -852,7 +853,7 @@ void MOTAdaptor::InitDataNodeId()
     MOT::GetGlobalConfiguration().SetPgNodes(1, 1);
 }
 
-void MOTAdaptor::Fini()
+void MOTAdaptor::Destroy()
 {
     if (!m_initialized) {
         return;

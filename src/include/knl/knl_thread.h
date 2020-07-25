@@ -2693,7 +2693,6 @@ typedef struct knl_t_mot_context {
     // misc
     uint8_t log_level;
     bool init_codegen_once;
-    bool mot_startup;
     
     uint16_t currentThreadId;
     int currentNumaNodeId;

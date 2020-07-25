@@ -1407,7 +1407,6 @@ static void knl_t_mot_init(knl_t_mot_context* mot_cxt)
 
     mot_cxt->bindPolicy = 2; // MPOL_BIND
     mot_cxt->mbindFlags = 0;
-    mot_cxt->mot_startup = false;
 }
 
 void knl_thread_mot_init()
