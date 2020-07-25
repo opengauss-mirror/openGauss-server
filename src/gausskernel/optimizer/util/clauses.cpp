@@ -1119,6 +1119,9 @@ static bool contain_specified_functions_walker(Node* node, check_function_contex
                 return true;
         }
         /* else fall through to check args */
+    } else if (IsA(node, Rownum)) {
+        /* ROWNUM is volatile */
+        return context->checktype == CONTAIN_VOLATILE_FUNTION;
     }
     return expression_tree_walker(node, (bool (*)())contain_specified_functions_walker<isSimpleVar>, context);
 }
@@ -5161,8 +5164,51 @@ static Node* convert_equalsimplevar_to_nulltest(Oid opno, List* args)
     rarg = (Node*)lsecond(args);
 
     if (_equalSimpleVar(larg, rarg) && ((Var*)larg)->varlevelsup == ((Var*)rarg)->varlevelsup &&
-        (get_oprrest(opno) == EQSELRETURNOID))
+        (get_oprrest(opno) == EQSELRETURNOID)) {
         nullTest = (Node*)makeNullTest(IS_NOT_NULL, (Expr*)larg);
+    }
 
     return nullTest;
+}
+
+
+
+/*
+ * check whether the node have rownum expr or not, test all kinds of nodes,
+ * check if it has the volatile rownum. If the node include rownum
+ * function, it will return true, else it will return false.
+ */
+bool contain_rownum_walker(Node *node, void *context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Rownum)) {
+        return true;
+    }
+
+    return expression_tree_walker(node, (bool (*)())contain_rownum_walker, context);
+}
+
+
+/*
+ * get the jtnode's qualifiers list, make query tree's table jion tree's
+ * qualifiers to be a list. Then return the list. (parse->jointree->quals:
+ * 'where clause' and 'and clause')
+ */
+List *get_quals_lists(Node *jtnode)
+{
+    if (jtnode == NULL || !IsA(jtnode, FromExpr)) {
+        return NULL;
+    }
+
+    FromExpr *expr = (FromExpr *)jtnode;
+    List *quallist = make_ands_implicit((Expr *)expr->quals);
+
+    if (expr->quals != NULL && and_clause((Node *)expr->quals)) {
+        quallist = list_copy(quallist);
+    }
+
+    return quallist;
 }

@@ -681,7 +681,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 	RANGE RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE REF REFERENCES REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P RENAME REPEATABLE REPLACE REPLICA
 	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLLBACK ROLLUP
-	ROW ROWS RULE
+	ROW ROWNUM ROWS RULE
 
 	SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN
@@ -16109,6 +16109,12 @@ func_expr_common_subexpr:
 					n->call_func = false;
 					$$ = (Node *)n;
 				}
+			| ROWNUM 
+				{
+					Rownum *r = makeNode(Rownum);
+				    r->location = @1;
+					$$ = (Node *)r;
+				}			
 			| CURRENT_ROLE
 				{
 					FuncCall *n = makeNode(FuncCall);
@@ -18148,6 +18154,7 @@ reserved_keyword:
 			| WHERE
 			| WINDOW
 			| WITH
+			| ROWNUM
 		;
 
 %%

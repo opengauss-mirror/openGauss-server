@@ -1952,6 +1952,14 @@ static void _outParam(StringInfo str, Param* node)
     WRITE_TYPEINFO_FIELD(paramtype);
 }
 
+static void _outRownum(StringInfo str, const Rownum* node)
+{
+    WRITE_NODE_TYPE("ROWNUM");
+    WRITE_OID_FIELD(rownumcollid);
+    WRITE_LOCATION_FIELD(location);
+}
+
+
 static void _outAggref(StringInfo str, Aggref* node)
 {
     WRITE_NODE_TYPE("AGGREF");
@@ -4974,6 +4982,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_Param:
                 _outParam(str, (Param*)obj);
+                break;
+            case T_Rownum:
+                _outRownum(str, (Rownum*)obj);
                 break;
             case T_Aggref:
                 _outAggref(str, (Aggref*)obj);

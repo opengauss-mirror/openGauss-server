@@ -301,6 +301,7 @@ Node* transformExpr(ParseState* pstate, Node* expr)
         case T_WindowFunc:
         case T_ArrayRef:
         case T_FuncExpr:
+        case T_Rownum:
         case T_OpExpr:
         case T_DistinctExpr:
         case T_NullIfExpr:

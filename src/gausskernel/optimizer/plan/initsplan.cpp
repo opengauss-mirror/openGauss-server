@@ -350,7 +350,6 @@ static List* deconstruct_recurse(
          */
         foreach (l, (List*)f->quals) {
             Node* qual = (Node*)lfirst(l);
-
             distribute_qual_to_rels(
                 root, qual, false, below_outer_join, JOIN_INNER, root->qualSecurityLevel, *qualscope, NULL, NULL, NULL);
         }
