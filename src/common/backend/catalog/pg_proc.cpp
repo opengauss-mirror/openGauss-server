@@ -777,7 +777,7 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
     }
 
     /* Can't change aggregate or window-function status, either */
-    if (PROC_IS_AGG(oldproc->prokind) != PROC_IS_AGG(prokind)) {
+    if ((PROC_IS_AGG(oldproc->prokind) || PROC_IS_AGG(prokind)) && oldproc->prokind != prokind) {
         if (PROC_IS_AGG(oldproc->prokind)) {
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -789,7 +789,7 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
         }
     }
 
-    if (PROC_IS_WIN(oldproc->prokind) != PROC_IS_WIN(prokind)) {
+    if ((PROC_IS_WIN(oldproc->prokind) || PROC_IS_WIN(prokind)) && oldproc->prokind != prokind) {
         if (PROC_IS_WIN(oldproc->prokind)) {
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("function \"%s\" is a window function", procedureName)));

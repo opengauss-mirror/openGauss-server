@@ -227,12 +227,6 @@ FROM pg_operator as p1 LEFT JOIN pg_description as d
      ON p1.tableoid = d.classoid and p1.oid = d.objoid and d.objsubid = 0
 WHERE d.classoid IS NULL AND p1.oid <= 9999;
 
--- Check prokind
-select count(*) from pg_proc where prokind = 'a';
-select count(*) from pg_proc where prokind = 'w';
-select count(*) from pg_proc where prokind = 'f';
-select count(*) from pg_proc where prokind = 'p';
-
 -- Check that operators' underlying functions have suitable comments,
 -- namely 'implementation of XXX operator'.  In some cases involving legacy
 -- names for operators, there are multiple operators referencing the same
