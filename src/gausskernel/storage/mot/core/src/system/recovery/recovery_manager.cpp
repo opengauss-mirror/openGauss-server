@@ -519,9 +519,16 @@ bool RecoveryManager::RecoverFromCheckpoint()
 bool RecoveryManager::RecoverDbStart()
 {
     MOT_LOG_INFO("Starting MOT recovery");
+
+    if (m_recoverFromCkptDone) {
+        return true;
+    }
+
     if (!RecoverFromCheckpoint()) {
         return false;
     }
+
+    m_recoverFromCkptDone = true;
     return true;
 }
 

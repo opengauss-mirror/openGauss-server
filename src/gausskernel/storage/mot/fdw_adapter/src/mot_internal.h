@@ -285,7 +285,7 @@ struct MOTFdwState_St {
 class MOTAdaptor {
 public:
     static void Init();
-    static void Fini();
+    static void Destroy();
     static void NotifyConfigChange();
     static void InitDataNodeId();
 

@@ -8243,9 +8243,7 @@ void StartupXLOG(void)
     /*
      * Recover MOT
      */
-    if (t_thrd.mot_cxt.mot_startup == true) {
-        MOTRecover();
-    }
+    MOTRecover();
 
     /* initialize shared memory variables from the checkpoint record */
     t_thrd.xact_cxt.ShmemVariableCache->nextXid = checkPoint.nextXid;
@@ -9227,9 +9225,7 @@ void StartupXLOG(void)
     /*
      * Cleanup MOT recovery
      */
-    if (t_thrd.mot_cxt.mot_startup == true) {
-        MOTRecoveryDone();
-    }
+    MOTRecoveryDone();
 }
 
 void sendPMBeginHotStby()
