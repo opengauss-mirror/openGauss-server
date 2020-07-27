@@ -20,7 +20,7 @@ index 5f8b100..7fdd24f 100644
 +override CPPFLAGS := $(filter-out $(exclude_option),$(CPPFLAGS))
 \ No newline at end of file
 diff --git oracle_fdw.cpp oracle_fdw.cpp
-index e75b6ab..7e83a4f 100644
+index e75b6ab..c7eec41 100644
 --- oracle_fdw.cpp
 +++ oracle_fdw.cpp
 @@ -92,13 +92,13 @@
@@ -121,6 +121,15 @@ index e75b6ab..7e83a4f 100644
  #ifdef IMPORT_API
  static char *fold_case(char *name, fold_t foldcase, int collation);
  #endif  /* IMPORT_API */
+@@ -403,7 +404,7 @@ PGDLLEXPORT Datum
+ oracle_fdw_handler(PG_FUNCTION_ARGS)
+ {
+ 	FdwRoutine *fdwroutine = makeNode(FdwRoutine);
+-
++	fdwroutine->AcquireSampleRows = acquireSampleRowsFunc;
+ #ifdef OLD_FDW_API
+ 	fdwroutine->PlanForeignScan = oraclePlanForeignScan;
+ #else
 @@ -457,7 +458,7 @@ oracle_fdw_validator(PG_FUNCTION_ARGS)
  	Oid catalog = PG_GETARG_OID(1);
  	ListCell *cell;

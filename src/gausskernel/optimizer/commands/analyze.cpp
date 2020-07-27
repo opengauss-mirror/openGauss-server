@@ -551,6 +551,8 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
                 retValue = fdwroutine->AnalyzeForeignTable(onerel, &acquirefunc, &relpages, 0, false);
             }
             if (!retValue) {
+                /* Supress warning info for mysql_fdw */
+                messageLevel = isMysqlFDWFromTblOid(RelationGetRelid(onerel)) ? LOG : messageLevel;
                 ereport(messageLevel,
                     (errmsg(
                         "Skipping \"%s\" --- cannot analyze this foreign table.", RelationGetRelationName(onerel))));
@@ -886,7 +888,8 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
         *numrows = acquirePartitionedSampleRows<estimate_table_rownum>(
             onerel, vacstmt, elevel, rows, target_rows, totalrows, totaldeadrows, vacattrstats, attr_cnt);
     } else if (isForeignTable ||
-            (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(RelationGetRelid(onerel)))) {
+            (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE &&
+            (isMOTFromTblOid(RelationGetRelid(onerel)) || isOracleFDWFromTblOid(RelationGetRelid(onerel))))) {
         /*
          * @hdfs processing foreign table sampling operation 
          * get foreign table FDW routine 
