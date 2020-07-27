@@ -35,10 +35,10 @@ RUN mkdir /docker-entrypoint-initdb.d
 
 ENV PGDATA /var/lib/opengauss/data
 
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh;ln -s /usr/local/bin/docker-entrypoint.sh / # backwards compat
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh;ln -s /usr/local/bin/entrypoint.sh / # backwards compat
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["entrypoint.sh"]
 
 EXPOSE 5432
 CMD ["gaussdb"]
