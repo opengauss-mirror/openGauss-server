@@ -1,0 +1,217 @@
+--
+-- Test exchange operator for interval partitioned table
+--
+--
+---- create interval partitioned table
+--
+CREATE TABLE interval_normal_exchange (logdate date not null) 
+PARTITION BY RANGE (logdate)
+INTERVAL ('1 month') 
+(
+	PARTITION interval_normal_exchange_p1 VALUES LESS THAN ('2020-03-01'),
+	PARTITION interval_normal_exchange_p2 VALUES LESS THAN ('2020-04-01'),
+	PARTITION interval_normal_exchange_p3 VALUES LESS THAN ('2020-05-01')
+);
+-- see about the info of the partitioned table in pg_partition
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_exchange')
+	order by relname;
+           relname           | parttype | partstrategy |  boundaries  
+-----------------------------+----------+--------------+--------------
+ interval_normal_exchange    | r        | i            | 
+ interval_normal_exchange_p1 | p        | r            | {2020-03-01}
+ interval_normal_exchange_p2 | p        | r            | {2020-04-01}
+ interval_normal_exchange_p3 | p        | r            | {2020-05-01}
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into interval_normal_exchange values ('2020-02-21');
+insert into interval_normal_exchange values ('2020-02-22');
+insert into interval_normal_exchange values ('2020-02-23');
+insert into interval_normal_exchange values ('2020-5-01');
+insert into interval_normal_exchange values ('2020-5-02');
+insert into interval_normal_exchange values ('2020-5-03');
+-- see about the info of the partitioned table in pg_partition
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_exchange')
+	order by relname;
+           relname           | parttype | partstrategy |          boundaries          
+-----------------------------+----------+--------------+------------------------------
+ interval_normal_exchange    | r        | i            | 
+ interval_normal_exchange_p1 | p        | r            | {2020-03-01}
+ interval_normal_exchange_p2 | p        | r            | {2020-04-01}
+ interval_normal_exchange_p3 | p        | r            | {2020-05-01}
+ sys_p1                      | p        | i            | {"Mon Jun 01 00:00:00 2020"}
+(5 rows)
+
+--
+---- create to be exchanged table and test range partition exchange
+--
+CREATE TABLE interval_exchange_test (logdate date not null);
+insert into interval_exchange_test values ('2020-02-24');
+insert into interval_exchange_test values ('2020-02-25');
+insert into interval_exchange_test values ('2020-02-26');
+-- do exchange partition interval_normal_exchange_p1 and interval_exchange_test
+-- The data they have belongs to the same range.
+ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
+        WITH TABLE interval_exchange_test;
+select * from interval_normal_exchange partition (interval_normal_exchange_p1)order by logdate;
+         logdate          
+--------------------------
+ Mon Feb 24 00:00:00 2020
+ Tue Feb 25 00:00:00 2020
+ Wed Feb 26 00:00:00 2020
+(3 rows)
+
+select * from interval_exchange_test order by logdate;
+         logdate          
+--------------------------
+ Fri Feb 21 00:00:00 2020
+ Sat Feb 22 00:00:00 2020
+ Sun Feb 23 00:00:00 2020
+(3 rows)
+
+-- exchange back
+ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
+        WITH TABLE interval_exchange_test;
+select * from interval_normal_exchange partition (interval_normal_exchange_p1)order by logdate;
+         logdate          
+--------------------------
+ Fri Feb 21 00:00:00 2020
+ Sat Feb 22 00:00:00 2020
+ Sun Feb 23 00:00:00 2020
+(3 rows)
+
+select * from interval_exchange_test order by logdate;
+         logdate          
+--------------------------
+ Mon Feb 24 00:00:00 2020
+ Tue Feb 25 00:00:00 2020
+ Wed Feb 26 00:00:00 2020
+(3 rows)
+
+-- Insert a new record not belongs to interval_normal_exchange_p1
+insert into interval_exchange_test values ('2020-3-05');
+-- defaut is WITH VALIDATION, and the exchange will be failed
+ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
+        WITH TABLE interval_exchange_test;
+ERROR:  some rows in table do not qualify for specified partition
+--  WITHOUT VALIDATION and the exchange will be success, but some date will in the wrong range;
+ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
+        WITH TABLE interval_exchange_test WITHOUT VALIDATION;
+select * from interval_normal_exchange partition (interval_normal_exchange_p1)order by logdate;
+         logdate          
+--------------------------
+ Mon Feb 24 00:00:00 2020
+ Tue Feb 25 00:00:00 2020
+ Wed Feb 26 00:00:00 2020
+ Thu Mar 05 00:00:00 2020
+(4 rows)
+
+select * from interval_exchange_test order by logdate;
+         logdate          
+--------------------------
+ Fri Feb 21 00:00:00 2020
+ Sat Feb 22 00:00:00 2020
+ Sun Feb 23 00:00:00 2020
+(3 rows)
+
+-- not include '2020-3-05'
+select * from interval_normal_exchange where logdate > '2020-03-01' order by logdate;
+         logdate          
+--------------------------
+ Fri May 01 00:00:00 2020
+ Sat May 02 00:00:00 2020
+ Sun May 03 00:00:00 2020
+(3 rows)
+
+--
+---- clean the data and test interval partition exchange
+--
+truncate table interval_exchange_test;
+insert into interval_exchange_test values ('2020-5-04');
+insert into interval_exchange_test values ('2020-5-05');
+insert into interval_exchange_test values ('2020-5-06');
+-- exchange table
+ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (sys_p1)
+        WITH TABLE interval_exchange_test;
+select * from interval_normal_exchange partition (sys_p1)order by logdate;
+         logdate          
+--------------------------
+ Mon May 04 00:00:00 2020
+ Tue May 05 00:00:00 2020
+ Wed May 06 00:00:00 2020
+(3 rows)
+
+select * from interval_exchange_test order by logdate;
+         logdate          
+--------------------------
+ Fri May 01 00:00:00 2020
+ Sat May 02 00:00:00 2020
+ Sun May 03 00:00:00 2020
+(3 rows)
+
+-- exchange back
+ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (sys_p1)
+        WITH TABLE interval_exchange_test;
+select * from interval_normal_exchange partition (sys_p1)order by logdate;
+         logdate          
+--------------------------
+ Fri May 01 00:00:00 2020
+ Sat May 02 00:00:00 2020
+ Sun May 03 00:00:00 2020
+(3 rows)
+
+select * from interval_exchange_test order by logdate;
+         logdate          
+--------------------------
+ Mon May 04 00:00:00 2020
+ Tue May 05 00:00:00 2020
+ Wed May 06 00:00:00 2020
+(3 rows)
+
+insert into interval_exchange_test values ('2020-6-05');
+-- defaut is WITH VALIDATION, and the exchange will be failed
+ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
+        WITH TABLE interval_exchange_test;
+ERROR:  some rows in table do not qualify for specified partition
+--  WITHOUT VALIDATION and the exchange will be success, but some date will in the wrong range;
+ALTER TABLE interval_normal_exchange EXCHANGE PARTITION (interval_normal_exchange_p1)
+        WITH TABLE interval_exchange_test WITHOUT VALIDATION;
+select * from interval_normal_exchange partition (interval_normal_exchange_p1)order by logdate;
+         logdate          
+--------------------------
+ Mon May 04 00:00:00 2020
+ Tue May 05 00:00:00 2020
+ Wed May 06 00:00:00 2020
+ Fri Jun 05 00:00:00 2020
+(4 rows)
+
+select * from interval_exchange_test order by logdate;
+         logdate          
+--------------------------
+ Mon Feb 24 00:00:00 2020
+ Tue Feb 25 00:00:00 2020
+ Wed Feb 26 00:00:00 2020
+ Thu Mar 05 00:00:00 2020
+(4 rows)
+
+-- not include '2020-6-05'
+select * from interval_normal_exchange order by logdate;
+         logdate          
+--------------------------
+ Fri May 01 00:00:00 2020
+ Sat May 02 00:00:00 2020
+ Sun May 03 00:00:00 2020
+ Mon May 04 00:00:00 2020
+ Tue May 05 00:00:00 2020
+ Wed May 06 00:00:00 2020
+ Fri Jun 05 00:00:00 2020
+(7 rows)
+
+select * from interval_normal_exchange where logdate > '2020-06-01' order by logdate;
+ logdate 
+---------
+(0 rows)
+
+drop table interval_normal_exchange;

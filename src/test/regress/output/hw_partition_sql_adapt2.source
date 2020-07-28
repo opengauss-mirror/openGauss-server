@@ -964,8 +964,6 @@ Indexes:
 Range partition by(a)
 Number of partition: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
-Distribute By: HASH(a)
-Location Nodes: ALL DATANODES
 Options: orientation=row, compression=no
 
 -- clean
@@ -1031,18 +1029,25 @@ partition by range (a, b)
 	partition test_partition_foreign_key_p2 values less than (4, 'e'),
 	partition test_partition_foreign_key_p3 values less than (7, 'h')
 );
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 -- failed
 drop user temp_user;
 ERROR:  cannot drop schema temp_user because other objects depend on it
 DETAIL:  table temp_user.test_ordinary_reftable depends on schema temp_user
+constraint test_partition_foreign_key_a_fkey on table test_partition_foreign_key depends on table temp_user.test_ordinary_reftable
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 -- failed
 drop owned by temp_user;
+ERROR:  cannot drop desired object(s) because other objects depend on them
+DETAIL:  constraint test_partition_foreign_key_a_fkey on table test_partition_foreign_key depends on table temp_user.test_ordinary_reftable
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 -- failed
 drop owned by temp_user restrict;
+ERROR:  cannot drop desired object(s) because other objects depend on them
+DETAIL:  constraint test_partition_foreign_key_a_fkey on table test_partition_foreign_key depends on table temp_user.test_ordinary_reftable
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 -- success 
 drop owned by temp_user cascade;
+NOTICE:  drop cascades to constraint test_partition_foreign_key_a_fkey on table test_partition_foreign_key
 select relname, rolname from pg_class, pg_roles where relname='test_ordinary_reftable' and pg_class.relowner=pg_roles.oid;
  relname | rolname 
 ---------+---------
@@ -1050,14 +1055,10 @@ select relname, rolname from pg_class, pg_roles where relname='test_ordinary_ref
 
 -- success
 insert into test_partition_foreign_key values (0, 'a', 0, 'a');
-ERROR:  relation "test_partition_foreign_key" does not exist
-LINE 1: insert into test_partition_foreign_key values (0, 'a', 0, 'a...
-                    ^
 -- success
 drop user temp_user;
 -- clean
 drop table test_partition_foreign_key;
-ERROR:  table "test_partition_foreign_key" does not exist
 ----------------------
 -- test alter table set tablespace on ordinary table
 \! rm -fr '@testtablespace@/hw_partition_sql_adapt_ts1'

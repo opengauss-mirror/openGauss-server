@@ -56,8 +56,7 @@ typedef struct PartitionMap {
 #define VALUE_PARTKEYMAXNUM 4
 #define INTERVAL_PARTKEYMAXNUM 1
 
-#define PartitionLogicalExist(partitionIdentifier) \
-    ((partitionIdentifier)->partSeq >= 0 && (partitionIdentifier)->partArea != PART_AREA_NONE)
+#define PartitionLogicalExist(partitionIdentifier) ((partitionIdentifier)->partSeq >= 0)
 
 #define PartitionPhysicalExist(partitionIdentifier) \
                     ((partitionIdentifier)->partArea != PART_AREA_NONE && ((partitionIdentifier)->fileExist)
@@ -98,7 +97,6 @@ extern Oid getRangePartitionOid(Relation relation, Const** partKeyValue, int* pa
 extern List* getPartitionBoundaryList(Relation rel, int sequence);
 extern Oid partitionKeyValueListGetPartitionOid(Relation rel, List* partKeyValueList, bool topClosed);
 extern int getNumberOfRangePartitions(Relation rel);
-extern int getNumberOfIntervalPartitions(Relation rel);
 extern int getNumberOfPartitions(Relation rel);
 extern Const* transformDatum2Const(TupleDesc tupledesc, int16 attnum, Datum datumValue, bool isnull, Const* cnst);
 

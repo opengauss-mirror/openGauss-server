@@ -2546,10 +2546,8 @@ Datum timestamp_larger(PG_FUNCTION_ARGS)
     PG_RETURN_TIMESTAMP(result);
 }
 
-Datum timestamp_mi(PG_FUNCTION_ARGS)
+Datum timestamp_mi(Timestamp dt1, Timestamp dt2)
 {
-    Timestamp dt1 = PG_GETARG_TIMESTAMP(0);
-    Timestamp dt2 = PG_GETARG_TIMESTAMP(1);
     Interval* result = NULL;
 
     result = (Interval*)palloc(sizeof(Interval));
@@ -2591,6 +2589,13 @@ Datum timestamp_mi(PG_FUNCTION_ARGS)
     result = DatumGetIntervalP(DirectFunctionCall1(interval_justify_hours, IntervalPGetDatum(result)));
 
     PG_RETURN_INTERVAL_P(result);
+}
+
+Datum timestamp_mi(PG_FUNCTION_ARGS)
+{
+    Timestamp dt1 = PG_GETARG_TIMESTAMP(0);
+    Timestamp dt2 = PG_GETARG_TIMESTAMP(1);
+    return timestamp_mi(dt1, dt2);
 }
 
 /*
@@ -2732,20 +2737,8 @@ Datum interval_justify_days(PG_FUNCTION_ARGS)
     PG_RETURN_INTERVAL_P(result);
 }
 
-/* timestamp_pl_interval()
- * Add a interval to a timestamp data type.
- * Note that interval has provisions for qualitative year/month and day
- *	units, so try to do the right thing with them.
- * To add a month, increment the month, and use the same day of month.
- * Then, if the next month has fewer days, set the day of month
- *	to the last day of month.
- * To add a day, increment the mday, and use the same time of day.
- * Lastly, add in the "quantitative time".
- */
-Datum timestamp_pl_interval(PG_FUNCTION_ARGS)
+Datum timestamp_pl_interval(Timestamp timestamp, Interval* span)
 {
-    Timestamp timestamp = PG_GETARG_TIMESTAMP(0);
-    Interval* span = PG_GETARG_INTERVAL_P(1);
     Timestamp result;
 
     if (TIMESTAMP_NOT_FINITE(timestamp)) {
@@ -2803,10 +2796,25 @@ Datum timestamp_pl_interval(PG_FUNCTION_ARGS)
     PG_RETURN_TIMESTAMP(result);
 }
 
-Datum timestamp_mi_interval(PG_FUNCTION_ARGS)
+/* timestamp_pl_interval()
+ * Add a interval to a timestamp data type.
+ * Note that interval has provisions for qualitative year/month and day
+ *	units, so try to do the right thing with them.
+ * To add a month, increment the month, and use the same day of month.
+ * Then, if the next month has fewer days, set the day of month
+ *	to the last day of month.
+ * To add a day, increment the mday, and use the same time of day.
+ * Lastly, add in the "quantitative time".
+ */
+Datum timestamp_pl_interval(PG_FUNCTION_ARGS)
 {
     Timestamp timestamp = PG_GETARG_TIMESTAMP(0);
     Interval* span = PG_GETARG_INTERVAL_P(1);
+    return timestamp_pl_interval(timestamp, span);
+}
+
+Datum timestamp_mi_interval(Timestamp timestamp, Interval* span)
+{
     Interval tspan;
 
     tspan.month = -span->month;
@@ -2814,6 +2822,13 @@ Datum timestamp_mi_interval(PG_FUNCTION_ARGS)
     tspan.time = -span->time;
 
     return DirectFunctionCall2(timestamp_pl_interval, TimestampGetDatum(timestamp), PointerGetDatum(&tspan));
+}
+
+Datum timestamp_mi_interval(PG_FUNCTION_ARGS)
+{
+    Timestamp timestamp = PG_GETARG_TIMESTAMP(0);
+    Interval* span = PG_GETARG_INTERVAL_P(1);
+    return timestamp_mi_interval(timestamp, span);
 }
 
 /* timestamptz_pl_interval()
@@ -2981,15 +2996,8 @@ Datum interval_mi(PG_FUNCTION_ARGS)
     PG_RETURN_INTERVAL_P(result);
 }
 
-/*
- *	There is no interval_abs():  it is unclear what value to return:
- *	  http://archives.postgresql.org/pgsql-general/2009-10/msg01031.php
- *	  http://archives.postgresql.org/pgsql-general/2009-11/msg00041.php
- */
-Datum interval_mul(PG_FUNCTION_ARGS)
+Datum interval_mul(Interval* span, float8 factor)
 {
-    Interval* span = PG_GETARG_INTERVAL_P(0);
-    float8 factor = PG_GETARG_FLOAT8(1);
     double month_remainder_days, sec_remainder;
     int32 orig_month = span->month;
     int32 orig_day = span->day;
@@ -3049,6 +3057,18 @@ Datum interval_mul(PG_FUNCTION_ARGS)
     interval_result_adjust(result);
 
     PG_RETURN_INTERVAL_P(result);
+}
+
+/*
+ *	There is no interval_abs():  it is unclear what value to return:
+ *	  http://archives.postgresql.org/pgsql-general/2009-10/msg01031.php
+ *	  http://archives.postgresql.org/pgsql-general/2009-11/msg00041.php
+ */
+Datum interval_mul(PG_FUNCTION_ARGS)
+{
+    Interval* span = PG_GETARG_INTERVAL_P(0);
+    float8 factor = PG_GETARG_FLOAT8(1);
+    return interval_mul(span, factor);
 }
 
 Datum mul_d_interval(PG_FUNCTION_ARGS)

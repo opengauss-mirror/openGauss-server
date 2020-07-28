@@ -166,6 +166,7 @@ static void transformTableLikeClause(
     CreateStmtContext* cxt, TableLikeClause* table_like_clause, bool preCheck, bool isFirstNode = false);
 static void transformTableLikePartitionProperty(Relation relation, HeapTuple partitionTableTuple, List** partKeyColumns,
     List* partitionList, List** partitionDefinitions);
+static IntervalPartitionDefState* TransformTableLikeIntervalPartitionDef(HeapTuple partitionTableTuple);
 static void transformTableLikePartitionKeys(
     Relation relation, HeapTuple partitionTableTuple, List** partKeyColumns, List** partKeyPosList);
 static void transformTableLikePartitionBoundaries(
@@ -220,6 +221,7 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
 static List* DividePartitionStartEndInterval(ParseState* pstate, Form_pg_attribute attr, char* partName,
     Const* startVal, Const* endVal, Const* everyVal, Node* everyExpr, int* numPart, int maxNum);
 static void TryReuseFilenode(Relation rel, CreateStmtContext *ctx, bool clonepart);
+extern Node* makeAConst(Value* v, int location);
 
 /*
  * transformCreateStmt -
@@ -1537,14 +1539,12 @@ static void transformTableLikeClause(
                     n = makeNode(PartitionState);
                     n->partitionKey = partKeyColumns;
                     n->partitionList = partitionDefinitions;
-#ifdef PGXC
-                    // in mppdb, we do not support interval partition
-                    n->intervalPartDef = NULL;
                     n->partitionStrategy = partitionForm->partstrategy;
-#else
-                    n->intervalPartDef = NULL;
-                    n->partitionStrategy = partitionForm->partstrategy;
-#endif
+                    if (partitionForm->partstrategy == PART_STRATEGY_INTERVAL) {
+                        n->intervalPartDef = TransformTableLikeIntervalPartitionDef(partitionTableTuple);
+                    } else {
+                        n->intervalPartDef = NULL;
+                    }
                     n->rowMovement = relation->rd_rel->relrowmovement ? ROWMOVEMENT_ENABLE : ROWMOVEMENT_DISABLE;
 
                     // store the produced partition state in CreateStmtContext
@@ -1683,6 +1683,32 @@ static void transformTableLikePartitionProperty(Relation relation, HeapTuple par
     transformTableLikePartitionBoundaries(relation, partKeyPosList, partitionList, partitionDefinitions);
 }
 
+static IntervalPartitionDefState* TransformTableLikeIntervalPartitionDef(HeapTuple partitionTableTuple)
+{
+    IntervalPartitionDefState* intervalPartDef = makeNode(IntervalPartitionDefState);
+    Relation partitionRel = relation_open(PartitionRelationId, RowExclusiveLock);
+    char* intervalStr = ReadIntervalStr(partitionTableTuple, RelationGetDescr(partitionRel));
+    Assert(intervalStr != NULL);
+    intervalPartDef->partInterval = makeAConst(makeString(intervalStr), -1);
+    oidvector* tablespaceIdVec = ReadIntervalTablespace(partitionTableTuple, RelationGetDescr(partitionRel));
+    intervalPartDef->intervalTablespaces = NULL;
+    if (tablespaceIdVec != NULL && tablespaceIdVec->dim1 > 0) {
+        for (int i = 0; i < tablespaceIdVec->dim1; ++i) {
+            char* tablespaceName = get_tablespace_name(tablespaceIdVec->values[i]);
+            if (tablespaceName == NULL) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("tablespace with OID %u does not exist", tablespaceIdVec->values[i])));
+            }
+            intervalPartDef->intervalTablespaces =
+                lappend(intervalPartDef->intervalTablespaces, makeString(tablespaceName));
+        }
+    }
+
+    relation_close(partitionRel, RowExclusiveLock);
+    return intervalPartDef;
+}
+
 static void transformTableLikePartitionKeys(
     Relation relation, HeapTuple partitionTableTuple, List** partKeyColumns, List** partKeyPosList)
 {
@@ -1789,6 +1815,11 @@ static void transformTableLikePartitionBoundaries(
     foreach (partitionCell, orderedPartitionList) {
         HeapTuple partitionTuple = (HeapTuple)lfirst(partitionCell);
         Form_pg_partition partitionForm = (Form_pg_partition)GETSTRUCT(partitionTuple);
+        /* no need to copy interval partition */
+        if (partitionForm->partstrategy == PART_STRATEGY_INTERVAL) {
+            continue;
+        }
+
         bool attIsNull = false;
         Datum tableSpace = (Datum)0;
         Datum boundaries = (Datum)0;
@@ -4161,19 +4192,24 @@ void checkPartitionSynax(CreateStmt* stmt)
 
     /* check interval synax */
     if (stmt->partTableState->intervalPartDef) {
-#ifdef PGXC
-        /* in mpp version, we close interval partition feature */
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("Range partitioned table with INTERVAL was forbidden"),
-                errhint("Only support pure range partitioned table")));
-#endif
         if (stmt->partTableState->partitionKey->length > 1) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                     errmsg("Range partitioned table with INTERVAL clause has more than one column"),
                     errhint("Only support one partition key for interval partition")));
         }
+        if (!IsA(stmt->partTableState->intervalPartDef->partInterval, A_Const) ||
+            ((A_Const*)stmt->partTableState->intervalPartDef->partInterval)->val.type != T_String) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
+                    // errmsg("invalid input syntax for type %s: \"%s\"", datatype, str)));
+                    errmsg("invalid input syntax for type interval")));
+        }
+        int32 typmod = -1;
+        Interval* interval = NULL;
+        A_Const* node = (A_Const*)stmt->partTableState->intervalPartDef->partInterval;
+        interval = char_to_interval(node->val.val.str, typmod);
+        pfree(interval);
     }
 }
 

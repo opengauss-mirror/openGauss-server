@@ -189,6 +189,7 @@ extern Datum timestamptz_timestamptz(PG_FUNCTION_ARGS);
 extern Datum interval_um(PG_FUNCTION_ARGS);
 extern Datum interval_pl(PG_FUNCTION_ARGS);
 extern Datum interval_mi(PG_FUNCTION_ARGS);
+extern Datum interval_mul(Interval* span, float8 factor);
 extern Datum interval_mul(PG_FUNCTION_ARGS);
 extern Datum mul_d_interval(PG_FUNCTION_ARGS);
 extern Datum interval_div(PG_FUNCTION_ARGS);
@@ -198,8 +199,11 @@ extern Datum interval_collect(PG_FUNCTION_ARGS);
 #endif
 extern Datum interval_avg(PG_FUNCTION_ARGS);
 
+extern Datum timestamp_mi(Timestamp dt1, Timestamp dt2);
 extern Datum timestamp_mi(PG_FUNCTION_ARGS);
+extern Datum timestamp_pl_interval(Timestamp timestamp, Interval* span);
 extern Datum timestamp_pl_interval(PG_FUNCTION_ARGS);
+extern Datum timestamp_mi_interval(Timestamp timestamp, Interval* span);
 extern Datum timestamp_mi_interval(PG_FUNCTION_ARGS);
 extern Datum timestamp_age(PG_FUNCTION_ARGS);
 extern Datum timestamp_diff(PG_FUNCTION_ARGS);

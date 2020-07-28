@@ -27,14 +27,13 @@ SET ENABLE_SEQSCAN = FALSE;
 SET ENABLE_BITMAPSCAN = FALSE;
 EXPLAIN (COSTS off, NODES off) SELECT * FROM TEST1_P WHERE TEST1_F1 > 5000;
                                 QUERY PLAN                                 
----------------------------------------------------------------------------
- Streaming (type: GATHER)
-   ->  Partition Iterator
-         Iterations: 0
-         ->  Partitioned Index Only Scan using index_on_test1_p on test1_p
-               Index Cond: (test1_f1 > 5000)
-               Selected Partitions:  NONE
-(6 rows)
+---------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 0
+   ->  Partitioned Index Only Scan using index_on_test1_p on test1_p
+         Index Cond: (test1_f1 > 5000)
+         Selected Partitions:  NONE
+(5 rows)
 
 RESET ENABLE_SEQSCAN;
 RESET ENABLE_BITMAPSCAN;

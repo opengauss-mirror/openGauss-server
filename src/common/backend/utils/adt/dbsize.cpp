@@ -1391,6 +1391,7 @@ static int64 calculate_partition_indexes_size(Oid part_table_oid, Oid part_oid)
     }
 
     list_free_ext(indexOids);
+    relation_close(part_table_rel, AccessShareLock);
 
     return size;
 }

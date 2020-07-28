@@ -1216,7 +1216,6 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
             	/* for partitioned table */
                 bool row_movement = false;
                 bool need_create_file = false;
-                int seq_num = -1;
 
                 if (!partKeyUpdate) {
                     row_movement = false;
@@ -1257,7 +1256,6 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                         if (result_relation_desc->rd_rel->relrowmovement) {
                             row_movement = true;
                             need_create_file = true;
-                            seq_num = u_sess->exec_cxt.route->partSeq;
                         } else {
                             ereport(ERROR,
                                 (errmodule(MOD_EXECUTOR),
@@ -1519,7 +1517,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                         Relation fake_insert_relation = NULL;
 
                         if (need_create_file) {
-                            new_partId = createNewIntervalFile(result_relation_desc, seq_num);
+                            new_partId = AddNewIntervalPartition(result_relation_desc, tuple);
                         }
 
                         searchFakeReationForPartitionOid(estate->esfRelations,

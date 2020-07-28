@@ -37,8 +37,6 @@
 #include "catalog/index.h"
 #include "storage/remote_read.h"
 
-extern void fastDropPartition(Relation rel, Oid partOid, const char* stmt);
-
 #define IsBitmapSet(_bitmap, _i) (((_bitmap)[(_i) >> 3] & (1 << ((_i) % 8))) != 0)
 
 #define ARRAY_2_LEN 2

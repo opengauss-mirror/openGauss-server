@@ -60,29 +60,29 @@ select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_table
 select * from insert_without_index_without_interval_without_maxvalue_tz order by col_timestamptz;
        col_timestamptz        
 ------------------------------
- Sat Feb 26 14:00:00 2011 CST
- Wed Jan 25 14:00:00 2012 CST
- Mon Feb 20 14:00:00 2012 CST
- Sat Feb 25 14:00:00 2012 CST
+ Sat Feb 26 00:00:00 2011 CST
+ Wed Jan 25 00:00:00 2012 CST
+ Mon Feb 20 00:00:00 2012 CST
+ Sat Feb 25 00:00:00 2012 CST
 (4 rows)
 
 select * from insert_without_index_without_interval_without_maxvalue_tz partition (insert_without_index_without_interval_without_maxvalue_tz_p1) order by 1;
        col_timestamptz        
 ------------------------------
- Sat Feb 26 14:00:00 2011 CST
+ Sat Feb 26 00:00:00 2011 CST
 (1 row)
 
 select * from insert_without_index_without_interval_without_maxvalue_tz partition (insert_without_index_without_interval_without_maxvalue_tz_p2) order by 1;
        col_timestamptz        
 ------------------------------
- Wed Jan 25 14:00:00 2012 CST
- Mon Feb 20 14:00:00 2012 CST
+ Wed Jan 25 00:00:00 2012 CST
+ Mon Feb 20 00:00:00 2012 CST
 (2 rows)
 
 select * from insert_without_index_without_interval_without_maxvalue_tz partition (insert_without_index_without_interval_without_maxvalue_tz_p3) order by 1;
        col_timestamptz        
 ------------------------------
- Sat Feb 25 14:00:00 2012 CST
+ Sat Feb 25 00:00:00 2012 CST
 (1 row)
 
 --clean up
@@ -137,33 +137,33 @@ select p.relname, p.boundaries, t.spcname from pg_partition p left join pg_table
 select * from insert_without_index_without_interval_with_maxvalue_tz order by col_timestamptz;
        col_timestamptz        
 ------------------------------
- Sat Feb 26 14:00:00 2011 CST
- Wed Jan 25 14:00:00 2012 CST
- Mon Feb 20 14:00:00 2012 CST
- Sat Feb 25 14:00:00 2012 CST
- Sun Mar 25 14:00:00 2012 CST
- Mon Mar 25 14:00:00 2013 CST
+ Sat Feb 26 00:00:00 2011 CST
+ Wed Jan 25 00:00:00 2012 CST
+ Mon Feb 20 00:00:00 2012 CST
+ Sat Feb 25 00:00:00 2012 CST
+ Sun Mar 25 00:00:00 2012 CST
+ Mon Mar 25 00:00:00 2013 CST
 (6 rows)
 
 select * from insert_without_index_without_interval_with_maxvalue_tz partition (insert_without_index_without_interval_with_maxvalue_tz_p1) order by 1;
        col_timestamptz        
 ------------------------------
- Sat Feb 26 14:00:00 2011 CST
+ Sat Feb 26 00:00:00 2011 CST
 (1 row)
 
 select * from insert_without_index_without_interval_with_maxvalue_tz partition (insert_without_index_without_interval_with_maxvalue_tz_p2) order by 1;
        col_timestamptz        
 ------------------------------
- Wed Jan 25 14:00:00 2012 CST
- Mon Feb 20 14:00:00 2012 CST
+ Wed Jan 25 00:00:00 2012 CST
+ Mon Feb 20 00:00:00 2012 CST
 (2 rows)
 
 select * from insert_without_index_without_interval_with_maxvalue_tz partition (insert_without_index_without_interval_with_maxvalue_tz_p3) order by 1;
        col_timestamptz        
 ------------------------------
- Sat Feb 25 14:00:00 2012 CST
- Sun Mar 25 14:00:00 2012 CST
- Mon Mar 25 14:00:00 2013 CST
+ Sat Feb 25 00:00:00 2012 CST
+ Sun Mar 25 00:00:00 2012 CST
+ Mon Mar 25 00:00:00 2013 CST
 (3 rows)
 
 --clean up
@@ -171,17 +171,6 @@ drop table insert_without_index_without_interval_with_maxvalue_tz;
 --
 ---- MAX_PARTITION_NUM(32767)
 --
---date
-create table insert_max_partition_num_date(col_date date)
-partition by range(col_date)
-interval (interval '1' day) store in (hw_partition_insert_tsp4, hw_partition_insert_tsp5, hw_partition_insert_tsp6)
-(
-	partition insert_max_partition_num_date_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp4,
-	partition insert_max_partition_num_date_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp5,
-	partition insert_max_partition_num_date_p3 values less than ('2012-3-25') tablespace hw_partition_insert_tsp6
-);
-ERROR:  Range partitioned table with INTERVAL was forbidden
-HINT:  Only support pure range partitioned table
 --
 ---- test for null, int2
 --
