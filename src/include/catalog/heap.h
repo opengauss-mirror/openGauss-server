@@ -76,7 +76,6 @@ extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc,
 
 extern void heap_truncate_one_part(Relation rel , Oid partOid);
 extern Oid heapTupleGetPartitionId(Relation rel, HeapTuple tuple);
-extern Oid createNewIntervalFile(Relation rel, int seqNum);
 extern void heap_truncate(List *relids);
 extern void heap_truncate_one_rel(Relation rel);
 extern void heap_truncate_check_FKs(List *relations, bool tempTables);
@@ -143,5 +142,7 @@ extern char* make_column_map(TupleDesc tuple_desc);
  * @Notes: remember to pfree the array.
  */
 extern bool* check_partkey_has_timestampwithzone(Relation partTableRel);
+
+extern Oid AddNewIntervalPartition(Relation rel, HeapTuple insertTuple);
 
 #endif   /* HEAP_H */

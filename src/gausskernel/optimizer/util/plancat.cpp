@@ -73,9 +73,7 @@ static void acquireSamplesForPartitionedRelation(
     if (RelationIsPartitioned(relation)) {
         if (relation->rd_rel->relkind == RELKIND_RELATION) {
             RangePartitionMap* partMap = (RangePartitionMap*)(relation->partMap);
-            int totalRangePartitionNumber = getNumberOfRangePartitions(relation);
-            int totalInervalPartitionNumber = getNumberOfIntervalPartitions(relation);
-            int totalPartitionNumber = totalRangePartitionNumber + totalInervalPartitionNumber;
+            int totalPartitionNumber = getNumberOfRangePartitions(relation);
             int partitionNumber = 0;
             int nonzeroPartitionNumber = 0;
             BlockNumber partPages = 0;
@@ -83,24 +81,7 @@ static void acquireSamplesForPartitionedRelation(
             Partition part = NULL;
 
             for (partitionNumber = 0; partitionNumber < totalPartitionNumber; partitionNumber++) {
-                Oid partitionOid = InvalidOid;
-#ifdef PGXC  // open range partition
-                partitionOid = partMap->rangeElements[partitionNumber].partitionOid;
-#else  // open range partition or interval partition
-                if (partitionNumber < totalRangePartitionNumber) {
-                    partitionOid = partMap->rangeElements[partitionNumber].partitionOid;
-                } else {
-                    IntervalPartitionMap* intervalPartMap = NULL;
-                    int intervalPartitionIndex = partitionNumber - totalRangePartitionNumber;
-
-                    AssertEreport(relation->partMap->type == PART_TYPE_INTERVAL,
-                        MOD_OPT,
-                        "Expected interval partition type but exception occurred.");
-                    intervalPartMap = (IntervalPartitionMap*)(relation->partMap);
-
-                    partitionOid = intervalPartMap->intervalElements[intervalPartitionIndex].partitionOid;
-                }
-#endif
+                Oid partitionOid = partMap->rangeElements[partitionNumber].partitionOid;
                 if (!OidIsValid(partitionOid))
                     continue;
 

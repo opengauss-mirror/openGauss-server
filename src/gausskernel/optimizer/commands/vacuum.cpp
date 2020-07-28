@@ -1610,7 +1610,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         if (onepartrel) {
             if (onepartrel->rd_rel->relkind == RELKIND_RELATION) {
                 partID = partOidGetPartID(onepartrel, relid);
-                if (partID->partArea == PART_AREA_RANGE) {
+                if (partID->partArea == PART_AREA_RANGE || partID->partArea == PART_AREA_INTERVAL) {
                     if (ConditionalLockPartition(onepartrel->rd_id, relid, lmode, PARTITION_LOCK)) {
                         GetLock = true;
                     }

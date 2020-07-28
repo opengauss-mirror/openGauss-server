@@ -47,6 +47,9 @@
 extern Partition PartitionIdGetPartition(Oid partitionId);
 extern void PartitionClose(Partition partition);
 
+extern char* PartitionOidGetName(Oid partOid);
+extern Oid PartitionOidGetTablespace(Oid partOid);
+
 /*
  * Routines for flushing/rebuilding relcache entries in various scenarios
  */

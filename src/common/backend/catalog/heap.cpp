@@ -31,6 +31,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
 #include "access/xact.h"
@@ -110,7 +111,7 @@
 
 static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, Oid new_rel_oid, Oid new_type_oid,
     Oid reloftype, Oid relowner, char relkind, Datum relacl, Datum reloptions, int2vector* bucketcol, bool ispartrel);
-static oidvector* buldIntervalTablespace(IntervalPartitionDefState* intervalPartDef);
+static oidvector* BuildIntervalTablespace(const IntervalPartitionDefState* intervalPartDef);
 static void deletePartitionTuple(Oid part_id);
 static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid relid, List *filenodelist, Oid reltablespace,
     Oid bucketOid, PartitionState* partTableState, Oid ownerid, Datum reloptions, const TupleDesc tupledesc);
@@ -4087,7 +4088,6 @@ int2vector* buildPartitionKey(List* keys, TupleDesc tupledsc)
         columName = ((Value*)linitial(col->fields))->val.str;
         finded = false;
         for (j = 0; j < attnum; j++) {
-
             if (strcmp(columName, attrs[j]->attname.data) == 0) {
                 partkey->values[i] = attrs[j]->attnum;
                 finded = true;
@@ -4106,16 +4106,44 @@ int2vector* buildPartitionKey(List* keys, TupleDesc tupledsc)
     return partkey;
 }
 
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		:
- * Description	:
- * Notes		:
- */
-static oidvector* buldIntervalTablespace(IntervalPartitionDefState* intervalPartDef)
+static oidvector* BuildIntervalTablespace(const IntervalPartitionDefState* intervalPartDef)
 {
-    return (oidvector*)NULL;
+    if (intervalPartDef->intervalTablespaces == NULL || intervalPartDef->intervalTablespaces->length == 0) {
+        return NULL;
+    }
+    oidvector* tablespaceVec = buildoidvector(NULL, intervalPartDef->intervalTablespaces->length);
+    ListCell* cell = NULL;
+    int i = 0;
+    const char* tablespaceName;
+    Oid tableSpaceOid;
+    AclResult aclresult;
+
+    foreach (cell, intervalPartDef->intervalTablespaces) {
+        tablespaceName = ((Value*)lfirst(cell))->val.str;
+        tableSpaceOid = get_tablespace_oid(tablespaceName, false);
+
+        if (tableSpaceOid != u_sess->proc_cxt.MyDatabaseTableSpace) {
+            aclresult = pg_tablespace_aclcheck(tableSpaceOid, GetUserId(), ACL_CREATE);
+            if (aclresult != ACLCHECK_OK) {
+                aclcheck_error(aclresult, ACL_KIND_TABLESPACE, tablespaceName);
+            }
+        }
+        tablespaceVec->values[i] = tableSpaceOid;
+        i++;
+    }
+    return tablespaceVec;
+}
+
+static Datum BuildInterval(Node* partInterval)
+{
+    Assert(IsA(partInterval, A_Const));
+    A_Const* constNode = (A_Const*)partInterval;
+    Assert(IsA(&constNode->val, String));
+
+    ArrayBuildState* astate = NULL;
+    astate = accumArrayResult(
+        astate, PointerGetDatum(cstring_to_text(constNode->val.val.str)), false, TEXTOID, CurrentMemoryContext);
+    return makeArrayResult(astate, CurrentMemoryContext);
 }
 
 /*
@@ -4702,7 +4730,7 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partrelfileO
         }
     }
 
-    /*create partition */
+    /* create partition */
     if (!OidIsValid(partrelfileOid) && u_sess->proc_cxt.IsBinaryUpgrade
         && binary_upgrade_is_next_part_pg_partition_oid_valid()) {
         newPartitionOid = binary_upgrade_get_next_part_pg_partition_oid();
@@ -4710,7 +4738,7 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partrelfileO
     } else if (!OidIsValid(partrelfileOid)) {
         newPartitionOid = GetNewRelFileNode(newPartitionTableSpaceOid,
             pgPartRel,
-            RELPERSISTENCE_PERMANENT); /* partition's persistence only can be 'p'(permanent table)*/
+            RELPERSISTENCE_PERMANENT); /* partition's persistence only can be 'p'(permanent table) */
     } else {
         Assert(t_thrd.xact_cxt.inheritFileNode);
         ereport(NOTICE,
@@ -4742,14 +4770,14 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partrelfileO
     newPartition->pd_part->relcudescidx = InvalidOid;
     newPartition->pd_part->indisusable = true;
 
-    /*step 3: insert into pg_partition tuple*/
+    /* step 3: insert into pg_partition tuple */
     addNewPartitionTuple(pgPartRel, /* RelationData pointer for pg_partition */
         newPartition,               /* PartitionData pointer for partition */
         NULL,                       /* */
         NULL,
-        (Datum)0,      /*interval*/
-        boundaryValue, /*max values */
-        (Datum)0,      /*transition point*/
+        (Datum)0,      /* interval*/
+        boundaryValue, /* max values */
+        (Datum)0,      /* transition point */
         reloptions);
 
     relation = relation_open(partTableOid, NoLock);
@@ -4758,6 +4786,353 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partrelfileO
     partitionClose(relation, newPartition, NoLock);
     relation_close(relation, NoLock);
     return newPartitionOid;
+}
+
+#define IsDigital(_ch) (((_ch) >= '0') && ((_ch) <= '9'))
+
+static unsigned ExtractIntervalPartNameSuffix(const char* partName)
+{
+    if (partName == NULL) {
+        return 0;
+    }
+
+    size_t len = strlen(partName);
+    size_t constPartLen = strlen(INTERVAL_PARTITION_NAME_PREFIX);
+    /* 5 is length of MAX_PARTITION_NUM */
+    if (len <= constPartLen || len > constPartLen + INTERVAL_PARTITION_NAME_SUFFIX_LEN) {
+        return 0;
+    }
+
+    if (strncmp(partName, INTERVAL_PARTITION_NAME_PREFIX, constPartLen) != 0) {
+        return 0;
+    }
+
+    for (size_t i = constPartLen; i < len; ++i) {
+        if (!IsDigital(partName[i])) {
+            return 0;
+        }
+    }
+
+    return (unsigned)atoi(partName + constPartLen);
+}
+
+int RangeElementOidCmp(const void* a, const void* b)
+{
+    const RangeElement* rea = (const RangeElement*)a;
+    const RangeElement* reb = (const RangeElement*)b;
+
+    if (rea->partitionOid < reb->partitionOid) {
+        return 1;
+    } 
+
+    if (rea->partitionOid == reb->partitionOid) {
+        return 0;
+    }
+
+    return -1;
+}
+
+char* GenIntervalPartitionName(Relation rel)
+{
+    unsigned suffix = 0;
+    Oid existingPartOid;
+    RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
+    RangeElement* eles = CopyRangeElementsWithoutBoundary(partMap->rangeElements, partMap->rangeElementsNum);
+    /* sort desc by oid */
+    qsort(eles, partMap->rangeElementsNum, sizeof(RangeElement), RangeElementOidCmp);
+    for (int i = 0; i < partMap->rangeElementsNum; ++i) {
+        /* merge or split may result in range oid bigger than interval range oid */
+        if (!eles[i].isInterval) {
+            continue;
+        }
+
+        char* name = PartitionOidGetName(eles[i].partitionOid);
+        if ((suffix = ExtractIntervalPartNameSuffix(name)) != 0) {
+            pfree(name);
+            break;
+        }
+    }
+    pfree(eles);
+
+    char* partName = (char*)palloc0(NAMEDATALEN);
+    error_t rc;
+    while (true) {
+        ++suffix;
+        suffix = (suffix % MAX_PARTITION_NUM == 0 ? MAX_PARTITION_NUM : suffix % MAX_PARTITION_NUM);
+        rc = snprintf_s(partName, NAMEDATALEN, NAMEDATALEN - 1, INTERVAL_PARTITION_NAME_PREFIX_FMT, suffix);
+        securec_check_ss(rc, "\0", "\0");
+        existingPartOid = partitionNameGetPartitionOid(
+            rel->rd_id, partName, PART_OBJ_TYPE_TABLE_PARTITION, AccessExclusiveLock, true, false, NULL, NULL, NoLock);
+        if (!OidIsValid(existingPartOid)) {
+            return partName;
+        }
+    }
+}
+
+Oid GetRecentUsedTablespace(Relation rel)
+{
+    RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
+    Assert(partMap->rangeElementsNum >= 1);
+    RangeElement* maxOidEle = &partMap->rangeElements[0];
+    for (int i = 1; i < partMap->rangeElementsNum; ++i) {
+        if (partMap->rangeElements[i].partitionOid > maxOidEle->partitionOid) {
+            maxOidEle = &partMap->rangeElements[i];
+        }
+    }
+
+    /* no interval partition yet */
+    if (!maxOidEle->isInterval) {
+        return InvalidOid;
+    }
+    return PartitionOidGetTablespace(maxOidEle->partitionOid);
+}
+
+Oid ChooseIntervalTablespace(Relation rel)
+{
+    const oidvector* tablespaceVec = ((RangePartitionMap*)rel->partMap)->intervalTablespace;
+    Assert(tablespaceVec->dim1 >= 1);
+    if (tablespaceVec->dim1 == 1) {
+        return tablespaceVec->values[0];
+    }
+
+    const Oid recentUsed = GetRecentUsedTablespace(rel);
+    if (!OidIsValid(recentUsed)) {
+        return tablespaceVec->values[0];
+    }
+
+    int i = 0;
+    for (; i < tablespaceVec->dim1; ++i) {
+        if (tablespaceVec->values[i] == recentUsed) {
+            break;
+        }
+    }
+
+    return tablespaceVec->values[(i + 1) % tablespaceVec->dim1];
+}
+
+Oid HeapAddIntervalPartition(Relation pgPartRel, Relation rel, Oid partTableOid, Oid partrelfileOid, Oid partTablespace,
+    Oid bucketOid, Datum boundaryValue, Oid ownerid, Datum reloptions)
+{
+    Oid newPartitionOid = InvalidOid;
+    Oid newPartitionTableSpaceOid = InvalidOid;
+    Relation relation;
+    Partition newPartition;
+
+    if (((RangePartitionMap*)rel->partMap)->intervalTablespace != NULL) {
+        newPartitionTableSpaceOid = ChooseIntervalTablespace(rel);
+    }
+
+    if (!OidIsValid(newPartitionTableSpaceOid)) {
+        newPartitionTableSpaceOid = partTablespace;
+    }
+
+    /* Check permissions except when using database's default */
+    if (OidIsValid(newPartitionTableSpaceOid) && newPartitionTableSpaceOid != u_sess->proc_cxt.MyDatabaseTableSpace) {
+        AclResult aclresult = pg_tablespace_aclcheck(newPartitionTableSpaceOid, GetUserId(), ACL_CREATE);
+        if (aclresult != ACLCHECK_OK) {
+            aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(newPartitionTableSpaceOid));
+        }
+    }
+
+    /* create partition */
+    if (!OidIsValid(partrelfileOid) && u_sess->proc_cxt.IsBinaryUpgrade &&
+        binary_upgrade_is_next_part_pg_partition_oid_valid()) {
+        newPartitionOid = binary_upgrade_get_next_part_pg_partition_oid();
+        partrelfileOid = binary_upgrade_get_next_part_pg_partition_rfoid();
+    } else if (!OidIsValid(partrelfileOid)) {
+        newPartitionOid = GetNewRelFileNode(newPartitionTableSpaceOid,
+            pgPartRel,
+            RELPERSISTENCE_PERMANENT); /* partition's persistence only can be 'p'(permanent table) */
+    } else {
+        Assert(t_thrd.xact_cxt.inheritFileNode);
+        ereport(NOTICE, (errmsg("Define inheritFileNode %u for new interval partition", partrelfileOid)));
+    }
+
+    LockPartitionOid(partTableOid, (uint32)newPartitionOid, AccessExclusiveLock);
+    char* partName = GenIntervalPartitionName(rel);
+    newPartition = heapCreatePartition(partName, /* partition's name */
+        false,                                   /* false for partition */
+        newPartitionTableSpaceOid,               /* partition's tablespace */
+        newPartitionOid,                         /* partition's oid */
+        partrelfileOid,
+        bucketOid,
+        ownerid);
+    pfree(partName);
+
+    Assert(newPartitionOid == PartitionGetPartid(newPartition));
+    newPartition->pd_part->parttype = PART_OBJ_TYPE_TABLE_PARTITION;
+    newPartition->pd_part->parentid = partTableOid;
+    newPartition->pd_part->rangenum = 0;
+    newPartition->pd_part->intervalnum = 0;
+    newPartition->pd_part->partstrategy = PART_STRATEGY_INTERVAL;
+    newPartition->pd_part->reltoastrelid = InvalidOid;
+    newPartition->pd_part->reltoastidxid = InvalidOid;
+    newPartition->pd_part->indextblid = InvalidOid;
+    newPartition->pd_part->reldeltarelid = InvalidOid;
+    newPartition->pd_part->reldeltaidx = InvalidOid;
+    newPartition->pd_part->relcudescrelid = InvalidOid;
+    newPartition->pd_part->relcudescidx = InvalidOid;
+    newPartition->pd_part->indisusable = true;
+
+    /* step 3: insert into pg_partition tuple*/
+    addNewPartitionTuple(pgPartRel, /* RelationData pointer for pg_partition */
+        newPartition,               /* PartitionData pointer for partition */
+        NULL,
+        NULL,
+        (Datum)0,      /* interval */
+        boundaryValue, /* max values */
+        (Datum)0,      /* transition point */
+        reloptions);
+
+    relation = relation_open(partTableOid, NoLock);
+    PartitionCloseSmgr(newPartition);
+
+    partitionClose(relation, newPartition, NoLock);
+    relation_close(relation, NoLock);
+    return newPartitionOid;
+}
+
+Timestamp Align2UpBoundary(Timestamp value, Interval* intervalValue, Timestamp boundary)
+{
+    Timestamp nearbyBoundary = boundary;
+    Interval* diff = DatumGetIntervalP(timestamp_mi(value, boundary));
+    /* approximate multiple */
+    int multiple = (int)(INTERVAL_TO_USEC(diff) / INTERVAL_TO_USEC(intervalValue));
+    pfree(diff);
+    if (multiple != 0) {
+        Interval* integerInterval = DatumGetIntervalP(interval_mul(intervalValue, (float8)multiple));
+        nearbyBoundary = DatumGetTimestamp(timestamp_pl_interval(boundary, integerInterval));
+        pfree(integerInterval);
+    }
+    if (nearbyBoundary <= value) {
+        while (true) {
+            nearbyBoundary = DatumGetTimestamp(timestamp_pl_interval(nearbyBoundary, intervalValue));
+            if (nearbyBoundary > value) {
+                return nearbyBoundary;
+            }
+        }
+    } else {
+        while (true) {
+            Timestamp res = DatumGetTimestamp(timestamp_mi_interval(nearbyBoundary, intervalValue));
+            if (res <= value) {
+                return nearbyBoundary;
+            }
+            nearbyBoundary = res;
+        }
+    }
+}
+
+Datum Timestamp2Boundarys(Relation rel, Timestamp ts)
+{
+    Const consts;
+    RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
+    bool isTimestamptz = partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0]->consttype == TIMESTAMPTZOID;
+    Datum columnRaw = TimestampGetDatum(ts);
+    int2vector*  partKeyColumn = partMap->partitionKey;
+    Assert(partKeyColumn->dim1 == 1);
+
+    (void)transformDatum2Const(rel->rd_att, partKeyColumn->values[0], columnRaw, false, &consts);
+    List* bondary = list_make1(&consts);
+    Datum res = transformPartitionBoundary(bondary, &isTimestamptz);
+    list_free(bondary);
+    return res;
+}
+
+Datum GetPartBoundaryByTuple(Relation rel, HeapTuple tuple)
+{
+    RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
+    int2vector* partKeyColumn = partMap->partitionKey;
+    Assert(partKeyColumn->dim1 == 1);
+    Assert(partMap->type.type == PART_TYPE_INTERVAL);
+    Assert(partMap->rangeElementsNum >= 1);
+    Assert(partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0]->consttype == TIMESTAMPOID ||
+           partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0]->consttype == TIMESTAMPTZOID);
+
+    bool isNull = false;
+    Datum columnRaw = fastgetattr(tuple, partKeyColumn->values[0], rel->rd_att, &isNull);
+    Timestamp value = DatumGetTimestamp(columnRaw);
+    Timestamp boundaryTs =
+        DatumGetTimestamp(partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0]->constvalue);
+    return Timestamp2Boundarys(rel, Align2UpBoundary(value, partMap->intervalValue, boundaryTs));
+}
+
+Oid AddNewIntervalPartition(Relation rel, HeapTuple insertTuple)
+{
+    Relation pgPartRel = NULL;
+    Oid newPartOid = InvalidOid;
+    Datum newRelOptions;
+    Datum relOptions;
+    HeapTuple tuple;
+    bool isNull = false;
+    List* oldRelOptions = NIL;
+    Oid bucketOid;
+
+    lockRelationForAddIntervalPartition(rel);
+    RelationInitPartitionMap(rel);
+    partitionRoutingForTuple(rel, insertTuple, u_sess->catalog_cxt.route);
+
+    /* if the partition exists, return partition's oid */
+    if (u_sess->catalog_cxt.route->fileExist) {
+        Assert(OidIsValid(u_sess->catalog_cxt.route->partitionId));
+        unLockRelationForAddIntervalPartition(rel);
+        return u_sess->catalog_cxt.route->partitionId;
+    }
+
+    /* check 1: can not add more partition, because more enough */
+    if ((getNumberOfPartitions(rel) + 1) > MAX_PARTITION_NUM) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                errmsg("too many partitions for partitioned table"),
+                errhint("Number of partitions can not be more than %d", MAX_PARTITION_NUM)));
+    }
+
+    /* check 5: whether has the unusable local index */
+    if (!checkRelationLocalIndexesUsable(rel)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("can't add partition bacause the relation %s has unusable local index",
+                    NameStr(rel->rd_rel->relname)),
+                errhint("please reindex the unusable index first.")));
+    }
+
+    pgPartRel = relation_open(PartitionRelationId, RowExclusiveLock);
+
+    /* step 2: add new partition entry in pg_partition */
+    /* TRANSFORM into target first */
+    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(rel->rd_id));
+    relOptions = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isNull);
+
+    oldRelOptions = untransformRelOptions(relOptions);
+    newRelOptions = transformRelOptions((Datum)0, oldRelOptions, NULL, NULL, false, false);
+    ReleaseSysCache(tuple);
+
+    if (oldRelOptions != NIL) {
+        list_free_ext(oldRelOptions);
+    }
+
+    bucketOid = RelationGetBucketOid(rel);
+    newPartOid = HeapAddIntervalPartition(pgPartRel,
+        rel,
+        rel->rd_id,
+        InvalidOid,
+        rel->rd_rel->reltablespace,
+        bucketOid,
+        GetPartBoundaryByTuple(rel, insertTuple),
+        rel->rd_rel->relowner,
+        (Datum)newRelOptions);
+
+    CommandCounterIncrement();
+    addIndexForPartition(rel, newPartOid);
+
+    addToastTableForNewPartition(rel, newPartOid);
+    /* step 4: invalidate relation */
+    CacheInvalidateRelcache(rel);
+    RelationInitPartitionMap(rel);
+
+    /* close relation, done */
+    relation_close(pgPartRel, NoLock);
+
+    return newPartOid;
 }
 
 static void addNewPartitionTupleForValuePartitionedTable(Relation pg_partition_rel, const char* relname,
@@ -4872,10 +5247,10 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
     }
 
     partition_key_attr_no = buildPartitionKey(partTableState->partitionKey, reltupledesc);
-    interval_talespace = buldIntervalTablespace(partTableState->intervalPartDef);
-
-    interval = (Datum)0;
-    transition_point = (Datum)0;
+    if (partTableState->intervalPartDef != NULL) {
+        interval_talespace = BuildIntervalTablespace(partTableState->intervalPartDef);
+        interval = BuildInterval(partTableState->intervalPartDef->partInterval);
+    }
 
     /*step1: create partition relation, initialize and set tuple properties*/
     if (u_sess->proc_cxt.IsBinaryUpgrade && OidIsValid(u_sess->upg_cxt.binary_upgrade_next_partrel_pg_partition_oid)) {
@@ -4929,6 +5304,10 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
 
     if (interval_talespace != NULL) {
         pfree(interval_talespace);
+    }
+
+    if (interval != 0) {
+        pfree(DatumGetPointer(interval));
     }
 }
 
@@ -5160,6 +5539,9 @@ Oid heapTupleGetPartitionId(Relation rel, HeapTuple tuple)
             ereport(ERROR,
                 (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
         } break;
+        case PART_AREA_INTERVAL: {
+            return AddNewIntervalPartition(rel, tuple);
+        } break;
         /* never happen; just to be self-contained */
         default: {
             ereport(ERROR,
@@ -5300,18 +5682,6 @@ static Oid binary_upgrade_get_next_part_toast_pg_class_rfoid()
     u_sess->upg_cxt.binary_upgrade_cur_part_toast_pg_class_rfoid++;
 
     return old_part_toast_pg_class_rfoid;
-}
-
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		: create a interval partition.
- * Description	:
- * Notes		:
- */
-Oid createNewIntervalFile(Relation rel, int seqNum)
-{
-    return InvalidOid;
 }
 
 static int TransformClusterColNameList(Oid relId, List* colList, int16* attnums)

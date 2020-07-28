@@ -941,7 +941,7 @@ void LockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode)
     Assert(PointerIsValid(prel) && prel->rd_rel->relkind == RELKIND_RELATION);
     partIdentifier = partOidGetPartID(prel, partId);
 
-    if (partIdentifier->partArea == PART_AREA_RANGE) {
+    if (partIdentifier->partArea == PART_AREA_RANGE || partIdentifier->partArea == PART_AREA_INTERVAL) {
         LockPartition(prel->rd_id, partId, lockmode, PARTITION_LOCK);
     }
 
@@ -951,29 +951,16 @@ void LockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode)
 bool ConditionalLockPartitionWithRetry(Relation relation, Oid partitionId, LOCKMODE lockmode)
 {
     Oid relationId = relation->rd_id;
-    char relkind = relation->rd_rel->relkind;
-    PartitionIdentifier *partIdentifier = NULL;
     int lock_retry = 0;
     int lock_retry_limit = u_sess->attr.attr_storage.partition_lock_upgrade_timeout *
                            (1000000 / PARTITION_RETRY_LOCK_WAIT_INTERVAL);
-    if (relkind == RELKIND_RELATION)
-        partIdentifier = partOidGetPartID(relation, partitionId);
 
     while (true) {
         /* step 1.1:  try to lock partition */
-        if (relkind == RELKIND_RELATION) {
-            if (partIdentifier->partArea == PART_AREA_RANGE) {
-                if (ConditionalLockPartition(relationId, partitionId, lockmode, PARTITION_LOCK))
-                    break;
-            } else if (partIdentifier->partArea == PART_AREA_INTERVAL) {
-                if (ConditionalLockPartition(relationId, partIdentifier->partSeq, lockmode, PARTITION_SEQUENCE_LOCK))
-                    break;
-            }
-        } else if (relkind == RELKIND_INDEX) {
-            if (ConditionalLockPartition(relationId, partitionId, lockmode, PARTITION_LOCK))
-                break;
+        if (ConditionalLockPartition(relationId, partitionId, lockmode, PARTITION_LOCK)) {
+            break;
         }
-
+        
         /* step 1.2: examine the try count */
         if (lock_retry_limit < 0) {
             /* do nothing, infinite loop */
@@ -982,15 +969,12 @@ bool ConditionalLockPartitionWithRetry(Relation relation, Oid partitionId, LOCKM
              * We failed to establish the lock in the specified timeout
              * . This means we give up.
              */
-            pfree(partIdentifier);
             return false;
         }
 
         /* step 1.3: just sleep for a while, then re-enter this loop */
         pg_usleep(PARTITION_RETRY_LOCK_WAIT_INTERVAL);
     }
-    if (partIdentifier != NULL)
-        pfree(partIdentifier);
 
     return true;
 }
@@ -1003,7 +987,7 @@ bool ConditionalLockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode
     Assert(PointerIsValid(prel) && prel->rd_rel->relkind == RELKIND_RELATION);
     partIdentifier = partOidGetPartID(prel, partId);
 
-    if (partIdentifier->partArea == PART_AREA_RANGE) {
+    if (partIdentifier->partArea == PART_AREA_RANGE || partIdentifier->partArea == PART_AREA_INTERVAL) {
         if (ConditionalLockPartition(prel->rd_id, partId, lockmode, PARTITION_LOCK)) {
             getLock = true;
         }
@@ -1020,6 +1004,9 @@ void UnLockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode)
 
     switch (partIdentifier->partArea) {
         case PART_AREA_RANGE:
+            UnlockPartition(prel->rd_id, partId, lockmode, PARTITION_LOCK);
+            break;
+        case PART_AREA_INTERVAL:
             UnlockPartition(prel->rd_id, partId, lockmode, PARTITION_LOCK);
             break;
         default:
@@ -1046,7 +1033,7 @@ void LockPartitionVacuumForSession(PartitionIdentifier *partIdtf, Oid partrelid,
 {
     LOCKTAG tag;
 
-    if (partIdtf->partArea == PART_AREA_RANGE) {
+    if (partIdtf->partArea == PART_AREA_RANGE || partIdtf->partArea == PART_AREA_INTERVAL) {
         SetLocktagPartitionOid(&tag, partrelid, partid);
     }
 
@@ -1059,7 +1046,7 @@ void UnLockPartitionVacuumForSession(PartitionIdentifier *partIdtf, Oid partreli
 {
     LOCKTAG tag;
 
-    if (partIdtf->partArea == PART_AREA_RANGE) {
+    if (partIdtf->partArea == PART_AREA_RANGE || partIdtf->partArea == PART_AREA_INTERVAL) {
         SetLocktagPartitionOid(&tag, partrelid, partid);
     }
 

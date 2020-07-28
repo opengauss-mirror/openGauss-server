@@ -1,0 +1,145 @@
+CREATE TABLE interval_tab1 (
+    city_id         int not null,
+    logdate         date not null,
+    peaktemp        int,
+    unitsales       int
+) 
+PARTITION BY RANGE (logdate)
+INTERVAL ('1 day')
+(
+	PARTITION p1 VALUES LESS THAN (('2020-03-01'))
+);
+insert into interval_tab1 values(1,'2020-4-7 2:0:0',  1, 1);
+insert into interval_tab1 values(1,'2020-4-8 2:0:0',  1, 1);
+select relname, boundaries from pg_partition;
+    relname    |          boundaries          
+---------------+------------------------------
+ interval_tab1 | 
+ p1            | {2020-03-01}
+ sys_p1        | {"Wed Apr 08 00:00:00 2020"}
+ sys_p2        | {"Thu Apr 09 00:00:00 2020"}
+(4 rows)
+
+select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
+ city_id | logdate | peaktemp | unitsales 
+---------+---------+----------+-----------
+(0 rows)
+
+explain (costs off, verbose on, nodes off) select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Output: city_id, logdate, peaktemp, unitsales
+   Iterations: 1
+   ->  Partitioned Seq Scan on public.interval_tab1
+         Output: city_id, logdate, peaktemp, unitsales
+         Filter: (interval_tab1.logdate < 'Tue Apr 07 00:00:00 2020'::timestamp without time zone)
+         Selected Partitions:  1
+(7 rows)
+
+select * from interval_tab1 where logdate > '2020-4-6';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
+       1 | Wed Apr 08 02:00:00 2020 |        1 |         1
+(2 rows)
+
+explain (costs off, verbose on, nodes off) select * from interval_tab1 where logdate > '2020-4-6';
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Output: city_id, logdate, peaktemp, unitsales
+   Iterations: 2
+   ->  Partitioned Seq Scan on public.interval_tab1
+         Output: city_id, logdate, peaktemp, unitsales
+         Filter: (interval_tab1.logdate > 'Mon Apr 06 00:00:00 2020'::timestamp without time zone)
+         Selected Partitions:  2..3
+(7 rows)
+
+select * from interval_tab1 where logdate = '2020-4-7 2:0:0';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
+(1 row)
+
+insert into interval_tab1 values(1,'2020-4-7 0:0:0',  1, 1);
+select * from interval_tab1 where logdate = '2020-4-7 0:0:0';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+(1 row)
+
+select * from interval_tab1 where logdate != '2020-4-7 0:0:0';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
+       1 | Wed Apr 08 02:00:00 2020 |        1 |         1
+(2 rows)
+
+select * from interval_tab1 where logdate >= '2020-4-7 0:0:0';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
+       1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+       1 | Wed Apr 08 02:00:00 2020 |        1 |         1
+(3 rows)
+
+insert into interval_tab1 values(1,'2020-4-5 2:0:0',  1, 1);
+select relname, boundaries from pg_partition;
+    relname    |          boundaries          
+---------------+------------------------------
+ interval_tab1 | 
+ p1            | {2020-03-01}
+ sys_p1        | {"Wed Apr 08 00:00:00 2020"}
+ sys_p2        | {"Thu Apr 09 00:00:00 2020"}
+ sys_p3        | {"Mon Apr 06 00:00:00 2020"}
+(5 rows)
+
+insert into interval_tab1 values(1,'2020-4-9 0:0:0',  1, 1);
+select * from interval_tab1 where logdate >= '2020-4-7 0:0:0' and logdate < '2020-4-9 0:0:0';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
+       1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+       1 | Wed Apr 08 02:00:00 2020 |        1 |         1
+(3 rows)
+
+select * from interval_tab1 where logdate > '2020-4-7 0:0:0' and logdate <= '2020-4-9 0:0:0';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
+       1 | Wed Apr 08 02:00:00 2020 |        1 |         1
+       1 | Thu Apr 09 00:00:00 2020 |        1 |         1
+(3 rows)
+
+select * from interval_tab1 where logdate >= '2020-4-7 0:0:0' and logdate <= '2020-4-9 0:0:0';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
+       1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+       1 | Wed Apr 08 02:00:00 2020 |        1 |         1
+       1 | Thu Apr 09 00:00:00 2020 |        1 |         1
+(4 rows)
+
+select * from interval_tab1 where logdate > '2020-4-6 0:0:0' and logdate <= '2020-4-9 0:0:0';
+ city_id |         logdate          | peaktemp | unitsales 
+---------+--------------------------+----------+-----------
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
+       1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+       1 | Wed Apr 08 02:00:00 2020 |        1 |         1
+       1 | Thu Apr 09 00:00:00 2020 |        1 |         1
+(4 rows)
+
+explain (costs off, verbose on, nodes off)  select * from interval_tab1 where logdate >= '2020-4-10 0:0:0';
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Output: city_id, logdate, peaktemp, unitsales
+   Iterations: 0
+   ->  Partitioned Seq Scan on public.interval_tab1
+         Output: city_id, logdate, peaktemp, unitsales
+         Filter: (interval_tab1.logdate >= 'Fri Apr 10 00:00:00 2020'::timestamp without time zone)
+         Selected Partitions:  NONE
+(7 rows)
+
+drop table interval_tab1;

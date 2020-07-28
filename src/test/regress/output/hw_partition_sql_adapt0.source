@@ -279,8 +279,8 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_pkey" for t
 insert into test values (0);
 -- failed
 alter table test_add_column_constraint add foreign key (a) references test(a) ;
-ERROR:  FOREIGN KEY ... REFERENCES constraint is not yet supported.
 drop table test cascade;
+NOTICE:  drop cascades to constraint test_add_column_constraint_a_fkey on table test_add_column_constraint
 -- d.deferrable 
 -- failed
 alter table test_add_column_constraint add column c4 int deferrable;
@@ -827,7 +827,7 @@ select * from test_drop_column_view order by 1,2;
 
 -- failed
 select * from temp_view order by 1,2;
-ERROR:  relation "temp_view" does not exist
+ERROR:  relation "temp_view" does not exist on datanode1
 LINE 1: select * from temp_view order by 1,2;
                       ^
 -- failed

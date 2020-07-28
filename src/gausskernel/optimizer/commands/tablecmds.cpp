@@ -522,18 +522,19 @@ static void RangeVarCallbackForAlterRelation(
     const RangeVar* rv, Oid relid, Oid oldrelid, bool target_is_partition, void* arg);
 
 static bool CheckRangePartitionKeyType(Oid typoid);
+static void CheckRangePartitionKeyType(Form_pg_attribute* attrs, List* pos);
+static void CheckIntervalPartitionKeyType(Form_pg_attribute* attrs, List* pos);
 static void CheckPartitionTablespace(const char* spcname, Oid owner);
 static void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, PartitionState* partTableState);
 static bool ConfirmTypeInfo(Oid* target_oid, int* target_mod, Const* src, Form_pg_attribute attrs, bool isinterval);
 
-static void addToastTableForNewPartition(Relation relation, Oid newPartId);
+void addToastTableForNewPartition(Relation relation, Oid newPartId);
 static void ATPrepAddPartition(Relation rel);
 static void ATPrepDropPartition(Relation rel);
 static void ATPrepUnusableIndexPartition(Relation rel);
 static void ATPrepUnusableAllIndexOnPartition(Relation rel);
 static void ATExecAddPartition(Relation rel, AddPartitionState* partState);
 static void ATExecDropPartition(Relation rel, AlterTableCmd* cmd);
-void fastDropPartition(Relation rel, Oid partOid, const char* stmt);
 static void ATExecUnusableIndexPartition(Relation rel, const char* partition_name);
 static void ATExecUnusableIndex(Relation rel);
 static void ATExecUnusableAllIndexOnPartition(Relation rel, const char* partition_name);
@@ -1722,16 +1723,18 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
 
     if (stmt->partTableState) {
         List* pos = NIL;
-        bool is_interval = false;
 
         /* get partitionkey's position */
         pos = GetPartitionkeyPos(stmt->partTableState->partitionKey, schema);
 
         /* check partitionkey's datatype */
-        if (stmt->partTableState->partitionStrategy == PART_STRATEGY_VALUE)
+        if (stmt->partTableState->partitionStrategy == PART_STRATEGY_VALUE) {
             CheckValuePartitionKeyType(descriptor->attrs, pos);
-        else
-            CheckPartitionKeyType(descriptor->attrs, pos, is_interval);
+        } else if (stmt->partTableState->partitionStrategy == PART_STRATEGY_INTERVAL) {
+            CheckIntervalPartitionKeyType(descriptor->attrs, pos);
+        } else {
+            CheckRangePartitionKeyType(descriptor->attrs, pos);
+        }
 
         /*
          * Check partitionkey's value for none value-partition table as for value
@@ -12465,7 +12468,7 @@ static void ATExecSetTableSpaceForPartitionP2(AlteredTableInfo* tab, Relation re
             rangePartDef = (RangePartitionDefState*)partition;
             transformRangePartitionValue(make_parsestate(NULL), (Node*)rangePartDef, false);
             rangePartDef->boundary = transformConstIntoTargetType(rel->rd_att->attrs,
-                ((IntervalPartitionMap*)rel->partMap)->rangePartitionMap.partitionKey,
+                ((RangePartitionMap*)rel->partMap)->partitionKey,
                 rangePartDef->boundary);
             partOid =
                 partitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessExclusiveLock, true, false, false);
@@ -15549,17 +15552,11 @@ List* GetPartitionkeyPos(List* partitionkeys, List* schema)
  * Description	:
  * Notes		:
  */
-void CheckPartitionKeyType(Form_pg_attribute* attrs, List* pos, bool is_interval)
+static void CheckRangePartitionKeyType(Form_pg_attribute* attrs, List* pos)
 {
     int location = 0;
     ListCell* cell = NULL;
     Oid typoid = InvalidOid;
-    /* must be one partitionkey for interval partition */
-    if (is_interval && pos->length != 1) {
-        list_free_ext(pos);
-        ereport(
-            ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("must be one partition key for interval partition")));
-    }
     foreach (cell, pos) {
         bool result = false;
         location = lfirst_int(cell);
@@ -15574,6 +15571,23 @@ void CheckPartitionKeyType(Form_pg_attribute* attrs, List* pos, bool is_interval
                     errmsg("column %s cannot serve as a range partitioning column because of its datatype",
                         NameStr(attrs[location]->attname))));
         }
+    }
+}
+
+static void CheckIntervalPartitionKeyType(Form_pg_attribute* attrs, List* pos)
+{
+    /* must be one partitionkey for interval partition, have checked before */
+    Assert(pos->length == 1);
+
+    ListCell* cell = list_head(pos);
+    int location = lfirst_int(cell);
+    Oid typoid = attrs[location]->atttypid;
+    if (typoid != TIMESTAMPOID && typoid != TIMESTAMPTZOID) {
+        list_free_ext(pos);
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("column %s cannot serve as a interval partitioning column because of its datatype",
+                    NameStr(attrs[location]->attname))));
     }
 }
 
@@ -15953,6 +15967,11 @@ static void ATPrepAddPartition(Relation rel)
         ereport(
             ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not add partition against NON-PARTITIONED table")));
     }
+
+    if (rel->partMap->type == PART_TYPE_INTERVAL) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+            errmsg("can not add partition against interval partitioned table")));
+    }
 }
 
 /*
@@ -16063,6 +16082,11 @@ static void ATPrepMergePartition(Relation rel)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not merge partition against NON-PARTITIONED table")));
     }
+
+    if (rel->partMap->type == PART_TYPE_INTERVAL) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+            errmsg("can not merge partition against interval partitioned table")));
+    }
 }
 
 static void ATPrepSplitPartition(Relation rel)
@@ -16070,6 +16094,11 @@ static void ATPrepSplitPartition(Relation rel)
     if (!RELATION_IS_PARTITIONED(rel)) {
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not split partition against NON-PARTITIONED table")));
+    }
+
+    if (rel->partMap->type == PART_TYPE_INTERVAL) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+            errmsg("can not split partition against interval partitioned table")));
     }
 }
 
@@ -16224,8 +16253,43 @@ static void ATExecAddPartition(Relation rel, AddPartitionState* partState)
     pfree_ext(isTimestamptz);
 }
 
-// assume caller already hold AccessExclusiveLock on the partition being dropped
-void fastDropPartition(Relation rel, Oid partOid, const char* stmt)
+/* Assume the caller has already hold RowExclusiveLock on the pg_partition. */
+static void UpdateIntervalPartToRange(Relation relPartition, Oid partOid, const char* stmt)
+{
+    bool dirty = false;
+    /* Fetch a copy of the tuple to scribble on */
+    HeapTuple parttup = SearchSysCacheCopy1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(parttup)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SQL_ROUTINE_EXCEPTION),
+                errmsg("pg_partition entry for partid %u vanished during %s.", partOid, stmt)));
+    }
+    Form_pg_partition partform = (Form_pg_partition)GETSTRUCT(parttup);
+
+    /* Apply required updates, if any, to copied tuple */
+    if (partform->partstrategy == PART_STRATEGY_INTERVAL) {
+        partform->partstrategy = PART_STRATEGY_RANGE;
+        dirty = true;
+    } else {
+        ereport(LOG,
+            (errcode(ERRCODE_SQL_ROUTINE_EXCEPTION),
+                errmsg("pg_partition entry for partid %u is not a interval "
+                       "partition when execute %s .",
+                    partOid,
+                    stmt)));
+    }
+
+    /* If anything changed, write out the tuple. */
+    if (dirty) {
+        heap_inplace_update(relPartition, parttup);
+    }
+}
+
+/* assume caller already hold AccessExclusiveLock on the partition being dropped
+ * if the intervalPartOid is not InvalidOid, the interval partition which is specificed by it 
+ * need to be changed to normal range partition.
+ */
+void fastDropPartition(Relation rel, Oid partOid, const char* stmt, Oid intervalPartOid)
 {
     Partition part = NULL;
     Relation pg_partition = NULL;
@@ -16240,6 +16304,7 @@ void fastDropPartition(Relation rel, Oid partOid, const char* stmt)
                     getPartitionName(partOid, false),
                     stmt)));
     }
+
     /* drop toast table, index, and finally the partition iteselt */
     dropIndexForPartition(partOid);
     dropToastTableOnPartition(partOid);
@@ -16248,6 +16313,10 @@ void fastDropPartition(Relation rel, Oid partOid, const char* stmt)
         dropDeltaTableOnPartition(partOid);
     }
     heapDropPartition(rel, part);
+
+    if (intervalPartOid) {
+        UpdateIntervalPartToRange(pg_partition, intervalPartOid, stmt);
+    }
 
     /* step 3: no need to update number of partitions in pg_partition */
     /* step 4: invalidate relation */
@@ -16291,8 +16360,7 @@ static void ATExecDropPartition(Relation rel, AlterTableCmd* cmd)
         /* next IS the DROP PARTITION FOR (MAXVALUELIST) branch */
         rangePartDef = (RangePartitionDefState*)cmd->def;
         rangePartDef->boundary = transformConstIntoTargetType(rel->rd_att->attrs,
-            ((IntervalPartitionMap*)rel->partMap)->rangePartitionMap.partitionKey,
-            rangePartDef->boundary);
+            ((RangePartitionMap*)rel->partMap)->partitionKey, rangePartDef->boundary);
         partOid = partitionValuesGetPartitionOid(rel,
             rangePartDef->boundary,
             AccessExclusiveLock,
@@ -16311,7 +16379,9 @@ static void ATExecDropPartition(Relation rel, AlterTableCmd* cmd)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OPERATION), errmsg("Cannot drop the only partition of a partitioned table")));
     }
-    fastDropPartition(rel, partOid, "DROP PARTITION");
+
+    Oid changeToRangePartOid = GetNeedDegradToRangePartOid(rel, partOid);
+    fastDropPartition(rel, partOid, "DROP PARTITION", changeToRangePartOid);
 }
 
 /*
@@ -16565,7 +16635,6 @@ static void ATExecModifyRowMovement(Relation rel, bool rowMovement)
     /* get the tuple of partitioned table */
     tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
     if (!HeapTupleIsValid(tuple)) {
-
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("could not find tuple for relation %u", relid)));
     }
 
@@ -16671,7 +16740,7 @@ static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd)
     } else {
         rangePartDef = (RangePartitionDefState*)cmd->def;
         rangePartDef->boundary = transformConstIntoTargetType(rel->rd_att->attrs,
-            ((IntervalPartitionMap*)rel->partMap)->rangePartitionMap.partitionKey,
+            ((RangePartitionMap*)rel->partMap)->partitionKey,
             rangePartDef->boundary);
         partOid = partitionValuesGetPartitionOid(rel,
             rangePartDef->boundary,
@@ -19298,7 +19367,7 @@ List* transformConstIntoTargetType(Form_pg_attribute* attrs, int2vector* partiti
  * Return		:
  * Notes		:
  */
-static void addToastTableForNewPartition(Relation relation, Oid newPartId)
+void addToastTableForNewPartition(Relation relation, Oid newPartId)
 {
     Oid firstPartitionId = InvalidOid;
     Oid firstPartitionToastId = InvalidOid;

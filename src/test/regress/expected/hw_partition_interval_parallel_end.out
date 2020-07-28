@@ -1,0 +1,25 @@
+-- check results and clean
+select count(*) from partition_interval_parallel;
+ count 
+-------
+ 10500
+(1 row)
+
+select relname, parttype, partstrategy, boundaries, indisusable from pg_partition
+	where parentid = (select oid from pg_class where relname = 'partition_interval_parallel')
+	order by 1;
+            relname             | parttype | partstrategy |          boundaries          | indisusable 
+--------------------------------+----------+--------------+------------------------------+-------------
+ partition_interval_parallel    | r        | i            |                              | t
+ partition_interval_parallel_p1 | p        | r            | {2020-05-01}                 | t
+ partition_interval_parallel_p2 | p        | r            | {2020-06-01}                 | t
+ sys_p1                         | p        | i            | {"Wed Jul 01 00:00:00 2020"} | t
+ sys_p2                         | p        | i            | {"Sat Aug 01 00:00:00 2020"} | t
+ sys_p3                         | p        | i            | {"Tue Sep 01 00:00:00 2020"} | t
+ sys_p4                         | p        | i            | {"Thu Oct 01 00:00:00 2020"} | t
+ sys_p5                         | p        | i            | {"Sun Nov 01 00:00:00 2020"} | t
+ sys_p6                         | p        | i            | {"Tue Dec 01 00:00:00 2020"} | t
+(9 rows)
+
+--cleanup
+DROP TABLE partition_interval_parallel;
