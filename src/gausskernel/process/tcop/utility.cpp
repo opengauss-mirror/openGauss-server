@@ -8504,7 +8504,8 @@ bool DropExtensionIsSupported(const char* query_string)
 {
     char* lower_string = lowerstr(query_string);
 
-    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages"))) {
+    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages") || 
+        strstr(lower_string, "mysql_fdw") || strstr(lower_string, "oracle_fdw"))) {
         pfree_ext(lower_string);
         return true;
     } else {
