@@ -85,8 +85,7 @@ void WaitForDataSync(void)
     }
 
     /*
-     * Set our wait offset so DataSender will know when to wake us, and add
-     * ourselves to the queue.
+     * Set our wait offset so DataSender will know when to wake us, and add ourselves to the queue.
      */
     t_thrd.proc->dataSyncRepState = SYNC_REP_WAITING;
     DataSyncRepQueueInsert();
@@ -102,7 +101,6 @@ void WaitForDataSync(void)
             t_thrd.dataqueue_cxt.DataSenderQueue->use_tail2.queueoff,
             t_thrd.proc->waitDataSyncPoint.queueid,
             t_thrd.proc->waitDataSyncPoint.queueoff)));
-
     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_DATASYNC);
 
     /*

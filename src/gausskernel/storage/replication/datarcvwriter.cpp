@@ -449,7 +449,7 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
         errorno = memcpy_s((void*)&datahdr, headerlen, buf, headerlen);
         securec_check(errorno, "", "");
         RelFileNodeCopy(curnode, datahdr.rnode, GETBUCKETID(datahdr.attid));
-        curattid = GETATTID(datahdr.attid);
+        curattid = (int)GETATTID((uint32)datahdr.attid);
         buf += headerlen;
 
         if (!g_instance.attr.attr_storage.enable_mix_replication) {
@@ -475,7 +475,7 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
                 datahdr.data_size,
                 datahdr.queue_offset.queueid,
                 datahdr.queue_offset.queueoff,
-                GETATTID(datahdr.attid))));
+                (int)GETATTID((uint32)datahdr.attid))));
 
 #ifdef DATA_DEBUG
         INIT_CRC32(crc);
@@ -666,12 +666,12 @@ uint32 DoDataWrite(char* buf, uint32 nbytes)
             if (u_sess->attr.attr_storage.HaModuleDebug) {
                 check_cu_block(buf, datahdr.data_size);
                 ereport(LOG,
-                    (errmsg("HA-DoDataWrite: rnode %u/%u/%u, col %d, "
+                    (errmsg("HA-DoDataWrite: rnode %u/%u/%u, col %u, "
                             "blockno %lu, cuUnitCount %u",
                         datahdr.rnode.spcNode,
                         datahdr.rnode.dbNode,
                         datahdr.rnode.relNode,
-                        GETATTID(datahdr.attid),
+                        GETATTID((uint)datahdr.attid),
                         datahdr.offset / ALIGNOF_CUSIZE,
                         datahdr.data_size / ALIGNOF_CUSIZE)));
             }

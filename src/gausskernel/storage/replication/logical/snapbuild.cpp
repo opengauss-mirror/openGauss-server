@@ -253,12 +253,6 @@ struct SnapBuild {
 #define MAX_SIZE_T_NUM 4294967295
 #endif
 
-/*
- * Starting a transaction -- which we need to do while exporting a snapshot --
- * removes knowledge about the previously used resowner, so we save it here.
- */
-ResourceOwner g_saved_resource_owner_during_export = NULL;
-
 /* ->committed manipulation */
 static void SnapBuildPurgeCommittedTxn(SnapBuild* builder);
 
@@ -542,6 +536,9 @@ const char* SnapBuildExportSnapshot(SnapBuild* builder)
     const int newxcnt = 0;
     int maxcnt = GetMaxSnapshotXidCount();
 
+    if (u_sess->utils_cxt.FirstSnapshotSet) {
+        return NULL;
+    }
     if (builder->state != SNAPBUILD_CONSISTENT)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -561,10 +558,10 @@ const char* SnapBuildExportSnapshot(SnapBuild* builder)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot export a snapshot from within a transaction")));
 
-    if (g_saved_resource_owner_during_export)
+    if (t_thrd.logical_cxt.SavedResourceOwnerDuringExport)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("can only export one snapshot at a time")));
 
-    g_saved_resource_owner_during_export = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.logical_cxt.SavedResourceOwnerDuringExport = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.logical_cxt.ExportInProgress = true;
 
     StartTransactionCommand();
@@ -627,8 +624,8 @@ void SnapBuildClearExportedSnapshot()
     /* make sure nothing  could have ever happened */
     AbortCurrentTransaction();
 
-    t_thrd.utils_cxt.CurrentResourceOwner = g_saved_resource_owner_during_export;
-    g_saved_resource_owner_during_export = NULL;
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.logical_cxt.SavedResourceOwnerDuringExport;
+    t_thrd.logical_cxt.SavedResourceOwnerDuringExport = NULL;
     t_thrd.logical_cxt.ExportInProgress = false;
 }
 

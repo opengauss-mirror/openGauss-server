@@ -76,10 +76,11 @@ typedef struct knl_instance_attr_storage {
     int recovery_redo_workers_per_paser_worker;
     int pagewriter_thread_num;
     int real_recovery_parallelism;
-	int batch_redo_num;
+    int batch_redo_num;
     int remote_read_mode;
     int advance_xlog_file_num;
     int gtm_option;
+    int max_keep_log_seg;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

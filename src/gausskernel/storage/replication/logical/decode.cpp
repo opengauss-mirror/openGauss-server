@@ -348,6 +348,7 @@ static void DecodeStandbyOp(LogicalDecodingContext* ctx, XLogRecordBuffer* buf)
     SnapBuild* builder = ctx->snapshot_builder;
     XLogReaderState* r = buf->record;
     uint8 info = XLogRecGetInfo(r) & ~XLR_INFO_MASK;
+    XLogRecPtr lsn = buf->endptr;
 
     ReorderBufferProcessXid(ctx->reorder, XLogRecGetXid(r), buf->origptr);
 
@@ -364,10 +365,12 @@ static void DecodeStandbyOp(LogicalDecodingContext* ctx, XLogRecordBuffer* buf)
              * while shutdown checkpoints just know that no non-prepared
              * transactions are in progress.
              */
-            ReorderBufferAbortOld(ctx->reorder, running->oldestRunningXid);
+            ReorderBufferAbortOld(ctx->reorder, running->oldestRunningXid, lsn);
         } break;
         case XLOG_STANDBY_LOCK:
         case XLOG_STANDBY_CSN:
+        case XLOG_STANDBY_CSN_COMMITTING:
+        case XLOG_STANDBY_CSN_ABORTED:
             break;
         default:
             ereport(ERROR,

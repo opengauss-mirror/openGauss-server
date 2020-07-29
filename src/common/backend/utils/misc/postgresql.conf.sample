@@ -258,6 +258,12 @@ max_wal_senders = 4		# max number of walsender processes
 				# (change requires restart)
 wal_keep_segments = 16		# in logfile segments, 16MB each; 0 disables
 #wal_sender_timeout = 6s	# in milliseconds; 0 disables
+enable_slot_log = off
+max_replication_slots = 8       # max number of replication slots.i
+                                # The value is classically set to 8.
+                                # (change requires restart)
+#max_changes_in_memory = 4096
+#max_cached_tuplebufs = 8192
 
 #replconninfo1 = ''		# replication connection information used to connect primary on standby, or standby on primary,
 						# or connect primary or standby on secondary

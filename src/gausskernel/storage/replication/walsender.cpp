@@ -111,6 +111,7 @@ static bool WalSndCaughtUp = false;
 bool WalSegmemtRemovedhappened = false;
 volatile bool bSyncStat = false;
 volatile bool bSyncStatStatBefore = false;
+long g_logical_slot_sleep_time = 0;
 
 #define AmWalSenderToDummyStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_DUMMYSTANDBY)
 #define AmWalSenderOnDummyStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_DUMMYSTANDBY_STANDBY)
@@ -163,6 +164,8 @@ static void ProcessStandbyReplyMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
 static void ProcessStandbySwitchRequestMessage(void);
 static void ProcessRepliesIfAny(void);
+static bool LogicalSlotSleepFlag(void);
+static void do_actual_sleep(volatile WalSnd* walsnd);
 static void LogCtrlCountSleepLimit(void);
 static void LogCtrlSleep(void);
 static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage* reply);
@@ -447,9 +450,13 @@ static void WalSndHandshake(void)
             } break;
 
             case 'X':
+            case 'c':
                 /* standby is closing the connection */
                 proc_exit(0);
                 /* fall-through */
+            case 'P':
+                /* standby is closing the connection */
+                break;
             case EOF:
                 /* standby disconnected unexpectedly */
                 ereport(
@@ -1574,6 +1581,43 @@ static XLogRecPtr WalSndWaitForWal(XLogRecPtr loc)
 }
 
 /*
+ * Check cmdString format.
+ */
+bool cmdStringCheck(const char* cmd_string)
+{
+    const int maxStack = 100;
+    char charStack[maxStack];
+    int stackLen = 0;
+    for (int i = 0; cmd_string[i] != '\0'; i++) {
+        if (cmd_string[i] == '\"') {
+            if (stackLen > 0 && charStack[stackLen - 1] == '\"') {
+                stackLen--;
+            } else {
+                charStack[stackLen++] = '\"';
+            }
+        } else if (cmd_string[i] == '\'') {
+            if (stackLen > 0 && charStack[stackLen - 1] == '\'') {
+                stackLen--;
+            } else {
+                charStack[stackLen++] = '\'';
+            }
+        } else if (cmd_string[i] == '(') {
+            charStack[stackLen++] = '(';
+        } else if (cmd_string[i] == ')') {
+            if (stackLen > 0 && charStack[stackLen - 1] == '(') {
+                stackLen--;
+            } else {
+                return false;
+            }
+        }
+    }
+    if (stackLen == 0) {
+        return true;
+    }
+    return false;
+}
+
+/*
  * Execute an incoming replication command.
  */
 static bool HandleWalReplicationCommand(const char* cmd_string)
@@ -1592,6 +1636,11 @@ static bool HandleWalReplicationCommand(const char* cmd_string)
     SnapBuildClearExportedSnapshot();
 
     ereport(LOG, (errmsg("received wal replication command: %s", cmd_string)));
+
+    if (cmdStringCheck(cmd_string) == false) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), 
+            (errmsg_internal("replication command, syntax error."))));
+    }
 
     cmd_context = AllocSetContextCreate(CurrentMemoryContext,
         "Replication command context",
@@ -1729,6 +1778,7 @@ static void ProcessRepliesIfAny(void)
                 /*
                  * 'X' means that the standby is closing down the socket.
                  */
+            case 'c':
             case 'X':
                 proc_exit(0);
                 /* fall-through */
@@ -1879,6 +1929,74 @@ char* remote_role_to_string(int role)
 }
 
 /*
+ * When flush_lsn exceeds min_restart_lsn by a margin of max_keep_log_seg,
+ * walsender stream limitation is triggered.
+ */
+static bool LogicalSlotSleepFlag(void)
+{
+    const int xlog_offset = 24;
+    const int sleep_time_unit = 100000;
+    int64 max_keep_log_seg = (int64)g_instance.attr.attr_storage.max_keep_log_seg;
+    if (max_keep_log_seg <= 0) {
+        return false;
+    }
+    XLogRecPtr min_restart_lsn = InvalidXLogRecPtr;
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ReplicationSlot* s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+
+        if (s->in_use && s->data.database != InvalidOid) {
+            min_restart_lsn = min_restart_lsn == InvalidXLogRecPtr ? s->data.restart_lsn :
+                Min(min_restart_lsn, s->data.restart_lsn);
+        }
+    }
+    if (min_restart_lsn == InvalidXLogRecPtr) {
+        return false;
+    }
+    XLogRecPtr flush_lsn = GetFlushRecPtr();
+    if (((flush_lsn - min_restart_lsn) >> xlog_offset) > (uint64)max_keep_log_seg) {
+        g_logical_slot_sleep_time += sleep_time_unit;
+        if (g_logical_slot_sleep_time > MICROSECONDS_PER_SECONDS) {
+            g_logical_slot_sleep_time = MICROSECONDS_PER_SECONDS;
+        }
+        ereport(LOG,
+            (errmsg("flush_lsn %X/%X exceed min_restart_lsn %X/%X by threshold %ld, sleep time increase by 0.1s.\n",
+                (uint32)(flush_lsn >> 32),
+                (uint32)flush_lsn,
+                (uint32)(min_restart_lsn >> 32),
+                (uint32)min_restart_lsn,
+                max_keep_log_seg)));
+        return true;
+    } else {
+        g_logical_slot_sleep_time = 0;
+    }
+    return false;
+}
+
+static void do_actual_sleep(volatile WalSnd* walsnd)
+{
+    bool logical_slot_sleep_flag = LogicalSlotSleepFlag();
+    /* try to control log sent rate so that standby can flush and apply log under RTO seconds */
+    if (walsnd->state == WALSNDSTATE_STREAMING && IS_PGXC_DATANODE) {
+        if (u_sess->attr.attr_storage.target_rto > 0) {
+            if (walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit == 0) {
+                LogCtrlCalculateSleepTime();
+                LogCtrlCountSleepLimit();
+            }
+            LogCtrlSleep();
+            if (logical_slot_sleep_flag &&
+                g_logical_slot_sleep_time > t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time) {
+                pg_usleep(g_logical_slot_sleep_time - t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time);
+            }
+        } else {
+            if (logical_slot_sleep_flag) {
+                pg_usleep(g_logical_slot_sleep_time);
+            }
+        }
+    }
+    walsnd->log_ctrl.sleep_count++;
+}
+
+/*
  * Regular reply from standby advising of WAL positions on standby server.
  */
 static void ProcessStandbyReplyMessage(void)
@@ -1945,27 +2063,20 @@ static void ProcessStandbyReplyMessage(void)
     }
 
     /*
-     * calculate RTO every sleep_count_limit.
+     * Only sleep when local role is not WAL_DB_SENDER.
      */
-    if (IS_PGXC_DATANODE && walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit == 0) {
-        LogCtrlCalculateCurrentRTO(&reply);
-        walsnd->log_ctrl.prev_reply_time = reply.sendTime;
-        walsnd->log_ctrl.prev_flush = reply.flush;
-        walsnd->log_ctrl.prev_apply = reply.apply;
-    }
-
-    /* try to control log sent rate so that standby can flush and apply log under RTO seconds */
-    if (walsnd->state == WALSNDSTATE_STREAMING && u_sess->attr.attr_storage.target_rto > 0 && IS_PGXC_DATANODE) {
-        if (walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit == 0) {
-            LogCtrlCalculateSleepTime();
-            LogCtrlCountSleepLimit();
+    if (!AM_WAL_DB_SENDER) {
+        if (IS_PGXC_DATANODE && walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit == 0) {
+            LogCtrlCalculateCurrentRTO(&reply);
+            walsnd->log_ctrl.prev_reply_time = reply.sendTime;
+            walsnd->log_ctrl.prev_flush = reply.flush;
+            walsnd->log_ctrl.prev_apply = reply.apply;
         }
-        LogCtrlSleep();
+        do_actual_sleep(walsnd);
     }
-    walsnd->log_ctrl.sleep_count++;
-
-    if (!AM_WAL_STANDBY_SENDER)
+    if (!AM_WAL_STANDBY_SENDER) {
         SyncRepReleaseWaiters();
+    }
 
     /*
      * Advance our local xmin horizon when the client confirmed a flush.
@@ -2693,7 +2804,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 
         if (sync_config_needed) {
             if (t_thrd.walsender_cxt.walsender_shutdown_requested) {
-                if (!SendConfigFile(t_thrd.walsender_cxt.gucconf_file))
+                if (!AM_WAL_DB_SENDER && !SendConfigFile(t_thrd.walsender_cxt.gucconf_file))
                     ereport(LOG, (errmsg("failed to send config to the peer when walsender shutdown.")));
                 sync_config_needed = false;
             } else {
@@ -2703,7 +2814,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                     sync_config_needed = false;
                     /* begin send file to standby */
                     if (t_thrd.walsender_cxt.MyWalSnd && t_thrd.walsender_cxt.MyWalSnd->peer_state != BUILDING_STATE) {
-                        if (!SendConfigFile(t_thrd.walsender_cxt.gucconf_file))
+                        if (!AM_WAL_DB_SENDER && !SendConfigFile(t_thrd.walsender_cxt.gucconf_file))
                             sync_config_needed = true;
                         else
                             last_syncconf_timestamp = nowtime;

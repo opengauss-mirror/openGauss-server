@@ -85,8 +85,6 @@ void log_slot_advance(const ReplicationSlotPersistentData* slotInfo)
     if (g_instance.attr.attr_storage.max_wal_senders > 0)
         WalSndWakeup();
     END_CRIT_SECTION();
-    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH)
-        SyncRepWaitForLSN(Ptr);
 }
 
 void log_slot_drop(const char* name)
@@ -175,14 +173,6 @@ Size GetAllLogicalSlot(LogicalPersistentData *&LogicalSlot)
     LWLockRelease(ReplicationSlotAllocationLock);
 
     return size;
-}
-
-static void check_permissions(void)
-{
-    if (!superuser() && !has_rolreplication(GetUserId()))
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                (errmsg("must be system admin or replication role to use replication slots"))));
 }
 
 /*
