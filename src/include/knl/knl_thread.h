@@ -74,6 +74,8 @@
 
 #define RESERVE_SIZE 32
 
+typedef struct ResourceOwnerData* ResourceOwner;
+
 typedef struct knl_t_codegen_context {
     void* thr_codegen_obj;
 
@@ -2176,6 +2178,7 @@ typedef struct knl_t_logical_context {
     uint64 sendSegNo;
     uint32 sendOff;
     bool ExportInProgress;
+    ResourceOwner SavedResourceOwnerDuringExport;
 } knl_t_logical_context;
 
 typedef struct knl_t_dataqueue_context {

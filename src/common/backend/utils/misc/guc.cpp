@@ -3560,8 +3560,6 @@ static void init_configure_names_bool()
             NULL
         },
 #endif
-#ifdef ENABLE_MULTIPLE_NODES
-
         {
             {
                 "enable_slot_log",
@@ -3576,7 +3574,6 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
-#endif
 #ifdef ENABLE_MULTIPLE_NODES
         {
             {
@@ -6435,7 +6432,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#ifdef ENABLE_MULTIPLE_NODES
         {
             /* see max_connections */
             {
@@ -6453,7 +6449,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#endif
         {
             {
                 "recovery_time_target",
@@ -8804,7 +8799,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#ifdef ENABLE_MULTIPLE_NODES
         {
             {
                 "max_changes_in_memory",
@@ -8821,8 +8815,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#endif
-#ifdef ENABLE_MULTIPLE_NODES
         {
             {
                 "max_cached_tuplebufs",
@@ -8839,7 +8831,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#endif
         {
             {
                 "table_skewness_warning_rows",
@@ -9071,6 +9062,22 @@ static void init_configure_names_int()
             1,
             1,
             MAX_REDO_WORKERS_PER_PARSE,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+                "max_keep_log_seg",
+                PGC_SUSET,
+                WAL,
+                gettext_noop("Sets the threshold for implementing logical replication flow control."),
+                NULL
+            },
+            &g_instance.attr.attr_storage.max_keep_log_seg,
+            0,
+            0,
+            INT_MAX,
             NULL,
             NULL,
             NULL

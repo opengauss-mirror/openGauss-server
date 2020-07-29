@@ -50,8 +50,6 @@
 PG_MODULE_MAGIC;
 
 /* These must be available to pg_dlsym() */
-extern "C" PG_FUNCTION_INFO_V1(_PG_init);
-extern "C" PG_FUNCTION_INFO_V1(_PG_output_plugin_init);
 extern "C" void _PG_init(void);
 extern "C" void _PG_output_plugin_init(OutputPluginCallbacks* cb);
 

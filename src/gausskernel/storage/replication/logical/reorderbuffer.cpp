@@ -179,7 +179,7 @@ static void ReorderBufferSerializeTXN(ReorderBuffer* rb, ReorderBufferTXN* txn);
 static void ReorderBufferSerializeChange(ReorderBuffer* rb, ReorderBufferTXN* txn, int fd, ReorderBufferChange* change);
 static Size ReorderBufferRestoreChanges(ReorderBuffer* rb, ReorderBufferTXN* txn, int* fd, XLogSegNo* segno);
 static void ReorderBufferRestoreChange(ReorderBuffer* rb, ReorderBufferTXN* txn, char* change);
-static void ReorderBufferRestoreCleanup(ReorderBuffer* rb, ReorderBufferTXN* txn);
+static void ReorderBufferRestoreCleanup(ReorderBuffer* rb, ReorderBufferTXN* txn, XLogRecPtr lsn);
 
 static void ReorderBufferFreeSnap(ReorderBuffer* rb, Snapshot snap);
 static Snapshot ReorderBufferCopySnap(ReorderBuffer* rb, Snapshot orig_snap, ReorderBufferTXN* txn, CommandId cid);
@@ -1011,7 +1011,7 @@ static void ReorderBufferIterTXNFinish(ReorderBuffer* rb, ReorderBufferIterTXNSt
  * Cleanup the contents of a transaction, usually after the transaction
  * committed or aborted.
  */
-static void ReorderBufferCleanupTXN(ReorderBuffer* rb, ReorderBufferTXN* txn)
+static void ReorderBufferCleanupTXN(ReorderBuffer* rb, ReorderBufferTXN* txn, XLogRecPtr lsn = InvalidXLogRecPtr)
 {
     bool found = false;
     dlist_mutable_iter iter;
@@ -1031,7 +1031,7 @@ static void ReorderBufferCleanupTXN(ReorderBuffer* rb, ReorderBufferTXN* txn)
         Assert(subtxn->is_known_as_subxact);
         Assert(subtxn->nsubtxns == 0);
 
-        ReorderBufferCleanupTXN(rb, subtxn);
+        ReorderBufferCleanupTXN(rb, subtxn, lsn);
     }
 
     /* cleanup changes in the toplevel txn */
@@ -1080,7 +1080,7 @@ static void ReorderBufferCleanupTXN(ReorderBuffer* rb, ReorderBufferTXN* txn)
 
     /* remove entries spilled to disk */
     if (txn->serialized)
-        ReorderBufferRestoreCleanup(rb, txn);
+        ReorderBufferRestoreCleanup(rb, txn, lsn);
 
     /* deallocate */
     ReorderBufferReturnTXN(rb, txn);
@@ -1393,6 +1393,7 @@ void ReorderBufferCommit(ReorderBuffer* rb, TransactionId xid, XLogRecPtr commit
 
                     if (snapshot_now->copied) {
                         ReorderBufferFreeSnap(rb, snapshot_now);
+                        snapshot_now = NULL;
                         snapshot_now = ReorderBufferCopySnap(rb, change->data.snapshot, txn, command_id);
                     } else if (change->data.snapshot->copied) {
                         /*
@@ -1484,7 +1485,7 @@ void ReorderBufferCommit(ReorderBuffer* rb, TransactionId xid, XLogRecPtr commit
 
         TeardownHistoricSnapshot(true);
 
-        if (snapshot_now->copied)
+        if (snapshot_now != NULL && snapshot_now->copied)
             ReorderBufferFreeSnap(rb, snapshot_now);
 
         if (subtxn_started)
@@ -1541,7 +1542,7 @@ void ReorderBufferAbort(ReorderBuffer* rb, TransactionId xid, XLogRecPtr lsn)
  * NB: These really have to be transactions that have aborted due to a server
  * crash/immediate restart, as we don't deal with invalidations here.
  */
-void ReorderBufferAbortOld(ReorderBuffer* rb, TransactionId oldestRunningXid)
+void ReorderBufferAbortOld(ReorderBuffer* rb, TransactionId oldestRunningXid, XLogRecPtr lsn)
 {
     dlist_mutable_iter it;
 
@@ -1562,7 +1563,7 @@ void ReorderBufferAbortOld(ReorderBuffer* rb, TransactionId oldestRunningXid)
                 ereport(DEBUG2, (errmsg("aborting old transaction %lu", txn->xid)));
 
             /* remove potential on-disk data, and deallocate this tx */
-            ReorderBufferCleanupTXN(rb, txn);
+            ReorderBufferCleanupTXN(rb, txn, lsn);
         } else
             return;
     }
@@ -1804,9 +1805,12 @@ bool ReorderBufferXidHasBaseSnapshot(ReorderBuffer* rb, TransactionId xid)
         return false;
 
     /* a known subtxn? operate on top-level txn instead */
-    if (txn->is_known_as_subxact)
+    if (txn->is_known_as_subxact) {
         txn = ReorderBufferTXNByXid(rb, txn->toplevel_xid, false, NULL, InvalidXLogRecPtr, false);
-
+        if (txn == NULL) {
+            return false;
+        }
+    }
     return txn->base_snapshot != NULL;
 }
 
@@ -2259,15 +2263,17 @@ static void ReorderBufferRestoreChange(ReorderBuffer* rb, ReorderBufferTXN* txn,
 /*
  * Remove all on-disk stored for the passed in transaction.
  */
-static void ReorderBufferRestoreCleanup(ReorderBuffer* rb, ReorderBufferTXN* txn)
+static void ReorderBufferRestoreCleanup(ReorderBuffer* rb, ReorderBufferTXN* txn, XLogRecPtr lsn = InvalidXLogRecPtr)
 {
     XLogSegNo first;
     XLogSegNo cur;
     XLogSegNo last;
     ReplicationSlot* slot = NULL;
     int rc = 0;
+    if (txn->final_lsn == InvalidXLogRecPtr) {
+        txn->final_lsn = lsn;
+    }
     Assert(!XLByteEQ(txn->first_lsn, InvalidXLogRecPtr));
-    Assert(!XLByteEQ(txn->final_lsn, InvalidXLogRecPtr));
 
     first = (txn->first_lsn) / XLogSegSize;
     last = (txn->final_lsn) / XLogSegSize;
@@ -2426,6 +2432,9 @@ static void ReorderBufferToastAppendChunk(
 
     chunk = DatumGetPointer(fastgetattr(&newtup->tuple, 3, desc, &isnull));
     Assert(!isnull);
+    if (isnull) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("fail to get toast chunk")));
+    }
 
     /* calculate size so we can allocate the right size at once later */
     if (!VARATT_IS_EXTENDED(chunk)) {

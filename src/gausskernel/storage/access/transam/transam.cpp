@@ -35,8 +35,6 @@
 #include "utils/builtins.h"
 #endif
 
-extern bool IsPostmasterEnvironment;
-
 static CLogXidStatus TransactionLogFetch(TransactionId transactionId);
 
 #ifdef PGXC

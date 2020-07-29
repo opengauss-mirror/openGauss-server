@@ -355,7 +355,7 @@ void ReorderBufferCommit(ReorderBuffer*, TransactionId, XLogRecPtr commit_lsn, X
 void ReorderBufferAssignChild(ReorderBuffer*, TransactionId, TransactionId, XLogRecPtr commit_lsn);
 void ReorderBufferCommitChild(ReorderBuffer*, TransactionId, TransactionId, XLogRecPtr commit_lsn, XLogRecPtr end_lsn);
 void ReorderBufferAbort(ReorderBuffer*, TransactionId, XLogRecPtr lsn);
-void ReorderBufferAbortOld(ReorderBuffer*, TransactionId xid);
+void ReorderBufferAbortOld(ReorderBuffer*, TransactionId xid, XLogRecPtr lsn);
 void ReorderBufferForget(ReorderBuffer*, TransactionId, XLogRecPtr lsn);
 
 void ReorderBufferSetBaseSnapshot(ReorderBuffer*, TransactionId, XLogRecPtr lsn, struct SnapshotData* snap);

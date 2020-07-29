@@ -65,6 +65,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enableSeparationOfDuty            | off
  enable_seqscan                    | on
  enable_show_any_tuples            | off
+ enable_slot_log                   | off
  enable_sonic_hashagg              | on
  enable_sonic_hashjoin             | on
  enable_sonic_optspill             | on
@@ -78,7 +79,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_vector_engine              | on
  enable_wdr_snapshot               | off
  enable_xlog_prune                 | on
-(77 rows)
+(78 rows)
 
 CREATE TABLE foo2(fooid int, f2 int);
 INSERT INTO foo2 VALUES(1, 11);

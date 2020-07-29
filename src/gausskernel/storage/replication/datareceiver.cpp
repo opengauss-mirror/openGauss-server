@@ -150,6 +150,47 @@ static void ReadDummyFile(HTAB* relFileNodeTab, uint32 readFileNum, int* bufferS
 static bool ReadDummySlice(FILE* readFileFd, char* buf, uint32 length, char* path);
 static int ParseDataHeader(HTAB* relFileNodeTab, char* bufPtr, uint32 nbytes);
 
+void DataReceiverPing(bool* ping_ptr, TimestampTz* last_recv_timestamp_ptr)
+{
+    /*
+     * We didn't receive anything new. If we haven't heard anything
+     * from the server for more than wal_receiver_timeout / 2,
+     * ping the server. Also, if it's been longer than
+     * wal_receiver_status_interval since the last update we sent,
+     * send a status update to the master anyway, to report any
+     * progress in applying WAL.
+     */
+    bool requestReply = false;
+
+    /*
+     * Check if time since last receive from master has reached the
+     * configured limit.
+     */
+    if (u_sess->attr.attr_storage.wal_receiver_timeout > 0) {
+        TimestampTz nowtime = GetCurrentTimestamp();
+        TimestampTz timeout = 0;
+
+        timeout = TimestampTzPlusMilliseconds(
+            *last_recv_timestamp_ptr, u_sess->attr.attr_storage.wal_receiver_timeout / 2);
+
+        /*
+         * We didn't receive anything new, for half of receiver
+         * replication timeout. Ping the server.
+         */
+        if (nowtime >= timeout) {
+            if (!(*ping_ptr)) {
+                requestReply = true;
+                *ping_ptr = true;
+                *last_recv_timestamp_ptr = nowtime;
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating datareceiver due to timeout")));
+            }
+        }
+    }
+    DataRcvSendReply(requestReply, requestReply);
+}
+
 /* Main entry point for datareceiver process */
 void DataReceiverMain(void)
 {
@@ -319,42 +360,7 @@ void DataReceiverMain(void)
             /* Let the master know that we received some data. */
             DataRcvSendReply(false, false);
         } else {
-            /*
-             * We didn't receive anything new. If we haven't heard anything
-             * from the server for more than wal_receiver_timeout / 2,
-             * ping the server. Also, if it's been longer than
-             * wal_receiver_status_interval since the last update we sent,
-             * send a status update to the master anyway, to report any
-             * progress in applying WAL.
-             */
-            bool requestReply = false;
-
-            /*
-             * Check if time since last receive from master has reached the
-             * configured limit.
-             */
-            if (u_sess->attr.attr_storage.wal_receiver_timeout > 0) {
-                TimestampTz nowtime = GetCurrentTimestamp();
-                TimestampTz timeout = 0;
-
-                timeout = TimestampTzPlusMilliseconds(
-                    last_recv_timestamp, u_sess->attr.attr_storage.wal_receiver_timeout / 2);
-                /*
-                 * We didn't receive anything new, for half of receiver
-                 * replication timeout. Ping the server.
-                 */
-                if (nowtime >= timeout) {
-                    if (!ping_sent) {
-                        requestReply = true;
-                        ping_sent = true;
-                        last_recv_timestamp = nowtime;
-                    } else {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("terminating datareceiver due to timeout")));
-                    }
-                }
-            }
-            DataRcvSendReply(requestReply, requestReply);
+            DataReceiverPing(&ping_sent, &last_recv_timestamp);
         }
     }
 }
@@ -905,7 +911,6 @@ static void ReadDummyFile(HTAB* relFileNodeTab, uint32 readFileNum, int* bufferS
         }
         char* elementBuf = NULL;
         elementBuf = (char*)palloc(nbytes);
-
         /*
          * 2. then, read the data which according to nbytes;
          */
@@ -972,7 +977,7 @@ static int ParseDataHeader(HTAB* relFileNodeTab, char* bufPtr, uint32 nbytes)
         elementKey = (RelFileNodeKey*)palloc(sizeof(RelFileNodeKey));
         /* Fill the key during this read */
         RelFileNodeCopy(elementKey->relfilenode, dataInfo.rnode, GETBUCKETID(dataInfo.attid));
-        elementKey->columnid = GETATTID(dataInfo.attid);
+        elementKey->columnid = (int)GETATTID((uint)dataInfo.attid);
 
         if (u_sess->attr.attr_storage.HaModuleDebug) {
             ereport(LOG,
@@ -1272,11 +1277,11 @@ static void DataRcvReceive(char* buf, Size nbytes)
         buf += headerlen;
         if (u_sess->attr.attr_storage.HaModuleDebug) {
             ereport(LOG,
-                (errmsg("DataRcvReceive element info: %u, %u, %u, %d  ",
+                (errmsg("DataRcvReceive element info: %u, %u, %u, %u  ",
                     dataelemheader.rnode.dbNode,
                     dataelemheader.rnode.spcNode,
                     dataelemheader.rnode.relNode,
-                    GETATTID(dataelemheader.attid))));
+                    GETATTID((uint)dataelemheader.attid))));
         }
 
         cursegno = dataelemheader.blocknum / ((BlockNumber)RELSEG_SIZE);
