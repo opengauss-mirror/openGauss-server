@@ -3508,6 +3508,7 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
         cxt.stmtType = ALTER_TABLE;
     }
     cxt.relation = stmt->relation;
+    cxt.relation->relpersistence = RelationGetRelPersistence(rel);
     cxt.rel = rel;
     cxt.inhRelations = NIL;
     cxt.isalter = true;

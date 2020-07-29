@@ -44,6 +44,7 @@
 #include "catalog/catalog.h"
 #include "catalog/dfsstore_ctlg.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/storage_gtt.h"
 #include "commands/tablespace.h"
 #include "executor/instrument.h"
 #include "lib/binaryheap.h"
@@ -4197,6 +4198,14 @@ void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod)
 BlockNumber RelationGetNumberOfBlocksInFork(Relation relation, ForkNumber fork_num)
 {
     BlockNumber result = 0;
+    /*
+     * When this backend not init gtt storage
+     * return 0
+     */
+    if (RELATION_IS_GLOBAL_TEMP(relation) &&
+        !gtt_storage_attached(RelationGetRelid(relation))) {
+        return result;
+    }
 
     // Just return the relpages in pg_class for column-store relation.
     // Future: new interface should be implemented to calculate the number of blocks.

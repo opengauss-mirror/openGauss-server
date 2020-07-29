@@ -571,3 +571,9 @@ test: udf_crem create_c_function
 #test: redis_truncate_col
 #test: redis_alter_truncate_partition
 #test: redis_alter_truncate_col_partition
+# global temp table test
+test: gtt_stats
+test: gtt_function
+test: gtt_prepare
+test: gtt_parallel_1 gtt_parallel_2
+test: gtt_clean

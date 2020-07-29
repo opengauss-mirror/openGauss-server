@@ -61,6 +61,7 @@
 #include "catalog/storage_xlog.h"
 #include "catalog/toasting.h"
 #include "catalog/cstore_ctlg.h"
+#include "catalog/storage_gtt.h"
 #include "commands/cluster.h"
 #include "commands/comment.h"
 #include "commands/defrem.h"
@@ -608,6 +609,8 @@ static void ResetRelRedisCtidRelOptions(
     Relation rel, Oid part_oid, int cat_id, int att_num, int att_inx, Oid pgcat_oid);
 static bool WLMRelationCanTruncate(Relation rel);
 static void alter_partition_policy_if_needed(Relation rel, List* defList);
+static OnCommitAction GttOncommitOption(const List *options);
+
 
 /* get all partitions oid */
 static List* get_all_part_oid(Oid relid)
@@ -1429,12 +1432,16 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
         stmt->relation->relpersistence = RELPERSISTENCE_PERMANENT;
 
     /* Check consistency of arguments */
-    if (stmt->oncommit != ONCOMMIT_NOOP && stmt->relation->relpersistence != RELPERSISTENCE_TEMP)
+    if (stmt->oncommit != ONCOMMIT_NOOP && 
+        !(stmt->relation->relpersistence == RELPERSISTENCE_TEMP || 
+          stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("ON COMMIT can only be used on temporary tables")));
 
     /* @Temp Table. We do not support on commit drop right now. */
-    if (stmt->relation->relpersistence == RELPERSISTENCE_TEMP && stmt->oncommit == ONCOMMIT_DROP)
+    if ((stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
+         stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) &&
+         stmt->oncommit == ONCOMMIT_DROP)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                 errmsg("ON COMMIT only support PRESERVE ROWS or DELETE ROWS option")));
@@ -1494,7 +1501,9 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
      * code.  This is needed because calling code might not expect untrusted
      * tables to appear in pg_temp at the front of its search path.
      */
-    if (stmt->relation->relpersistence == RELPERSISTENCE_TEMP && InSecurityRestrictedOperation())
+    if ((stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
+        stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) &&
+        InSecurityRestrictedOperation())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("cannot create temporary table within security-restricted operation")));
@@ -1567,6 +1576,40 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
     /*
      * Parse and validate reloptions, if any.
      */
+    /* global temp table */
+    OnCommitAction oncommitAction = GttOncommitOption(stmt->options);
+    if (stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP &&
+        relkind == RELKIND_RELATION) {
+        if (oncommitAction != ONCOMMIT_NOOP) {
+            if (stmt->oncommit != ONCOMMIT_NOOP) {
+                elog(ERROR, "could not create global temporary table with on commit and with clause at same time");
+            }
+            stmt->oncommit = oncommitAction;
+        } else {
+            DefElem *opt = makeNode(DefElem);
+
+            opt->type = T_DefElem;
+            opt->defnamespace = NULL;
+            opt->defname = "on_commit_delete_rows";
+            opt->defaction = DEFELEM_UNSPEC;
+
+            /* use reloptions to remember on commit clause */
+            if (stmt->oncommit == ONCOMMIT_DELETE_ROWS) {
+                opt->arg = reinterpret_cast<Node *>(makeString("true"));
+            } else if (stmt->oncommit == ONCOMMIT_PRESERVE_ROWS) {
+                opt->arg = reinterpret_cast<Node *>(makeString("false"));
+            } else if (stmt->oncommit == ONCOMMIT_NOOP) {
+                opt->arg = reinterpret_cast<Node *>(makeString("false"));
+            } else {
+                elog(ERROR, "global temp table not support on commit drop clause");
+            }
+            stmt->options = lappend(stmt->options, opt);
+        }
+    } else if (oncommitAction != ONCOMMIT_NOOP) {
+        elog(ERROR, "The parameter on_commit_delete_rows is exclusive to the global temp table, which cannot be "
+                    "specified by a regular table");
+    }
+
     reloptions = transformRelOptions((Datum)0, stmt->options, NULL, validnsps, true, false);
 
     orientedFrom = (Node*)makeString(ORIENTATION_ROW); /* default is ORIENTATION_ROW */
@@ -1850,7 +1893,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
             Assert((createbucket == true && bucketinfo->bucketlist != NULL && bucketinfo->bucketcol != NULL) ||
                    (createbucket == false && bucketinfo->bucketlist == NULL && bucketinfo->bucketcol != NULL));
         }
-    } else {
+	    } else {
         /* here is normal mode */
         /* check if the table can be hash partition */
         if (!IS_SINGLE_NODE && !IsInitdb && (relkind == RELKIND_RELATION) && !IsSystemNamespace(namespaceId) &&
@@ -2345,10 +2388,10 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
     LOCKMODE lockmode = AccessExclusiveLock;
     bool cn_miss_relation = false;
     StringInfo relation_namelist = makeStringInfo();
+    char relPersistence;
 
     /* DROP CONCURRENTLY uses a weaker lock, and has some restrictions */
     if (drop->concurrent) {
-        flags |= PERFORM_DELETION_CONCURRENTLY;
         lockmode = ShareUpdateExclusiveLock;
         Assert(drop->removeType == OBJECT_INDEX);
         if (list_length(drop->objects) != 1)
@@ -2467,7 +2510,13 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
         if (delrel != NULL) {
             relation_close(delrel, NoLock);
         }
-
+        
+        relPersistence = get_rel_persistence(relOid);
+        if (drop->concurrent &&
+                !(relPersistence == RELPERSISTENCE_TEMP || relPersistence == RELPERSISTENCE_GLOBAL_TEMP)) {
+            Assert(list_length(drop->objects) == 1 && drop->removeType == OBJECT_INDEX);
+            flags |= PERFORM_DELETION_CONCURRENTLY;
+        }
         /* OK, we're ready to delete this one */
         obj.classId = RelationRelationId;
         obj.objectId = relOid;
@@ -3053,6 +3102,10 @@ void ExecuteTruncate(TruncateStmt* stmt)
          * holding a predicate lock on the table.
          */
         CheckTableForSerializableConflictIn(rel);
+
+        if (RELATION_IS_GLOBAL_TEMP(rel) && !gtt_storage_attached(RelationGetRelid(rel))) {
+            continue;
+        }
 
         if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(RelationGetRelid(rel))) {
             FdwRoutine* fdwroutine = GetFdwRoutineByRelId(RelationGetRelid(rel));
@@ -4554,7 +4607,6 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
      */
     if (targetrelation->rd_rel->relkind == RELKIND_INDEX) {
         Oid constraintId = get_index_constraint(myrelid);
-
         if (OidIsValid(constraintId))
             RenameConstraintById(constraintId, newrelname);
     }
@@ -5274,6 +5326,17 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
 
     /* Caller is required to provide an adequate lock. */
     rel = relation_open(relid, lockmode);
+
+    /* We allow to alter global temp table only this session use it */
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        if (is_other_backend_use_gtt(RelationGetRelid(rel))) {
+            ereport(
+                ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("can not alter table %s when other backend attached this global temp table",
+                        RelationGetRelationName(rel))));
+        }
+    }
 
     CheckTableNotInUse(rel, "ALTER TABLE");
 
@@ -6597,6 +6660,28 @@ static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("cannot rewrite temporary tables of other sessions")));
+
+            if (RELATION_IS_GLOBAL_TEMP(OldHeap)) {
+                /* gtt may not attached, create it */
+                if (!gtt_storage_attached(tab->relid)) {
+                    ResultRelInfo *resultRelInfo;
+                    MemoryContext oldcontext;
+                    MemoryContext ctx_alter_gtt;
+                    ctx_alter_gtt =
+                        AllocSetContextCreate(CurrentMemoryContext, "gtt alter table", ALLOCSET_DEFAULT_SIZES);
+                    oldcontext = MemoryContextSwitchTo(ctx_alter_gtt);
+                    resultRelInfo = makeNode(ResultRelInfo);
+                    InitResultRelInfo(resultRelInfo, OldHeap, 1, 0);
+                    if (resultRelInfo->ri_RelationDesc->rd_rel->relhasindex &&
+                        resultRelInfo->ri_IndexRelationDescs == NULL)
+                        ExecOpenIndices(resultRelInfo);
+
+                    init_gtt_storage(CMD_UTILITY, resultRelInfo);
+                    ExecCloseIndices(resultRelInfo);
+                    (void)MemoryContextSwitchTo(oldcontext);
+                    MemoryContextDelete(ctx_alter_gtt);
+                }
+            }
 
             /*
              * Select destination tablespace (same as original unless user
@@ -8248,15 +8333,16 @@ static void ATExecAddStatistics(Relation rel, Node* def, LOCKMODE lockmode)
     VacAttrStats** vacattrstats_array = es_build_vacattrstats_array(rel, (List*)def, true, &array_length, inh);
 
     if (array_length > 0) {
-        update_attstats(relid, relkind, false, array_length, vacattrstats_array);
+        update_attstats(relid, relkind, false, array_length, vacattrstats_array, RelationGetRelPersistence(rel));
         if (RelationIsDfsStore(rel)) {
             /* HDFS complex table */
-            update_attstats(relid, relkind, true, array_length, vacattrstats_array);
+            update_attstats(relid, relkind, true, array_length, vacattrstats_array, RelationGetRelPersistence(rel));
 
             /* HDFS delta table */
             Oid delta_relid = rel->rd_rel->reldeltarelid;
             Assert(OidIsValid(delta_relid));
-            update_attstats(delta_relid, relkind, false, array_length, vacattrstats_array);
+            update_attstats(
+                delta_relid, relkind, false, array_length, vacattrstats_array, RelationGetRelPersistence(rel));
         }
     }
 }
@@ -9119,6 +9205,13 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                         errmsg("constraints on temporary tables must involve temporary tables of this session")));
+            break;
+        case RELPERSISTENCE_GLOBAL_TEMP:
+            if (pkrel->rd_rel->relpersistence != RELPERSISTENCE_GLOBAL_TEMP) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                         errmsg("constraints on global temporary tables may reference only global temporary tables")));
+            }
             break;
         default:
             ereport(ERROR,
@@ -12198,6 +12291,12 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
     if (defList == NIL && operation != AT_ReplaceRelOptions)
         return; /* nothing to do */
 
+    if (GttOncommitOption(defList) != ONCOMMIT_NOOP) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_OPERATION), 
+                errmsg("table cannot add or modify on commit parameter by ALTER TABLE command.")));
+    }
+
     /* forbid user to set or change inner options */
     ForbidOutUsersToSetInnerOptions(defList);
 
@@ -12617,7 +12716,7 @@ static void atexecset_table_space_internal(Relation rel, Oid newTableSpace, Oid 
      * NOTE: any conflict in relfilenode value will be caught in
      * RelationCreateStorage function.
      */
-    RelationCreateStorage(newrnode, rel->rd_rel->relpersistence, rel->rd_rel->relowner, rel->rd_bucketoid);
+    RelationCreateStorage(newrnode, rel->rd_rel->relpersistence, rel->rd_rel->relowner, rel->rd_bucketoid, rel);
 
     /* copy main fork */
     copy_relation_data(rel, &dstrel, MAIN_FORKNUM, rel->rd_rel->relpersistence);
@@ -12730,6 +12829,11 @@ static void ATExecSetTableSpace(Oid tableOid, Oid newTableSpace, LOCKMODE lockmo
      */
     rel = relation_open(tableOid, lockmode);
 
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+                errmsg("not support alter table set tablespace on global temp table.")));
+    }
     /*
      * No work if no change in tablespace.
      */
@@ -15134,14 +15238,7 @@ void PreCommit_on_commit_actions(void)
                 /* Do nothing (there shouldn't be such entries, actually) */
                 break;
             case ONCOMMIT_DELETE_ROWS:
-
-                /*
-                 * If this transaction hasn't accessed any temporary
-                 * relations, we can skip truncating ON COMMIT DELETE ROWS
-                 * tables, as they must still be empty.
-                 */
-                if (t_thrd.xact_cxt.MyXactAccessedTempRel)
-                    oids_to_truncate = lappend_oid(oids_to_truncate, oc->relid);
+                oids_to_truncate = lappend_oid(oids_to_truncate, oc->relid);
                 break;
             case ONCOMMIT_DROP: {
                 ObjectAddress object;
@@ -21181,4 +21278,33 @@ static void at_timeseries_check(Relation rel, AlterTableCmd* cmd)
         }
     }
 }
+
+static OnCommitAction GttOncommitOption(const List *options)
+{
+    ListCell *listptr;
+    OnCommitAction action = ONCOMMIT_NOOP;
+
+    foreach(listptr, options) {
+        DefElem *def = reinterpret_cast<DefElem *>(lfirst(listptr));
+        if (strcmp(def->defname, "on_commit_delete_rows") == 0) {
+            bool res = false;
+            char *sval = defGetString(def);
+
+            if (!parse_bool(sval, &res)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                         errmsg("parameter \"on_commit_delete_rows\" requires a Boolean value")));
+            }
+
+            if (res) {
+                action = ONCOMMIT_DELETE_ROWS;
+            } else {
+                action = ONCOMMIT_PRESERVE_ROWS;
+            }
+            break;
+        }
+    }
+    return action;
+}
+
 

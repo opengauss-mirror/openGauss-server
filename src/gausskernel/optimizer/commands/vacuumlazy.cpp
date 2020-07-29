@@ -49,6 +49,7 @@
 #include "catalog/catalog.h"
 #include "catalog/storage.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/storage_gtt.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
 #include "miscadmin.h"

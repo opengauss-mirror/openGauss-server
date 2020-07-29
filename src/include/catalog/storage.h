@@ -25,7 +25,8 @@
 
 #define DFS_STOR_FLAG  -1
 
-extern void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ownerid, Oid bucketOid = InvalidOid);
+extern void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ownerid, Oid bucketOid = InvalidOid,
+                                  Relation rel = NULL);
 extern void RelationDropStorage(Relation rel, bool isDfsTruncate = false);
 extern void RelationPreserveStorage(RelFileNode rnode, bool atCommit);
 extern void RelationTruncate(Relation rel, BlockNumber nblocks);
@@ -57,7 +58,8 @@ extern void ColMainFileNodesCreate(void);
 extern void ColMainFileNodesDestroy(void);
 extern void ColMainFileNodesAppend(RelFileNode* bcmFileNode, BackendId backend);
 extern void ColumnRelationDoDeleteFiles(RelFileNode* bcmFileNode, ForkNumber forknum, BackendId backend, Oid ownerid);
-extern void RowRelationDoDeleteFiles(RelFileNode rnode, BackendId backend, Oid ownerid);
+extern void RowRelationDoDeleteFiles(RelFileNode rnode, BackendId backend, Oid ownerid, Oid relOid = InvalidOid,
+                                     bool isCommit = false);
 extern uint64 GetSMgrRelSize(RelFileNode* relfilenode, BackendId backend, ForkNumber forkNum);
 
 /*

@@ -63,6 +63,7 @@
 #include "catalog/pg_type_fn.h"
 #include "catalog/storage.h"
 #include "catalog/storage_xlog.h"
+#include "catalog/storage_gtt.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
 #include "commands/typecmds.h"
@@ -110,7 +111,8 @@
 #endif
 
 static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, Oid new_rel_oid, Oid new_type_oid,
-    Oid reloftype, Oid relowner, char relkind, Datum relacl, Datum reloptions, int2vector* bucketcol, bool ispartrel);
+    Oid reloftype, Oid relowner, char relkind, char relpersistence, Datum relacl, Datum reloptions,
+    int2vector* bucketcol, bool ispartrel);
 static oidvector* BuildIntervalTablespace(const IntervalPartitionDefState* intervalPartDef);
 static void deletePartitionTuple(Oid part_id);
 static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid relid, List *filenodelist, Oid reltablespace,
@@ -406,7 +408,8 @@ Form_pg_attribute SystemAttributeByName(const char* attname, bool relhasoids)
  */
 Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, Oid relid, Oid relfilenode,
     Oid bucketOid, TupleDesc tupDesc, char relkind, char relpersistence, bool partitioned_relation, bool rowMovement,
-    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Oid ownerid)
+    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Oid ownerid,
+    bool skip_create_storage)
 {
     bool create_storage = false;
     Relation rel;
@@ -512,6 +515,9 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
     if (u_sess->attr.attr_common.IsInplaceUpgrade && !u_sess->upg_cxt.new_catalog_need_storage)
         create_storage = false;
 
+    if (skip_create_storage) {
+        create_storage = false;
+    }
     /*
      * Have the storage manager create the relation's disk file, if needed.
      *
@@ -520,7 +526,7 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
      */
     if (create_storage) {
         RelationOpenSmgr(rel);
-        RelationCreateStorage(rel->rd_node, relpersistence, ownerid, bucketOid);
+        RelationCreateStorage(rel->rd_node, relpersistence, ownerid, bucketOid, rel);
     }
 
     if (RelationUsesSpaceType(rel->rd_rel->relpersistence) == SP_TEMP) {
@@ -1008,7 +1014,8 @@ void InsertPgClassTuple(
  * --------------------------------
  */
 static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, Oid new_rel_oid, Oid new_type_oid,
-    Oid reloftype, Oid relowner, char relkind, Datum relacl, Datum reloptions, int2vector* bucketcol, bool ispartrel)
+    Oid reloftype, Oid relowner, char relkind, char relpersistence, Datum relacl, Datum reloptions,
+    int2vector* bucketcol, bool ispartrel)
 {
     Form_pg_class new_rel_reltup;
 
@@ -1040,6 +1047,7 @@ static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, O
             new_rel_reltup->relallvisible = 0;
             break;
     }
+    
     /* Initialize relfrozenxid */
     if (relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE) {
         /*
@@ -1057,6 +1065,12 @@ static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, O
          */
         new_rel_reltup->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
     }
+
+    /* global temp table not remember transaction info in catalog */
+    if (relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        new_rel_reltup->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
+    }
+
     new_rel_reltup->relowner = relowner;
     new_rel_reltup->reltype = new_type_oid;
     new_rel_reltup->reloftype = reloftype;
@@ -1928,7 +1942,8 @@ Oid heap_create_with_catalog(const char* relname, Oid relnamespace, Oid reltable
         mapped_relation,
         allow_system_table_mods,
         row_compress,
-        ownerid);
+        ownerid,
+        false);
 
     /* Recode the table or other object in pg_class create time. */
     PgObjectType objectType = GetPgObjectTypePgClass(relkind);
@@ -2068,6 +2083,7 @@ Oid heap_create_with_catalog(const char* relname, Oid relnamespace, Oid reltable
         reloftypeid,
         ownerid,
         relkind,
+        relpersistence,
         PointerGetDatum(relacl),
         reloptions,
         bucketcol,
@@ -2699,6 +2715,15 @@ void heap_drop_with_catalog(Oid relid)
 
     if (RELATION_IS_PARTITIONED(rel)) {
         heapDropPartitionTable(rel);
+    }
+
+    /* We allow to drop global temp table only this session use it */
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        if (is_other_backend_use_gtt(RelationGetRelid(rel)))
+            ereport(ERROR,
+                (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                  errmsg("cannot drop global temporary table %s when other backend attached it.",
+                      RelationGetRelationName(rel))));
     }
 
     /*
@@ -3603,7 +3628,7 @@ void RemoveStatistics(Oid relid, AttrNumber attnum)
  * The routine will truncate and then reconstruct the indexes on
  * the specified relation.	Caller must hold exclusive lock on rel.
  */
-static void RelationTruncateIndexes(Relation heapRelation)
+static void RelationTruncateIndexes(Relation heapRelation, LOCKMODE lockmode)
 {
     ListCell* indlist = NULL;
 
@@ -3614,7 +3639,7 @@ static void RelationTruncateIndexes(Relation heapRelation)
         IndexInfo* indexInfo = NULL;
 
         /* Open the index relation; use exclusive lock, just to be sure */
-        currentIndex = index_open(indexId, AccessExclusiveLock);
+        currentIndex = index_open(indexId, lockmode);
 
         /* Fetch info needed for index_build */
         indexInfo = BuildIndexInfo(currentIndex);
@@ -3629,7 +3654,7 @@ static void RelationTruncateIndexes(Relation heapRelation)
         }
         /* truncate psort relation */
         if (unlikely(currentIndex->rd_rel->relam == PSORT_AM_OID)) {
-            Relation psort_rel = heap_open(currentIndex->rd_rel->relcudescrelid, AccessExclusiveLock);
+            Relation psort_rel = heap_open(currentIndex->rd_rel->relcudescrelid, lockmode);
             heap_truncate_one_rel(psort_rel);
             heap_close(psort_rel, NoLock);
         }
@@ -3661,8 +3686,14 @@ void heap_truncate(List* relids)
     foreach (cell, relids) {
         Oid rid = lfirst_oid(cell);
         Relation rel;
+        LOCKMODE lockmode = AccessExclusiveLock;
 
-        rel = heap_open(rid, AccessExclusiveLock);
+        /* truncate global temp table only need RowExclusiveLock */
+        if (get_rel_persistence(rid) == RELPERSISTENCE_GLOBAL_TEMP) {
+            lockmode = RowExclusiveLock;
+        }
+
+        rel = heap_open(rid, lockmode);
         relations = lappend(relations, rel);
     }
 
@@ -3725,7 +3756,7 @@ static void heap_truncate_one_rel_for_bucket(Relation rel, Partition part)
         if (OidIsValid(toastOid)) {
             toastBucketRel = bucketGetRelation(rel, NULL, bucketlist->values[i]);
             RelationTruncate(toastBucketRel, 0);
-            RelationTruncateIndexes(toastBucketRel);
+            RelationTruncateIndexes(toastBucketRel, AccessExclusiveLock);
             bucketCloseRelation(toastBucketRel);
         }
     }
@@ -3747,6 +3778,17 @@ static void heap_truncate_one_rel_for_bucket(Relation rel, Partition part)
 void heap_truncate_one_rel(Relation rel)
 {
     Oid toastrelid;
+    LOCKMODE lockmode = AccessExclusiveLock;
+
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        if (!gtt_storage_attached(RelationGetRelid(rel)))
+            return;
+
+        /*
+         * Truncate global temp table only need RowExclusiveLock
+         */
+        lockmode = RowExclusiveLock;
+    }
 
     if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(RelationGetRelid(rel))) {
         FdwRoutine* fdwroutine = GetFdwRoutineByRelId(RelationGetRelid(rel));
@@ -3767,12 +3809,12 @@ void heap_truncate_one_rel(Relation rel)
             /* If the relation is a cloumn store */
             if (RelationIsColStore(rel)) {
                 /* cudesc */
-                Relation cudesc_rel = heap_open(rel->rd_rel->relcudescrelid, AccessExclusiveLock);
+                Relation cudesc_rel = heap_open(rel->rd_rel->relcudescrelid, lockmode);
                 heap_truncate_one_rel(cudesc_rel);
                 heap_close(cudesc_rel, NoLock);
 
                 /* delta */
-                Relation delta_rel = heap_open(rel->rd_rel->reldeltarelid, AccessExclusiveLock);
+                Relation delta_rel = heap_open(rel->rd_rel->reldeltarelid, lockmode);
                 heap_truncate_one_rel(delta_rel);
                 heap_close(delta_rel, NoLock);
 
@@ -3783,16 +3825,16 @@ void heap_truncate_one_rel(Relation rel)
             /* If there is a toast table, truncate that too */
             toastrelid = rel->rd_rel->reltoastrelid;
             if (OidIsValid(toastrelid)) {
-                Relation toastrel = heap_open(toastrelid, AccessExclusiveLock);
+                Relation toastrel = heap_open(toastrelid, lockmode);
 
                 RelationTruncate(toastrel, 0);
-                RelationTruncateIndexes(toastrel);
+                RelationTruncateIndexes(toastrel, lockmode);
                 /* keep the lock... */
                 heap_close(toastrel, NoLock);
             }
         }
         /* If the relation has indexes, truncate the indexes too */
-        RelationTruncateIndexes(rel);
+        RelationTruncateIndexes(rel, lockmode);
     } else /* partitioned table */
     {
         List* partOidList = NIL;
@@ -3806,7 +3848,7 @@ void heap_truncate_one_rel(Relation rel)
         /* truncate each partition */
         partOidList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, rel->rd_id);
         foreach (partCell, partOidList) {
-            Partition p = partitionOpen(rel, HeapTupleGetOid((HeapTuple)lfirst(partCell)), AccessExclusiveLock);
+            Partition p = partitionOpen(rel, HeapTupleGetOid((HeapTuple)lfirst(partCell)), lockmode);
 
             /*
              * two levels and in dn
@@ -3831,7 +3873,7 @@ void heap_truncate_one_rel(Relation rel)
             ListCell* cell1 = NULL;
             IndexInfo* indexInfo = NULL;
             Oid indexId = lfirst_oid(indCell);
-            currentIndex = index_open(indexId, AccessExclusiveLock);
+            currentIndex = index_open(indexId, lockmode);
 
             indexInfo = BuildIndexInfo(currentIndex);
 
@@ -3839,7 +3881,7 @@ void heap_truncate_one_rel(Relation rel)
 
             foreach (cell1, currentParttiionIndexList) {
                 Partition indexPart =
-                    partitionOpen(currentIndex, HeapTupleGetOid((HeapTuple)lfirst(cell1)), AccessExclusiveLock);
+                    partitionOpen(currentIndex, HeapTupleGetOid((HeapTuple)lfirst(cell1)), lockmode);
                 Partition p;
 
                 if (RELATION_OWN_BUCKET(currentIndex)) {
@@ -3849,7 +3891,7 @@ void heap_truncate_one_rel(Relation rel)
                 }
                 /* truncate psort relation */
                 if (unlikely(currentIndex->rd_rel->relam == PSORT_AM_OID)) {
-                    Relation psort_rel = heap_open(currentIndex->rd_rel->relcudescrelid, AccessExclusiveLock);
+                    Relation psort_rel = heap_open(currentIndex->rd_rel->relcudescrelid, lockmode);
                     heap_truncate_one_rel(psort_rel);
                     heap_close(psort_rel, NoLock);
                 }
@@ -3873,10 +3915,10 @@ void heap_truncate_one_rel(Relation rel)
                 Form_pg_partition partForm = (Form_pg_partition)GETSTRUCT(tup);
 
                 if (partForm->reltoastrelid != InvalidOid) {
-                    Relation toastrel = heap_open(partForm->reltoastrelid, AccessExclusiveLock);
+                    Relation toastrel = heap_open(partForm->reltoastrelid, lockmode);
 
                     RelationTruncate(toastrel, 0);
-                    RelationTruncateIndexes(toastrel);
+                    RelationTruncateIndexes(toastrel, lockmode);
                     /* keep the lock... */
                     heap_close(toastrel, NoLock);
                 }
@@ -3884,6 +3926,11 @@ void heap_truncate_one_rel(Relation rel)
         }
 
         freePartList(partOidList);
+    }
+
+    // for GTT
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        up_gtt_relstats(rel, 0, 0, 0, u_sess->utils_cxt.RecentXmin);
     }
 }
 

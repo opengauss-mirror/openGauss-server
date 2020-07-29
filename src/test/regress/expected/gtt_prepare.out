@@ -1,0 +1,14 @@
+CREATE SCHEMA gtt;
+set search_path=gtt,sys;
+create global temp table gtt1(a int primary key, b text) on commit delete rows;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt1_pkey" for table "gtt1"
+create global temp table gtt2(a int primary key, b text) on commit delete rows;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt2_pkey" for table "gtt2"
+create global temp table gtt3(a int primary key, b text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt3_pkey" for table "gtt3"
+create global temp table gtt_t_kenyon(id int,vname varchar(48),remark text) on commit PRESERVE rows;
+create index idx_gtt_t_kenyon_1 on gtt_t_kenyon(id);
+create index idx_gtt_t_kenyon_2 on gtt_t_kenyon(remark);
+CREATE GLOBAL TEMPORARY TABLE gtt_with_seq(c1 bigint, c2 bigserial) on commit PRESERVE rows;
+NOTICE:  CREATE TABLE will create implicit sequence "gtt_with_seq_c2_seq" for serial column "gtt_with_seq.c2"
+reset search_path;

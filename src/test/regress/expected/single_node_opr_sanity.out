@@ -2063,6 +2063,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3589 | timestamptz_list_agg_noarg2_transfn
  3590 | listagg
  3591 | pgxc_get_thread_wait_status
+ 3596 | pg_get_gtt_relstats
+ 3597 | pg_get_gtt_statistics
+ 3598 | pg_gtt_attached_pid
+ 3599 | pg_list_gtt_relfrozenxids
  3610 | tsvectorin
  3611 | tsvectorout
  3612 | tsqueryin
@@ -2671,7 +2675,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
  9999 | pg_test_err_contain_err
-(2270 rows)
+(2274 rows)
 
 -- Check prokind
 select count(*) from pg_proc where prokind = 'a';
@@ -2689,7 +2693,7 @@ select count(*) from pg_proc where prokind = 'w';
 select count(*) from pg_proc where prokind = 'f';
  count 
 -------
-  3130
+  3134
 (1 row)
 
 select count(*) from pg_proc where prokind = 'p';

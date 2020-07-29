@@ -2526,6 +2526,10 @@ static void makeTableDataInfo(TableInfo* tbinfo, bool boids)
     if (tbinfo->relpersistence == RELPERSISTENCE_UNLOGGED && no_unlogged_table_data)
         return;
 
+    /* Don't dump data in global temp table/sequence */
+    if (tbinfo->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
+        return;
+
     /* Check that the data is not explicitly excluded */
     if (simple_oid_list_member(&tabledata_exclude_oids, tbinfo->dobj.catId.oid))
         return;
@@ -16035,9 +16039,17 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
         if (tbinfo->parttype == PARTTYPE_PARTITIONED_RELATION) {
             appendPQExpBuffer(q, "CREATE %s %s", reltypename, fmtId(tbinfo->dobj.name));
         } else {
+            const char *tableType = nullptr;
+            if (tbinfo->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                tableType = "UNLOGGED ";
+            } else if (tbinfo->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+                tableType = "GLOBAL TEMPORARY ";
+            } else {
+                tableType = "";
+            }
             appendPQExpBuffer(q,
                 "CREATE %s%s %s",
-                tbinfo->relpersistence == RELPERSISTENCE_UNLOGGED ? "UNLOGGED " : "",
+                tableType,
                 reltypename,
                 fmtId(tbinfo->dobj.name));
         }
@@ -16715,7 +16727,9 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
          * attislocal correctly, plus fix up any inherited CHECK constraints.
          * Analogously, we set up typed tables using ALTER TABLE / OF here.
          */
-        if (binary_upgrade && ((tbinfo->relkind == RELKIND_RELATION) || (tbinfo->relkind == RELKIND_FOREIGN_TABLE))) {
+        if (binary_upgrade && 
+            ((tbinfo->relkind == RELKIND_RELATION) || (tbinfo->relkind == RELKIND_FOREIGN_TABLE)) &&
+            tbinfo->relpersistence != RELPERSISTENCE_GLOBAL_TEMP) {
             for (j = 0; j < tbinfo->numatts; j++) {
                 if (tbinfo->attisdropped[j]) {
                     appendPQExpBuffer(q, "\n-- For binary upgrade, recreate dropped column.\n");

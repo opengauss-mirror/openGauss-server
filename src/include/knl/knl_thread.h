@@ -841,6 +841,10 @@ typedef struct knl_t_shemem_ptr_context {
      * where we have special measures to pass it down).
      */
     union LWLockPadded *mainLWLockArray;
+
+    // for GTT table to track sessions and their usage of GTTs 
+    struct gtt_ctl_data* gtt_shared_ctl;
+    struct HTAB* active_gtt_shared_hash;
 } knl_t_shemem_ptr_context;
 
 typedef struct knl_t_cstore_context {
@@ -2425,8 +2429,10 @@ typedef struct knl_t_storage_context {
     bool atexit_callback_setup;
     ONEXIT on_proc_exit_list[MAX_ON_EXITS];
     ONEXIT on_shmem_exit_list[MAX_ON_EXITS];
+    ONEXIT before_shmem_exit_list[MAX_ON_EXITS];
     int on_proc_exit_index;
     int on_shmem_exit_index;
+    int before_shmem_exit_index;
 
     union CmprMetaUnion* cmprMetaInfo;
 

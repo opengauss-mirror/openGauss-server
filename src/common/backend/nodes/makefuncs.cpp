@@ -615,3 +615,36 @@ Param* makeParam(ParamKind paramkind, int paramid, Oid paramtype, int32 paramtyp
 
     return argp;
 }
+
+/*
+ * makeIndexInfo
+ *	  create an IndexInfo node
+ */
+IndexInfo* makeIndexInfo(int numattrs, List* expressions, List* predicates, bool unique, bool isready, bool concurrent)
+{
+    IndexInfo* n = makeNode(IndexInfo);
+
+    n->ii_NumIndexAttrs = numattrs;
+    n->ii_Unique = unique;
+    n->ii_ReadyForInserts = isready;
+    n->ii_Concurrent = concurrent;
+
+    /* expressions */
+    n->ii_Expressions = expressions;
+    n->ii_ExpressionsState = NIL;
+
+    /* predicates  */
+    n->ii_Predicate = predicates;
+    n->ii_PredicateState = NULL;
+
+    /* exclusion constraints */
+    n->ii_ExclusionOps = NULL;
+    n->ii_ExclusionProcs = NULL;
+    n->ii_ExclusionStrats = NULL;
+
+    /* initialize index-build state to default */
+    n->ii_BrokenHotChain = false;
+    n->ii_PgClassAttrId = 0;
+
+    return n;
+}

@@ -332,6 +332,23 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     List* partitionTableList = NIL;
     List* partitionIndexdef = NIL;
     List* partitiontspList = NIL;
+    char relPersistence;
+    bool concurrent;
+
+    /*
+     * Force non-concurrent build on temporary relations, even if CONCURRENTLY
+     * was requested.  Other backends can't access a temporary relation, so
+     * there's no harm in grabbing a stronger lock, and a non-concurrent DROP
+     * is more efficient.  Do this before any use of the concurrent option is
+     * done.
+     */
+    relPersistence = get_rel_persistence(relationId);
+    if (stmt->concurrent && !(relPersistence == RELPERSISTENCE_TEMP ||
+                                relPersistence == RELPERSISTENCE_GLOBAL_TEMP)) {
+        concurrent = true;
+    } else {
+        concurrent = false;
+    }
 
     /*
      * count attributes in index
@@ -356,7 +373,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * the relation.  To avoid lock upgrade hazards, that lock should be at
      * least as strong as the one we take here.
      */
-    lockmode = stmt->concurrent ? ShareUpdateExclusiveLock : ShareLock;
+    lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
 
     relationId = RelationGetRelid(rel);
@@ -393,7 +410,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     /*
      * partitioned index not is not support concurrent index
      */
-    if (stmt->isPartitioned && stmt->concurrent) {
+    if (stmt->isPartitioned && concurrent) {
         ereport(
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot create concurrent partitioned indexes ")));
     }
@@ -655,8 +672,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexInfo->ii_ExclusionStrats = NULL;
     indexInfo->ii_Unique = stmt->unique;
     /* In a concurrent build, mark it not-ready-for-inserts */
-    indexInfo->ii_ReadyForInserts = !stmt->concurrent;
-    indexInfo->ii_Concurrent = stmt->concurrent;
+    indexInfo->ii_ReadyForInserts = !concurrent;
+    indexInfo->ii_Concurrent = concurrent;
     indexInfo->ii_BrokenHotChain = false;
     indexInfo->ii_PgClassAttrId = 0;
 
@@ -765,7 +782,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * A valid stmt->oldPSortOid implies that we already have a built form
      * of the psort index.
      */
-    if ((OidIsValid(stmt->oldNode) && !(skip_build && !stmt->concurrent) &&
+    if ((OidIsValid(stmt->oldNode) && !(skip_build && !concurrent) &&
         !u_sess->attr.attr_sql.enable_cluster_resize) ||
         (OidIsValid(stmt->oldPSortOid) && !OidIsValid(stmt->oldNode))) {
         ereport(defence_errlevel(),
@@ -803,7 +820,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                         stmt->initdeferred,
                         g_instance.attr.attr_common.allowSystemTableMods,
                         true,
-                        stmt->concurrent,
+                        concurrent,
                         &extra);
                 heap_close(rel, NoLock);
                 return indexRelationId;
@@ -855,8 +872,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         stmt->deferrable,
         stmt->initdeferred,
         (g_instance.attr.attr_common.allowSystemTableMods || u_sess->attr.attr_common.IsInplaceUpgrade),
-        skip_build || stmt->concurrent,
-        stmt->concurrent,
+        skip_build || concurrent,
+        concurrent,
         &extra);
     /* Add any requested comment */
     if (stmt->idxcomment != NULL)
@@ -984,7 +1001,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         return indexRelationId;
     }
 
-    if (!stmt->concurrent) {
+    if (!concurrent) {
         /* Close the heap and we're done, in the non-concurrent case */
         heap_close(rel, NoLock);
         return indexRelationId;
@@ -2105,6 +2122,8 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
     Oid heapOid = InvalidOid;
     Oid heapPartOid = InvalidOid;
     LOCKMODE lockmode;
+    Relation irel;
+    char persistence;
 
     /* lock level used here should match index lock reindex_index() */
     if (partition_name != NULL)
@@ -2120,6 +2139,13 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
         false,
         RangeVarCallbackForReindexIndex,
         (void*)&heapOid);
+    /*
+     * Obtain the current persistence of the existing index.  We already hold
+     * lock on the index.
+     */
+    irel = index_open(indOid, NoLock);
+    persistence = irel->rd_rel->relpersistence;
+    index_close(irel, NoLock);
 
     if (partition_name != NULL)
         indPartOid = partitionNameGetPartitionOid(indOid,
@@ -2131,7 +2157,7 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
             PartitionNameCallbackForIndexPartition,
             (void*)&heapPartOid,
             ShareLock);  // lock on heap partition
-    reindex_index(indOid, indPartOid, false, mem_info, false);
+    reindex_index(indOid, indPartOid, false, mem_info, false, persistence);
 }
 
 void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid, const char* partitionName, Oid partId,

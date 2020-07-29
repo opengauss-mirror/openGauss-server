@@ -182,6 +182,117 @@ CREATE VIEW pg_indexes AS
          LEFT JOIN pg_tablespace T ON (T.oid = I.reltablespace)
     WHERE C.relkind = 'r' AND I.relkind = 'i';
 
+-- For global temporary table
+CREATE VIEW pg_gtt_relstats WITH (security_barrier) AS
+ SELECT n.nspname AS schemaname,
+    c.relname AS tablename,
+    (select relfilenode from pg_get_gtt_relstats(c.oid)),
+    (select relpages from pg_get_gtt_relstats(c.oid)),
+    (select reltuples from pg_get_gtt_relstats(c.oid)),
+    (select relallvisible from pg_get_gtt_relstats(c.oid)),
+    (select relfrozenxid from pg_get_gtt_relstats(c.oid)),
+    (select relminmxid from pg_get_gtt_relstats(c.oid))
+ FROM
+     pg_class c
+     LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE c.relpersistence='g' AND c.relkind in('r','p','i','t');
+
+CREATE VIEW pg_gtt_attached_pids WITH (security_barrier) AS
+ SELECT n.nspname AS schemaname,
+    c.relname AS tablename,
+    c.oid AS relid,
+    array(select pid from pg_gtt_attached_pid(c.oid)) AS pids
+ FROM
+     pg_class c
+     LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE c.relpersistence='g' AND c.relkind in('r','S');
+
+CREATE VIEW pg_gtt_stats WITH (security_barrier) AS
+SELECT s.nspname AS schemaname,
+    s.relname AS tablename,
+    s.attname,
+    s.stainherit AS inherited,
+    s.stanullfrac AS null_frac,
+    s.stawidth AS avg_width,
+    s.stadistinct AS n_distinct,
+        CASE
+            WHEN s.stakind1 = 1 THEN s.stavalues1
+            WHEN s.stakind2 = 1 THEN s.stavalues2
+            WHEN s.stakind3 = 1 THEN s.stavalues3
+            WHEN s.stakind4 = 1 THEN s.stavalues4
+            WHEN s.stakind5 = 1 THEN s.stavalues5
+        END AS most_common_vals,
+        CASE
+            WHEN s.stakind1 = 1 THEN s.stanumbers1
+            WHEN s.stakind2 = 1 THEN s.stanumbers2
+            WHEN s.stakind3 = 1 THEN s.stanumbers3
+            WHEN s.stakind4 = 1 THEN s.stanumbers4
+            WHEN s.stakind5 = 1 THEN s.stanumbers5
+        END AS most_common_freqs,
+        CASE
+            WHEN s.stakind1 = 2 THEN s.stavalues1
+            WHEN s.stakind2 = 2 THEN s.stavalues2
+            WHEN s.stakind3 = 2 THEN s.stavalues3
+            WHEN s.stakind4 = 2 THEN s.stavalues4
+            WHEN s.stakind5 = 2 THEN s.stavalues5
+        END AS histogram_bounds,
+        CASE
+            WHEN s.stakind1 = 3 THEN s.stanumbers1[1]
+            WHEN s.stakind2 = 3 THEN s.stanumbers2[1]
+            WHEN s.stakind3 = 3 THEN s.stanumbers3[1]
+            WHEN s.stakind4 = 3 THEN s.stanumbers4[1]
+            WHEN s.stakind5 = 3 THEN s.stanumbers5[1]
+        END AS correlation,
+        CASE
+            WHEN s.stakind1 = 4 THEN s.stavalues1
+            WHEN s.stakind2 = 4 THEN s.stavalues2
+            WHEN s.stakind3 = 4 THEN s.stavalues3
+            WHEN s.stakind4 = 4 THEN s.stavalues4
+            WHEN s.stakind5 = 4 THEN s.stavalues5
+        END AS most_common_elems,
+        CASE
+            WHEN s.stakind1 = 4 THEN s.stanumbers1
+            WHEN s.stakind2 = 4 THEN s.stanumbers2
+            WHEN s.stakind3 = 4 THEN s.stanumbers3
+            WHEN s.stakind4 = 4 THEN s.stanumbers4
+            WHEN s.stakind5 = 4 THEN s.stanumbers5
+        END AS most_common_elem_freqs,
+        CASE
+            WHEN s.stakind1 = 5 THEN s.stanumbers1
+            WHEN s.stakind2 = 5 THEN s.stanumbers2
+            WHEN s.stakind3 = 5 THEN s.stanumbers3
+            WHEN s.stakind4 = 5 THEN s.stanumbers4
+            WHEN s.stakind5 = 5 THEN s.stanumbers5
+        END AS elem_count_histogram
+   FROM 
+    (SELECT n.nspname,
+        c.relname,
+        a.attname,
+        (select stainherit from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stainherit,
+        (select stanullfrac from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanullfrac,
+        (select stawidth from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stawidth,
+        (select stadistinct from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stadistinct,
+        (select stakind1 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind1,
+        (select stakind2 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind2,
+        (select stakind3 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind3,
+        (select stakind4 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind4,
+        (select stakind5 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind5,
+        (select stanumbers1 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers1,
+        (select stanumbers2 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers2,
+        (select stanumbers3 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers3,
+        (select stanumbers4 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers4,
+        (select stanumbers5 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers5,
+        (select stavalues1 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues1,
+        (select stavalues2 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues2,
+        (select stavalues3 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues3,
+        (select stavalues4 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues4,
+        (select stavalues5 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues5
+       FROM 
+         pg_class c
+         JOIN pg_attribute a ON c.oid = a.attrelid
+         LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relpersistence='g' AND c.relkind in('r','p','i','t') and a.attnum > 0 and NOT a.attisdropped AND has_column_privilege(c.oid, a.attnum, 'select'::text)) s;
+
 CREATE VIEW pg_stats AS
     SELECT
         nspname AS schemaname,

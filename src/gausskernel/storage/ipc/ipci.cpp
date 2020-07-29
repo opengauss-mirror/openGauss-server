@@ -26,6 +26,7 @@
 #include "access/subtrans.h"
 #include "access/twophase.h"
 #include "access/double_write.h"
+#include "catalog/storage_gtt.h"
 #include "commands/tablespace.h"
 #include "commands/async.h"
 #include "foreign/dummyserver.h"
@@ -161,6 +162,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         size = add_size(size, BTreeShmemSize());
         size = add_size(size, SyncScanShmemSize());
         size = add_size(size, AsyncShmemSize());
+        size = add_size(size, active_gtt_shared_hash_size());
 #ifdef PGXC
         size = add_size(size, NodeTablesShmemSize());
 #endif
@@ -243,6 +245,8 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         CSNLOGShmemInit();
         MultiXactShmemInit();
         InitBufferPool();
+        /* global temporay table */
+        active_gtt_shared_hash_init();
         /*
          * Set up lock manager
          */

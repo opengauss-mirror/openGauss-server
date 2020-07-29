@@ -50,6 +50,7 @@ extern MultiXactId MultiXactIdCreate(TransactionId xid1, TransactionId xid2);
 extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern bool MultiXactIdIsCurrent(MultiXactId multi);
+extern MultiXactId ReadNextMultiXactId(void);
 extern void MultiXactIdWait(MultiXactId multi, bool allow_con_update = false);
 extern bool ConditionalMultiXactIdWait(MultiXactId multi);
 extern void MultiXactIdSetOldestMember(void);

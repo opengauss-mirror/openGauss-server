@@ -27,6 +27,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/heap.h"
+#include "catalog/storage_gtt.h"
 #include "commands/dbcommands.h"
 #include "executor/nodeModifyTable.h"
 #include "foreign/fdwapi.h"
@@ -232,6 +233,12 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                 continue;
             }
 
+            /* Ignore empty index for global temp table */
+            if (RELATION_IS_GLOBAL_TEMP(indexRelation) &&
+                !gtt_storage_attached(RelationGetRelid(indexRelation))) {
+                index_close(indexRelation, NoLock);
+                continue;
+            }
             /*
              * If the index is valid, but cannot yet be used, ignore it; but
              * mark the plan we are generating as transient. See

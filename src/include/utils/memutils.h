@@ -86,6 +86,7 @@ extern MemoryContext PmTopMemoryContext;
 extern MemoryContext StreamInfoContext;
 
 extern THR_LOCAL PGDLLIMPORT MemoryContext ErrorContext;
+extern THR_LOCAL PGDLLIMPORT MemoryContext CacheMemoryContext;
 
 /*
  * Memory-context-type-independent functions in mcxt.c

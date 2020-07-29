@@ -363,7 +363,8 @@ extern char* buildTempSampleTable(Oid relid, Oid mian_relid, TempSmpleTblType ty
 extern void dropSampleTable(const char* tableName);
 extern const char* get_sample_tblname(AnalyzeMode analyzemode, List* tmpSampleTblNameList);
 extern VacAttrStats* examine_attribute(Relation onerel, Bitmapset* bms_attnums, bool isLog);
-extern void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats** vacattrstats);
+extern void update_attstats(
+    Oid relid, char relkind, bool inh, int natts, VacAttrStats** vacattrstats, char relpersistence);
 /* we should delete all records in pg_statistic when the data is dirty and current totalrows is null. */
 extern void delete_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats** vacattrstats,
     unsigned int delete_stats_option = DELETE_STATS_SINGLE);

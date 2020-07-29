@@ -1049,9 +1049,22 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
     char* rpath = NULL;
     int fd;
     bool collides = false;
+    BackendId    backend;
 
-    //@Temp Table. we now use same storage as unlogged table for temp table,
-    // so backendID is no need.
+    switch (relpersistence) {
+        case RELPERSISTENCE_GLOBAL_TEMP:
+            backend = t_thrd.proc_cxt.MyBackendId;
+            break;
+        case RELPERSISTENCE_TEMP:
+        case RELPERSISTENCE_UNLOGGED:
+        case RELPERSISTENCE_PERMANENT:
+            backend = InvalidBackendId;
+            break;
+        default:
+            elog(ERROR, "invalid relpersistence: %c", relpersistence);
+            return InvalidOid;    /* placate compiler */
+    }  
+
     /* This logic should match relation_init_physical_addr */
     rnode.node.spcNode = ConvertToRelfilenodeTblspcOid(reltablespace);
     rnode.node.dbNode = (rnode.node.spcNode == GLOBALTABLESPACE_OID) ? InvalidOid : u_sess->proc_cxt.MyDatabaseId;
@@ -1061,7 +1074,7 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
      * that properly here to make sure that any collisions based on filename
      * are properly detected.
      */
-    rnode.backend = InvalidBackendId;
+    rnode.backend = backend;
 
     do {
         CHECK_FOR_INTERRUPTS();

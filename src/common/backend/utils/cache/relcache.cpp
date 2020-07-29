@@ -112,6 +112,7 @@
 #include "catalog/schemapg.h"
 #include "catalog/storage.h"
 #include "catalog/pg_extension_data_source.h"
+#include "catalog/storage_gtt.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/tablespace.h"
 #include "commands/trigger.h"
@@ -148,6 +149,8 @@
 #include "utils/partitionmap_gs.h"
 #include "utils/resowner.h"
 #include "access/cstore_am.h"
+#include "nodes/nodeFuncs.h"
+#include "nodes/makefuncs.h"
 
 /*
  *		name of relcache init file(s), used to speed up backend startup
@@ -1693,9 +1696,26 @@ static Relation relation_build_desc(Oid targetRelId, bool insertIt, bool buildke
         switch (relation->rd_rel->relpersistence) {
             case RELPERSISTENCE_UNLOGGED:
             case RELPERSISTENCE_PERMANENT:
-            case RELPERSISTENCE_TEMP:  // @Temp Table. Temp table here is just like unlogged table.
                 relation->rd_backend = InvalidBackendId;
                 relation->rd_islocaltemp = false;
+                break;
+            case RELPERSISTENCE_TEMP:  // @Temp Table. Temp table here is just like unlogged table.
+                relation->rd_backend = InvalidBackendId;
+                relation->rd_islocaltemp = true;
+                break;
+            case RELPERSISTENCE_GLOBAL_TEMP:  // global temp table
+                {
+                    BlockNumber relpages = 0;
+                    double reltuples = 0;
+                    BlockNumber relallvisible = 0;
+
+                    relation->rd_backend = t_thrd.proc_cxt.MyBackendId;
+                    relation->rd_islocaltemp = false;
+                    get_gtt_relstats(RelationGetRelid(relation), &relpages, &reltuples, &relallvisible, NULL);
+                    relation->rd_rel->relpages = static_cast<float8>(relpages);
+                    relation->rd_rel->reltuples = static_cast<float8>(reltuples);
+                    relation->rd_rel->relallvisible = static_cast<int4>(relallvisible);
+                }
                 break;
             default:
                 ereport(ERROR,
@@ -1961,7 +1981,16 @@ static void relation_init_physical_addr(Relation relation)
             heap_freetuple_ext(phys_tuple);
         }
 
-        relation->rd_node.relNode = relation->rd_rel->relfilenode;
+        if (RELATION_IS_GLOBAL_TEMP(relation)) {
+            Oid newrelnode = gtt_fetch_current_relfilenode(RelationGetRelid(relation));
+            if (newrelnode != InvalidOid && newrelnode != relation->rd_rel->relfilenode) {
+                relation->rd_node.relNode = newrelnode;
+            } else {
+                relation->rd_node.relNode = relation->rd_rel->relfilenode;
+            }
+        } else {
+            relation->rd_node.relNode = relation->rd_rel->relfilenode;
+        }
     } else {
         /* Consult the relation mapper */
         relation->rd_node.relNode = RelationMapOidToFilenode(relation->rd_id, relation->rd_rel->relisshared);
@@ -2735,6 +2764,8 @@ static void relation_reload_index_info(Relation relation)
         HeapTupleSetXmin(relation->rd_indextuple, HeapTupleGetRawXmin(tuple));
 
         ReleaseSysCache(tuple);
+
+        gtt_fix_index_state(relation);
     }
 
     /* Okay, now it's valid again */
@@ -3672,10 +3703,16 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     switch (relpersistence) {
         case RELPERSISTENCE_UNLOGGED:
         case RELPERSISTENCE_PERMANENT:
-        case RELPERSISTENCE_TEMP:  // @Temp Table. Temp table here is just like unlogged table.
             rel->rd_backend = InvalidBackendId;
             rel->rd_islocaltemp = false;
-
+            break;
+        case RELPERSISTENCE_TEMP:  // @Temp Table. Temp table here is just like unlogged table.
+            rel->rd_backend = InvalidBackendId;
+            rel->rd_islocaltemp = true;
+            break;
+        case RELPERSISTENCE_GLOBAL_TEMP:  // global temp table
+            rel->rd_backend = t_thrd.proc_cxt.MyBackendId;
+            rel->rd_islocaltemp = false;
             break;
         default:
             ereport(ERROR,
@@ -3815,8 +3852,8 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
     Datum values[Natts_pg_class];
     bool nulls[Natts_pg_class];
     bool replaces[Natts_pg_class];
-    errno_t rc;
-
+    errno_t rc = EOK;
+    bool modifyPgClass = !RELATION_IS_GLOBAL_TEMP(relation);
     /* Indexes, sequences must have Invalid frozenxid; other rels must not */
     Assert(((relation->rd_rel->relkind == RELKIND_INDEX || relation->rd_rel->relkind == RELKIND_SEQUENCE)
                 ? freezeXid == InvalidTransactionId : TransactionIdIsNormal(freezeXid)) ||
@@ -3850,17 +3887,22 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
         }
     }
 
-    /*
-     * Get a writable copy of the pg_class tuple for the given relation.
-     */
-    pg_class = heap_open(RelationRelationId, RowExclusiveLock);
-
-    tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(RelationGetRelid(relation)));
-    if (!HeapTupleIsValid(tuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("could not find tuple for relation %u", RelationGetRelid(relation))));
-    classform = (Form_pg_class)GETSTRUCT(tuple);
+    if (modifyPgClass) {
+        /*
+        * Get a writable copy of the pg_class tuple for the given relation.
+        */
+        pg_class = heap_open(RelationRelationId, RowExclusiveLock);
+        tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(RelationGetRelid(relation)));
+        if (!HeapTupleIsValid(tuple)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("could not find tuple for relation %u", RelationGetRelid(relation))));
+        }
+        classform = (Form_pg_class) GETSTRUCT(tuple);
+    } else {
+        memset_s(&classform, sizeof(classform), 0, sizeof(classform));
+        securec_check(rc, "\0", "\0");
+    }
 
     ereport(LOG,
         (errmsg("Relation %s(%u) set newfilenode %u oldfilenode %u xid %lu",
@@ -3880,52 +3922,58 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
     newrnode.node.relNode = newrelfilenode;
     newrnode.backend = relation->rd_backend;
     RelationCreateStorage(
-        newrnode.node, relation->rd_rel->relpersistence, relation->rd_rel->relowner, relation->rd_bucketoid);
+        newrnode.node, relation->rd_rel->relpersistence, relation->rd_rel->relowner, relation->rd_bucketoid, relation);
     smgrclosenode(newrnode);
 
     /*
      * Schedule unlinking of the old storage at transaction commit.
      */
     RelationDropStorage(relation, isDfsTruncate);
+    if (!modifyPgClass) {
+        Oid relnode = gtt_fetch_current_relfilenode(RelationGetRelid(relation));
+        Assert(RELATION_IS_GLOBAL_TEMP(relation));
+        Assert(!RelationIsMapped(relation));
+        relation->rd_node.relNode = relnode;
+        CacheInvalidateRelcache(relation);
+    } else {
+        /*
+         * Now update the pg_class row.  However, if we're dealing with a mapped
+         * index, pg_class.relfilenode doesn't change; instead we have to send the
+         * update to the relation mapper.
+         */
+        if (RelationIsMapped(relation))
+            RelationMapUpdateMap(RelationGetRelid(relation), newrelfilenode, relation->rd_rel->relisshared, false);
+        else
+            classform->relfilenode = newrelfilenode;
 
-    /*
-     * Now update the pg_class row.  However, if we're dealing with a mapped
-     * index, pg_class.relfilenode doesn't change; instead we have to send the
-     * update to the relation mapper.
-     */
-    if (RelationIsMapped(relation))
-        RelationMapUpdateMap(RelationGetRelid(relation), newrelfilenode, relation->rd_rel->relisshared, false);
-    else
-        classform->relfilenode = newrelfilenode;
+        /* These changes are safe even for a mapped relation */
+        if (relation->rd_rel->relkind != RELKIND_SEQUENCE) {
+            classform->relpages = 0; /* it's empty until further notice */
+            classform->reltuples = 0;
+            classform->relallvisible = 0;
+        }
+        /* set classform's relfrozenxid and relfrozenxid64 */
+        classform->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
 
-    /* These changes are safe even for a mapped relation */
-    if (relation->rd_rel->relkind != RELKIND_SEQUENCE) {
-        classform->relpages = 0; /* it's empty until further notice */
-        classform->reltuples = 0;
-        classform->relallvisible = 0;
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+        securec_check(rc, "\0", "\0");
+
+        replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
+        values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(freezeXid);
+
+        nctup = heap_modify_tuple(tuple, RelationGetDescr(pg_class), values, nulls, replaces);
+
+        simple_heap_update(pg_class, &nctup->t_self, nctup);
+        CatalogUpdateIndexes(pg_class, nctup);
+
+        heap_freetuple_ext(nctup);
+        heap_freetuple_ext(tuple);
+        heap_close(pg_class, RowExclusiveLock);
     }
-    /* set classform's relfrozenxid and relfrozenxid64 */
-    classform->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
-
-    rc = memset_s(values, sizeof(values), 0, sizeof(values));
-    securec_check(rc, "\0", "\0");
-    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
-    securec_check(rc, "\0", "\0");
-    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
-    securec_check(rc, "\0", "\0");
-
-    replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
-    values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(freezeXid);
-
-    nctup = heap_modify_tuple(tuple, RelationGetDescr(pg_class), values, nulls, replaces);
-
-    simple_heap_update(pg_class, &nctup->t_self, nctup);
-    CatalogUpdateIndexes(pg_class, nctup);
-
-    heap_freetuple_ext(nctup);
-    heap_freetuple_ext(tuple);
-
-    heap_close(pg_class, RowExclusiveLock);
 
     /*
      * Make the pg_class row change visible, as well as the relation map
@@ -5063,6 +5111,45 @@ List* RelationGetIndexExpressions(Relation relation)
     oldcxt = MemoryContextSwitchTo(relation->rd_indexcxt);
     relation->rd_indexprs = (List*)copyObject(result);
     (void)MemoryContextSwitchTo(oldcxt);
+
+    return result;
+}
+
+/*
+ * RelationGetDummyIndexExpressions -- get dummy expressions for an index
+ *
+ * Return a list of dummy expressions (just Const nodes) with the same
+ * types/typmods/collations as the index's real expressions.  This is
+ * useful in situations where we don't want to run any user-defined code.
+ */
+List* RelationGetDummyIndexExpressions(Relation relation)
+{
+    List* result;
+    Datum exprsDatum;
+    bool isnull;
+    char* exprsString;
+    List* rawExprs;
+    ListCell* lc;
+
+    /* Quick exit if there is nothing to do. */
+    if (relation->rd_indextuple == NULL || heap_attisnull(relation->rd_indextuple, Anum_pg_index_indexprs, NULL)) {
+        return NIL;
+    }
+
+    /* Extract raw node tree(s) from index tuple. */
+    exprsDatum = heap_getattr(relation->rd_indextuple, Anum_pg_index_indexprs, get_pg_index_descriptor(), &isnull);
+    Assert(!isnull);
+    exprsString = TextDatumGetCString(exprsDatum);
+    rawExprs = (List*)stringToNode(exprsString);
+    pfree(exprsString);
+
+    /* Construct null Consts; the typlen and typbyval are arbitrary. */
+    result = NIL;
+    foreach (lc, rawExprs) {
+        Node* rawExpr = (Node*)lfirst(lc);
+        result = lappend(
+            result, makeConst(exprType(rawExpr), exprTypmod(rawExpr), exprCollation(rawExpr), 1, (Datum)0, true, true));
+    }
 
     return result;
 }

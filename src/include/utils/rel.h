@@ -306,6 +306,7 @@ typedef struct StdRdOptions {
     char* start_ctid_internal;
     char* end_ctid_internal;
     char        *merge_list;
+    bool on_commit_delete_rows; /* global temp table */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -477,7 +478,9 @@ typedef struct StdRdOptions {
  * RelationUsesLocalBuffers
  *		True if relation's pages are stored in local buffers.
  */
-#define RelationUsesLocalBuffers(relation) ((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
+#define RelationUsesLocalBuffers(relation) \
+    ((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP || \
+     (relation)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
 #define RelationIsLocalTemp(relation)                                           \
     ((relation)->rd_rel->relnamespace == u_sess->catalog_cxt.myTempNamespace || \
         (relation)->rd_rel->relnamespace == u_sess->catalog_cxt.myTempToastNamespace)
@@ -505,14 +508,38 @@ typedef struct StdRdOptions {
 
 /*
  * RELATION_IS_LOCAL
- *		If a rel is either temp or newly created in the current transaction,
+ *		If a rel is either local temp or global temp relation
+ *		or newly created in the current transaction,
  *		it can be assumed to be accessible only to the current backend.
  *		This is typically used to decide that we can skip acquiring locks.
  *
  * Beware of multiple eval of argument
  */
 #define RELATION_IS_LOCAL(relation) \
-    ((relation)->rd_islocaltemp || (relation)->rd_createSubid != InvalidSubTransactionId)
+    ((relation)->rd_islocaltemp || \
+     (relation)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP || \
+     (relation)->rd_createSubid != InvalidSubTransactionId)
+
+/*
+ * RELATION_IS_TEMP
+ *        Test a rel is either local temp relation of this session
+ *         or global temp relation.
+ */
+#define RELATION_IS_TEMP(relation) \
+    ((relation)->rd_islocaltemp || \
+     (relation)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
+
+/* global temp table implementations */
+#define RELATION_IS_GLOBAL_TEMP(relation) \
+    ((relation) != NULL && (relation)->rd_rel != NULL && \
+     (relation)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
+
+#define RELATION_GTT_ON_COMMIT_DELETE(relation)    \
+    ((relation)->rd_options && (relation)->rd_rel->relkind == RELKIND_RELATION && \
+    (relation)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP ? \
+    (reinterpret_cast<StdRdOptions *>((relation)->rd_options))->on_commit_delete_rows : false)
+
+#define RelationGetRelPersistence(relation) ((relation)->rd_rel->relpersistence)
 
 /* routines in utils/cache/relcache.c */
 extern void RelationIncrementReferenceCount(Relation rel);
