@@ -408,7 +408,8 @@ void DefineSequence(CreateSeqStmt* seq)
     isUseLocalSeq = IS_SINGLE_NODE || isTempNamespace(namespaceOid);
 
     bool notSupportTmpSeq = false;
-    if (seq->sequence->relpersistence == RELPERSISTENCE_TEMP) {
+    if (seq->sequence->relpersistence == RELPERSISTENCE_TEMP ||
+        seq->sequence->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
         notSupportTmpSeq = true;
     } else if (IS_MAIN_COORDINATOR || IS_SINGLE_NODE) {
         if (seq->canCreateTempSeq) {

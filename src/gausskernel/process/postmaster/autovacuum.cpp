@@ -2170,8 +2170,10 @@ static void do_autovacuum(void)
         bool enable_vacuum = false;
 
         /* We cannot safely process other backends' temp tables, so skip 'em. */
-        if (RELPERSISTENCE_TEMP == classForm->relpersistence)
+        if (classForm->relpersistence == RELPERSISTENCE_TEMP ||
+            classForm->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
             continue;
+        }
 
         /* Fetch reloptions for this table */
         relopts = extract_autovac_opts(tuple, pg_class_desc);
@@ -2414,7 +2416,8 @@ static void do_autovacuum(void)
         av_toastid_mainid* at_entry = NULL;
 
         /* We cannot safely process other backends' temp tables, so skip 'em. */
-        if (classForm->relpersistence == RELPERSISTENCE_TEMP)
+        if (classForm->relpersistence == RELPERSISTENCE_TEMP ||
+            classForm->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
             continue;
 
         at_entry = (av_toastid_mainid*)hash_search(toast_table_map, &(relid), HASH_FIND, &found);

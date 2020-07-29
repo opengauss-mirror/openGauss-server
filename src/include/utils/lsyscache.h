@@ -94,6 +94,7 @@ extern int get_relnatts(Oid relid);
 extern char* get_rel_name(Oid relid);
 extern char* getPartitionName(Oid partid, bool missing_ok);
 extern Oid get_rel_namespace(Oid relid);
+extern char get_rel_persistence(Oid relid);
 extern bool is_sys_table(Oid relid);
 extern Oid get_rel_type_id(Oid relid);
 extern char get_rel_relkind(Oid relid);

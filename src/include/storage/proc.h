@@ -128,6 +128,7 @@ struct PGPROC {
     ThreadId sessMemorySessionid;
     uint64 sessionid; /* if not zero, session id in thread pool*/
     int logictid;     /*logic thread id*/
+    TransactionId session_gtt_frozenxid;    /* session level global temp table relfrozenxid */
 
     int pgprocno;
     int nodeno;

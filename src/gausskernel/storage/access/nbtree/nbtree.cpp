@@ -228,6 +228,17 @@ Datum btinsert(PG_FUNCTION_ARGS)
     bool result = false;
     IndexTuple itup;
 
+    /* skip inserting if global temp table index does not exist */
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        if (rel->rd_smgr == NULL) {
+            /* Open it at the smgr level if not already done */
+            RelationOpenSmgr(rel);
+        }
+        if (!smgrexists(rel->rd_smgr, MAIN_FORKNUM)) {
+            PG_RETURN_BOOL(result);
+        }
+    }
+
     /* generate an index tuple */
     itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
     itup->t_tid = *ht_ctid;

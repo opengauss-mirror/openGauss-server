@@ -1822,10 +1822,13 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
     switch (relform->relpersistence) {
         case RELPERSISTENCE_UNLOGGED:
         case RELPERSISTENCE_PERMANENT:
-        case RELPERSISTENCE_TEMP:  // @Temp Table. temp table is the same as unlogged table here.
+        case RELPERSISTENCE_TEMP:
             backend = InvalidBackendId;
             break;
 
+        case RELPERSISTENCE_GLOBAL_TEMP:
+            backend = t_thrd.proc_cxt.MyBackendId;
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),

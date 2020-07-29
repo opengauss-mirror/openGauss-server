@@ -36,7 +36,8 @@ extern void finishPartitionHeapSwap(Oid partitionOid, Oid tempTableOid, bool swa
     TransactionId frozenXid, bool tempTableIsPartition = false);
 
 extern void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bool swap_toast_by_content,
-    bool check_constraints, TransactionId frozenXid, AdaptMem* memInfo = NULL);
+    bool check_constraints, TransactionId frozenXid, AdaptMem* memInfo = NULL,
+    char newrelpersistence = RELPERSISTENCE_PERMANENT);
 
 extern void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int freeze_table_age);
 extern void updateRelationName(Oid relOid, bool isPartition, const char* relNewName);

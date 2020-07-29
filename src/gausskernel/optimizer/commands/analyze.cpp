@@ -34,6 +34,7 @@
 #include "catalog/pg_statistic_ext.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "catalog/namespace.h"
+#include "catalog/storage_gtt.h"
 #include "commands/dbcommands.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
@@ -234,7 +235,8 @@ static void get_sample_rows_for_query(
     MemoryContext speccontext, Relation rel, VacuumStmt* vacstmt, int64* num_sample_rows, HeapTuple** samplerows);
 template <bool isSingleColumn>
 static void update_stats_catalog(
-    Relation pgstat, MemoryContext oldcontext, Oid relid, char relkind, bool inh, VacAttrStats* stats);
+    Relation pgstat, MemoryContext oldcontext, Oid relid, char relkind, bool inh, VacAttrStats* stats, int natts,
+    char relpersistence);
 
 /* The sample info of special attribute for compute statistic for index or type of tsvector. */
 typedef struct {
@@ -494,6 +496,11 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
         return;
     }
 
+    if (RELATION_IS_GLOBAL_TEMP(onerel) && !gtt_storage_attached(RelationGetRelid(onerel))) {
+        relation_close(onerel, ShareUpdateExclusiveLock);
+        return;
+    }
+
     /*
      * We can ANALYZE any table except pg_statistic. See update_attstats
      */
@@ -720,7 +727,7 @@ static int get_total_width(
         total_width1 = 0;
 
         for (i = 0; i < thisdata->attr_cnt; i++) {
-            for (unsigned int j = 0; j < vacattrstats[i]->num_attrs; ++j) {
+            for (unsigned int j = 0; j < thisdata->vacattrstats[i]->num_attrs; ++j) {
                 attr = thisdata->vacattrstats[i]->attrs[j];
 
                 /* This should match set_rel_width() in costsize.c */
@@ -1578,7 +1585,8 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
                 VacAttrStats* stats = vacattrstats[i];
                 if (stats->num_attrs > 1) {
                     stats->stats_valid = true;
-                    update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, 1, &stats);
+                    update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, 1, &stats,
+                                    RelationGetRelPersistence(onerel));
                 }
             }
         }
@@ -4188,7 +4196,7 @@ void releaseSourceAfterDelteOrUpdateAttStats(
  *       function
  */
 // Added parameter - char relkind by data partition
-void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats** vacattrstats)
+void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats** vacattrstats, char relpersistence)
 {
     Relation pgstat = NULL;
     Relation pgstat_ext = NULL;
@@ -4226,7 +4234,7 @@ void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats*
             }
 
             /* do multi column stats update */
-            update_stats_catalog<false>(pgstat_ext, oldcontext, relid, relkind, inh, stats);
+            update_stats_catalog<false>(pgstat_ext, oldcontext, relid, relkind, inh, stats, natts, relpersistence);
         } else {
             /* Open rel handler for pg_statistic to process single-column statistic */
             if (!pgstat) {
@@ -4234,7 +4242,7 @@ void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats*
             }
 
             /* do signle column stats update */
-            update_stats_catalog<true>(pgstat, oldcontext, relid, relkind, inh, stats);
+            update_stats_catalog<true>(pgstat, oldcontext, relid, relkind, inh, stats, natts, relpersistence);
         }
     }
 
@@ -4261,7 +4269,8 @@ void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats*
  */
 template <bool isSingleColumn>
 static void update_stats_catalog(
-    Relation pgstat, MemoryContext oldcontext, Oid relid, char relkind, bool inh, VacAttrStats* stats)
+    Relation pgstat, MemoryContext oldcontext, Oid relid, char relkind, bool inh, VacAttrStats* stats, int natts,
+    char relpersistence)
 {
     HeapTuple stup, oldtup;
     int i, k, n;
@@ -4400,6 +4409,17 @@ static void update_stats_catalog(
         }
 
         values[Anum_pg_statistic_ext_stakey - 1] = PointerGetDatum(stakey);
+    }
+
+    /* Update column statistic to localhash, not catalog */
+    if (relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        up_gtt_att_statistic(relid,
+                             attnum,
+                             natts,
+                             RelationGetDescr(pgstat),
+                             values,
+                             nulls);
+        return;
     }
 
     /* store tuple to pg_statistic(_ext) */
@@ -6546,11 +6566,13 @@ static bool do_analyze_samplerows(Relation onerel, VacuumStmt* vacstmt, int attr
      * previous statistics for the target columns.	(If there are stats in
      * pg_statistic for columns we didn't process, we leave them alone.)
      */
-    update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, attr_cnt, vacattrstats);
+    update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, attr_cnt, vacattrstats,
+                    RelationGetRelPersistence(onerel));
     for (i = 0; i < nindexes; i++) {
         AnlIndexData* thisdata = &indexdata[i];
 
-        update_attstats(RelationGetRelid(Irel[i]), STARELKIND_CLASS, false, thisdata->attr_cnt, thisdata->vacattrstats);
+        update_attstats(RelationGetRelid(Irel[i]), STARELKIND_CLASS, false, thisdata->attr_cnt, thisdata->vacattrstats,
+                        RelationGetRelPersistence(Irel[i]));
     }
 
     return true;
@@ -6685,7 +6707,8 @@ static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int att
      * previous statistics for the target columns.	(If there are stats in
      * pg_statistic for columns we didn't process, we leave them alone.)
      */
-    update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, attr_cnt, vacattrstats);
+    update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, attr_cnt, vacattrstats,
+                    RelationGetRelPersistence(onerel));
 
     /*
      * Update stats of dfs table or delta table using statistic of complex table
@@ -6693,10 +6716,12 @@ static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int att
      */
     if (analyzemode == ANALYZECOMPLEX) {
         if (!vacstmt->pstGlobalStatEx[ANALYZEMAIN - 1].exec_query)
-            update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, false, attr_cnt, vacattrstats);
+            update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, false,
+                            attr_cnt, vacattrstats, RelationGetRelPersistence(onerel));
 
         if (!vacstmt->pstGlobalStatEx[ANALYZEDELTA - 1].exec_query)
-            update_attstats(onerel->rd_rel->reldeltarelid, STARELKIND_CLASS, false, attr_cnt, vacattrstats);
+            update_attstats(onerel->rd_rel->reldeltarelid, STARELKIND_CLASS, false,
+                            attr_cnt, vacattrstats, RelationGetRelPersistence(onerel));
     }
 
     /*
@@ -6712,7 +6737,8 @@ static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int att
             AnlIndexData* thisdata = &indexdata[i];
 
             update_attstats(
-                RelationGetRelid(Irel[i]), STARELKIND_CLASS, false, thisdata->attr_cnt, thisdata->vacattrstats);
+                RelationGetRelid(Irel[i]), STARELKIND_CLASS, false, thisdata->attr_cnt, thisdata->vacattrstats,
+                RelationGetRelPersistence(Irel[i]));
         }
     }
 

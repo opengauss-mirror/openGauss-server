@@ -233,7 +233,8 @@ Boot_CreateStmt:
 												   mapped_relation,
 												   true,
 												   REL_CMPRS_NOT_SUPPORT,
-												   BOOTSTRAP_SUPERUSERID);
+												   BOOTSTRAP_SUPERUSERID,
+												   false);
 						ereport(DEBUG4, (errmsg("bootstrap relation created")));
 						
 						/*

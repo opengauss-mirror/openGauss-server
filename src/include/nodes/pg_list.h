@@ -303,6 +303,8 @@ extern List* list_copy_tail(const List* list, int nskip);
 
 extern void dlist_add_tail_cell(DList* dlist, DListCell* cell);
 extern List* list_merge_int(List* list1, List* list2);
+extern List* list_insert_nth_oid(List *list, int pos, Oid datum);
+
 /*
  * To ease migration to the new list API, a set of compatibility
  * macros are provided that reduce the impact of the list API changes

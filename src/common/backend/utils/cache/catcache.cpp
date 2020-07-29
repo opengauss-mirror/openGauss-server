@@ -698,6 +698,25 @@ void AtEOXact_CatCache(bool is_commit)
 }
 
 /*
+ * Standard routine for creating cache context if it doesn't exist yet
+ *
+ * There are a lot of places (probably far more than necessary) that check
+ * whether CacheMemoryContext exists yet and want to create it if not.
+ * We centralize knowledge of exactly how to create it here.
+ */
+void CreateCacheMemoryContext(void)
+{
+    /*  
+     * Purely for paranoia, check that context doesn't exist; caller probably
+     * did so already.
+     */  
+    if (!CacheMemoryContext)
+        CacheMemoryContext = AllocSetContextCreate(TopMemoryContext,
+                                                   "CacheMemoryContext",                           
+                                                   ALLOCSET_DEFAULT_SIZES);                        
+}
+
+/*
  *		reset_catalog_cache
  *
  * Reset one catalog cache to empty.

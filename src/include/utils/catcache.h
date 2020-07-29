@@ -174,6 +174,11 @@ typedef struct CatCacheHeader {
 
 extern void AtEOXact_CatCache(bool isCommit);
 
+/* this extern duplicates utils/memutils.h... */
+extern THR_LOCAL PGDLLIMPORT MemoryContext CacheMemoryContext;
+
+extern void CreateCacheMemoryContext(void);
+
 extern CatCache* InitCatCache(int id, Oid reloid, Oid indexoid, int nkeys, const int* key, int nbuckets);
 extern void InitCatCachePhase2(CatCache* cache, bool touch_index);
 

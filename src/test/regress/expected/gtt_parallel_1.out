@@ -1,0 +1,90 @@
+set search_path=gtt,sys;
+select nextval('gtt_with_seq_c2_seq');
+ nextval 
+---------
+       1
+(1 row)
+
+insert into gtt1 values(1, 'test1');
+select * from gtt1 order by a;
+ a | b 
+---+---
+(0 rows)
+
+begin;
+insert into gtt1 values(1, 'test1');
+select * from gtt1 order by a;
+ a |   b   
+---+-------
+ 1 | test1
+(1 row)
+
+commit;
+select * from gtt1 order by a;
+ a | b 
+---+---
+(0 rows)
+
+begin;
+insert into gtt1 values(1, 'test1');
+select * from gtt1 order by a;
+ a |   b   
+---+-------
+ 1 | test1
+(1 row)
+
+rollback;
+select * from gtt1 order by a;
+ a | b 
+---+---
+(0 rows)
+
+truncate gtt1;
+select * from gtt1 order by a;
+ a | b 
+---+---
+(0 rows)
+
+begin;
+insert into gtt1 values(1, 'test1');
+select * from gtt1 order by a;
+ a |   b   
+---+-------
+ 1 | test1
+(1 row)
+
+truncate gtt1;
+select * from gtt1 order by a;
+ a | b 
+---+---
+(0 rows)
+
+insert into gtt1 values(1, 'test1');
+rollback;
+select * from gtt1 order by a;
+ a | b 
+---+---
+(0 rows)
+
+begin;
+select * from gtt1 order by a;
+ a | b 
+---+---
+(0 rows)
+
+truncate gtt1;
+insert into gtt1 values(1, 'test1');
+select * from gtt1 order by a;
+ a |   b   
+---+-------
+ 1 | test1
+(1 row)
+
+truncate gtt1;
+commit;
+select * from gtt1 order by a;
+ a | b 
+---+---
+(0 rows)
+
+reset search_path;

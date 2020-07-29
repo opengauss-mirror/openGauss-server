@@ -29,6 +29,7 @@
 #include "access/printtup.h"
 #include "access/transam.h"
 #include "catalog/pg_aggregate.h"
+#include "catalog/storage_gtt.h"
 #include "commands/copy.h"
 #include "executor/nodeIndexscan.h"
 #include "gstrace/executer_gstrace.h"
@@ -1099,7 +1100,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     CommandId mycid = GetCurrentCommandId(true);
 
     refreshParameterIfNecessary();
-
+    init_gtt_storage(CMD_INSERT, result_rel_info);
     /************************
      * step 2: begin insert *
      ************************/

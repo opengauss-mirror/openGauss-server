@@ -85,6 +85,7 @@ static relopt_bool boolRelOpts[] = {
     {{"multi_zall", "segmente all word from long words in zhparser text search praser", RELOPT_KIND_ZHPARSER}, false},
     {{"ignore_enable_hadoop_env", "ignore enable_hadoop_env option", RELOPT_KIND_HEAP}, false},
     {{"hashbucket", "Enables hashbucket in this relation", RELOPT_KIND_HEAP}, false},
+    {{"on_commit_delete_rows", "global temp table on commit options", RELOPT_KIND_HEAP}, true},
     /* list terminator */
     {{NULL}}};
 
@@ -1490,7 +1491,8 @@ bytea* default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         {"start_ctid_internal", RELOPT_TYPE_STRING, offsetof(StdRdOptions, start_ctid_internal)},
         {"end_ctid_internal", RELOPT_TYPE_STRING, offsetof(StdRdOptions, end_ctid_internal)},
         {"user_catalog_table", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, user_catalog_table)},
-        {"hashbucket", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hashbucket)}};
+        {"hashbucket", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hashbucket)},
+        {"on_commit_delete_rows", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, on_commit_delete_rows)}};
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
 

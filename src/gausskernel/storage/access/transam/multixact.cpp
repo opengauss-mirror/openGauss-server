@@ -504,6 +504,25 @@ static void MultiXactIdSetOldestVisible(void)
 }
 
 /*
+ * ReadNextMultiXactId
+ *        Return the next MultiXactId to be assigned, but don't allocate it
+ */
+MultiXactId ReadNextMultiXactId(void)
+{
+    MultiXactId mxid;
+
+    /* XXX we could presumably do this without a lock. */
+    LWLockAcquire(MultiXactGenLock, LW_SHARED);
+    mxid = t_thrd.shemem_ptr_cxt.MultiXactState->nextMXact;
+    LWLockRelease(MultiXactGenLock);
+
+    if (mxid < FirstMultiXactId)
+        mxid = FirstMultiXactId;
+
+    return mxid;
+}
+
+/*
  * MultiXactIdWait
  *		Sleep on a MultiXactId.
  *

@@ -1750,3 +1750,22 @@ List* list_merge_int(List* list1, List* list2)
 
     return list_dst;
 }
+
+List* list_insert_nth_oid(List* list, int pos, Oid datum)
+{
+    if (list == NIL) {
+        Assert(pos == 0);
+        return list_make1_oid(datum);
+    }
+    Assert(IsOidList(list));
+
+    if (pos == 0) {  // add at first pos
+        list = lcons_oid(datum, list);
+    } else {  // find cell at pos - 1, then add new cell after it;
+        ListCell* prevCell = list_nth_cell(list, pos - 1);
+        ListCell* newCell = add_new_cell(list, prevCell);
+        lfirst_oid(newCell) = datum;
+    }
+    check_list_invariants(list);
+    return list;
+}

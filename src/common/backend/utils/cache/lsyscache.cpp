@@ -47,6 +47,7 @@
 #include "catalog/pg_app_workloadgroup_mapping.h"
 #include "catalog/namespace.h"
 #endif
+#include "catalog/storage_gtt.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -1910,6 +1911,27 @@ Oid get_rel_tablespace(Oid relid)
     } else {
         return InvalidOid;
     }
+}
+
+/*
+ * get_rel_persistence
+ *
+ *        Returns the relpersistence associated with a given relation.
+ */
+char get_rel_persistence(Oid relid)
+{
+    HeapTuple    tp;    
+    Form_pg_class reltup;
+    char result; 
+
+    tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for relation %u", relid); 
+    reltup = (Form_pg_class) GETSTRUCT(tp);
+    result = reltup->relpersistence;
+    ReleaseSysCache(tp);
+
+    return result;
 }
 
 /*
@@ -4072,6 +4094,18 @@ int32 get_attavgwidth(Oid relid, AttrNumber attnum, bool ispartition)
     char stakind = ispartition ? STARELKIND_PARTITION : STARELKIND_CLASS;
     if (u_sess->attr.attr_common.upgrade_mode != 0) {
         return 0;
+    }
+    if (!ispartition && get_rel_persistence(relid) == RELPERSISTENCE_GLOBAL_TEMP) {
+        tp = get_gtt_att_statistic(relid, attnum);
+        if (!HeapTupleIsValid(tp)) {
+            return 0;
+        }
+        stawidth = ((Form_pg_statistic) GETSTRUCT(tp))->stawidth;
+        if (stawidth > 0) {
+            return stawidth;
+        } else {
+            return 0;
+        }
     }
     tp = SearchSysCache4(
         STATRELKINDATTINH, ObjectIdGetDatum(relid), CharGetDatum(stakind), Int16GetDatum(attnum), BoolGetDatum(false));

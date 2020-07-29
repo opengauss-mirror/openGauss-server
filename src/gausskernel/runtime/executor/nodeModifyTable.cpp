@@ -43,6 +43,7 @@
 #include "catalog/heap.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_partition_fn.h"
+#include "catalog/storage_gtt.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 #ifdef PGXC
@@ -2161,7 +2162,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
                     result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC)
                 ExecOpenIndices(result_rel_info);
         }
-
+        init_gtt_storage(operation, result_rel_info);
         /* Now init the plan for this result rel */
         estate->es_result_relation_info = result_rel_info;
         mt_state->mt_plans[i] = ExecInitNode(sub_plan, estate, eflags);

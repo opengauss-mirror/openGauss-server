@@ -7958,6 +7958,11 @@ void StartupXLOG(void)
      */
     t_thrd.xlog_cxt.recoveryTargetTLI = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.ThisTimeLineID;
 
+    /* clean temp relation files */
+    if (u_sess->attr.attr_storage.max_active_gtt > 0) {
+        RemovePgTempFiles();
+    }
+
     // Check for recovery control file, and if so set up state for offline recovery
     readRecoveryCommandFile();
 

@@ -1045,6 +1045,11 @@ void ExecCheckXactReadOnly(PlannedStmt *plannedstmt)
         if (isTempNamespace(get_rel_namespace(rte->relid))) {
             continue;
         }
+
+        if (get_rel_persistence(rte->relid) == RELPERSISTENCE_GLOBAL_TEMP) {
+            continue;
+        }
+
         if (rte->relid == PgxcNodeRelationId && g_instance.attr.attr_storage.IsRoachStandbyCluster &&
             u_sess->attr.attr_common.xc_maintenance_mode) {
             continue;

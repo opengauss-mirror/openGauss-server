@@ -40,6 +40,7 @@
 #include "access/dfs/dfs_insert.h"
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
+#include "catalog/storage_gtt.h"
 #include "commands/async.h"
 #include "commands/prepare.h"
 #include "commands/vacuum.h"
@@ -4594,6 +4595,38 @@ void set_qunit_case_number_hook(int newval, void* extra)
 static void init_configure_names_int()
 {
     struct config_int local_configure_names_int[] = {
+        {
+            {
+                "max_active_global_temporary_table",
+                PGC_USERSET,
+                UNGROUPED,
+                gettext_noop("max active global temporary table."),
+                NULL
+            },
+            &u_sess->attr.attr_storage.max_active_gtt,
+            1000,
+            0,
+            1000000,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+                "vacuum_gtt_defer_check_age", 
+                PGC_USERSET, 
+                CLIENT_CONN_STATEMENT,
+                gettext_noop("The defer check age of GTT, used to check expired data after vacuum."),
+                NULL
+            },
+            &u_sess->attr.attr_storage.vacuum_gtt_defer_check_age,
+            10000,
+            0,
+            1000000,
+            NULL,
+            NULL,
+            NULL
+        },
         {
             {
                 "archive_timeout",

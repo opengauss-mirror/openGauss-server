@@ -142,6 +142,7 @@ enum BuiltinTrancheIds {
     LWTRANCHE_BUFFER_FREELIST,
     LWTRANCHE_ACCOUNT_TABLE,
     LWTRANCHE_EXTEND,  // For general 3rd plugin
+    LWTRANCHE_GTT_CTL, // For GTT
 
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
@@ -227,6 +228,8 @@ typedef union LWLockPadded {
     char pad[LWLOCK_PADDED_SIZE];
 } LWLockPadded;
 
+extern PGDLLIMPORT LWLockPadded *MainLWLockArray;
+
 /*
  * We use this structure to keep track of locked LWLocks for release
  * during error recovery.  The maximum size could be determined at runtime
@@ -268,6 +271,21 @@ extern void CreateLWLocks(void);
 
 extern void RequestAddinLWLocks(int n);
 extern const char *GetBuiltInTrancheName(int trancheId);
+
+/*
+ * There is another, more flexible method of obtaining lwlocks. First, call
+ * LWLockNewTrancheId just once to obtain a tranche ID; this allocates from
+ * a shared counter.  Next, each individual process using the tranche should
+ * call LWLockRegisterTranche() to associate that tranche ID with a name.
+ * Finally, LWLockInitialize should be called just once per lwlock, passing
+ * the tranche ID as an argument.
+ *
+ * It may seem strange that each process using the tranche must register it
+ * separately, but dynamic shared memory segments aren't guaranteed to be
+ * mapped at the same address in all coordinating backends, so storing the
+ * registration in the main shared memory segment wouldn't work for that case.
+ */
+extern void LWLockRegisterTranche(int tranche_id, const char *tranche_name);
 
 extern void wakeup_victim(LWLock *lock, ThreadId victim_tid);
 extern int *get_held_lwlocks_num(void);
