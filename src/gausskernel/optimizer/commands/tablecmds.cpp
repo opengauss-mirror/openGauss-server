@@ -1803,13 +1803,6 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
         if (colDef->raw_default != NULL) {
             RawColumnDefault* rawEnt = NULL;
 
-            if (relkind == RELKIND_FOREIGN_TABLE) {
-                if (!(IsA(stmt, CreateForeignTableStmt) &&
-                        isMOTTableFromSrvName(((CreateForeignTableStmt*)stmt)->servername)))
-                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                            errmsg("default values on foreign tables are not supported")));
-            }
-
             Assert(colDef->cooked_default == NULL);
             rawEnt = (RawColumnDefault*)palloc(sizeof(RawColumnDefault));
             rawEnt->attnum = attnum;
