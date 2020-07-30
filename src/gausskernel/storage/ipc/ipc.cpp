@@ -436,6 +436,11 @@ void sess_exit_prepare(int code)
     t_thrd.proc_cxt.sess_exit_inprogress = true;
     old_sigset = gs_signal_block_sigusr2();
 
+    if (u_sess->gtt_ctx.gtt_cleaner_exit_registered) {
+        pg_on_exit_callback func = u_sess->gtt_ctx.gtt_sess_exit;
+        (*func)(code, UInt32GetDatum(NULL));
+    }
+
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++)
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
 

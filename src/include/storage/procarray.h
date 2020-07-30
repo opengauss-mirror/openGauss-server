@@ -128,5 +128,6 @@ extern void ResetProcXidCache(PGPROC* proc, bool needlock);
 #endif /* USE_UT */
 
 // For GTT
-extern TransactionId list_all_session_gtt_frozenxids(int max_size, ThreadId *pids, TransactionId *xids, int *n);
+extern TransactionId ListAllThreadGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);
+extern TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);
 

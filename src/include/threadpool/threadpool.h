@@ -36,6 +36,7 @@
 #define ENABLE_THREAD_POOL (g_threadPoolControler != NULL)
 #define IS_THREAD_POOL_WORKER (t_thrd.role == THREADPOOL_WORKER)
 #define IS_THREAD_POOL_SESSION (u_sess->session_id > 0)
+#define BackendIdForTempRelations (ENABLE_THREAD_POOL ? (BackendId)u_sess->session_ctr_index : t_thrd.proc_cxt.MyBackendId)
 #define THREAD_CORE_RATIO 1
 #define DEFAULT_THREAD_POOL_SIZE 16
 #define DEFAULT_THREAD_POOL_GROUPS 2

@@ -133,6 +133,7 @@
 #include "rewrite/rewriteRlsPolicy.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
+#include "threadpool/threadpool.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -1709,7 +1710,7 @@ static Relation relation_build_desc(Oid targetRelId, bool insertIt, bool buildke
                     double reltuples = 0;
                     BlockNumber relallvisible = 0;
 
-                    relation->rd_backend = t_thrd.proc_cxt.MyBackendId;
+                    relation->rd_backend = BackendIdForTempRelations;
                     relation->rd_islocaltemp = false;
                     get_gtt_relstats(RelationGetRelid(relation), &relpages, &reltuples, &relallvisible, NULL);
                     relation->rd_rel->relpages = static_cast<float8>(relpages);
@@ -3711,7 +3712,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
             rel->rd_islocaltemp = true;
             break;
         case RELPERSISTENCE_GLOBAL_TEMP:  // global temp table
-            rel->rd_backend = t_thrd.proc_cxt.MyBackendId;
+            rel->rd_backend = BackendIdForTempRelations;
             rel->rd_islocaltemp = false;
             break;
         default:

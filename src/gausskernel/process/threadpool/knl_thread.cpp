@@ -1148,17 +1148,6 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->smoothed_alloc = 0;
     storage_cxt->smoothed_density = 10.0;
     storage_cxt->StrategyControl = NULL;
-    storage_cxt->NLocBuffer = 0; /* until buffers are initialized */
-    storage_cxt->LocalBufferDescriptors = NULL;
-    storage_cxt->LocalBufferBlockPointers = NULL;
-    storage_cxt->LocalRefCount = NULL;
-    storage_cxt->nextFreeLocalBuf = 0;
-    storage_cxt->LocalBufHash = NULL;
-    storage_cxt->cur_block = NULL;
-    storage_cxt->next_buf_in_block = 0;
-    storage_cxt->num_bufs_in_block = 0;
-    storage_cxt->total_bufs_allocated = 0;
-    storage_cxt->LocalBufferContext = NULL;
     storage_cxt->CacheBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
     storage_cxt->CacheBlockInProgressUncompress = CACHE_BLOCK_INVALID_IDX;
     storage_cxt->MetaBlockInProgressIO = CACHE_BLOCK_INVALID_IDX;
