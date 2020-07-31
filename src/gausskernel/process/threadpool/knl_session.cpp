@@ -743,6 +743,19 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
     storage_cxt->twoPhaseCommitInProgress = false;
     storage_cxt->dumpHashbucketIdNum = 0;
     storage_cxt->dumpHashbucketIds = NULL;
+
+    /* session local buffer */
+    storage_cxt->NLocBuffer = 0; /* until buffers are initialized */
+    storage_cxt->LocalBufferDescriptors = NULL;
+    storage_cxt->LocalBufferBlockPointers = NULL;
+    storage_cxt->LocalRefCount = NULL;
+    storage_cxt->nextFreeLocalBuf = 0;
+    storage_cxt->LocalBufHash = NULL;
+    storage_cxt->cur_block = NULL;
+    storage_cxt->next_buf_in_block = 0;
+    storage_cxt->num_bufs_in_block = 0;
+    storage_cxt->total_bufs_allocated = 0;
+    storage_cxt->LocalBufferContext = NULL;
 }
 
 static void knl_u_libpq_init(knl_u_libpq_context* libpq_cxt)

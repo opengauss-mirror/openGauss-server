@@ -46,6 +46,7 @@
 #include "storage/shmem.h"
 #include "storage/sinvaladt.h"
 #include "storage/smgr.h"
+#include "threadpool/threadpool.h"
 #include "utils/catcache.h"
 #include "gs_threadlocal.h"
 #include "utils/guc.h"
@@ -60,14 +61,6 @@
 #define WORDNUM(x) ((x) / BITS_PER_BITMAPWORD)
 
 #define BITMAPSET_SIZE(nwords) (offsetof(Bitmapset, words) + (nwords) * sizeof(bitmapword))
-
-THR_LOCAL bool gtt_cleaner_exit_registered = false;
-THR_LOCAL HTAB* gtt_storage_local_hash = NULL;
-THR_LOCAL MemoryContext gtt_relstats_context = NULL;
-
-/* relfrozenxid of all gtts in the current session */
-THR_LOCAL List* gtt_session_relfrozenxid_list = NIL;
-THR_LOCAL TransactionId gtt_session_frozenxid = InvalidTransactionId;
 
 struct gtt_ctl_data {
     LWLock lock;
@@ -139,7 +132,7 @@ static Size action_gtt_shared_hash_entry_size(void)
     if (u_sess->attr.attr_storage.max_active_gtt <= 0)
         return 0;
 
-    wordnum = WORDNUM(g_instance.shmem_cxt.MaxBackends + 1);
+    wordnum = WORDNUM(MAX_BACKEND_SLOT + 1);
     hashEntrySize += MAXALIGN(sizeof(gtt_shared_hash_entry));
     hashEntrySize += (size_t)MAXALIGN(BITMAPSET_SIZE(wordnum + 1));
 
@@ -167,7 +160,7 @@ void active_gtt_shared_hash_init(void)
         return;
 
     t_thrd.shemem_ptr_cxt.gtt_shared_ctl =
-        reinterpret_cast<gtt_ctl_data* >(ShmemInitStruct("gtt_shared_ctl", sizeof(gtt_ctl_data), &found));
+        (gtt_ctl_data*)ShmemInitStruct("gtt_shared_ctl", sizeof(gtt_ctl_data), &found);
 
     if (!found) {
         LWLockRegisterTranche((int)LWTRANCHE_GTT_CTL, "gtt_shared_ctl");
@@ -199,8 +192,8 @@ static void gtt_storage_checkin(Oid relid)
     fnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
     fnode.relNode = relid;
     (void)LWLockAcquire(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock, LW_EXCLUSIVE);
-    entry = reinterpret_cast<gtt_shared_hash_entry* >(hash_search(
-        t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, reinterpret_cast<void*>(&(fnode)), HASH_ENTER_NULL, &found));
+    entry = (gtt_shared_hash_entry*)hash_search(
+        t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_ENTER_NULL, &found);
 
     if (entry == NULL) {
         LWLockRelease(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock);
@@ -213,14 +206,14 @@ static void gtt_storage_checkin(Oid relid)
     if (found == false) {
         int wordnum;
 
-        entry->map = reinterpret_cast<Bitmapset* >((char*)entry + MAXALIGN(sizeof(gtt_shared_hash_entry)));
-        wordnum = WORDNUM(g_instance.shmem_cxt.MaxBackends + 1);
+        entry->map = (Bitmapset*)((char*)entry + MAXALIGN(sizeof(gtt_shared_hash_entry)));
+        wordnum = WORDNUM(MAX_BACKEND_SLOT + 1);
         errno_t rc = memset_s(entry->map, (size_t)BITMAPSET_SIZE(wordnum + 1), 0, (size_t)BITMAPSET_SIZE(wordnum + 1));
         securec_check(rc, "", "");
         entry->map->nwords = wordnum + 1;
     }
 
-    (void)bms_add_member(entry->map, t_thrd.proc_cxt.MyBackendId);
+    (void)bms_add_member(entry->map, BackendIdForTempRelations);
     LWLockRelease(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock);
 }
 
@@ -238,8 +231,7 @@ static void gtt_storage_checkout(Oid relid, bool skiplock, bool isCommit)
         (void)LWLockAcquire(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock, LW_EXCLUSIVE);
     }
 
-    entry = reinterpret_cast<gtt_shared_hash_entry* >(hash_search(
-        t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, reinterpret_cast<void* >(&(fnode)), HASH_FIND, NULL));
+    entry = (gtt_shared_hash_entry*)hash_search(t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_FIND, NULL);
 
     if (entry == NULL) {
         if (!skiplock) {
@@ -251,8 +243,8 @@ static void gtt_storage_checkout(Oid relid, bool skiplock, bool isCommit)
         return;
     }
 
-    Assert(t_thrd.proc_cxt.MyBackendId >= 1 && t_thrd.proc_cxt.MyBackendId <= g_instance.shmem_cxt.MaxBackends);
-    (void)bms_del_member(entry->map, t_thrd.proc_cxt.MyBackendId);
+    Assert(BackendIdForTempRelations >= 1 && BackendIdForTempRelations <= MAX_BACKEND_SLOT);
+    (void)bms_del_member(entry->map, BackendIdForTempRelations);
 
     if (bms_is_empty(entry->map)) {
         if (!hash_search(t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_REMOVE, NULL)) {
@@ -278,8 +270,7 @@ Bitmapset* copy_active_gtt_bitmap(Oid relid)
     fnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
     fnode.relNode = relid;
     (void)LWLockAcquire(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock, LW_SHARED);
-    entry = reinterpret_cast<gtt_shared_hash_entry* >(hash_search(
-        t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, reinterpret_cast<void* >(&(fnode)), HASH_FIND, NULL));
+    entry = (gtt_shared_hash_entry*)hash_search(t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_FIND, NULL);
 
     if (entry == NULL) {
         LWLockRelease(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock);
@@ -307,8 +298,7 @@ bool is_other_backend_use_gtt(Oid relid)
     fnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
     fnode.relNode = relid;
     (void)LWLockAcquire(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock, LW_SHARED);
-    entry = reinterpret_cast<gtt_shared_hash_entry* >(hash_search(
-        t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, reinterpret_cast<void* >(&(fnode)), HASH_FIND, NULL));
+    entry = (gtt_shared_hash_entry*)hash_search(t_thrd.shemem_ptr_cxt.active_gtt_shared_hash, &fnode, HASH_FIND, NULL);
 
     if (entry == NULL) {
         LWLockRelease(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock);
@@ -316,13 +306,13 @@ bool is_other_backend_use_gtt(Oid relid)
     }
 
     Assert(entry->map);
-    Assert(t_thrd.proc_cxt.MyBackendId >= 1 && t_thrd.proc_cxt.MyBackendId <= g_instance.shmem_cxt.MaxBackends);
+    Assert(BackendIdForTempRelations >= 1 && BackendIdForTempRelations <= MAX_BACKEND_SLOT);
 
     int numUse = bms_num_members(entry->map);
     if (numUse == 0) {
         inUse = false;
     } else if (numUse == 1) {
-        if (bms_is_member(t_thrd.proc_cxt.MyBackendId, entry->map)) {
+        if (bms_is_member(BackendIdForTempRelations, entry->map)) {
             inUse = false;
         } else {
             inUse = true;
@@ -358,7 +348,8 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
         (!rel->rd_index->indisvalid || !rel->rd_index->indisready)) {
         elog(ERROR, "invalid gtt index %s not allow to create storage", RelationGetRelationName(rel));
     }
-    if (gtt_storage_local_hash == NULL) {
+
+    if (u_sess->gtt_ctx.gtt_storage_local_hash == NULL) {
 #define GTT_LOCAL_HASH_SIZE 1024
         /* First time through: initialize the hash table */
         HASHCTL ctl;
@@ -366,17 +357,19 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
         securec_check(rc, "", "");
         ctl.keysize = sizeof(Oid);
         ctl.entrysize = sizeof(gtt_local_hash_entry);
-        gtt_storage_local_hash =
+        u_sess->gtt_ctx.gtt_storage_local_hash =
             hash_create("global temporary table info", GTT_LOCAL_HASH_SIZE, &ctl, HASH_ELEM | HASH_BLOBS);
 
-        if (!CacheMemoryContext)
-            CreateCacheMemoryContext();
+        if (u_sess->cache_mem_cxt == nullptr) {
+            u_sess->cache_mem_cxt =
+                AllocSetContextCreate(u_sess->top_mem_cxt, "SessionCacheMemoryContext", ALLOCSET_DEFAULT_SIZES);
+        }
 
-        gtt_relstats_context =
-            AllocSetContextCreate(CacheMemoryContext, "gtt relstats context", ALLOCSET_DEFAULT_SIZES);
+        u_sess->gtt_ctx.gtt_relstats_context =
+            AllocSetContextCreate(u_sess->cache_mem_cxt, "gtt relstats context", ALLOCSET_DEFAULT_SIZES);
     }
 
-    oldcontext = MemoryContextSwitchTo(gtt_relstats_context);
+    oldcontext = MemoryContextSwitchTo(u_sess->gtt_ctx.gtt_relstats_context);
 
     entry = gtt_search_by_relid(relid, true);
     if (!entry) {
@@ -384,12 +377,12 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
         int natts = 0;
 
         /* Look up or create an entry */
-        entry = reinterpret_cast<gtt_local_hash_entry* >(hash_search(gtt_storage_local_hash,
-            reinterpret_cast<void* >(&relid), HASH_ENTER, &found));
+        entry = (gtt_local_hash_entry*)hash_search(
+            u_sess->gtt_ctx.gtt_storage_local_hash, (void*)&relid, HASH_ENTER, &found);
 
         if (found) {
             (void)MemoryContextSwitchTo(oldcontext);
-            elog(ERROR, "backend %d relid %u already exists in gtt local hash", t_thrd.proc_cxt.MyBackendId, relid);
+            elog(ERROR, "backend %d relid %u already exists in gtt local hash", BackendIdForTempRelations, relid);
         }
 
         entry->relfilenode_list = NIL;
@@ -401,8 +394,8 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
         entry->oldrelid = InvalidOid;
 
         natts = RelationGetNumberOfAttributes(rel);
-        entry->attnum = reinterpret_cast<int* >(palloc0(sizeof(int) * (unsigned long)natts));
-        entry->att_stat_tups = reinterpret_cast<HeapTuple* >(palloc0(sizeof(HeapTuple) * (unsigned long)natts));
+        entry->attnum = (int*)palloc0(sizeof(int) * (unsigned long)natts);
+        entry->att_stat_tups = (HeapTuple*)palloc0(sizeof(HeapTuple) * (unsigned long)natts);
         entry->natts = natts;
 
         if (entry->relkind == RELKIND_RELATION) {
@@ -417,7 +410,7 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
         }
     }
 
-    newNode = reinterpret_cast<gtt_relfilenode* >(palloc0(sizeof(gtt_relfilenode)));
+    newNode = (gtt_relfilenode*)palloc0(sizeof(gtt_relfilenode));
     newNode->relfilenode = rnode.relNode;
     newNode->spcnode = rnode.spcNode;
     newNode->relpages = 0;
@@ -437,9 +430,13 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
 
     (void)MemoryContextSwitchTo(oldcontext);
 
-    if (!gtt_cleaner_exit_registered) {
-        on_shmem_exit(gtt_storage_removeall, 0);
-        gtt_cleaner_exit_registered = true;
+    if (!u_sess->gtt_ctx.gtt_cleaner_exit_registered) {
+        if (!ENABLE_THREAD_POOL) {
+            on_shmem_exit(gtt_storage_removeall, 0);
+        } else {
+            u_sess->gtt_ctx.gtt_sess_exit = gtt_storage_removeall;
+        }
+        u_sess->gtt_ctx.gtt_cleaner_exit_registered = true;
     }
 
     return;
@@ -486,7 +483,7 @@ void forget_gtt_storage_info(Oid relid, const RelFileNode rnode, bool isCommit)
                     gtt_storage_checkout(relid, false, isCommit);
 
                 gtt_free_statistics(entry);
-                (void*)hash_search(gtt_storage_local_hash,  reinterpret_cast<void* >(&(relid)), HASH_REMOVE, NULL);
+                (void*)hash_search(u_sess->gtt_ctx.gtt_storage_local_hash, (void*)&(relid), HASH_REMOVE, NULL);
             }
             return;
         }
@@ -515,7 +512,7 @@ void forget_gtt_storage_info(Oid relid, const RelFileNode rnode, bool isCommit)
         }
 
         gtt_free_statistics(entry);
-        (void*)hash_search(gtt_storage_local_hash, reinterpret_cast<void* >(&(relid)), HASH_REMOVE, NULL);
+        (void*)hash_search(u_sess->gtt_ctx.gtt_storage_local_hash, (void*)&(relid), HASH_REMOVE, NULL);
     } else
         gtt_reset_statistics(entry);
 
@@ -553,30 +550,30 @@ static void gtt_storage_removeall(int code, Datum arg)
     unsigned long maxfiles = 0;
     unsigned long i = 0;
 
-    if (gtt_storage_local_hash == NULL)
+    if (u_sess->gtt_ctx.gtt_storage_local_hash == NULL)
         return;
 
-    hash_seq_init(&status, gtt_storage_local_hash);
-    while ((entry = reinterpret_cast<gtt_local_hash_entry* >(hash_seq_search(&status))) != NULL) {
+    hash_seq_init(&status, u_sess->gtt_ctx.gtt_storage_local_hash);
+    while ((entry = (gtt_local_hash_entry*)hash_seq_search(&status)) != NULL) {
         ListCell* lc;
 
         foreach (lc, entry->relfilenode_list) {
             SMgrRelation srel;
             RelFileNode rnode;
-            gtt_relfilenode* gtt_rnode = reinterpret_cast<gtt_relfilenode* >(lfirst(lc));
+            gtt_relfilenode* gtt_rnode = (gtt_relfilenode*)lfirst(lc);
 
             rnode.spcNode = gtt_rnode->spcnode;
             rnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
             rnode.relNode = gtt_rnode->relfilenode;
             rnode.bucketNode = InvalidBktId;
-            srel = smgropen(rnode, t_thrd.proc_cxt.MyBackendId);
+            srel = smgropen(rnode, BackendIdForTempRelations);
 
             if (maxfiles == 0) {
                 maxfiles = INIT_ALLOC_NUMS;
-                srels = reinterpret_cast<SMgrRelation* >(palloc(sizeof(SMgrRelation) * maxfiles));
+                srels = (SMgrRelation*)palloc(sizeof(SMgrRelation) * maxfiles);
             } else if (maxfiles <= nfiles) {
                 maxfiles *= 2;
-                srels = reinterpret_cast<SMgrRelation* >(repalloc(srels, sizeof(SMgrRelation) * maxfiles));
+                srels = (SMgrRelation*)repalloc(srels, sizeof(SMgrRelation) * maxfiles);
             }
 
             srels[nfiles++] = srel;
@@ -584,12 +581,12 @@ static void gtt_storage_removeall(int code, Datum arg)
 
         if (maxrels == 0) {
             maxrels = INIT_ALLOC_NUMS;
-            relids = reinterpret_cast<Oid* >(palloc(sizeof(Oid) * maxrels));
-            relkinds = reinterpret_cast<char* >(palloc(sizeof(char) * maxrels));
+            relids = (Oid*)palloc(sizeof(Oid) * maxrels);
+            relkinds = (char*)palloc(sizeof(char) * maxrels);
         } else if (maxrels <= nrels) {
             maxrels *= 2;
-            relids = reinterpret_cast<Oid* >(repalloc(relids, sizeof(Oid) * maxrels));
-            relkinds = reinterpret_cast<char* >(repalloc(relkinds, sizeof(char) * maxrels));
+            relids = (Oid*)repalloc(relids, sizeof(Oid) * maxrels);
+            relkinds = (char*)repalloc(relkinds, sizeof(char) * maxrels);
         }
 
         relkinds[nrels] = entry->relkind;
@@ -617,7 +614,11 @@ static void gtt_storage_removeall(int code, Datum arg)
         pfree(relkinds);
     }
 
-    t_thrd.proc->session_gtt_frozenxid = InvalidTransactionId;
+    if (ENABLE_THREAD_POOL) {
+        u_sess->gtt_ctx.gtt_session_frozenxid = InvalidTransactionId;
+    } else {
+        t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId;
+    }
 
     return;
 }
@@ -640,12 +641,12 @@ void up_gtt_relstats(const Relation relation, BlockNumber numPages, double numTu
     if (entry == NULL)
         return;
 
-    gttRnode = reinterpret_cast<gtt_relfilenode* >(lfirst(list_tail(entry->relfilenode_list)));
+    gttRnode = (gtt_relfilenode*)lfirst(list_tail(entry->relfilenode_list));
     if (gttRnode == NULL)
         return;
 
-    if (gttRnode->relpages != static_cast<int32>(numPages)) {
-        gttRnode->relpages = static_cast<int32>(numPages);
+    if (gttRnode->relpages != int32(numPages)) {
+        gttRnode->relpages = int32(numPages);
     }
 
     if (numTuples >= 0 && gttRnode->reltuples != (float4)numTuples)
@@ -653,8 +654,8 @@ void up_gtt_relstats(const Relation relation, BlockNumber numPages, double numTu
 
     /* only heap contain transaction information and relallvisible */
     if (entry->relkind == RELKIND_RELATION) {
-        if (gttRnode->relallvisible >= 0 && gttRnode->relallvisible != static_cast<int32>(numAllVisiblePages)) {
-            gttRnode->relallvisible = static_cast<int32>(numAllVisiblePages);
+        if (gttRnode->relallvisible >= 0 && gttRnode->relallvisible != int32(numAllVisiblePages)) {
+            gttRnode->relallvisible = int32(numAllVisiblePages);
         }
 
         if (TransactionIdIsNormal(relfrozenxid) && gttRnode->relfrozenxid != relfrozenxid &&
@@ -689,7 +690,7 @@ bool get_gtt_relstats(Oid relid, BlockNumber* relpages, double* reltuples, Block
 
     Assert(entry->relid == relid);
 
-    gttRnode = reinterpret_cast<gtt_relfilenode* >(lfirst(list_tail(entry->relfilenode_list)));
+    gttRnode = (gtt_relfilenode*)lfirst(list_tail(entry->relfilenode_list));
     if (gttRnode == NULL)
         return false;
 
@@ -712,8 +713,7 @@ bool get_gtt_relstats(Oid relid, BlockNumber* relpages, double* reltuples, Block
  * Update global temp table statistic info(definition is same as pg_statistic)
  * to local hashtable where ananyze global temp table
  */
-void up_gtt_att_statistic(
-    Oid reloid, int attnum, int natts, TupleDesc tupleDescriptor, Datum* values, bool* isnull)
+void up_gtt_att_statistic(Oid reloid, int attnum, int natts, TupleDesc tupleDescriptor, Datum* values, bool* isnull)
 {
     gtt_local_hash_entry* entry;
     MemoryContext oldcontext;
@@ -731,7 +731,7 @@ void up_gtt_att_statistic(
         return;
     }
 
-    oldcontext = MemoryContextSwitchTo(gtt_relstats_context);
+    oldcontext = MemoryContextSwitchTo(u_sess->gtt_ctx.gtt_relstats_context);
     Assert(entry->relid == reloid);
     for (i = 0; i < entry->natts; i++) {
         if (entry->attnum[i] == 0) {
@@ -793,46 +793,50 @@ static void insert_gtt_relfrozenxid_to_ordered_list(Oid relfrozenxid)
 
     Assert(TransactionIdIsNormal(relfrozenxid));
 
-    oldcontext = MemoryContextSwitchTo(gtt_relstats_context);
+    oldcontext = MemoryContextSwitchTo(u_sess->gtt_ctx.gtt_relstats_context);
     /* Does the datum belong at the front? */
-    if (gtt_session_relfrozenxid_list == NIL ||
-        TransactionIdFollowsOrEquals(relfrozenxid, linitial_oid(gtt_session_relfrozenxid_list))) {
-        gtt_session_relfrozenxid_list = lcons_oid(relfrozenxid, gtt_session_relfrozenxid_list);
-        (void)MemoryContextSwitchTo(oldcontext);
+    if (u_sess->gtt_ctx.gtt_session_relfrozenxid_list == NIL ||
+        TransactionIdFollowsOrEquals(relfrozenxid, linitial_oid(u_sess->gtt_ctx.gtt_session_relfrozenxid_list))) {
+        u_sess->gtt_ctx.gtt_session_relfrozenxid_list =
+            lcons_oid(relfrozenxid, u_sess->gtt_ctx.gtt_session_relfrozenxid_list);
+        MemoryContextSwitchTo(oldcontext);
 
         return;
     }
 
     /* No, so find the entry it belongs after */
     i = 0;
-    foreach (cell, gtt_session_relfrozenxid_list) {
+    foreach (cell, u_sess->gtt_ctx.gtt_session_relfrozenxid_list) {
         if (TransactionIdFollowsOrEquals(relfrozenxid, lfirst_oid(cell)))
             break;
 
         i++;
     }
-    gtt_session_relfrozenxid_list =
-        list_insert_nth_oid(gtt_session_relfrozenxid_list, i, relfrozenxid);
-    (void)MemoryContextSwitchTo(oldcontext);
+    u_sess->gtt_ctx.gtt_session_relfrozenxid_list =
+        list_insert_nth_oid(u_sess->gtt_ctx.gtt_session_relfrozenxid_list, i, relfrozenxid);
+    MemoryContextSwitchTo(oldcontext);
 
     return;
 }
 
 static void remove_gtt_relfrozenxid_from_ordered_list(Oid relfrozenxid)
 {
-    gtt_session_relfrozenxid_list = list_delete_oid(gtt_session_relfrozenxid_list, relfrozenxid);
+    u_sess->gtt_ctx.gtt_session_relfrozenxid_list =
+        list_delete_oid(u_sess->gtt_ctx.gtt_session_relfrozenxid_list, relfrozenxid);
 }
 
 static void set_gtt_session_relfrozenxid(void)
 {
     TransactionId gtt_frozenxid = InvalidTransactionId;
 
-    if (gtt_session_relfrozenxid_list)
-        gtt_frozenxid = llast_oid(gtt_session_relfrozenxid_list);
+    if (u_sess->gtt_ctx.gtt_session_relfrozenxid_list)
+        gtt_frozenxid = llast_oid(u_sess->gtt_ctx.gtt_session_relfrozenxid_list);
 
-    gtt_session_frozenxid = gtt_frozenxid;
-    if (t_thrd.proc->session_gtt_frozenxid != gtt_frozenxid)
-        t_thrd.proc->session_gtt_frozenxid = gtt_frozenxid;
+    if (ENABLE_THREAD_POOL) {
+        u_sess->gtt_ctx.gtt_session_frozenxid = gtt_frozenxid;
+    } else {
+        t_thrd.proc->gtt_session_frozenxid = gtt_frozenxid;
+    }
 }
 
 Datum pg_get_gtt_statistics(PG_FUNCTION_ARGS)
@@ -841,7 +845,7 @@ Datum pg_get_gtt_statistics(PG_FUNCTION_ARGS)
     int attnum = PG_GETARG_INT32(1);
     Oid reloid = PG_GETARG_OID(0);
     char relPersistence;
-    ReturnSetInfo* rsinfo = reinterpret_cast<ReturnSetInfo* >(fcinfo->resultinfo);
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
     TupleDesc tupdesc;
     MemoryContext oldcontext;
     Tuplestorestate* tupstore;
@@ -908,7 +912,7 @@ Datum pg_get_gtt_statistics(PG_FUNCTION_ARGS)
 
 Datum pg_get_gtt_relstats(PG_FUNCTION_ARGS)
 {
-    ReturnSetInfo* rsinfo = reinterpret_cast<ReturnSetInfo* >(fcinfo->resultinfo);
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
     TupleDesc tupdesc;
     Tuplestorestate* tupstore;
     MemoryContext oldcontext;
@@ -956,7 +960,7 @@ Datum pg_get_gtt_relstats(PG_FUNCTION_ARGS)
     (void)get_gtt_relstats(reloid, &relpages, &reltuples, &relallvisible, &relfrozenxid);
     Oid relnode = gtt_fetch_current_relfilenode(reloid);
     if (relnode != InvalidOid) {
-        // output attribute: relfilenode | relpages | reltuples | relallvisible | relfrozenxid | relminmxid 
+        // output attribute: relfilenode | relpages | reltuples | relallvisible | relfrozenxid | relminmxid
         Datum values[6];
         bool isnull[6];
 
@@ -981,7 +985,7 @@ Datum pg_get_gtt_relstats(PG_FUNCTION_ARGS)
 
 Datum pg_gtt_attached_pid(PG_FUNCTION_ARGS)
 {
-    ReturnSetInfo* rsinfo = reinterpret_cast<ReturnSetInfo* >(fcinfo->resultinfo);
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
     TupleDesc tupdesc;
     Tuplestorestate* tupstore;
     MemoryContext oldcontext;
@@ -1027,8 +1031,15 @@ Datum pg_gtt_attached_pid(PG_FUNCTION_ARGS)
         backendid = bms_first_member(map);
 
         do {
-            proc = BackendIdGetProc(backendid);
-            pid = proc->pid;
+            if (ENABLE_THREAD_POOL) {
+                ThreadPoolSessControl* sess_ctrl = g_threadPoolControler->GetSessionCtrl();
+                knl_session_context* sess = sess_ctrl->GetSessionByIdx(backendid);
+                pid = sess->attachPid;
+            } else {
+                proc = BackendIdGetProc(backendid);
+                pid = proc->pid;
+            }
+
             // output attribute: relid | pid
             Datum values[2];
             bool isnull[2];
@@ -1054,7 +1065,7 @@ Datum pg_gtt_attached_pid(PG_FUNCTION_ARGS)
 
 Datum pg_list_gtt_relfrozenxids(PG_FUNCTION_ARGS)
 {
-    ReturnSetInfo* rsinfo = reinterpret_cast<ReturnSetInfo* >(fcinfo->resultinfo);
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
     TupleDesc tupdesc;
     Tuplestorestate* tupstore;
     MemoryContext oldcontext;
@@ -1098,15 +1109,16 @@ Datum pg_list_gtt_relfrozenxids(PG_FUNCTION_ARGS)
     }
 
     pids = (ThreadId*)palloc0(sizeof(ThreadId) * numXid);
-    xids = reinterpret_cast<TransactionId* >(palloc0(sizeof(TransactionId) * numXid));
-    TransactionId oldest = list_all_session_gtt_frozenxids(numXid, pids, xids, &i);
+    xids = (TransactionId*)palloc0(sizeof(TransactionId) * numXid);
+    TransactionId oldest = ENABLE_THREAD_POOL ? ListAllSessionGttFrozenxids(numXid, pids, xids, &i)
+                                              : ListAllThreadGttFrozenxids(numXid, pids, xids, &i);
     if (i > 0) {
         pids[i] = 0;
         xids[i] = oldest;
         i++;
 
         for (j = 0; j < i; j++) {
-            // output attribute: pid | relfrozenxid 
+            // output attribute: pid | relfrozenxid
             Datum values[2];
             bool isnull[2];
 
@@ -1263,18 +1275,21 @@ Oid gtt_fetch_current_relfilenode(Oid relid)
     gtt_local_hash_entry* entry;
     gtt_relfilenode* gttRnode = NULL;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
         return InvalidOid;
+    }
 
     entry = gtt_search_by_relid(relid, true);
-    if (entry == NULL)
+    if (entry == NULL) {
         return InvalidOid;
+    }
 
     Assert(entry->relid == relid);
 
-    gttRnode = reinterpret_cast<gtt_relfilenode* >(lfirst(list_tail(entry->relfilenode_list)));
-    if (gttRnode == NULL)
+    gttRnode = (gtt_relfilenode*)lfirst(list_tail(entry->relfilenode_list));
+    if (gttRnode == NULL) {
         return InvalidOid;
+    }
 
     return gttRnode->relfilenode;
 }
@@ -1290,7 +1305,7 @@ void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfil
     if (u_sess->attr.attr_storage.max_active_gtt <= 0)
         return;
 
-    if (gtt_storage_local_hash == NULL)
+    if (u_sess->gtt_ctx.gtt_storage_local_hash == NULL)
         return;
 
     entry1 = gtt_search_by_relid(rel1, false);
@@ -1299,7 +1314,7 @@ void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfil
     entry2 = gtt_search_by_relid(rel2, false);
     gttRnode2 = gtt_search_relfilenode(entry2, relfilenode2, false);
 
-    oldcontext = MemoryContextSwitchTo(gtt_relstats_context);
+    oldcontext = MemoryContextSwitchTo(u_sess->gtt_ctx.gtt_relstats_context);
     entry1->relfilenode_list = list_delete_ptr(entry1->relfilenode_list, gttRnode1);
     entry2->relfilenode_list = lappend(entry2->relfilenode_list, gttRnode1);
 
@@ -1323,7 +1338,7 @@ static gtt_relfilenode* gtt_search_relfilenode(const gtt_local_hash_entry* entry
     Assert(entry);
 
     foreach (lc, entry->relfilenode_list) {
-        gtt_relfilenode* gtt_rnode = reinterpret_cast<gtt_relfilenode* >(lfirst(lc));
+        gtt_relfilenode* gtt_rnode = (gtt_relfilenode*)lfirst(lc);
         if (gtt_rnode->relfilenode == relfilenode) {
             rnode = gtt_rnode;
             break;
@@ -1341,12 +1356,12 @@ static gtt_local_hash_entry* gtt_search_by_relid(Oid relid, bool missingOk)
 {
     gtt_local_hash_entry* entry = NULL;
 
-    if (gtt_storage_local_hash == NULL) {
+    if (u_sess->gtt_ctx.gtt_storage_local_hash == NULL) {
         return NULL;
     }
 
-    entry = reinterpret_cast<gtt_local_hash_entry* >(hash_search(gtt_storage_local_hash,
-        reinterpret_cast<void* >(&(relid)), HASH_FIND, NULL));
+    entry =
+        (gtt_local_hash_entry*)hash_search(u_sess->gtt_ctx.gtt_storage_local_hash, (void*)&(relid), HASH_FIND, NULL);
 
     if (entry == NULL && !missingOk) {
         elog(ERROR, "relid %u not found in local hash", relid);

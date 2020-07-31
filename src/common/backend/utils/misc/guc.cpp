@@ -5267,7 +5267,7 @@ static void init_configure_names_int()
                 GUC_UNIT_BLOCKS
             },
             &u_sess->attr.attr_storage.num_temp_buffers,
-            1024,
+            128,
             100,
             INT_MAX / 2,
             check_temp_buffers,
@@ -17908,7 +17908,7 @@ static bool check_temp_buffers(int* newval, void** extra, GucSource source)
     /*
      * Once local buffers have been initialized, it's too late to change this.
      */
-    if (t_thrd.storage_cxt.NLocBuffer && t_thrd.storage_cxt.NLocBuffer != *newval) {
+    if (u_sess->storage_cxt.NLocBuffer && u_sess->storage_cxt.NLocBuffer != *newval) {
         GUC_check_errdetail(
             "\"temp_buffers\" cannot be changed after any temporary tables have been accessed in the session.");
         return false;

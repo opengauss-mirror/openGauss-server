@@ -39,6 +39,7 @@
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
+#include "threadpool/threadpool.h"
 #include "utils/fmgroids.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -120,7 +121,7 @@ static void StorageSetBackendAndLogged(_in_ char relpersistence, _out_ BackendId
             }
             break;
         case RELPERSISTENCE_GLOBAL_TEMP:
-            *backend = t_thrd.proc_cxt.MyBackendId;
+            *backend = BackendIdForTempRelations;
             *needs_wal = false;
             break;
         case RELPERSISTENCE_UNLOGGED:

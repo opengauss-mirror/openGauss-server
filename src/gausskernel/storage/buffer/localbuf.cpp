@@ -34,7 +34,7 @@ typedef struct {
 } LocalBufferLookupEnt;
 
 /* Note: this macro only works on local buffers, not shared ones! */
-#define LocalBufHdrGetBlock(bufHdr) t_thrd.storage_cxt.LocalBufferBlockPointers[-((bufHdr)->buf_id + 2)]
+#define LocalBufHdrGetBlock(bufHdr) u_sess->storage_cxt.LocalBufferBlockPointers[-((bufHdr)->buf_id + 2)]
 
 static void InitLocalBuffers(void);
 static Block GetLocalBufferStorage(void);
@@ -55,11 +55,11 @@ void LocalPrefetchBuffer(SMgrRelation smgr, ForkNumber forkNum, BlockNumber bloc
     INIT_BUFFERTAG(new_tag, smgr->smgr_rnode.node, forkNum, blockNum);
 
     /* Initialize local buffers if first request in this session */
-    if (t_thrd.storage_cxt.LocalBufHash == NULL)
+    if (u_sess->storage_cxt.LocalBufHash == NULL)
         InitLocalBuffers();
 
     /* See if the desired buffer already exists */
-    hresult = (LocalBufferLookupEnt*)hash_search(t_thrd.storage_cxt.LocalBufHash, (void*)&new_tag, HASH_FIND, NULL);
+    hresult = (LocalBufferLookupEnt*)hash_search(u_sess->storage_cxt.LocalBufHash, (void*)&new_tag, HASH_FIND, NULL);
     if (hresult != NULL) {
         /* Yes, so nothing to do */
         return;
@@ -76,7 +76,7 @@ void LocalBufferWrite(BufferDesc *bufHdr)
     Page        localpage = (char *) LocalBufHdrGetBlock(bufHdr);
 
     /* Find smgr relation for buffer */
-    oreln = smgropen(bufHdr->tag.rnode, t_thrd.proc_cxt.MyBackendId);
+    oreln = smgropen(bufHdr->tag.rnode, BackendIdForTempRelations);
 
     PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 
@@ -102,12 +102,12 @@ void LocalBufferFlushAllBuffer()
 {
     int i;
 
-    for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
-        BufferDesc *bufHdr = &t_thrd.storage_cxt.LocalBufferDescriptors[i];
+    for (i = 0; i < u_sess->storage_cxt.NLocBuffer; i++) {
+        BufferDesc *bufHdr = &u_sess->storage_cxt.LocalBufferDescriptors[i];
         uint32 buf_state;
 
         buf_state = pg_atomic_read_u32(&bufHdr->state);
-        Assert(t_thrd.storage_cxt.LocalRefCount[i] == 0);
+        Assert(u_sess->storage_cxt.LocalRefCount[i] == 0);
 
         if ((buf_state & BM_VALID) && (buf_state & BM_DIRTY)) {     
             LocalBufferFlushForExtremRTO(bufHdr);
@@ -141,14 +141,14 @@ BufferDesc* LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
     INIT_BUFFERTAG(new_tag, smgr->smgr_rnode.node, forkNum, blockNum);
 
     /* Initialize local buffers if first request in this session */
-    if (t_thrd.storage_cxt.LocalBufHash == NULL)
+    if (u_sess->storage_cxt.LocalBufHash == NULL)
         InitLocalBuffers();
 
     /* See if the desired buffer already exists */
-    hresult = (LocalBufferLookupEnt*)hash_search(t_thrd.storage_cxt.LocalBufHash, (void*)&new_tag, HASH_FIND, NULL);
+    hresult = (LocalBufferLookupEnt*)hash_search(u_sess->storage_cxt.LocalBufHash, (void*)&new_tag, HASH_FIND, NULL);
     if (hresult != NULL) {
         b = hresult->id;
-        buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[b];
+        buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[b];
         if (!BUFFERTAGS_EQUAL(buf_desc->tag, new_tag)) {
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                         (errmsg("local buffer hash tag mismatch."))));
@@ -159,13 +159,13 @@ BufferDesc* LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
         buf_state = pg_atomic_read_u32(&buf_desc->state);
 
         /* this part is equivalent to PinBuffer for a shared buffer */
-        if (t_thrd.storage_cxt.LocalRefCount[b] == 0) {
+        if (u_sess->storage_cxt.LocalRefCount[b] == 0) {
             if (BUF_STATE_GET_USAGECOUNT(buf_state) < BM_MAX_USAGE_COUNT) {
                 buf_state += BUF_USAGECOUNT_ONE;
                 pg_atomic_write_u32(&buf_desc->state, buf_state);
             }
         }
-        t_thrd.storage_cxt.LocalRefCount[b]++;
+        u_sess->storage_cxt.LocalRefCount[b]++;
         ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf_desc));
         if (buf_state & BM_VALID)
             *foundPtr = TRUE;
@@ -188,31 +188,31 @@ BufferDesc* LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
         smgr->smgr_rnode.node.relNode,
         forkNum,
         blockNum,
-        -t_thrd.storage_cxt.nextFreeLocalBuf - 1);
+        -u_sess->storage_cxt.nextFreeLocalBuf - 1);
 #endif
 
     /*
      * Need to get a new buffer.  We use a clock sweep algorithm (essentially
      * the same as what freelist.c does now...)
      */
-    try_counter = t_thrd.storage_cxt.NLocBuffer;
+    try_counter = u_sess->storage_cxt.NLocBuffer;
     for (;;) {
-        b = t_thrd.storage_cxt.nextFreeLocalBuf;
+        b = u_sess->storage_cxt.nextFreeLocalBuf;
 
-        if (++t_thrd.storage_cxt.nextFreeLocalBuf >= t_thrd.storage_cxt.NLocBuffer)
-            t_thrd.storage_cxt.nextFreeLocalBuf = 0;
+        if (++u_sess->storage_cxt.nextFreeLocalBuf >= u_sess->storage_cxt.NLocBuffer)
+            u_sess->storage_cxt.nextFreeLocalBuf = 0;
 
-        buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[b];
+        buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[b];
 
-        if (t_thrd.storage_cxt.LocalRefCount[b] == 0) {
+        if (u_sess->storage_cxt.LocalRefCount[b] == 0) {
             buf_state = pg_atomic_read_u32(&buf_desc->state);
             if (BUF_STATE_GET_USAGECOUNT(buf_state) > 0) {
                 buf_state -= BUF_USAGECOUNT_ONE;
                 pg_atomic_write_u32(&buf_desc->state, buf_state);
-                try_counter = t_thrd.storage_cxt.NLocBuffer;
+                try_counter = u_sess->storage_cxt.NLocBuffer;
             } else {
                 /* Found a usable buffer */
-                t_thrd.storage_cxt.LocalRefCount[b]++;
+                u_sess->storage_cxt.LocalRefCount[b]++;
                 ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf_desc));
 
 #ifdef EXTREME_RTO_DEBUG
@@ -267,7 +267,7 @@ BufferDesc* LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
      */
     if (buf_state & BM_TAG_VALID) {
         hresult =
-            (LocalBufferLookupEnt*)hash_search(t_thrd.storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
+            (LocalBufferLookupEnt*)hash_search(u_sess->storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
         if (hresult == NULL) /* shouldn't happen */
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("local buffer hash table corrupted."))));
         /* mark buffer invalid just in case hash insert fails */
@@ -276,7 +276,7 @@ BufferDesc* LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
         pg_atomic_write_u32(&buf_desc->state, buf_state);
     }
 
-    hresult = (LocalBufferLookupEnt*)hash_search(t_thrd.storage_cxt.LocalBufHash, (void*)&new_tag, HASH_ENTER, &found);
+    hresult = (LocalBufferLookupEnt*)hash_search(u_sess->storage_cxt.LocalBufHash, (void*)&new_tag, HASH_ENTER, &found);
     if (found) /* shouldn't happen */
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("local buffer hash table corrupted."))));
     hresult->id = b;
@@ -320,9 +320,9 @@ void MarkLocalBufferDirty(Buffer buffer)
 
     buf_id = -(buffer + 1);
 
-    Assert(t_thrd.storage_cxt.LocalRefCount[buf_id] > 0);
+    Assert(u_sess->storage_cxt.LocalRefCount[buf_id] > 0);
 
-    buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[buf_id];
+    buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[buf_id];
 
     buf_state = pg_atomic_fetch_or_u32(&buf_desc->state, BM_DIRTY);
     if (!(buf_state & BM_DIRTY)) {
@@ -353,25 +353,25 @@ void DropRelFileNodeLocalBuffers(const RelFileNode& rnode, ForkNumber forkNum, B
 {
     int i;
 
-    for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
-        BufferDesc* buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[i];
+    for (i = 0; i < u_sess->storage_cxt.NLocBuffer; i++) {
+        BufferDesc* buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[i];
         LocalBufferLookupEnt* hresult = NULL;
         uint32 buf_state;
 
         buf_state = pg_atomic_read_u32(&buf_desc->state);
         if ((buf_state & BM_TAG_VALID) && RelFileNodeEquals(buf_desc->tag.rnode, rnode) &&
             buf_desc->tag.forkNum == forkNum && buf_desc->tag.blockNum >= firstDelBlock) {
-            if (t_thrd.storage_cxt.LocalRefCount[i] != 0) {
+            if (u_sess->storage_cxt.LocalRefCount[i] != 0) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_BUFFER_REFERENCE),
                         (errmsg("block %u of %s is still referenced (local %d)",
                             buf_desc->tag.blockNum,
-                            relpathbackend(buf_desc->tag.rnode, t_thrd.proc_cxt.MyBackendId, buf_desc->tag.forkNum),
-                            t_thrd.storage_cxt.LocalRefCount[i]))));
+                            relpathbackend(buf_desc->tag.rnode, BackendIdForTempRelations, buf_desc->tag.forkNum),
+                            u_sess->storage_cxt.LocalRefCount[i]))));
             }
             /* Remove entry from hashtable */
             hresult = (LocalBufferLookupEnt*)hash_search(
-                t_thrd.storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
+                u_sess->storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
             if (hresult == NULL) /* shouldn't happen */
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("local buffer hash table corrupted."))));
             /* Mark buffer invalid */
@@ -394,24 +394,24 @@ void DropRelFileNodeAllLocalBuffers(const RelFileNode& rnode)
 {
     int i;
 
-    for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
-        BufferDesc* buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[i];
+    for (i = 0; i < u_sess->storage_cxt.NLocBuffer; i++) {
+        BufferDesc* buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[i];
         LocalBufferLookupEnt* hresult = NULL;
         uint32 buf_state;
 
         buf_state = pg_atomic_read_u32(&buf_desc->state);
         if ((buf_state & BM_TAG_VALID) && RelFileNodeEquals(buf_desc->tag.rnode, rnode)) {
-            if (t_thrd.storage_cxt.LocalRefCount[i] != 0) {
+            if (u_sess->storage_cxt.LocalRefCount[i] != 0) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_BUFFER_REFERENCE),
                         (errmsg("block %u of %s is still referenced (local %d)",
                             buf_desc->tag.blockNum,
-                            relpathbackend(buf_desc->tag.rnode, t_thrd.proc_cxt.MyBackendId, buf_desc->tag.forkNum),
-                            t_thrd.storage_cxt.LocalRefCount[i]))));
+                            relpathbackend(buf_desc->tag.rnode, BackendIdForTempRelations, buf_desc->tag.forkNum),
+                            u_sess->storage_cxt.LocalRefCount[i]))));
             }
             /* Remove entry from hashtable */
             hresult = (LocalBufferLookupEnt*)hash_search(
-                t_thrd.storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
+                u_sess->storage_cxt.LocalBufHash, (void*)&buf_desc->tag, HASH_REMOVE, NULL);
             if (hresult == NULL) /* shouldn't happen */
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), (errmsg("local buffer hash table corrupted."))));
             /* Mark buffer invalid */
@@ -436,21 +436,21 @@ static void InitLocalBuffers(void)
     int i;
 
     /* Allocate and zero buffer headers and auxiliary arrays */
-    t_thrd.storage_cxt.LocalBufferDescriptors =
-        (BufferDesc*)MemoryContextAllocZero(t_thrd.top_mem_cxt, (unsigned int)nbufs * sizeof(BufferDesc));
-    t_thrd.storage_cxt.LocalBufferBlockPointers =
-        (Block*)MemoryContextAllocZero(t_thrd.top_mem_cxt, (unsigned int)nbufs * sizeof(Block));
-    t_thrd.storage_cxt.LocalRefCount =
-        (int32*)MemoryContextAllocZero(t_thrd.top_mem_cxt, (unsigned int)nbufs * sizeof(int32));
-    if (!t_thrd.storage_cxt.LocalBufferDescriptors || !t_thrd.storage_cxt.LocalBufferBlockPointers ||
-        !t_thrd.storage_cxt.LocalRefCount)
+    u_sess->storage_cxt.LocalBufferDescriptors =
+        (BufferDesc*)MemoryContextAllocZero(u_sess->top_mem_cxt, (unsigned int)nbufs * sizeof(BufferDesc));
+    u_sess->storage_cxt.LocalBufferBlockPointers =
+        (Block*)MemoryContextAllocZero(u_sess->top_mem_cxt, (unsigned int)nbufs * sizeof(Block));
+    u_sess->storage_cxt.LocalRefCount =
+        (int32*)MemoryContextAllocZero(u_sess->top_mem_cxt, (unsigned int)nbufs * sizeof(int32));
+    if (!u_sess->storage_cxt.LocalBufferDescriptors || !u_sess->storage_cxt.LocalBufferBlockPointers ||
+        !u_sess->storage_cxt.LocalRefCount)
         ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
 
-    t_thrd.storage_cxt.nextFreeLocalBuf = 0;
+    u_sess->storage_cxt.nextFreeLocalBuf = 0;
 
     /* initialize fields that need to start off nonzero */
     for (i = 0; i < nbufs; i++) {
-        BufferDesc* buf = &t_thrd.storage_cxt.LocalBufferDescriptors[i];
+        BufferDesc* buf = &u_sess->storage_cxt.LocalBufferDescriptors[i];
 
         /*
          * negative to indicate local buffer. This is tricky: shared buffers
@@ -468,13 +468,16 @@ static void InitLocalBuffers(void)
     info.entrysize = sizeof(LocalBufferLookupEnt);
     info.hash = tag_hash;
 
-    t_thrd.storage_cxt.LocalBufHash = hash_create("Local Buffer Lookup Table", nbufs, &info, HASH_ELEM | HASH_FUNCTION);
+    u_sess->storage_cxt.LocalBufHash = hash_create(
+            "Local Buffer Lookup Table", nbufs, &info, HASH_ELEM | HASH_FUNCTION);
 
-    if (!t_thrd.storage_cxt.LocalBufHash)
-        ereport(ERROR, (errcode(ERRCODE_INITIALIZE_FAILED), (errmsg("could not initialize local buffer hash table."))));
+    if (!u_sess->storage_cxt.LocalBufHash) {
+        ereport(ERROR, (errcode(ERRCODE_INITIALIZE_FAILED),
+                        (errmsg("could not initialize local buffer hash table."))));
+    }
 
     /* Initialization done, mark buffers allocated */
-    t_thrd.storage_cxt.NLocBuffer = nbufs;
+    u_sess->storage_cxt.NLocBuffer = nbufs;
 }
 
 /*
@@ -490,9 +493,9 @@ static Block GetLocalBufferStorage(void)
 {
     char* this_buf = NULL;
 
-    Assert(t_thrd.storage_cxt.total_bufs_allocated < t_thrd.storage_cxt.NLocBuffer);
+    Assert(u_sess->storage_cxt.total_bufs_allocated < u_sess->storage_cxt.NLocBuffer);
 
-    if (t_thrd.storage_cxt.next_buf_in_block >= t_thrd.storage_cxt.num_bufs_in_block) {
+    if (u_sess->storage_cxt.next_buf_in_block >= u_sess->storage_cxt.num_bufs_in_block) {
         /* Need to make a new request to memmgr */
         int num_bufs;
 
@@ -501,30 +504,30 @@ static Block GetLocalBufferStorage(void)
          * space eaten for them is easily recognizable in MemoryContextStats
          * output.  Create the context on first use.
          */
-        if (t_thrd.storage_cxt.LocalBufferContext == NULL)
-            t_thrd.storage_cxt.LocalBufferContext = AllocSetContextCreate(t_thrd.top_mem_cxt,
+        if (u_sess->storage_cxt.LocalBufferContext == NULL)
+            u_sess->storage_cxt.LocalBufferContext = AllocSetContextCreate(u_sess->top_mem_cxt,
                 "LocalBufferContext",
                 ALLOCSET_DEFAULT_MINSIZE,
                 ALLOCSET_DEFAULT_INITSIZE,
                 ALLOCSET_DEFAULT_MAXSIZE);
 
         /* Start with a 16-buffer request; subsequent ones double each time */
-        num_bufs = Max(t_thrd.storage_cxt.num_bufs_in_block * 2, 16);
+        num_bufs = Max(u_sess->storage_cxt.num_bufs_in_block * 2, 16);
         /* But not more than what we need for all remaining local bufs */
-        num_bufs = Min(num_bufs, t_thrd.storage_cxt.NLocBuffer - t_thrd.storage_cxt.total_bufs_allocated);
+        num_bufs = Min(num_bufs, u_sess->storage_cxt.NLocBuffer - u_sess->storage_cxt.total_bufs_allocated);
         /* And don't overflow MaxAllocSize, either */
         num_bufs = Min((unsigned int)(num_bufs), MaxAllocSize / BLCKSZ);
 
-        t_thrd.storage_cxt.cur_block =
-            (char*)MemoryContextAlloc(t_thrd.storage_cxt.LocalBufferContext, num_bufs * BLCKSZ);
-        t_thrd.storage_cxt.next_buf_in_block = 0;
-        t_thrd.storage_cxt.num_bufs_in_block = num_bufs;
+        u_sess->storage_cxt.cur_block =
+            (char*)MemoryContextAlloc(u_sess->storage_cxt.LocalBufferContext, num_bufs * BLCKSZ);
+        u_sess->storage_cxt.next_buf_in_block = 0;
+        u_sess->storage_cxt.num_bufs_in_block = num_bufs;
     }
 
     /* Allocate next buffer in current memory block */
-    this_buf = t_thrd.storage_cxt.cur_block + t_thrd.storage_cxt.next_buf_in_block * BLCKSZ;
-    t_thrd.storage_cxt.next_buf_in_block++;
-    t_thrd.storage_cxt.total_bufs_allocated++;
+    this_buf = u_sess->storage_cxt.cur_block + u_sess->storage_cxt.next_buf_in_block * BLCKSZ;
+    u_sess->storage_cxt.next_buf_in_block++;
+    u_sess->storage_cxt.total_bufs_allocated++;
 
     return (Block)this_buf;
 }
@@ -540,8 +543,8 @@ void AtEOXact_LocalBuffers(bool isCommit)
     if (assert_enabled) {
         int i;
 
-        for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
-            Assert(t_thrd.storage_cxt.LocalRefCount[i] == 0);
+        for (i = 0; i < u_sess->storage_cxt.NLocBuffer; i++) {
+            Assert(u_sess->storage_cxt.LocalRefCount[i] == 0);
         }
     }
 #endif
@@ -558,11 +561,11 @@ void AtEOXact_LocalBuffers(bool isCommit)
 void AtProcExit_LocalBuffers(void)
 {
 #ifdef USE_ASSERT_CHECKING
-    if (assert_enabled && t_thrd.storage_cxt.LocalRefCount) {
+    if (assert_enabled && u_sess->storage_cxt.LocalRefCount) {
         int i;
 
-        for (i = 0; i < t_thrd.storage_cxt.NLocBuffer; i++) {
-            Assert(t_thrd.storage_cxt.LocalRefCount[i] == 0);
+        for (i = 0; i < u_sess->storage_cxt.NLocBuffer; i++) {
+            Assert(u_sess->storage_cxt.LocalRefCount[i] == 0);
         }
     }
 #endif

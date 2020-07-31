@@ -1226,7 +1226,9 @@ void vac_update_datfrozenxid(void)
     */
     if (u_sess->attr.attr_storage.max_active_gtt > 0) {
         TransactionId safeAge;
-        TransactionId oldestGttFrozenxid = list_all_session_gtt_frozenxids(0, NULL, NULL, NULL);
+        TransactionId oldestGttFrozenxid = ENABLE_THREAD_POOL ? 
+                                            ListAllSessionGttFrozenxids(0, NULL, NULL, NULL) :
+                                            ListAllThreadGttFrozenxids(0, NULL, NULL, NULL);
 
         if (TransactionIdIsNormal(oldestGttFrozenxid)) {
             safeAge =

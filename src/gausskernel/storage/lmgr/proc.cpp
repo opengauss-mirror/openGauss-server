@@ -573,7 +573,7 @@ void InitProcess(void)
     t_thrd.proc->backendId = InvalidBackendId;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
-    t_thrd.proc->session_gtt_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
+    t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
     /* For backends, upgrade status is either passed down from remote backends or inherit from PM */
     t_thrd.proc->workingVersionNum = (u_sess->proc_cxt.MyProcPort ? u_sess->proc_cxt.MyProcPort->SessionVersionNum
                                                                     : pg_atomic_read_u32(&WorkingGrandVersionNum));
@@ -787,7 +787,7 @@ void InitAuxiliaryProcess(void)
     t_thrd.proc->backendId = InvalidBackendId;
     t_thrd.proc->databaseId = InvalidOid;
     t_thrd.proc->roleId = InvalidOid;
-    t_thrd.proc->session_gtt_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
+    t_thrd.proc->gtt_session_frozenxid = InvalidTransactionId; /* init session level gtt frozenxid */
     t_thrd.pgxact->delayChkpt = false;
     t_thrd.pgxact->vacuumFlags = 0;
     t_thrd.proc->lwWaiting = false;

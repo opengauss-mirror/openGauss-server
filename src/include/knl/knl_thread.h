@@ -2211,7 +2211,6 @@ typedef struct knl_t_walrcvwriter_context {
 } knl_t_walrcvwriter_context;
 
 typedef int CacheSlotId_t;
-typedef void* Block;
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 typedef void (*shmem_startup_hook_type)(void);
 typedef struct ONEXIT {
@@ -2293,17 +2292,6 @@ typedef struct knl_t_storage_context {
 
     /* Pointers to shared state */
     struct BufferStrategyControl* StrategyControl;
-    int NLocBuffer; /* until buffers are initialized */
-    struct BufferDesc* LocalBufferDescriptors;
-    Block* LocalBufferBlockPointers;
-    int32* LocalRefCount;
-    int nextFreeLocalBuf;
-    struct HTAB* LocalBufHash;
-    char* cur_block;
-    int next_buf_in_block;
-    int num_bufs_in_block;
-    int total_bufs_allocated;
-    MemoryContext LocalBufferContext;
     /* remember global block slot in progress */
     CacheSlotId_t CacheBlockInProgressIO;
     CacheSlotId_t CacheBlockInProgressUncompress;

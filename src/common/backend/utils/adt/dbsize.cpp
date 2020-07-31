@@ -39,6 +39,7 @@
 #include "pgxc/execRemote.h"
 #endif
 #include "storage/fd.h"
+#include "threadpool/threadpool.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -1827,7 +1828,7 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
             break;
 
         case RELPERSISTENCE_GLOBAL_TEMP:
-            backend = t_thrd.proc_cxt.MyBackendId;
+            backend = BackendIdForTempRelations;
             break;
         default:
             ereport(ERROR,

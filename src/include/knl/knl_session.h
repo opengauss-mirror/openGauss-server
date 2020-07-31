@@ -61,6 +61,8 @@
 #include "storage/shmem.h"
 #include "utils/palloc.h"
 
+typedef void (*pg_on_exit_callback)(int code, Datum arg);
+
 /* all session level attribute which expose to user. */
 typedef struct knl_session_attr {
     knl_session_attr_sql attr_sql;
@@ -1300,6 +1302,7 @@ typedef struct knl_u_stat_context {
 #define MAX_LOCKMETHOD 2
 
 typedef uint16 CycleCtr;
+typedef void* Block;
 typedef struct knl_u_storage_context {
     /*
      * How many buffers PrefetchBuffer callers should try to stay ahead of their
@@ -1387,6 +1390,20 @@ typedef struct knl_u_storage_context {
     bool twoPhaseCommitInProgress;
     int32 dumpHashbucketIdNum;
     int2 *dumpHashbucketIds;
+
+    /* Pointers to shared state */
+    // struct BufferStrategyControl* StrategyControl;
+    int NLocBuffer; /* until buffers are initialized */
+    struct BufferDesc* LocalBufferDescriptors;
+    Block* LocalBufferBlockPointers;
+    int32* LocalRefCount;
+    int nextFreeLocalBuf;
+    struct HTAB* LocalBufHash;
+    char* cur_block;
+    int next_buf_in_block;
+    int num_bufs_in_block;
+    int total_bufs_allocated;
+    MemoryContext LocalBufferContext;
 } knl_u_storage_context;
 
 
@@ -1986,6 +2003,17 @@ typedef struct knl_u_mot_context {
     MOT::TxnManager* jit_txn;
 } knl_u_mot_context;
 
+typedef struct knl_u_gtt_context {
+    bool gtt_cleaner_exit_registered;
+    HTAB* gtt_storage_local_hash;
+    MemoryContext gtt_relstats_context;
+
+    /* relfrozenxid of all gtts in the current session */
+    List* gtt_session_relfrozenxid_list;
+    TransactionId gtt_session_frozenxid;
+    pg_on_exit_callback gtt_sess_exit;
+} knl_u_gtt_context;
+
 enum knl_session_status {
     KNL_SESS_FAKE,
     KNL_SESS_UNINIT,
@@ -2075,6 +2103,9 @@ typedef struct knl_session_context {
     knl_u_unique_sql_context unique_sql_cxt;
     knl_u_user_login_context user_login_cxt;
     knl_u_percentile_context percentile_cxt;
+
+    /* GTT */
+    knl_u_gtt_context gtt_ctx;
 } knl_session_context;
 
 extern knl_session_context* create_session_context(MemoryContext parent, uint64 id);

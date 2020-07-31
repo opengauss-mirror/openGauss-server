@@ -53,6 +53,7 @@
 #include "commands/directory.h"
 #include "cstore.h"
 #include "storage/custorage.h"
+#include "threadpool/threadpool.h"
 #include "catalog/pg_resource_pool.h"
 #include "catalog/pg_workload_group.h"
 #include "catalog/pg_app_workloadgroup_mapping.h"
@@ -1053,7 +1054,7 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
 
     switch (relpersistence) {
         case RELPERSISTENCE_GLOBAL_TEMP:
-            backend = t_thrd.proc_cxt.MyBackendId;
+            backend = BackendIdForTempRelations;
             break;
         case RELPERSISTENCE_TEMP:
         case RELPERSISTENCE_UNLOGGED:
