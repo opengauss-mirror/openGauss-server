@@ -402,24 +402,19 @@ RESET enable_bitmapscan;
 -- Domains over enums
 --
 CREATE DOMAIN rgb AS rainbow CHECK (VALUE IN ('red', 'green', 'blue'));
-ERROR:  domain is not yet supported.
 SELECT 'red'::rgb;
-ERROR:  type "rgb" does not exist
-LINE 1: SELECT 'red'::rgb;
-                      ^
-CONTEXT:  referenced column: rgb
+ rgb 
+-----
+ red
+(1 row)
+
 SELECT 'purple'::rgb;
-ERROR:  type "rgb" does not exist
-LINE 1: SELECT 'purple'::rgb;
-                         ^
+ERROR:  value for domain rgb violates check constraint "rgb_check"
 CONTEXT:  referenced column: rgb
 SELECT 'purple'::rainbow::rgb;
-ERROR:  type "rgb" does not exist
-LINE 1: SELECT 'purple'::rainbow::rgb;
-                                  ^
+ERROR:  value for domain rgb violates check constraint "rgb_check"
 CONTEXT:  referenced column: rgb
 DROP DOMAIN rgb;
-ERROR:  type "rgb" does not exist
 --
 -- Arrays
 --

@@ -294,56 +294,50 @@ drop table p1 cascade;
 -- test that operations with a dropped column do not try to reference
 -- its datatype
 create domain mytype as text;
-ERROR:  domain is not yet supported.
 create table foo (f1 text, f2 mytype, f3 text);;
-ERROR:  type "mytype" does not exist
-LINE 1: create table foo (f1 text, f2 mytype, f3 text);
-                                      ^
 insert into foo values('bb','cc','dd');
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: insert into foo values('bb','cc','dd');
-                    ^
 select * from foo order by f1;
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: select * from foo order by f1;
-                      ^
+ f1 | f2 | f3 
+----+----+----
+ bb | cc | dd
+(1 row)
+
 drop domain mytype cascade;
-ERROR:  type "mytype" does not exist
+NOTICE:  drop cascades to table foo column f2
 select * from foo order by f1;
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: select * from foo order by f1;
-                      ^
+ f1 | f3 
+----+----
+ bb | dd
+(1 row)
+
 insert into foo values('qq','rr');
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: insert into foo values('qq','rr');
-                    ^
 select * from foo order by f1;
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: select * from foo order by f1;
-                      ^
+ f1 | f3 
+----+----
+ bb | dd
+ qq | rr
+(2 rows)
+
 update foo set f3 = 'zz';
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: update foo set f3 = 'zz';
-               ^
 select * from foo order by f1;
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: select * from foo order by f1;
-                      ^
+ f1 | f3 
+----+----
+ bb | zz
+ qq | zz
+(2 rows)
+
 select f3,max(f1) from foo group by f3;
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: select f3,max(f1) from foo group by f3;
-                               ^
+ f3 | max 
+----+-----
+ zz | qq
+(1 row)
+
 -- Simple tests for alter table column type
 delete from foo where f1 = 'qq';
-ERROR:  relation "foo" does not exist on datanode1
-LINE 1: delete from foo where f1 = 'qq';
-                    ^
 alter table foo alter f1 TYPE integer; -- fails
-ERROR:  relation "foo" does not exist
+ERROR:  invalid input syntax for integer: "bb"
 alter table foo alter f1 TYPE varchar(10);
-ERROR:  relation "foo" does not exist
 drop table foo;
-ERROR:  table "foo" does not exist
 create table anothertab (atcol1 serial8, atcol2 boolean,
 	constraint anothertab_chk check (atcol1 <= 3));;
 NOTICE:  CREATE TABLE will create implicit sequence "anothertab_atcol1_seq" for serial column "anothertab.atcol1"
@@ -446,11 +440,8 @@ ERROR:  composite type recur1 cannot be made a member of itself
 alter table recur1 add column f2 recur1[]; -- fails
 ERROR:  composite type recur1 cannot be made a member of itself
 create domain array_of_recur1 as recur1[];
-ERROR:  domain is not yet supported.
 alter table recur1 add column f2 array_of_recur1; -- fails
-ERROR:  type "array_of_recur1" does not exist
-LINE 1: alter table recur1 add column f2 array_of_recur1;
-                                         ^
+ERROR:  composite type recur1 cannot be made a member of itself
 create table recur2 (f1 int, f2 recur1);
 alter table recur1 add column f2 recur2; -- fails
 ERROR:  composite type recur1 cannot be made a member of itself
@@ -649,7 +640,6 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for tab
 create view alter1.v1 as select * from alter1.t1;
 create function alter1.plus1(int) returns int as 'select $1+1' language sql;
 create domain alter1.posint integer check (value > 0);
-ERROR:  domain is not yet supported.
 create type alter1.ctype as (f1 int, f2 text);
 create function alter1.same(alter1.ctype, alter1.ctype) returns boolean language sql
 as 'select $1.f1 is not distinct from $2.f1 and $1.f2 is not distinct from $2.f2';
@@ -675,7 +665,6 @@ ERROR:  There's dependent sequence, but ALTER SEQUENCE SET SCHEMA is not yet sup
 alter table alter1.v1 set schema alter2;
 alter function alter1.plus1(int) set schema alter2;
 alter domain alter1.posint set schema alter2;
-ERROR:  type "alter1.posint" does not exist
 alter operator class alter1.ctype_hash_ops using hash set schema alter2;
 ERROR:  operator class "alter1.ctype_hash_ops" does not exist for access method "hash"
 alter operator family alter1.ctype_hash_ops using hash set schema alter2;
@@ -727,9 +716,10 @@ select alter2.plus1(41);
 
 -- clean up
 drop schema alter2 cascade;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to view alter2.v1
 drop cascades to function alter2.plus1(integer)
+drop cascades to type alter2.posint
 drop cascades to type alter2.ctype
 drop cascades to function alter2.same(alter2.ctype,alter2.ctype)
 drop schema alter1 cascade;

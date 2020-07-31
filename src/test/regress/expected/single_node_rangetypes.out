@@ -897,7 +897,6 @@ ERROR:  table "float8range_test" does not exist
 -- Test range types over domains
 --
 create domain mydomain as int4;
-ERROR:  domain is not yet supported.
 create type mydomainrange as range(subtype=mydomain);
 ERROR:  user defined range type is not yet supported.
 select '[4,50)'::mydomainrange @> 7::mydomain;
@@ -905,24 +904,21 @@ ERROR:  type "mydomainrange" does not exist
 LINE 1: select '[4,50)'::mydomainrange @> 7::mydomain;
                          ^
 drop domain mydomain;  -- fail
-ERROR:  type "mydomain" does not exist
 drop domain mydomain cascade;
 ERROR:  type "mydomain" does not exist
 --
 -- Test domains over range types
 --
 create domain restrictedrange as int4range check (upper(value) < 10);
-ERROR:  domain is not yet supported.
 select '[4,5)'::restrictedrange @> 7;
-ERROR:  type "restrictedrange" does not exist
-LINE 1: select '[4,5)'::restrictedrange @> 7;
-                        ^
+ ?column? 
+----------
+ f
+(1 row)
+
 select '[4,50)'::restrictedrange @> 7; -- should fail
-ERROR:  type "restrictedrange" does not exist
-LINE 1: select '[4,50)'::restrictedrange @> 7;
-                         ^
+ERROR:  value for domain restrictedrange violates check constraint "restrictedrange_check"
 drop domain restrictedrange;
-ERROR:  type "restrictedrange" does not exist
 --
 -- Test multiple range types over the same subtype
 --

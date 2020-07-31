@@ -71,7 +71,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_sonic_optspill             | on
  enable_sort                       | on
  enable_stream_replication         | on
- enable_thread_pool                | on
+ enable_thread_pool                | off
  enable_tidscan                    | on
  enable_upgrade_merge_lock_mode    | off
  enable_user_metric_persistent     | on

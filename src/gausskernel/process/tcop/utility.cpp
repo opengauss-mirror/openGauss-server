@@ -3587,7 +3587,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
         case T_AlterDomainStmt:
 #ifdef PGXC
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
+            /*Single node support domain feature.*/
+            /* ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));*/
 #endif /* PGXC */
             {
                 AlterDomainStmt* stmt = (AlterDomainStmt*)parse_tree;
@@ -4928,8 +4929,9 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
              */
         case T_CreateDomainStmt:
 #ifdef PGXC
-            if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade)
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
+            /*Single node support domain feature.*/
+            /* if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade)
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));*/
 #endif /* PGXC */
             DefineDomain((CreateDomainStmt*)parse_tree);
 #ifdef PGXC
@@ -8564,9 +8566,10 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
         case OBJECT_LANGUAGE:
             tag = "LANGUAGE";
             break;
-        case OBJECT_DOMAIN:
+        /*Single node support domain feature.*/
+        /* case OBJECT_DOMAIN:
             tag = "DOMAIN";
-            break;
+            break;*/
         case OBJECT_CONVERSION:
             tag = "CONVERSION";
             break;
