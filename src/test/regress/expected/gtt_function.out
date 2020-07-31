@@ -2,32 +2,11 @@ CREATE SCHEMA gtt_function;
 set search_path=gtt_function,sys;
 create global temp table gtt1(a int primary key, b text);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt1_pkey" for table "gtt1"
-create global temp table gtt_test_rename(a int primary key, b text);
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt_test_rename_pkey" for table "gtt_test_rename"
 create global temp table gtt2(a int primary key, b text) on commit delete rows;
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt2_pkey" for table "gtt2"
 create global temp table gtt3(a int primary key, b text) on commit PRESERVE rows;
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt3_pkey" for table "gtt3"
-create global temp table tmp_t0(c0 tsvector,c1 varchar(100));
-create table tbl_inherits_parent(
-a int not null,
-b varchar(32) not null default 'Got u',
-c int check (c > 0),
-d date not null
-);
-create global temp table tbl_inherits_parent_global_temp(
-a int not null,
-b varchar(32) not null default 'Got u',
-c int check (c > 0),
-d date not null
-)on commit delete rows;
-CREATE global temp TABLE products (
-    product_no integer PRIMARY KEY,
-    name text,
-    price numeric
-);
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "products_pkey" for table "products"
-create global temp table gtt6(n int) with (on_commit_delete_rows='true');
+create global temp table gtt6(n int) with (on_commit_delete_rows=true);
 begin;
 insert into gtt6 values (9);
 -- 1 row
@@ -44,46 +23,58 @@ select * from gtt6;
 ---
 (0 rows)
 
+-- ok
+cluster gtt1 using gtt1_pkey;
 -- ERROR
 create index CONCURRENTLY idx_gtt1 on gtt1 (b);
--- ERROR
-cluster gtt1 using gtt1_pkey;
 -- ERROR
 create table gtt1(a int primary key, b text) on commit delete rows;
 ERROR:  ON COMMIT can only be used on temporary tables
 -- ERROR
-alter table gtt1 SET TABLESPACE pg_default;
-ERROR:  not support alter table set tablespace on global temp table.
--- ERROR
-alter table gtt1 set ( on_commit_delete_rows='true');
-ERROR:  table cannot add or modify on commit parameter by ALTER TABLE command.
--- ERROR
 create table gtt1(a int primary key, b text) with(on_commit_delete_rows=true);
 ERROR:  The parameter on_commit_delete_rows is exclusive to the global temp table, which cannot be specified by a regular table
 -- ERROR
+alter table gtt1 SET TABLESPACE pg_default;
+ERROR:  not support alter table set tablespace on global temp table.
+-- ERROR
+alter table gtt1 set (on_commit_delete_rows='true');
+ERROR:  table cannot add or modify on commit parameter by ALTER TABLE command.
+-- ERROR
 create or replace global temp view gtt_v as select 5;
 ERROR:  views cannot be global temp because they do not have storage
-create table foo();
+-- ERROR
+create global temp sequence seq1 start 50;
+ERROR:  Temporary sequences are not supported
+create global temp table foo();
 ERROR:  must have at least one column
 -- ERROR
 alter table foo set (on_commit_delete_rows='true');
 ERROR:  relation "foo" does not exist
--- ok
---CREATE global temp TABLE measurement (
---    logdate         date not null,
---    peaktemp        int,
---    unitsales       int
---) PARTITION BY RANGE (logdate);
---ok
---CREATE global temp TABLE p_table01 (
---id        bigserial NOT NULL,
---cre_time  timestamp without time zone,
---note      varchar(30)
---) PARTITION BY RANGE (cre_time)
---WITH (
---OIDS = FALSE
---)on commit delete rows;
- 
+-- ERROR
+CREATE global temp TABLE measurement (
+    logdate         date not null,
+    peaktemp        int,
+    unitsales       int
+) PARTITION BY RANGE (logdate) (
+  PARTITION P1 VALUES LESS THAN('2019-01-01 00:00:00'),
+  PARTITION P2 VALUES LESS THAN('2020-01-01 00:00:00')
+);
+ERROR:  unsupported feature with temporary/unlogged table for partitioned table
+-- ERROR
+CREATE global temp TABLE p_table01 (
+id        bigserial NOT NULL,
+cre_time  timestamp without time zone,
+note      varchar(30)
+)
+WITH (OIDS = FALSE)
+on commit delete rows
+PARTITION BY RANGE (cre_time) (
+  PARTITION P1 VALUES LESS THAN('2018-01-01 00:00:00'),
+  PARTITION P2 VALUES LESS THAN('2019-01-01 00:00:00')
+);
+NOTICE:  CREATE TABLE will create implicit sequence "p_table01_id_seq" for serial column "p_table01.id"
+ERROR:  ON COMMIT option is not supported for partitioned table 
+
 --CREATE global temp TABLE p_table01_2018
 --PARTITION OF p_table01
 --FOR VALUES FROM ('2018-01-01 00:00:00') TO ('2019-01-01 00:00:00') on commit delete rows;
@@ -97,26 +88,44 @@ ERROR:  relation "foo" does not exist
 --select count(*) from p_table01;
 --commit;
 --select count(*) from p_table01;
---ok
---CREATE global temp TABLE p_table02 (
---id        bigserial NOT NULL,
---cre_time  timestamp without time zone,
---note      varchar(30)
---) PARTITION BY RANGE (cre_time)
---WITH (
---OIDS = FALSE
---)
---on commit PRESERVE rows;
+-- ERROR
+CREATE global temp TABLE p_table02 (
+id        bigserial NOT NULL,
+cre_time  timestamp without time zone,
+note      varchar(30)
+)
+WITH (OIDS = FALSE)
+on commit PRESERVE rows
+PARTITION BY RANGE (cre_time) (
+  PARTITION P1 VALUES LESS THAN('2018-01-01 00:00:00'),
+  PARTITION P2 VALUES LESS THAN('2019-01-01 00:00:00')
+);
+NOTICE:  CREATE TABLE will create implicit sequence "p_table02_id_seq" for serial column "p_table02.id"
+ERROR:  ON COMMIT option is not supported for partitioned table
 --CREATE global temp TABLE p_table02_2018
 --PARTITION OF p_table02
 --FOR VALUES FROM ('2018-01-01 00:00:00') TO ('2019-01-01 00:00:00');
 --CREATE global temp TABLE p_table02_2017
 --PARTITION OF p_table02
 --FOR VALUES FROM ('2017-01-01 00:00:00') TO ('2018-01-01 00:00:00');
+create table tbl_inherits_parent(
+a int not null,
+b varchar(32) not null default 'Got u',
+c int check (c > 0),
+d date not null
+);
+create global temp table tbl_inherits_parent_global_temp(
+a int not null,
+b varchar(32) not null default 'Got u',
+c int check (c > 0),
+d date not null
+)on commit delete rows;
 -- ERROR
---create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent);
--- ok
---create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent_global_temp) on commit delete rows;
+create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+-- ERROR
+create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent_global_temp) on commit delete rows;
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
 select relname ,relkind, relpersistence, reloptions from pg_class where relname like 'p_table0%' or  relname like 'tbl_inherits%' order by relname;
              relname             | relkind | relpersistence |                         reloptions                          
 ---------------------------------+---------+----------------+-------------------------------------------------------------
@@ -128,15 +137,37 @@ select relname ,relkind, relpersistence, reloptions from pg_class where relname 
 create global temp table gtt3(a int primary key, b text) on commit drop;
 ERROR:  ON COMMIT only support PRESERVE ROWS or DELETE ROWS option
 -- ERROR
+create global temp table gtt4(a int primary key, b text) with(on_commit_delete_rows=true) on commit preserve rows;
+ERROR:  could not create global temporary table with different on commit parameter and with clause options at same time
+-- ok
 create global temp table gtt4(a int primary key, b text) with(on_commit_delete_rows=true) on commit delete rows;
-ERROR:  could not create global temporary table with on commit and with clause at same time
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt4_pkey" for table "gtt4"
 -- ok
 create global temp table gtt5(a int primary key, b text) with(on_commit_delete_rows=true);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt5_pkey" for table "gtt5"
+-- ok
+create table tb1 (like gtt2 including reloptions);
+-- ERROR
+create global temp table gtt7 (like gtt2 including reloptions) on commit preserve rows;
+ERROR:  could not create global temporary table with different on commit parameter and with clause options at same time
+-- ok
+create global temp table gtt7 (like gtt2 including reloptions) on commit delete rows;
+-- ok
+create global temp table gtt8 on commit delete rows as select * from gtt3;
+-- ok
+select * into global temp table gtt9 from gtt2;
+create global temp table gtt_test_rename(a int primary key, b text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt_test_rename_pkey" for table "gtt_test_rename"
 --ok
 alter table gtt_test_rename rename to gtt_test_new;
 -- ok
 ALTER TABLE gtt_test_new ADD COLUMN address varchar(30);
+CREATE global temp TABLE products (
+    product_no integer PRIMARY KEY,
+    name text,
+    price numeric
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "products_pkey" for table "products"
 -- ERROR
 CREATE TABLE orders (
     order_id integer PRIMARY KEY,
@@ -192,8 +223,10 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "mytable_pkey" fo
 --ERROR
 --CREATE MATERIALIZED VIEW mv_gtt1 as select * from gtt1;
 -- ok
-create index idx_gtt1_1 on gtt1 using hash (a);
+create index idx_gtt1_1 on gtt1 using btree (a);
+create index idx_gtt1_2 on gtt1 using hash (a);
 ERROR:  access method "hash" does not support row store
+create global temp table tmp_t0(c0 tsvector,c1 varchar(100));
 create index idx_tmp_t0_1 on tmp_t0 using gin (c0);
 create index idx_tmp_t0_2 on tmp_t0 using gist (c0);
 --ok
@@ -317,6 +350,7 @@ explain (costs off) select * from gt1 where a*10=3;
 (3 rows)
 
 --ok
+create global temp table gtt_test0(c1 int) with(on_commit_delete_rows='true');
 create global temp table gtt_test1(c1 int) with(on_commit_delete_rows='1');
 create global temp table gtt_test2(c1 int) with(on_commit_delete_rows='0');
 create global temp table gtt_test3(c1 int) with(on_commit_delete_rows='t');
@@ -325,28 +359,38 @@ create global temp table gtt_test5(c1 int) with(on_commit_delete_rows='yes');
 create global temp table gtt_test6(c1 int) with(on_commit_delete_rows='no');
 create global temp table gtt_test7(c1 int) with(on_commit_delete_rows='y');
 create global temp table gtt_test8(c1 int) with(on_commit_delete_rows='n');
---error
 create global temp table gtt_test9(c1 int) with(on_commit_delete_rows='tr');
 create global temp table gtt_test10(c1 int) with(on_commit_delete_rows='ye');
+-- ERROR
+create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='o');
+ERROR:  parameter "on_commit_delete_rows" requires a Boolean value
+create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='');
+ERROR:  parameter "on_commit_delete_rows" requires a Boolean value
 reset search_path;
 drop schema gtt_function cascade;
-NOTICE:  drop cascades to 26 other objects
+NOTICE:  drop cascades to 32 other objects
 DETAIL:  drop cascades to table gtt_function.gtt1
-drop cascades to table gtt_function.gtt_test_new
 drop cascades to table gtt_function.gtt2
 drop cascades to table gtt_function.gtt3
-drop cascades to table gtt_function.tmp_t0
+drop cascades to table gtt_function.gtt6
 drop cascades to table gtt_function.tbl_inherits_parent
 drop cascades to table gtt_function.tbl_inherits_parent_global_temp
-drop cascades to table gtt_function.products
-drop cascades to table gtt_function.gtt6
+drop cascades to table gtt_function.gtt4
 drop cascades to table gtt_function.gtt5
+drop cascades to table gtt_function.tb1
+drop cascades to table gtt_function.gtt7
+drop cascades to table gtt_function.gtt8
+drop cascades to table gtt_function.gtt9
+drop cascades to table gtt_function.gtt_test_new
+drop cascades to table gtt_function.products
 drop cascades to table gtt_function.orders
 drop cascades to table gtt_function.mytable
+drop cascades to table gtt_function.tmp_t0
 drop cascades to table gtt_function.gt
 drop cascades to table gtt_function.gtt_s_1
 drop cascades to table gtt_function.gtt_s_2
 drop cascades to table gtt_function.gt1
+drop cascades to table gtt_function.gtt_test0
 drop cascades to table gtt_function.gtt_test1
 drop cascades to table gtt_function.gtt_test2
 drop cascades to table gtt_function.gtt_test3

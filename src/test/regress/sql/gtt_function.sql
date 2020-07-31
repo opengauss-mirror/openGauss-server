@@ -5,13 +5,106 @@ set search_path=gtt_function,sys;
 
 create global temp table gtt1(a int primary key, b text);
 
-create global temp table gtt_test_rename(a int primary key, b text);
-
 create global temp table gtt2(a int primary key, b text) on commit delete rows;
 
 create global temp table gtt3(a int primary key, b text) on commit PRESERVE rows;
 
-create global temp table tmp_t0(c0 tsvector,c1 varchar(100));
+create global temp table gtt6(n int) with (on_commit_delete_rows=true);
+
+begin;
+insert into gtt6 values (9);
+-- 1 row
+select * from gtt6;
+commit;
+-- 0 row
+select * from gtt6;
+
+-- ok
+cluster gtt1 using gtt1_pkey;
+
+-- ERROR
+create index CONCURRENTLY idx_gtt1 on gtt1 (b);
+
+-- ERROR
+create table gtt1(a int primary key, b text) on commit delete rows;
+
+-- ERROR
+create table gtt1(a int primary key, b text) with(on_commit_delete_rows=true);
+
+-- ERROR
+alter table gtt1 SET TABLESPACE pg_default;
+
+-- ERROR
+alter table gtt1 set (on_commit_delete_rows='true');
+
+-- ERROR
+create or replace global temp view gtt_v as select 5;
+
+-- ERROR
+create global temp sequence seq1 start 50;
+
+create global temp table foo();
+-- ERROR
+alter table foo set (on_commit_delete_rows='true');
+
+-- ERROR
+CREATE global temp TABLE measurement (
+    logdate         date not null,
+    peaktemp        int,
+    unitsales       int
+) PARTITION BY RANGE (logdate) (
+  PARTITION P1 VALUES LESS THAN('2019-01-01 00:00:00'),
+  PARTITION P2 VALUES LESS THAN('2020-01-01 00:00:00')
+);
+
+-- ERROR
+CREATE global temp TABLE p_table01 (
+id        bigserial NOT NULL,
+cre_time  timestamp without time zone,
+note      varchar(30)
+)
+WITH (OIDS = FALSE)
+on commit delete rows
+PARTITION BY RANGE (cre_time) (
+  PARTITION P1 VALUES LESS THAN('2018-01-01 00:00:00'),
+  PARTITION P2 VALUES LESS THAN('2019-01-01 00:00:00')
+);
+ 
+--CREATE global temp TABLE p_table01_2018
+--PARTITION OF p_table01
+--FOR VALUES FROM ('2018-01-01 00:00:00') TO ('2019-01-01 00:00:00') on commit delete rows;
+ 
+--CREATE global temp TABLE p_table01_2017
+--PARTITION OF p_table01
+--FOR VALUES FROM ('2017-01-01 00:00:00') TO ('2018-01-01 00:00:00') on commit delete rows;
+
+--begin;
+--insert into p_table01 values(1,'2018-01-02 00:00:00','test1');
+--insert into p_table01 values(1,'2018-01-02 00:00:00','test2');
+--select count(*) from p_table01;
+--commit;
+--select count(*) from p_table01;
+
+-- ERROR
+CREATE global temp TABLE p_table02 (
+id        bigserial NOT NULL,
+cre_time  timestamp without time zone,
+note      varchar(30)
+)
+WITH (OIDS = FALSE)
+on commit PRESERVE rows
+PARTITION BY RANGE (cre_time) (
+  PARTITION P1 VALUES LESS THAN('2018-01-01 00:00:00'),
+  PARTITION P2 VALUES LESS THAN('2019-01-01 00:00:00')
+);
+
+--CREATE global temp TABLE p_table02_2018
+--PARTITION OF p_table02
+--FOR VALUES FROM ('2018-01-01 00:00:00') TO ('2019-01-01 00:00:00');
+
+--CREATE global temp TABLE p_table02_2017
+--PARTITION OF p_table02
+--FOR VALUES FROM ('2017-01-01 00:00:00') TO ('2018-01-01 00:00:00');
 
 create table tbl_inherits_parent(
 a int not null,
@@ -27,104 +120,11 @@ c int check (c > 0),
 d date not null
 )on commit delete rows;
 
-CREATE global temp TABLE products (
-    product_no integer PRIMARY KEY,
-    name text,
-    price numeric
-);
-
-create global temp table gtt6(n int) with (on_commit_delete_rows='true');
-
-begin;
-insert into gtt6 values (9);
--- 1 row
-select * from gtt6;
-commit;
--- 0 row
-select * from gtt6;
+-- ERROR
+create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent);
 
 -- ERROR
-create index CONCURRENTLY idx_gtt1 on gtt1 (b);
-
--- ERROR
-cluster gtt1 using gtt1_pkey;
-
--- ERROR
-create table gtt1(a int primary key, b text) on commit delete rows;
-
--- ERROR
-alter table gtt1 SET TABLESPACE pg_default;
-
--- ERROR
-alter table gtt1 set ( on_commit_delete_rows='true');
-
--- ERROR
-create table gtt1(a int primary key, b text) with(on_commit_delete_rows=true);
-
--- ERROR
-create or replace global temp view gtt_v as select 5;
-
-create table foo();
--- ERROR
-alter table foo set (on_commit_delete_rows='true');
-
--- ok
---CREATE global temp TABLE measurement (
---    logdate         date not null,
---    peaktemp        int,
---    unitsales       int
---) PARTITION BY RANGE (logdate);
-
---ok
---CREATE global temp TABLE p_table01 (
---id        bigserial NOT NULL,
---cre_time  timestamp without time zone,
---note      varchar(30)
---) PARTITION BY RANGE (cre_time)
---WITH (
---OIDS = FALSE
---)on commit delete rows;
- 
---CREATE global temp TABLE p_table01_2018
---PARTITION OF p_table01
---FOR VALUES FROM ('2018-01-01 00:00:00') TO ('2019-01-01 00:00:00') on commit delete rows;
- 
---CREATE global temp TABLE p_table01_2017
---PARTITION OF p_table01
---FOR VALUES FROM ('2017-01-01 00:00:00') TO ('2018-01-01 00:00:00') on commit delete rows;
-
---begin;
---insert into p_table01 values(1,'2018-01-02 00:00:00','test1');
---insert into p_table01 values(1,'2018-01-02 00:00:00','test2');
---select count(*) from p_table01;
---commit;
-
---select count(*) from p_table01;
-
---ok
---CREATE global temp TABLE p_table02 (
---id        bigserial NOT NULL,
---cre_time  timestamp without time zone,
---note      varchar(30)
---) PARTITION BY RANGE (cre_time)
---WITH (
---OIDS = FALSE
---)
---on commit PRESERVE rows;
-
---CREATE global temp TABLE p_table02_2018
---PARTITION OF p_table02
---FOR VALUES FROM ('2018-01-01 00:00:00') TO ('2019-01-01 00:00:00');
-
---CREATE global temp TABLE p_table02_2017
---PARTITION OF p_table02
---FOR VALUES FROM ('2017-01-01 00:00:00') TO ('2018-01-01 00:00:00');
-
--- ERROR
---create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent);
-
--- ok
---create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent_global_temp) on commit delete rows;
+create global temp table tbl_inherits_partition() inherits (tbl_inherits_parent_global_temp) on commit delete rows;
 
 select relname ,relkind, relpersistence, reloptions from pg_class where relname like 'p_table0%' or  relname like 'tbl_inherits%' order by relname;
 
@@ -132,16 +132,42 @@ select relname ,relkind, relpersistence, reloptions from pg_class where relname 
 create global temp table gtt3(a int primary key, b text) on commit drop;
 
 -- ERROR
+create global temp table gtt4(a int primary key, b text) with(on_commit_delete_rows=true) on commit preserve rows;
+
+-- ok
 create global temp table gtt4(a int primary key, b text) with(on_commit_delete_rows=true) on commit delete rows;
 
 -- ok
 create global temp table gtt5(a int primary key, b text) with(on_commit_delete_rows=true);
+
+-- ok
+create table tb1 (like gtt2 including reloptions); 
+
+-- ERROR
+create global temp table gtt7 (like gtt2 including reloptions) on commit preserve rows;
+
+-- ok
+create global temp table gtt7 (like gtt2 including reloptions) on commit delete rows;
+
+-- ok
+create global temp table gtt8 on commit delete rows as select * from gtt3;
+
+-- ok
+select * into global temp table gtt9 from gtt2;
+
+create global temp table gtt_test_rename(a int primary key, b text);
 
 --ok
 alter table gtt_test_rename rename to gtt_test_new;
 
 -- ok
 ALTER TABLE gtt_test_new ADD COLUMN address varchar(30);
+
+CREATE global temp TABLE products (
+    product_no integer PRIMARY KEY,
+    name text,
+    price numeric
+);
 
 -- ERROR
 CREATE TABLE orders (
@@ -190,7 +216,9 @@ CREATE GLOBAL TEMPORARY TABLE mytable (
 --CREATE MATERIALIZED VIEW mv_gtt1 as select * from gtt1;
 
 -- ok
-create index idx_gtt1_1 on gtt1 using hash (a);
+create index idx_gtt1_1 on gtt1 using btree (a);
+create index idx_gtt1_2 on gtt1 using hash (a);
+create global temp table tmp_t0(c0 tsvector,c1 varchar(100));
 create index idx_tmp_t0_1 on tmp_t0 using gin (c0);
 create index idx_tmp_t0_2 on tmp_t0 using gist (c0);
 
@@ -234,6 +262,7 @@ explain (costs off) select * from gt1 where a*10=300;
 explain (costs off) select * from gt1 where a*10=3;
 
 --ok
+create global temp table gtt_test0(c1 int) with(on_commit_delete_rows='true');
 create global temp table gtt_test1(c1 int) with(on_commit_delete_rows='1');
 create global temp table gtt_test2(c1 int) with(on_commit_delete_rows='0');
 create global temp table gtt_test3(c1 int) with(on_commit_delete_rows='t');
@@ -242,10 +271,12 @@ create global temp table gtt_test5(c1 int) with(on_commit_delete_rows='yes');
 create global temp table gtt_test6(c1 int) with(on_commit_delete_rows='no');
 create global temp table gtt_test7(c1 int) with(on_commit_delete_rows='y');
 create global temp table gtt_test8(c1 int) with(on_commit_delete_rows='n');
-
---error
 create global temp table gtt_test9(c1 int) with(on_commit_delete_rows='tr');
 create global temp table gtt_test10(c1 int) with(on_commit_delete_rows='ye');
+
+-- ERROR
+create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='o');
+create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='');
 
 reset search_path;
 

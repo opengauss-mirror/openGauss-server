@@ -1581,8 +1581,9 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
     if (stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP &&
         relkind == RELKIND_RELATION) {
         if (oncommitAction != ONCOMMIT_NOOP) {
-            if (stmt->oncommit != ONCOMMIT_NOOP) {
-                elog(ERROR, "could not create global temporary table with on commit and with clause at same time");
+            if (stmt->oncommit != ONCOMMIT_NOOP && stmt->oncommit != oncommitAction) {
+                elog(ERROR, "could not create global temporary table with different on commit parameter and with "
+                            "clause options at same time");
             }
             stmt->oncommit = oncommitAction;
         } else {

@@ -1042,7 +1042,7 @@ ERROR:  table "table_rep" does not exist
 -- Check of inheritance between temp and non-temp tables
 CREATE TEMP TABLE table_parent (a int);
 CREATE TABLE table_child (like table_parent, b int);
-ERROR:  do not support create non-temp table like temp table
+ERROR:  do not support create non-local-temp table like local temp table
 DROP TABLE table_child;
 ERROR:  table "table_child" does not exist
 create table temp_tb(a int);
