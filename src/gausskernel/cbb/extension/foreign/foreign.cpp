@@ -524,8 +524,7 @@ FdwRoutine* GetFdwRoutineByServerId(Oid serverid)
     /* Get foreign-data wrapper OID for the server. */
     tp = SearchSysCache1(FOREIGNSERVEROID, ObjectIdGetDatum(serverid));
     if (!HeapTupleIsValid(tp))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("cache lookup failed for foreign server %u", serverid)));
+        return NULL;
     serverform = (Form_pg_foreign_server) GETSTRUCT(tp);
     fdwid = serverform->srvfdw;
     ReleaseSysCache(tp);
