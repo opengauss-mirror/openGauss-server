@@ -95,6 +95,7 @@ export CC=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/gcc
 export CXX=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/g++
 export LD_LIBRARY_PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/lib64:$BUILD_TOOLS_PATH/gcc$gcc_version/isl/lib:$BUILD_TOOLS_PATH/gcc$gcc_version/mpc/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/mpfr/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/gmp/lib/:$LD_LIBRARY_PATH
 export PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin:$PATH
+export MAKE_JOBS=$(($(cat /proc/cpuinfo | grep processor | wc -l) * 2))
 
 log()
 {
@@ -154,7 +155,7 @@ function compile_gaussdb()
     fi
     getExtraFlags
     #configure
-    make distclean -sj >> "$LOG_FILE" 2>&1
+    make distclean -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
     echo "Begin configure, Please wait a few minutes..."
     chmod 755 configure
 
@@ -174,8 +175,8 @@ function compile_gaussdb()
     echo "Begin make compile database, Please wait a few minutes..."
     export GAUSSHOME=${BUILD_DIR}
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:${BUILD_DIR}/lib/postgresql:${LD_LIBRARY_PATH}
-    make -sj >> "$LOG_FILE" 2>&1
-    make install -sj>> "$LOG_FILE" 2>&1
+    make -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
+    make install -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
 
     if [ $? -ne 0 ]; then
         die "make compile failed."
