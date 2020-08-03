@@ -46,6 +46,8 @@ select * from gtt6;
 
 -- ERROR
 create index CONCURRENTLY idx_gtt1 on gtt1 (b);
+ERROR:  PGXC does not support concurrent INDEX yet
+DETAIL:  The feature is not currently supported
 -- ERROR
 cluster gtt1 using gtt1_pkey;
 -- ERROR
