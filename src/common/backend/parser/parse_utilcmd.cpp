@@ -4199,7 +4199,8 @@ void checkPartitionSynax(CreateStmt* stmt)
                     errmsg("Range partitioned table with INTERVAL clause has more than one column"),
                     errhint("Only support one partition key for interval partition")));
         }
-        if (!IsA(stmt->partTableState->intervalPartDef->partInterval, A_Const)) {
+        if (!IsA(stmt->partTableState->intervalPartDef->partInterval, A_Const) ||
+            ((A_Const*)stmt->partTableState->intervalPartDef->partInterval)->val.type != T_String) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
                     // errmsg("invalid input syntax for type %s: \"%s\"", datatype, str)));
