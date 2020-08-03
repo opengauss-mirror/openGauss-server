@@ -182,6 +182,21 @@ select relname, parttype, partstrategy, boundaries from pg_partition
 drop table interval_normal_date;
 
 --
+---- the cstore table does not support interval partition;
+--
+create table partiton_table_001(
+COL_1 smallint,
+COL_2 char(30),
+COL_3 int,
+COL_4 date not null
+)with (orientation = column)
+PARTITION BY RANGE (COL_4)
+INTERVAL ('1 month')
+(
+PARTITION partiton_table_001_p1 VALUES LESS THAN ('2020-03-01')
+);
+
+--
 ---- tablespace
 --
 --date

@@ -680,6 +680,13 @@ static void CheckCStoreUnsupportedFeature(CreateStmt* stmt)
                 errdetail("cstore/timeseries don't support relation defination with inheritance.")));
     }
 
+    if (stmt->partTableState && stmt->partTableState->intervalPartDef) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Unsupport feature"),
+                errdetail("cstore/timeseries don't support interval partition type.")));
+    }
+
     /* Check constraints */
     ListCell* lc = NULL;
     foreach (lc, stmt->tableEltsDup) {
