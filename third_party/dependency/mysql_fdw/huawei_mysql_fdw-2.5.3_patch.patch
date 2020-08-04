@@ -1,5 +1,5 @@
 diff --git Makefile Makefile
-index d5e7b36..34667e1 100644
+index d5e7b362..34667e12 100644
 --- Makefile
 +++ Makefile
 @@ -31,6 +31,8 @@ else
@@ -41,7 +41,7 @@ index d5e7b36..34667e1 100644
  endif
  
 diff --git connection.cpp connection.cpp
-index a517a73..3fc2f20 100644
+index a517a738..3fc2f201 100644
 --- connection.cpp
 +++ connection.cpp
 @@ -24,6 +24,7 @@
@@ -106,7 +106,7 @@ index a517a73..3fc2f20 100644
  
  /*
 diff --git deparse.cpp deparse.cpp
-index a75c270..94b1799 100644
+index a75c2705..94b1799c 100644
 --- deparse.cpp
 +++ deparse.cpp
 @@ -20,7 +20,7 @@
@@ -226,7 +226,7 @@ index a75c270..94b1799 100644
  	}
  	appendStringInfoChar(buf, ']');
 diff --git mysql_fdw.cpp mysql_fdw.cpp
-index d518e2e..a56fae6 100644
+index d518e2ec..a56fae67 100644
 --- mysql_fdw.cpp
 +++ mysql_fdw.cpp
 @@ -53,7 +53,7 @@
@@ -509,7 +509,7 @@ index d518e2e..a56fae6 100644
  	if (festate && festate->stmt)
  	{
 diff --git mysql_fdw.h mysql_fdw.h
-index 5b543cd..ea58af7 100644
+index 5b543cd0..ea58af7f 100644
 --- mysql_fdw.h
 +++ mysql_fdw.h
 @@ -135,31 +135,31 @@ extern bool is_foreign_expr(PlannerInfo *root,
@@ -592,7 +592,7 @@ index 5b543cd..ea58af7 100644
  
  /* option.c headers */
 diff --git mysql_query.cpp mysql_query.cpp
-index 8c25f5c..6093a5a 100644
+index 8c25f5cc..64fd770a 100644
 --- mysql_query.cpp
 +++ mysql_query.cpp
 @@ -21,7 +21,7 @@
@@ -621,18 +621,19 @@ index 8c25f5c..6093a5a 100644
  }
  
  /*
-@@ -238,8 +239,8 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -238,8 +239,9 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  	/* Clear the bind buffer and attributes */
  	memset(&binds[attnum], 0x0, sizeof(MYSQL_BIND));
  
 -	binds[attnum].buffer_type = mysql_from_pgtyp(type);
 -	binds[attnum].is_null = isnull;
 +	binds[attnum].buffer_type = (enum_field_types)mysql_from_pgtyp(type);
-+	binds[attnum].is_null = (my_bool*)isnull;
++	binds[attnum].is_null = (my_bool*)palloc(sizeof(my_bool));
++	*(binds[attnum].is_null) = *isnull;
  
  	/* Avoid to bind buffer in case value is NULL */
  	if (*isnull)
-@@ -250,7 +251,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -250,7 +252,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		case INT2OID:
  		{
  			int16 dat = DatumGetInt16(value);
@@ -641,7 +642,7 @@ index 8c25f5c..6093a5a 100644
  			memcpy(bufptr, (char*)&dat, sizeof(int16));
  
  			binds[attnum].buffer = bufptr;
-@@ -259,7 +260,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -259,7 +261,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		case INT4OID:
  		{
  			int32 dat = DatumGetInt32(value);
@@ -650,7 +651,7 @@ index 8c25f5c..6093a5a 100644
  			memcpy(bufptr, (char*)&dat, sizeof(int32));
  
  			binds[attnum].buffer = bufptr;
-@@ -268,7 +269,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -268,7 +270,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		case INT8OID:
  		{
  			int64 dat = DatumGetInt64(value);
@@ -659,7 +660,7 @@ index 8c25f5c..6093a5a 100644
  			memcpy(bufptr, (char*)&dat, sizeof(int64));
  
  			binds[attnum].buffer = bufptr;
-@@ -277,7 +278,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -277,7 +279,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		case FLOAT4OID:
  		{
  			float4 dat = DatumGetFloat4(value);
@@ -668,7 +669,7 @@ index 8c25f5c..6093a5a 100644
  			memcpy(bufptr, (char*)&dat, sizeof(float4));
  
  			binds[attnum].buffer = bufptr;
-@@ -286,7 +287,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -286,7 +288,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		case FLOAT8OID:
  		{
  			float8 dat = DatumGetFloat8(value);
@@ -677,7 +678,7 @@ index 8c25f5c..6093a5a 100644
  			memcpy(bufptr, (char*)&dat, sizeof(float8));
  
  			binds[attnum].buffer = bufptr;
-@@ -296,7 +297,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -296,7 +298,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		{
  			Datum valueDatum = DirectFunctionCall1(numeric_float8, value);
  			float8 dat = DatumGetFloat8(valueDatum);
@@ -686,7 +687,7 @@ index 8c25f5c..6093a5a 100644
  			memcpy(bufptr, (char*)&dat, sizeof(float8));
  
  			binds[attnum].buffer = bufptr;
-@@ -305,7 +306,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -305,7 +307,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		case BOOLOID:
  		{
  			int32 dat = DatumGetInt32(value);
@@ -695,7 +696,7 @@ index 8c25f5c..6093a5a 100644
  			memcpy(bufptr, (char*)&dat, sizeof(int32));
  
  			binds[attnum].buffer = bufptr;
-@@ -348,7 +349,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -348,7 +350,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  
  			Datum valueDatum = DirectFunctionCall1(date_timestamp, value);
  			Timestamp valueTimestamp = DatumGetTimestamp(valueDatum);
@@ -704,7 +705,7 @@ index 8c25f5c..6093a5a 100644
  
  			timestamp2tm(valueTimestamp, &tz, tm, &fsec, &tzn, pg_tzset("UTC"));
  
-@@ -364,7 +365,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -364,7 +366,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		case TIMESTAMPTZOID:
  		{
  			Timestamp valueTimestamp = DatumGetTimestamp(value);
@@ -713,7 +714,7 @@ index 8c25f5c..6093a5a 100644
  
  			int			tz;
  			struct pg_tm tt,
-@@ -384,7 +385,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -384,7 +386,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  		case BITOID:
  		{
  			int32 dat;
@@ -722,7 +723,7 @@ index 8c25f5c..6093a5a 100644
  			char *outputString = NULL;
  			Oid outputFunctionId = InvalidOid;
  			bool typeVarLength = false;
-@@ -412,7 +413,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
+@@ -412,7 +414,7 @@ mysql_bind_sql_var(Oid type, int attnum, Datum value, MYSQL_BIND *binds, bool *i
  				len = VARSIZE_4B(result) - VARHDRSZ;
  				dat = VARDATA_4B(result);
  			}
@@ -731,7 +732,7 @@ index 8c25f5c..6093a5a 100644
  			memcpy(bufptr, (char*)dat, len);
  			binds[attnum].buffer = bufptr;
  			binds[attnum].buffer_length = len;
-@@ -438,9 +439,9 @@ void
+@@ -438,9 +440,9 @@ void
  mysql_bind_result(Oid pgtyp, int pgtypmod, MYSQL_FIELD *field, mysql_column *column)
  {
  	MYSQL_BIND *mbind = column->_mysql_bind;
@@ -744,7 +745,7 @@ index 8c25f5c..6093a5a 100644
  	switch (pgtyp)
  	{
 diff --git option.cpp option.cpp
-index 574cb24..5c92c50 100644
+index 574cb24a..5c92c50f 100644
 --- option.cpp
 +++ option.cpp
 @@ -81,7 +81,7 @@ static struct MySQLFdwOption valid_options[] =
