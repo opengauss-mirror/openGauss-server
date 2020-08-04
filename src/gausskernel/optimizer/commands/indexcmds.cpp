@@ -1007,6 +1007,13 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         return indexRelationId;
     }
 
+    // cstore relation doesn't support concurrent INDEX now.
+    if (OidIsValid(rel->rd_rel->relcudescrelid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("column store table does not support concurrent INDEX yet"),
+            errdetail("The feature is not currently supported")));
+    }
+
     /* save lockrelid and locktag for below, then close rel */
     heaprelid = rel->rd_lockInfo.lockRelId;
     SET_LOCKTAG_RELATION(heaplocktag, heaprelid.dbId, heaprelid.relId);

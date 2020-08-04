@@ -22,7 +22,7 @@ select * from gtt6;
 -- ok
 cluster gtt1 using gtt1_pkey;
 
--- ERROR
+-- ok
 create index CONCURRENTLY idx_gtt1 on gtt1 (b);
 
 -- ERROR

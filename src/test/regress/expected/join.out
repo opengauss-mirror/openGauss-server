@@ -3230,15 +3230,15 @@ INSERT INTO c VALUES (0), (1);
 INSERT INTO d VALUES (1,3), (2,2), (3,1);
 -- all three cases should be optimizable into a simple seqscan
 explain (verbose on, costs off, nodes off) SELECT a.* FROM a LEFT JOIN b ON a.b_id = b.id;
-               QUERY PLAN               
-----------------------------------------
+--?.*QUERY PLAN.*
+--?----------------------------.*
 --? Seq Scan on pg_temp_datanod.*
    Output: a.id, a.b_id
 (2 rows)
 
 explain (verbose on, costs off, nodes off) SELECT b.* FROM b LEFT JOIN c ON b.c_id = c.id;
-               QUERY PLAN               
-----------------------------------------
+--?.*QUERY PLAN.*
+--?----------------------------.*
 --? Seq Scan on pg_temp_datanod.*
    Output: b.id, b.c_id
 (2 rows)
@@ -3246,8 +3246,8 @@ explain (verbose on, costs off, nodes off) SELECT b.* FROM b LEFT JOIN c ON b.c_
 explain (verbose on, costs off, nodes off)
   SELECT a.* FROM a LEFT JOIN (b left join c on b.c_id = c.id)
   ON (a.b_id = b.id);
-               QUERY PLAN               
-----------------------------------------
+--?QUERY PLAN.*
+--?-----------------------------.*
 --? Seq Scan on pg_temp_datanod.*
    Output: a.id, a.b_id
 (2 rows)
@@ -3257,8 +3257,8 @@ explain (verbose on, costs off, nodes off)
 select id from a where id in (
 	select b.id from b left join c on b.id = c.id
 );
-                     QUERY PLAN                     
-----------------------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Hash Join
    Output: a.id
    Hash Cond: (a.id = b.id)
@@ -3275,8 +3275,8 @@ select id from a where id in (
 explain (verbose on, costs off, nodes off)
 select d.* from d left join (select * from b group by b.id, b.c_id) s
   on d.a = s.id and d.b = s.c_id;
-               QUERY PLAN               
-----------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
 --? Seq Scan on pg_temp_datanod.*
    Output: d.a, d.b
 (2 rows)
@@ -3285,8 +3285,8 @@ select d.* from d left join (select * from b group by b.id, b.c_id) s
 explain (verbose on, costs off, nodes off)
 select d.* from d left join (select distinct * from b) s
   on d.a = s.id and d.b = s.c_id;
-               QUERY PLAN               
-----------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
 --? Seq Scan on pg_temp_datanod.*
    Output: d.a, d.b
 (2 rows)
@@ -3296,8 +3296,8 @@ select d.* from d left join (select distinct * from b) s
 explain (verbose on, costs off, nodes off)
 select d.* from d left join (select * from b group by b.id, b.c_id) s
   on d.a = s.id;
-                     QUERY PLAN                     
-----------------------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Hash Right Join
    Output: d.a, d.b
    Hash Cond: (b.id = d.a)
@@ -3316,8 +3316,8 @@ select d.* from d left join (select * from b group by b.id, b.c_id) s
 explain (verbose on, costs off, nodes off)
 select d.* from d left join (select distinct * from b) s
   on d.a = s.id;
-                     QUERY PLAN                     
-----------------------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Hash Right Join
    Output: d.a, d.b
    Hash Cond: (b.id = d.a)
@@ -3337,8 +3337,8 @@ select d.* from d left join (select distinct * from b) s
 explain (verbose on, costs off, nodes off)
 select d.* from d left join (select id from a union select id from b) s
   on d.a = s.id;
-               QUERY PLAN               
-----------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
 --? Seq Scan on pg_temp_datanod.*
    Output: d.a, d.b
 (2 rows)
@@ -3347,8 +3347,8 @@ select d.* from d left join (select id from a union select id from b) s
 explain (verbose on, costs off, nodes off)
 select i8.* from int8_tbl i8 left join (select f1 from int4_tbl group by f1) i4
   on i8.q1 = i4.f1;
-           QUERY PLAN           
---------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Seq Scan on public.int8_tbl i8
    Output: i8.q1, i8.q2
 (2 rows)
@@ -3371,8 +3371,8 @@ select p.* from parent p left join child c on (p.k = c.k) order by 1,2;
 
 explain (verbose on, costs off, nodes off)
   select p.* from parent p left join child c on (p.k = c.k) order by 1,2;
-                     QUERY PLAN                      
------------------------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Sort
    Output: p.k, p.pd
    Sort Key: p.k, p.pd
@@ -3395,8 +3395,8 @@ explain (verbose on, costs off, nodes off)
   select p.*, linked from parent p
     left join (select c.*, true as linked from child c) as ss
     on (p.k = ss.k) order by p.k;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Merge Left Join
    Output: p.k, p.pd, (true)
    Merge Cond: (p.k = c.k)
@@ -3418,8 +3418,8 @@ explain (verbose on, costs off, nodes off)
 select p.* from
   parent p left join child c on (p.k = c.k)
   where p.k = 1 and p.k = 2;
-        QUERY PLAN        
---------------------------
+--?QUERY PLAN.*
+--?----------------.*
  Result
    Output: p.k, p.pd
    One-Time Filter: false
@@ -3519,8 +3519,8 @@ select t1.* from
   on (t1.f1 = b1.d1)
   left join int4_tbl i4
   on (i8.q2 = i4.f1);
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Hash Left Join
    Output: t1.f1
    Hash Cond: (i8.q2 = i4.f1)
@@ -3586,8 +3586,8 @@ select t1.* from
   on (t1.f1 = b1.d1)
   left join int4_tbl i4
   on (i8.q2 = i4.f1);
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Hash Left Join
    Output: t1.f1
    Hash Cond: (i8.q2 = i4.f1)
@@ -3652,8 +3652,8 @@ select * from
   on t1.f1 = 'doh!'
   left join int4_tbl i4
   on i8.q1 = i4.f1;
-                          QUERY PLAN                          
---------------------------------------------------------------
+--?QUERY PLAN.*
+--?----------------------------.*
  Nested Loop Left Join
    Output: t1.f1, i8.q1, i8.q2, t2.f1, i4.f1
    ->  Seq Scan on public.text_tbl t2
@@ -3700,8 +3700,8 @@ CREATE TABLE mj_t2 (a int,c char(10));
 insert into mj_t2 values(12,'abcde');
 insert into mj_t2 values(12,'efghi');
 explain (nodes off, costs off) select * from mj_t1 full outer join mj_t2 on 1=1;
-          QUERY PLAN           
--------------------------------
+--?QUERY PLAN.*
+--?-----------------------.*
  Merge Full Join
    ->  Seq Scan on mj_t1
    ->  Materialize

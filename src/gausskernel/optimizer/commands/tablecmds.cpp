@@ -1846,14 +1846,12 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
 
         if (colDef->raw_default != NULL) {
             RawColumnDefault* rawEnt = NULL;
-
             if (relkind == RELKIND_FOREIGN_TABLE) {
                 if (!(IsA(stmt, CreateForeignTableStmt) &&
                         isMOTTableFromSrvName(((CreateForeignTableStmt*)stmt)->servername)))
                     ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                             errmsg("default values on foreign tables are not supported")));
             }
-
             Assert(colDef->cooked_default == NULL);
             rawEnt = (RawColumnDefault*)palloc(sizeof(RawColumnDefault));
             rawEnt->attnum = attnum;
@@ -2506,6 +2504,13 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
             ereport(ERROR,
                 (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
                     errmsg("%s is redistributing, please retry later.", delrel->rd_rel->relname.data)));
+        }
+
+        // cstore relation doesn't support concurrent INDEX now.
+        if (drop->concurrent == true && delrel != NULL && OidIsValid(delrel->rd_rel->relcudescrelid)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("column store table does not support concurrent INDEX yet"),
+                errdetail("The feature is not currently supported")));
         }
 
         if (delrel != NULL) {
