@@ -1035,8 +1035,9 @@ static PGPing test_postmaster_connection(pgpid_t pm_pid, bool do_checkpoint, str
                          _("could not stat file gaussdb_state_file %s: %s\n"), 
                         gaussdb_state_file, 
                         strerror(errno));
-                } else {
-                    if (beforeStat.st_mtime != afterStat.st_mtime) {
+                } else if (errno != ENOENT) {
+                    if (beforeStat.st_mtim.tv_sec != afterStat.st_mtim.tv_sec || 
+                        beforeStat.st_mtim.tv_nsec != afterStat.st_mtim.tv_nsec) {
                         nRet = memset_s(&state, sizeof(state), 0, sizeof(state));
                         securec_check_c(nRet, "\0", "\0");
                         ReadDBStateFile(&state);
