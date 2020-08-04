@@ -2779,7 +2779,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
             switch (((DropStmt*)parse_tree)->removeType) {
                 case OBJECT_INDEX:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
                     if (((DropStmt*)parse_tree)->concurrent) {
                         ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -3928,10 +3928,10 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         } break;
 
         case T_CreateRangeStmt: /* CREATE TYPE AS RANGE */
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("user defined range type is not yet supported.")));
-#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
             DefineRange((CreateRangeStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR)
@@ -4140,12 +4140,14 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
             }
 
+#ifdef ENABLE_MULTIPLE_NODES
             if (stmt->concurrent) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("PGXC does not support concurrent INDEX yet"),
                         errdetail("The feature is not currently supported")));
             }
+#endif
 
             /* INDEX on a temporary table cannot use 2PC at commit */
             rel_id = RangeVarGetRelidExtended(stmt->relation, AccessShareLock, true, false, false, true, NULL, NULL);
@@ -4240,6 +4242,10 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         } break;
 
         case T_RuleStmt: /* CREATE RULE */
+#ifdef PGXC
+            if (!IsInitdb && !u_sess->attr.attr_sql.enable_cluster_resize && !u_sess->exec_cxt.extension_is_valid)
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("RULE is not yet supported.")));
+#endif /* PGXC */
             DefineRule((RuleStmt*)parse_tree, query_string);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
@@ -8527,6 +8533,9 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
                 return;
             else
                 break;
+        case OBJECT_AGGREGATE:
+            tag = "AGGREGATE";
+            break;
         case OBJECT_OPERATOR:
             tag = "OPERATOR";
             break;
@@ -8590,6 +8599,28 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
  */
 bool CheckExtensionInWhiteList(const char* extension_name, uint32 hash_value, bool hash_check)
 {
+        /* 2902411162 hash for fastcheck, the sql file is much shorter than published version. */
+    uint32 postgisHashHistory[POSTGIS_VERSION_NUM] = {2902411162, 2959454932};
+
+    /* check for extension name */
+    if (pg_strcasecmp(extension_name, "postgis") == 0) {
+        /* PostGIS is disabled under 300 deployment */
+        if (is_feature_disabled(POSTGIS_DOCKING)) {
+            return false;
+        }
+
+        if (hash_check && !isSecurityMode) {
+            /* check for postgis hashvalue */
+            for (int i = 0; i < POSTGIS_VERSION_NUM; i++) {
+                if (hash_value == postgisHashHistory[i]) {
+                    return true;
+                }         
+            }
+        } else {
+            return true;
+        }
+    }
+
     return true;
 }
 

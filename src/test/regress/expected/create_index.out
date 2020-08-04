@@ -2203,31 +2203,23 @@ create unique index hash_f8_index_3 on hash_f8_heap(random) where seqno > 1000;
 CREATE TABLE concur_heap (f1 text, f2 text);
 -- empty table
 CREATE INDEX CONCURRENTLY concur_index1 ON concur_heap(f2,f1);
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 INSERT INTO concur_heap VALUES  ('a','b');
 INSERT INTO concur_heap VALUES  ('b','b');
 -- unique index
 CREATE UNIQUE INDEX CONCURRENTLY concur_index2 ON concur_heap(f1);
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 -- check if constraint is set up properly to be enforced
 INSERT INTO concur_heap VALUES ('b','x');
+ERROR:  duplicate key value violates unique constraint "concur_index2"
+DETAIL:  Key (f1)=(b) already exists.
 -- check if constraint is enforced properly at build time
 CREATE UNIQUE INDEX CONCURRENTLY concur_index3 ON concur_heap(f2);
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
+ERROR:  could not create unique index "concur_index3"
+DETAIL:  Key (f2)=(b) is duplicated.
 -- test that expression indexes and partial indexes work concurrently
 CREATE INDEX CONCURRENTLY concur_index4 on concur_heap(f2) WHERE f1='a';
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 CREATE INDEX CONCURRENTLY concur_index5 on concur_heap(f2) WHERE f1='x';
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 -- here we also check that you can default the index name
 CREATE INDEX CONCURRENTLY on concur_heap((f2||f1));
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 -- You can't do a concurrent index build in a transaction
 START TRANSACTION;
 CREATE INDEX CONCURRENTLY concur_index7 ON concur_heap(f1);
@@ -2247,42 +2239,33 @@ Table "public.concur_heap"
  f1     | text | 
  f2     | text | 
 Indexes:
+    "concur_index2" UNIQUE, btree (f1) TABLESPACE pg_default
+    "concur_index3" UNIQUE, btree (f2) TABLESPACE pg_default INVALID
+    "concur_heap_expr_idx" btree ((f2 || f1)) TABLESPACE pg_default
+    "concur_index1" btree (f2, f1) TABLESPACE pg_default
+    "concur_index4" btree (f2) TABLESPACE pg_default WHERE f1 = 'a'::text
+    "concur_index5" btree (f2) TABLESPACE pg_default WHERE f1 = 'x'::text
     "std_index" btree (f2) TABLESPACE pg_default
 
 --
 -- Try some concurrent index drops
 --
 DROP INDEX CONCURRENTLY "concur_index2";				-- works
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 DROP INDEX CONCURRENTLY IF EXISTS "concur_index2";		-- notice
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
+NOTICE:  index "concur_index2" does not exist, skipping
 -- failures
 DROP INDEX CONCURRENTLY "concur_index2", "concur_index3";
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
+ERROR:  DROP INDEX CONCURRENTLY does not support dropping multiple objects
 START TRANSACTION;
 DROP INDEX CONCURRENTLY "concur_index5";
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
+ERROR:  DROP INDEX CONCURRENTLY cannot run inside a transaction block
 ROLLBACK;
 -- successes
 DROP INDEX CONCURRENTLY IF EXISTS "concur_index3";
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 DROP INDEX CONCURRENTLY "concur_index4";
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 DROP INDEX CONCURRENTLY "concur_index5";
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 DROP INDEX CONCURRENTLY "concur_index1";
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 DROP INDEX CONCURRENTLY "concur_heap_expr_idx";
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
 \d concur_heap
 Table "public.concur_heap"
  Column | Type | Modifiers 
