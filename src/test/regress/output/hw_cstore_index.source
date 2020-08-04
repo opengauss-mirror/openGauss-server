@@ -10,7 +10,7 @@ COPY cstore_insert_t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/cstore_c
 CREATE UNIQUE INDEX unsupport1_idx ON cstore_insert_t1(c1);
 ERROR:  access method "psort" does not support unique indexes
 CREATE INDEX CONCURRENTLY unsupport2_idx ON cstore_insert_t1(c1);
-ERROR:  PGXC does not support concurrent INDEX yet
+ERROR:  column store table does not support concurrent INDEX yet
 DETAIL:  The feature is not currently supported
 CREATE INDEX unsupport3_idx ON cstore_insert_t1(lower(c2));
 ERROR:  access method "psort" does not support index expressions

@@ -43,7 +43,7 @@ commit;
 -- 0 row
 select * from gtt6;
 
--- ERROR
+-- SUCCESS
 create index CONCURRENTLY idx_gtt1 on gtt1 (b);
 
 -- ERROR
