@@ -3324,7 +3324,6 @@ ERROR:  SECURITY LABEL is not yet supported.
 CREATE TYPE bigobj (INPUT = lo_filein, OUTPUT = lo_fileout, INTERNALLENGTH = VARIABLE);
 ERROR:  function lo_filein(cstring) does not exist
 CREATE TYPE float8_range AS RANGE (subtype = float8, subtype_diff = float8mi);
-ERROR:  user defined range type is not yet supported.
 ALTER TYPE colors ADD VALUE 'orange' AFTER 'red';
 ERROR:  type "colors" does not exist
 CREATE COLLATION french (LOCALE = 'fr_FR.utf8');

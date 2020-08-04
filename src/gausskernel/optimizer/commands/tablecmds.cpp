@@ -2505,6 +2505,13 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
                     errmsg("%s is redistributing, please retry later.", delrel->rd_rel->relname.data)));
         }
 
+        // cstore relation doesn't support concurrent INDEX now.
+        if (drop->concurrent == true && delrel != NULL && OidIsValid(delrel->rd_rel->relcudescrelid)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("column store table does not support concurrent INDEX yet"),
+                errdetail("The feature is not currently supported")));
+        }
+
         if (delrel != NULL) {
             relation_close(delrel, NoLock);
         }
