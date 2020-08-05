@@ -141,7 +141,7 @@ create global temp table gtt4(a int primary key, b text) with(on_commit_delete_r
 create global temp table gtt5(a int primary key, b text) with(on_commit_delete_rows=true);
 
 -- ok
-create table tb1 (like gtt2 including reloptions); 
+create table tb1 (like gtt2 including reloptions);
 
 -- ERROR
 create global temp table gtt7 (like gtt2 including reloptions) on commit preserve rows;
@@ -160,8 +160,20 @@ create global temp table gtt_test_rename(a int primary key, b text);
 --ok
 alter table gtt_test_rename rename to gtt_test_new;
 
+--ok
+ALTER TABLE gtt_test_new ADD COLUMN address integer;
+
+--ok
+insert into gtt_test_new values(1, 'hello postgres', 128);
+
 -- ok
-ALTER TABLE gtt_test_new ADD COLUMN address varchar(30);
+ALTER TABLE gtt_test_new MODIFY (address varchar(1024));
+
+--ok
+select * from gtt_test_new;
+
+--ok
+ALTER TABLE gtt_test_new DROP address;
 
 CREATE global temp TABLE products (
     product_no integer PRIMARY KEY,

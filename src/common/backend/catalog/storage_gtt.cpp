@@ -1370,3 +1370,27 @@ static gtt_local_hash_entry* gtt_search_by_relid(Oid relid, bool missingOk)
     return entry;
 }
 
+void gtt_create_storage_files(Oid relid)
+{
+    if (gtt_storage_attached(relid)) {
+        return;
+    }
+
+    MemoryContext ctxAlterGtt =
+        AllocSetContextCreate(CurrentMemoryContext, "gtt alter table", ALLOCSET_DEFAULT_SIZES);
+    MemoryContext oldcontext = MemoryContextSwitchTo(ctxAlterGtt);
+    ResultRelInfo* resultRelInfo = makeNode(ResultRelInfo);
+    Relation rel = relation_open(relid, NoLock);
+
+    InitResultRelInfo(resultRelInfo, rel, 1, 0);
+    if (resultRelInfo->ri_RelationDesc->rd_rel->relhasindex &&
+        resultRelInfo->ri_IndexRelationDescs == NULL) {
+        ExecOpenIndices(resultRelInfo);
+    }
+    init_gtt_storage(CMD_UTILITY, resultRelInfo);
+    relation_close(rel, NoLock);
+    ExecCloseIndices(resultRelInfo);
+    (void)MemoryContextSwitchTo(oldcontext);
+    MemoryContextDelete(ctxAlterGtt);
+}
+
