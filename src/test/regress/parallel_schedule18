@@ -17,6 +17,7 @@ test: hw_partition_interval_parallel_prepare
 test: hw_partition_interval_parallel_insert hw_partition_interval_parallel_insert_01 hw_partition_interval_parallel_insert_02
 test: hw_partition_interval_parallel_end
 test: hw_partition_interval_select
+test: hw_partition_interval_check_syntax
 #test: hw_partition_lock
 #test: hw_partition_llt
 # FIXME: move me back to the parallel test when the refcnt issue is fixed
