@@ -2830,18 +2830,21 @@ static void relation_destroy_partition_map(Relation relation)
         /* first free partKeyNum/partitionKeyDataType/ranges in the range map */
         if (range_map->partitionKey) {
             pfree_ext(range_map->partitionKey);
-            range_map->partitionKey = NULL;
         }
         if (range_map->partitionKeyDataType) {
             pfree_ext(range_map->partitionKeyDataType);
-            range_map->partitionKeyDataType = NULL;
+        }
+        if (range_map->intervalValue) {
+            pfree_ext(range_map->intervalValue);
+        }
+        if (range_map->intervalTablespace) {
+            pfree_ext(range_map->intervalTablespace);
         }
         if (range_map->rangeElements) {
             partition_map_destroy_range_array(range_map->rangeElements, range_map->rangeElementsNum);
         }
     }
     pfree_ext(relation->partMap);
-    relation->partMap = NULL;
     return;
 }
 
