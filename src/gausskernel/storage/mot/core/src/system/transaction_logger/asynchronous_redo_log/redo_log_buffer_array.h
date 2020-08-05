@@ -30,7 +30,7 @@
 #include "global.h"
 #include "redo_log_buffer.h"
 
-#define MAX_BUFFERS 1000
+#define MAX_BUFFERS 128
 
 namespace MOT {
 class RedoLogBufferArray {
@@ -91,6 +91,10 @@ public:
         return m_array;
     }
 
+    static uint32_t MaxSize()
+    {
+        return MAX_BUFFERS;
+    }
 private:
     std::atomic<uint32_t> m_nextFree;
     RedoLogBuffer* m_array[MAX_BUFFERS];

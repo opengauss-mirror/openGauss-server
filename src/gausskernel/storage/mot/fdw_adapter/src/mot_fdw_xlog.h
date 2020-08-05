@@ -45,9 +45,8 @@ public:
     inline ~XLOGLogger()
     {}
 
+    uint64_t AddToLog(MOT::RedoLogBuffer** redoLogBufferArray, uint32_t size);
     uint64_t AddToLog(uint8_t* data, uint32_t size);
-    uint64_t AddToLog(MOT::RedoLogBuffer* redoBuffer);
-    uint64_t AddToLog(MOT::RedoLogBuffer** redoBufferArray, uint32_t size);
     void FlushLog();
     void CloseLog();
     void ClearLog();

@@ -155,4 +155,17 @@ RedoLogBuffer* GroupSyncRedoLogHandler::WriteToLog(RedoLogBuffer* buffer)
     joinedGroup->Commit(leader, joinedGroup);
     return buffer;
 }
+
+void GroupSyncRedoLogHandler::Flush()
+{
+    std::shared_ptr<CommitGroup> flushGroup = m_currentGroup;
+    if (flushGroup == nullptr) {
+        return;
+    }
+
+    while (!flushGroup->IsCommitted()) {
+        // spin until group is flushed
+        cpu_relax();
+    }
+}
 }  // namespace MOT

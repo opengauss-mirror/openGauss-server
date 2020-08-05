@@ -80,35 +80,19 @@ void MOTRedo(XLogReaderState* record)
     }
 }
 
+uint64_t XLOGLogger::AddToLog(MOT::RedoLogBuffer** redoLogBufferArray, uint32_t size)
+{
+    uint64_t written = MOT::ILogger::AddToLog(redoLogBufferArray, size);
+    XLogSetAsyncXactLSN(t_thrd.xlog_cxt.XactLastRecEnd);
+    return written;
+}
+
 uint64_t XLOGLogger::AddToLog(uint8_t* data, uint32_t size)
 {
     XLogBeginInsert();
     XLogRegisterData((char*)data, size);
     XLogInsert(RM_MOT_ID, MOT_REDO_DATA);
     return size;
-}
-
-uint64_t XLOGLogger::AddToLog(MOT::RedoLogBuffer* redoBuffer)
-{
-    uint32_t length;
-    uint8_t* data = redoBuffer->Serialize(&length);
-    return AddToLog(data, length);
-}
-
-uint64_t XLOGLogger::AddToLog(MOT::RedoLogBuffer** redoTransactionArray, uint32_t size)
-{
-    uint32_t written = 0;
-    // ensure that we have enough space to add all transaction buffers
-    XLogEnsureRecordSpace(0, size);
-    XLogBeginInsert();
-    for (uint32_t i = 0; i < size; i++) {
-        uint32_t length;
-        uint8_t* data = redoTransactionArray[i]->Serialize(&length);
-        XLogRegisterData((char*)data, length);
-        written += length;
-    }
-    XLogInsert(RM_MOT_ID, MOT_REDO_DATA);
-    return written;
 }
 
 void XLOGLogger::FlushLog()

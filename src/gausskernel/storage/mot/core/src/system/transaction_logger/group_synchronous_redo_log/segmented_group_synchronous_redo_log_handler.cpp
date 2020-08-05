@@ -74,4 +74,11 @@ void SegmentedGroupSyncRedoLogHandler::SetLogger(ILogger* logger)
     for (unsigned int i = 0; i < m_numaNodes; i++)
         m_redoLogHandlerArray[i].SetLogger(logger);
 }
+
+void SegmentedGroupSyncRedoLogHandler::Flush()
+{
+    for (unsigned int i = 0; i < m_numaNodes; i++) {
+        m_redoLogHandlerArray[i].Flush();
+    }
+}
 }  // namespace MOT

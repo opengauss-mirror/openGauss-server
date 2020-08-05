@@ -61,6 +61,7 @@ public:
      * @return The next buffer to write to, or null in case of failure.
      */
     virtual RedoLogBuffer* WriteToLog(RedoLogBuffer* buffer);
+    virtual void Flush();
     virtual void SetLogger(ILogger* logger);
 
 private:

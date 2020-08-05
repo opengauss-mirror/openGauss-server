@@ -93,7 +93,7 @@ uint32_t RecoveryManager::RecoverLogOperationCreateTable(
     Table* table = nullptr;
     switch (state) {
         case COMMIT:
-            MOT_LOG_INFO("RecoverLogOperationCreateTable: COMMIT");
+            MOT_LOG_DEBUG("RecoverLogOperationCreateTable: COMMIT");
             CreateTable((char*)data, status, table, true);
             break;
 

@@ -39,6 +39,7 @@ MOTConfiguration MOTConfiguration::motGlobalConfiguration;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_REDO_LOG;
 constexpr LoggerType MOTConfiguration::DEFAULT_LOGGER_TYPE;
 constexpr RedoLogHandlerType MOTConfiguration::DEFAULT_REDO_LOG_HANDLER_TYPE;
+constexpr uint32_t MOTConfiguration::DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_GROUP_COMMIT;
 constexpr uint64_t MOTConfiguration::DEFAULT_GROUP_COMMIT_SIZE;
 constexpr const char* MOTConfiguration::DEFAULT_GROUP_COMMIT_TIMEOUT;
@@ -381,6 +382,7 @@ MOTConfiguration::MOTConfiguration()
     : m_enableRedoLog(DEFAULT_ENABLE_REDO_LOG),
       m_loggerType(DEFAULT_LOGGER_TYPE),
       m_redoLogHandlerType(DEFAULT_REDO_LOG_HANDLER_TYPE),
+      m_asyncRedoLogBufferArrayCount(DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT),
       m_enableGroupCommit(DEFAULT_ENABLE_GROUP_COMMIT),
       m_groupCommitSize(DEFAULT_GROUP_COMMIT_SIZE),
       m_groupCommitTimeoutUSec(DEFAULT_GROUP_COMMIT_TIMEOUT_USEC),
@@ -475,6 +477,7 @@ bool MOTConfiguration::SetFlag(const std::string& name, const std::string& value
     if (ParseBool(name, "enable_redo_log", value, &m_enableRedoLog)) {
     } else if (ParseLoggerType(name, "logger_type", value, &m_loggerType)) {
     } else if (ParseRedoLogHandlerType(name, "redo_log_handler_type", value, &m_redoLogHandlerType)) {
+    } else if (ParseUint32(name, "async_log_buffer_count", value, &m_asyncRedoLogBufferArrayCount)) {
     } else if (ParseBool(name, "enable_group_commit", value, &m_enableGroupCommit)) {
     } else if (ParseUint64(name, "group_commit_size", value, &m_groupCommitSize)) {
     } else if (ParseUint64(name, "group_commit_timeout_usec", value, &m_groupCommitTimeoutUSec)) {
@@ -603,6 +606,9 @@ int MOTConfiguration::GetMappedCore(int logicId) const
 #define UPDATE_INT_CFG(var, cfgPath, defaultValue) \
     UpdateConfigItem(var, cfg->GetIntegerConfigValue(cfgPath, defaultValue), cfgPath)
 
+#define UPDATE_INT_CFG_BOUNDS(var, cfgPath, defaultValue, lowerBound, upperBound) \
+    UpdateConfigItem(var, cfg->GetIntegerConfigValue(cfgPath, defaultValue), cfgPath, lowerBound, upperBound)
+
 #define UPDATE_MEM_CFG(var, cfgPath, defaultValue, scale)                                                   \
     do {                                                                                                    \
         uint64_t memoryValueBytes =                                                                         \
@@ -633,6 +639,11 @@ void MOTConfiguration::LoadConfig()
     UPDATE_CFG(m_enableRedoLog, "enable_redo_log", DEFAULT_ENABLE_REDO_LOG);
     UPDATE_USER_CFG(m_loggerType, "logger_type", DEFAULT_LOGGER_TYPE);
     UPDATE_USER_CFG(m_redoLogHandlerType, "redo_log_handler_type", DEFAULT_REDO_LOG_HANDLER_TYPE);
+    UPDATE_INT_CFG_BOUNDS(m_asyncRedoLogBufferArrayCount,
+        "async_log_buffer_count",
+        DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
+        MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
+        MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT);
 
     // commit configuration
     UPDATE_CFG(m_enableGroupCommit, "enable_group_commit", DEFAULT_ENABLE_GROUP_COMMIT);

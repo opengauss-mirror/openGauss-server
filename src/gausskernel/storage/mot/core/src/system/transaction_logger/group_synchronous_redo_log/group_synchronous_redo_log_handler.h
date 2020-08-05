@@ -63,6 +63,8 @@ public:
      */
     virtual RedoLogBuffer* WriteToLog(RedoLogBuffer* buffer);
 
+    void Flush();
+
     /**
      * @brief initializes group params
      * @param group the group to work on
