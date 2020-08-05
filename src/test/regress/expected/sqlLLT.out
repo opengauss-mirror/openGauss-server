@@ -3205,7 +3205,6 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for tab
 create view alter_llt1.v1 as select * from alter_llt1.t1;
 create function alter_llt1.plus1(int) returns int as 'select $1+1' language sql; 
 create domain alter_llt1.posint integer check (value > 0);
-ERROR:  domain is not yet supported.
 create type alter_llt1.ctype as (f1 int, f2 text);
 create function alter_llt1.same(alter_llt1.ctype, alter_llt1.ctype) returns boolean language sql
 as 'select $1.f1 is not distinct from $2.f1 and $1.f2 is not distinct from $2.f2';

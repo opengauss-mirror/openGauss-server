@@ -3586,7 +3586,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         } break;
 
         case T_AlterDomainStmt:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
 #endif /* PGXC */
             {
@@ -4929,12 +4929,12 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
              * ******************************** DOMAIN statements ****
              */
         case T_CreateDomainStmt:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
 #endif /* PGXC */
             DefineDomain((CreateDomainStmt*)parse_tree);
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (IS_PGXC_COORDINATOR)
                 ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
 #endif
@@ -8566,9 +8566,10 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
         case OBJECT_LANGUAGE:
             tag = "LANGUAGE";
             break;
-        case OBJECT_DOMAIN:
+        /*Single node support domain feature.*/
+        /* case OBJECT_DOMAIN:
             tag = "DOMAIN";
-            break;
+            break;*/
         case OBJECT_CONVERSION:
             tag = "CONVERSION";
             break;
