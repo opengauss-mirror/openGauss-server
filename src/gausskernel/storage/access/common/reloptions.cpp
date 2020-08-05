@@ -2036,3 +2036,30 @@ bytea* tsearch_config_reloptions(Datum tsoptions, bool validate, Oid prsoid, boo
 
     return (bytea*)cfopts;
 }
+
+/* remove an option from options list. If succeeded, set removed = true */ 
+List* RemoveRelOption(List* options, const char* optName, bool* removed)
+{
+    ListCell* lcell = NULL;
+    DefElem* opt = NULL;
+    bool found = false;
+
+    foreach (lcell, options) {
+        opt = (DefElem*)lfirst(lcell);
+        if (strncmp(opt->defname, optName, strlen(optName)) == 0) {
+            found = true;
+            break;
+        }
+    }
+
+    if (found) {
+        options = list_delete_ptr(options, opt);
+        pfree_ext(opt);
+    }
+    if (removed != NULL) {
+        *removed = found;
+    }
+
+    return options;
+}
+

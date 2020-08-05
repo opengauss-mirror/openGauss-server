@@ -443,7 +443,7 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
                     tblLlikeClause->relation->relpersistence == RELPERSISTENCE_TEMP)
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("do not support create non-temp table like temp table")));
+                            errmsg("do not support create non-local-temp table like local temp table")));
                 break;
 
             default:
@@ -1610,6 +1610,12 @@ static void transformTableLikeClause(
         if (isNull)
             reloptions = (Datum)0;
         cxt->reloptions = untransformRelOptions(reloptions);
+
+        /* remove on_commit_delete_rows option */
+        if (cxt->relation->relpersistence != RELPERSISTENCE_TEMP &&
+            cxt->relation->relpersistence != RELPERSISTENCE_GLOBAL_TEMP) {
+            cxt->reloptions = RemoveRelOption(cxt->reloptions, "on_commit_delete_rows", NULL);
+        }
 
         /* remove redis options first. */
         RemoveRedisRelOptionsFromList(&(cxt->reloptions));
