@@ -20,7 +20,7 @@ index 5f8b100..7fdd24f 100644
 +override CPPFLAGS := $(filter-out $(exclude_option),$(CPPFLAGS))
 \ No newline at end of file
 diff --git oracle_fdw.cpp oracle_fdw.cpp
-index e75b6ab..c7eec41 100644
+index e75b6ab..0a9683d 100644
 --- oracle_fdw.cpp
 +++ oracle_fdw.cpp
 @@ -92,13 +92,13 @@
@@ -512,7 +512,7 @@ index e75b6ab..c7eec41 100644
  		case XACT_EVENT_COMMIT:
  		case XACT_EVENT_PREPARE:
  #if PG_VERSION_NUM >= 90500
-@@ -6046,11 +6032,19 @@ transactionCallback(XactEvent event, void *arg)
+@@ -6046,6 +6032,8 @@ transactionCallback(XactEvent event, void *arg)
  			/* remote rollback */
  			oracleEndTransaction(arg, 0, 1);
  			break;
@@ -521,18 +521,7 @@ index e75b6ab..c7eec41 100644
  	}
  
  	dml_in_transaction = false;
- }
- 
-+void oracleProcExit(void)
-+{
-+	/* register an exit hook */
-+	on_proc_exit(&exitHook, PointerGetDatum(NULL));
-+}
-+
- /*
-  * exitHook
-  * 		Close all Oracle connections on process exit.
-@@ -6254,14 +6248,14 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
+@@ -6254,14 +6242,14 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
  			ora_geometry *geom = (ora_geometry *)fdw_state->oraTable->cols[index]->val;
  
  			/* install error context callback */
@@ -550,7 +539,7 @@ index e75b6ab..c7eec41 100644
  
  			value = NULL;  /* we will fetch that later to avoid unnecessary copying */
  		}
-@@ -6303,8 +6297,8 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
+@@ -6303,8 +6291,8 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
  			struct varlena *result = NULL;
  
  			/* install error context callback */
@@ -561,7 +550,7 @@ index e75b6ab..c7eec41 100644
  			fdw_state->columnindex = index;
  
  			result = (bytea *)palloc(value_len + VARHDRSZ);
-@@ -6312,7 +6306,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
+@@ -6312,7 +6300,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
  			SET_VARSIZE(result, value_len + VARHDRSZ);
  
  			/* uninstall error context callback */
@@ -570,7 +559,7 @@ index e75b6ab..c7eec41 100644
  
  			values[j] = PointerGetDatum(result);
  
-@@ -6342,7 +6336,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
+@@ -6342,7 +6330,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
  			if (fdw_state->oraTable->cols[index]->oratype == ORA_TYPE_INTERVALD2S
  				&& value[0] == '-')
  			{
@@ -579,7 +568,7 @@ index e75b6ab..c7eec41 100644
  				char *pos = strchr(value, ' ');
  
  				if (pos == NULL)
-@@ -6367,8 +6361,8 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
+@@ -6367,8 +6355,8 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
  			dat = CStringGetDatum(value);
  
  			/* install error context callback */
@@ -590,7 +579,7 @@ index e75b6ab..c7eec41 100644
  			fdw_state->columnindex = index;
  
  			/* for string types, check that the data are in the database encoding */
-@@ -6396,7 +6390,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
+@@ -6396,7 +6384,7 @@ convertTuple(struct OracleFdwState *fdw_state, Datum *values, bool *nulls, bool
  			}
  
  			/* uninstall error context callback */
@@ -599,7 +588,7 @@ index e75b6ab..c7eec41 100644
  		}
  
  		/* free the data buffer for LOBs */
-@@ -6465,8 +6459,9 @@ oracleGetShareFileName(const char *relativename)
+@@ -6465,8 +6453,9 @@ oracleGetShareFileName(const char *relativename)
  
  	get_share_path(my_exec_path, share_path);
  
@@ -611,7 +600,7 @@ index e75b6ab..c7eec41 100644
  
  	return result;
  }
-@@ -6655,8 +6650,7 @@ void
+@@ -6655,8 +6644,7 @@ void
  initializePostGIS()
  {
  	CatCList *catlist;
@@ -621,7 +610,7 @@ index e75b6ab..c7eec41 100644
  
  	/* this needs to be done only once per database session */
  	if (geometry_is_setup)
-@@ -6665,10 +6659,9 @@ initializePostGIS()
+@@ -6665,10 +6653,9 @@ initializePostGIS()
  	geometry_is_setup = true;
  
  	/* find all functions called "geometry_recv" with "internal" argument type */
@@ -634,15 +623,46 @@ index e75b6ab..c7eec41 100644
  
  	for (i = 0; i < catlist->n_members; i++)
  	{
+@@ -6695,3 +6682,28 @@ initializePostGIS()
+ 	}
+ 	ReleaseSysCacheList(catlist);
+ }
++
++struct envEntry* oracleGetConnList(void)
++{
++    return (struct envEntry*)u_sess->fdw_ctx[ORACLE_TYPE_FDW].connList;
++}
++
++void oracleSetConnList(struct envEntry* connList)
++{
++    u_sess->fdw_ctx[ORACLE_TYPE_FDW].connList = connList;
++}
++
++void oracleRegExitProc(void)
++{
++	if (u_sess->fdw_ctx[ORACLE_TYPE_FDW].connList == NULL)
++	{
++		if (IS_THREAD_POOL_SESSION)
++		{
++			u_sess->fdw_ctx[ORACLE_TYPE_FDW].fdwExitFunc = exitHook;
++		}
++		else
++		{
++			on_proc_exit(exitHook, 0);
++		}
++	}
++}
 diff --git oracle_fdw.h oracle_fdw.h
-index c748971..a62a8b5 100644
+index c748971..d666c9b 100644
 --- oracle_fdw.h
 +++ oracle_fdw.h
-@@ -223,6 +223,7 @@ extern void oracleError_i(oraError sqlstate, const char *message, int arg);
+@@ -223,6 +223,9 @@ extern void oracleError_i(oraError sqlstate, const char *message, int arg);
  extern void oracleError(oraError sqlstate, const char *message);
  extern void oracleDebug2(const char *message);
  extern void initializePostGIS(void);
-+extern void oracleProcExit(void);
++extern void oracleRegExitProc(void);
++extern struct envEntry* oracleGetConnList(void);
++extern void oracleSetConnList(struct envEntry* connList);
  
  /*
   * functions defined in oracle_gis.c
@@ -696,7 +716,7 @@ index 31f9ea1..d97716e 100644
  		}
  	}
 diff --git oracle_utils.cpp oracle_utils.cpp
-index 469e7b9..8d8b60e 100644
+index 469e7b9..0bafb0a 100644
 --- oracle_utils.cpp
 +++ oracle_utils.cpp
 @@ -27,15 +27,15 @@
@@ -719,14 +739,15 @@ index 469e7b9..8d8b60e 100644
  
  /*
   * Linked list for temporary Oracle handles and descriptors.
-@@ -54,12 +54,12 @@ struct handleEntry
- /*
-  * Linked list of handles for cached Oracle connections.
-  */
--static struct envEntry *envlist = NULL;
-+static THR_LOCAL struct envEntry *envlist = NULL;
+@@ -52,14 +52,9 @@ struct handleEntry
+ };
  
  /*
+- * Linked list of handles for cached Oracle connections.
+- */
+-static struct envEntry *envlist = NULL;
+-
+-/*
   * NULL value used for "in" callback in RETURNING clauses.
   */
 -static ora_geometry null_geometry = { NULL, NULL, -1, NULL, -1, NULL };
@@ -734,19 +755,28 @@ index 469e7b9..8d8b60e 100644
  
  /*
   * Helper functions
-@@ -119,6 +119,11 @@ oracleSession
+@@ -119,8 +114,10 @@ oracleSession
  	 */
  	initializePostGIS();
  
-+	if (envlist == NULL) {
-+		/* register an exit hook when first time connect to oracle */
-+		oracleProcExit();
-+	}
++	oracleRegExitProc();
 +
  	/* search environment and server handle in cache */
- 	for (envp = envlist; envp != NULL; envp = envp->next)
+-	for (envp = envlist; envp != NULL; envp = envp->next)
++	for (envp = oracleGetConnList(); envp != NULL; envp = envp->next)
  	{
-@@ -183,7 +188,7 @@ oracleSession
+ 		if (strcmp(envp->nls_lang, nls_lang) == 0)
+ 		{
+@@ -147,7 +144,7 @@ oracleSession
+ 
+ 		/* create environment handle */
+ 		if (checkerr(
+-			OCIEnvCreate((OCIEnv **) &envhp, (ub4)OCI_OBJECT,
++			OCIEnvCreate((OCIEnv **) &envhp, (ub4)OCI_THREADED,
+ 				(dvoid *) 0, (dvoid * (*)(dvoid *,size_t)) 0,
+ 				(dvoid * (*)(dvoid *, dvoid *, size_t)) 0,
+ 				(void (*)(dvoid *, dvoid *)) 0, (size_t) 0, (dvoid **) 0),
+@@ -183,7 +180,7 @@ oracleSession
  		}
  
  		/* add handles to cache */
@@ -755,7 +785,18 @@ index 469e7b9..8d8b60e 100644
  		{
  			oracleError_i(FDW_OUT_OF_MEMORY,
  				"error connecting to Oracle: failed to allocate %d bytes of memory",
-@@ -275,7 +280,7 @@ oracleSession
+@@ -194,8 +191,8 @@ oracleSession
+ 		envp->envhp = envhp;
+ 		envp->errhp = errhp;
+ 		envp->srvlist = NULL;
+-		envp->next = envlist;
+-		envlist = envp;
++		envp->next = oracleGetConnList();
++        oracleSetConnList(envp);
+ 	}
+ 
+ 	/* search connect string in cache */
+@@ -275,7 +272,7 @@ oracleSession
  		}
  
  		/* add server handle to cache */
@@ -764,7 +805,7 @@ index 469e7b9..8d8b60e 100644
  		{
  			oracleError_i(FDW_OUT_OF_MEMORY,
  				"error connecting to Oracle: failed to allocate %d bytes of memory",
-@@ -373,8 +378,9 @@ oracleSession
+@@ -373,8 +370,9 @@ oracleSession
  		sprintf(pid, "%lu", (unsigned long)getpid());
  		pid[29] = '\0';
  
@@ -775,7 +816,7 @@ index 469e7b9..8d8b60e 100644
  				OCI_ATTR_MODULE, errhp),
  			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
  		{
-@@ -394,9 +400,10 @@ oracleSession
+@@ -394,9 +392,10 @@ oracleSession
  				oraMessage);
  		}
  
@@ -787,7 +828,7 @@ index 469e7b9..8d8b60e 100644
  				OCI_ATTR_DRIVER_NAME, errhp),
  			(dvoid *)errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
  		{
-@@ -455,7 +462,7 @@ oracleSession
+@@ -455,7 +454,7 @@ oracleSession
  		}
  
  		/* add session handle to cache */
@@ -796,7 +837,7 @@ index 469e7b9..8d8b60e 100644
  		{
  			oracleError_i(FDW_OUT_OF_MEMORY,
  				"error connecting to Oracle: failed to allocate %d bytes of memory",
-@@ -519,7 +526,7 @@ oracleSession
+@@ -519,7 +518,7 @@ oracleSession
  	}
  
  	/* palloc a data structure pointing to the cached entries */
@@ -805,7 +846,64 @@ index 469e7b9..8d8b60e 100644
  	session->envp = envp;
  	session->srvp = srvp;
  	session->connp = connp;
-@@ -825,7 +832,7 @@ struct oraTable
+@@ -554,7 +553,8 @@ oracleCloseStatement(oracleSession *session)
+ void
+ oracleCloseConnections(void)
+ {
+-	while (envlist != NULL)
++	struct envEntry* envlist = NULL;
++	while ((envlist = oracleGetConnList()) != NULL)
+ 	{
+ 		while (envlist->srvlist != NULL)
+ 		{
+@@ -566,6 +566,7 @@ oracleCloseConnections(void)
+ 		}
+ 		removeEnvironment(envlist->envhp);
+ 	}
++    oracleSetConnList(NULL);
+ }
+ 
+ /*
+@@ -584,6 +585,9 @@ oracleShutdown(void)
+ 	/* done with Oracle */
+ 	if (oci_initialized)
+ 		(void)OCITerminate(OCI_DEFAULT);
++
++    silent = 0;
++    oci_initialized = 0;
+ }
+ 
+ /*
+@@ -597,7 +601,7 @@ oracleCancel(void)
+ 	struct srvEntry *srvp;
+ 
+ 	/* send a cancel request for all servers ignoring errors */
+-	for (envp = envlist; envp != NULL; envp = envp->next)
++	for (envp = oracleGetConnList(); envp != NULL; envp = envp->next)
+ 		for (srvp = envp->srvlist; srvp != NULL; srvp = srvp->next)
+ 			(void)OCIBreak(srvp->srvhp, envp->errhp);
+ }
+@@ -620,8 +624,7 @@ void oracleEndTransaction(void *arg, int is_commit, int noerror)
+ 		return;
+ 
+ 	/* find the cached handles for the argument */
+-	envp = envlist;
+-	while (envp)
++	while ((envp = oracleGetConnList()) != NULL)
+ 	{
+ 		srvp = envp->srvlist;
+ 		while (srvp)
+@@ -722,8 +725,7 @@ oracleEndSubtransaction(void *arg, int nest_level, int is_commit)
+ 	}
+ 
+ 	/* find the cached handles for the argument */
+-	envp = envlist;
+-	while (envp)
++	while ((envp = oracleGetConnList()) != NULL)
+ 	{
+ 		srvp = envp->srvlist;
+ 		while (srvp)
+@@ -825,7 +827,7 @@ struct oraTable
  		qschema = copyOraText(schema, strlen(schema), 1);
  		length += strlen(qschema) + 1;
  	}
@@ -814,7 +912,7 @@ index 469e7b9..8d8b60e 100644
  	tablename[0] = '\0';  /* empty */
  	if (schema != NULL)
  	{
-@@ -839,7 +846,7 @@ struct oraTable
+@@ -839,7 +841,7 @@ struct oraTable
  
  	/* construct a "SELECT * FROM ..." query to describe columns */
  	length += 14;
@@ -823,7 +921,7 @@ index 469e7b9..8d8b60e 100644
  	strcpy(query, "SELECT * FROM ");
  	strcat(query, tablename);
  
-@@ -875,7 +882,7 @@ struct oraTable
+@@ -875,7 +877,7 @@ struct oraTable
  	}
  
  	/* allocate an oraTable struct for the results */
@@ -832,7 +930,7 @@ index 469e7b9..8d8b60e 100644
  	reply->name = tablename;
  	reply->pgname = pgname;
  	reply->npgcols = 0;
-@@ -955,7 +962,7 @@ struct oraTable
+@@ -955,7 +957,7 @@ struct oraTable
  		}
  
  		/* create a zero-terminated copy */
@@ -841,7 +939,7 @@ index 469e7b9..8d8b60e 100644
  		strncpy(type_name, (char *)typname, typname_size);
  		type_name[typname_size] = '\0';
  
-@@ -971,7 +978,7 @@ struct oraTable
+@@ -971,7 +973,7 @@ struct oraTable
  		}
  
  		/* create a zero-terminated copy */
@@ -850,7 +948,7 @@ index 469e7b9..8d8b60e 100644
  		strncpy(type_schema, (char *)typschema, typschema_size);
  		type_schema[typschema_size] = '\0';
  
-@@ -1211,7 +1218,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
+@@ -1211,7 +1213,7 @@ oracleExplain(oracleSession *session, const char *query, int *nrows, char ***pla
  			*plan = (char **)oracleRealloc(*plan, sizeof(char *) * (*nrows));
  
  		/* add entry */
@@ -859,7 +957,7 @@ index 469e7b9..8d8b60e 100644
  		strcpy((*plan)[(*nrows)-1], res);
  
  		/* fetch next row */
-@@ -1446,7 +1453,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
+@@ -1446,7 +1448,7 @@ oracleQueryPlan(oracleSession *session, const char *query, const char *desc_quer
  	 */
  
  	/* get the first part of the SQL query with '%' appended */
@@ -868,7 +966,7 @@ index 469e7b9..8d8b60e 100644
  	{
  		oracleError(FDW_ERROR, "oracleQueryPlan internal error: no space found in query");
  	}
-@@ -1726,7 +1733,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
+@@ -1726,7 +1728,7 @@ oraclePrepareQuery(oracleSession *session, const char *query, const struct oraTa
  
  					/* define the result for the named type */
  					if (checkerr(
@@ -877,7 +975,7 @@ index 469e7b9..8d8b60e 100644
  							(void **)&geom->geometry, 0, (void **)&geom->indicator, 0),
  							session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
  					{
-@@ -1807,7 +1814,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
+@@ -1807,7 +1809,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
  		++param_count;
  
  	/* allocate a temporary array of indicators */
@@ -886,7 +984,7 @@ index 469e7b9..8d8b60e 100644
  
  	/* bind the parameters */
  	param_count = -1;
-@@ -1827,13 +1834,13 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
+@@ -1827,13 +1829,13 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
  			switch (param->bindType) {
  				case BIND_NUMBER:
  					/* allocate a new NUMBER */
@@ -902,7 +1000,7 @@ index 469e7b9..8d8b60e 100644
  					/* fill everything with '9' */
  					memset(num_format, '9', value_len);
  					num_format[value_len] = '\0';
-@@ -1955,7 +1962,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
+@@ -1955,7 +1957,7 @@ oracleExecuteQuery(oracleSession *session, const struct oraTable *oraTable, stru
  
  			if (checkerr(
  				OCIBindObject((OCIBind *)param->bindh, session->envp->errhp,
@@ -911,7 +1009,7 @@ index 469e7b9..8d8b60e 100644
  				(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
  			{
  				oracleError_d(FDW_UNABLE_TO_CREATE_EXECUTION,
-@@ -2142,9 +2149,9 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
+@@ -2142,9 +2144,9 @@ oracleGetLob(oracleSession *session, void *locptr, oraType type, char **value, l
  	{
  		/* extend result buffer */
  		if (*value_len == 0)
@@ -923,7 +1021,7 @@ index 469e7b9..8d8b60e 100644
  
  		/*
  		 * The first time round, "amount_* = 0" tells OCILobRead to read the whole LOB.
-@@ -2271,7 +2278,7 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname,
+@@ -2271,7 +2273,7 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname,
  {
  	/* the static variables will contain data returned to the caller */
  	static char s_tabname[129], s_colname[129];
@@ -932,7 +1030,7 @@ index 469e7b9..8d8b60e 100644
  	int count = 0;
  	const char * const schema_query = "SELECT COUNT(*) FROM all_users WHERE username = :nsp";
  	const char * const column_query =
-@@ -2439,7 +2446,7 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname,
+@@ -2439,7 +2441,7 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname,
  
  		if (checkerr(
  			OCIDefineByPos(session->stmthp, &defnhp_typename, session->envp->errhp, (ub4)3,
@@ -941,7 +1039,7 @@ index 469e7b9..8d8b60e 100644
  				SQLT_STR, (dvoid *)&ind_typename,
  				(ub2 *)&len_typename, NULL, OCI_DEFAULT),
  			(dvoid *)session->envp->errhp, OCI_HTYPE_ERROR) != OCI_SUCCESS)
-@@ -2563,53 +2570,53 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname,
+@@ -2563,53 +2565,53 @@ int oracleGetImportColumn(oracleSession *session, char *schema, char **tabname,
  		*nullable = (isnull[0] == 'Y');
  
  		/* figure out correct data type */
@@ -1016,7 +1114,7 @@ index 469e7b9..8d8b60e 100644
  			*type = ORA_TYPE_BINARYDOUBLE;
  		else
  			*type = ORA_TYPE_OTHER;
-@@ -2673,7 +2680,7 @@ char
+@@ -2673,7 +2675,7 @@ char
  	/* if "string" is parenthized, return a copy */
  	if (string[0] == '(' && string[size-1] == ')')
  	{
@@ -1025,7 +1123,7 @@ index 469e7b9..8d8b60e 100644
  		memcpy(result, string, size);
  		result[size] = '\0';
  		return result;
-@@ -2688,7 +2695,7 @@ char
+@@ -2688,7 +2690,7 @@ char
  		}
  	}
  
@@ -1034,7 +1132,43 @@ index 469e7b9..8d8b60e 100644
  	if (quote)
  		result[++j] = '"';
  	for (i=0; i<size; ++i)
-@@ -2933,7 +2940,7 @@ allocHandle(dvoid **handlepp, ub4 type, int isDescriptor, OCIEnv *envhp, struct
+@@ -2718,7 +2720,7 @@ closeSession(OCIEnv *envhp, OCIServer *srvhp, OCISession *userhp, int disconnect
+ 	OCITrans *txnhp = NULL;
+ 
+ 	/* search environment handle in cache */
+-	for (envp = envlist; envp != NULL; envp = envp->next)
++	for (envp = oracleGetConnList(); envp != NULL; envp = envp->next)
+ 	{
+ 		if (envp->envhp == envhp)
+ 			break;
+@@ -2823,7 +2825,7 @@ disconnectServer(OCIEnv *envhp, OCIServer *srvhp)
+ 	struct srvEntry *srvp, *prevsrvp = NULL;
+ 
+ 	/* search environment handle in cache */
+-	for (envp = envlist; envp != NULL; envp = envp->next)
++	for (envp = oracleGetConnList(); envp != NULL; envp = envp->next)
+ 	{
+ 		if (envp->envhp == envhp)
+ 			break;
+@@ -2888,7 +2890,7 @@ removeEnvironment(OCIEnv *envhp)
+ 	struct envEntry *envp, *prevenvp = NULL;
+ 
+ 	/* search environment handle in cache */
+-	for (envp = envlist; envp != NULL; envp = envp->next)
++	for (envp = oracleGetConnList(); envp != NULL; envp = envp->next)
+ 	{
+ 		if (envp->envhp == envhp)
+ 			break;
+@@ -2912,7 +2914,7 @@ removeEnvironment(OCIEnv *envhp)
+ 
+ 	/* remove environment entry from the linked list */
+ 	if (prevenvp == NULL)
+-		envlist = envp->next;
++        oracleSetConnList(envp->next);
+ 	else
+ 		prevenvp->next = envp->next;
+ 
+@@ -2933,7 +2935,7 @@ allocHandle(dvoid **handlepp, ub4 type, int isDescriptor, OCIEnv *envhp, struct
  	sword rc;
  
  	/* create entry for linked list */
