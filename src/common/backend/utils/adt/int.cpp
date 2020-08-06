@@ -893,8 +893,11 @@ Datum int4mod(PG_FUNCTION_ARGS)
     int32 arg1 = PG_GETARG_INT32(0);
     int32 arg2 = PG_GETARG_INT32(1);
     if (unlikely(arg2 == 0)) {
-        /* zero is allowed to be divisor */
-        PG_RETURN_INT32(arg1);
+        /* zero is not allowed to be divisor */
+        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+
+        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+        PG_RETURN_NULL();
     }
 
     /*
@@ -915,8 +918,11 @@ Datum int2mod(PG_FUNCTION_ARGS)
     int16 arg2 = PG_GETARG_INT16(1);
 
     if (unlikely(arg2 == 0)) {
-        /* zero is allowed to be divisor */
-        PG_RETURN_INT16(arg1);
+        /* zero is not allowed to be divisor */
+        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+
+        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+        PG_RETURN_NULL();
     }
 
     /*
@@ -1532,7 +1538,11 @@ Datum int1mod(PG_FUNCTION_ARGS)
     uint8 arg1 = PG_GETARG_UINT8(0);
     uint8 arg2 = PG_GETARG_UINT8(1);
     if (arg2 == 0) {
-        PG_RETURN_UINT8(arg1);
+        /* zero is not allowed to be divisor */
+        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+
+        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+        PG_RETURN_NULL();
     }
     /* No overflow is possible */
     PG_RETURN_UINT8(arg1 % arg2);

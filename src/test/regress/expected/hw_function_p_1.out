@@ -335,19 +335,13 @@ select 4/3;
  */
 --mod zero
 select mod(3,0) from dual;
- mod 
------
-   3
-(1 row)
-
+ERROR:  division by zero
+CONTEXT:  referenced column: mod
  
 --mod(float8,numeric)
 select mod(0.0::float8,0.0::numeric) from dual;
- mod 
------
-   0
-(1 row)
-
+ERROR:  division by zero
+CONTEXT:  referenced column: mod
 select mod(0.0::float8,1234.5678::numeric) from dual;
   mod   
 --------
@@ -355,17 +349,11 @@ select mod(0.0::float8,1234.5678::numeric) from dual;
 (1 row)
 
 select mod(1234.5678::float8,0.0::numeric) from dual;
-    mod    
------------
- 1234.5678
-(1 row)
-
+ERROR:  division by zero
+CONTEXT:  referenced column: mod
 select mod(1234.5678::float8,0.0::numeric) from dual;
-    mod    
------------
- 1234.5678
-(1 row)
-
+ERROR:  division by zero
+CONTEXT:  referenced column: mod
 select mod(11234.5678::float8,9638.5632::numeric) from dual;
     mod    
 -----------
@@ -374,17 +362,11 @@ select mod(11234.5678::float8,9638.5632::numeric) from dual;
 
 --mod(numeric,float8)
 select mod(0.0::numeric,0.0::float8) from dual;
- mod 
------
- 0.0
-(1 row)
-
+ERROR:  division by zero
+CONTEXT:  referenced column: mod
 select mod(1234.5678::numeric,0.0::float8) from dual;
-    mod    
------------
- 1234.5678
-(1 row)
-
+ERROR:  division by zero
+CONTEXT:  referenced column: mod
 select mod(0.0::numeric,1234.5678::float8) from dual;
   mod   
 --------

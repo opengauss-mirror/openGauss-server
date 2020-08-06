@@ -285,7 +285,7 @@ SELECT int1abs(ID) FROM TEST_TINYINT ORDER BY 1;
  255
 (6 rows)
 
-SELECT int1mod(ID,IT) FROM TEST_TINYINT ORDER BY 1;
+SELECT int1mod(ID,IT) FROM TEST_TINYINT WHERE IT != 0 ORDER BY 1;
  int1mod 
 ---------
  0
@@ -293,9 +293,11 @@ SELECT int1mod(ID,IT) FROM TEST_TINYINT ORDER BY 1;
  0
  0
  0
- 50
-(6 rows)
+(5 rows)
 
+SELECT int1mod(ID, 0) FROM TEST_TINYINT ORDER BY 1;
+ERROR:  division by zero
+CONTEXT:  referenced column: int1mod
 	  
 SELECT int1um(ID) FROM TEST_TINYINT ORDER BY 1;
  int1um 
