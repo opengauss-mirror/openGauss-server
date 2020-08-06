@@ -56,6 +56,8 @@ explain (costs off, nodes off) select count(distinct(a)), count(distinct(b)), c,
 select count(distinct(a)), count(distinct(b)), c, d from t_distinct group by c, d order by 3 desc, 4 desc limit 10;
 explain (costs off, nodes off) select count(distinct(a)), count(distinct(b)), count(distinct(c)), d from t_distinct group by d order by 4 desc limit 10;
 select count(distinct(a)), count(distinct(b)), count(distinct(c)), d from t_distinct group by d order by 4 desc limit 10;
+explain (costs off, nodes off) select count(distinct(a)) col1, avg(b) col2, sum(distinct(b)) col3, avg(distinct(c)) col4, count(distinct(a%b)) col5, max(distinct(c not in (5, 6))) col6, d, d is not null, coalesce(d, 5), d<>5 from t_distinct where b<>0 group by d, d is not null, coalesce(d, 5), d<>5 order by d, avg(distinct(c));
+select count(distinct(a)) col1, avg(b) col2, sum(distinct(b)) col3, avg(distinct(c)) col4, count(distinct(a%b)) col5, max(distinct(c not in (5, 6))) col6, d, d is not null, coalesce(d, 5), d<>5 from t_distinct where b<>0 group by d, d is not null, coalesce(d, 5), d<>5 order by d, avg(distinct(c));
 explain (costs off, nodes off) select count(distinct(a)) col1, avg(b) col2, sum(distinct(b)) col3, avg(distinct(c)) col4, count(distinct(a%b)) col5, max(distinct(c not in (5, 6))) col6, d, d is not null, coalesce(d, 5), d<>5 from t_distinct group by d, d is not null, coalesce(d, 5), d<>5 order by d, avg(distinct(c));
 select count(distinct(a)) col1, avg(b) col2, sum(distinct(b)) col3, avg(distinct(c)) col4, count(distinct(a%b)) col5, max(distinct(c not in (5, 6))) col6, d, d is not null, coalesce(d, 5), d<>5 from t_distinct group by d, d is not null, coalesce(d, 5), d<>5 order by d, avg(distinct(c));
 reset enable_hashjoin;

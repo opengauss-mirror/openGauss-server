@@ -2366,13 +2366,16 @@ Datum numeric_mod(PG_FUNCTION_ARGS)
 
     init_var(&result);
 
-    // zero is allowed to be divisor
+    // zero is not allowed to be divisor
     if (0 == cmp_var(&arg2, &const_zero)) {
         free_var(&result);
         free_var(&arg2);
         free_var(&arg1);
 
-        PG_RETURN_NUMERIC(num1);
+        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("division by zero")));
+
+        /* ensure compiler realizes we mustn't reach the division (gcc bug) */
+        PG_RETURN_NULL();
     }
     mod_var(&arg1, &arg2, &result);
 
