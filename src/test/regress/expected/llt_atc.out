@@ -62,15 +62,15 @@ CREATE or replace RULE "_RETURN" AS
     ON SELECT TO llt_make_ruledef_t1
     DO INSTEAD
         SELECT * FROM llt_make_ruledef_t2;
-ERROR:  RULE is not yet supported.
 select pg_get_ruledef(oid, true) from pg_rewrite where rulename='_RETURN' and ev_class in (select oid from pg_class where relname='llt_make_ruledef_t1');
  pg_get_ruledef 
-----------------
-(0 rows)
+--------------------------------------------------------------------------------
+ CREATE RULE "_RETURN" AS                                                      +
+     ON SELECT TO llt_make_ruledef_t1 DO INSTEAD  SELECT llt_make_ruledef_t2.q1+
+    FROM llt_make_ruledef_t2;
+(1 row)
 
 drop view llt_make_ruledef_t1;
-ERROR:  "llt_make_ruledef_t1" is not a view
-HINT:  Use DROP TABLE to remove a table.
 drop table llt_make_ruledef_t2;
 -- add test case for function byteane
 select 'a'::bytea <> 'b'::bytea;

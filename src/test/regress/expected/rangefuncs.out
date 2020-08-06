@@ -786,7 +786,6 @@ select * from tt order by 1, 2;
 create table tt_log(f1 int, data text);
 create rule insert_tt_rule as on insert to tt do also
   insert into tt_log values(new.*);
-ERROR:  RULE is not yet supported.
 select insert_tt2('foollog','barlog') limit 1;
 NOTICE:  noticetrigger <NULL> foollog
 CONTEXT:  SQL function "insert_tt2" statement 1
