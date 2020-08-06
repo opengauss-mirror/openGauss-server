@@ -57,6 +57,7 @@ public:
      * @return The next buffer to write to, or null in case of failure.
      */
     RedoLogBuffer* WriteToLog(RedoLogBuffer* buffer);
+    void Flush();
     SynchronousRedoLogHandler(const SynchronousRedoLogHandler& orig) = delete;
     SynchronousRedoLogHandler& operator=(const SynchronousRedoLogHandler& orig) = delete;
     ~SynchronousRedoLogHandler();

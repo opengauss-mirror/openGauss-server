@@ -123,6 +123,9 @@ public:
     /** Determines the redo log handler type (not configurable, but derived). */
     RedoLogHandlerType m_redoLogHandlerType;
 
+    /** Determines the number of asynchronous redo log buffer arrays. */
+    uint32_t m_asyncRedoLogBufferArrayCount;
+
     /**********************************************************************/
     // Commit configuration
     /**********************************************************************/
@@ -397,6 +400,9 @@ private:
     /** @var Default redo log handler type. */
     static constexpr RedoLogHandlerType DEFAULT_REDO_LOG_HANDLER_TYPE = RedoLogHandlerType::SYNC_REDO_LOG_HANDLER;
 
+    /** @var Default asynchronous redo log buffer array count. */
+    static constexpr uint32_t DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 24;
+
     // default commit configuration
     /** @var Default enable group commit. */
     static constexpr bool DEFAULT_ENABLE_GROUP_COMMIT = false;
@@ -630,9 +636,12 @@ private:
     }
 
     template <typename T>
-    static void UpdateConfigItem(uint32_t& oldValue, T newValue, const char* name)
+    static void UpdateConfigItem(uint32_t& oldValue, T newValue, const char* name,
+        uint32_t lowerBound = 0, uint32_t upperBound = UINT_MAX)
     {
-        if (newValue > UINT_MAX) {
+        if (newValue > upperBound) {
+            MOT_LOG_WARN("Configuration of %s overflowed: keeping default value %u", name, oldValue);
+        } else if (lowerBound > 0 && newValue < lowerBound) {
             MOT_LOG_WARN("Configuration of %s overflowed: keeping default value %u", name, oldValue);
         } else if (oldValue != newValue) {
             MOT_LOG_TRACE("Configuration of %s changed: %u --> %u", name, oldValue, (uint32_t)newValue);

@@ -1343,7 +1343,7 @@ void RecoveryManager::ClearTableCache()
     while (it != m_tableDeletesStat.end()) {
         auto table = *it;
         if (table.second > NUM_DELETE_MAX_INC) {
-            MOT_LOG_INFO("RecoveryManager::ClearTableCache: Table = %s items = %lu\n",
+            MOT_LOG_TRACE("RecoveryManager::ClearTableCache: Table = %s items = %lu\n",
                 table.first->GetTableName().c_str(),
                 table.second);
             table.first->ClearRowCache();

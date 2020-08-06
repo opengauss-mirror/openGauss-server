@@ -69,6 +69,11 @@ public:
     virtual RedoLogBuffer* WriteToLog(RedoLogBuffer* buffer) = 0;
 
     /**
+     * @brief flush all buffers (if exist) to log
+     */
+    virtual void Flush() = 0;
+
+    /**
      * @brief flushes the the log
      */
     virtual void Write()

@@ -26,8 +26,10 @@
 #ifndef ASYNCHRONOUS_REDO_LOG_HANDLER_H
 #define ASYNCHRONOUS_REDO_LOG_HANDLER_H
 
+#include <queue>
 #include "redo_log_handler.h"
 #include "redo_log_buffer_pool.h"
+#include "rw_lock.h"
 
 namespace MOT {
 class TxnManager;
@@ -62,6 +64,8 @@ public:
      */
     RedoLogBuffer* WriteToLog(RedoLogBuffer* buffer);
 
+    void Flush();
+
     /**
      * @brief switches the buffers and flushes the log
      */
@@ -72,16 +76,25 @@ public:
     ~AsyncRedoLogHandler();
 
 private:
-    static constexpr unsigned int WRITE_LOG_WAIT_INTERVAL = 10000;  // micro seconds
-    static constexpr unsigned int WRITE_LOG_BUFFER_COUNT = 3;
+    static constexpr unsigned int WRITE_LOG_WAIT_INTERVAL = 1000;  // micro second
+
     /**
      * @brief free all the RedoLogBuffers in the array and return them to the pool
      */
     void FreeBuffers(RedoLogBufferArray& bufferArray);
+    bool TrySwitchBuffers(int index);
+    void WriteSingleBuffer();
+    void WriteAllBuffers();
 
     RedoLogBufferPool m_bufferPool;
-    RedoLogBufferArray m_tripleBuffer[WRITE_LOG_BUFFER_COUNT];  // 3 buffer arrays for switching in cyclic manner.
-    volatile uint64_t m_activeBuffer;
+    // array of RedoLogBufferArray for switching in cyclic manner.
+    RedoLogBufferArray m_redoLogBufferArrayArray[MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT];
+    uint32_t m_redoLogBufferArrayCount;
+    volatile int m_activeBuffer;
+    bool m_initialized;
+    RwLock m_switchLock;
+    pthread_mutex_t m_writeLock;
+    std::queue<uint32_t> m_writeQueue;
 };
 }  // namespace MOT
 

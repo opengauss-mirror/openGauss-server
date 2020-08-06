@@ -72,6 +72,11 @@ public:
      */
     void Commit(bool isLeader, std::shared_ptr<CommitGroup> groupRef);
 
+    inline bool IsCommitted()
+    {
+        return m_commited;
+    }
+
 private:
     const uint8_t m_handlerId;
     GroupSyncRedoLogHandler* m_handler;

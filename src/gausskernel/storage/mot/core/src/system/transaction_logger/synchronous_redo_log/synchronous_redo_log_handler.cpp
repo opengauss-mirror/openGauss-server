@@ -60,4 +60,7 @@ RedoLogBuffer* SynchronousRedoLogHandler::WriteToLog(RedoLogBuffer* buffer)
     m_logger->FlushLog();
     return buffer;
 }
+
+void SynchronousRedoLogHandler::Flush()
+{}
 }  // namespace MOT

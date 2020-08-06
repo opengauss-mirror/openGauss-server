@@ -335,6 +335,9 @@ void CheckpointManager::MoveToNextPhase()
             // hold the redo log lock to avoid inserting additional entries to the
             // log. Once snapshot is taken, this lock will be released in SnapshotReady().
             m_redoLogHandler->WrLock();
+            // write all buffer entries before taking the LSN position
+            // relevant for asynchronous logging or group commit
+            m_redoLogHandler->Flush();
         }
     }
 

@@ -29,19 +29,42 @@
 #include "global.h"
 #include "utilities.h"
 #include "mot_atomic_ops.h"
+#include "mot_configuration.h"
 
 namespace MOT {
 DECLARE_LOGGER(AsyncRedoLogHandler, redolog)
 
-AsyncRedoLogHandler::AsyncRedoLogHandler() : m_bufferPool(), m_activeBuffer(0)
+AsyncRedoLogHandler::AsyncRedoLogHandler()
+    : m_bufferPool(),
+      m_redoLogBufferArrayCount(GetGlobalConfiguration().m_asyncRedoLogBufferArrayCount),
+      m_activeBuffer(0),
+      m_initialized(false)
 {}
 
 AsyncRedoLogHandler::~AsyncRedoLogHandler()
-{}
+{
+    // wait for all redo log buffers to be written
+    while (!m_writeQueue.empty()) {
+        usleep(WRITE_LOG_WAIT_INTERVAL);
+    }
+    if (m_initialized) {
+        pthread_mutex_destroy(&m_writeLock);
+    }
+    m_initialized = false;
+}
 
 bool AsyncRedoLogHandler::Init()
 {
-    return m_bufferPool.Init();
+    bool result = false;
+    int rc = pthread_mutex_init(&m_writeLock, nullptr);
+    result = (rc == 0);
+    if (result != true) {
+        MOT_LOG_ERROR("Error initializing async redolog handler lock");
+        return result;
+    }
+    result = m_bufferPool.Init();
+    m_initialized = true;
+    return result;
 }
 
 RedoLogBuffer* AsyncRedoLogHandler::CreateBuffer()
@@ -56,16 +79,18 @@ void AsyncRedoLogHandler::DestroyBuffer(RedoLogBuffer* buffer)
 
 RedoLogBuffer* AsyncRedoLogHandler::WriteToLog(RedoLogBuffer* buffer)
 {
-    int position = 0;
+    int position = -1;
     do {
-        uint64_t activeBuffer = MOT_ATOMIC_LOAD(m_activeBuffer) % WRITE_LOG_BUFFER_COUNT;
-        position = m_tripleBuffer[activeBuffer].PushBack(buffer);
-        if (position == MAX_BUFFERS / 2) {
-            WakeupWalWriter();
-        } else if (position == -1) {
-            // async redo log ternary buffer is full, waiting for write thread
-            // to flush the buffer
-            usleep(WRITE_LOG_WAIT_INTERVAL);
+        m_switchLock.RdLock();
+        int activeBuffer = m_activeBuffer;
+        position = m_redoLogBufferArrayArray[m_activeBuffer].PushBack(buffer);
+        m_switchLock.RdUnlock();
+        if (position == -1) {
+            usleep(1000);
+        } else if (position == (int)(MAX_BUFFERS - 1)) {
+            if (TrySwitchBuffers(activeBuffer)) {
+                WriteSingleBuffer();
+            }
         }
     } while (position == -1);
     return CreateBuffer();
@@ -73,28 +98,34 @@ RedoLogBuffer* AsyncRedoLogHandler::WriteToLog(RedoLogBuffer* buffer)
 
 void AsyncRedoLogHandler::Write()
 {
-    // buffer list switch logic:
-    // while writers write to list 0, we increment index to 1 and then write list 2 to log
-    // while writers write to list 1, we increment index to 2 and then write list 0 to log
-    // while writers write to list 2, we increment index to 0 and then write list 1 to log
-    uint64_t currentIndex = MOT_ATOMIC_LOAD(m_activeBuffer);
-    uint64_t nextIndex = (currentIndex + 1) % WRITE_LOG_BUFFER_COUNT;
-    uint64_t prevIndex = (currentIndex + 2) % WRITE_LOG_BUFFER_COUNT;
-
-    // allow writers to start writing to next buffer list
-    MOT_ATOMIC_STORE(m_activeBuffer, nextIndex);
-
-    // in the meantime we write and flush previous list to log
-    // writers might still be writing to current list, but we do not touch it in this cycle
-    RedoLogBufferArray& prevBufferArray = m_tripleBuffer[prevIndex];
-
-    // invoke logger only if something happened, otherwise we just juggle with empty buffer arrays
-    if (!prevBufferArray.Empty()) {
-        m_logger->AddToLog(prevBufferArray);
-        m_logger->FlushLog();
-        FreeBuffers(prevBufferArray);
-        prevBufferArray.Reset();
+    m_switchLock.RdLock();
+    int activeBuffer = m_activeBuffer;
+    m_switchLock.RdUnlock();
+    if (TrySwitchBuffers(activeBuffer)) {
+        WriteSingleBuffer();
     }
+}
+
+bool AsyncRedoLogHandler::TrySwitchBuffers(int index)
+{
+    bool result = false;
+    int nextIndex = (index + 1) % m_redoLogBufferArrayCount;
+    m_switchLock.WrLock();
+    while (index == m_activeBuffer && !m_redoLogBufferArrayArray[index].Empty()) {
+        if (!m_redoLogBufferArrayArray[nextIndex].Empty()) {
+            // the next buffer was not yet written to the log
+            // wait until write complete
+            m_switchLock.WrUnlock();
+            usleep(WRITE_LOG_WAIT_INTERVAL);
+            m_switchLock.WrLock();
+            continue;
+        }
+        m_writeQueue.push(m_activeBuffer);
+        m_activeBuffer = nextIndex;
+        result = true;
+    }
+    m_switchLock.WrUnlock();
+    return result;
 }
 
 void AsyncRedoLogHandler::FreeBuffers(RedoLogBufferArray& bufferArray)
@@ -102,5 +133,54 @@ void AsyncRedoLogHandler::FreeBuffers(RedoLogBufferArray& bufferArray)
     for (uint32_t i = 0; i < bufferArray.Size(); i++) {
         m_bufferPool.Free(bufferArray[i]);
     }
+}
+
+void AsyncRedoLogHandler::WriteSingleBuffer()
+{
+    uint32_t writeBufferIndex;
+    pthread_mutex_lock(&m_writeLock);
+    if (!m_writeQueue.empty()) {
+        writeBufferIndex = m_writeQueue.front();
+        m_writeQueue.pop();
+        RedoLogBufferArray& bufferArray = m_redoLogBufferArrayArray[writeBufferIndex];
+
+        // invoke logger only if something happened, otherwise we just juggle with empty buffer arrays
+        if (!bufferArray.Empty()) {
+            m_logger->AddToLog(bufferArray);
+            m_logger->FlushLog();
+            FreeBuffers(bufferArray);
+            bufferArray.Reset();
+        }
+    }
+    pthread_mutex_unlock(&m_writeLock);
+}
+
+void AsyncRedoLogHandler::WriteAllBuffers()
+{
+    uint32_t writeBufferIndex;
+    pthread_mutex_lock(&m_writeLock);
+    while (!m_writeQueue.empty()) {
+        writeBufferIndex = m_writeQueue.front();
+        m_writeQueue.pop();
+        RedoLogBufferArray& bufferArray = m_redoLogBufferArrayArray[writeBufferIndex];
+
+        // invoke logger only if something happened, otherwise we just juggle with empty buffer arrays
+        if (!bufferArray.Empty()) {
+            m_logger->AddToLog(bufferArray);
+            m_logger->FlushLog();
+            FreeBuffers(bufferArray);
+            bufferArray.Reset();
+        }
+    }
+    pthread_mutex_unlock(&m_writeLock);
+}
+
+void AsyncRedoLogHandler::Flush()
+{
+    m_switchLock.RdLock();
+    int activeBuffer = m_activeBuffer;
+    m_switchLock.RdUnlock();
+    TrySwitchBuffers(activeBuffer);
+    WriteAllBuffers();
 }
 }  // namespace MOT
