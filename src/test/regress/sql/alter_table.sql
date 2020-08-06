@@ -693,6 +693,7 @@ insert into test_modify values(1,1);
 insert into test_modify values(1,null);
 alter table test_modify modify (b constraint ak null);
 insert into test_modify values(1,null);
+alter table test_modify modify (a null, a not null);
 -- try alter view should fail
 create view test_modify_view as select * from test_modify;
 alter table test_modify_view modify (a not null enable);
@@ -1769,6 +1770,7 @@ ALTER TABLE MODIFY_TABLE_A MODIFY (myint1 VARCHAR(12));
 \d MODIFY_TABLE_A
 ALTER TABLE MODIFY_TABLE_A MODIFY (myint1 VARCHAR(13), mychar1 INT);
 \d MODIFY_TABLE_A
+ALTER TABLE MODIFY_TABLE_A MODIFY (myint1 VARCHAR(13), myint1 INT);
 DROP TABLE MODIFY_TABLE_A;
 
 create table test_alter_type(a int,b text);
