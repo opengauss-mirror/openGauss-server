@@ -2635,7 +2635,7 @@ stmt_commit    : K_COMMIT ';'
                         newp->cmd_type = PLPGSQL_STMT_COMMIT;
                         newp->lineno = plpgsql_location_to_lineno(@1);
 
-                        $$ = (PLpgSQL_stmt_commit *)newp;
+                        $$ = (PLpgSQL_stmt *)newp;
                     }
                 ;
 
@@ -2648,7 +2648,7 @@ stmt_rollback	: K_ROLLBACK ';'
                         newp->cmd_type = PLPGSQL_STMT_ROLLBACK;
                         newp->lineno = plpgsql_location_to_lineno(@1);
 
-                        $$ = (PLpgSQL_stmt_rollback *)newp;
+                        $$ = (PLpgSQL_stmt *)newp;
                     }
                 ;
 

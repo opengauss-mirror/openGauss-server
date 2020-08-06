@@ -413,7 +413,7 @@ typedef struct PLpgSQL_stmt_commit {
 typedef struct PLpgSQL_stmt_rollback {
     int cmd_type;
 	int lineno;
-} PLpgSQL_stmt_commit;
+} PLpgSQL_stmt_rollback;
 
 typedef struct { /* Get Diagnostics item		*/
     int kind;    /* id for diagnostic value desired */

@@ -270,7 +270,7 @@ END;
 -- Test COMMIT/ROLLBACK
 -------------------------------------------------------
 CREATE TABLE t_transaction(id INTEGER);
-CREATE OR REPLACE PROCDURE proc_callas_transaction
+CREATE OR REPLACE PROCEDURE proc_callas_transaction
 AS
 BEGIN
     INSERT INTO t_transaction VALUES(1);

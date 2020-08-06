@@ -222,10 +222,10 @@ const char* plpgsql_stmt_typename(PLpgSQL_stmt* stmt)
             return "PERFORM";
         case PLPGSQL_STMT_NULL:
             return "NULL";
-	    case PLPGSQL_STMT_COMMIT:
-			return "COMMIT";
-		case PLPGSQL_STMT_ROLLBACK:
-			return "ROLLBACK";
+        case PLPGSQL_STMT_COMMIT:
+            return "COMMIT";
+        case PLPGSQL_STMT_ROLLBACK:
+            return "ROLLBACK";
         default:
             break;
     }
@@ -376,12 +376,12 @@ static void free_stmt(PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_NULL:
             free_null((PLpgSQL_stmt*)stmt);
             break;
-		case PLPGSQL_STMT_COMMIT:
-			free_commit((PLpgSQL_stmt_commit*)stmt);
-			break;
-		case PLPGSQL_STMT_ROLLBACK:
-			free_rollback((PLpgSQL_stmt_rollback*)stmt);
-			break;
+        case PLPGSQL_STMT_COMMIT:
+            free_commit((PLpgSQL_stmt_commit*)stmt);
+            break;
+        case PLPGSQL_STMT_ROLLBACK:
+            free_rollback((PLpgSQL_stmt_rollback*)stmt);
+            break;
         default:
             ereport(ERROR,
                 (errmodule(MOD_PLSQL),
@@ -798,12 +798,12 @@ static void dump_stmt(PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_NULL:
             dump_null((PLpgSQL_stmt*)stmt);
             break;
-		case PLPGSQL_STMT_COMMIT:
-			dump_commit((PLpgSQL_stmt_commit*)stmt);
-			break;
-		case PLPGSQL_STMT_ROLLBACK:
-			dump_rollback((PLpgSQL_stmt_rollback*)stmt);
-			break;
+        case PLPGSQL_STMT_COMMIT:
+            dump_commit((PLpgSQL_stmt_commit*)stmt);
+            break;
+        case PLPGSQL_STMT_ROLLBACK:
+            dump_rollback((PLpgSQL_stmt_rollback*)stmt);
+            break;
         default:
             ereport(ERROR,
                 (errmodule(MOD_PLSQL),
@@ -1167,13 +1167,13 @@ static void dump_null(PLpgSQL_stmt* stmt)
 static void dump_commit(PLpgSQL_stmt_commit* stmt)
 {
     dump_ind();
-	printf("COMMIT\n");
+    printf("COMMIT\n");
 }
 
 static void dump_rollback(PLpgSQL_stmt_rollback* stmt)
 {
     dump_ind();
-	printf("ROLLBACK\n");
+    printf("ROLLBACK\n");
 }
 
 static void dump_exit(PLpgSQL_stmt_exit* stmt)
