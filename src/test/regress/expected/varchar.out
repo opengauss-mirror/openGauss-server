@@ -108,7 +108,6 @@ SELECT '' AS four, * FROM VARCHAR_TBL ORDER BY f1;
       | abcd
 (4 rows)
 
-
 select char_length(to_char(lpad('abc', 1024 * 1024 *10, 'x')));
  char_length 
 -------------
