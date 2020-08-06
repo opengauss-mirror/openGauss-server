@@ -73,8 +73,8 @@ PARTITION BY RANGE (cre_time) (
   PARTITION P2 VALUES LESS THAN('2019-01-01 00:00:00')
 );
 NOTICE:  CREATE TABLE will create implicit sequence "p_table01_id_seq" for serial column "p_table01.id"
-ERROR:  ON COMMIT option is not supported for partitioned table 
-
+ERROR:  ON COMMIT option is not supported for partitioned table
+ 
 --CREATE global temp TABLE p_table01_2018
 --PARTITION OF p_table01
 --FOR VALUES FROM ('2018-01-01 00:00:00') TO ('2019-01-01 00:00:00') on commit delete rows;
@@ -160,8 +160,21 @@ create global temp table gtt_test_rename(a int primary key, b text);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt_test_rename_pkey" for table "gtt_test_rename"
 --ok
 alter table gtt_test_rename rename to gtt_test_new;
+--ok
+ALTER TABLE gtt_test_new ADD COLUMN address integer;
+--ok
+insert into gtt_test_new values(1, 'hello postgres', 128);
 -- ok
-ALTER TABLE gtt_test_new ADD COLUMN address varchar(30);
+ALTER TABLE gtt_test_new MODIFY (address varchar(1024));
+--ok
+select * from gtt_test_new;
+ a |       b        | address 
+---+----------------+---------
+ 1 | hello postgres | 128
+(1 row)
+
+--ok
+ALTER TABLE gtt_test_new DROP address;
 CREATE global temp TABLE products (
     product_no integer PRIMARY KEY,
     name text,

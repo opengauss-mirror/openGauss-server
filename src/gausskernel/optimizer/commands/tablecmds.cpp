@@ -6272,7 +6272,9 @@ static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode)
     /* Check to see if a toast table must be added. */
     foreach (ltab, *wqueue) {
         AlteredTableInfo* tab = (AlteredTableInfo*)lfirst(ltab);
-
+        if (get_rel_persistence(tab->relid) == RELPERSISTENCE_GLOBAL_TEMP) {
+            gtt_create_storage_files(tab->relid);
+        }
         if (tab->relkind == RELKIND_RELATION)
             AlterTableCreateToastTable(tab->relid, (Datum)0);
     }
@@ -6673,28 +6675,6 @@ static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("cannot rewrite temporary tables of other sessions")));
-
-            if (RELATION_IS_GLOBAL_TEMP(OldHeap)) {
-                /* gtt may not attached, create it */
-                if (!gtt_storage_attached(tab->relid)) {
-                    ResultRelInfo *resultRelInfo;
-                    MemoryContext oldcontext;
-                    MemoryContext ctx_alter_gtt;
-                    ctx_alter_gtt =
-                        AllocSetContextCreate(CurrentMemoryContext, "gtt alter table", ALLOCSET_DEFAULT_SIZES);
-                    oldcontext = MemoryContextSwitchTo(ctx_alter_gtt);
-                    resultRelInfo = makeNode(ResultRelInfo);
-                    InitResultRelInfo(resultRelInfo, OldHeap, 1, 0);
-                    if (resultRelInfo->ri_RelationDesc->rd_rel->relhasindex &&
-                        resultRelInfo->ri_IndexRelationDescs == NULL)
-                        ExecOpenIndices(resultRelInfo);
-
-                    init_gtt_storage(CMD_UTILITY, resultRelInfo);
-                    ExecCloseIndices(resultRelInfo);
-                    (void)MemoryContextSwitchTo(oldcontext);
-                    MemoryContextDelete(ctx_alter_gtt);
-                }
-            }
 
             /*
              * Select destination tablespace (same as original unless user
@@ -20247,7 +20227,10 @@ static void ExecRewriteRowTable(AlteredTableInfo* tab, Oid NewTableSpace, LOCKMO
     ATRewriteTable(tab, oldRel, newRel);
     heap_close(oldRel, NoLock);
     heap_close(newRel, NoLock);
-
+    bool swapToastByContent = false;
+    if (RELATION_IS_GLOBAL_TEMP(oldRel)) {
+        swapToastByContent = true;
+    }
     /*
      * Swap the physical files of the old and new heaps, then rebuild
      * indexes and discard the old heap.  We can use RecentXmin for
@@ -20256,7 +20239,7 @@ static void ExecRewriteRowTable(AlteredTableInfo* tab, Oid NewTableSpace, LOCKMO
      * we never try to swap toast tables by content, since we have no
      * interest in letting this code work on system catalogs.
      */
-    finish_heap_swap(tab->relid, OIDNewHeap, false, false, true, u_sess->utils_cxt.RecentXmin);
+    finish_heap_swap(tab->relid, OIDNewHeap, false, swapToastByContent, true, u_sess->utils_cxt.RecentXmin);
 
     /* clear all attrinitdefval */
     clearAttrInitDefVal(tab->relid);

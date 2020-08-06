@@ -142,8 +142,7 @@ static Datum pgxc_parallel_execution(const char* query, ExecNodes* exec_nodes);
 static int switch_relfilenode_execnode(Oid relOid1, Oid relOid2, bool isbucket, RedisSwitchNode* rsn);
 #endif
 static void swapRelationIndicesRelfileNode(Relation rel1, Relation rel2, bool swapBucket);
-static void GttSwapRelationFiles(Oid r1, Oid r2, bool targetIsPgClass, bool swapToastByContent,
-    TransactionId frozenXid, Oid *mappedTables);
+static void GttSwapRelationFiles(Oid r1, Oid r2);
 
 /* ---------------------------------------------------------------------------
  * This cluster code allows for clustering multiple tables at once. Because
@@ -698,7 +697,6 @@ static void rebuild_relation(
     Oid tableOid = RelationGetRelid(OldHeap);
     Oid tableSpace = OldHeap->rd_rel->reltablespace;
     Oid OIDNewHeap;
-    char relpersistence;
     bool is_system_catalog = false;
     bool swap_toast_by_content = false;
     TransactionId frozenXid;
@@ -710,7 +708,6 @@ static void rebuild_relation(
         mark_index_clustered(OldHeap, indexOid);
 
     /* Remember if it's a system catalog */
-    relpersistence = OldHeap->rd_rel->relpersistence;
     is_system_catalog = IsSystemRelation(OldHeap);
 
     /* Close relcache entry, but keep lock until transaction commit */
@@ -744,8 +741,7 @@ static void rebuild_relation(
      * Swap the physical files of the target and transient tables, then
      * rebuild the target's indexes and throw away the transient table.
      */
-    finish_heap_swap(
-        tableOid, OIDNewHeap, is_system_catalog, swap_toast_by_content, false, frozenXid, memUsage, relpersistence);
+    finish_heap_swap(tableOid, OIDNewHeap, is_system_catalog, swap_toast_by_content, false, frozenXid, memUsage);
 
     /* report vacuum full stat to PgStatCollector */
     pgstat_report_vacuum(tableOid, InvalidOid, is_shared, deleteTupleNum);
@@ -2790,7 +2786,7 @@ static void SwapCStoreTables(Oid relId1, Oid relId2, Oid parentOid, Oid tempTabl
  * cleaning up (including rebuilding all indexes on the old heap).
  */
 void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bool swap_toast_by_content,
-    bool checkConstraints, TransactionId frozenXid, AdaptMem* memInfo, char newrelpersistence)
+    bool checkConstraints, TransactionId frozenXid, AdaptMem* memInfo)
 {
     ObjectAddress object;
     Oid mapped_tables[4];
@@ -2806,10 +2802,9 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
      * Swap the contents of the heap relations (including any toast tables).
      * Also set old heap's relfrozenxid to frozenXid.
      */
-    if (newrelpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+    if (get_rel_persistence(OIDOldHeap) == RELPERSISTENCE_GLOBAL_TEMP) {
         Assert(!is_system_catalog);
-        GttSwapRelationFiles(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId),
-            swap_toast_by_content, frozenXid, mapped_tables);
+        GttSwapRelationFiles(OIDOldHeap, OIDNewHeap);
     } else {
         swap_relation_files(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId), 
             swap_toast_by_content, frozenXid, mapped_tables);
@@ -2997,16 +2992,12 @@ static List* get_tables_to_cluster(MemoryContext cluster_context)
     return rvs;
 }
 
-static void GttSwapRelationFiles(Oid r1, Oid r2, bool targetIsPgClass, bool swapToastByContent,
-    TransactionId frozenXid, Oid *mappedTables)
+static void GttSwapRelationFiles(Oid r1, Oid r2)
 {
-    Relation    relRelation;
-    Oid         relfilenode1,
-                relfilenode2;
+    Oid         relfilenode1;
+    Oid         relfilenode2;
     Relation    rel1;
     Relation    rel2;
-
-    relRelation = relation_open(RelationRelationId, RowExclusiveLock);
 
     rel1 = relation_open(r1, AccessExclusiveLock);
     rel2 = relation_open(r2, AccessExclusiveLock);
@@ -3020,81 +3011,16 @@ static void GttSwapRelationFiles(Oid r1, Oid r2, bool targetIsPgClass, bool swap
     CacheInvalidateRelcache(rel1);
     CacheInvalidateRelcache(rel2);
 
-    if (rel1->rd_rel->reltoastrelid || rel2->rd_rel->reltoastrelid) {
-        if (swapToastByContent) {
-            if (rel1->rd_rel->reltoastrelid && rel2->rd_rel->reltoastrelid) {
-                GttSwapRelationFiles(rel1->rd_rel->reltoastrelid,
-                    rel2->rd_rel->reltoastrelid,
-                    targetIsPgClass,
-                    swapToastByContent,
-                    frozenXid,
-                    mappedTables);
-            } else {
-                elog(ERROR, "cannot swap toast files by content when there's only one");
-            }
-        } else {
-            ObjectAddress baseobject,
-                        toastobject;
-            long        count;
-
-            if (IsSystemRelation(rel1)) {
-                elog(ERROR, "cannot swap toast files by links for system catalogs");
-            }
-
-            if (rel1->rd_rel->reltoastrelid) {
-                count = deleteDependencyRecordsFor(RelationRelationId,
-                                                   rel1->rd_rel->reltoastrelid,
-                                                   false);
-                if (count != 1) {
-                    elog(ERROR, "expected one dependency record for TOAST table, found %ld",
-                         count);
-                }
-            }
-            if (rel2->rd_rel->reltoastrelid) {
-                count = deleteDependencyRecordsFor(RelationRelationId,
-                                                   rel2->rd_rel->reltoastrelid,
-                                                   false);
-                if (count != 1) {
-                    elog(ERROR, "expected one dependency record for TOAST table, found %ld",
-                         count);
-                }
-            }
-
-            /* Register new dependencies */
-            baseobject.classId = RelationRelationId;
-            baseobject.objectSubId = 0;
-            toastobject.classId = RelationRelationId;
-            toastobject.objectSubId = 0;
-
-            if (rel1->rd_rel->reltoastrelid) {
-                baseobject.objectId = r1;
-                toastobject.objectId = rel1->rd_rel->reltoastrelid;
-                recordDependencyOn(&toastobject, &baseobject,
-                                   DEPENDENCY_INTERNAL);
-            }
-
-            if (rel2->rd_rel->reltoastrelid) {
-                baseobject.objectId = r2;
-                toastobject.objectId = rel2->rd_rel->reltoastrelid;
-                recordDependencyOn(&toastobject, &baseobject, DEPENDENCY_INTERNAL);
-            }
-        }
+    if (rel1->rd_rel->reltoastrelid && rel2->rd_rel->reltoastrelid) {
+        GttSwapRelationFiles(rel1->rd_rel->reltoastrelid, rel2->rd_rel->reltoastrelid);
     }
 
-    if (swapToastByContent && rel1->rd_rel->relkind == RELKIND_TOASTVALUE &&
-        rel2->rd_rel->relkind == RELKIND_TOASTVALUE) {
-        GttSwapRelationFiles(rel1->rd_rel->reltoastidxid,
-            rel2->rd_rel->reltoastidxid,
-            targetIsPgClass,
-            swapToastByContent,
-            InvalidTransactionId,
-            mappedTables);
+    if (rel1->rd_rel->relkind == RELKIND_TOASTVALUE && rel2->rd_rel->relkind == RELKIND_TOASTVALUE) {
+        GttSwapRelationFiles(rel1->rd_rel->reltoastidxid, rel2->rd_rel->reltoastidxid);
     }
 
     relation_close(rel1, NoLock);
     relation_close(rel2, NoLock);
-
-    relation_close(relRelation, RowExclusiveLock);
 
     RelationCloseSmgrByOid(r1);
     RelationCloseSmgrByOid(r2);

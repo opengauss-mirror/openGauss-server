@@ -43,5 +43,5 @@ extern void gtt_fix_index_state(Relation index);
 extern void init_gtt_storage(CmdType operation, ResultRelInfo *resultRelInfo);
 extern Oid gtt_fetch_current_relfilenode(Oid relid);
 extern void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfilenode2, bool footprint);
-
+extern void gtt_create_storage_files(Oid relid);
 #endif  /* STORAGE_GTT_H */
