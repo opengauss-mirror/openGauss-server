@@ -263,6 +263,7 @@ static	List			*read_raise_options(void);
 %type <stmt>	stmt_return stmt_raise stmt_execsql
 %type <stmt>	stmt_dynexecute stmt_for stmt_perform stmt_getdiag
 %type <stmt>	stmt_open stmt_fetch stmt_move stmt_close stmt_null
+%type <stmt>	stmt_commit stmt_rollback
 %type <stmt>	stmt_case stmt_foreach_a
 
 %type <list>	proc_exceptions
@@ -338,6 +339,7 @@ static	List			*read_raise_options(void);
 %token <keyword>	K_CASE
 %token <keyword>	K_CLOSE
 %token <keyword>	K_COLLATE
+%token <keyword>	K_COMMIT
 %token <keyword>	K_CONSTANT
 %token <keyword>	K_CONTINUE
 %token <keyword>	K_CURRENT
@@ -405,6 +407,7 @@ static	List			*read_raise_options(void);
 %token <keyword>	K_RETURN
 %token <keyword>	K_RETURNED_SQLSTATE
 %token <keyword>	K_REVERSE
+%token <keyword>	K_ROLLBACK
 %token <keyword>	K_ROWTYPE
 %token <keyword>	K_ROW_COUNT
 %token <keyword>	K_SAVEPOINT
@@ -1078,6 +1081,10 @@ label_stmt		: stmt_assign
                 | stmt_close
                         { $$ = $1; }
                 | stmt_null
+                        { $$ = $1; }
+                | stmt_commit
+                        { $$ = $1; }
+                | stmt_rollback
                         { $$ = $1; }
                 ;
 
@@ -2619,6 +2626,32 @@ stmt_null		: K_NULL ';'
                     }
                 ;
 
+stmt_commit    : K_COMMIT ';'
+                    {
+                        /* We do building a node for NULL for GOTO */
+                        PLpgSQL_stmt_commit *newp;
+
+                        newp = (PLpgSQL_stmt_commit *)palloc(sizeof(PLpgSQL_stmt_commit));
+                        newp->cmd_type = PLPGSQL_STMT_COMMIT;
+                        newp->lineno = plpgsql_location_to_lineno(@1);
+
+                        $$ = (PLpgSQL_stmt_commit *)newp;
+                    }
+                ;
+
+stmt_rollback	: K_ROLLBACK ';'
+                    {
+                        /* We do building a node for NULL for GOTO */
+                        PLpgSQL_stmt_rollback *newp;
+
+                        newp = (PLpgSQL_stmt_rollback *)palloc(sizeof(PLpgSQL_stmt_rollback));
+                        newp->cmd_type = PLPGSQL_STMT_ROLLBACK;
+                        newp->lineno = plpgsql_location_to_lineno(@1);
+
+                        $$ = (PLpgSQL_stmt_rollback *)newp;
+                    }
+                ;
+
 cursor_variable	: T_DATUM
                     {
                         if ($1.datum->dtype != PLPGSQL_DTYPE_VAR)
@@ -2896,6 +2929,7 @@ unreserved_keyword	:
                 | K_BACKWARD
                 | K_CONSTANT
                 | K_CONTINUE
+                | K_COMMIT
                 | K_CURRENT
                 | K_DEBUG
                 | K_DETAIL
@@ -2926,6 +2960,7 @@ unreserved_keyword	:
                 | K_RESULT_OID
                 | K_RETURNED_SQLSTATE
                 | K_REVERSE
+                | K_ROLLBACK
                 | K_ROW_COUNT
                 | K_ROWTYPE
                 | K_SCROLL

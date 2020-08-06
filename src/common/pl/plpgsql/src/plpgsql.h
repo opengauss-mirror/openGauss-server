@@ -116,7 +116,9 @@ enum PLpgSQL_stmt_types {
     PLPGSQL_STMT_FETCH,
     PLPGSQL_STMT_CLOSE,
     PLPGSQL_STMT_PERFORM,
-    PLPGSQL_STMT_NULL
+    PLPGSQL_STMT_NULL,
+    PLPGSQL_STMT_COMMIT,
+    PLPGSQL_STMT_ROLLBACK
 };
 
 /* ----------
@@ -398,6 +400,23 @@ typedef struct { /* PERFORM statement		*/
     int lineno;
     PLpgSQL_expr* expr;
 } PLpgSQL_stmt_perform;
+
+/*
+ * COMMIT statement
+ */
+typedef struct PLpgSQL_stmt_commit {
+    int cmd_type;
+	int lineno;
+} PLpgSQL_stmt_commit;
+
+/*
+ * ROLLBACK statement
+ */
+typedef struct PLpgSQL_stmt_rollback {
+    int cmd_type;
+	int lineno;
+} PLpgSQL_stmt_rollback;
+
 
 typedef struct { /* Get Diagnostics item		*/
     int kind;    /* id for diagnostic value desired */

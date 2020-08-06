@@ -122,6 +122,8 @@ static int exec_stmt_return_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_return
 static int exec_stmt_raise(PLpgSQL_execstate* estate, PLpgSQL_stmt_raise* stmt);
 static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* stmt);
 static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecute* stmt);
+static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt);
+static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* stmt);
 static int exchange_parameters(
     PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecute* dynstmt, List* stmts, int* ppdindex, int* datumindex);
 static bool is_anonymous_block(const char* query);
@@ -2000,6 +2002,14 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
 
         case PLPGSQL_STMT_NULL:
             rc = exec_stmt_null(estate, (PLpgSQL_stmt*)stmt);
+            break;
+
+        case PLPGSQL_STMT_COMMIT:
+            rc = exec_stmt_commit(estate, (PLpgSQL_stmt_commit*)stmt);
+            break;
+
+        case PLPGSQL_STMT_ROLLBACK:
+            rc = exec_stmt_rollback(estate, (PLpgSQL_stmt_rollback*)stmt);
             break;
 
         default:
@@ -4875,6 +4885,26 @@ static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
 {
     Assert(estate && stmt->lineno >= 0);
 
+    return PLPGSQL_RC_OK;
+}
+
+/*
+ * exec_stmt_commit
+ *
+ * Commit the transaction.
+ */
+static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt)
+{
+    return PLPGSQL_RC_OK;
+}
+
+/*
+ * exec_stmt_rollback
+ *
+ * Abort the transaction.
+ */
+static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* stmt)
+{
     return PLPGSQL_RC_OK;
 }
 
