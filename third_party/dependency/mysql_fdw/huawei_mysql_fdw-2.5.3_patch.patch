@@ -41,7 +41,7 @@ index d5e7b362..34667e12 100644
  endif
  
 diff --git connection.cpp connection.cpp
-index a517a738..3fc2f201 100644
+index a517a738..51554000 100644
 --- connection.cpp
 +++ connection.cpp
 @@ -24,6 +24,7 @@
@@ -52,59 +52,111 @@ index a517a738..3fc2f201 100644
  
  /* Length of host */
  #define HOST_LEN 256
-@@ -53,10 +54,15 @@ typedef struct ConnCacheEntry
- /*
-  * Connection cache (initialized on first use)
-  */
+@@ -50,10 +51,11 @@ typedef struct ConnCacheEntry
+ 	uint32		mapping_hashvalue;  /* hash value of user mapping OID */
+ } ConnCacheEntry;
+ 
+-/*
+- * Connection cache (initialized on first use)
+- */
 -static HTAB *ConnectionHash = NULL;
-+static THR_LOCAL HTAB *ConnectionHash = NULL;
- 
- static void mysql_inval_callback(Datum arg, int cacheid, uint32 hashvalue);
- 
 +static void
 +mysql_fdw_exit(int code, Datum arg)
 +{
 +	mysql_cleanup_connection();
 +}
- /*
-  * mysql_get_connection:
-  * 			Get a connection which can be used to execute queries on
-@@ -80,7 +86,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+ 
+ static void mysql_inval_callback(Datum arg, int cacheid, uint32 hashvalue);
+ 
+@@ -71,7 +73,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+ 	ConnCacheKey key;
+ 
+ 	/* First time through, initialize connection cache hashtable */
+-	if (ConnectionHash == NULL)
++	if (u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
+ 	{
+ 		HASHCTL	ctl;
+ 		MemSet(&ctl, 0, sizeof(ctl));
+@@ -80,8 +82,8 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
  		ctl.hash = tag_hash;
  
  		/* allocate ConnectionHash in the cache context */
 -		ctl.hcxt = CacheMemoryContext;
+-		ConnectionHash = hash_create("mysql_fdw connections", 8,
 +		ctl.hcxt = u_sess->cache_mem_cxt;
- 		ConnectionHash = hash_create("mysql_fdw connections", 8,
++		u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList = hash_create("mysql_fdw connections", 8,
  									&ctl,
  									HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-@@ -93,6 +99,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+ 
+@@ -93,6 +95,14 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
  									  mysql_inval_callback, (Datum) 0);
  		CacheRegisterSyscacheCallback(USERMAPPINGOID,
  									  mysql_inval_callback, (Datum) 0);
-+		on_proc_exit(&mysql_fdw_exit, PointerGetDatum(NULL));
++		if (IS_THREAD_POOL_SESSION)
++		{
++			u_sess->fdw_ctx[MYSQL_TYPE_FDW].fdwExitFunc = mysql_fdw_exit;
++		}
++		else
++		{
++			on_proc_exit(mysql_fdw_exit, 0);
++		}
  	}
  
  	/* Create hash key for the entry.  Assume no pad bytes in key struct */
-@@ -102,7 +109,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
+@@ -102,7 +112,7 @@ mysql_get_connection(ForeignServer *server, UserMapping *user, mysql_opt *opt)
  	/*
  	 * Find or create cached entry for requested connection.
  	 */
 -	entry = hash_search(ConnectionHash, &key, HASH_ENTER, &found);
-+	entry = (ConnCacheEntry*)hash_search(ConnectionHash, &key, HASH_ENTER, &found);
++	entry = (ConnCacheEntry*)hash_search((HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList, &key, HASH_ENTER, &found);
  	if (!found)
  	{
  		/* initialize new hashtable entry (key is already filled in) */
-@@ -196,6 +203,9 @@ mysql_cleanup_connection(void)
+@@ -183,10 +193,10 @@ mysql_cleanup_connection(void)
+ 	HASH_SEQ_STATUS	scan;
+ 	ConnCacheEntry *entry;
+ 
+-	if (ConnectionHash == NULL)
++	if (u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
+ 		return;
+ 
+-	hash_seq_init(&scan, ConnectionHash);
++	hash_seq_init(&scan, (HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList);
+ 	while ((entry = (ConnCacheEntry *) hash_seq_search(&scan)))
+ 	{
+ 		if (entry->conn == NULL)
+@@ -196,6 +206,9 @@ mysql_cleanup_connection(void)
  		_mysql_close(entry->conn);
  		entry->conn = NULL;
  	}
 +	/* clean-up memory */
-+	hash_destroy(ConnectionHash);
-+	ConnectionHash = NULL;
++	hash_destroy((HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList);
++	u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList = NULL;
  }
  
  /*
+@@ -207,10 +220,10 @@ mysql_rel_connection(MYSQL *conn)
+ 	HASH_SEQ_STATUS	scan;
+ 	ConnCacheEntry *entry;
+ 
+-	if (ConnectionHash == NULL)
++	if (u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
+ 		return;
+ 
+-	hash_seq_init(&scan, ConnectionHash);
++	hash_seq_init(&scan, (HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList);
+ 	while ((entry = (ConnCacheEntry *) hash_seq_search(&scan)))
+ 	{
+ 		if (entry->conn == NULL)
+@@ -306,7 +319,7 @@ mysql_inval_callback(Datum arg, int cacheid, uint32 hashvalue)
+ 	Assert(cacheid == FOREIGNSERVEROID || cacheid == USERMAPPINGOID);
+ 
+ 	/* ConnectionHash must exist already, if we're registered */
+-	hash_seq_init(&scan, ConnectionHash);
++	hash_seq_init(&scan, (HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList);
+ 	while ((entry = (ConnCacheEntry *) hash_seq_search(&scan)))
+ 	{
+ 		/* Ignore invalid entries */
 diff --git deparse.cpp deparse.cpp
 index a75c2705..94b1799c 100644
 --- deparse.cpp

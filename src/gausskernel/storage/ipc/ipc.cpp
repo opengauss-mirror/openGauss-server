@@ -441,6 +441,13 @@ void sess_exit_prepare(int code)
         (*func)(code, UInt32GetDatum(NULL));
     }
 
+    /* FDW exit callback, used to free connections to other server, check FDW code for detail. */
+    for (int i = 0; i < MAX_TYPE_FDW; i++) {
+        if (u_sess->fdw_ctx[i].fdwExitFunc != NULL) {
+            (u_sess->fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
+        }
+    }
+
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++)
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
 

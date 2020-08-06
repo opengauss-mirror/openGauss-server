@@ -2014,6 +2014,19 @@ typedef struct knl_u_gtt_context {
     pg_on_exit_callback gtt_sess_exit;
 } knl_u_gtt_context;
 
+enum knl_fdw_type {
+    MYSQL_TYPE_FDW,
+    ORACLE_TYPE_FDW,
+    POSTGRES_TYPE_FDW,
+    /* Add new FDW type before MAX_TYPE_FDW */
+    MAX_TYPE_FDW
+};
+
+typedef struct knl_u_fdw_context {
+    void* connList;
+    pg_on_exit_callback fdwExitFunc;
+} knl_u_fdw_context;
+
 enum knl_session_status {
     KNL_SESS_FAKE,
     KNL_SESS_UNINIT,
@@ -2106,6 +2119,9 @@ typedef struct knl_session_context {
 
     /* GTT */
     knl_u_gtt_context gtt_ctx;
+
+    /* FDW */
+    knl_u_fdw_context fdw_ctx[MAX_TYPE_FDW];
 } knl_session_context;
 
 extern knl_session_context* create_session_context(MemoryContext parent, uint64 id);
