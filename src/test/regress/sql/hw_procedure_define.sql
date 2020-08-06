@@ -267,6 +267,20 @@ END;
 --CREATE USER  USER2 PASSWORD 'ttest@123';
 
 -------------------------------------------------------
+-- Test COMMIT/ROLLBACK
+-------------------------------------------------------
+CREATE TABLE t_transaction(id INTEGER);
+CREATE OR REPLACE PROCEDURE proc_callas_transaction
+AS
+BEGIN
+    INSERT INTO t_transaction VALUES(1);
+    COMMIT;
+    INSERT INTO t_transaction VALUES(10);
+    ROLLBACK;
+END;
+/
+CALL proc_callas_transaction();
+-------------------------------------------------------
 -- Clean up Test envirment
 -------------------------------------------------------
 DROP PROCEDURE proc_def_arg;
@@ -274,7 +288,9 @@ DROP FUNCTION func_def_arg;
 DROP PROCEDURE test_multi_level;
 DROP PROCEDURE proc_callas_definer;
 DROP PROCEDURE proc_callas_curr_user;
+DROP PROCEDURE proc_callas_transaction;
 DROP TABLE t_priv;
+DROP TABLE t_transaction;
 
 
 create or replace procedure test_blank (a int)

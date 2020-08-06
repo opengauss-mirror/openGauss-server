@@ -222,6 +222,10 @@ const char* plpgsql_stmt_typename(PLpgSQL_stmt* stmt)
             return "PERFORM";
         case PLPGSQL_STMT_NULL:
             return "NULL";
+        case PLPGSQL_STMT_COMMIT:
+            return "COMMIT";
+        case PLPGSQL_STMT_ROLLBACK:
+            return "ROLLBACK";
         default:
             break;
     }
@@ -291,6 +295,8 @@ static void free_fetch(PLpgSQL_stmt_fetch* stmt);
 static void free_close(PLpgSQL_stmt_close* stmt);
 static void free_null(PLpgSQL_stmt* stmt);
 static void free_perform(PLpgSQL_stmt_perform* stmt);
+static void free_commit(PLpgSQL_stmt_commit* stmt);
+static void free_rollback(PLpgSQL_stmt_rollback* stmt);
 
 static void free_stmt(PLpgSQL_stmt* stmt)
 {
@@ -369,6 +375,12 @@ static void free_stmt(PLpgSQL_stmt* stmt)
             break;
         case PLPGSQL_STMT_NULL:
             free_null((PLpgSQL_stmt*)stmt);
+            break;
+        case PLPGSQL_STMT_COMMIT:
+            free_commit((PLpgSQL_stmt_commit*)stmt);
+            break;
+        case PLPGSQL_STMT_ROLLBACK:
+            free_rollback((PLpgSQL_stmt_rollback*)stmt);
             break;
         default:
             ereport(ERROR,
@@ -509,6 +521,13 @@ static void free_perform(PLpgSQL_stmt_perform* stmt)
     free_expr(stmt->expr);
 }
 
+static void free_commit(PLpgSQL_stmt_commit* stmt)
+{
+}
+
+static void free_rollback(PLpgSQL_stmt_rollback* stmt)
+{
+}
 static void free_exit(PLpgSQL_stmt_exit* stmt)
 {
     free_expr(stmt->cond);
@@ -687,6 +706,8 @@ static void dump_cursor_direction(PLpgSQL_stmt_fetch* stmt);
 static void dump_close(PLpgSQL_stmt_close* stmt);
 static void dump_perform(PLpgSQL_stmt_perform* stmt);
 static void dump_null(PLpgSQL_stmt* stmt);
+static void dump_commit(PLpgSQL_stmt_commit* stmt);
+static void dump_rollback(PLpgSQL_stmt_rollback* stmt);
 static void dump_expr(PLpgSQL_expr* expr);
 
 static void dump_ind(void)
@@ -776,6 +797,12 @@ static void dump_stmt(PLpgSQL_stmt* stmt)
             break;
         case PLPGSQL_STMT_NULL:
             dump_null((PLpgSQL_stmt*)stmt);
+            break;
+        case PLPGSQL_STMT_COMMIT:
+            dump_commit((PLpgSQL_stmt_commit*)stmt);
+            break;
+        case PLPGSQL_STMT_ROLLBACK:
+            dump_rollback((PLpgSQL_stmt_rollback*)stmt);
             break;
         default:
             ereport(ERROR,
@@ -1135,6 +1162,18 @@ static void dump_null(PLpgSQL_stmt* stmt)
 {
     dump_ind();
     printf("NULL\n");
+}
+
+static void dump_commit(PLpgSQL_stmt_commit* stmt)
+{
+    dump_ind();
+    printf("COMMIT\n");
+}
+
+static void dump_rollback(PLpgSQL_stmt_rollback* stmt)
+{
+    dump_ind();
+    printf("ROLLBACK\n");
 }
 
 static void dump_exit(PLpgSQL_stmt_exit* stmt)
