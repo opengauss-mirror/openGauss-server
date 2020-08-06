@@ -39,6 +39,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
+#include "catalog/storage_gtt.h"
 #include "commands/cluster.h"
 #include "commands/tablespace.h"
 #include "commands/vacuum.h"
@@ -975,6 +976,16 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
     bool isNull = false;
     TransactionId relfrozenxid;
     Datum xid64datum;
+    bool isGtt = false;
+
+    /* global temp table remember relstats to localhash and rel->rd_rel, not catalog */
+    if (RELATION_IS_GLOBAL_TEMP(relation)) {
+        isGtt = true;
+        up_gtt_relstats(relation,
+                        static_cast<unsigned int>(num_pages), num_tuples,
+                        num_all_visible_pages,
+                        frozenxid);
+    }
 
     /* Fetch a copy of the tuple to scribble on */
     ctup = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
@@ -989,17 +1000,23 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
     // frozenxid == BootstrapTransactionId means it was invoked by execRemote.cpp:ReceivePageAndTuple()
     if (IS_PGXC_DATANODE || (frozenxid == BootstrapTransactionId) || IsSystemRelation(relation)) {
 #endif
-        if (pgcform->relpages - num_pages != 0) {
-            pgcform->relpages = num_pages;
-            dirty = true;
-        }
-        if (pgcform->reltuples - num_tuples != 0) {
-            pgcform->reltuples = num_tuples;
-            dirty = true;
-        }
-        if (pgcform->relallvisible != (int32)num_all_visible_pages) {
-            pgcform->relallvisible = (int32)num_all_visible_pages;
-            dirty = true;
+        if (isGtt) {
+            relation->rd_rel->relpages = (int32) num_pages;
+            relation->rd_rel->reltuples = (float4) num_tuples;
+            relation->rd_rel->relallvisible = (int32) num_all_visible_pages;
+        } else {
+            if (pgcform->relpages - num_pages != 0) {
+                pgcform->relpages = num_pages;
+                dirty = true;
+            }
+            if (pgcform->reltuples - num_tuples != 0) {
+                pgcform->reltuples = num_tuples;
+                dirty = true;
+            }
+            if (pgcform->relallvisible != (int32)num_all_visible_pages) {
+                pgcform->relallvisible = (int32)num_all_visible_pages;
+                dirty = true;
+            }
         }
 #ifdef PGXC
     }
@@ -1144,6 +1161,11 @@ void vac_update_datfrozenxid(void)
         if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_TOASTVALUE)
             continue;
 
+        /* global temp table relstats not in pg_class */
+        if (classForm->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+            continue;
+        }
+
         xid64datum = heap_getattr(classTup, Anum_pg_class_relfrozenxid64, RelationGetDescr(relation), &isNull);
 
         if (isNull) {
@@ -1198,6 +1220,42 @@ void vac_update_datfrozenxid(void)
     }
 
     Assert(TransactionIdIsNormal(newFrozenXid));
+    /*
+    * Global temp table get frozenxid from MyProc
+    * to avoid the vacuum truncate clog that gtt need.
+    */
+    if (u_sess->attr.attr_storage.max_active_gtt > 0) {
+        TransactionId safeAge;
+        TransactionId oldestGttFrozenxid = ENABLE_THREAD_POOL ? 
+                                            ListAllSessionGttFrozenxids(0, NULL, NULL, NULL) :
+                                            ListAllThreadGttFrozenxids(0, NULL, NULL, NULL);
+
+        if (TransactionIdIsNormal(oldestGttFrozenxid)) {
+            safeAge =
+                oldestGttFrozenxid + static_cast<TransactionId>(u_sess->attr.attr_storage.vacuum_gtt_defer_check_age);
+            if (safeAge < FirstNormalTransactionId) {
+                safeAge += FirstNormalTransactionId;
+            }
+
+            /*
+            * We tolerate that the minimum age of gtt is less than
+            * the minimum age of conventional tables, otherwise it will
+            * throw warning message.
+            */
+            if (TransactionIdIsNormal(safeAge) &&
+                TransactionIdPrecedes(safeAge, newFrozenXid)) {
+                ereport(WARNING, 
+                    (errmsg(
+                        "global temp table oldest relfrozenxid %lu is the oldest in the entire db", oldestGttFrozenxid),
+                     errdetail("The oldest relfrozenxid in pg_class is %lu", newFrozenXid),
+                     errhint("If they differ greatly, please consider cleaning up the data in global temp table.")));
+            }
+
+            if (TransactionIdPrecedes(oldestGttFrozenxid, newFrozenXid)) {
+                newFrozenXid = oldestGttFrozenxid;
+            }
+        }
+    }
 
     /* Now fetch the pg_database tuple we need to update. */
     relation = heap_open(DatabaseRelationId, RowExclusiveLock);
@@ -1610,7 +1668,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         if (onepartrel) {
             if (onepartrel->rd_rel->relkind == RELKIND_RELATION) {
                 partID = partOidGetPartID(onepartrel, relid);
-                if (partID->partArea == PART_AREA_RANGE) {
+                if (partID->partArea == PART_AREA_RANGE || partID->partArea == PART_AREA_INTERVAL) {
                     if (ConditionalLockPartition(onepartrel->rd_id, relid, lmode, PARTITION_LOCK)) {
                         GetLock = true;
                     }
@@ -1787,6 +1845,13 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     if (RELATION_IS_OTHER_TEMP(onerel)) {
         CloseAllRelationsBeforeReturnFalse();
 
+        proc_snapshot_and_transaction();
+        return false;
+    }
+
+    if (RELATION_IS_GLOBAL_TEMP(onerel) &&
+        !gtt_storage_attached(RelationGetRelid(onerel))) {
+        CloseAllRelationsBeforeReturnFalse();
         proc_snapshot_and_transaction();
         return false;
     }
@@ -2263,9 +2328,7 @@ void vac_open_part_indexes(
     Assert(vacstmt->onepartrel != NULL);
 
     indexoidlist = PartitionGetPartIndexList(vacstmt->onepart);
-
     i = list_length(indexoidlist);
-
     if (i > 0) {
         *Irel = (Relation*)palloc((long)(i) * sizeof(Relation));
         *indexrel = (Relation*)palloc((long)(i) * sizeof(Relation));

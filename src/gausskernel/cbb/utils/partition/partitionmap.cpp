@@ -20,7 +20,7 @@
  *
  * IDENTIFICATION
  *	  src/gausskernel/cbb/utils/partition/partitionmap.cpp
- * 
+ *
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
@@ -379,33 +379,32 @@ static inline void constCompare(Const* value1, Const* value2, int& compare)
         }                                                                                                           \
     } while (0)
 
-#define buildRangeElement(range, type, typelen, relid, attrno, tuple, desc) \
-    do {                                                                    \
-        Assert(PointerIsValid(range));                                      \
-        Assert(PointerIsValid(type) && PointerIsValid(attrno));             \
-        Assert(PointerIsValid(tuple) && PointerIsValid(desc));              \
-        Assert((attrno)->dim1 <= RANGE_PARTKEYMAXNUM);                      \
-        Assert((attrno)->dim1 == (typelen));                                \
-        unserializePartitionStringAttribute((range)->boundary,              \
-            RANGE_PARTKEYMAXNUM,                                            \
-            (type),                                                         \
-            (typelen),                                                      \
-            (relid),                                                        \
-            (attrno),                                                       \
-            (tuple),                                                        \
-            Anum_pg_partition_boundaries,                                   \
-            (desc));                                                        \
-        (range)->partitionOid = HeapTupleGetOid(tuple);                     \
-        (range)->len = (typelen);                                           \
+#define BuildRangeElement(range, type, typelen, relid, attrno, tuple, desc, isInter) \
+    do {                                                                             \
+        Assert(PointerIsValid(range));                                               \
+        Assert(PointerIsValid(type) && PointerIsValid(attrno));                      \
+        Assert(PointerIsValid(tuple) && PointerIsValid(desc));                       \
+        Assert((attrno)->dim1 <= RANGE_PARTKEYMAXNUM);                               \
+        Assert((attrno)->dim1 == (typelen));                                         \
+        unserializePartitionStringAttribute((range)->boundary,                       \
+            RANGE_PARTKEYMAXNUM,                                                     \
+            (type),                                                                  \
+            (typelen),                                                               \
+            (relid),                                                                 \
+            (attrno),                                                                \
+            (tuple),                                                                 \
+            Anum_pg_partition_boundaries,                                            \
+            (desc));                                                                 \
+        (range)->partitionOid = HeapTupleGetOid(tuple);                              \
+        (range)->len = (typelen);                                                    \
+        (range)->isInterval = (isInter);                                             \
     } while (0)
 
 static void RebuildRangePartitionMap(RangePartitionMap* oldMap, RangePartitionMap* newMap);
 
-static void RebuildIntervalPartitionMap(IntervalPartitionMap* oldMap, IntervalPartitionMap* newMap);
-
 /* these routines are partition map related */
 static void buildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
-    Relation pg_partition, List* partition_list);
+    Relation pg_partition, const List* partition_list);
 
 static RangeElement* copyRangeElements(RangeElement* src, int elementNum, int partkeyNum);
 
@@ -635,7 +634,6 @@ void RelationInitPartitionMap(Relation relation)
     }
 
     partitioned_form = (Form_pg_partition)GETSTRUCT(partitioned_tuple);
-
     /*
      * For value based partition-table, we only have to retrieve partkeys
      */
@@ -694,6 +692,7 @@ void RelationInitPartitionMap(Relation relation)
 
     switch (partitioned_form->partstrategy) {
         case PART_STRATEGY_RANGE:
+        case PART_STRATEGY_INTERVAL:
             buildRangePartitionMap(relation, partitioned_form, partitioned_tuple, pg_partition, partition_list);
             break;
         default:
@@ -765,11 +764,7 @@ void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap)
 
     // when the map is referenced, don't rebuild the partitionmap
     if (oldMap->refcount == 0) {
-        if (PartitionMapIsRange(oldMap)) {
-            RebuildRangePartitionMap((RangePartitionMap*)oldMap, (RangePartitionMap*)newMap);
-        } else {
-            RebuildIntervalPartitionMap((IntervalPartitionMap*)oldMap, (IntervalPartitionMap*)newMap);
-        }
+        RebuildRangePartitionMap((RangePartitionMap*)oldMap, (RangePartitionMap*)newMap);
     } else {
         oldMap->isDirty = true;
         elog(LOG, "map refcount is not zero when RebuildPartitonMap ");
@@ -799,9 +794,6 @@ static void RebuildRangePartitionMap(RangePartitionMap* oldMap, RangePartitionMa
     PARTITIONMAP_SWAPFIELD(Oid*, partitionKeyDataType);
 }
 
-static void RebuildIntervalPartitionMap(IntervalPartitionMap* oldMap, IntervalPartitionMap* newMap)
-{}
-
 /*
  * copy the rangeElement
  */
@@ -826,6 +818,79 @@ static RangeElement* copyRangeElements(RangeElement* src, int elementNum, int pa
     return ret;
 }
 
+RangeElement* CopyRangeElementsWithoutBoundary(const RangeElement* src, int elementNum)
+{
+    Size size_ret = sizeof(RangeElement) * elementNum;
+    RangeElement* ret = (RangeElement*)palloc0(size_ret);
+    errno_t rc = memcpy_s(ret, size_ret, src, size_ret);
+    securec_check(rc, "\0", "\0");
+    return ret;
+}
+
+char* ReadIntervalStr(HeapTuple tuple, TupleDesc tupleDesc)
+{
+    bool isNull = true;
+    Oid elemType;
+    int16 elemLen;
+    bool elemByval = false;
+    char elemAlign;
+    int numElems;
+    Datum* elemValues = NULL;
+    bool* elemNulls = NULL;
+    Datum attrRawValue = heap_getattr(tuple, (uint32)Anum_pg_partition_interval, tupleDesc, &isNull);
+    ArrayType* array = DatumGetArrayTypeP(attrRawValue);
+
+    elemType = ARR_ELEMTYPE(array);
+    Assert(elemType == TEXTOID);
+    get_typlenbyvalalign(elemType, &elemLen, &elemByval, &elemAlign);
+    deconstruct_array(array, elemType, elemLen, elemByval, elemAlign, &elemValues, &elemNulls, &numElems);
+    Assert(numElems == 1);
+    Assert(!elemNulls[0]);
+    char* intervalStr = text_to_cstring(DatumGetTextP(*elemValues));
+    pfree(elemValues);
+    pfree(elemNulls);
+    return intervalStr;
+}
+
+static Interval* ReadInterval(HeapTuple tuple, TupleDesc tupleDesc)
+{
+    int32 typmod = -1;
+    char* intervalStr = ReadIntervalStr(tuple, tupleDesc);
+    Interval* res = char_to_interval(intervalStr, typmod);
+    pfree(intervalStr);
+    return res;
+}
+
+oidvector* ReadIntervalTablespace(HeapTuple tuple, TupleDesc tupleDesc)
+{
+    Datum tablespaceRaw;
+    ArrayType* tablespaceArray = NULL;
+    bool isNull = false;
+    Oid* values = NULL;
+    int arraySize;
+
+    /* Get the raw data which contain interval tablespace's columns */
+    tablespaceRaw = heap_getattr(tuple, Anum_pg_partition_intablespace, tupleDesc, &isNull);
+
+    if (isNull) {
+        return NULL;
+    }
+
+    /*  convert Datum to ArrayType */
+    tablespaceArray = DatumGetArrayTypeP(tablespaceRaw);
+    arraySize = ARR_DIMS(tablespaceArray)[0];
+
+    /* CHECK: the ArrayType of interval tablespace is valid */
+    if (ARR_NDIM(tablespaceArray) != 1 || arraySize <= 0 || ARR_HASNULL(tablespaceArray) ||
+        ARR_ELEMTYPE(tablespaceArray) != OIDOID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("interval tablespace column's number is not a oid array")));
+    }
+
+    values = (Oid*)ARR_DATA_PTR(tablespaceArray);
+    return buildoidvector(values, arraySize);
+}
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -834,7 +899,7 @@ static RangeElement* copyRangeElements(RangeElement* src, int elementNum, int pa
  * Notes		:
  */
 static void buildRangePartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
-    Relation pg_partition, List* partition_list)
+    Relation pg_partition, const List* partition_list)
 {
     int range_itr = 0;
     RangePartitionMap* range_map = NULL;
@@ -870,6 +935,14 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
         partitionKeyDataType,
         sizeof(Oid) * partitionKey->dim1);
     securec_check(rc, "\0", "\0");
+
+    if (partitioned_form->partstrategy == PART_STRATEGY_INTERVAL) {
+        range_map->type.type = PART_TYPE_INTERVAL;
+        /* the interval partition only supports one partition key */
+        Assert(partitionKey->dim1 == 1);
+        range_map->intervalValue = ReadInterval(partitioned_tuple, RelationGetDescr(pg_partition));
+        range_map->intervalTablespace = ReadIntervalTablespace(partitioned_tuple, RelationGetDescr(pg_partition));
+    }
     (void)MemoryContextSwitchTo(old_context);
 
     /* allocate range element array */
@@ -881,7 +954,8 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
         partition_tuple = (HeapTuple)lfirst(tuple_cell);
         partition_form = (Form_pg_partition)GETSTRUCT(partition_tuple);
 
-        if (PART_STRATEGY_RANGE != partition_form->partstrategy) {
+        if (partition_form->partstrategy != PART_STRATEGY_RANGE &&
+            partition_form->partstrategy != PART_STRATEGY_INTERVAL) {
             pfree_ext(range_eles);
             pfree_ext(range_map);
 
@@ -891,14 +965,14 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
                     errdetail("Incorrect partition strategy for partition %u", HeapTupleGetOid(partition_tuple))));
         }
 
-        buildRangeElement(&(range_eles[range_itr]),
+        BuildRangeElement(&(range_eles[range_itr]),
             range_map->partitionKeyDataType,
             range_map->partitionKey->dim1,
             RelationGetRelid(relation),
             range_map->partitionKey,
             partition_tuple,
-            RelationGetDescr(pg_partition));
-
+            RelationGetDescr(pg_partition),
+            partition_form->partstrategy == PART_STRATEGY_INTERVAL);
         range_itr++;
     }
 
@@ -1017,7 +1091,7 @@ Oid getRangePartitionOid(Relation relation, Const** partKeyValue, int32* partSeq
     RangeElement* rangeElementIterator = NULL;
     RangePartitionMap* rangePartMap = NULL;
     Oid result = InvalidOid;
-    int keyNums = 0;
+    int keyNums;
     int hit = -1;
     int min_part_id = 0;
     int max_part_id = 0;
@@ -1084,13 +1158,39 @@ Oid getRangePartitionOid(Relation relation, Const** partKeyValue, int32* partSeq
     return result;
 }
 
-/*
- * return value: InvalidOid---when requested partition not created yet
- */
-Oid getIntervalPartitionOid(IntervalPartitionMap* intervalPartMap, Const** partKeyValue, int32* partIndex,
-    PartitionArea* partArea, bool topClosed, bool missIsOk)
+inline Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
 {
-    return InvalidOid;
+    Assert(upBoundary->consttype == TIMESTAMPOID || upBoundary->consttype == TIMESTAMPTZOID);
+    Timestamp lowTs = timestamp_mi_interval(DatumGetTimestamp(upBoundary->constvalue), intervalValue);
+    return makeConst(upBoundary->consttype,
+        upBoundary->consttypmod,
+        upBoundary->constcollid,
+        upBoundary->constlen,
+        TimestampGetDatum(lowTs),
+        upBoundary->constisnull,
+        upBoundary->constbyval);
+}
+
+inline int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Interval* intervalValue)
+{
+    Assert(partition->isInterval);
+    Assert(partition->len == 1);
+    int compare = 0;
+    Const* lowBoundary = CalcLowBoundary(partition->boundary[0], intervalValue);
+    partitonKeyCompareForRouting(partKeyValue, &lowBoundary, partition->len, compare);
+    pfree(lowBoundary);
+    return compare;
+}
+
+/* the low boundary is close */
+bool ValueSatisfyLowBoudary(Const** partKeyValue, RangeElement* partition, Interval* intervalValue, bool topClosed)
+{
+    int compare = ValueCmpLowBoudary(partKeyValue, partition, intervalValue);
+    if (compare > 0 || (compare == 0 && topClosed)) {
+        return true;
+    }
+
+    return false;
 }
 
 /*
@@ -1110,7 +1210,7 @@ int getNumberOfRangePartitions(Relation rel)
                 errmsg("CAN NOT get number of partition against NON-PARTITIONED relation")));
     }
 
-    if (rel->partMap->type == PART_TYPE_RANGE) {
+    if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
         RangePartitionMap* rangeMap = NULL;
         rangeMap = (RangePartitionMap*)(rel->partMap);
 
@@ -1121,33 +1221,9 @@ int getNumberOfRangePartitions(Relation rel)
     return ret;
 }
 
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		:
- * Description	:
- * Notes		:
- */
-int getNumberOfIntervalPartitions(Relation rel)
-{
-    return 0;
-}
-
 int getNumberOfPartitions(Relation rel)
 {
-    int ranges = 0;
-    int intervals = 0;
-
-    if (!RELATION_IS_PARTITIONED(rel)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("CAN NOT get number of partition against NON-PARTITIONED relation")));
-    }
-
-    ranges = getNumberOfRangePartitions(rel);
-    intervals = getNumberOfIntervalPartitions(rel);
-
-    return (ranges + intervals);
+    return getNumberOfRangePartitions(rel);
 }
 
 Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID)
@@ -1164,9 +1240,7 @@ Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID)
         return InvalidOid;
     }
 
-    if (relation->partMap->type == PART_TYPE_RANGE) {
-        Assert(partID->partArea == PART_AREA_RANGE);
-
+    if (relation->partMap->type == PART_TYPE_RANGE || relation->partMap->type == PART_TYPE_INTERVAL) {
         rang_map = (RangePartitionMap*)(relation->partMap);
 
         if (partID->partSeq <= rang_map->rangeElementsNum) {
@@ -1201,13 +1275,17 @@ PartitionIdentifier* partOidGetPartID(Relation rel, Oid partOid)
     }
 
     result = (PartitionIdentifier*)palloc0(sizeof(PartitionIdentifier));
-    if (PART_TYPE_RANGE == rel->partMap->type) {
+    if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
         int i;
         RangePartitionMap* rangeMap = (RangePartitionMap*)rel->partMap;
 
         for (i = 0; i < rangeMap->rangeElementsNum; i++) {
             if (partOid == rangeMap->rangeElements[i].partitionOid) {
-                result->partArea = PART_AREA_RANGE;
+                if (rangeMap->rangeElements[i].isInterval) {
+                    result->partArea = PART_AREA_INTERVAL;
+                } else {
+                    result->partArea = PART_AREA_RANGE;
+                }
                 result->partSeq = i;
                 result->fileExist = true;
                 result->partitionId = partOid;
@@ -1237,9 +1315,7 @@ int partOidGetPartSequence(Relation rel, Oid partOid)
     } else if (false == resultPartID->fileExist || PART_AREA_NONE == resultPartID->partArea) {
         resultPartSequence = -1;
     } else {
-        if (resultPartID->partArea == PART_AREA_RANGE) {
-            resultPartSequence = resultPartID->partSeq + 1;
-        }
+        resultPartSequence = resultPartID->partSeq + 1;
     }
 
     pfree_ext(resultPartID);
@@ -1346,33 +1422,18 @@ void releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode)
 List* relationGetPartitionOidList(Relation rel)
 {
     List* result = NIL;
-    int conuter = 0;
-    int sumtotal = -1;
-    int rangeNumber = -1;
-    Bitmapset* mapset = NULL;
-    PartitionMap* map = NULL;
-    Oid partitionid = InvalidOid;
+    Oid partitionId = InvalidOid;
 
     if (rel == NULL || rel->partMap == NULL) {
         return NIL;
     }
 
-    map = rel->partMap;
-    sumtotal = getPartitionNumber(map);
-    rangeNumber = ((RangePartitionMap*)map)->rangeElementsNum;
-
-    if (sumtotal > rangeNumber) {
-        mapset = bms_copy(((IntervalPartitionMap*)map)->sequenceMap);
+    PartitionMap* map = rel->partMap;
+    int sumTotal = getPartitionNumber(map);
+    for (int conuter = 0; conuter < sumTotal; ++conuter) {
+        partitionId = ((RangePartitionMap*)map)->rangeElements[conuter].partitionOid;
+        result = lappend_oid(result, partitionId);
     }
-
-    for (conuter = 0; conuter < sumtotal; ++conuter) {
-        if (conuter < rangeNumber) { /* range partition */
-            partitionid = ((RangePartitionMap*)map)->rangeElements[conuter].partitionOid;
-        }
-        result = lappend_oid(result, partitionid);
-    }
-
-    bms_free_ext(mapset);
 
     return result;
 }
@@ -1533,7 +1594,7 @@ int getPartitionNumber(PartitionMap* map)
 {
     int result = -1;
 
-    if (map->type == PART_TYPE_RANGE) {
+    if (map->type == PART_TYPE_RANGE || map->type == PART_TYPE_INTERVAL) {
         result = ((RangePartitionMap*)map)->rangeElementsNum;
     } else {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("unsupported partitioned strategy")));
@@ -1708,3 +1769,45 @@ void decre_partmap_refcount(PartitionMap* map)
     if (!IsBootstrapProcessingMode())
         ResourceOwnerForgetPartitionMapRef(t_thrd.utils_cxt.CurrentResourceOwner, map);
 }
+
+/* 
+ * Get the oid of the partition which is a interval partition and next to the droped range partition which is
+ * specificed by partOid. If the droped partition is a interval partition, the next partition no need to
+ * be changed to range partition, return InvalidOid. If the next partition is a range partition, nothing need
+ * to do, return InvalidOid.
+ */
+Oid GetNeedDegradToRangePartOid(Relation rel, Oid partOid)
+{
+    /* never happen */
+    if (!PointerIsValid(rel) || !OidIsValid(partOid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FETCH_DATA_FAILED), errmsg("invalid partitioned table relaiton or partition table oid")));
+    }
+    Assert(rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL);
+
+    /* In normal range partitioned tabel, there has no interval ranges. */
+    if (rel->partMap->type == PART_TYPE_RANGE) {
+        return InvalidOid;
+    }
+
+    RangePartitionMap* rangeMap = (RangePartitionMap*)rel->partMap;
+    for (int i = 0; i < rangeMap->rangeElementsNum; i++) {
+        if (rangeMap->rangeElements[i].partitionOid == partOid) {
+            /* 
+             * 1. the droped range is interval range
+             * 2. there is no more ranges
+             * 3. the next partition is a range partition
+             */
+            if (rangeMap->rangeElements[i].isInterval || (i == rangeMap->rangeElementsNum - 1) ||
+                !rangeMap->rangeElements[i + 1].isInterval) {
+                return InvalidOid;
+            }
+
+            return rangeMap->rangeElements[i + 1].partitionOid;
+        }
+    }
+    /* It must never happened. */
+    ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("Not find the target partiton %u", partOid)));
+    return InvalidOid;
+}
+

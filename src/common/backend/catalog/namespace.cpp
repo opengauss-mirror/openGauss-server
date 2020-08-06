@@ -593,6 +593,12 @@ void RangeVarAdjustRelationPersistence(RangeVar* newRelation, Oid nspid)
                             errmsg("cannot create temporary relation in non-temporary schema")));
             }
             break;
+        case RELPERSISTENCE_GLOBAL_TEMP:       /* global temp table */
+            if (isAnyTempNamespace(nspid))
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                         errmsg("cannot create global temp relations in temporary schemas")));
+            break;
         case RELPERSISTENCE_PERMANENT:
             if (isTempOrToastNamespace(nspid))
                 newRelation->relpersistence = RELPERSISTENCE_TEMP;

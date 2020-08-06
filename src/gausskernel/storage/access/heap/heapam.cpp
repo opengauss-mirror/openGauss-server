@@ -7362,10 +7362,6 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
     /* Get the lock before trying to open the relcache entry */
     if (lockmode != NoLock) {
         if (relation->rd_rel->relkind == RELKIND_RELATION) {
-            /*
-             * assume the partition is in PART_AREA_RANGE, if we support interval partition,
-             * we have to find a quick way to find the area it belongs to.
-             */
             LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
         } else if (relation->rd_rel->relkind == RELKIND_INDEX) {
             LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
@@ -7427,6 +7423,9 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
                 case PART_AREA_RANGE:
                     LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
                     break;
+                case PART_AREA_INTERVAL:
+                    LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
+                    break;
                 default:
                     break;
             }
@@ -7454,6 +7453,9 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
                 partID = partOidGetPartID(relation, partition_id);
                 switch (partID->partArea) {
                     case PART_AREA_RANGE:
+                        UnlockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
+                        break;
+                    case PART_AREA_INTERVAL:
                         UnlockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
                         break;
                     default:
@@ -7522,6 +7524,9 @@ void partitionClose(Relation relation, Partition partition, LOCKMODE lockmode)
             partID = partOidGetPartID(relation, part->pd_id);
             switch (partID->partArea) {
                 case PART_AREA_RANGE:
+                    UnlockPartition(relation->rd_id, part->pd_id, lockmode, PARTITION_LOCK);
+                    break;
+                case PART_AREA_INTERVAL:
                     UnlockPartition(relation->rd_id, part->pd_id, lockmode, PARTITION_LOCK);
                     break;
                 default:

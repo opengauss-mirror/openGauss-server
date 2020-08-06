@@ -2268,6 +2268,20 @@ static Param* _copyParam(const Param* from)
 }
 
 /*
+ * _copyRownum
+ */
+static Rownum* _copyRownum(const Rownum* from)
+{
+    Rownum* newnode = (Rownum*)makeNode(Rownum);
+
+    COPY_SCALAR_FIELD(rownumcollid);
+    COPY_LOCATION_FIELD(location);
+
+    return newnode;
+}
+
+
+/*
  * _copyAggref
  */
 static Aggref* _copyAggref(const Aggref* from)
@@ -6010,6 +6024,9 @@ void* copyObject(const void* from)
             break;
         case T_Param:
             retval = _copyParam((Param*)from);
+            break;
+        case T_Rownum:
+            retval = _copyRownum((Rownum*)from);
             break;
         case T_Aggref:
             retval = _copyAggref((Aggref*)from);

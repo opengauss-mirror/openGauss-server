@@ -76,7 +76,7 @@ std::string HexStr(const uint8_t* data, uint16_t len);
 #define HIGH_NIBBLE(byte) (((byte) >> 4) & 0x0F)
 
 /** @define Low nibble of a byte. */
-#define LOW_NIBBLE(byte) ((byte)&0x0F)
+#define LOW_NIBBLE(byte) ((byte) & 0x0F)
 
 /** @define Compile-time conversion of identifier to string literal. */
 #define stringify(name) #name

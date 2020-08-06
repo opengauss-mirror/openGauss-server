@@ -3135,13 +3135,20 @@ void RemovePgTempFiles(void)
         if (strcmp(spc_de->d_name, ".") == 0 || strcmp(spc_de->d_name, "..") == 0)
             continue;
 
+        /*
+         * subDir returned by ReadDir will be overwritten by the next invoking.
+         * therefore, the result needs to be saved.
+         */
+        char curSubDir[MAXPGPATH] = {0};
+        strncpy_s(curSubDir, MAXPGPATH, spc_de->d_name, strlen(spc_de->d_name));
+        securec_check_ss(rc, "", "");
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
         rc = snprintf_s(temp_path,
             sizeof(temp_path),
             sizeof(temp_path) - 1,
             "pg_tblspc/%s/%s_%s/%s",
-            spc_de->d_name,
+            curSubDir,
             TABLESPACE_VERSION_DIRECTORY,
             g_instance.attr.attr_common.PGXCNodeName,
             PG_TEMP_FILES_DIR);
@@ -3151,7 +3158,7 @@ void RemovePgTempFiles(void)
             sizeof(temp_path),
             sizeof(temp_path) - 1,
             "pg_tblspc/%s/%s/%s",
-            spc_de->d_name,
+            curSubDir,
             TABLESPACE_VERSION_DIRECTORY,
             PG_TEMP_FILES_DIR);
         securec_check_ss(rc, "", "");
@@ -3164,7 +3171,7 @@ void RemovePgTempFiles(void)
             sizeof(temp_path),
             sizeof(temp_path) - 1,
             "pg_tblspc/%s/%s_%s",
-            spc_de->d_name,
+            curSubDir,
             TABLESPACE_VERSION_DIRECTORY,
             g_instance.attr.attr_common.PGXCNodeName);
         securec_check_ss(rc, "", "");
@@ -3173,7 +3180,7 @@ void RemovePgTempFiles(void)
             sizeof(temp_path),
             sizeof(temp_path) - 1,
             "pg_tblspc/%s/%s",
-            spc_de->d_name,
+            curSubDir,
             TABLESPACE_VERSION_DIRECTORY);
         securec_check_ss(rc, "", "");
 #endif

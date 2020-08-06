@@ -436,6 +436,11 @@ void sess_exit_prepare(int code)
     t_thrd.proc_cxt.sess_exit_inprogress = true;
     old_sigset = gs_signal_block_sigusr2();
 
+    if (u_sess->gtt_ctx.gtt_cleaner_exit_registered) {
+        pg_on_exit_callback func = u_sess->gtt_ctx.gtt_sess_exit;
+        (*func)(code, UInt32GetDatum(NULL));
+    }
+
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++)
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
 
@@ -482,6 +487,23 @@ void shmem_exit(int code)
 }
 
 /* ----------------------------------------------------------------
+ *        atexit_callback
+ *
+ *        Backstop to ensure that direct calls of exit() don't mess us up.
+ *
+ * Somebody who was being really uncooperative could call _exit(),
+ * but for that case we have a "dead man switch" that will make the
+ * postmaster treat it as a crash --- see pmsignal.c.
+ * ----------------------------------------------------------------
+ */
+static void atexit_callback(void)
+{
+    /* Clean up everything that must be cleaned up */
+    /* ... too bad we don't know the real exit code ... */
+    proc_exit_prepare(-1);
+}
+
+/* ----------------------------------------------------------------
  *		on_proc_exit
  *
  *		this function adds a callback function to the list of
@@ -501,6 +523,32 @@ void on_proc_exit(pg_on_exit_callback function, Datum arg)
     if (!t_thrd.storage_cxt.atexit_callback_setup) {
         t_thrd.storage_cxt.atexit_callback_setup = true;
     }
+}
+
+/* ----------------------------------------------------------------
+ *        before_shmem_exit
+ *
+ *        Register early callback to perform user-level cleanup,
+ *        e.g. transaction abort, before we begin shutting down
+ *        low-level subsystems.
+ * ----------------------------------------------------------------
+ */
+void before_shmem_exit(pg_on_exit_callback function, Datum arg)
+{
+    if (t_thrd.storage_cxt.before_shmem_exit_index >= MAX_ON_EXITS)
+        ereport(FATAL,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg_internal("out of before_shmem_exit slots")));
+
+    t_thrd.storage_cxt.before_shmem_exit_list[t_thrd.storage_cxt.before_shmem_exit_index].function = function;
+    t_thrd.storage_cxt.before_shmem_exit_list[t_thrd.storage_cxt.before_shmem_exit_index].arg = arg;
+
+    ++t_thrd.storage_cxt.before_shmem_exit_index;
+
+    if (!t_thrd.storage_cxt.atexit_callback_setup) {
+        (void)atexit(atexit_callback);
+        t_thrd.storage_cxt.atexit_callback_setup = true; 
+    }   
 }
 
 /* ----------------------------------------------------------------

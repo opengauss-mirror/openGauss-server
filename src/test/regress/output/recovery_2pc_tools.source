@@ -340,6 +340,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_function_args                  | integer |      | 666     | 666
  max_identifier_length              | integer |      | 63      | 63
  max_index_keys                     | integer |      | 32      | 32
+ max_keep_log_seg                   | integer |      | 0       | 2147483647
  max_loaded_cudesc                  | integer |      | 100     | 1073741823
  max_locks_per_transaction          | integer |      | 10      | 2147483647
  max_pred_locks_per_transaction     | integer |      | 10      | 2147483647

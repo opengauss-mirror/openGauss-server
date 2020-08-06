@@ -72,6 +72,7 @@ extern void index_constraint_create(Relation heapRelation, Oid indexRelationId, 
 extern void index_drop(Oid indexId, bool concurrent);
 
 extern IndexInfo *BuildIndexInfo(Relation index);
+extern IndexInfo *BuildDummyIndexInfo(Relation index);
 
 extern void FormIndexDatum(IndexInfo *indexInfo, TupleTableSlot *slot, EState *estate, Datum *values, bool *isnull);
 extern void index_build(Relation heapRelation, Partition heapPartition, Relation indexRelation,
@@ -94,7 +95,9 @@ extern void reindex_indexpart_internal(Relation heapRelation,
                                        Relation iRel, 
                                        IndexInfo* indexInfo, 
                                        Oid indexPartId);
-extern void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks, AdaptMem *memInfo, bool dbWide);
+extern void reindex_index(Oid indexId, Oid indexPartId,
+                          bool skip_constraint_checks, AdaptMem *memInfo,
+                          bool dbWide, char persistence);
 
 /* Flag bits for reindex_relation(): */
 #define REINDEX_REL_PROCESS_TOAST		0x01

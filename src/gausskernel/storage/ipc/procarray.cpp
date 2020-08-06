@@ -113,6 +113,7 @@
 #include "catalog/pg_control.h"
 #include "pgstat.h"
 #include "storage/lwlock.h"
+#include "threadpool/threadpool_sessctl.h"
 #include "access/multi_redo_api.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/storage_gstrace.h"
@@ -4523,3 +4524,123 @@ char* transfer_snapshot_type(SnapshotType snap_type)
     }
     return "UnKnown";
 }
+
+/*
+ * search all active backend to get oldest frozenxid
+ * for global temp table.
+ */
+TransactionId ListAllThreadGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n)
+{
+	ProcArrayStruct *arrayP = g_instance.proc_array_idx;
+	TransactionId result = InvalidTransactionId;
+	int			index;
+	int			flags = 0;
+	int			i = 0;
+
+	if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+		return 0;
+
+	if (maxSize > 0) {
+		Assert(pids);
+		Assert(xids);
+		Assert(n);
+		*n = 0;
+	}
+
+	if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+		return InvalidTransactionId;
+
+	if (RecoveryInProgress())
+		return InvalidTransactionId;
+
+	flags |= PROC_IS_AUTOVACUUM;
+	flags |= PROC_IN_LOGICAL_DECODING;
+
+	LWLockAcquire(ProcArrayLock, LW_SHARED);
+	if (maxSize > 0 && maxSize < arrayP->numProcs) {
+		LWLockRelease(ProcArrayLock);
+		elog(ERROR, "list_all_gtt_frozenxids require more array");
+	}
+
+	for (index = 0; index < arrayP->numProcs; index++) {
+		int			pgprocno = arrayP->pgprocnos[index];
+		volatile PGPROC *proc = g_instance.proc_base_all_procs[pgprocno];
+		volatile PGXACT *pgxact = &g_instance.proc_base_all_xacts[pgprocno];
+
+		if (pgxact->vacuumFlags & flags)
+			continue;
+
+		if (proc->databaseId == u_sess->proc_cxt.MyDatabaseId &&
+			TransactionIdIsNormal(proc->gtt_session_frozenxid)) {
+			if (result == InvalidTransactionId)
+				result = proc->gtt_session_frozenxid;
+			else if (TransactionIdPrecedes(proc->gtt_session_frozenxid, result))
+				result = proc->gtt_session_frozenxid;
+
+			if (maxSize > 0) {
+				pids[i] = proc->pid;
+				xids[i] = proc->gtt_session_frozenxid;
+				i++;
+			}
+		}
+	}
+	LWLockRelease(ProcArrayLock);
+    if (maxSize > 0) {
+        *n = i;
+    }
+    return result;
+}
+
+TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n)
+{
+    TransactionId result = InvalidTransactionId;
+    int           i = 0;
+
+    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+        return 0;
+    }
+
+    if (maxSize > 0) {
+        Assert(pids);
+        Assert(xids);
+        Assert(n);
+        *n = 0;
+    }
+
+    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+        return InvalidTransactionId;
+    }
+
+    if (RecoveryInProgress()) {
+        return InvalidTransactionId;
+    }
+
+    ThreadPoolSessControl *sessCtrl = g_threadPoolControler->GetSessionCtrl();
+    const knl_sess_control *sessList = sessCtrl->GetSessionList();
+    const knl_sess_control *currSess = sessList;
+    while (currSess != nullptr) {
+        knl_session_context *session = currSess->sess;
+        if (session->proc_cxt.MyDatabaseId == u_sess->proc_cxt.MyDatabaseId &&
+            TransactionIdIsNormal(session->gtt_ctx.gtt_session_frozenxid)) {
+            if (result == InvalidTransactionId) {
+                result = session->gtt_ctx.gtt_session_frozenxid;
+            } else if (TransactionIdPrecedes(session->gtt_ctx.gtt_session_frozenxid, result)) {
+                result = session->gtt_ctx.gtt_session_frozenxid;
+            }
+
+            if (maxSize > 0) {
+                pids[i] = session->attachPid;
+                xids[i] = session->gtt_ctx.gtt_session_frozenxid;
+                i++;
+            }
+        }
+        currSess = currSess->next;
+    }
+
+    if (maxSize > 0) {
+        *n = i;
+    }
+    return result;
+}
+
+

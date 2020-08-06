@@ -1480,8 +1480,7 @@ static void makeRangeConstructors(const char* name, Oid nmspace, Oid rangeOid, O
             F_FMGR_INTERNAL_VALIDATOR,  /* language validator */
             prosrc[i],                  /* prosrc */
             NULL,                       /* probin */
-            false,                      /* isAgg */
-            false,                      /* isWindowFunc */
+            PROKIND_FUNCTION,           /* prokind */
             false,                      /* security_definer */
             false,                      /* leakproof */
             false,                      /* isStrict */

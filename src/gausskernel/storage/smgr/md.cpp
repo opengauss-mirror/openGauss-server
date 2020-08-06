@@ -590,6 +590,9 @@ static MdfdVec* mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
  */
 void mdclose(SMgrRelation reln, ForkNumber forknum)
 {
+    if (reln->md_fd == NULL) {
+        return;
+    }
     MdfdVec* v = reln->md_fd[forknum];
 
     /* No work if already closed */

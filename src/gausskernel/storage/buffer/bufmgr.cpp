@@ -44,6 +44,7 @@
 #include "catalog/catalog.h"
 #include "catalog/dfsstore_ctlg.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/storage_gtt.h"
 #include "commands/tablespace.h"
 #include "executor/instrument.h"
 #include "lib/binaryheap.h"
@@ -2820,12 +2821,12 @@ Buffer ReleaseAndReadBuffer(Buffer buffer, Relation relation, BlockNumber block_
 
     if (BufferIsValid(buffer)) {
         if (BufferIsLocal(buffer)) {
-            buf_desc = &t_thrd.storage_cxt.LocalBufferDescriptors[-buffer - 1];
+            buf_desc = &u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1];
             if (buf_desc->tag.blockNum == block_num && RelFileNodeEquals(buf_desc->tag.rnode, relation->rd_node) &&
                 buf_desc->tag.forkNum == fork_num)
                 return buffer;
             ResourceOwnerForgetBuffer(t_thrd.utils_cxt.CurrentResourceOwner, buffer);
-            t_thrd.storage_cxt.LocalRefCount[-buffer - 1]--;
+            u_sess->storage_cxt.LocalRefCount[-buffer - 1]--;
         } else {
             buf_desc = GetBufferDescriptor(buffer - 1);
             /* we have pin, so it's ok to examine tag without spinlock */
@@ -3886,9 +3887,9 @@ void PrintBufferLeakWarning(Buffer buffer)
 
     Assert(BufferIsValid(buffer));
     if (BufferIsLocal(buffer)) {
-        buf = &t_thrd.storage_cxt.LocalBufferDescriptors[-buffer - 1];
-        loccount = t_thrd.storage_cxt.LocalRefCount[-buffer - 1];
-        backend = t_thrd.proc_cxt.MyBackendId;
+        buf = &u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1];
+        loccount = u_sess->storage_cxt.LocalRefCount[-buffer - 1];
+        backend = BackendIdForTempRelations;
     } else {
         buf = GetBufferDescriptor(buffer - 1);
         loccount = GetPrivateRefCount(buffer);
@@ -3997,7 +3998,7 @@ BlockNumber BufferGetBlockNumber(Buffer buffer)
     Assert(BufferIsPinned(buffer));
 
     if (BufferIsLocal(buffer)) {
-        buf_desc = &(t_thrd.storage_cxt.LocalBufferDescriptors[-buffer - 1]);
+        buf_desc = &(u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1]);
     } else {
         buf_desc = GetBufferDescriptor(buffer - 1);
     }
@@ -4014,7 +4015,7 @@ void BufferGetTag(Buffer buffer, RelFileNode* rnode, ForkNumber* forknum, BlockN
     /* Do the same checks as BufferGetBlockNumber. */
     Assert(BufferIsPinned(buffer));
     if (BufferIsLocal(buffer)) {
-        buf_desc = &(t_thrd.storage_cxt.LocalBufferDescriptors[-buffer - 1]);
+        buf_desc = &(u_sess->storage_cxt.LocalBufferDescriptors[-buffer - 1]);
     } else {
         buf_desc = GetBufferDescriptor(buffer - 1);
     }
@@ -4197,6 +4198,14 @@ void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod)
 BlockNumber RelationGetNumberOfBlocksInFork(Relation relation, ForkNumber fork_num)
 {
     BlockNumber result = 0;
+    /*
+     * When this backend not init gtt storage
+     * return 0
+     */
+    if (RELATION_IS_GLOBAL_TEMP(relation) &&
+        !gtt_storage_attached(RelationGetRelid(relation))) {
+        return result;
+    }
 
     // Just return the relpages in pg_class for column-store relation.
     // Future: new interface should be implemented to calculate the number of blocks.
@@ -4377,7 +4386,7 @@ void DropRelFileNodeBuffers(const RelFileNodeBackend& rnode, ForkNumber forkNum,
 
     /* If it's a local relation, it's localbuf.c's problem. */
     if (RelFileNodeBackendIsTemp(rnode)) {
-        if (rnode.backend == t_thrd.proc_cxt.MyBackendId) {
+        if (rnode.backend == BackendIdForTempRelations) {
             DropRelFileNodeLocalBuffers(rnode.node, forkNum, firstDelBlock);
         }
 
@@ -4402,7 +4411,7 @@ void DropRelFileNodeAllBuffers(const RelFileNodeBackend& rnode)
 
     /* If it's a local relation, it's localbuf.c's problem. */
     if (RelFileNodeBackendIsTemp(rnode)) {
-        if (rnode.backend == t_thrd.proc_cxt.MyBackendId)
+        if (rnode.backend == BackendIdForTempRelations)
             DropRelFileNodeAllLocalBuffers(rnode.node);
 
         gstrace_exit(GS_TRC_ID_DropRelFileNodeAllBuffers);
@@ -4670,8 +4679,8 @@ void ReleaseBuffer(Buffer buffer)
     ResourceOwnerForgetBuffer(t_thrd.utils_cxt.CurrentResourceOwner, buffer);
 
     if (BufferIsLocal(buffer)) {
-        Assert(t_thrd.storage_cxt.LocalRefCount[-buffer - 1] > 0);
-        t_thrd.storage_cxt.LocalRefCount[-buffer - 1]--;
+        Assert(u_sess->storage_cxt.LocalRefCount[-buffer - 1] > 0);
+        u_sess->storage_cxt.LocalRefCount[-buffer - 1]--;
         return;
     }
 
@@ -4717,7 +4726,7 @@ void IncrBufferRefCount(Buffer buffer)
     Assert(BufferIsPinned(buffer));
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
     if (BufferIsLocal(buffer)) {
-        t_thrd.storage_cxt.LocalRefCount[-buffer - 1]++;
+        u_sess->storage_cxt.LocalRefCount[-buffer - 1]++;
     } else {
         PrivateRefCountEntry* ref = NULL;
         PrivateRefCountEntry *free_entry = NULL;
@@ -5011,10 +5020,10 @@ void LockBufferForCleanup(Buffer buffer)
 
     if (BufferIsLocal(buffer)) {
         /* There should be exactly one pin */
-        if (t_thrd.storage_cxt.LocalRefCount[-buffer - 1] != 1) {
+        if (u_sess->storage_cxt.LocalRefCount[-buffer - 1] != 1) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_BUFFER),
-                    (errmsg("incorrect local pin count: %d", t_thrd.storage_cxt.LocalRefCount[-buffer - 1]))));
+                    (errmsg("incorrect local pin count: %d", u_sess->storage_cxt.LocalRefCount[-buffer - 1]))));
         }
         /* Nobody else to wait for */
         return;
@@ -5114,7 +5123,7 @@ bool ConditionalLockBufferForCleanup(Buffer buffer)
     Assert(BufferIsValid(buffer));
 
     if (BufferIsLocal(buffer)) {
-        refcount = t_thrd.storage_cxt.LocalRefCount[-buffer - 1];
+        refcount = u_sess->storage_cxt.LocalRefCount[-buffer - 1];
         /* There should be exactly one pin */
         Assert(refcount > 0);
         if (refcount != 1)

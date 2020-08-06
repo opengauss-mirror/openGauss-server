@@ -254,7 +254,7 @@ DataQueuePtr PushToSenderQueue(const RelFileNode& rnode, BlockNumber blockNum, S
     /* structure the data_header. */
     RelFileNodeRelCopy(data_header.rnode, rnode);
     data_header.blocknum = blockNum;
-    data_header.attid = attid | ((uint32)(rnode.bucketNode + 1) << 16);
+    data_header.attid = (int)((uint32)attid | ((uint32)(rnode.bucketNode + 1) << 16));
     data_header.type = type;
     data_header.data_size = data_len;
 
@@ -703,7 +703,7 @@ void PushCUToDataQueue(Relation rel, int col, const char* mem, _in_ uint64 offse
 
         /* read current bcm block */
         cuSliceOffset = offset;
-        curBcmBlock = CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
+        curBcmBlock = (BlockNumber)CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
         nextBcmBlock = curBcmBlock;
         BCM_CStore_pin(rel, col, cuSliceOffset, &bcmbuffer);
         LockBuffer(bcmbuffer, BUFFER_LOCK_EXCLUSIVE);
@@ -724,7 +724,7 @@ void PushCUToDataQueue(Relation rel, int col, const char* mem, _in_ uint64 offse
             BCMSetStatusBit(rel, cuBlock, bcmbuffer, NOTSYNCED, col);
 
             cuSliceOffset += ALIGNOF_CUSIZE;
-            nextBcmBlock = CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
+            nextBcmBlock = (BlockNumber)CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
         } while (cuSliceOffset < offset + size);
 
         UnlockReleaseBuffer(bcmbuffer);
@@ -883,7 +883,8 @@ static void PushToBCMElementArray(const RelFileNode& rnode, BlockNumber blockNum
     RelFileNodeRelCopy(t_thrd.dataqueue_cxt.BCMElementArray[array_index].rnode, rnode);
 
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].blocknum = blockNum;
-    t_thrd.dataqueue_cxt.BCMElementArray[array_index].attid = attid | ((uint32)(rnode.bucketNode + 1) << 16);
+    t_thrd.dataqueue_cxt.BCMElementArray[array_index].attid =
+        (int)((uint32)attid | ((uint32)(rnode.bucketNode + 1) << 16));
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].type = type;
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].offset = offset;
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].data_size = data_len;
@@ -955,7 +956,7 @@ static void ClearBCMStatus(uint32 first, uint32 end)
                     bcmhdr.blocknum,
                     bcmhdr.offset,
                     bcmhdr.data_size,
-                    GETATTID(bcmhdr.attid))));
+                    (int)GETATTID((uint32)bcmhdr.attid))));
         }
 
         ereport(DEBUG5,
@@ -967,7 +968,7 @@ static void ClearBCMStatus(uint32 first, uint32 end)
                 bcmhdr.blocknum,
                 bcmhdr.offset,
                 bcmhdr.data_size,
-                GETATTID(bcmhdr.attid))));
+                (int)GETATTID((uint32)bcmhdr.attid))));
 
         if (bcmhdr.type == ROW_STORE) {
             Buffer buffer;
@@ -1000,7 +1001,7 @@ static void ClearBCMStatus(uint32 first, uint32 end)
             cuSliceOffset = bcmhdr.offset;
             curBcmBlock = CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
             nextBcmBlock = curBcmBlock;
-            BCM_CStore_pin(relation, GETATTID(bcmhdr.attid), cuSliceOffset, &bcmbuffer);
+            BCM_CStore_pin(relation, (int)GETATTID((uint32)bcmhdr.attid), cuSliceOffset, &bcmbuffer);
             LockBuffer(bcmbuffer, BUFFER_LOCK_EXCLUSIVE);
 
             do {
@@ -1011,12 +1012,12 @@ static void ClearBCMStatus(uint32 first, uint32 end)
                     /* release last bcm block and read in the next one */
                     UnlockReleaseBuffer(bcmbuffer);
 
-                    BCM_CStore_pin(relation, GETATTID(bcmhdr.attid), cuSliceOffset, &bcmbuffer);
+                    BCM_CStore_pin(relation, (int)GETATTID((uint32)bcmhdr.attid), cuSliceOffset, &bcmbuffer);
                     LockBuffer(bcmbuffer, BUFFER_LOCK_EXCLUSIVE);
                 }
 
                 cuBlock = CSTORE_OFFSET_TO_CSTOREBLOCK(cuSliceOffset);
-                BCMSetStatusBit(relation, cuBlock, bcmbuffer, SYNCED, GETATTID(bcmhdr.attid));
+                BCMSetStatusBit(relation, cuBlock, bcmbuffer, SYNCED, (int)GETATTID((uint32)bcmhdr.attid));
 
                 cuSliceOffset += ALIGNOF_CUSIZE;
                 nextBcmBlock = CSTORE_OFFSET_TO_BCMBLOCK(cuSliceOffset);
@@ -1025,16 +1026,16 @@ static void ClearBCMStatus(uint32 first, uint32 end)
             UnlockReleaseBuffer(bcmbuffer);
 
             /* record one log_cu_bcm xlog */
-            BCMLogCU(relation, bcmhdr.offset, GETATTID(bcmhdr.attid), SYNCED, cuUnitCount);
+            BCMLogCU(relation, bcmhdr.offset, (int)GETATTID((uint32)bcmhdr.attid), SYNCED, cuUnitCount);
 
             if (u_sess->attr.attr_storage.HaModuleDebug) {
                 ereport(LOG,
-                    (errmsg("HA-ClearBCMStatus: rnode %u/%u/%u, col %d, blockno %lu "
+                    (errmsg("HA-ClearBCMStatus: rnode %u/%u/%u, col %u, blockno %lu "
                             "cuUnitCount %u, status  %u",
                         relation->rd_node.spcNode,
                         relation->rd_node.dbNode,
                         relation->rd_node.relNode,
-                        GETATTID(bcmhdr.attid),
+                        GETATTID((uint)bcmhdr.attid),
                         bcmhdr.offset / ALIGNOF_CUSIZE,
                         bcmhdr.data_size / ALIGNOF_CUSIZE,
                         SYNCED)));

@@ -57,6 +57,7 @@ MemoryContext StreamInfoContext = NULL;
  * of these contexts, refer to src/backend/utils/mmgr/README
  */
 THR_LOCAL MemoryContext ErrorContext = NULL;
+THR_LOCAL MemoryContext CacheMemoryContext = NULL;
 THR_LOCAL MemoryContext SelfMemoryContext = NULL;
 THR_LOCAL MemoryContext TopMemoryContext = NULL;
 THR_LOCAL MemoryContext AlignMemoryContext = NULL;

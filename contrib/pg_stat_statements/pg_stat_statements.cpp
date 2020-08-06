@@ -1936,3 +1936,4 @@ static int comp_location(const void* a, const void* b)
     else
         return 0;
 }
+

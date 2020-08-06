@@ -56,7 +56,10 @@ extern int RelationGetIndexNum(Relation relation);
 extern Oid RelationGetOidIndex(Relation relation);
 extern Oid RelationGetReplicaIndex(Relation relation);
 extern List* RelationGetIndexExpressions(Relation relation);
+extern List* RelationGetIndexExpressions(Relation relation);
+extern List* RelationGetDummyIndexExpressions(Relation relation);
 extern List* RelationGetIndexPredicate(Relation relation);
+
 
 typedef enum IndexAttrBitmapKind {
     INDEX_ATTR_BITMAP_ALL,

@@ -39,6 +39,7 @@
 #include "pgxc/execRemote.h"
 #endif
 #include "storage/fd.h"
+#include "threadpool/threadpool.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -1391,6 +1392,7 @@ static int64 calculate_partition_indexes_size(Oid part_table_oid, Oid part_oid)
     }
 
     list_free_ext(indexOids);
+    relation_close(part_table_rel, AccessShareLock);
 
     return size;
 }
@@ -1821,10 +1823,13 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
     switch (relform->relpersistence) {
         case RELPERSISTENCE_UNLOGGED:
         case RELPERSISTENCE_PERMANENT:
-        case RELPERSISTENCE_TEMP:  // @Temp Table. temp table is the same as unlogged table here.
+        case RELPERSISTENCE_TEMP:
             backend = InvalidBackendId;
             break;
 
+        case RELPERSISTENCE_GLOBAL_TEMP:
+            backend = BackendIdForTempRelations;
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),

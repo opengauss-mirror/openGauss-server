@@ -572,6 +572,12 @@ Datum varchar(PG_FUNCTION_ARGS)
 
     /* only reach here if string is too long... */
 
+    if (len > MaxAttrSize) {
+        ereport(ERROR,
+            (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                errmsg("value too long for type character varying maxlen(%d) input_len(%d)", MaxAttrSize, len)));
+    }
+
     /* truncate multibyte string preserving multibyte boundary */
     max_mb_len = pg_mbcharcliplen(s_data, len, max_len);
 

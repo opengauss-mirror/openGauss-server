@@ -1482,6 +1482,9 @@ static int FigureColnameInternal(Node* node, char** name)
             /* make GROUPING() act like a regular function */
             *name = "grouping";
             return 2;
+        case T_Rownum:
+            *name = "rownum";
+            return 2;
         case T_SubLink:
             switch (((SubLink*)node)->subLinkType) {
                 case EXISTS_SUBLINK:

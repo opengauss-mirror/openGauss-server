@@ -2526,6 +2526,10 @@ static void makeTableDataInfo(TableInfo* tbinfo, bool boids)
     if (tbinfo->relpersistence == RELPERSISTENCE_UNLOGGED && no_unlogged_table_data)
         return;
 
+    /* Don't dump data in global temp table/sequence */
+    if (tbinfo->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
+        return;
+
     /* Check that the data is not explicitly excluded */
     if (simple_oid_list_member(&tabledata_exclude_oids, tbinfo->dobj.catId.oid))
         return;
@@ -4694,7 +4698,7 @@ AggInfo* getAggregates(Archive* fout, int* numAggs)
             "(%s proowner) AS rolname, "
             "proacl AS aggacl "
             "FROM pg_proc p "
-            "WHERE proisagg AND ("
+            "WHERE prokind = 'a' AND ("
             "pronamespace != "
             "(SELECT oid FROM pg_namespace "
             "WHERE nspname = 'pg_catalog')",
@@ -4716,7 +4720,7 @@ AggInfo* getAggregates(Archive* fout, int* numAggs)
             "(%s proowner) AS rolname, "
             "proacl AS aggacl "
             "FROM pg_proc "
-            "WHERE proisagg "
+            "WHERE prokind = 'a' "
             "AND pronamespace != "
             "(SELECT oid FROM pg_namespace WHERE nspname = 'pg_catalog')",
             username_subquery);
@@ -4862,7 +4866,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
             "pronamespace, "
             "(%s proowner) AS rolname "
             "FROM pg_proc p "
-            "WHERE NOT proisagg AND ("
+            "WHERE prokind != 'a' AND ("
             "pronamespace != "
             "(SELECT oid FROM pg_namespace "
             "WHERE nspname = 'pg_catalog')",
@@ -11118,7 +11122,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     char* proallargtypes = NULL;
     char* proargmodes = NULL;
     char* proargnames = NULL;
-    char* proiswindow = NULL;
+    char* prokind = NULL;
     char* provolatile = NULL;
     char* proisstrict = NULL;
     char* prosecdef = NULL;
@@ -11171,7 +11175,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         "pg_catalog.pg_get_function_arguments(oid) AS funcargs, "
         "pg_catalog.pg_get_function_identity_arguments(oid) AS funciargs, "
         "pg_catalog.pg_get_function_result(oid) AS funcresult, "
-        "proiswindow, provolatile, proisstrict, prosecdef, "
+        "prokind, provolatile, proisstrict, prosecdef, "
         "proleakproof, proconfig, procost, prorows, "
         "%s, "
         "%s, "
@@ -11192,7 +11196,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     funciargs = PQgetvalue(res, 0, PQfnumber(res, "funciargs"));
     funcresult = PQgetvalue(res, 0, PQfnumber(res, "funcresult"));
     proallargtypes = proargmodes = proargnames = NULL;
-    proiswindow = PQgetvalue(res, 0, PQfnumber(res, "proiswindow"));
+    prokind = PQgetvalue(res, 0, PQfnumber(res, "prokind"));
     provolatile = PQgetvalue(res, 0, PQfnumber(res, "provolatile"));
     proisstrict = PQgetvalue(res, 0, PQfnumber(res, "proisstrict"));
     prosecdef = PQgetvalue(res, 0, PQfnumber(res, "prosecdef"));
@@ -11303,7 +11307,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
 
     appendPQExpBuffer(q, "\n    LANGUAGE %s", fmtId(lanname));
 
-    if (proiswindow[0] == 't')
+    if (PROC_IS_WIN(prokind[0]))
         appendPQExpBuffer(q, " WINDOW");
 
     if (provolatile[0] != PROVOLATILE_VOLATILE) {
@@ -16035,9 +16039,17 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
         if (tbinfo->parttype == PARTTYPE_PARTITIONED_RELATION) {
             appendPQExpBuffer(q, "CREATE %s %s", reltypename, fmtId(tbinfo->dobj.name));
         } else {
+            const char *tableType = nullptr;
+            if (tbinfo->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                tableType = "UNLOGGED ";
+            } else if (tbinfo->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+                tableType = "GLOBAL TEMPORARY ";
+            } else {
+                tableType = "";
+            }
             appendPQExpBuffer(q,
                 "CREATE %s%s %s",
-                tbinfo->relpersistence == RELPERSISTENCE_UNLOGGED ? "UNLOGGED " : "",
+                tableType,
                 reltypename,
                 fmtId(tbinfo->dobj.name));
         }
@@ -16715,7 +16727,9 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
          * attislocal correctly, plus fix up any inherited CHECK constraints.
          * Analogously, we set up typed tables using ALTER TABLE / OF here.
          */
-        if (binary_upgrade && ((tbinfo->relkind == RELKIND_RELATION) || (tbinfo->relkind == RELKIND_FOREIGN_TABLE))) {
+        if (binary_upgrade && 
+            ((tbinfo->relkind == RELKIND_RELATION) || (tbinfo->relkind == RELKIND_FOREIGN_TABLE)) &&
+            tbinfo->relpersistence != RELPERSISTENCE_GLOBAL_TEMP) {
             for (j = 0; j < tbinfo->numatts; j++) {
                 if (tbinfo->attisdropped[j]) {
                     appendPQExpBuffer(q, "\n-- For binary upgrade, recreate dropped column.\n");

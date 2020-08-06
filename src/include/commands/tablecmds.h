@@ -123,7 +123,6 @@ extern void ATExecSetIndexUsableState(Oid objclassOid, Oid objOid, bool newState
 extern bool checkPartitionLocalIndexesUsable(Oid partitionOid);
 extern bool checkRelationLocalIndexesUsable(Relation relation);
 extern List* GetPartitionkeyPos(List* partitionkeys, List* schema);
-extern void CheckPartitionKeyType(Form_pg_attribute* attrs, List* pos, bool is_interval);
 
 extern void clearAttrInitDefVal(Oid relid);
 
@@ -140,5 +139,7 @@ extern Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval
 extern void ATExecEnableDisableRls(Relation rel, RelationRlsStatus changeType, LOCKMODE lockmode);
 extern void create_part_policy_if_needed(CreateStmt *stmt, char relkind);
 
+extern void addToastTableForNewPartition(Relation relation, Oid newPartId);
+extern void fastDropPartition(Relation rel, Oid partOid, const char* stmt, Oid intervalPartOid = InvalidOid);
 #endif /* TABLECMDS_H */
 

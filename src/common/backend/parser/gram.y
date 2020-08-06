@@ -681,7 +681,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 	RANGE RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE REF REFERENCES REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P RENAME REPEATABLE REPLACE REPLICA
 	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLLBACK ROLLUP
-	ROW ROWS RULE
+	ROW ROWNUM ROWS RULE
 
 	SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN
@@ -4184,20 +4184,8 @@ OptTemp:	TEMPORARY					{ $$ = RELPERSISTENCE_TEMP; }
 			| TEMP						{ $$ = RELPERSISTENCE_TEMP; }
 			| LOCAL TEMPORARY			{ $$ = RELPERSISTENCE_TEMP; }
 			| LOCAL TEMP				{ $$ = RELPERSISTENCE_TEMP; }
-			| GLOBAL TEMPORARY
-				{
-					ereport(WARNING,
-							(errmsg("GLOBAL is deprecated in temporary table creation"),
-							 parser_errposition(@1)));
-					$$ = RELPERSISTENCE_TEMP;
-				}
-			| GLOBAL TEMP
-				{
-					ereport(WARNING,
-							(errmsg("GLOBAL is deprecated in temporary table creation"),
-							 parser_errposition(@1)));
-					$$ = RELPERSISTENCE_TEMP;
-				}
+			| GLOBAL TEMPORARY			{ $$ = RELPERSISTENCE_GLOBAL_TEMP; }
+			| GLOBAL TEMP				{ $$ = RELPERSISTENCE_GLOBAL_TEMP; }
 			| UNLOGGED					{ $$ = RELPERSISTENCE_UNLOGGED; }
 			| /*EMPTY*/					{ $$ = RELPERSISTENCE_PERMANENT; }
 		;
@@ -13646,19 +13634,13 @@ OptTempTableName:
 				}
 			| GLOBAL TEMPORARY opt_table qualified_name
 				{
-					ereport(WARNING,
-							(errmsg("GLOBAL is deprecated in temporary table creation"),
-							 parser_errposition(@1)));
 					$$ = $4;
-					$$->relpersistence = RELPERSISTENCE_TEMP;
+					$$->relpersistence = RELPERSISTENCE_GLOBAL_TEMP;
 				}
 			| GLOBAL TEMP opt_table qualified_name
 				{
-					ereport(WARNING,
-							(errmsg("GLOBAL is deprecated in temporary table creation"),
-							 parser_errposition(@1)));
 					$$ = $4;
-					$$->relpersistence = RELPERSISTENCE_TEMP;
+					$$->relpersistence = RELPERSISTENCE_GLOBAL_TEMP;
 				}
 			| UNLOGGED opt_table qualified_name
 				{
@@ -16109,6 +16091,12 @@ func_expr_common_subexpr:
 					n->call_func = false;
 					$$ = (Node *)n;
 				}
+			| ROWNUM 
+				{
+					Rownum *r = makeNode(Rownum);
+				    r->location = @1;
+					$$ = (Node *)r;
+				}			
 			| CURRENT_ROLE
 				{
 					FuncCall *n = makeNode(FuncCall);
@@ -18148,6 +18136,7 @@ reserved_keyword:
 			| WHERE
 			| WINDOW
 			| WITH
+			| ROWNUM
 		;
 
 %%

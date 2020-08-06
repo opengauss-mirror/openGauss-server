@@ -1,303 +1,320 @@
 ![openGauss Logo](doc/openGauss-logo.png "openGauss logo")
 
-- [What Is openGauss](#what-is-opengauss)
-- [Installation](#installation)
-    - [Creating a Configuration File](#creating-a-configuration-file)
-    - [Initializing the Installation Environment](#initializing-the-installation-environment)
-- [Executing Installation](#executing-installation)
--  [Uninstalling the openGauss](#uninstalling-the-openGauss)
-- [Compilation](#compilation)
-    - [Overview](#overview)
-    - [OS and Software Dependency Requirements](#os-and-software-dependency-requirements)
-    - [Downloading openGauss](#downloading-openGauss)
-    - [Compiling Third-Party Software](#compiling-third-party-software)
-    - [Compiling by build.sh](#compiling-by-build.sh)
-    - [Compiling by Command](#compiling-by-command)
-    - [Compiling the Installation Package](#compiling-the-installation-package)
-- [Quick Start](#quick-start)
-- [Docs](#docs)
-- [Community](#community)
-    - [Governance](#governance)
-    - [Communication](#communication)
-- [Contribution](#contribution)
-- [Release Notes](#release-notes)
-- [License](#license)
+[English](./README.en.md) | 简体中文
 
-## What Is openGauss
 
-openGauss is an open source relational database management system. It has multi-core high-performance, full link security, intelligent operation and maintenance for enterprise features. openGauss, which is early originated from PostgreSQL, integrates Huawei's core experience in database field for many years. It optimizes the architecture, transaction, storage engine, optimizer and ARM architecture. At the meantime, openGauss as a global database open source community, aims to further advance the development and enrichment of the database software/hardware application ecosystem.
 
-<img src="doc/openGauss-architecture.png" alt="openGauss Architecture" width="600"/>
+- [什么是openGauss](#什么是openGauss)
+- [安装](#安装)
+    - [创建配置文件](#创建配置文件)
+    - [初始化安装环境](#初始化安装环境)
+    - [执行安装](#执行安装)
+- [卸载openGauss](#卸载openGauss)
+- [编译](#编译)
+    - [概述](#概述)
+    - [操作系统和软件依赖要求](#操作系统和软件依赖要求)
+    - [下载openGauss](#下载openGauss)
+    - [编译第三方软件](#编译第三方软件)
+    - [使用build.sh编译](#使用build编译)
+    - [使用命令编译](#使用命令编译)
+    - [编译安装包](#编译安装包)
+- [快速入门](#快速入门)
+- [文档](#文档)
+- [社区](#社区)
+    - [治理](#治理)
+    - [交流](#交流)
+- [贡献](#贡献)
+- [发行说明](#发行说明)
+- [许可证](许可证)
 
-**High Performance**
+## 什么是openGauss
 
-openGauss breaks through the bottleneck of multi-core CPU, 2-way Kunpeng 128 core 1.5 million TPMC on disk-based row store and 3.5 million TPMC on MOT (Memory-Optimized Tables) Engine.
+openGauss是一款开源的关系型数据库管理系统，它具有多核高性能、全链路安全性、智能运维等企业级特性。
+openGauss内核早期源自开源数据库PostgreSQL，融合了华为在数据库领域多年的内核经验，在架构、事务、存储引擎、优化器及ARM架构上进行了适配与优化。作为一个开源数据库，期望与广泛的开发者共同构建一个多元化技术的开源数据库社区。
 
-**Partitions**
+<img src="doc/openGauss-architecture.png" alt="openGauss架构" width="600"/>
 
-Divide key data structure shared by internal threads into different partitions to reduce lock access conflicts. For example, CLOG uses partition optimization to solve the bottleneck of ClogControlLock.
+**高性能**
 
-**NUMA Structure**
+openGauss突破了多核CPU的瓶颈，实现两路鲲鹏128核150万tpmC，内存优化表（MOT）引擎达350万tpmC。
 
-Malloc key data structures help reduce cross CPU access. The global PGPROC array is divided into several parts according to the number of NUMA nodes, solving the bottleneck of ProcArrayLock. 
+**数据分区**
 
-**Binding Cores**
+内部线程共享的关键数据结构进行数据分区，减少加锁访问冲突。比如CLOG就采用分区优化，解决ClogControlLock锁瓶颈。
 
-Bind NIC interrupts to different cores and bind cores to different background threads to avoid performance instability due to thread migration between cores.
+**NUMA化内核数据结构**
 
-**ARM Optimization**
+关键数据结构NUMA化分配，减少跨CPU访问。比如全局PGPROC数组按照NUMA Node的数目分为多份，分别在对应NUMA Node上申请内存。解决ProcArrayLock锁瓶颈。
 
-Optimize atomic operations based on ARM platform LSE instructions, implementing efficient operation of critical sections.
+**绑核优化**
 
-**SQL Bypass**
+把网络中断绑核和后台业务线程绑核区分开，避免运行线程在核间迁移造成的性能不稳定。
 
-Optimize SQL execution process through SQL bypass, reducing CPU execution overhead.
+**ARM指令优化**
 
-**High Reliability**
+结合ARM平台的原子操作lse进行优化，实现关键互斥变量原子高效操作。
 
-Under normal service loads, the RTO is less than 10 seconds, reducing the service interruption time caused by node failure.
+**SQL BY PASS**
 
-**Parallel Recovery**
+通过SQL BY PASS优化SQL执行流程，简化CPU执行开销。
 
-When the Xlog is transferred to the standby node, the standby node flushes the Xlog to storage medium. At the meantime, the Xlog is sent to the redo recovery dispatch thread. The dispatch thread sends the Xlog to multiple parallel recovery threads to replay. Ensure that the redo speed of the standby node keeps up with the generation speed of the primary host. The standby node is ready in real time, which can be promoted to primary instantly. 
+**高可靠**
 
-**MOT Engine (beta release)**
+正常业务负载情况下，RTO小于10秒，降低节点故障导致的业务不可用时间。
 
-The Memory-Optimized Tables (MOT) storage engine is a transactional rowstore optimized for many-core and large memory and delivering extreme OLTP performance and high resources utilization. With data and indexes stored totally in-memory, a NUMA-aware design, algorithms that eliminate lock and latch contention and query native compilation (JIT), MOT provides low latency data access and more efficient transaction execution. See MOT Engine documentation (https://opengauss.org/en/docs/1.0.0/docs/Developerguide/mot.html).
+**并行恢复**
 
-**Security**
+主机日志传输到备机时，备机日志落盘的同时，发送给重做恢复分发线程，分发线程根据日志类型和日志操作的数据页发给多个并行恢复线程进行日志重做，保证备机的重做速度跟上主机日志的产生速度。这样备机实时处于ready状态，从而实现瞬间故障切换。
 
-openGauss supports account management, account authentication, account locking, password complexity check, privilege management and verification, transmission encryption, and operation audit, protecting service data security.
 
-**Easy Operation and Maintenance**
+**MOT引擎（Beta发布）**
 
-openGauss integrates AI algorithms into databases, reducing the burden of database maintenance.
+内存优化表（MOT）存储引擎是一个专为多核大内存优化的存储引擎，具有极高的联机事务处理（OLTP）性能和资源利用率。MOT的数据和索引完全存储在内存中，通过NUMA感知执行，算法消除闩锁争用以及查询JIT本地编译，提供低时延数据访问及高效事务执行。更多请参考[MOT引擎文档](https://opengauss.org/zh/docs/1.0.0/docs/Developerguide/%E5%86%85%E5%AD%98%E8%A1%A8%E7%89%B9%E6%80%A7.html)。
 
-- **SQL Prediction**
+**安全**
 
-openGauss supports SQL execution time prediction based on collected historical performance data.
+openGauss支持账号管理，账号认证，口令复杂度检查，账号锁定，权限管理和校验，传输加密，操作
+审计等全方位的数据库安全能力，保护业务满足安全要求。
 
-- **SQL Diagnoser**
+**易运维**
 
-openGauss supports the diagnoser for SQL execution statements, finding out slow queries in advance..
+openGauss将AI算法集成到数据库中，减少数据库维护的负担。
 
-- **Automatic Parameter Adjustment**
+- **SQL预测**
 
-openGauss supports automatically adjusting database parameters, reducing the cost and time of parameter adjustment.
+openGauss根据收集的历史性能数据进行编码和基于深度学习的训练及预测，支持SQL执行时间预测。
 
-## Installation
+- **SQL诊断器**
 
-### Creating a Configuration File
+openGauss支持SQL执行语句的诊断器，提前发现慢查询。
 
-Before installing the openGauss, you need to create a configuration file. The configuration file in the XML format contains the information about the server where the openGauss is deployed, installation path, IP address, and port number. This file is used to guide how to deploy the openGauss. You need to configure the configuration file according to the actual deployment requirements.
+- **参数自动调整**
 
-The following describes how to create an XML configuration file based on the deployment solution of one primary node and one standby node.
-The information of value is only an example. You can replace it as required. Each line of information is commented out.
+openGauss通过机器学习方法自动调整数据库参数，提高调参效率，降低正确调参成本。
+
+
+## 安装
+
+### 创建配置文件
+
+在安装openGauss之前，需要创建clusterconfig.xml配置文件。XML文件包含部署openGauss的服务器信息、安装路径、IP地址以及端口号等。用于告知openGauss如何部署。用户需根据不同场配置对应的XML文件。
+
+下面以一主一备的部署方案为例，说明如何创建XML配置文件。
+以下value取值信息仅为示例，可自行替换。每行信息均有注释进行说明。
 
 ```
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <ROOT>
-<!-- Overall information -->
-  <CLUSTER>
-  <!-- Database name -->
-    <PARAM name="clusterName" value="Cluster_template" />
-	<!-- Database node name (hostname) -->
-    <PARAM name="nodeNames" value="node1_hostname,node2_hostname"/>
-	<!-- Database installation path -->
-    <PARAM name="gaussdbAppPath" value="/opt/huawei/install/app" />
-	<!-- Log directory -->
-    <PARAM name="gaussdbLogPath" value="/var/log/omm" />
-	<!-- Temporary file directory -->
-    <PARAM name="tmpMppdbPath" value="/opt/huawei/tmp"/>
-	<!-- Database tool directory -->
-    <PARAM name="gaussdbToolPath" value="/opt/huawei/install/om" />
-	<!--Directory of the core file of the database -->
-    <PARAM name="corePath" value="/opt/huawei/corefile"/>
-	<!-- Node IP addresses corresponding to the node names, respectively -->
-    <PARAM name="backIp1s" value="192.168.0.1,192.168.0.2"/>
-  </CLUSTER>
-<!-- Information about node deployment on each server -->
-  <DEVICELIST>
-  <!-- Information about the node deployment on node1 -->
-    <DEVICE sn="node1_hostname">
-	  <!-- Host name of node1 -->
-      <PARAM name="name" value="node1_hostname"/>
-	  <!-- AZ where node1 is located and AZ priority -->
-      <PARAM name="azName" value="AZ1"/>
-      <PARAM name="azPriority" value="1"/>
-	  <!-- IP address of node1. If only one NIC is available for the server, set backIP1 and sshIP1 to the same IP address. -->
-      <PARAM name="backIp1" value="192.168.0.1"/>
-      <PARAM name="sshIp1" value="192.168.0.1"/>
-      <!--DBnode-->
-      <PARAM name="dataNum" value="1"/>
-	  <!-- Database node port number -->
-      <PARAM name="dataPortBase" value="15400"/>
-	  <!-- Data directory on the primary database node and data directories of standby nodes -->
-      <PARAM name="dataNode1" value="/opt/huawei/install/data/dn,node2_hostname,/opt/huawei/install/data/dn"/>
-	  <!-- Number of nodes for which the synchronization mode is set on the database node -->
-      <PARAM name="dataNode1_syncNum" value="0"/>
-    </DEVICE>
-  <!-- Information about the node deployment on node2 -->
-    <DEVICE sn="node2_hostname">
-	  <!-- Host name of node2 -->
-      <PARAM name="name" value="node2_hostname"/>
-	  <!-- AZ where node2 is located and AZ priority -->
-      <PARAM name="azName" value="AZ1"/>
-      <PARAM name="azPriority" value="1"/>
-	  <!-- IP address of node2. If only one NIC is available for the server, set backIP1 and sshIP1 to the same IP address. -->
-      <PARAM name="backIp1" value="192.168.0.2"/>
-      <PARAM name="sshIp1" value="192.168.0.2"/>
-    </DEVICE>
-  </DEVICELIST>
+    <!-- openGauss整体信息 -->
+    <CLUSTER>
+    <!-- 数据库名称 -->
+        <PARAM name="clusterName" value="dbCluster" />
+    <!-- 数据库节点名称(hostname) -->
+        <PARAM name="nodeNames" value="node1,node2" />
+    <!-- 节点IP，与nodeNames一一对应 -->
+        <PARAM name="backIp1s" value="192.168.0.11,192.168.0.12"/>
+    <!-- 数据库安装目录-->
+        <PARAM name="gaussdbAppPath" value="/opt/huawei/install/app" />
+    <!-- 日志目录-->
+        <PARAM name="gaussdbLogPath" value="/var/log/omm" />
+    <!-- 临时文件目录-->
+        <PARAM name="tmpMppdbPath" value="/opt/huawei/tmp"/>
+    <!--数据库工具目录-->
+        <PARAM name="gaussdbToolPath" value="/opt/huawei/install/om" />
+    <!--数据库core文件目录-->
+        <PARAM name="corePath" value="/opt/huawei/corefile"/>
+    <!-- openGauss类型，此处示例为单机类型，“single-inst”表示单机一主多备部署形态-->
+        <PARAM name="clusterType" value="single-inst"/>
+    </CLUSTER>
+    <!-- 每台服务器上的节点部署信息 -->
+    <DEVICELIST>
+        <!-- node1上的节点部署信息 -->
+        <DEVICE sn="1000001">
+        <!-- node1的hostname -->
+            <PARAM name="name" value="node1"/>
+        <!-- node1所在的AZ及AZ优先级 -->
+            <PARAM name="azName" value="AZ1"/>
+            <PARAM name="azPriority" value="1"/>
+        <!-- 如果服务器只有一个网卡可用，将backIP1和sshIP1配置成同一个IP -->
+            <PARAM name="backIp1" value="192.168.0.11"/>
+            <PARAM name="sshIp1" value="192.168.0.11"/>
+            
+	    <!--dbnode-->
+	    	<PARAM name="dataNum" value="1"/>
+	    <!--DBnode端口号-->
+	    	<PARAM name="dataPortBase" value="26000"/>
+	    <!--DBnode主节点上数据目录，及备机数据目录-->
+	    	<PARAM name="dataNode1" value="/opt/huawei/install/data/db1,node2,/opt/huawei/install/data/db1"/>
+	    <!--DBnode节点上设定同步模式的节点数-->
+	    	<PARAM name="dataNode1_syncNum" value="0"/>
+        </DEVICE>
+
+        <!-- node2上的节点部署信息，其中“name”的值配置为主机名称（hostname） -->
+        <DEVICE sn="1000002">
+            <PARAM name="name" value="node2"/>
+            <PARAM name="azName" value="AZ1"/>
+            <PARAM name="azPriority" value="1"/>
+            <!-- 如果服务器只有一个网卡可用，将backIP1和sshIP1配置成同一个IP -->
+            <PARAM name="backIp1" value="192.168.0.12"/>
+            <PARAM name="sshIp1" value="192.168.0.12"/>
+	</DEVICE>
+    </DEVICELIST>
 </ROOT>
 ```
 
-### Initializing the Installation Environment
+### 初始化安装环境
 
-After the openGauss configuration file is created, you need to run the gs_preinstall script to prepare the account and environment so that you can perform openGauss installation and management operations with the minimum permission, ensuring system security.
+创建完openGauss配置文件后，在执行安装前，为了后续能以最小权限进行安装及openGauss管理操作，保证系统安全性，需要运行安装前置脚本gs_preinstall准备好安装用户及环境。
 
-**Precautions**
+安装前置脚本gs_preinstall可以协助用户自动完成如下的安装环境准备工作：
 
-- You must check the upper-layer directory permissions to ensure that the user has the read, write, and execution permissions on the installation package and configuration file directory.
-- The mapping between each host name and IP address in the XML configuration file must be correct.
-- Only user root is authorized to run the gs_preinstall command.
+- 自动设置Linux内核参数以达到提高服务器负载能力的目的。这些参数直接影响数据库系统的运行状态，请仅在确认必要时调整。
+- 自动将openGauss配置文件、安装包拷贝到openGauss主机的相同目录下。
+- openGauss安装用户、用户组不存在时，自动创建安装用户以及用户组。
+- 读取openGauss配置文件中的目录信息并创建，将目录权限授予安装用户。
 
-**Procedure**
+**注意事项**
 
-1. Log in to any host where the openGauss is to be installed as user root and create a directory for storing the installation package as planned.
+- 用户需要检查上层目录权限，保证安装用户对安装包和配置文件目录读写执行的权限。
+- xml文件中各主机的名称与IP映射配置正确。
+- 只能使用root用户执行gs_preinstall命令。
+
+**操作步骤**
+
+1.以root用户登录待安装openGauss的任意主机，并按规划创建存放安装包的目录。
 
    ```
-   mkdir -p /opt/software/openGauss
-   chmod 755 -R /opt/software
+mkdir -p /opt/software/openGauss
+chmod 755 -R /opt/software
    ```
 
-   > **NOTE:** 
+   > **说明** 
    >
-   > - Do not create the directory in the home directory or subdirectory of any openGauss user because you may lack permissions for such directories.
-   > - The openGauss user must have the read and write permissions on the /opt/software/openGauss directory.
+   > - 不建议把安装包的存放目录规划到openGauss用户的家目录或其子目录下，可能导致权限问题。
+   > - openGauss用户须具有/opt/software/openGauss目录的读写权限。
 
-2. The release package is used as an example. Upload the installation package openGauss_x.x.x_PACKAGES_RELEASE.tar.gz and the configuration file clusterconfig.xml to the directory created in the previous step.
+2.将安装包“openGauss-x.x.x-openEULER-64bit.tar.gz”和配置文件“clusterconfig.xml”都上传至上一步所创建的目录中。
 
-3. Go to the directory for storing the uploaded software package and decompress the package.
+3.在安装包所在的目录下，解压安装包openGauss-x.x.x-openEULER-64bit.tar.gz。安装包解压后，在/opt/software/openGauss目录下自动生成script目录。在script目录下生成gs_preinstall等OM工具脚本。
 
-   ```
-   cd /opt/software/openGauss
-   tar -zxvf openGauss_x.x.x_PACKAGES_RELEASE.tar.gz
-   ```
+```
+cd /opt/software/openGauss
+tar -zxvf openGauss-x.x.x-openEULER-64bit.tar.gz
+```
 
-4. Decompress the openGauss-x.x.x-openEULER-64bit.tar.gz package.
-
-   ```
-   tar -zxvf openGauss-x.x.x-openEULER-64bit.tar.gz
-   ```
-
-   After the installation package is decompressed, the script subdirectory is automatically generated in /opt/software/openGauss. OM tool scripts such as gs_preinstall are generated in the script subdirectory.
-
-5. Go to the directory for storing tool scripts.
+4.进入工具脚本目录。
 
    ```
-   cd /opt/software/openGauss/script
+cd /opt/software/openGauss/script
    ```
 
-6. To ensure that the OpenSSL version is correct, load the lib library in the installation package before preinstallation. Run the following command. {packagePath} indicates the path where the installation package is stored. In this example, the path is /opt/software/openGauss.
+5.如果是openEuler的操作系统，执行如下命令打开performance.sh文件，用#注释sysctl -w vm.min_free_kbytes=112640 &> /dev/null，键入“ESC”键进入指令模式，执行**:wq**保存并退出修改。
+
+```
+vi /etc/profile.d/performance.sh
+```
+
+6.为确保openssl版本正确，执行预安装前请加载安装包中lib库。执行命令如下，其中*{packagePath}*为用户安装包放置的路径，本示例中为/opt/software/openGauss。
 
    ```
-   export LD_LIBRARY_PATH={packagePath}/script/gspylib/clib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH={packagePath}/script/gspylib/clib:$LD_LIBRARY_PATH
    ```
 
 
-7. To ensure successful installation, check whether the values of hostname and /etc/hostname are the same. During preinstallation, the host name is checked.
+7.为确保成功安装，检查 hostname 与 /etc/hostname 是否一致。预安装过程中，会对hostname进行检查。
 
-8. Execute gs_preinstall to configure the installation environment. If the shared environment is used, add the --sep-env-file=ENVFILE parameter to separate environment variables to avoid mutual impact with other users. The environment variable separation file path is specified by users.
-   Execute gs_preinstall in interactive mode. During the execution, the mutual trust between users root and between clusteropenGauss users is automatically established.	
-
-   ```
-   ./gs_preinstall -U omm -G dbgrp -X /opt/software/openGauss/clusterconfig.xml
-   ```
-
-   omm is the database administrator (also the OS user running the openGauss), dbgrp is the group name of the OS user running the openGauss, and /opt/software/ openGauss/clusterconfig.xml is the path of the openGauss configuration file. During the execution, you need to determine whether to establish mutual trust as prompted and enter the password of user root or the openGauss user.
-
-### Executing Installation
-
-After the openGauss installation environment is prepared by executing the pre-installation script, deploy openGauss based on the installation process.
-
-**Prerequisites**
-
-- You have successfully executed the gs_preinstall script. 
-- All the server OSs and networks are functioning properly.
-- You have checked that the locale parameter for each server is set to the same value. 
-
-**Procedure**
-
-1. (Optional) Check whether the installation package and openGauss configuration file exist in the planned directories. If no such package or file exists, perform the preinstallation again..
-
-2. Log in to any host of the openGauss and switch to the omm user.
+8.使用gs_preinstall准备好安装环境。若为共用环境需加入--sep-env-file=ENVFILE参数分离环境变量，避免与其他用户相互影响，ENVFILE为用户自行指定的环境变量分离文件的路径。
+   执行如下命令，即采用交互模式执行前置，并在执行过程中自动创建root用户互信和openGauss用户互信：
 
    ```
-   su - omm
+./gs_preinstall -U omm -G dbgrp -X /opt/software/openGauss/clusterconfig.xml
    ```
 
-   > **NOTE:** 
+   omm为数据库管理员用户（即运行openGauss的操作系统用户）,dbgrp为运行openGauss的操作系统用户的组名，/opt/software/ openGauss/clusterconfig.xml为openGauss的配置文件路径。执行过程中需要根据提示选择建立互信，并输入root或openGauss用户的密码。
+
+### 执行安装
+
+执行前置脚本准备好openGauss安装环境之后，按照启动安装过程部署openGauss。
+
+**前提条件**
+
+- 已成功执行前置脚本gs_preinstall。
+- 所有服务器操作系统和网络均正常运行。
+- 用户需确保各个主机上的locale保持一致。
+
+**操作步骤**
+
+1.（可选）检查安装包和openGauss配置文件在规划路径下是否已存在，如果没有，重新执行预安装，确保预安装成功，再执行以下步骤。
+
+2.登录到openGauss的主机，并切换到omm用户。
+
+   ```
+su - omm
+   ```
+
+   > **说明** 
    >
-   > - omm indicates the user specified by the -U parameter in the gs_preinstall script.
-   > - You need to execute the gs_install script as user omm specified in the gs_preinstall script. Otherwise, an execution error will be reported.
+   > - omm为gs_preinstall脚本中-U参数指定的用户。
+   > - 以上述omm用户执行gs_install脚本。否则会报执行错误。
 
-3. Use gs_install to install the openGauss. If the openGauss is installed in environment variable separation mode, run the source command to obtain the environment variable separation file ENVFILE.
-
-   ```
-   gs_install -X /opt/software/openGauss/clusterconfig.xml
-   ```
-
-   The password must meet the following complexity requirements:
-
-   - Contain at least eight characters.	
-   - Cannot be the same as the username, the current password (ALTER), or the current password in an inverted sequence.
-   - Contain at least three of the following: uppercase characters (A to Z), lowercase characters (a to z), digits (0 to 9), and other characters (limited to ~!@#$%^&*()-_=+\|[{}];:,<.>/?).
-
-4. After the installation is successful, manually delete the trust between users root on the host, that is, delete the mutual trust file on each openGauss database node.
+3.使用gs_install安装openGauss。若为环境变量分离的模式安装的集群需要source环境变量分离文件ENVFILE。
 
    ```
-   rm -rf ~/.ssh
+gs_install -X /opt/software/openGauss/clusterconfig.xml
    ```
 
-### Uninstalling the openGauss
+ /opt/software/openGauss/script/clusterconfig.xml为openGauss配置文件的路径。在执行过程中，用户需根据提示输入数据库的密码，密码具有一定的复杂度，为保证用户正常使用该数据库，请记住输入的数据库密码。
 
-The process of uninstalling the openGauss includes uninstalling the openGauss and clearing the environment of the openGauss server.
+ 密码复杂度要求：
 
-#### **Executing Uninstallation**
+   - 长度至少8个字符。	
+   - 不能和用户名、当前密码（ALTER）、当前密码的倒序相同。
+   - 以下至少包含三类：大写字母（A~Z）、小写字母（a~z）、数字（0~9）、其他字符（仅限~!@#$%^&*()-_=+\|[{}];:,<.>/?）。
 
-The openGauss provides an uninstallation script to help users uninstall the openGauss.
-
-**Procedure**
-
-1. Log in as the OS user omm to the host where the CN is located.
-
-2. Execute the gs_uninstall script to uninstall the database cluster.
+4.安装执行成功之后，需要手动删除主机root用户的互信，即删除openGauss数据库各节点上的互信文件。
 
    ```
-   gs_uninstall --delete-data
+rm -rf ~/.ssh
    ```
 
-   Alternatively, execute uninstallation on each openGauss node.
+### 卸载openGauss
+
+卸载openGauss的过程包括卸载openGauss和清理openGauss服务器环境。
+
+#### **执行卸载**
+
+openGauss提供了卸载脚本，帮助用户卸载openGauss。
+
+**操作步骤**
+
+1.以操作系统用户omm登录数据库主节点。
+
+2.使用gs_uninstall卸载openGauss。
 
    ```
-   gs_uninstall --delete-data -L
+gs_uninstall --delete-data
    ```
 
-#### **Deleting openGauss Configurations**
+   或者在openGauss中每个节点执行本地卸载。
 
-After the openGauss is uninstalled, execute the gs_postuninstall script to delete configurations from all servers in the openGauss if you do not need to re-deploy the openGauss using these configurations. These configurations are made by the gs_preinstall script.
-**Prerequisites**
+   ```
+gs_uninstall --delete-data -L
+   ```
 
-- The openGauss uninstallation task has been successfully executed.
-- User root is trustworthy and available.
-- Only user root is authorized to run the gs_postuninstall command.
+#### **一键式环境清理**
 
-**Procedure**
+在openGauss卸载完成后，如果不需要在环境上重新部署openGauss，可以运行脚本gs_postuninstall对openGauss服务器上环境信息做清理。openGauss环境清理是对环境准备脚本gs_preinstall所做设置的清理。
+**前提条件**
 
-1. Log in to the openGauss server as user root.
+- openGauss卸载执行成功。
+- root用户互信可用。
+- 只能使用root用户执行gs_postuninstall命令。
 
-2. Run the ssh Host name command to check whether mutual trust has been successfully established. Then, enter exit.
+**操作步骤**
+
+1.以root用户登录openGauss服务器。
+
+2.查看互信是否建成功，可以互相执行**ssh 主机名**。输入exit退出。
 
    ```
    plat1:~ # ssh plat2 
@@ -308,158 +325,157 @@ After the openGauss is uninstalled, execute the gs_postuninstall script to delet
    plat1:~ #
    ```
 
-3. Go to the following path:
+3.进入script路径下。
 
    ```
    cd /opt/software/openGauss/script
    ```
 
-4. Run the gs_postuninstall command to clear the environment. If the openGauss is installed in environment variable separation mode, run the source command to obtain the environment variable separation file ENVFILE.
+4.使用gs_postuninstall进行清理。若为环境变量分离的模式安装的集群需要source环境变量分离文件ENVFILE。
 
    ```
    ./gs_postuninstall -U omm -X /opt/software/openGauss/clusterconfig.xml --delete-user --delete-group
    ```
 
-   Alternatively, locally use the gs_postuninstall tool to clear each openGauss node.
+  或者在openGauss中每个节点执行本地后置清理。
 
    ```
    ./gs_postuninstall -U omm -X /opt/software/openGauss/clusterconfig.xml --delete-user --delete-group -L
    ```
 
-   omm is the name of the OS user who runs the openGauss, and the path of the openGauss configuration file is /opt/software/openGauss/clusterconfig.xml.
-   If the cluster is installed in environment variable separation mode, delete the environment variable separation parameter ENV obtained by running the source command.
+ omm为运行openGauss的操作系统用户名，/opt/software/openGauss/clusterconfig.xml为openGauss配置文件路径。
 
-   ```
-   unset MPPDB_ENV_SEPARATE_PATH
-   ```
+若为环境变量分离的模式安装的集群需删除之前source的环境变量分离的env参数unset MPPDB_ENV_SEPARATE_PATH
 
-5. Delete the mutual trust between the users root on each openGauss database node. 
+5.删除各openGauss数据库节点root用户互信。 
 
 
-## Compilation
+## 编译
 
-### Overview
+### 概述
 
-To compile openGauss, you need two components: openGauss-server and binarylibs.
+编译openGauss需要openGauss-server和binarylibs两个组件。
 
-- openGauss-server: main code of openGauss. You can obtain it from the open source community.
+- openGauss-server：openGauss的主要代码。可以从开源社区获取。
 
-- binarylibs: third party open source software that openGauss depends on. You can obtain it by compiling the openGauss-third_party code or downloading from the open source community on which we have compiled a copy and uploaded it . The first method will be introduced in the following chapter.
+- binarylibs：openGauss依赖的第三方开源软件，你可以直接编译openGauss-third_party代码获取，也可以从开源社区下载已经编译好的并上传的一个副本。
 
-Before you compile openGauss, please check the OS and software dependency requirements.
+在编译openGauss之前，请检查操作系统和软件依赖要求。
 
-You can compile openGauss by build.sh, a one-click shell tool, which we will introduce later, or compile by command. Also, an installation package is produced by build.sh.
+openGauss可以通过一键式shell工具build.sh进行编译，也可以通过命令进行编译。安装包由build.sh生成。
 
-### OS and Software Dependency Requirements
+### 操作系统和软件依赖要求
 
-The following OSs are supported:
+openGauss支持以下操作系统：
 
-- CentOS 7.6 (x86 architecture)
+- CentOS 7.6（x86架构）
 
-- openEuler-20.03-LTS (aarch64 architecture)
+- openEuler-20.03-LTS（aarch64架构）
 
 
-The following table lists the software requirements for compiling the openGauss.
+以下表格列举了编译openGauss的软件要求。
 
-You are advised to use the default installation packages of the following dependent software in the listed OS installation CD-ROMs or sources. If the following software does not exist, refer to the recommended versions of the software.
+建议使用从列出的操作系统安装盘或安装源中获取的以下依赖软件的默认安装包进行安装。如果不存在以下软件，请参考推荐的软件版本。
 
-Software dependency requirements are as follows:
+软件依赖要求如下：
 
-| Software      | Recommended Version |
-| ------------- | ------------------- |
-| libaio-devel  | 0.3.109-13          |
-| flex          | 2.5.31 or later     |
-| bison         | 2.7-4               |
-| ncurses-devel | 5.9-13.20130511     |
-| glibc.devel   | 2.17-111            |
-| patch         | 2.7.1-10            |
-| lsb_release   | 4.1                 |
+| 软件            | 推荐版本            |
+| ------------- | --------------- |
+| libaio-devel  | 0.3.109-13      |
+| flex          | 2.5.31及以上版本     |
+| bison         | 2.7-4           |
+| ncurses-devel | 5.9-13.20130511 |
+| glibc.devel   | 2.17-111        |
+| patch         | 2.7.1-10        |
+| lsb_release   | 4.1             |
 
-### Downloading openGauss
+### 下载openGauss
 
-You can download openGauss-server and openGauss-third_party from open source community.
+可以从开源社区下载openGauss-server和openGauss-third_party。
 
 https://opengauss.org/zh/
 
-From the following website, you can obtain the binarylibs we have compiled. Please unzip it and rename to **binarylibs** after you download.
+可以通过以下网站获取编译好的binarylibs。下载后请解压缩并重命名为**binarylibs**。
 
 https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.0/openGauss-third_party_binarylibs.tar.gz
 
 
-Now we have completed openGauss code, for example, we store it in following directories.
+现在我们已经拥有完整的openGauss代码，把它存储在以下目录中（以sda为例）。
 
 - /sda/openGauss-server
 - /sda/binarylibs
 - /sda/openGauss-third_party
 
-### Compiling Third-Party Software
+### 编译第三方软件
 
-Before compiling the openGauss, compile and build the open-source and third-party software on which the openGauss depends. These open-source and third-party software is stored in the openGauss-third_party code repository and usually needs to be built only once. If the open-source software is updated, rebuild the software.
+在编译openGauss之前，需要先编译openGauss依赖的开源及第三方软件。这些开源及第三方软件存储在openGauss-third_party代码仓库中，通常只需要构建一次。如果开源软件有更新，需要重新构建软件。
 
-You can also directly obtain the output file of the open-source software compilation and build from the **binarylibs** repository.
+用户也可以直接从**binarylibs**库中获取开源软件编译和构建的输出文件。
 
-If you want to compile third-party by yourself, please go to openGauss-third_party repository to see details. 
+如果你想自己编译第三方软件，请到openGauss-third_party仓库查看详情。 
 
-After the preceding script is executed, the final compilation and build result is stored in the **binarylibs** directory at the same level as **openGauss-third_party**. These files will be used during the compilation of **openGauss-server**.
+执行完上述脚本后，最终编译和构建的结果保存在与**openGauss-third_party**同级的**binarylibs**目录下。在编译**openGauss-server**时会用到这些文件。
 
-### Compiling by build.sh
+### 代码编译
 
-build.sh in openGauss-server is an important script tool during compilation. It integrates software installation and compilation and product installation package compilation functions to quickly compile and package code.
+##### 使用build.sh编译代码
 
-The following table describes the parameters.
+openGauss-server中的build.sh是编译过程中的重要脚本工具。该工具集成了软件安装编译和产品安装包编译功能，可快速进行代码编译和打包。。
 
-| Option      | Default Value                | Parameter                      | Description                                                  |
-| :----- | :--------------------------- | :----------------------------- | :----------------------------------------------------------- |
-| -h      | Do not use this option.      | -                              | Help menu.                                                   |
-| -m      | release                      | [debug \| release \| memcheck] | Selects the target version.                                  |
-| -3rd      | ${Code directory}/binarylibs | [binarylibs path]              | Specifies the path of binarylibs. The path must be an absolute path. |
-| -pkg      | Do not use this option.      | -                              | Compresses the code compilation result into an installation package. |
-| -nopt      | Do not use this option.      | -                              | On kunpeng platform, like 1616 version, without LSE optimized. |
+参数说明请见以下表格。
 
-> **NOTICE:** 
+| 选项  | 缺省值                       | 参数                                   | 说明                                              |
+| :---- | :--------------------------- | :------------------------------------- | :------------------------------------------------ |
+| -h    | 请勿使用此选项。             | -                                      | 帮助菜单。                                        |
+| -m    | release                      | [debug &#124; release &#124; memcheck] | 选择目标版本。                                    |
+| -3rd  | ${Code directory}/binarylibs | [binarylibs path]                      | 指定binarylibs路径。该路径必须是绝对路径。        |
+| -pkg  | 请勿使用此选项。             | -                                      | 将代码编译结果压缩至安装包。                      |
+| -nopt | 请勿使用此选项。             | -                                      | 如果使用此功能，则对鲲鹏平台的相关CPU不进行优化。 |
+
+> **注意** 
 >
-> 1. **-m [debug | release | memcheck]** indicates that three target versions can be selected:
->    - **release**: indicates that the binary program of the release version is generated. During compilation of this version, the GCC high-level optimization option is configured to remove the kernel debugging code. This option is usually used in the generation environment or performance test environment.
->    - **debug**: indicates that a binary program of the debug version is generated. During compilation of this version, the kernel code debugging function is added, which is usually used in the development self-test environment.
->    - **memcheck**: indicates that a binary program of the memcheck version is generated. During compilation of this version, the ASAN function is added based on the debug version to locate memory problems.
-> 2. **-3rd [binarylibs path]** is the path of **binarylibs**. By default, **binarylibs** exists in the current code folder. If **binarylibs** is moved to **openGauss-server** or a soft link to **binarylibs** is created in **openGauss-server**, you do not need to specify the parameter. However, if you do so, please note that the file is easy to be deleted by the **git clean** command.
-> 3. Each option in this script has a default value. The number of options is small and the dependency is simple. Therefore, this script is easy to use. If the required value is different from the default value, set this parameter based on the actual requirements.
+> - **-m [debug | release | memcheck]**表示有三个目标版本可以选择：
+>    - **release**：生成release版本的二进制程序。此版本编译时，通过配置GCC高级优化选项，去除内核调试代码。此选项通常在生成环境或性能测试环境中使用。
+>    - **debug**：表示生成debug版本的二进制程序。此版本编译时，增加了内核代码调试功能，一般用于开发自测环境。
+>    - **memcheck**：表示生成memcheck版本的二进制程序。此版本编译时，在debug版本的基础上增加了ASAN功能，用于定位内存问题。
+> - **-3rd [binarylibs path]**为**binarylibs**的路径。默认设置为当前代码文件夹下存在**binarylibs**，因此如果**binarylibs**被移至**openGauss-server**中，或者在**openGauss-server**中创建了到**binarylibs**的软链接，则不需要指定此参数。但请注意，这样做的话，该文件很容易被**git clean**命令删除。
+> - 该脚本中的每个选项都有一个默认值。选项数量少，依赖简单。因此，该脚本易于使用。如果实际需要的参数值与默认值不同，请根据实际情况配置。
 
-Now you know the usage of build.sh, so you can compile the openGauss-server by one command with build.sh.
+现在你已经知晓build.sh的用法，只需使用如下命令即可编译openGauss-server。
 
 ```
 [user@linux openGauss-server]$ sh build.sh -m [debug | release | memcheck] -3rd [binarylibs path]
 ```
 
-For example: 
+举例： 
 
 ```
-[user@linux openGauss-server]$ sh build.sh       # Compile openGauss of the release version. The binarylibs or its soft link must exist in the code directory. Otherwise, the operation fails.
-[user@linux openGauss-server]$ sh build.sh -m debug -3rd /sda/binarylibs    # Compilate openGauss of the debug version using binarylibs we put on /sda/
+[user@linux openGauss-server]$ sh build.sh       # 编译安装release版本的openGauss。需代码目录下有binarylibs或者其软链接，否则将会失败。
+[user@linux openGauss-server]$ sh build.sh -m debug -3rd /sda/binarylibs    # 编译安装debug版本的openGauss
 ```
 
-The software installation path after compilation is **/sda/openGauss-server/dest**.
+编译后的软件安装路径为：**/sda/openGauss-server/dest**
 
-The compiled binary files are stored in **/sda/openGauss-server/dest/bin**.
+编译后的二进制文件路径为：**/sda/openGauss-server/dest/bin**
 
-Compilation log: **make_compile.log**
+编译日志： **make_compile.log**
 
 
 
-### Compiling by Command
+##### 使用命令编译代码
 
-1. Run the following script to obtain the system version:
+1.执行以下脚本获取系统版本号：
 
    ```
    [user@linux openGauss-server]$ sh src/get_PlatForm_str.sh
    ```
 
-   > **NOTICE:** 
+   > **注意** 
    >
-   > - The command output indicates the OSs supported by the openGauss. The OSs supported by the openGauss are centos7.6_x86_64 and openeuler_aarch64.
-   > - If **Failed** or another version is displayed, the openGauss does not support the current operating system.
+   > - 命令回显信息即为openGauss支持的操作系统。目前openGauss支持的操作系统为centos7.6_x86_64和openeuler_aarch64。
+   > - 如果显示**Failed**或其他版本，表示openGauss不支持当前操作系统。
 
-2. Configure environment variables, add **____** based on the code download location, and replace *** with the result obtained in the previous step.
+2.配置环境变量，根据代码下载位置添加**____**，并将***替换为上一步的结果。
 
    ```
    export CODE_BASE=________     # Path of the openGauss-server file
@@ -473,8 +489,8 @@ Compilation log: **make_compile.log**
 
    ```
 
-   For example, on CENTOS X86-64 platform, binarylibs directory is placed as the sibling directory of openGauss-server directory.
-   The following command can be executed under openGauss-server directory.
+   例如，在CENTOS X86-64平台上，binarylibs目录被作为openGauss-server目录的兄弟目录。
+   在openGauss-server目录下执行以下命令。
 
    ```
    export CODE_BASE=`pwd`
@@ -487,105 +503,105 @@ Compilation log: **make_compile.log**
    export PATH=$GAUSSHOME/bin:$GCC_PATH/gcc/bin:$PATH
 
    ```
-3. Select a version and configure it.
+3.选择一个版本进行配置。
 
-   **debug** version:
+   **debug**版本：
 
    ```
    ./configure --gcc-version=8.2.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib
    ```
 
-   **release** version:
+   **release**版本：
 
    ```
    ./configure --gcc-version=8.2.0 CC=g++ CFLAGS="-O2 -g3" --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-thread-safety --without-readline --without-zlib
    ```
 
-   **memcheck** version:
+   **memcheck**版本：
 
    ```
    ./configure --gcc-version=8.2.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib --enable-memory-check
    ```
 
-   > **NOTICE:** 
+   > **注意** 
    >
-   > 1. *[debug | release | memcheck]* indicates that three target versions are available. 
-   > 2. On the ARM-based platform, **-D__USE_NUMA** needs to be added to **CFLAGS**.
-   > 3. On the **ARMv8.1** platform or a later version (for example, Kunpeng 920), **-D__ARM_LSE** needs to be added to **CFLAGS**.
-   > 4. If **binarylibs** is moved to **openGauss-server** or a soft link to **binarylibs** is created in **openGauss-server**, you do not need to specify the **--3rd** parameter. However, if you do so, please note that the file is easy to be deleted by the `git clean` command.
-   > 5. To build with mysql_fdw, add **--enable-mysql-fdw** when configure. Note that before build mysql_fdw, MariaDB's C client library is needed.
-   > 6. To build with oracle_fdw, add **--enable-oracle-fdw** when configure. Note that before build oracle_fdw, Oracle's C client library is needed.
+   > - *[debug | release | memcheck]*表示有三个目标版本可用。 
+   > - 在ARM平台上，需要把**-D__USE_NUMA**添加至**CFLAGS**中。
+   > - 在**ARMv8.1**及以上平台（如鲲鹏920），需要把**-D__ARM_LSE**添加至**CFLAGS**中。
+   > - 如果**binarylibs**被移至**openGauss-server**中，或者在**openGauss-server**中创建了到**binarylibs**的软链接，则不需要指定**--3rd**参数。但请注意，这样做的话，该文件很容易被`git clean`命令删除。
 
-4. Run the following commands to compile openGauss:
+4.执行以下命令编译openGauss：
 
    ```
    [user@linux openGauss-server]$ make -sj
    [user@linux openGauss-server]$ make install -sj
    ```
 
-5. If the following information is displayed, the compilation and installation are successful:
+5.显示如下信息，表示编译和安装成功。
 
    ```
    openGauss installation complete.
    ```
 
-   The software installation path after compilation is **$GAUSSHOME**.
+- 编译后的软件安装路径为**$GAUSSHOME**。
 
-   The compiled binary files are stored in **$GAUSSHOME/bin**.
+- 编译后的二进制文件存放路径为：**$GAUSSHOME/bin**。
 
 
 
-### Compiling the Installation Package 
 
-Please read the chapter **Compiling by build.sh** first to understand the usage of build.sh and how to compile openGauss by using the script.
+### 编译安装包 
 
-Now you can compile the installation package with just adding an option `-pkg`.
+请先阅读[使用build.sh编译](#使用build.sh编译)章节，了解build.sh的用法，以及如何使用该脚本编译openGauss。
+
+现在，只需添加一个-pkg选项，就可以编译安装包。
 
 ```
 [user@linux openGauss-server]$ sh build.sh -m [debug | release | memcheck] -3rd [binarylibs path] -pkg
 ```
 
-For example:
+举例：
 
 ```
-[user@linux openGauss-server]$ sh build.sh -pkg      # Compile openGauss installation package of the release version. The binarylibs or its soft link must exist in the code directory. Otherwise, the operation fails.
-[user@linux openGauss-server]$ sh build.sh -m debug -3rd /sda/binarylibs -pkg   # Compile openGauss installation package of the debug version using binarylibs we put on /sda/
+sh build.sh -pkg       # 生成release版本的openGauss安装包。需代码目录下有binarylibs或者其软链接，否则将会失败。
+sh build.sh -m debug -3rd /sdc/binarylibs -pkg           # 生成debug版本的openGauss安装包
 ```
 
-The generated installation package is stored in the **./package** directory.
+- 生成的安装包存放目录：**./package**。
 
-Compilation log: **make_compile.log**
+- 编译日志： **make_compile.log**
 
-Installation package packaging log: **./package/make_package.log**
+- 安装包打包日志： **./package/make_package.log**
 
-## Quick Start
 
-See the [Quick Start](https://opengauss.org/en/docs/1.0.0/docs/Quickstart/Quickstart.html) to implement the image classification.
+## 快速入门
 
-## Docs
+参考[快速入门](https://opengauss.org/zh/docs/1.0.0/docs/Quickstart/Quickstart.html)。
 
-For more details about the installation guide, tutorials, and APIs, please see the [User Documentation](https://gitee.com/opengauss/docs).
+## 文档
 
-## Community
+更多安装指南、教程和API请参考[用户文档](https://gitee.com/opengauss/docs)。
 
-### Governance
+## 社区
 
-Check out how openGauss implements open governance [works](https://gitee.com/opengauss/community/blob/master/governance.md).
+### 治理
 
-### Communication
+查看openGauss是如何实现开放[治理](https://gitee.com/opengauss/community/blob/master/governance.md)。
 
-- WeLink- Communication platform for developers.
-- IRC channel at `#opengauss-meeting` (only for meeting minutes logging purpose)
-- Mailing-list: https://opengauss.org/en/community/onlineCommunication.html
+### 交流
 
-## Contribution
+- WeLink：开发者的交流平台。
+- IRC频道：`#opengauss-meeting`（仅用于会议纪要）。
+- 邮件列表：https://opengauss.org/zh/community/onlineCommunication.html
 
-Welcome contributions. See our [Contributor](https://opengauss.org/en/contribution.html) for more details.
+## 贡献
 
-## Release Notes
+欢迎大家来参与贡献。详情请参阅我们的[社区贡献](https://opengauss.org/zh/contribution.html)。
 
-For the release notes, see our [RELEASE](https://opengauss.org/en/docs/1.0.0/docs/Releasenotes/Releasenotes.html).
+## 发行说明
 
-## License
+请参见[发行说明](https://opengauss.org/zh/docs/1.0.0/docs/Releasenotes/Releasenotes.html)。
+
+## 许可证
 
 [MulanPSL-2.0](http://license.coscl.org.cn/MulanPSL2/)

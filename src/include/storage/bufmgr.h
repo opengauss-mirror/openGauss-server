@@ -120,7 +120,7 @@ struct WritebackContext;
  */
 #define BufferIsPinned(bufnum)                                                                            \
     (!BufferIsValid(bufnum) ? false                                                                       \
-                            : BufferIsLocal(bufnum) ? (t_thrd.storage_cxt.LocalRefCount[-(bufnum)-1] > 0) \
+                            : BufferIsLocal(bufnum) ? (u_sess->storage_cxt.LocalRefCount[-(bufnum)-1] > 0) \
                                                     : (GetPrivateRefCount(bufnum) > 0))
 
 /*
@@ -147,7 +147,7 @@ struct WritebackContext;
  * now demoted the range checks to assertions within the macro itself.
  */
 #define BufferIsValid(bufnum)                                                                                      \
-    (AssertMacro((bufnum) <= g_instance.attr.attr_storage.NBuffers && (bufnum) >= -t_thrd.storage_cxt.NLocBuffer), \
+    (AssertMacro((bufnum) <= g_instance.attr.attr_storage.NBuffers && (bufnum) >= -u_sess->storage_cxt.NLocBuffer), \
         (bufnum) != InvalidBuffer)
 
 /*
@@ -159,7 +159,7 @@ struct WritebackContext;
  */
 #define BufferGetBlock(buffer)                                                           \
     (AssertMacro(BufferIsValid(buffer)),                                                 \
-        BufferIsLocal(buffer) ? t_thrd.storage_cxt.LocalBufferBlockPointers[-(buffer)-1] \
+        BufferIsLocal(buffer) ? u_sess->storage_cxt.LocalBufferBlockPointers[-(buffer)-1] \
                               : (Block)(t_thrd.storage_cxt.BufferBlocks + ((Size)((uint)(buffer)-1)) * BLCKSZ))
 
 /*
@@ -186,7 +186,7 @@ struct WritebackContext;
 #define BufferGetLSN(bufHdr) (PageGetLSN(BufHdrGetBlock(bufHdr)))
 
 /* Note: this macro only works on local buffers, not shared ones! */
-#define LocalBufHdrGetBlock(bufHdr) t_thrd.storage_cxt.LocalBufferBlockPointers[-((bufHdr)->buf_id + 2)]
+#define LocalBufHdrGetBlock(bufHdr) u_sess->storage_cxt.LocalBufferBlockPointers[-((bufHdr)->buf_id + 2)]
 #define LocalBufGetLSN(bufHdr) (PageGetLSN(LocalBufHdrGetBlock(bufHdr)))
 
 /*

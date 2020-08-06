@@ -43,6 +43,7 @@
 #include "catalog/heap.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_partition_fn.h"
+#include "catalog/storage_gtt.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 #ifdef PGXC
@@ -1216,7 +1217,6 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
             	/* for partitioned table */
                 bool row_movement = false;
                 bool need_create_file = false;
-                int seq_num = -1;
 
                 if (!partKeyUpdate) {
                     row_movement = false;
@@ -1257,7 +1257,6 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                         if (result_relation_desc->rd_rel->relrowmovement) {
                             row_movement = true;
                             need_create_file = true;
-                            seq_num = u_sess->exec_cxt.route->partSeq;
                         } else {
                             ereport(ERROR,
                                 (errmodule(MOD_EXECUTOR),
@@ -1519,7 +1518,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                         Relation fake_insert_relation = NULL;
 
                         if (need_create_file) {
-                            new_partId = createNewIntervalFile(result_relation_desc, seq_num);
+                            new_partId = AddNewIntervalPartition(result_relation_desc, tuple);
                         }
 
                         searchFakeReationForPartitionOid(estate->esfRelations,
@@ -2163,7 +2162,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
                     result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC)
                 ExecOpenIndices(result_rel_info);
         }
-
+        init_gtt_storage(operation, result_rel_info);
         /* Now init the plan for this result rel */
         estate->es_result_relation_info = result_rel_info;
         mt_state->mt_plans[i] = ExecInitNode(sub_plan, estate, eflags);

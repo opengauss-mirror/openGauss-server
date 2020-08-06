@@ -92,6 +92,7 @@
 #include <execinfo.h>
 
 #include "tcop/stmt_retry.h"
+#include "replication/walsender.h"
 
 #undef _
 #define _(x) err_gettext(x)
@@ -3299,6 +3300,9 @@ static void send_message_to_frontend(ErrorData* edata)
 
         if (edata->elevel == FATAL)
             t_thrd.log_cxt.flush_message_immediately = true;
+    }
+    if (AM_WAL_DB_SENDER) {
+        ReadyForQuery((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
     }
 }
 

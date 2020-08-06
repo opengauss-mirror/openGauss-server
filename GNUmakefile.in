@@ -42,17 +42,23 @@ install_oracle_fdw:
 endif
 
 ifeq ($(enable_multiple_nodes), yes)
-install: install_mysql_fdw install_oracle_fdw
+install:
+	$(MAKE) install_mysql_fdw
+	$(MAKE) install_oracle_fdw
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C src/distribute/kernel/extension/packages $@
 	$(MAKE) -C contrib/pagehack $@
+	$(MAKE) -C contrib/pg_stat_statements $@
 	$(MAKE) -C contrib/pg_xlogdump $@
 	$(MAKE) -C contrib/gsredistribute $@
 	$(MAKE) -C src/distribute/kernel/extension/dimsearch $@
 	$(MAKE) -C src/distribute/kernel/extension/tsdb $@
 	+@echo "PostgreSQL installation complete."
 else
-install: install_mysql_fdw install_oracle_fdw
+install:
+	$(MAKE) install_mysql_fdw
+	$(MAKE) install_oracle_fdw
+	$(MAKE) -C contrib/pg_stat_statements $@
 	+@echo "openGauss installation complete."
 endif
 

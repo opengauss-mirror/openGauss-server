@@ -1024,8 +1024,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
         languageValidator,
         prosrc_str, /* converted to text later */
         probin_str, /* converted to text later */
-        false,      /* not an aggregate */
-        isWindowFunc,
+        stmt->isProcedure ? PROKIND_PROCEDURE : (isWindowFunc ? PROKIND_WINDOW : PROKIND_FUNCTION),
         security,
         isLeakProof,
         isStrict,
@@ -1181,7 +1180,7 @@ void RemoveFunctionById(Oid funcOid)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
 
     Form_pg_proc procedureStruct = (Form_pg_proc)GETSTRUCT(tup);
-    isagg = procedureStruct->proisagg;
+    isagg = PROC_IS_AGG(procedureStruct->prokind);
 
     if (procedureStruct->prolang == ClanguageId) {
         PrepareCFunctionLibrary(tup);
@@ -1245,7 +1244,7 @@ void RenameFunction(List* name, List* argtypes, const char* newname)
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
     procForm = (Form_pg_proc)GETSTRUCT(tup);
-    if (procForm->proisagg)
+    if (PROC_IS_AGG(procForm->prokind))
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is an aggregate function", NameListToString(name)),
@@ -1308,7 +1307,7 @@ void AlterFunctionOwner(List* name, List* argtypes, Oid newOwnerId)
     tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procOid));
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
-    if (((Form_pg_proc)GETSTRUCT(tup))->proisagg)
+    if (PROC_IS_AGG(((Form_pg_proc)GETSTRUCT(tup))->prokind))
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is an aggregate function", NameListToString(name)),
@@ -1507,7 +1506,7 @@ void AlterFunction(AlterFunctionStmt* stmt)
     if (!pg_proc_ownercheck(funcOid, GetUserId()))
         aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PROC, NameListToString(stmt->func->funcname));
 
-    if (procForm->proisagg)
+    if (PROC_IS_AGG(procForm->prokind))
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is an aggregate function", NameListToString(stmt->func->funcname))));
@@ -1821,11 +1820,11 @@ void CreateCast(CreateCastStmt* stmt)
         if (procstruct->provolatile == PROVOLATILE_VOLATILE)
             ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("cast function must not be volatile")));
 #endif
-        if (procstruct->proisagg)
+        if (PROC_IS_AGG(procstruct->prokind))
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("cast function must not be an aggregate function")));
-        if (procstruct->proiswindow)
+        if (PROC_IS_WIN(procstruct->prokind))
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("cast function must not be a window function")));
         if (procstruct->proretset)

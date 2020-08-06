@@ -27,6 +27,7 @@
 
 #include <atomic>
 #include <iostream>
+#include <pthread.h>
 #include "rw_lock.h"
 #include "global.h"
 #include "txn.h"
@@ -48,10 +49,7 @@ public:
 
     virtual ~CheckpointManager();
 
-    void SetValidation(bool val)
-    {
-        m_checkpointValidation = val;
-    }
+    bool Initialize();
 
     /**
      * @brief Starts an MOT checkpoint snapshot operation.
@@ -112,11 +110,11 @@ public:
     /**
      * @brief Checkpoint task completion callback
      * @param checkpointId The checkpoint's id.
-     * @param tableId The table's id.
+     * @param table The table's pointer.
      * @param numSegs number of segments written.
      * @param success Indicates a success or a failure.
      */
-    virtual void TaskDone(uint32_t tableId, uint32_t numSegs, bool success);
+    virtual void TaskDone(Table* table, uint32_t numSegs, bool success);
 
     virtual bool ShouldStop() const
     {
@@ -178,12 +176,12 @@ public:
 
     void FetchRdLock()
     {
-        m_fetchLock.RdLock();
+        (void)pthread_rwlock_rdlock(&m_fetchLock);
     }
 
     void FetchRdUnlock()
     {
-        m_fetchLock.RdUnlock();
+        (void)pthread_rwlock_unlock(&m_fetchLock);
     }
 
     bool GetCheckpointDirName(std::string& dirName);
@@ -209,14 +207,17 @@ private:
     volatile CheckpointPhase m_phase;
 
     // NA 'bit' handling
-    volatile std::atomic_bool m_availableBit;
+    std::atomic_bool m_availableBit;
 
     // Counts the number of table ids that we are checkpointing.
     // When this reaches 0, the checkpoint is complete;
     std::atomic<uint32_t> m_numCpTasks;
 
-    // Holds table IDs to checkpoint
-    std::list<uint32_t> m_tasksList;
+    // Holds tables to checkpoint to be passed to the checkpoint threads
+    std::list<Table*> m_tasksList;
+
+    // Holds finished (checkpointed) tables that can be released by the main thread
+    std::list<Table*> m_finishedTasks;
 
     // the checkpoint workers pool
     CheckpointWorkerPool* m_checkpointers = nullptr;
@@ -224,11 +225,8 @@ private:
     // Number of threads to run
     int m_numThreads;
 
-    // Enable checkpoint validation - checkbits
-    bool m_checkpointValidation;
-
-    // Checkpoint map file information
-    std::mutex m_mapfileMutex;
+    // mutex for safeguarding mapfile and tasks queues access
+    std::mutex m_tasksMutex;
 
     std::list<MapFileEntry*> m_mapfileInfo;
 
@@ -259,8 +257,11 @@ private:
     // Envelope's checkpoint lsn
     uint64_t m_lsn;
 
-    // Current Checkpoint's ID
+    // Last Valid (completed) Checkpoint ID
     uint64_t m_id;
+
+    // Current (in-progress) Checkpoint ID
+    uint64_t m_inProgressId;
 
     // last seen recovery lsn
     uint64_t m_lastReplayLsn;
@@ -268,7 +269,7 @@ private:
     bool m_emptyCheckpoint;
 
     // this lock guards gs_ctl checkpoint fetching
-    RwLock m_fetchLock;
+    pthread_rwlock_t m_fetchLock;
 
     void SetId(uint64_t id)
     {
@@ -297,7 +298,7 @@ private:
 
     static const char* PhaseToString(CheckpointPhase phase);
 
-    void SwapAvailableAndNotAvailable()
+    inline void SwapAvailableAndNotAvailable()
     {
         m_availableBit = !m_availableBit;
     }
@@ -309,12 +310,11 @@ private:
     bool CreateEmptyCheckpoint();
 
     /**
-     * @brief Performs a checkpoint completion tasks:
+     * @brief Performs checkpoint completion tasks:
      * updates control file, creates the map file
      * and 2pc recovery file
-     * @param checkpointId The checkpoint's id.
      */
-    void CompleteCheckpoint(uint64_t checkpointId);
+    void CompleteCheckpoint();
 
     /**
      * @brief Performs the checkpoint's Capture phase
@@ -326,6 +326,12 @@ private:
      * that should be included in the checkpoint
      */
     void FillTasksQueue();
+
+    /**
+     * @brief Unlocks tables and clear the tables' list
+     * @param tables Tables list to clear
+     */
+    void UnlockAndClearTables(std::list<Table *>& tables);
 
     /**
      * @brief Destroys all the checkpoint threads
@@ -358,34 +364,24 @@ private:
     }
 
     /**
-     * @brief A utility function to validate the checkpoint.
-     * should not be enabled by default since it can
-     * have an impact on checkpoint's completion time
-     */
-    void Checkbits();
-
-    /**
      * @brief Creates the checkpoint's map file - where all
      * the metadata is stored in
-     * @param id The new checkpoint id
      * @return Boolean value denoting success or failure.
      */
-    bool CreateCheckpointMap(uint64_t checkpointId);
+    bool CreateCheckpointMap();
 
     /**
      * @brief Saves the in-process transaction data for 2pc recovery
      * purposes during the checkpoint.
-     * @param id The new checkpoint id
      * @return Boolean value denoting success or failure.
      */
-    bool CreateTpcRecoveryFile(uint64_t checkpointId);
+    bool CreateTpcRecoveryFile();
 
     /**
      * @brief Creates a file that indicates checkpoint completion.
-     * @param id The checkoint id
      * @return Boolean value denoting success or failure.
      */
-    bool CreateEndFile(uint64_t checkpointId);
+    bool CreateEndFile();
 
     void ResetFlags();
 

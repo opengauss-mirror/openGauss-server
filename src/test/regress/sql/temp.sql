@@ -211,9 +211,7 @@ insert into temp_col2 select * from temp_col1;
 --temp function
 
 --Create temp table
-create global temp table tg(a int, b varchar2(3000));
 create local temp table tl(a int, b varchar2(3000));
-create global temporary table gt(a int, b varchar2(3000));
 create local temporary table lt(a int, b varchar2(3000));
 create temp table pg_temp.temp_t(a int);
 create table pg_temp.temp_t1(a int);

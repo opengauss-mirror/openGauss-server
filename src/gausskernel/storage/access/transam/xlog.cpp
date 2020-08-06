@@ -7958,6 +7958,11 @@ void StartupXLOG(void)
      */
     t_thrd.xlog_cxt.recoveryTargetTLI = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.ThisTimeLineID;
 
+    /* clean temp relation files */
+    if (u_sess->attr.attr_storage.max_active_gtt > 0) {
+        RemovePgTempFiles();
+    }
+
     // Check for recovery control file, and if so set up state for offline recovery
     readRecoveryCommandFile();
 
@@ -8243,9 +8248,7 @@ void StartupXLOG(void)
     /*
      * Recover MOT
      */
-    if (t_thrd.mot_cxt.mot_startup == true) {
-        MOTRecover();
-    }
+    MOTRecover();
 
     /* initialize shared memory variables from the checkpoint record */
     t_thrd.xact_cxt.ShmemVariableCache->nextXid = checkPoint.nextXid;
@@ -9227,9 +9230,7 @@ void StartupXLOG(void)
     /*
      * Cleanup MOT recovery
      */
-    if (t_thrd.mot_cxt.mot_startup == true) {
-        MOTRecoveryDone();
-    }
+    MOTRecoveryDone();
 }
 
 void sendPMBeginHotStby()

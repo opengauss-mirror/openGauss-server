@@ -21,6 +21,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "access/multixact.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
 #include "access/sysattr.h"
@@ -43,6 +44,7 @@
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
 #include "catalog/storage.h"
+#include "catalog/storage_gtt.h"
 #include "commands/tablecmds.h"
 #include "commands/trigger.h"
 #include "commands/vacuum.h"
@@ -689,6 +691,11 @@ Oid index_create(Relation heapRelation, const char* indexRelationName, Oid index
     int i;
     char relpersistence;
     Oid psortRelationId = InvalidOid;
+    bool skip_create_storage = false;
+
+    if (RELATION_IS_GLOBAL_TEMP(heapRelation) && !gtt_storage_attached(RelationGetRelid(heapRelation))) {
+        skip_create_storage = true;
+    }
 
     is_exclusion = (indexInfo->ii_ExclusionOps != NULL);
 
@@ -766,6 +773,20 @@ Oid index_create(Relation heapRelation, const char* indexRelationName, Oid index
 
     if (get_relname_relid(indexRelationName, namespaceId))
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_TABLE), errmsg("relation \"%s\" already exists", indexRelationName)));
+    
+    if (RELATION_IS_GLOBAL_TEMP(heapRelation))
+    {
+        /* No support create index on global temp table use concurrent mode yet */
+        if (concurrent)
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot reindex global temporary tables concurrently")));
+
+        /* if global temp table not init storage, then skip build index */
+        if (!gtt_storage_attached(RelationGetRelid(heapRelation))) {
+            skip_build = true;
+        }
+    }
 
     /*
      * construct tuple descriptor for index tuples
@@ -828,7 +849,8 @@ Oid index_create(Relation heapRelation, const char* indexRelationName, Oid index
         mapped_relation,
         allow_system_table_mods,
         REL_CMPRS_NOT_SUPPORT,
-        heapRelation->rd_rel->relowner);
+        heapRelation->rd_rel->relowner,
+        skip_create_storage);
 
     Assert(indexRelationId == RelationGetRelid(indexRelation));
 
@@ -1413,6 +1435,15 @@ void index_drop(Oid indexId, bool concurrent)
     VirtualTransactionId* old_lockholders = NULL;
 
     List* partIndexlist = NIL;
+    /*
+     * A temporary relation uses a non-concurrent DROP.  Other backends can't
+     * access a temporary relation, so there's no harm in grabbing a stronger
+     * lock (see comments in RemoveRelations), and a non-concurrent DROP is
+     * more efficient.
+     */
+    Assert(!(get_rel_persistence(indexId) == RELPERSISTENCE_TEMP ||
+            get_rel_persistence(indexId) == RELPERSISTENCE_GLOBAL_TEMP) ||
+            (!concurrent));
 
     /*
      * To drop an index safely, we must grab exclusive lock on its parent
@@ -1443,6 +1474,14 @@ void index_drop(Oid indexId, bool concurrent)
      */
     CheckTableNotInUse(userIndexRelation, "DROP INDEX");
 
+    /* We allow to drop index on global temp table only this session use it */
+    if (RELATION_IS_GLOBAL_TEMP(userHeapRelation)) {
+        if (is_other_backend_use_gtt(RelationGetRelid(userHeapRelation))) {
+            elog(ERROR,
+                "can not drop index %s when other backend attached this global temp table.",
+                RelationGetRelationName(userHeapRelation));
+        }
+    }
     /*
      * Drop Index Concurrently is more or less the reverse process of Create
      * Index Concurrently.
@@ -1760,36 +1799,69 @@ IndexInfo* BuildIndexInfo(Relation index)
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("invalid indnatts %d for index %u", numKeys, RelationGetRelid(index))));
-    ii->ii_NumIndexAttrs = numKeys;
-    for (i = 0; i < numKeys; i++)
+
+    ii = makeIndexInfo(indexStruct->indnatts, 
+                       RelationGetIndexExpressions(index),
+                       RelationGetIndexPredicate(index),
+                       indexStruct->indisunique,
+                       IndexIsReady(indexStruct),
+                       false);
+
+    /* fill in attribute numbers */
+    for (i = 0; i < numKeys; i++) {
         ii->ii_KeyAttrNumbers[i] = indexStruct->indkey.values[i];
-
-    /* fetch any expressions needed for expressional indexes */
-    ii->ii_Expressions = RelationGetIndexExpressions(index);
-    ii->ii_ExpressionsState = NIL;
-
-    /* fetch index predicate if any */
-    ii->ii_Predicate = RelationGetIndexPredicate(index);
-    ii->ii_PredicateState = NIL;
-
+    }
     /* fetch exclusion constraint info if any */
     if (indexStruct->indisexclusion) {
         RelationGetExclusionInfo(index, &ii->ii_ExclusionOps, &ii->ii_ExclusionProcs, &ii->ii_ExclusionStrats);
-    } else {
-        ii->ii_ExclusionOps = NULL;
-        ii->ii_ExclusionProcs = NULL;
-        ii->ii_ExclusionStrats = NULL;
+    } 
+    return ii;
+}
+
+/* ----------------
+ *		BuildDummyIndexInfo
+ *			Construct a dummy IndexInfo record for an open index
+ *
+ * This differs from the real BuildIndexInfo in that it will never run any
+ * user-defined code that might exist in index expressions or predicates.
+ * Instead of the real index expressions, we return null constants that have
+ * the right types/typmods/collations.  Predicates and exclusion clauses are
+ * just ignored.  This is sufficient for the purpose of truncating an index,
+ * since we will not need to actually evaluate the expressions or predicates;
+ * the only thing that's likely to be done with the data is construction of
+ * a tupdesc describing the index's rowtype.
+ * ----------------
+ */
+IndexInfo* BuildDummyIndexInfo(Relation index)
+{
+    IndexInfo* ii;
+    Form_pg_index indexStruct = index->rd_index;
+    int i;
+    int numAtts;
+
+    /* check the number of keys, and copy attr numbers into the IndexInfo */
+    numAtts = indexStruct->indnatts;
+    if (numAtts < 1 || numAtts > INDEX_MAX_KEYS) {
+        elog(ERROR, "invalid indnatts %d for index %u", numAtts, RelationGetRelid(index));
     }
 
-    /* other info */
-    ii->ii_Unique = indexStruct->indisunique;
-    ii->ii_ReadyForInserts = IndexIsReady(indexStruct);
+    /*
+     * Create the node, using dummy index expressions, and pretending there is
+     * no predicate.
+     */
+    ii = makeIndexInfo(indexStruct->indnatts,
+        RelationGetDummyIndexExpressions(index),
+        NIL,
+        indexStruct->indisunique,
+        indexStruct->indisready,
+        false);
 
-    /* initialize index-build state to default */
-    ii->ii_Concurrent = false;
-    ii->ii_BrokenHotChain = false;
-    ii->ii_PgClassAttrId = 0;
+    /* fill in attribute numbers */
+    for (i = 0; i < numAtts; i++) {
+        ii->ii_KeyAttrNumbers[i] = indexStruct->indkey.values[i];
+    }
 
+    /* We ignore the exclusion constraint if any */
     return ii;
 }
 
@@ -1889,7 +1961,12 @@ void index_update_stats(
     HeapTuple tuple;
     Form_pg_class rd_rel;
     bool dirty = false;
+    bool is_gtt = false;
 
+    /* update index stats into localhash and rel_rd_rel for global temp table */
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        is_gtt = true;
+    }
     /*
      * We always update the pg_class row using a non-transactional,
      * overwrite-in-place update.  There are several reasons for this:
@@ -1996,17 +2073,29 @@ void index_update_stats(
             else /* don't bother for indexes */
                 relallvisible = 0;
 
-            if (rd_rel->relpages != (float8)relpages) {
+            if (is_gtt) {
+                rel->rd_rel->relpages = static_cast<int32>(relpages);
+            } else if (rd_rel->relpages != (float8)relpages) {
                 rd_rel->relpages = (float8)relpages;
                 dirty = true;
             }
-            if (rd_rel->reltuples != (float8)reltuples) {
+
+            if (is_gtt) {
+                rel->rd_rel->reltuples = (float4) reltuples;
+            } else if (rd_rel->reltuples != (float8)reltuples) {
                 rd_rel->reltuples = (float8)reltuples;
                 dirty = true;
             }
-            if (rd_rel->relallvisible != (int32)relallvisible) {
+
+            if (is_gtt) {
+                rel->rd_rel->relallvisible = (int32) relallvisible;
+            } else if (rd_rel->relallvisible != (int32)relallvisible) {
                 rd_rel->relallvisible = (int32)relallvisible;
                 dirty = true;
+            }
+
+            if (is_gtt) {
+                up_gtt_relstats(rel, relpages, reltuples, relallvisible, InvalidTransactionId);
             }
         }
 #ifdef PGXC
@@ -2311,12 +2400,25 @@ void index_build(Relation heapRelation, Partition heapPartition, Relation indexR
         relation_close(psortRel, NoLock);
     }
 
+    if (RELATION_IS_GLOBAL_TEMP(indexRelation)) {
+        if (indexRelation->rd_smgr == NULL) {
+            /* Open it at the smgr level if not already done */
+            RelationOpenSmgr(indexRelation);
+        }
+        if (!gtt_storage_attached(RelationGetRelid(indexRelation)) ||
+            !smgrexists(indexRelation->rd_smgr, MAIN_FORKNUM)) {
+            gtt_force_enable_index(indexRelation);
+            RelationCreateStorage(indexRelation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, indexRelation->rd_rel->relowner,
+                                  indexRelation->rd_bucketoid, indexRelation);
+        }
+    }
+
     /*
      * Call the access method's build procedure
      */
     hasbucket = (!isPartition && RELATION_CREATE_BUCKET(heapRelation)) ||
                 (isPartition && RELATION_OWN_BUCKETKEY(heapRelation));
-    if (hasbucket == true) {
+    if (hasbucket) {
         index_build_storage_for_bucket(heapRelation,
             indexRelation,
             heapPartition,
@@ -3527,7 +3629,8 @@ void reindex_indexpart_internal(Relation heapRelation, Relation iRel, IndexInfo*
 /*
  * reindex_index - This routine is used to recreate a single index
  */
-void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks, AdaptMem* mem_info, bool db_wide)
+void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
+                   AdaptMem *memInfo, bool dbWide, char persistence)
 {
     Relation iRel, heapRelation;
     Oid heapId;
@@ -3615,19 +3718,19 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks, Ad
         /* workload client manager */
         if (IS_PGXC_COORDINATOR && ENABLE_WORKLOAD_CONTROL) {
             /* if operatorMem is already set, the mem check is already done */
-            if (mem_info != NULL && mem_info->work_mem == 0) {
+            if (memInfo != NULL && memInfo->work_mem == 0) {
                 EstIdxMemInfo(heapRelation, NULL, &indexInfo->ii_desc, indexInfo, iRel->rd_am->amname.data);
-                if (db_wide) {
+                if (dbWide) {
                     indexInfo->ii_desc.cost = g_instance.cost_cxt.disable_cost;
                     indexInfo->ii_desc.query_mem[0] = Max(STATEMENT_MIN_MEM * 1024, indexInfo->ii_desc.query_mem[0]);
                 }
                 WLMInitQueryPlan((QueryDesc*)&indexInfo->ii_desc, false);
                 dywlm_client_manager((QueryDesc*)&indexInfo->ii_desc, false);
-                AdjustIdxMemInfo(mem_info, &indexInfo->ii_desc);
+                AdjustIdxMemInfo(memInfo, &indexInfo->ii_desc);
             }
-        } else if (IS_PGXC_DATANODE && mem_info != NULL && mem_info->work_mem > 0) {
-            indexInfo->ii_desc.query_mem[0] = mem_info->work_mem;
-            indexInfo->ii_desc.query_mem[1] = mem_info->max_mem;
+        } else if (IS_PGXC_DATANODE && memInfo != NULL && memInfo->work_mem > 0) {
+            indexInfo->ii_desc.query_mem[0] = memInfo->work_mem;
+            indexInfo->ii_desc.query_mem[1] = memInfo->max_mem;
         }
 
         if (!RELATION_IS_PARTITIONED(heapRelation)) /* for non partitioned table */
@@ -3862,8 +3965,9 @@ bool reindex_relation(Oid relid, int flags, int reindexType, AdaptMem* memInfo, 
             Oid indexOid = lfirst_oid(indexId);
             Relation indexRel = index_open(indexOid, AccessShareLock);
 
-            if (is_pg_class)
+            if (is_pg_class) {
                 RelationSetIndexList(rel, doneIndexes, InvalidOid);
+            }
 
             if ((((uint32)reindexType) & REINDEX_ALL_INDEX) ||
                 ((((uint32)reindexType) & REINDEX_BTREE_INDEX) && (indexRel->rd_rel->relam == BTREE_AM_OID)) ||
@@ -3873,17 +3977,19 @@ bool reindex_relation(Oid relid, int flags, int reindexType, AdaptMem* memInfo, 
                 ((((uint32)reindexType) & REINDEX_GIST_INDEX) && (indexRel->rd_rel->relam == GIST_AM_OID))) {
                 index_close(indexRel, AccessShareLock);
                 reindex_index(
-                    indexOid, InvalidOid, !(((uint32)flags) & REINDEX_REL_CHECK_CONSTRAINTS), memInfo, dbWide);
-
+                    indexOid, InvalidOid, !((static_cast<uint32>(flags)) & REINDEX_REL_CHECK_CONSTRAINTS), memInfo,
+                    dbWide, rel->rd_rel->relpersistence);
                 CommandCounterIncrement();
-            } else
+            } else {
                 index_close(indexRel, AccessShareLock);
+            }
 
             /* Index should no longer be in the pending list */
             Assert(!ReindexIsProcessingIndex(indexOid));
 
-            if (is_pg_class)
+            if (is_pg_class) {
                 doneIndexes = lappend_oid(doneIndexes, indexOid);
+            }
         }
     }
     PG_CATCH();
@@ -3895,8 +4001,9 @@ bool reindex_relation(Oid relid, int flags, int reindexType, AdaptMem* memInfo, 
     PG_END_TRY();
     ResetReindexPending();
 
-    if (is_pg_class)
+    if (is_pg_class) {
         RelationSetIndexList(rel, indexIds, ClassOidIndexId);
+    }
 
     /*
      * Close rel, but continue to hold the lock.
@@ -3904,8 +4011,7 @@ bool reindex_relation(Oid relid, int flags, int reindexType, AdaptMem* memInfo, 
     heap_close(rel, NoLock);
 
     // reset all local indexes on partition usable if needed
-    if (RELATION_IS_PARTITIONED(rel)) /* for partitioned table */
-    {
+    if (RELATION_IS_PARTITIONED(rel)) { /* for partitioned table */
         Oid partOid;
         ListCell* cell = NULL;
         List* partOidList = relationGetPartitionOidList(rel);
@@ -3918,16 +4024,14 @@ bool reindex_relation(Oid relid, int flags, int reindexType, AdaptMem* memInfo, 
 
     result = (indexIds != NIL);
 
-    if (!isPartitioned) /* for non partitioned table */
-    {
+    if (!isPartitioned) { /* for non partitioned table */
         /*
          * If the relation has a secondary toast rel, reindex that too while we
          * still hold the lock on the master table.
          */
         if ((((uint32)flags) & REINDEX_REL_PROCESS_TOAST) && OidIsValid(toast_relid))
             result = reindex_relation(toast_relid, flags, REINDEX_BTREE_INDEX) || result;
-    } else /* for partitioned table */
-    {
+    } else { /* for partitioned table */
         List* partTupleList = NULL;
         ListCell* partCell = NULL;
 

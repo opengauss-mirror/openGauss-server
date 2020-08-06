@@ -433,6 +433,9 @@ inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
     } while (0)
 #define PageClearPrunable(page) (HeapPageSetPruneXid(page, InvalidTransactionId))
 
+#define GlobalTempRelationPageIsNotInitialized(rel, page) \
+    ((rel)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP && PageIsNew(page))
+
 constexpr int PAGE_INDEX_CAN_TUPLE_DELETE = 2;
 
 /* ----------------------------------------------------------------

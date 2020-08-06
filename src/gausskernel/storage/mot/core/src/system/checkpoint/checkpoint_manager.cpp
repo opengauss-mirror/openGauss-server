@@ -47,7 +47,6 @@ CheckpointManager::CheckpointManager()
       m_availableBit(true),
       m_numCpTasks(0),
       m_numThreads(GetGlobalConfiguration().m_checkpointWorkers),
-      m_checkpointValidation(GetGlobalConfiguration().m_validateCheckpoint),
       m_cpSegThreshold(GetGlobalConfiguration().m_checkpointSegThreshold),
       m_stopFlag(false),
       m_checkpointEnded(false),
@@ -56,9 +55,21 @@ CheckpointManager::CheckpointManager()
       m_counters{{0}},
       m_lsn(0),
       m_id(0),
+      m_inProgressId(0),
       m_lastReplayLsn(0),
       m_emptyCheckpoint(false)
 {}
+
+bool CheckpointManager::Initialize()
+{
+    int initRc = pthread_rwlock_init(&m_fetchLock, NULL);
+    if (initRc != 0) {
+        MOT_LOG_ERROR("Failed to initialize CheckpointManager, could not init rwlock (%d)", initRc);
+        return false;
+    }
+
+    return true;
+}
 
 void CheckpointManager::ResetFlags()
 {
@@ -74,26 +85,24 @@ CheckpointManager::~CheckpointManager()
         delete m_checkpointers;
         m_checkpointers = nullptr;
     }
+    (void)pthread_rwlock_destroy(&m_fetchLock);
 }
 
 bool CheckpointManager::CreateSnapShot()
 {
-    if (!CheckpointManager::CreateCheckpointId(m_id)) {
+    if (!CheckpointManager::CreateCheckpointId(m_inProgressId)) {
         MOT_LOG_ERROR("Could not begin checkpoint, checkpoint id creation failed");
         OnError(CheckpointWorkerPool::ErrCodes::CALC, "Could not begin checkpoint, checkpoint id creation failed");
         return false;
     }
 
-    MOT_LOG_INFO("Creating MOT checkpoint snapshot: id: %lu", GetId());
+    MOT_LOG_INFO("Creating MOT checkpoint snapshot: id: %lu", m_inProgressId);
     if (m_phase != CheckpointPhase::REST) {
         MOT_LOG_WARN("Could not begin checkpoint, checkpoint is already running");
         OnError(CheckpointWorkerPool::ErrCodes::CALC, "Could not begin checkpoint, checkpoint is already running");
         return false;
     }
 
-    MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
-
-    engine->LockDDLForCheckpoint();
     ResetFlags();
 
     // Ensure that there are no transactions that started in Checkpoint COMPLETE
@@ -114,28 +123,35 @@ bool CheckpointManager::CreateSnapShot()
 
 bool CheckpointManager::SnapshotReady(uint64_t lsn)
 {
-    MOT_LOG_INFO("MOT snapshot ready. id: %lu, lsn: %lu", GetId(), m_lsn);
+    MOT_LOG_INFO("MOT snapshot ready. id: %lu, lsn: %lu", m_inProgressId, m_lsn);
     if (m_phase != CheckpointPhase::CAPTURE) {
         MOT_LOG_ERROR("BAD Checkpoint state. Checkpoint ID: %lu, expected: 'CAPTURE', actual: %s",
-            GetId(),
+            m_inProgressId,
             PhaseToString(m_phase));
         m_errorSet = true;
     } else {
         SetLsn(lsn);
         if (m_redoLogHandler != nullptr)
             m_redoLogHandler->WrUnlock();
-        MOT_LOG_DEBUG("Checkpoint snapshot ready. Checkpoint ID: %lu, LSN: %lu", GetId(), GetLsn());
+        MOT_LOG_DEBUG("Checkpoint snapshot ready. Checkpoint ID: %lu, LSN: %lu", m_inProgressId, GetLsn());
     }
     return !m_errorSet;
 }
 
 bool CheckpointManager::BeginCheckpoint()
 {
-    MOT_LOG_INFO("MOT begin checkpoint capture. id: %lu, lsn: %lu", GetId(), m_lsn);
+    MOT_LOG_INFO("MOT begin checkpoint capture. id: %lu, lsn: %lu", m_inProgressId, m_lsn);
     Capture();
     while (!m_checkpointEnded) {
         usleep(100000L);
+        if (m_finishedTasks.empty() == false) {
+            std::lock_guard<std::mutex> guard(m_tasksMutex);
+            UnlockAndClearTables(m_finishedTasks);
+        }
     }
+
+    // No locking required here, as the checkpoint workers have already exited.
+    UnlockAndClearTables(m_finishedTasks);
 
     // Move to complete.
     // No need to wait for transactions started in previous checkpoint phase
@@ -145,8 +161,12 @@ bool CheckpointManager::BeginCheckpoint()
     m_lock.WrUnlock();
 
     if (!m_errorSet) {
-        CompleteCheckpoint(GetId());
+        CompleteCheckpoint();
     }
+
+    // No locking required here, as the checkpoint workers have already exited.
+    UnlockAndClearTables(m_tasksList);
+    m_numCpTasks = 0;
 
     // Ensure that there are no transactions that started in Checkpoint CAPTURE
     // phase that are not yet completed before moving to REST phase
@@ -157,8 +177,6 @@ bool CheckpointManager::BeginCheckpoint()
     MoveToNextPhase();
     m_lock.WrUnlock();
 
-    MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
-    engine->UnlockDDLForCheckpoint();
     return !m_errorSet;
 }
 
@@ -183,13 +201,15 @@ bool CheckpointManager::Abort()
         // phase that are not yet completed before moving to REST phase
         WaitPrevPhaseCommittedTxnComplete();
 
+        // No locking required here, as there no checkpoint workers when the control reaches here.
+        UnlockAndClearTables(m_tasksList);
+        UnlockAndClearTables(m_finishedTasks);
+        m_numCpTasks = 0;
+
         // Move to rest
         m_lock.WrLock();
         MoveToNextPhase();
         m_lock.WrUnlock();
-
-        MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
-        engine->UnlockDDLForCheckpoint();
     }
     return true;
 }
@@ -250,8 +270,10 @@ void CheckpointManager::CommitTransaction(TxnManager* txn, int writeSetSize)
 
 void CheckpointManager::TransactionCompleted(TxnManager* txn)
 {
-    if (txn->m_checkpointPhase == CheckpointPhase::NONE)
+    if (txn->m_checkpointPhase == CheckpointPhase::NONE) {
         return;
+    }
+
     m_lock.RdLock();
     CheckpointPhase current_phase = m_phase;
     if (txn->m_checkpointPhase == m_phase) {  // current phase
@@ -302,55 +324,24 @@ void CheckpointManager::MoveToNextPhase()
     m_phase = (CheckpointPhase)nextPhase;
     m_cntBit = !m_cntBit;
 
-    if (m_phase == CheckpointPhase::CAPTURE && m_redoLogHandler != nullptr) {
-        // hold the redo log lock to avoid inserting additional entries to the
-        // log. Once snapshot is taken, this lock will be released in SnapshotReady().
-        m_redoLogHandler->WrLock();
+    if (m_phase == CheckpointPhase::PREPARE) {
+        // Obtain a list of all tables. The tables are read locked
+        // in order to avoid delete/truncate during checkpoint.
+        FillTasksQueue();
     }
 
-    if (m_phase == PREPARE && m_checkpointValidation == true) {
-        Checkbits();
+    if (m_phase == CheckpointPhase::CAPTURE) {
+        if (m_redoLogHandler != nullptr) {
+            // hold the redo log lock to avoid inserting additional entries to the
+            // log. Once snapshot is taken, this lock will be released in SnapshotReady().
+            m_redoLogHandler->WrLock();
+        }
     }
 
     // there are no open transactions from previous phase, we can move forward to next phase
     if (m_counters[!m_cntBit] == 0 && IsAutoCompletePhase()) {
         MoveToNextPhase();
     }
-}
-
-void CheckpointManager::Checkbits()
-{
-    GetTableManager()->AddTableIdsToList(m_tasksList);
-    m_numCpTasks = m_tasksList.size();
-    while (!m_tasksList.empty()) {
-        uint32_t curId = m_tasksList.front();
-        MOT_LOG_DEBUG("checkbits - %u", curId);
-        Table* table = GetTableManager()->GetTable(curId);
-        if (table == nullptr) {
-            MOT_LOG_ERROR("could not find tableId %u", curId);
-            continue;
-        }
-
-        m_tasksList.pop_front();
-        m_numCpTasks--;
-        Index* index = table->GetPrimaryIndex();
-        if (index == nullptr) {
-            MOT_LOG_ERROR("could not get primary index for tableId %u", curId);
-            continue;
-        }
-
-        IndexIterator* it = index->Begin(0);
-        while (it != nullptr && it->IsValid()) {
-            MOT::Sentinel* Sentinel = it->GetPrimarySentinel();
-            MOT::Row* r = Sentinel->GetData();
-            if (!r->IsAbsentRow() && Sentinel->GetStableStatus() == m_availableBit)
-                MOT_LOG_ERROR("CHECKPOINT, AVAILABLE BIT IS SET");
-            if (Sentinel->GetStable() != nullptr)
-                MOT_LOG_ERROR("CHECKPOINT, HAS STABLE DATA!!!");
-            it->Next();
-        }
-    }
-    MOT_LOG_DEBUG("checkbits - done");
 }
 
 const char* CheckpointManager::PhaseToString(CheckpointPhase phase)
@@ -375,6 +366,7 @@ const char* CheckpointManager::PhaseToString(CheckpointPhase phase)
 bool CheckpointManager::ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType type)
 {
     CheckpointPhase startPhase = txnMan->m_checkpointPhase;
+    MOT_ASSERT(startPhase != RESOLVE);
     Sentinel* s = origRow->GetPrimarySentinel();
     MOT_ASSERT(s);
     if (s == nullptr) {
@@ -385,32 +377,36 @@ bool CheckpointManager::ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType 
     bool statusBit = s->GetStableStatus();
     switch (startPhase) {
         case REST:
-            if (type == INS)
+            if (type == INS) {
                 s->SetStableStatus(!m_availableBit);
+            }
             break;
         case PREPARE:
-            if (type == INS)
+            if (type == INS) {
                 s->SetStableStatus(!m_availableBit);
-            else if (statusBit == !m_availableBit) {
-                if (!CheckpointUtils::SetStableRow(origRow))
+            } else if (statusBit == !m_availableBit) {
+                if (!CheckpointUtils::SetStableRow(origRow)) {
                     return false;
+                }
             }
             break;
         case RESOLVE:
         case CAPTURE:
-            if (type == INS)
+            if (type == INS) {
                 s->SetStableStatus(m_availableBit);
-            else {
+            } else {
                 if (statusBit == !m_availableBit) {
-                    if (!CheckpointUtils::SetStableRow(origRow))
+                    if (!CheckpointUtils::SetStableRow(origRow)) {
                         return false;
+                    }
                     s->SetStableStatus(m_availableBit);
                 }
             }
             break;
         case COMPLETE:
-            if (type == INS)
+            if (type == INS) {
                 s->SetStableStatus(!txnMan->m_checkpointNABit);
+            }
             break;
         default:
             MOT_LOG_ERROR("Unknown transaction start phase: %s", CheckpointManager::PhaseToString(startPhase));
@@ -426,22 +422,40 @@ void CheckpointManager::FillTasksQueue()
         OnError(CheckpointWorkerPool::ErrCodes::CALC, "CheckpointManager::fillTasksQueue: queue is not empty!");
         return;
     }
-    GetTableManager()->AddTableIdsToList(m_tasksList);
+    GetTableManager()->AddTablesToList(m_tasksList);
     m_numCpTasks = m_tasksList.size();
     m_mapfileInfo.clear();
     MOT_LOG_DEBUG("CheckpointManager::fillTasksQueue:: got %d tasks", m_tasksList.size());
 }
 
-void CheckpointManager::TaskDone(uint32_t tableId, uint32_t numSegs, bool success)
+void CheckpointManager::UnlockAndClearTables(std::list<Table *>& tables)
 {
+    std::list<Table *>::iterator it;
+    for (it = tables.begin(); it != tables.end(); ++it) {
+        Table *table = *it;
+        if (table != nullptr) {
+            table->Unlock();
+        }
+    }
+    tables.clear();
+}
+
+void CheckpointManager::TaskDone(Table* table, uint32_t numSegs, bool success)
+{
+    MOT_ASSERT(table);
     if (success) { /* only successful tasks are added to the map file */
+        if (table == nullptr) {
+            OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "Got a null table on task done");
+            return;
+        }
         MapFileEntry* entry = new (std::nothrow) MapFileEntry();
         if (entry != nullptr) {
-            entry->m_id = tableId;
+            entry->m_id = table->GetTableId();
             entry->m_numSegs = numSegs;
-            MOT_LOG_DEBUG("TaskDone %lu: %u %u segs", GetId(), tableId, numSegs);
-            std::lock_guard<std::mutex> guard(m_mapfileMutex);
+            MOT_LOG_DEBUG("TaskDone %lu: %u %u segs", m_inProgressId, entry->m_id, numSegs);
+            std::lock_guard<std::mutex> guard(m_tasksMutex);
             m_mapfileInfo.push_back(entry);
+            m_finishedTasks.push_back(table);
         } else {
             OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "Failed to allocate map file entry");
             return;
@@ -453,7 +467,7 @@ void CheckpointManager::TaskDone(uint32_t tableId, uint32_t numSegs, bool succes
     }
 }
 
-void CheckpointManager::CompleteCheckpoint(uint64_t checkpointId)
+void CheckpointManager::CompleteCheckpoint()
 {
     if (m_emptyCheckpoint == true && CreateEmptyCheckpoint() == false) {
         OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create empty checkpoint");
@@ -466,12 +480,12 @@ void CheckpointManager::CompleteCheckpoint(uint64_t checkpointId)
         return;
     }
 
-    if (!CreateCheckpointMap(checkpointId)) {
+    if (!CreateCheckpointMap()) {
         OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create map file");
         return;
     }
 
-    if (!CreateTpcRecoveryFile(checkpointId)) {
+    if (!CreateTpcRecoveryFile()) {
         OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create 2pc recovery file");
         return;
     }
@@ -481,22 +495,32 @@ void CheckpointManager::CompleteCheckpoint(uint64_t checkpointId)
         return;
     }
 
-    m_fetchLock.WrLock();
-    if (!ctrlFile->Update(checkpointId, GetLsn(), GetLastReplayLsn())) {
-        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to update control file");
+    bool finishedUpdatingFiles = false;
+    (void)pthread_rwlock_wrlock(&m_fetchLock);
+    do {
+        if (!CreateEndFile()) {
+            OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create completion file");
+            break;
+        }
+
+        if (!ctrlFile->Update(m_inProgressId, GetLsn(), GetLastReplayLsn())) {
+            OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to update control file");
+            break;
+        }
+
+        // Update checkpoint Id
+        SetId(m_inProgressId);
+        GetRecoveryManager()->SetCheckpointId(m_id);
+        finishedUpdatingFiles = true;
+    } while (0);
+    (void)pthread_rwlock_unlock(&m_fetchLock);
+
+    if (!finishedUpdatingFiles) {
         return;
     }
 
-    GetRecoveryManager()->SetCheckpointId(checkpointId);
-
-    if (!CreateEndFile(checkpointId)) {
-        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create completion file");
-        return;
-    }
-
-    m_fetchLock.WrUnlock();
-    RemoveOldCheckpoints(checkpointId);
-    MOT_LOG_INFO("Checkpoint [%lu] completed", checkpointId);
+    RemoveOldCheckpoints(m_inProgressId);
+    MOT_LOG_INFO("Checkpoint [%lu] completed", m_inProgressId);
 }
 
 void CheckpointManager::DestroyCheckpointers()
@@ -510,18 +534,12 @@ void CheckpointManager::DestroyCheckpointers()
 void CheckpointManager::CreateCheckpointers()
 {
     m_checkpointers = new (std::nothrow)
-        CheckpointWorkerPool(m_numThreads, !m_availableBit, m_tasksList, m_cpSegThreshold, m_id, *this);
+        CheckpointWorkerPool(m_numThreads, !m_availableBit, m_tasksList, m_cpSegThreshold, m_inProgressId, *this);
 }
 
 void CheckpointManager::Capture()
 {
     MOT_LOG_DEBUG("CheckpointManager::capture");
-    if (m_numCpTasks) {
-        MOT_LOG_ERROR("The number of tasks is  %d, cannot start capture!", m_numCpTasks.load());
-        return;
-    }
-
-    FillTasksQueue();
 
     if (m_numCpTasks == 0) {
         MOT_LOG_INFO("No tasks in queue - empty checkpoint");
@@ -628,7 +646,7 @@ void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
     free(buf);
 }
 
-bool CheckpointManager::CreateCheckpointMap(uint64_t checkpointId)
+bool CheckpointManager::CreateCheckpointMap()
 {
     int fd = -1;
     std::string fileName;
@@ -636,10 +654,11 @@ bool CheckpointManager::CreateCheckpointMap(uint64_t checkpointId)
     bool ret = false;
 
     do {
-        if (!CheckpointUtils::SetWorkingDir(workingDir, checkpointId))
+        if (!CheckpointUtils::SetWorkingDir(workingDir, m_inProgressId)) {
             break;
+        }
 
-        CheckpointUtils::MakeMapFilename(fileName, workingDir, checkpointId);
+        CheckpointUtils::MakeMapFilename(fileName, workingDir, m_inProgressId);
         if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
             MOT_LOG_ERROR("createCheckpointMap: failed to create file '%s' - %d - %s",
                 fileName.c_str(),
@@ -704,7 +723,7 @@ bool CheckpointManager::CreateEmptyCheckpoint()
 {
     std::string workingDir;
 
-    if (!CheckpointUtils::SetWorkingDir(workingDir, m_id)) {
+    if (!CheckpointUtils::SetWorkingDir(workingDir, m_inProgressId)) {
         OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "failed to setup working dir");
         return false;
     }
@@ -763,7 +782,7 @@ bool CheckpointManager::CreateCheckpointDir(std::string& dir)
     return true;
 }
 
-bool CheckpointManager::CreateTpcRecoveryFile(uint64_t checkpointId)
+bool CheckpointManager::CreateTpcRecoveryFile()
 {
     int fd = -1;
     std::string fileName;
@@ -771,10 +790,11 @@ bool CheckpointManager::CreateTpcRecoveryFile(uint64_t checkpointId)
     bool ret = false;
 
     do {
-        if (!CheckpointUtils::SetWorkingDir(workingDir, checkpointId))
+        if (!CheckpointUtils::SetWorkingDir(workingDir, m_inProgressId)) {
             break;
+        }
 
-        CheckpointUtils::MakeTpcFilename(fileName, workingDir, checkpointId);
+        CheckpointUtils::MakeTpcFilename(fileName, workingDir, m_inProgressId);
         if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to create file '%s' - %d - %s",
                 fileName.c_str(),
@@ -819,7 +839,7 @@ bool CheckpointManager::CreateTpcRecoveryFile(uint64_t checkpointId)
     return ret;
 }
 
-bool CheckpointManager::CreateEndFile(uint64_t checkpointId)
+bool CheckpointManager::CreateEndFile()
 {
     int fd = -1;
     std::string fileName;
@@ -827,11 +847,11 @@ bool CheckpointManager::CreateEndFile(uint64_t checkpointId)
     bool ret = false;
 
     do {
-        if (!CheckpointUtils::SetWorkingDir(workingDir, checkpointId)) {
+        if (!CheckpointUtils::SetWorkingDir(workingDir, m_inProgressId)) {
             break;
         }
 
-        CheckpointUtils::MakeEndFilename(fileName, workingDir, checkpointId);
+        CheckpointUtils::MakeEndFilename(fileName, workingDir, m_inProgressId);
         if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
             MOT_LOG_ERROR(
                 "CreateEndFile: failed to create file '%s' - %d - %s", fileName.c_str(), errno, gs_strerror(errno));

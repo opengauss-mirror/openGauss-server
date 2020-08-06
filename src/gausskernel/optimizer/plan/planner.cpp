@@ -1018,6 +1018,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     root->rowMarks = NIL;
     root->hasInheritedTarget = false;
     root->grouping_map = NULL;
+    root->hasRownumQual = false;
 
     /*
      * Apply memory context for query rewrite in optimizer.

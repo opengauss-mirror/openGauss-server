@@ -124,6 +124,7 @@ const char* g_reserve_param[RESERVE_SIZE] = {"application_name",
 static void EnableWalRcvImmediateExit(void);
 static void DisableWalRcvImmediateExit(void);
 static void WalRcvDie(int code, Datum arg);
+static void XLogWalRcvDataPageReplication(char* buf, Size len);
 static void XLogWalRcvProcessMsg(unsigned char type, char* buf, Size len);
 static void XLogWalRcvReceive(char* buf, Size nbytes, XLogRecPtr recptr);
 static void XLogWalRcvReceiveInBuf(char* buf, Size nbytes, XLogRecPtr recptr);
@@ -809,6 +810,44 @@ bool WalRcvIsShutdown(void)
     return t_thrd.walreceiver_cxt.got_SIGTERM;
 }
 
+static void XLogWalRcvDataPageReplication(char* buf, Size len)
+{
+    WalDataPageMessageHeader msghdr;
+    Assert(true == g_instance.attr.attr_storage.enable_mix_replication);
+
+    if (!g_instance.attr.attr_storage.enable_mix_replication) {
+        ereport(PANIC, (errmsg("WAL streaming isn't employed to sync all the replication data log.")));
+    }
+    if (len < sizeof(WalDataPageMessageHeader)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                errmsg_internal("invalid wal data page message received from primary")));
+    }
+
+    /* memcpy is required here for alignment reasons */
+    error_t rc = memcpy_s(&msghdr, sizeof(WalDataPageMessageHeader), buf, sizeof(WalDataPageMessageHeader));
+    securec_check(rc, "\0", "\0");
+
+    ProcessWalDataHeaderMessage(&msghdr);
+
+    buf += sizeof(WalDataPageMessageHeader);
+    len -= sizeof(WalDataPageMessageHeader);
+
+    if (len > WS_MAX_DATA_QUEUE_SIZE) {
+        Assert(false);
+        ereport(ERROR,
+            (errcode(ERRCODE_PROTOCOL_VIOLATION),
+                errmsg_internal(
+                    "unexpected wal data size %lu bytes exceeds the max receiving data queue size %u bytes",
+                    len,
+                    WS_MAX_DATA_QUEUE_SIZE)));
+    }
+    if (u_sess->attr.attr_storage.HaModuleDebug) {
+        WSDataRcvCheck(buf, len);
+    }
+    WalDataRcvReceive(buf, len, 0);
+}
+
 /*
  * Accept the message from XLOG stream, and process it.
  */
@@ -858,39 +897,7 @@ static void XLogWalRcvProcessMsg(unsigned char type, char* buf, Size len)
         }
         case 'd': /* Data page replication for the logical xlog */
         {
-            WalDataPageMessageHeader msghdr;
-
-            Assert(true == g_instance.attr.attr_storage.enable_mix_replication);
-
-            if (!g_instance.attr.attr_storage.enable_mix_replication)
-                ereport(PANIC, (errmsg("WAL streaming isn't employed to sync all the replication data log.")));
-
-            if (len < sizeof(WalDataPageMessageHeader))
-                ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg_internal("invalid wal data page message received from primary")));
-
-            /* memcpy is required here for alignment reasons */
-            errorno = memcpy_s(&msghdr, sizeof(WalDataPageMessageHeader), buf, sizeof(WalDataPageMessageHeader));
-            securec_check(errorno, "\0", "\0");
-
-            ProcessWalDataHeaderMessage(&msghdr);
-
-            buf += sizeof(WalDataPageMessageHeader);
-            len -= sizeof(WalDataPageMessageHeader);
-
-            if (len > WS_MAX_DATA_QUEUE_SIZE) {
-                Assert(false);
-                ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg_internal(
-                            "unexpected wal data size %lu bytes exceeds the max receiving data queue size %u bytes",
-                            len,
-                            WS_MAX_DATA_QUEUE_SIZE)));
-            }
-            if (u_sess->attr.attr_storage.HaModuleDebug)
-                WSDataRcvCheck(buf, len);
-            WalDataRcvReceive(buf, len, 0);
+            XLogWalRcvDataPageReplication(buf, len);
             break;
         }
         case 'k': /* Keepalive */

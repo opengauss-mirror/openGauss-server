@@ -30,6 +30,7 @@
 #include <string>
 #include <iostream>
 #include <memory>
+#include <pthread.h>
 #include "global.h"
 #include "sentinel.h"
 #include "surrogate_key_generator.h"
@@ -704,19 +705,39 @@ public:
     }
 
     /**
-     * @brief locks that table for modifications
+     * @brief takes a read lock on the table.
      */
-    void Lock()
+    void RdLock()
     {
-        m_mutex.lock();
+        (void)pthread_rwlock_rdlock(&m_rwLock);
     }
 
     /**
-     * @brief unlocks the table
+     * @brief tries to takes a write lock on the table.
+     * @return True on success, False if the lock could not be acquired.
+     */
+    bool WrTryLock()
+    {
+        if (pthread_rwlock_trywrlock(&m_rwLock) != 0) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @brief takes a write lock on the table.
+     */
+    void WrLock()
+    {
+        (void)pthread_rwlock_wrlock(&m_rwLock);
+    }
+
+    /**
+     * @brief releases the table lock.
      */
     void Unlock()
     {
-        m_mutex.unlock();
+        (void)pthread_rwlock_unlock(&m_rwLock);
     }
 
     bool IsDeserialized() const
@@ -785,8 +806,8 @@ private:
     /** @var Secondary index map accessed by name. */
     SecondaryIndexMap m_secondaryIndexes;
 
-    /** @var Lock that guards against deletion while checkpointing. */
-    std::mutex m_mutex;
+    /** @var RW Lock that guards against deletion during checkpoint/vacuum. */
+    pthread_rwlock_t m_rwLock;
 
     string m_tableName;
 

@@ -40,6 +40,7 @@
 #include "access/dfs/dfs_insert.h"
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
+#include "catalog/storage_gtt.h"
 #include "commands/async.h"
 #include "commands/prepare.h"
 #include "commands/vacuum.h"
@@ -3560,8 +3561,6 @@ static void init_configure_names_bool()
             NULL
         },
 #endif
-#ifdef ENABLE_MULTIPLE_NODES
-
         {
             {
                 "enable_slot_log",
@@ -3576,7 +3575,6 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
-#endif
 #ifdef ENABLE_MULTIPLE_NODES
         {
             {
@@ -4599,6 +4597,38 @@ static void init_configure_names_int()
     struct config_int local_configure_names_int[] = {
         {
             {
+                "max_active_global_temporary_table",
+                PGC_USERSET,
+                UNGROUPED,
+                gettext_noop("max active global temporary table."),
+                NULL
+            },
+            &u_sess->attr.attr_storage.max_active_gtt,
+            1000,
+            0,
+            1000000,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+                "vacuum_gtt_defer_check_age", 
+                PGC_USERSET, 
+                CLIENT_CONN_STATEMENT,
+                gettext_noop("The defer check age of GTT, used to check expired data after vacuum."),
+                NULL
+            },
+            &u_sess->attr.attr_storage.vacuum_gtt_defer_check_age,
+            10000,
+            0,
+            1000000,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
                 "archive_timeout",
                 PGC_SIGHUP,
                 WAL_ARCHIVING,
@@ -5237,7 +5267,7 @@ static void init_configure_names_int()
                 GUC_UNIT_BLOCKS
             },
             &u_sess->attr.attr_storage.num_temp_buffers,
-            1024,
+            128,
             100,
             INT_MAX / 2,
             check_temp_buffers,
@@ -6435,7 +6465,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#ifdef ENABLE_MULTIPLE_NODES
         {
             /* see max_connections */
             {
@@ -6453,7 +6482,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#endif
         {
             {
                 "recovery_time_target",
@@ -8804,7 +8832,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#ifdef ENABLE_MULTIPLE_NODES
         {
             {
                 "max_changes_in_memory",
@@ -8821,8 +8848,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#endif
-#ifdef ENABLE_MULTIPLE_NODES
         {
             {
                 "max_cached_tuplebufs",
@@ -8839,7 +8864,6 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
-#endif
         {
             {
                 "table_skewness_warning_rows",
@@ -9071,6 +9095,22 @@ static void init_configure_names_int()
             1,
             1,
             MAX_REDO_WORKERS_PER_PARSE,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+                "max_keep_log_seg",
+                PGC_SUSET,
+                WAL,
+                gettext_noop("Sets the threshold for implementing logical replication flow control."),
+                NULL
+            },
+            &g_instance.attr.attr_storage.max_keep_log_seg,
+            0,
+            0,
+            INT_MAX,
             NULL,
             NULL,
             NULL
@@ -17868,7 +17908,7 @@ static bool check_temp_buffers(int* newval, void** extra, GucSource source)
     /*
      * Once local buffers have been initialized, it's too late to change this.
      */
-    if (t_thrd.storage_cxt.NLocBuffer && t_thrd.storage_cxt.NLocBuffer != *newval) {
+    if (u_sess->storage_cxt.NLocBuffer && u_sess->storage_cxt.NLocBuffer != *newval) {
         GUC_check_errdetail(
             "\"temp_buffers\" cannot be changed after any temporary tables have been accessed in the session.");
         return false;

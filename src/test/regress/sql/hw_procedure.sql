@@ -30,6 +30,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- check prokind
+select prokind from pg_proc where proname = 'test_forall';
+
 CREATE FUNCTION test_forallDML1(IN iter int) RETURNS integer AS $$
 BEGIN
 	forall i in 1..iter	
@@ -77,6 +80,9 @@ BEGIN
 --         raise info 'SQLCODE IS %',  PSV_SQLCODE;              
 END ;
 /
+
+-- check prokind
+select prokind from pg_proc where proname = 'pro_sqlcode';
 
 CREATE FUNCTION test_forallDML5(IN iter int) RETURNS integer AS $$
 BEGIN

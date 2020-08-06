@@ -2779,7 +2779,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
             switch (((DropStmt*)parse_tree)->removeType) {
                 case OBJECT_INDEX:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
                     if (((DropStmt*)parse_tree)->concurrent) {
                         ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -3586,7 +3586,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         } break;
 
         case T_AlterDomainStmt:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
 #endif /* PGXC */
             {
@@ -3928,10 +3928,10 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         } break;
 
         case T_CreateRangeStmt: /* CREATE TYPE AS RANGE */
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("user defined range type is not yet supported.")));
-#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
             DefineRange((CreateRangeStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR)
@@ -4140,12 +4140,14 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
             }
 
+#ifdef ENABLE_MULTIPLE_NODES
             if (stmt->concurrent) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("PGXC does not support concurrent INDEX yet"),
                         errdetail("The feature is not currently supported")));
             }
+#endif
 
             /* INDEX on a temporary table cannot use 2PC at commit */
             rel_id = RangeVarGetRelidExtended(stmt->relation, AccessShareLock, true, false, false, true, NULL, NULL);
@@ -4927,12 +4929,12 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
              * ******************************** DOMAIN statements ****
              */
         case T_CreateDomainStmt:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
 #endif /* PGXC */
             DefineDomain((CreateDomainStmt*)parse_tree);
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (IS_PGXC_COORDINATOR)
                 ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
 #endif
@@ -8504,7 +8506,8 @@ bool DropExtensionIsSupported(const char* query_string)
 {
     char* lower_string = lowerstr(query_string);
 
-    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages"))) {
+    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages") || 
+        strstr(lower_string, "mysql_fdw") || strstr(lower_string, "oracle_fdw"))) {
         pfree_ext(lower_string);
         return true;
     } else {
@@ -8563,9 +8566,10 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
         case OBJECT_LANGUAGE:
             tag = "LANGUAGE";
             break;
-        case OBJECT_DOMAIN:
+        /*Single node support domain feature.*/
+        /* case OBJECT_DOMAIN:
             tag = "DOMAIN";
-            break;
+            break;*/
         case OBJECT_CONVERSION:
             tag = "CONVERSION";
             break;
@@ -8595,7 +8599,7 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
  */
 bool CheckExtensionInWhiteList(const char* extension_name, uint32 hash_value, bool hash_check)
 {
-    /* 2902411162 hash for fastcheck, the sql file is much shorter than published version. */
+        /* 2902411162 hash for fastcheck, the sql file is much shorter than published version. */
     uint32 postgisHashHistory[POSTGIS_VERSION_NUM] = {2902411162, 2959454932};
 
     /* check for extension name */

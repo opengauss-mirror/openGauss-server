@@ -41,7 +41,8 @@
 #include "utils/snapmgr.h"
 
 void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id, int2vector* pkey,
-    oidvector* intablespace, Datum interval, Datum maxValues, Datum transitionPoint, Datum reloptions, char parttype)
+    const oidvector* tablespaces, Datum interval, Datum maxValues, Datum transitionPoint, Datum reloptions,
+    char parttype)
 {
     Datum values[Natts_pg_partition];
     bool nulls[Natts_pg_partition];
@@ -88,7 +89,13 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
         nulls[Anum_pg_partition_partkey - 1] = true;
     }
 
-    nulls[Anum_pg_partition_intablespace - 1] = true;
+    /* interval tablespaces */
+    if (tablespaces != NULL) {
+        values[Anum_pg_partition_intablespace - 1] = PointerGetDatum(tablespaces);
+    } else {
+        nulls[Anum_pg_partition_intablespace - 1] = true;
+    }
+
     nulls[Anum_pg_partition_intspnum - 1] = true;
 
     /* interval */
@@ -586,7 +593,7 @@ static Oid getPartitionIndexFormData(Oid indexid, Oid partitionid, Form_pg_parti
     heap_close(pg_partition, AccessShareLock);
 
     /* If drop index occur before this function and after pg_get_indexdef_partitions, */
-    /* the index has been deleted now. Ext. If drop patition occur, the partition might be deleted. 
+    /* the index has been deleted now. Ext. If drop patition occur, the partition might be deleted.
      * Drop partition just use RowExclusiveLock for parellel performance. */
     if (!found) {
         ereport(ERROR,

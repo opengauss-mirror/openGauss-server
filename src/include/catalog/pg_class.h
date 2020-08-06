@@ -156,7 +156,7 @@ DATA(insert OID = 1247 (  pg_type       PGNSP 71 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0
 DESCR("");
 DATA(insert OID = 1249 (  pg_attribute  PGNSP 75 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 24 0 f f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_));
 DESCR("");
-DATA(insert OID = 1255 (  pg_proc       PGNSP 81 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 31 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_));
+DATA(insert OID = 1255 (  pg_proc       PGNSP 81 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 30 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_));
 DESCR("");
 DATA(insert OID = 1259 (  pg_class      PGNSP 83 0 PGUID 0 0 0 0 0 0 0 0 0 0 0 0 f f p r 39 0 t f f f f 0 f f n 3 _null_ _null_ n 3 _null_ _null_));
 DESCR("");
@@ -174,6 +174,7 @@ DESCR("");
 #define RELPERSISTENCE_PERMANENT 'p'            /* regular table */
 #define RELPERSISTENCE_UNLOGGED 'u'             /* unlogged permanent table */
 #define RELPERSISTENCE_TEMP 't'                 /* temporary table */
+#define RELPERSISTENCE_GLOBAL_TEMP 'g'          /* global temporary table */
 
 /* default selection for replica identity (primary key or nothing) */
 #define REPLICA_IDENTITY_DEFAULT 'd'
@@ -181,6 +182,18 @@ DESCR("");
 #define REPLICA_IDENTITY_NOTHING 'n'
 /* all columns are loged as replica identity */
 #define REPLICA_IDENTITY_FULL 'f'
+
+/*
+ * Relation kinds that have physical storage. These relations normally have
+ * relfilenode set to non-zero, but it can also be zero if the relation is
+ * mapped.
+ */
+#define RELKIND_HAS_STORAGE(relkind) \
+    ((relkind) == RELKIND_RELATION || \
+     (relkind) == RELKIND_INDEX || \
+     (relkind) == RELKIND_SEQUENCE || \
+     (relkind) == RELKIND_TOASTVALUE)
+
 /*
  * an explicitly chosen candidate key's columns are used as identity;
  * will still be set if the index has been dropped, in that case it

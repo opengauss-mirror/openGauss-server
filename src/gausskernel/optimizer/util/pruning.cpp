@@ -140,7 +140,7 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
     heapRel = relation_open(heapRelOid, NoLock);
     indexRel = relation_open(indexOid, NoLock);
     if (!RelationIsPartitioned(heapRel) || !RelationIsPartitioned(indexRel) ||
-        heapRel->partMap->type != PART_TYPE_RANGE) {
+        (heapRel->partMap->type != PART_TYPE_RANGE && heapRel->partMap->type != PART_TYPE_INTERVAL)) {
         ereport(ERROR,
             (errmodule(MOD_OPT),
                 errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
@@ -226,8 +226,7 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
 
     heapRel = relation_open(heapRelOid, NoLock);
     indexRel = relation_open(indexOid, NoLock);
-    if (!RelationIsPartitioned(heapRel) || !RelationIsPartitioned(indexRel) ||
-        heapRel->partMap->type != PART_TYPE_RANGE) {
+    if (!RelationIsPartitioned(heapRel) || !RelationIsPartitioned(indexRel)) {
         ereport(ERROR,
             (errmodule(MOD_OPT),
                 (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
@@ -438,7 +437,7 @@ PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation 
     pruningRes->state = PRUNING_RESULT_SUBSET;
 
     /* it's a pattitioned table without interval */
-    if (rel->partMap->type == PART_TYPE_RANGE) {
+    if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
         rangePartMap = (RangePartitionMap*)rel->partMap;
 
         for (counter = 0; counter < rangePartMap->rangeElementsNum; counter++) {
@@ -1152,13 +1151,13 @@ int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum)
     (PruningResultIsFull(pruningResult) || PruningResultIsEmpty(pruningResult) || \
         !PointerIsValid((pruningResult)->boundary))
 
-#define IsCleanPruningBottom(bottomSeqPtr, pruningResult, bottomValue)                                \
-    ((bottomSeqPtr)->partArea == PART_AREA_RANGE && (pruningResult)->boundary->partitionKeyNum > 1 && \
-        PointerIsValid((bottomValue)[0]) && !(pruningResult)->boundary->minClose[0])
+#define IsCleanPruningBottom(bottomSeqPtr, pruningResult, bottomValue)                     \
+    ((pruningResult)->boundary->partitionKeyNum > 1 && PointerIsValid((bottomValue)[0]) && \
+        !(pruningResult)->boundary->minClose[0])
 
-#define IsCleanPruningTop(topSeqPtr, pruningResult, topValue)                                                    \
-    ((topSeqPtr)->partArea == PART_AREA_RANGE && (pruningResult)->boundary->partitionKeyNum > 1 && (topValue) && \
-        PointerIsValid((topValue)[0]) && !(pruningResult)->boundary->maxClose[0])
+#define IsCleanPruningTop(topSeqPtr, pruningResult, topValue)                                         \
+    ((pruningResult)->boundary->partitionKeyNum > 1 && (topValue) && PointerIsValid((topValue)[0]) && \
+        !(pruningResult)->boundary->maxClose[0])
 
 /*
  * @@GaussDB@@
@@ -1209,13 +1208,14 @@ static void partitionPruningFromBoundary(Relation relation, PruningResult* pruni
 
     // compare the bottom and the intervalMax, if the bottom is large than or equal than intervalMax, pruning result is
     // empty.
-    partitionRoutingForValue(
+    partitionRoutingForValueRange(
         relation, bottomValue, pruningResult->boundary->partitionKeyNum, true, true, u_sess->opt_cxt.bottom_seq);
     if (IsCleanPruningBottom(u_sess->opt_cxt.bottom_seq, pruningResult, bottomValue)) {
         cleanPruningBottom(relation, u_sess->opt_cxt.bottom_seq, bottomValue[0]);
     }
-    partitionRoutingForValue(
-        relation, topValue, pruningResult->boundary->partitionKeyNum, isTopClosed, true, u_sess->opt_cxt.top_seq);
+
+    partitionRoutingForValueRange(
+        relation, topValue, pruningResult->boundary->partitionKeyNum, isTopClosed, false, u_sess->opt_cxt.top_seq);
     if (IsCleanPruningTop(u_sess->opt_cxt.top_seq, pruningResult, topValue)) {
         cleanPruningTop(relation, u_sess->opt_cxt.top_seq, topValue[0]);
     }
@@ -1226,22 +1226,14 @@ static void partitionPruningFromBoundary(Relation relation, PruningResult* pruni
     if (!PartitionLogicalExist(u_sess->opt_cxt.bottom_seq) && !PartitionLogicalExist(u_sess->opt_cxt.top_seq)) {
         /* pruning failed or result contains all partition */
         pruningResult->state = PRUNING_RESULT_EMPTY;
-    } else if (!PartitionLogicalExist(u_sess->opt_cxt.bottom_seq) &&
-               u_sess->opt_cxt.top_seq->partArea == PART_AREA_RANGE) {
+    } else if (!PartitionLogicalExist(u_sess->opt_cxt.bottom_seq)) {
         rangeStart = 0;
         rangeEnd = u_sess->opt_cxt.top_seq->partSeq;
-    } else if (u_sess->opt_cxt.bottom_seq->partArea == PART_AREA_RANGE &&
-               !PartitionLogicalExist(u_sess->opt_cxt.top_seq)) {
+    } else if (!PartitionLogicalExist(u_sess->opt_cxt.top_seq)) {
         rangeStart = u_sess->opt_cxt.bottom_seq->partSeq;
-    } else if (u_sess->opt_cxt.bottom_seq->partArea == PART_AREA_RANGE &&
-               u_sess->opt_cxt.top_seq->partArea == PART_AREA_RANGE) {
+    } else {
         rangeStart = u_sess->opt_cxt.bottom_seq->partSeq;
         rangeEnd = u_sess->opt_cxt.top_seq->partSeq;
-    } else {
-        ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                errmsg("pruning result(PartitionIdentifier) is invalid")));
     }
 
     if (0 <= rangeStart) {
@@ -1655,8 +1647,8 @@ static void cleanPruningBottom(Relation relation, PartitionIdentifier* bottomSeq
     int i = 0;
     RangePartitionMap* partMap = NULL;
 
-    if (bottomSeq->partArea != PART_AREA_RANGE || bottomSeq->partSeq < 0 ||
-        bottomSeq->partSeq >= ((RangePartitionMap*)relation->partMap)->rangeElementsNum || value == NULL) {
+    if (bottomSeq->partSeq < 0 || bottomSeq->partSeq >= ((RangePartitionMap*)relation->partMap)->rangeElementsNum ||
+        value == NULL) {
         return;
     }
 
@@ -1688,8 +1680,8 @@ static void cleanPruningTop(Relation relation, PartitionIdentifier* topSeq, Cons
     int i = 0;
     RangePartitionMap* partMap = NULL;
 
-    if (topSeq->partArea != PART_AREA_RANGE || topSeq->partSeq < 0 ||
-        topSeq->partSeq >= ((RangePartitionMap*)relation->partMap)->rangeElementsNum || value == NULL) {
+    if (topSeq->partSeq < 0 || topSeq->partSeq >= ((RangePartitionMap*)relation->partMap)->rangeElementsNum ||
+        value == NULL) {
         return;
     }
 
@@ -1853,7 +1845,7 @@ Oid getPartitionOidFromSequence(Relation relation, int partSeq)
     AssertEreport(PointerIsValid(relation), MOD_OPT, "Unexpected NULL pointer for relation.");
     AssertEreport(PointerIsValid(relation->partMap), MOD_OPT, "Unexpected NULL pointer for relation->partMap.");
 
-    if (relation->partMap->type == PART_TYPE_RANGE) {
+    if (relation->partMap->type == PART_TYPE_RANGE || relation->partMap->type == PART_TYPE_INTERVAL) {
         int rangeElementsNum = ((RangePartitionMap*)(relation->partMap))->rangeElementsNum;
         if (partSeq < rangeElementsNum) {
             result = ((RangePartitionMap*)(relation->partMap))->rangeElements[partSeq].partitionOid;

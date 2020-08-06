@@ -176,6 +176,10 @@ typedef struct knl_session_attr_storage {
      */
     bool enable_xlog_prune;
     int defer_csn_cleanup_time;
+
+    /* for GTT */
+    int max_active_gtt;
+    int vacuum_gtt_defer_check_age;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */

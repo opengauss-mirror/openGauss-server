@@ -140,7 +140,7 @@ create index cross_test_table_index on cross_test_table(c1) local;
 delete from cross_test_table where c1 = 149;
 rollback;
 select * from cross_test_table order by 1;
-ERROR:  relation "cross_test_table" does not exist
+ERROR:  relation "cross_test_table" does not exist on datanode1
 LINE 1: select * from cross_test_table order by 1;
                       ^
 --table not exist

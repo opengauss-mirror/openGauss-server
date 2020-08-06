@@ -285,7 +285,7 @@ struct MOTFdwState_St {
 class MOTAdaptor {
 public:
     static void Init();
-    static void Fini();
+    static void Destroy();
     static void NotifyConfigChange();
     static void InitDataNodeId();
 
@@ -401,10 +401,6 @@ public:
     static MatchIndex* GetBestMatchIndex(
         MOTFdwStateSt* festate, MatchIndexArr* marr, int numClauses, bool setLocal = true);
     inline static int32_t AddParam(List** params, Expr* expr);
-
-    // ddl <> checkpoint sync
-    static int DdlCpTryLock();
-    static int DdlCpUnlock();
 
     static MOT::MOTEngine* m_engine;
     static bool m_initialized;

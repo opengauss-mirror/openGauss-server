@@ -34,6 +34,7 @@
 #ifdef PGXC
 #include "catalog/pg_trigger.h"
 #endif
+#include "catalog/storage_gtt.h"
 #include "commands/copy.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
@@ -982,7 +983,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         Assert(rel);
 
         /* check read-only transaction */
-        if (u_sess->attr.attr_common.XactReadOnly && !RelationIsLocalTemp(rel))
+        if (u_sess->attr.attr_common.XactReadOnly && !RELATION_IS_TEMP(rel))
             PreventCommandIfReadOnly("COPY FROM");
 
         /* set write for backend status for the thread, we will use it to check default transaction readOnly */
@@ -3479,6 +3480,7 @@ static uint64 CopyFrom(CopyState cstate)
         0);
 
     ExecOpenIndices(resultRelInfo);
+    init_gtt_storage(CMD_INSERT, resultRelInfo);
 
     resultRelationDesc = resultRelInfo->ri_RelationDesc;
     isPartitionRel = RELATION_IS_PARTITIONED(resultRelationDesc);

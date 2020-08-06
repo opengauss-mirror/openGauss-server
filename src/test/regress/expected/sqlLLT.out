@@ -3205,7 +3205,6 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for tab
 create view alter_llt1.v1 as select * from alter_llt1.t1;
 create function alter_llt1.plus1(int) returns int as 'select $1+1' language sql; 
 create domain alter_llt1.posint integer check (value > 0);
-ERROR:  domain is not yet supported.
 create type alter_llt1.ctype as (f1 int, f2 text);
 create function alter_llt1.same(alter_llt1.ctype, alter_llt1.ctype) returns boolean language sql
 as 'select $1.f1 is not distinct from $2.f1 and $1.f2 is not distinct from $2.f2';
@@ -3324,7 +3323,6 @@ ERROR:  SECURITY LABEL is not yet supported.
 CREATE TYPE bigobj (INPUT = lo_filein, OUTPUT = lo_fileout, INTERNALLENGTH = VARIABLE);
 ERROR:  function lo_filein(cstring) does not exist
 CREATE TYPE float8_range AS RANGE (subtype = float8, subtype_diff = float8mi);
-ERROR:  user defined range type is not yet supported.
 ALTER TYPE colors ADD VALUE 'orange' AFTER 'red';
 ERROR:  type "colors" does not exist
 CREATE COLLATION french (LOCALE = 'fr_FR.utf8');

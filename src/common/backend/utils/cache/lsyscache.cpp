@@ -47,6 +47,7 @@
 #include "catalog/pg_app_workloadgroup_mapping.h"
 #include "catalog/namespace.h"
 #endif
+#include "catalog/storage_gtt.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -1520,7 +1521,7 @@ Oid get_func_lang(Oid funcid)
 
 /*
  * get_func_iswindow
- *		Given procedure id, return the function's proiswindow field.
+ *		Given procedure id, return the function is window or not.
  */
 bool get_func_iswindow(Oid funcid)
 {
@@ -1530,7 +1531,7 @@ bool get_func_iswindow(Oid funcid)
     if (!HeapTupleIsValid(tp)) {
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
     }
-    result = ((Form_pg_proc)GETSTRUCT(tp))->proiswindow;
+    result = PROC_IS_WIN(((Form_pg_proc)GETSTRUCT(tp))->prokind);
     ReleaseSysCache(tp);
     return result;
 }
@@ -1910,6 +1911,27 @@ Oid get_rel_tablespace(Oid relid)
     } else {
         return InvalidOid;
     }
+}
+
+/*
+ * get_rel_persistence
+ *
+ *        Returns the relpersistence associated with a given relation.
+ */
+char get_rel_persistence(Oid relid)
+{
+    HeapTuple    tp;    
+    Form_pg_class reltup;
+    char result; 
+
+    tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for relation %u", relid); 
+    reltup = (Form_pg_class) GETSTRUCT(tp);
+    result = reltup->relpersistence;
+    ReleaseSysCache(tp);
+
+    return result;
 }
 
 /*
@@ -4073,6 +4095,18 @@ int32 get_attavgwidth(Oid relid, AttrNumber attnum, bool ispartition)
     if (u_sess->attr.attr_common.upgrade_mode != 0) {
         return 0;
     }
+    if (!ispartition && get_rel_persistence(relid) == RELPERSISTENCE_GLOBAL_TEMP) {
+        tp = get_gtt_att_statistic(relid, attnum);
+        if (!HeapTupleIsValid(tp)) {
+            return 0;
+        }
+        stawidth = ((Form_pg_statistic) GETSTRUCT(tp))->stawidth;
+        if (stawidth > 0) {
+            return stawidth;
+        } else {
+            return 0;
+        }
+    }
     tp = SearchSysCache4(
         STATRELKINDATTINH, ObjectIdGetDatum(relid), CharGetDatum(stakind), Int16GetDatum(attnum), BoolGetDatum(false));
     if (HeapTupleIsValid(tp)) {
@@ -4710,7 +4744,7 @@ bool is_not_strict_agg(Oid funcOid)
         return false;
     }
     func_form = (Form_pg_proc)GETSTRUCT(func_tuple);
-    if (func_form->proisstrict == false && func_form->proisagg == false) {
+    if (func_form->proisstrict == false && !PROC_IS_AGG(func_form->prokind)) {
         ReleaseSysCache(func_tuple);
         return true;
     }

@@ -268,8 +268,8 @@ DROP TABLE zktt3;
 -- test pg_stat_get_activity_for_temptable
 --
 select * from pg_stat_get_activity_for_temptable() limit 1;
- datid | timelineid | tempid |    sessionid    
--------+------------+--------+-----------------
+--? datid | timelineid | tempid | .*sessionid.*
+--?-------+------------+--------+ .*
 --?     0 |          0 |      0 | .*
 (1 row)
 

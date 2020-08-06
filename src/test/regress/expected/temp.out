@@ -238,15 +238,7 @@ insert into temp_col2 select * from temp_col1;
 --Other features
 --temp function
 --Create temp table
-create global temp table tg(a int, b varchar2(3000));
-WARNING:  GLOBAL is deprecated in temporary table creation
-LINE 1: create global temp table tg(a int, b varchar2(3000));
-               ^
 create local temp table tl(a int, b varchar2(3000));
-create global temporary table gt(a int, b varchar2(3000));
-WARNING:  GLOBAL is deprecated in temporary table creation
-LINE 1: create global temporary table gt(a int, b varchar2(3000));
-               ^
 create local temporary table lt(a int, b varchar2(3000));
 create temp table pg_temp.temp_t(a int);
 ERROR:  temporary tables cannot specify a schema name
@@ -819,7 +811,7 @@ create temp table test_serial(a serial, b varchar2(100));
 ERROR:  It's not supported to create serial column on temporary table
 create temp table test_serial2(a int);
 alter table test_serial2 add b serial;
-ERROR:  It's not supported to alter table add serial column
+ERROR:  It's not supported to create serial column on temporary table
 drop table test_serial;
 ERROR:  table "test_serial" does not exist
 drop table test_serial2;

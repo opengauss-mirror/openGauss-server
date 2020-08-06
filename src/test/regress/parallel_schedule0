@@ -47,7 +47,7 @@ test: single_node_oidjoins single_node_type_sanity single_node_opr_sanity
 # ----------
 # These four each depend on the previous one
 # ----------
-test: single_node_insert
+test: single_node_insert xc_rownum
 test: single_node_temple
 test: single_node_create_function_1
 test: single_node_create_table_1

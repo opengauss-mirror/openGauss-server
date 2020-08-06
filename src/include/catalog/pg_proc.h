@@ -47,8 +47,7 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
     float4      prorows;         /* estimated # of rows out (if proretset) */
     Oid         provariadic;     /* element type of variadic array, or 0 */
     regproc     protransform;    /* transforms calls to it during planning */
-    bool        proisagg;        /* is it an aggregate? */
-    bool        proiswindow;     /* is it a window function? */
+    char        prokind;         /* see PROKIND_ categories below */
     bool        prosecdef;       /* security definer */
     bool        proleakproof;    /* is it a leak-proof function? */
     bool        proisstrict;     /* strict with respect to NULLs? */
@@ -92,7 +91,7 @@ typedef FormData_pg_proc *Form_pg_proc;
  *        compiler constants for pg_proc
  * ----------------
  */
-#define Natts_pg_proc 31
+#define Natts_pg_proc 30
 #define Anum_pg_proc_proname 1
 #define Anum_pg_proc_pronamespace 2
 #define Anum_pg_proc_proowner 3
@@ -101,34 +100,33 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define Anum_pg_proc_prorows 6
 #define Anum_pg_proc_provariadic 7
 #define Anum_pg_proc_protransform 8
-#define Anum_pg_proc_proisagg 9
-#define Anum_pg_proc_proiswindow 10
-#define Anum_pg_proc_prosecdef 11
-#define Anum_pg_proc_proleakproof 12
-#define Anum_pg_proc_proisstrict 13
-#define Anum_pg_proc_proretset 14
-#define Anum_pg_proc_provolatile 15
-#define Anum_pg_proc_pronargs 16
-#define Anum_pg_proc_pronargdefaults 17
-#define Anum_pg_proc_prorettype 18
-#define Anum_pg_proc_proargtypes 19
-#define Anum_pg_proc_proallargtypes 20
-#define Anum_pg_proc_proargmodes 21
-#define Anum_pg_proc_proargnames 22
-#define Anum_pg_proc_proargdefaults 23
-#define Anum_pg_proc_prosrc 24
-#define Anum_pg_proc_probin 25
-#define Anum_pg_proc_proconfig 26
-#define Anum_pg_proc_proacl 27
-#define Anum_pg_proc_prodefaultargpos 28
-#define Anum_pg_proc_fenced 29
-#define Anum_pg_proc_shippable 30
-#define Anum_pg_proc_package 31
+#define Anum_pg_proc_prokind 9
+#define Anum_pg_proc_prosecdef 10
+#define Anum_pg_proc_proleakproof 11
+#define Anum_pg_proc_proisstrict 12
+#define Anum_pg_proc_proretset 13
+#define Anum_pg_proc_provolatile 14
+#define Anum_pg_proc_pronargs 15
+#define Anum_pg_proc_pronargdefaults 16
+#define Anum_pg_proc_prorettype 17
+#define Anum_pg_proc_proargtypes 18
+#define Anum_pg_proc_proallargtypes 19
+#define Anum_pg_proc_proargmodes 20
+#define Anum_pg_proc_proargnames 21
+#define Anum_pg_proc_proargdefaults 22
+#define Anum_pg_proc_prosrc 23
+#define Anum_pg_proc_probin 24
+#define Anum_pg_proc_proconfig 25
+#define Anum_pg_proc_proacl 26
+#define Anum_pg_proc_prodefaultargpos 27
+#define Anum_pg_proc_fenced 28
+#define Anum_pg_proc_shippable 29
+#define Anum_pg_proc_package 30
 
 /* proc_oid is only for builitin
  * func view shouldn't be included in Natts_pg_proc
  */
-#define Anum_pg_proc_oid 32
+#define Anum_pg_proc_oid 31
 
 /* ----------------
  *        initial contents of pg_proc
@@ -389,6 +387,20 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define TESTSKEWNESSRETURNTYPE 4048
 #define PERCENTILECONTAGGFUNCOID 4452
 #define PGCHECKAUTHIDFUNCOID 3228
+
+/*
+ * Symbolic values for prokind column
+ */
+#define PROKIND_FUNCTION    'f'
+#define PROKIND_AGGREGATE   'a'
+#define PROKIND_WINDOW      'w'
+#define PROKIND_PROCEDURE   'p'
+
+#define PROC_IS_FUNC(prokind)   ((prokind) == PROKIND_FUNCTION)
+#define PROC_IS_AGG(prokind)    ((prokind) == PROKIND_AGGREGATE)
+#define PROC_IS_WIN(prokind)    ((prokind) == PROKIND_WINDOW)
+#define PROC_IS_PRO(prokind)    ((prokind) == PROKIND_PROCEDURE)
+
 /*
  * Symbolic values for provolatile column: these indicate whether the result
  * of a function is dependent *only* on the values of its explicit arguments,

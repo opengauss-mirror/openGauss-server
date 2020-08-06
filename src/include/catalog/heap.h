@@ -47,7 +47,8 @@ typedef struct HashBucketInfo {
 
 extern Relation heap_create(const char *relname, Oid relnamespace, Oid reltablespace, Oid relid, Oid relfilenode,
     Oid bucketOid, TupleDesc tupDesc, char relkind, char relpersistence, bool partitioned_relation, bool rowMovement,
-    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Oid ownerid);
+    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Oid ownerid,
+    bool skip_create_storage);
 
 extern Partition heapCreatePartition(const char* part_name, bool for_partitioned_table, Oid part_tablespace, Oid part_id,
     Oid partFileNode, Oid bucketOid, Oid ownerid);
@@ -76,7 +77,6 @@ extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc,
 
 extern void heap_truncate_one_part(Relation rel , Oid partOid);
 extern Oid heapTupleGetPartitionId(Relation rel, HeapTuple tuple);
-extern Oid createNewIntervalFile(Relation rel, int seqNum);
 extern void heap_truncate(List *relids);
 extern void heap_truncate_one_rel(Relation rel);
 extern void heap_truncate_check_FKs(List *relations, bool tempTables);
@@ -143,5 +143,7 @@ extern char* make_column_map(TupleDesc tuple_desc);
  * @Notes: remember to pfree the array.
  */
 extern bool* check_partkey_has_timestampwithzone(Relation partTableRel);
+
+extern Oid AddNewIntervalPartition(Relation rel, HeapTuple insertTuple);
 
 #endif   /* HEAP_H */

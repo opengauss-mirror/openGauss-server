@@ -31,6 +31,7 @@
 #include "catalog/catalog.h"
 #include "catalog/dfsstore_ctlg.h"
 #include "catalog/storage.h"
+#include "catalog/storage_gtt.h"
 #include "catalog/storage_xlog.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "commands/tablespace.h"
@@ -38,6 +39,7 @@
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
+#include "threadpool/threadpool.h"
 #include "utils/fmgroids.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -67,6 +69,7 @@ typedef struct PendingRelDelete {
     RelFileNode relnode;           /* relation that may need to be deleted */
     ForkNumber forknum;            /* MAIN_FORKNUM for row table; or valid column ForkNum */
     BackendId backend;             /* InvalidBackendId if not a temp rel */
+    Oid relOid;                    /* InvalidOid if not a global temp rel */
     Oid ownerid;                   /* owner id for user space statistics */
     bool atCommit;                 /* T=delete at commit; F=delete at abort */
     int nestLevel;                 /* xact nesting level of request */
@@ -117,6 +120,10 @@ static void StorageSetBackendAndLogged(_in_ char relpersistence, _out_ BackendId
                 *needs_wal = false;
             }
             break;
+        case RELPERSISTENCE_GLOBAL_TEMP:
+            *backend = BackendIdForTempRelations;
+            *needs_wal = false;
+            break;
         case RELPERSISTENCE_UNLOGGED:
             *backend = InvalidBackendId;
             *needs_wal = false;
@@ -136,8 +143,8 @@ static void StorageSetBackendAndLogged(_in_ char relpersistence, _out_ BackendId
  * if it's a row-storage table, *whichAttr* must is *AllTheAttrs*.
  * if it's a column-storage table, *whichAttr* >= *AllTheAttrs*.
  */
-static void InsertStorageIntoPendingList(_in_ RelFileNode* rnode, _in_ AttrNumber attrnum, _in_ BackendId backend,
-    _in_ Oid ownerid, _in_ bool atCommit, _in_ bool isDfsTruncate = false)
+static void InsertStorageIntoPendingList(_in_ const RelFileNode* rnode, _in_ AttrNumber attrnum, _in_ BackendId backend,
+    _in_ Oid ownerid, _in_ bool atCommit, _in_ bool isDfsTruncate = false, Relation rel = NULL)
 {
     PendingRelDelete* pending = (PendingRelDelete*)MemoryContextAlloc(u_sess->top_mem_cxt, sizeof(PendingRelDelete));
     pending->relnode = *rnode;
@@ -165,17 +172,22 @@ static void InsertStorageIntoPendingList(_in_ RelFileNode* rnode, _in_ AttrNumbe
         }
     }
     pending->backend = backend;
+    pending->relOid = InvalidOid;
     pending->ownerid = ownerid;
     pending->atCommit = atCommit; /* false: delete if abort; true: delete if commit */
     pending->nestLevel = GetCurrentTransactionNestLevel();
     pending->next = u_sess->catalog_cxt.pendingDeletes;
     u_sess->catalog_cxt.pendingDeletes = pending;
 
-    /* Lock RelFileNode to control concurrent with Catchup Thread */
-    LockRelFileNode(*rnode, AccessExclusiveLock);
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        pending->relOid = RelationGetRelid(rel);
+    } else {
+        /* Lock RelFileNode to control concurrent with Catchup Thread */
+        LockRelFileNode(*rnode, AccessExclusiveLock);
+    }
 }
 
-void RelationCreateStorageInternal(RelFileNode rnode, char relpersistence, Oid ownerid)
+static void RelationCreateStorageInternal(RelFileNode rnode, char relpersistence, Oid ownerid, Relation rel = NULL)
 {
     SMgrRelation srel;
     BackendId backend;
@@ -190,7 +202,12 @@ void RelationCreateStorageInternal(RelFileNode rnode, char relpersistence, Oid o
         log_smgrcreate(&srel->smgr_rnode.node, MAIN_FORKNUM);
 
     /* Add the relation to the list of stuff to delete at abort */
-    InsertStorageIntoPendingList(&rnode, InvalidAttrNumber, backend, ownerid, false);
+    InsertStorageIntoPendingList(&rnode, InvalidAttrNumber, backend, ownerid, false, false, rel);
+
+    /* remember global temp table storage info to localhash */
+    if (rel && relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        remember_gtt_storage_info(rnode, rel);
+    }
 }
 
 /*
@@ -204,12 +221,12 @@ void RelationCreateStorageInternal(RelFileNode rnode, char relpersistence, Oid o
  * This function is transactional. The creation is WAL-logged, and if the
  * transaction aborts later on, the storage will be destroyed.
  */
-void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ownerid, Oid bucketOid)
+void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ownerid, Oid bucketOid, Relation rel)
 {
     if (OidIsValid(bucketOid) && (bucketOid != VirtualBktOid)) {
         BucketCreateStorage(rnode, bucketOid, ownerid);
     } else {
-        RelationCreateStorageInternal(rnode, relpersistence, ownerid);
+        RelationCreateStorageInternal(rnode, relpersistence, ownerid, rel);
     }
 }
 
@@ -328,6 +345,17 @@ void CStoreRelDropColumn(Relation rel, AttrNumber attrnum, Oid ownerid)
  */
 void RelationDropStorage(Relation rel, bool isDfsTruncate)
 {
+    // global temp table files may not exist
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        if (rel->rd_smgr == NULL) {
+            /* Open it at the smgr level if not already done */
+            RelationOpenSmgr(rel);
+        }
+        if (!smgrexists(rel->rd_smgr, MAIN_FORKNUM)) {
+            return;
+        }
+    }
+
     /*
      * First we must push the column file, column bcm file to the pendingDeletes and
      * then push the logical table file to pendingDeletes.
@@ -369,7 +397,7 @@ void RelationDropStorage(Relation rel, bool isDfsTruncate)
     } else {
         /* Add the relation to the list of stuff to delete at commit */
         InsertStorageIntoPendingList(
-            &rel->rd_node, InvalidAttrNumber, rel->rd_backend, rel->rd_rel->relowner, true, isDfsTruncate);
+            &rel->rd_node, InvalidAttrNumber, rel->rd_backend, rel->rd_rel->relowner, true, isDfsTruncate, rel);
     }
 
     /*
@@ -536,6 +564,11 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
     if (bcm)
         BCM_truncate(rel);
 
+    /* skip truncating if global temp table index does not exist */
+    if (RELATION_IS_GLOBAL_TEMP(rel) && !smgrexists(rel->rd_smgr, MAIN_FORKNUM)) {
+        return;
+    }
+
     /*
      * We WAL-log the truncation before actually truncating, which means
      * trouble if the truncation fails. If we then crash, the WAL replay
@@ -570,9 +603,10 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
         if (fsm || vm)
             XLogFlush(lsn);
     }
-
-    /* Lock RelFileNode to control concurrent with Catchup Thread */
-    LockRelFileNode(rel->rd_node, AccessExclusiveLock);
+    if (!RELATION_IS_GLOBAL_TEMP(rel)) {
+        /* Lock RelFileNode to control concurrent with Catchup Thread */
+        LockRelFileNode(rel->rd_node, AccessExclusiveLock);
+    }
 
     /* Do the real work */
     smgrtruncate(rel->rd_smgr, MAIN_FORKNUM, nblocks);
@@ -686,7 +720,8 @@ void smgrDoPendingDeletes(bool isCommit)
             /* do deletion if called for */
             if (pending->atCommit == isCommit) {
                 if (!IsValidColForkNum(pending->forknum)) {
-                    RowRelationDoDeleteFiles(pending->relnode, pending->backend, pending->ownerid);
+                    RowRelationDoDeleteFiles(
+                        pending->relnode, pending->backend, pending->ownerid, pending->relOid, isCommit);
 
                     /*
                      * "CREATE/DROP hdfs table" will use Two-Phrases Commit Transaction,
@@ -1900,7 +1935,7 @@ void ColumnRelationDoDeleteFiles(RelFileNode* rnode, ForkNumber forknum, Backend
 }
 
 /* Delete all the physical files for row relation. */
-void RowRelationDoDeleteFiles(RelFileNode rnode, BackendId backend, Oid ownerid)
+void RowRelationDoDeleteFiles(RelFileNode rnode, BackendId backend, Oid ownerid, Oid relOid, bool isCommit)
 {
     /* decrease the permanent space on users' record */
     uint64 size = GetSMgrRelSize(&rnode, backend, InvalidForkNumber);
@@ -1911,6 +1946,11 @@ void RowRelationDoDeleteFiles(RelFileNode rnode, BackendId backend, Oid ownerid)
     /* Before unlinking files, invalid all the shared buffers first. */
     smgrdounlink(srel, false);
     smgrclose(srel);
+
+    /* clean global temp table flags when transaction commit or rollback */
+    if (SmgrIsTemp(srel) && relOid != InvalidOid && gtt_storage_attached(relOid)) {
+        forget_gtt_storage_info(relOid, rnode, isCommit);
+    }
 
     /*
      * After files are deleted, append this filenode into BCM file list,

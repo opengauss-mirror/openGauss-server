@@ -14,7 +14,7 @@
  * -------------------------------------------------------------------------
  *
  * rw_lock.h
- *    Implements a reader/writer lock used in the checkpoint manager.
+ *    Implements a reader/writer lock using spinlock.
  *
  * IDENTIFICATION
  *    src/gausskernel/storage/mot/core/src/infra/synchronization/rw_lock.h
@@ -30,7 +30,7 @@ typedef unsigned Spinlock;
 
 /**
  * @class RwLock
- * @brief this class implements a reader/writer lock used in the checkpint manager
+ * @brief this class implements a reader/writer lock using spinlock
  */
 class RwLock {
 public:

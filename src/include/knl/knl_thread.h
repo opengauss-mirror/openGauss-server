@@ -74,6 +74,8 @@
 
 #define RESERVE_SIZE 32
 
+typedef struct ResourceOwnerData* ResourceOwner;
+
 typedef struct knl_t_codegen_context {
     void* thr_codegen_obj;
 
@@ -841,6 +843,10 @@ typedef struct knl_t_shemem_ptr_context {
      * where we have special measures to pass it down).
      */
     union LWLockPadded *mainLWLockArray;
+
+    // for GTT table to track sessions and their usage of GTTs 
+    struct gtt_ctl_data* gtt_shared_ctl;
+    struct HTAB* active_gtt_shared_hash;
 } knl_t_shemem_ptr_context;
 
 typedef struct knl_t_cstore_context {
@@ -2176,6 +2182,7 @@ typedef struct knl_t_logical_context {
     uint64 sendSegNo;
     uint32 sendOff;
     bool ExportInProgress;
+    ResourceOwner SavedResourceOwnerDuringExport;
 } knl_t_logical_context;
 
 typedef struct knl_t_dataqueue_context {
@@ -2204,7 +2211,6 @@ typedef struct knl_t_walrcvwriter_context {
 } knl_t_walrcvwriter_context;
 
 typedef int CacheSlotId_t;
-typedef void* Block;
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 typedef void (*shmem_startup_hook_type)(void);
 typedef struct ONEXIT {
@@ -2286,17 +2292,6 @@ typedef struct knl_t_storage_context {
 
     /* Pointers to shared state */
     struct BufferStrategyControl* StrategyControl;
-    int NLocBuffer; /* until buffers are initialized */
-    struct BufferDesc* LocalBufferDescriptors;
-    Block* LocalBufferBlockPointers;
-    int32* LocalRefCount;
-    int nextFreeLocalBuf;
-    struct HTAB* LocalBufHash;
-    char* cur_block;
-    int next_buf_in_block;
-    int num_bufs_in_block;
-    int total_bufs_allocated;
-    MemoryContext LocalBufferContext;
     /* remember global block slot in progress */
     CacheSlotId_t CacheBlockInProgressIO;
     CacheSlotId_t CacheBlockInProgressUncompress;
@@ -2425,8 +2420,10 @@ typedef struct knl_t_storage_context {
     bool atexit_callback_setup;
     ONEXIT on_proc_exit_list[MAX_ON_EXITS];
     ONEXIT on_shmem_exit_list[MAX_ON_EXITS];
+    ONEXIT before_shmem_exit_list[MAX_ON_EXITS];
     int on_proc_exit_index;
     int on_shmem_exit_index;
+    int before_shmem_exit_index;
 
     union CmprMetaUnion* cmprMetaInfo;
 
@@ -2693,7 +2690,6 @@ typedef struct knl_t_mot_context {
     // misc
     uint8_t log_level;
     bool init_codegen_once;
-    bool mot_startup;
     
     uint16_t currentThreadId;
     int currentNumaNodeId;

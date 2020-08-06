@@ -5859,8 +5859,10 @@ ForeignScan* make_foreignscan(
     plan->righttree = NULL;
     plan->exec_type = type;
     plan->distributed_keys = NIL;
+#ifdef ENABLE_MULTIPLE_NODES
     plan->distributed_keys =
         lappend(plan->distributed_keys, makeVar(0, InvalidAttrNumber, InvalidOid, -1, InvalidOid, 0));
+#endif
     node->scan.scanrelid = scanrelid;
     node->fdw_exprs = fdw_exprs;
     node->fdw_private = fdw_private;

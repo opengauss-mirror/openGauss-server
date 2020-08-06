@@ -1,0 +1,444 @@
+--
+-- prepare: create tablespace dir
+--
+\! mkdir '@testtablespace@/hw_partition_interval_tsp4'
+\! mkdir '@testtablespace@/hw_partition_interval_tsp5'
+\! mkdir '@testtablespace@/hw_partition_interval_tsp6'
+set timezone = 'PRC';
+create tablespace hw_partition_interval_tsp4 location '@testtablespace@/hw_partition_interval_tsp4';
+create tablespace hw_partition_interval_tsp5 location '@testtablespace@/hw_partition_interval_tsp5';
+create tablespace hw_partition_interval_tsp6 location '@testtablespace@/hw_partition_interval_tsp6';
+--
+---- normal operates : create, insert, auto create and drop without table space
+--
+CREATE TABLE interval_normal_date (logdate date not null) 
+PARTITION BY RANGE (logdate)
+INTERVAL ('1 day')
+(
+	PARTITION interval_normal_date_p1 VALUES LESS THAN ('2020-03-01'),
+	PARTITION interval_normal_date_p2 VALUES LESS THAN ('2020-05-01'),
+	PARTITION interval_normal_date_p3 VALUES LESS THAN ('2020-06-01')
+);
+-- see about the info of the partitioned table in pg_partition
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |  boundaries  
+-------------------------+----------+--------------+--------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ interval_normal_date_p2 | p        | r            | {2020-05-01}
+ interval_normal_date_p3 | p        | r            | {2020-06-01}
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into interval_normal_date values ('2020-02-20');
+insert into interval_normal_date values ('2020-3-01');
+insert into interval_normal_date values ('2020-3-02');
+insert into interval_normal_date values ('2020-5-02');
+-- no new interval range created
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |  boundaries  
+-------------------------+----------+--------------+--------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ interval_normal_date_p2 | p        | r            | {2020-05-01}
+ interval_normal_date_p3 | p        | r            | {2020-06-01}
+(4 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into interval_normal_date values ('2020-6-01');
+insert into interval_normal_date values ('2020-6-02');
+insert into interval_normal_date values ('2020-6-03');
+-- created two new interval ranges
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ interval_normal_date_p2 | p        | r            | {2020-05-01}
+ interval_normal_date_p3 | p        | r            | {2020-06-01}
+ sys_p1                  | p        | i            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p2                  | p        | i            | {"Wed Jun 03 00:00:00 2020"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+(7 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from interval_normal_date order by logdate;
+         logdate          
+--------------------------
+ Thu Feb 20 00:00:00 2020
+ Sun Mar 01 00:00:00 2020
+ Mon Mar 02 00:00:00 2020
+ Sat May 02 00:00:00 2020
+ Mon Jun 01 00:00:00 2020
+ Tue Jun 02 00:00:00 2020
+ Wed Jun 03 00:00:00 2020
+(7 rows)
+
+select * from interval_normal_date partition (interval_normal_date_p1) order by logdate; 
+         logdate          
+--------------------------
+ Thu Feb 20 00:00:00 2020
+(1 row)
+
+select * from interval_normal_date partition (interval_normal_date_p2) order by logdate;
+         logdate          
+--------------------------
+ Sun Mar 01 00:00:00 2020
+ Mon Mar 02 00:00:00 2020
+(2 rows)
+
+select * from interval_normal_date partition (interval_normal_date_p3) order by logdate;
+         logdate          
+--------------------------
+ Sat May 02 00:00:00 2020
+(1 row)
+
+-- first created interval range
+select * from interval_normal_date partition (sys_p1) order by logdate;
+         logdate          
+--------------------------
+ Mon Jun 01 00:00:00 2020
+(1 row)
+
+-- second created interval range
+select * from interval_normal_date partition (sys_p2) order by logdate;
+         logdate          
+--------------------------
+ Tue Jun 02 00:00:00 2020
+(1 row)
+
+-- third created interval range
+select * from interval_normal_date partition (sys_p3) order by logdate;
+         logdate          
+--------------------------
+ Wed Jun 03 00:00:00 2020
+(1 row)
+
+-- drop range partition which is not next to interval range.
+ALTER TABLE interval_normal_date DROP PARTITION interval_normal_date_p2;
+-- see about the info of the partitioned table in pg_partition
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ interval_normal_date_p3 | p        | r            | {2020-06-01}
+ sys_p1                  | p        | i            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p2                  | p        | i            | {"Wed Jun 03 00:00:00 2020"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+(6 rows)
+
+-- drop interval range partition
+ALTER TABLE interval_normal_date DROP PARTITION sys_p2;
+-- see the info of the partitioned table in pg_partition, only reduce a interval range partition instance.
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ interval_normal_date_p3 | p        | r            | {2020-06-01}
+ sys_p1                  | p        | i            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+(5 rows)
+
+-- drop range partition which is next to interval range.
+ALTER TABLE interval_normal_date DROP PARTITION interval_normal_date_p3;
+-- the interval parttition will changed to range partition
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+(4 rows)
+
+-- insert the record to create droped range sys_p2, which will have a new relname.
+insert into interval_normal_date values ('2020-6-02');
+-- will add the new created interval partition. 
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+ sys_p4                  | p        | i            | {"Wed Jun 03 00:00:00 2020"}
+(5 rows)
+
+-- insert the record that is smaller than the lower boundary
+insert into interval_normal_date values ('2020-3-02');
+insert into interval_normal_date values ('2020-5-02');
+-- inquire about data of the partition and the partitioned table
+select * from interval_normal_date order by logdate;
+         logdate          
+--------------------------
+ Thu Feb 20 00:00:00 2020
+ Mon Mar 02 00:00:00 2020
+ Sat May 02 00:00:00 2020
+ Mon Jun 01 00:00:00 2020
+ Tue Jun 02 00:00:00 2020
+ Wed Jun 03 00:00:00 2020
+(6 rows)
+
+select * from interval_normal_date partition (interval_normal_date_p1) order by logdate; 
+         logdate          
+--------------------------
+ Thu Feb 20 00:00:00 2020
+(1 row)
+
+-- first created interval range
+select * from interval_normal_date partition (sys_p1) order by logdate;
+         logdate          
+--------------------------
+ Mon Mar 02 00:00:00 2020
+ Sat May 02 00:00:00 2020
+ Mon Jun 01 00:00:00 2020
+(3 rows)
+
+-- third created interval range
+select * from interval_normal_date partition (sys_p3) order by logdate;
+         logdate          
+--------------------------
+ Wed Jun 03 00:00:00 2020
+(1 row)
+
+-- fourth created interval range
+select * from interval_normal_date partition (sys_p4) order by logdate;
+         logdate          
+--------------------------
+ Tue Jun 02 00:00:00 2020
+(1 row)
+
+-- Insert a future data
+insert into interval_normal_date values ('2030-3-01');
+insert into interval_normal_date values ('2040-06-20');
+-- see about the info of the partitioned table in pg_partition
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+ sys_p4                  | p        | i            | {"Wed Jun 03 00:00:00 2020"}
+ sys_p5                  | p        | i            | {"Sat Mar 02 00:00:00 2030"}
+ sys_p6                  | p        | i            | {"Thu Jun 21 00:00:00 2040"}
+(7 rows)
+
+-- inquire about data of the partition and the partitioned table
+select * from interval_normal_date order by logdate;
+         logdate          
+--------------------------
+ Thu Feb 20 00:00:00 2020
+ Mon Mar 02 00:00:00 2020
+ Sat May 02 00:00:00 2020
+ Mon Jun 01 00:00:00 2020
+ Tue Jun 02 00:00:00 2020
+ Wed Jun 03 00:00:00 2020
+ Fri Mar 01 00:00:00 2030
+ Wed Jun 20 00:00:00 2040
+(8 rows)
+
+select * from interval_normal_date partition (sys_p5) order by logdate;
+         logdate          
+--------------------------
+ Fri Mar 01 00:00:00 2030
+(1 row)
+
+select * from interval_normal_date partition (sys_p6) order by logdate;
+         logdate          
+--------------------------
+ Wed Jun 20 00:00:00 2040
+(1 row)
+
+--
+---- test truncate partitions without index
+--
+-- truncate a range partition
+ALTER TABLE interval_normal_date truncate PARTITION interval_normal_date_p1;
+select * from interval_normal_date partition (interval_normal_date_p1) order by logdate;
+ logdate 
+---------
+(0 rows)
+
+-- truncate a interval partition
+ALTER TABLE interval_normal_date truncate PARTITION sys_p4;
+select * from interval_normal_date partition (sys_p4) order by logdate;
+ logdate 
+---------
+(0 rows)
+
+-- truncate the partitioned table
+truncate table interval_normal_date;
+select * from interval_normal_date order by logdate;
+ logdate 
+---------
+(0 rows)
+
+--
+---- merge and split partition are not supported yet;
+--
+-- split partition
+ALTER TABLE interval_normal_date SPLIT PARTITION sys_p1 AT ('2020-04-01 00:00:00') INTO
+(
+    PARTITION sys_p6,
+    PARTITION sys_p7
+);
+ERROR:  can not split partition against interval partitioned table
+-- mgerge partition
+ALTER TABLE interval_normal_date MERGE PARTITIONS interval_normal_date_p1, sys_p1 into PARTITION sys_p8;
+ERROR:  can not merge partition against interval partitioned table
+ALTER TABLE interval_normal_date MERGE PARTITIONS sys_p1, sys_p4 into PARTITION sys_p9;
+ERROR:  can not merge partition against interval partitioned table
+--
+---- add partition is not supported;
+--
+ALTER TABLE interval_normal_date ADD PARTITION sys_10 VALUES LESS THAN ('2020-07-01');
+ERROR:  can not add partition against interval partitioned table
+--
+---- alter partition name
+--
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p5 To my_sys_p5;
+ALTER TABLE interval_normal_date RENAME PARTITION FOR ('2020-06-02') To my_sys_p4;
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
+ my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
+ sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+ sys_p6                  | p        | i            | {"Thu Jun 21 00:00:00 2040"}
+(7 rows)
+
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p6 To my_sys_p6;
+insert into interval_normal_date values ('2040-06-21');
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
+ my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
+ my_sys_p6               | p        | i            | {"Thu Jun 21 00:00:00 2040"}
+ sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+ sys_p4                  | p        | i            | {"Fri Jun 22 00:00:00 2040"}
+(8 rows)
+
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p4 To sys_p32767;
+insert into interval_normal_date values ('2040-06-22');
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
+ my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
+ my_sys_p6               | p        | i            | {"Thu Jun 21 00:00:00 2040"}
+ sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p2                  | p        | i            | {"Sat Jun 23 00:00:00 2040"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+ sys_p32767              | p        | i            | {"Fri Jun 22 00:00:00 2040"}
+(9 rows)
+
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p2 To sys_p32780;
+insert into interval_normal_date values ('2040-06-24');
+select relname, parttype, partstrategy, boundaries from pg_partition
+	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
+	order by relname;
+         relname         | parttype | partstrategy |          boundaries          
+-------------------------+----------+--------------+------------------------------
+ interval_normal_date    | r        | i            | 
+ interval_normal_date_p1 | p        | r            | {2020-03-01}
+ my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
+ my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
+ my_sys_p6               | p        | i            | {"Thu Jun 21 00:00:00 2040"}
+ sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p14                 | p        | i            | {"Mon Jun 25 00:00:00 2040"}
+ sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
+ sys_p32767              | p        | i            | {"Fri Jun 22 00:00:00 2040"}
+ sys_p32780              | p        | i            | {"Sat Jun 23 00:00:00 2040"}
+(10 rows)
+
+--clean up
+drop table interval_normal_date;
+--
+---- the cstore table does not support interval partition;
+--
+create table partiton_table_001(
+COL_1 smallint,
+COL_2 char(30),
+COL_3 int,
+COL_4 date not null
+)with (orientation = column)
+PARTITION BY RANGE (COL_4)
+INTERVAL ('1 month')
+(
+PARTITION partiton_table_001_p1 VALUES LESS THAN ('2020-03-01')
+);
+ERROR:  Unsupport feature
+DETAIL:  cstore/timeseries don't support interval partition type.
+--
+---- tablespace
+--
+--date
+--create table insert_max_partition_num_date(col_date date)
+--partition by range(col_date)
+--interval ('1' day) store in (hw_partition_insert_tsp4, hw_partition_insert_tsp5, hw_partition_insert_tsp6)
+--(
+--	partition insert_max_partition_num_date_p1 values less than ('2012-1-25') tablespace hw_partition_insert_tsp4,
+--	partition insert_max_partition_num_date_p2 values less than ('2012-2-25') tablespace hw_partition_insert_tsp5,
+--	partition insert_max_partition_num_date_p3 values less than ('2012-3-25') tablespace hw_partition_insert_tsp6
+--);
+--
+---- test with where conditions
+--
+--select * from interval_normal_date where logdate < '2020-06-01';
+--ERROR:  pruning result(PartitionIdentifier) is invalid
+--
+---- test with maxvalue
+--
+--
+---- test with null
+--
+--
+---- test support interval type maxvalue
+-- Hour, Day, month, timestamp, timestamptz, date 
+--
+--
+---- test month interval increase, specific Feb
+--
+--
+-- clean up
+--
+drop tablespace hw_partition_interval_tsp4;
+drop tablespace hw_partition_interval_tsp5;
+drop tablespace hw_partition_interval_tsp6;
+\! rm -fr '@testtablespace@/hw_partition_interval_tsp4'
+\! rm -fr '@testtablespace@/hw_partition_interval_tsp5'
+\! rm -fr '@testtablespace@/hw_partition_interval_tsp6'

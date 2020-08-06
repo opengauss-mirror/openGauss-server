@@ -1,0 +1,14 @@
+reset search_path;
+select pg_sleep(5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+drop schema gtt cascade;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to table gtt.gtt1
+drop cascades to table gtt.gtt2
+drop cascades to table gtt.gtt3
+drop cascades to table gtt.gtt_t_kenyon
+drop cascades to table gtt.gtt_with_seq

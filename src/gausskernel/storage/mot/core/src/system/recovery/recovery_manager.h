@@ -171,6 +171,7 @@ public:
     RecoveryManager()
         : m_logStats(nullptr),
           m_initialized(false),
+          m_recoverFromCkptDone(false),
           m_checkpointId(0),
           m_lsn(0),
           m_numWorkers(GetGlobalConfiguration().m_checkpointRecoveryWorkers),
@@ -1009,6 +1010,8 @@ private:
     }
 
     bool m_initialized;
+
+    bool m_recoverFromCkptDone;
 
     uint64_t m_checkpointId;
 

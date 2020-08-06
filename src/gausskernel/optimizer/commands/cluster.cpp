@@ -33,6 +33,7 @@
 #include "catalog/index.h"
 #include "catalog/namespace.h"
 #include "catalog/toasting.h"
+#include "catalog/storage_gtt.h"
 #include "commands/cluster.h"
 #include "commands/tablecmds.h"
 #include "commands/vacuum.h"
@@ -141,6 +142,9 @@ static Datum pgxc_parallel_execution(const char* query, ExecNodes* exec_nodes);
 static int switch_relfilenode_execnode(Oid relOid1, Oid relOid2, bool isbucket, RedisSwitchNode* rsn);
 #endif
 static void swapRelationIndicesRelfileNode(Relation rel1, Relation rel2, bool swapBucket);
+static void GttSwapRelationFiles(Oid r1, Oid r2, bool targetIsPgClass, bool swapToastByContent,
+    TransactionId frozenXid, Oid *mappedTables);
+
 /* ---------------------------------------------------------------------------
  * This cluster code allows for clustering multiple tables at once. Because
  * of this, we cannot just run everything on a single transaction, or we
@@ -453,6 +457,12 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot vacuum temporary tables of other sessions")));
     }
 
+    if (RELATION_IS_GLOBAL_TEMP(OldHeap) && !gtt_storage_attached(RelationGetRelid(OldHeap))) {
+        relation_close(OldHeap, lockMode);
+        gstrace_exit(GS_TRC_ID_cluster_rel);
+        return;
+    }
+
     /*
      * Also check for active uses of the relation in the current transaction,
      * including open scans and pending AFTER trigger events.
@@ -688,6 +698,7 @@ static void rebuild_relation(
     Oid tableOid = RelationGetRelid(OldHeap);
     Oid tableSpace = OldHeap->rd_rel->reltablespace;
     Oid OIDNewHeap;
+    char relpersistence;
     bool is_system_catalog = false;
     bool swap_toast_by_content = false;
     TransactionId frozenXid;
@@ -699,6 +710,7 @@ static void rebuild_relation(
         mark_index_clustered(OldHeap, indexOid);
 
     /* Remember if it's a system catalog */
+    relpersistence = OldHeap->rd_rel->relpersistence;
     is_system_catalog = IsSystemRelation(OldHeap);
 
     /* Close relcache entry, but keep lock until transaction commit */
@@ -732,7 +744,8 @@ static void rebuild_relation(
      * Swap the physical files of the target and transient tables, then
      * rebuild the target's indexes and throw away the transient table.
      */
-    finish_heap_swap(tableOid, OIDNewHeap, is_system_catalog, swap_toast_by_content, false, frozenXid, memUsage);
+    finish_heap_swap(
+        tableOid, OIDNewHeap, is_system_catalog, swap_toast_by_content, false, frozenXid, memUsage, relpersistence);
 
     /* report vacuum full stat to PgStatCollector */
     pgstat_report_vacuum(tableOid, InvalidOid, is_shared, deleteTupleNum);
@@ -1783,6 +1796,8 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
     TransactionId FreezeXid;
     bool use_sort = false;
     double tups_vacuumed = 0;
+    bool isGtt = false;
+    TransactionId gttRelfrozenxid = 0;
 
     /*
      * Open the relations we need.
@@ -1793,6 +1808,10 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
         OldIndex = index_open(OIDOldIndex, ExclusiveLock);
     else
         OldIndex = NULL;
+
+    if (RELATION_IS_GLOBAL_TEMP(OldHeap)) {
+        isGtt = true;
+    }
 
     /*
      * If the OldHeap has a toast table, get lock on the toast table to keep
@@ -1851,32 +1870,38 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
      * FreezeXid will become the table's new relfrozenxid, and that mustn't go
      * backwards, so take the max.
      */
-    bool isNull = false;
-    TransactionId relfrozenxid;
-    Relation rel = heap_open(RelationRelationId, AccessShareLock);
-    HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(OIDOldHeap));
-    if (!HeapTupleIsValid(tuple)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_TABLE),
-                errmsg("cache lookup failed for relation %u", RelationGetRelid(OldHeap))));
-    }
-    Datum xid64datum = heap_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
-    heap_close(rel, AccessShareLock);
-    heap_freetuple(tuple);
-
-    if (isNull) {
-        relfrozenxid = OldHeap->rd_rel->relfrozenxid;
-
-        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, relfrozenxid) ||
-            !TransactionIdIsNormal(relfrozenxid)) {
-            relfrozenxid = FirstNormalTransactionId;
-            }
+    if (isGtt) {
+        (void)get_gtt_relstats(OIDOldHeap, NULL, NULL, NULL, &gttRelfrozenxid);
+        if (TransactionIdIsValid(gttRelfrozenxid) && TransactionIdPrecedes(FreezeXid, gttRelfrozenxid))
+            FreezeXid = gttRelfrozenxid;
     } else {
-        relfrozenxid = DatumGetTransactionId(xid64datum);
-    }
+        bool isNull = false;
+        TransactionId relfrozenxid;
+        Relation rel = heap_open(RelationRelationId, AccessShareLock);
+        HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(OIDOldHeap));
+        if (!HeapTupleIsValid(tuple)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_TABLE),
+                    errmsg("cache lookup failed for relation %u", RelationGetRelid(OldHeap))));
+        }
+        Datum xid64datum = heap_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
+        heap_close(rel, AccessShareLock);
+        heap_freetuple(tuple);
 
-    if (TransactionIdPrecedes(FreezeXid, relfrozenxid)) {
-        FreezeXid = relfrozenxid;
+        if (isNull) {
+            relfrozenxid = OldHeap->rd_rel->relfrozenxid;
+
+            if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, relfrozenxid) ||
+                !TransactionIdIsNormal(relfrozenxid)) {
+                relfrozenxid = FirstNormalTransactionId;
+                }
+        } else {
+            relfrozenxid = DatumGetTransactionId(xid64datum);
+        }
+
+        if (TransactionIdPrecedes(FreezeXid, relfrozenxid)) {
+            FreezeXid = relfrozenxid;
+        }
     }
     /* return selected value to caller */
     *pFreezeXid = FreezeXid;
@@ -2765,7 +2790,7 @@ static void SwapCStoreTables(Oid relId1, Oid relId2, Oid parentOid, Oid tempTabl
  * cleaning up (including rebuilding all indexes on the old heap).
  */
 void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bool swap_toast_by_content,
-    bool check_constraints, TransactionId frozenXid, AdaptMem* memInfo)
+    bool checkConstraints, TransactionId frozenXid, AdaptMem* memInfo, char newrelpersistence)
 {
     ObjectAddress object;
     Oid mapped_tables[4];
@@ -2781,8 +2806,15 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
      * Swap the contents of the heap relations (including any toast tables).
      * Also set old heap's relfrozenxid to frozenXid.
      */
-    swap_relation_files(
-        OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId), swap_toast_by_content, frozenXid, mapped_tables);
+    if (newrelpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        Assert(!is_system_catalog);
+        GttSwapRelationFiles(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId),
+            swap_toast_by_content, frozenXid, mapped_tables);
+    } else {
+        swap_relation_files(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId), 
+            swap_toast_by_content, frozenXid, mapped_tables);
+    }
+
     /*
      * If it's a system catalog, queue an sinval message to flush all
      * catcaches on the catalog when we reach CommandCounterIncrement.
@@ -2806,7 +2838,7 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
      * broken ones, so it can't be necessary to set indcheckxmin.
      */
     reindex_flags = REINDEX_REL_SUPPRESS_INDEX_USE;
-    if (check_constraints)
+    if (checkConstraints)
         reindex_flags |= REINDEX_REL_CHECK_CONSTRAINTS;
     reindex_relation(OIDOldHeap, reindex_flags, REINDEX_ALL_INDEX, memInfo);
 
@@ -2963,6 +2995,111 @@ static List* get_tables_to_cluster(MemoryContext cluster_context)
     relation_close(indRelation, AccessShareLock);
 
     return rvs;
+}
+
+static void GttSwapRelationFiles(Oid r1, Oid r2, bool targetIsPgClass, bool swapToastByContent,
+    TransactionId frozenXid, Oid *mappedTables)
+{
+    Relation    relRelation;
+    Oid         relfilenode1,
+                relfilenode2;
+    Relation    rel1;
+    Relation    rel2;
+
+    relRelation = relation_open(RelationRelationId, RowExclusiveLock);
+
+    rel1 = relation_open(r1, AccessExclusiveLock);
+    rel2 = relation_open(r2, AccessExclusiveLock);
+
+    relfilenode1 = gtt_fetch_current_relfilenode(r1);
+    relfilenode2 = gtt_fetch_current_relfilenode(r2);
+
+    Assert(OidIsValid(relfilenode1) && OidIsValid(relfilenode2));
+    gtt_switch_rel_relfilenode(r1, relfilenode1, r2, relfilenode2, true);
+
+    CacheInvalidateRelcache(rel1);
+    CacheInvalidateRelcache(rel2);
+
+    if (rel1->rd_rel->reltoastrelid || rel2->rd_rel->reltoastrelid) {
+        if (swapToastByContent) {
+            if (rel1->rd_rel->reltoastrelid && rel2->rd_rel->reltoastrelid) {
+                GttSwapRelationFiles(rel1->rd_rel->reltoastrelid,
+                    rel2->rd_rel->reltoastrelid,
+                    targetIsPgClass,
+                    swapToastByContent,
+                    frozenXid,
+                    mappedTables);
+            } else {
+                elog(ERROR, "cannot swap toast files by content when there's only one");
+            }
+        } else {
+            ObjectAddress baseobject,
+                        toastobject;
+            long        count;
+
+            if (IsSystemRelation(rel1)) {
+                elog(ERROR, "cannot swap toast files by links for system catalogs");
+            }
+
+            if (rel1->rd_rel->reltoastrelid) {
+                count = deleteDependencyRecordsFor(RelationRelationId,
+                                                   rel1->rd_rel->reltoastrelid,
+                                                   false);
+                if (count != 1) {
+                    elog(ERROR, "expected one dependency record for TOAST table, found %ld",
+                         count);
+                }
+            }
+            if (rel2->rd_rel->reltoastrelid) {
+                count = deleteDependencyRecordsFor(RelationRelationId,
+                                                   rel2->rd_rel->reltoastrelid,
+                                                   false);
+                if (count != 1) {
+                    elog(ERROR, "expected one dependency record for TOAST table, found %ld",
+                         count);
+                }
+            }
+
+            /* Register new dependencies */
+            baseobject.classId = RelationRelationId;
+            baseobject.objectSubId = 0;
+            toastobject.classId = RelationRelationId;
+            toastobject.objectSubId = 0;
+
+            if (rel1->rd_rel->reltoastrelid) {
+                baseobject.objectId = r1;
+                toastobject.objectId = rel1->rd_rel->reltoastrelid;
+                recordDependencyOn(&toastobject, &baseobject,
+                                   DEPENDENCY_INTERNAL);
+            }
+
+            if (rel2->rd_rel->reltoastrelid) {
+                baseobject.objectId = r2;
+                toastobject.objectId = rel2->rd_rel->reltoastrelid;
+                recordDependencyOn(&toastobject, &baseobject, DEPENDENCY_INTERNAL);
+            }
+        }
+    }
+
+    if (swapToastByContent && rel1->rd_rel->relkind == RELKIND_TOASTVALUE &&
+        rel2->rd_rel->relkind == RELKIND_TOASTVALUE) {
+        GttSwapRelationFiles(rel1->rd_rel->reltoastidxid,
+            rel2->rd_rel->reltoastidxid,
+            targetIsPgClass,
+            swapToastByContent,
+            InvalidTransactionId,
+            mappedTables);
+    }
+
+    relation_close(rel1, NoLock);
+    relation_close(rel2, NoLock);
+
+    relation_close(relRelation, RowExclusiveLock);
+
+    RelationCloseSmgrByOid(r1);
+    RelationCloseSmgrByOid(r2);
+
+    CommandCounterIncrement();
 }
 
 /*

@@ -2785,7 +2785,9 @@ List* QueryRewriteCTAS(Query* parsetree)
         /*
          * Check consistency of arguments
          */
-        if (create_stmt->oncommit != ONCOMMIT_NOOP && create_stmt->relation->relpersistence != RELPERSISTENCE_TEMP)
+        if (create_stmt->oncommit != ONCOMMIT_NOOP && 
+           (create_stmt->relation->relpersistence != RELPERSISTENCE_TEMP && 
+            create_stmt->relation->relpersistence != RELPERSISTENCE_GLOBAL_TEMP))
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("ON COMMIT can only be used on temporary tables")));
 

@@ -560,6 +560,8 @@ PlanState* ExecInitNode(Plan* node, EState* e_state, int e_flags)
     /* restore the per query context */
     e_state->es_query_cxt = query_context;
 
+    result->ps_rownum = 0;
+
     gstrace_exit(GS_TRC_ID_ExecInitNode);
     return result;
 }
@@ -742,6 +744,8 @@ TupleTableSlot* ExecProcNode(PlanState* node)
     }
 
     MemoryContextSwitchTo(old_context);
+
+    node->ps_rownum++;
 
     return result;
 }

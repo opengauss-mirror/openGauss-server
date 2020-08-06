@@ -153,7 +153,9 @@ static const char *BuiltinTrancheNames[] = {
     "DoubleWriteLock",
     "BufFreeListLock",
     "LWTRANCHE_ACCOUNT_TABLE",
-    "GeneralExtendedLock"
+    "GeneralExtendedLock",
+    /* LWTRANCHE_GTT_CTL */
+    "GlobalTempTableControl"
 };
 
 static void RegisterLWLockTranches(void);

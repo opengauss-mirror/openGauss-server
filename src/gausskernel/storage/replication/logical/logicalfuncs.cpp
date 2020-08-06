@@ -102,7 +102,7 @@ static void LogicalOutputWrite(LogicalDecodingContext* ctx, XLogRecPtr lsn, Tran
     p->returned_rows++;
 }
 
-static void check_permissions(void)
+void check_permissions(void)
 {
     if (!superuser() && !has_rolreplication(GetUserId()))
         ereport(ERROR,

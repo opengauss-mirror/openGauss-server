@@ -1,0 +1,95 @@
+CREATE SCHEMA gtt_stats;
+set search_path=gtt_stats,sys;
+-- expect 0
+select count(*) from pg_gtt_attached_pids;
+ count 
+-------
+     0
+(1 row)
+
+-- expect 0
+select count(*) from pg_list_gtt_relfrozenxids();
+ count 
+-------
+     0
+(1 row)
+
+create global temp table gtt_stats.gtt(a int primary key, b text) on commit PRESERVE rows;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt_pkey" for table "gtt"
+-- expect 0
+select count(*) from pg_gtt_attached_pids;
+ count 
+-------
+     1
+(1 row)
+
+-- expect 0
+select count(*) from pg_list_gtt_relfrozenxids();
+ count 
+-------
+     2
+(1 row)
+
+insert into gtt values(generate_series(1,10000),'test');
+-- expect 1
+select count(*) from pg_gtt_attached_pids;
+ count 
+-------
+     1
+(1 row)
+
+-- expect 2
+select count(*) from pg_list_gtt_relfrozenxids();
+ count 
+-------
+     2
+(1 row)
+
+-- expect 2
+select schemaname, tablename, relpages, reltuples, relallvisible from pg_gtt_relstats where schemaname = 'gtt_stats' order by tablename;
+ schemaname | tablename | relpages | reltuples | relallvisible 
+------------+-----------+----------+-----------+---------------
+ gtt_stats  | gtt       |        0 |         0 |             0
+ gtt_stats  | gtt_pkey  |        1 |         0 |             0
+(2 rows)
+
+-- expect 0
+select * from pg_gtt_stats order by tablename, attname;
+ schemaname |      tablename       |  attname   | inherited | null_frac | avg_width | n_distinct | most_common_vals | most_common_freqs | histogram_bounds | correlation | most_common_elems | most_common_elem_freqs | elem_count_histogram 
+------------+----------------------+------------+-----------+-----------+-----------+------------+------------------+-------------------+------------------+-------------+-------------------+------------------------+----------------------
+ gtt_stats  | gtt                  | a          |           |           |           |            |                  |                   |                  |             |                   |                        | 
+ gtt_stats  | gtt                  | b          |           |           |           |            |                  |                   |                  |             |                   |                        | 
+ gtt_stats  | gtt_pkey             | a          |           |           |           |            |                  |                   |                  |             |                   |                        | 
+--? pg_toast   | pg_toast_.....       | chunk_data |           |           |           |            |                  |                   |                  |             |                   |                        | 
+--? pg_toast   | pg_toast_.....       | chunk_id   |           |           |           |            |                  |                   |                  |             |                   |                        | 
+--? pg_toast   | pg_toast_.....       | chunk_seq  |           |           |           |            |                  |                   |                  |             |                   |                        | 
+--? pg_toast   | pg_toast_....._index | chunk_id   |           |           |           |            |                  |                   |                  |             |                   |                        | 
+--? pg_toast   | pg_toast_....._index | chunk_seq  |           |           |           |            |                  |                   |                  |             |                   |                        | 
+(8 rows)
+
+reindex table gtt;
+reindex index gtt_pkey;
+analyze gtt;
+select schemaname, tablename, relpages, reltuples, relallvisible from pg_gtt_relstats where schemaname = 'gtt_stats' order by tablename;
+ schemaname | tablename | relpages | reltuples | relallvisible 
+------------+-----------+----------+-----------+---------------
+ gtt_stats  | gtt       |       55 |     10000 |             0
+ gtt_stats  | gtt_pkey  |       30 |     10000 |             0
+(2 rows)
+
+select * from pg_gtt_stats order by tablename, attname;
+ schemaname |      tablename       |  attname   | inherited | null_frac | avg_width | n_distinct | most_common_vals | most_common_freqs |                                                                                                                                                                                                                                                histogram_bounds                                                                                                                                                                                                                                                 | correlation | most_common_elems | most_common_elem_freqs | elem_count_histogram 
+------------+----------------------+------------+-----------+-----------+-----------+------------+------------------+-------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-------------+-------------------+------------------------+----------------------
+ gtt_stats  | gtt                  | a          | f         |         0 |         4 |         -1 |                  |                   | {1,100,200,300,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2200,2300,2400,2500,2600,2700,2800,2900,3000,3100,3200,3300,3400,3500,3600,3700,3800,3900,4000,4100,4200,4300,4400,4500,4600,4700,4800,4900,5000,5100,5200,5300,5400,5500,5600,5700,5800,5900,6000,6100,6200,6300,6400,6500,6600,6700,6800,6900,7000,7100,7200,7300,7400,7500,7600,7700,7800,7900,8000,8100,8200,8300,8400,8500,8600,8700,8800,8900,9000,9100,9200,9300,9400,9500,9600,9700,9800,9900,10000} |           1 |                   |                        | 
+ gtt_stats  | gtt                  | b          | f         |         0 |         5 |          1 | {test}           | {1}               |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |           1 |                   |                        | 
+ gtt_stats  | gtt_pkey             | a          |           |           |           |            |                  |                   |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |             |                   |                        | 
+--? pg_toast   | pg_toast_.....       | chunk_data |           |           |           |            |                  |                   |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |             |                   |                        | 
+--? pg_toast   | pg_toast_.....       | chunk_id   |           |           |           |            |                  |                   |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |             |                   |                        | 
+--? pg_toast   | pg_toast_.....       | chunk_seq  |           |           |           |            |                  |                   |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |             |                   |                        | 
+--? pg_toast   | pg_toast_....._index | chunk_id   |           |           |           |            |                  |                   |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |             |                   |                        | 
+--? pg_toast   | pg_toast_....._index | chunk_seq  |           |           |           |            |                  |                   |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |             |                   |                        | 
+(8 rows)
+
+reset search_path;
+drop schema gtt_stats cascade;
+NOTICE:  drop cascades to table gtt_stats.gtt

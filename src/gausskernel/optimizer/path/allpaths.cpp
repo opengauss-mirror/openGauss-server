@@ -2394,8 +2394,13 @@ static bool qual_is_pushdown_safe(Query* subquery, Index rti, Node* qual, const 
     ListCell* vl = NULL;
 
     /* Refuse subselects (point 1) */
-    if (contain_subplans(qual))
+    if (contain_subplans(qual)) {
         return false;
+    }
+
+    if(contain_volatile_functions(qual)) {
+        return false;
+    }
 
     /*
      * It would be unsafe to push down window function calls, but at least for

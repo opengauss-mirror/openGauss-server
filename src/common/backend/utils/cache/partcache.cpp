@@ -368,6 +368,36 @@ Partition PartitionIdGetPartition(Oid partitionId)
     return pd;
 }
 
+char* PartitionOidGetName(Oid partOid)
+{
+    HeapTuple tuple = ScanPgPartition(partOid, true);
+    if (!HeapTupleIsValid(tuple)) {
+        return NULL;
+    }
+
+    Form_pg_partition part = (Form_pg_partition)GETSTRUCT(tuple);
+    char* relName = (char*)palloc0(NAMEDATALEN);
+    error_t rc = strncpy_s(relName, NAMEDATALEN, part->relname.data, NAMEDATALEN - 1);
+    securec_check_ss(rc, "\0", "\0");
+    heap_freetuple_ext(tuple);
+
+    return relName;
+}
+
+Oid PartitionOidGetTablespace(Oid partOid)
+{
+    HeapTuple tuple = ScanPgPartition(partOid, true);
+    if (!HeapTupleIsValid(tuple)) {
+        return InvalidOid;
+    }
+
+    Form_pg_partition part = (Form_pg_partition)GETSTRUCT(tuple);
+    Oid tablespaceOid = part->reltablespace;
+    heap_freetuple_ext(tuple);
+
+    return tablespaceOid;
+}
+
 void PartitionClose(Partition partition)
 {
     /* Note: no locking manipulations needed */

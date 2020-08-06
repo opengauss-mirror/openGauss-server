@@ -762,8 +762,8 @@ static Node* build_coercion_expression(Node* node, CoercionPathType pathtype, Oi
          * various binary-compatibility cases.
          */
         AssertEreport(!procstruct->proretset, MOD_OPT, "function is not return set");
-        AssertEreport(!procstruct->proisagg, MOD_OPT, "function is not agg");
-        AssertEreport(!procstruct->proiswindow, MOD_OPT, "function is not window function");
+        AssertEreport(!PROC_IS_AGG(procstruct->prokind), MOD_OPT, "function is not agg");
+        AssertEreport(!PROC_IS_WIN(procstruct->prokind), MOD_OPT, "function is not window function");
         nargs = procstruct->pronargs;
         AssertEreport((nargs >= 1 && nargs <= 3), MOD_OPT, "The number of parameters in the function is incorrect.");
         AssertEreport((nargs < 2 || procstruct->proargtypes.values[1] == INT4OID),

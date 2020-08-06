@@ -230,6 +230,11 @@ int MOTXlateRecoveryErr(int err)
 
 void MOTRecover()
 {
+    if (!MOTAdaptor::m_initialized) {
+        // This is the case when StartupXLOG is called during bootstrap.
+        return;
+    }
+
     EnsureSafeThreadAccess();
     if (!MOT::MOTEngine::GetInstance()->StartRecovery()) {
         // we treat errors fatally.
@@ -247,6 +252,11 @@ void MOTRecover()
 
 void MOTRecoveryDone()
 {
+    if (!MOTAdaptor::m_initialized) {
+        // This is the case when StartupXLOG is called during bootstrap.
+        return;
+    }
+
     EnsureSafeThreadAccess();
     if (!MOT::MOTEngine::GetInstance()->EndRecovery()) {
         // we treat errors fatally.
@@ -261,6 +271,10 @@ void MOTRecoveryDone()
  */
 void MOTBeginRedoRecovery()
 {
+    if (!MOTAdaptor::m_initialized) {
+        return;
+    }
+
     EnsureSafeThreadAccess();
     if (!MOT::MOTEngine::GetInstance()->CreateRecoverySessionContext()) {
         // we treat errors fatally.
@@ -276,6 +290,10 @@ void MOTBeginRedoRecovery()
 
 void MOTEndRedoRecovery()
 {
+    if (!MOTAdaptor::m_initialized) {
+        return;
+    }
+
     EnsureSafeThreadAccess();
     MOT::MOTEngine::GetInstance()->DestroyRecoverySessionContext();
     knl_thread_mot_init();  // reset all thread locals
@@ -287,9 +305,13 @@ void MOTEndRedoRecovery()
  */
 void InitMOT()
 {
-    JitExec::JitInitialize();
+    if (MOTAdaptor::m_initialized) {
+        // MOT is already initialized, probably it's primary switch-over to standby.
+        return;
+    }
+
     InitMOTHandler();
-    t_thrd.mot_cxt.mot_startup = true;
+    JitExec::JitInitialize();
 }
 
 /**
@@ -297,11 +319,20 @@ void InitMOT()
  */
 void TermMOT()
 {
-    MOTAdaptor::Fini();
+    if (!MOTAdaptor::m_initialized) {
+        return;
+    }
+
+    JitExec::JitDestroy();
+    MOTAdaptor::Destroy();
 }
 
 void MOTProcessRecoveredTransaction(uint64_t txid, bool isCommit)
 {
+    if (!MOTAdaptor::m_initialized) {
+        return;
+    }
+
     if (MOT::MOTEngine::GetInstance()->IsInProcessTx(txid)) {
         elog(LOG, "MOTProcessRecoveredTransaction: %lu - %s", txid, isCommit ? "commit" : "abort");
         MOT::TxnManager* mgr = GetSafeTxn();
@@ -1898,7 +1929,6 @@ static int MOTIsForeignRelationUpdatable(Relation rel)
 
 static void InitMOTHandler()
 {
-    MOTAdaptor::Fini();
     MOTAdaptor::Init();
     MOT::GetGlobalConfiguration().m_enableIncrementalCheckpoint =
         g_instance.attr.attr_storage.enableIncrementalCheckpoint;

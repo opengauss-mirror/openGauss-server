@@ -112,6 +112,7 @@
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_proc.h"
+#include "catalog/storage_gtt.h"
 #include "executor/executor.h"
 #include "foreign/foreign.h"
 #include "mb/pg_wchar.h"
@@ -4754,18 +4755,23 @@ void examine_variable(PlannerInfo* root, Node* node, int var_relid, VariableStat
                              */
                             char stakind = STARELKIND_CLASS;
                             Oid indexid = index->indexoid;
-
+                            char relPersistence = get_rel_persistence(index->indexoid);
+                            
                             if (u_sess->attr.attr_common.upgrade_mode != 0) {
                                 var_data->statsTuple = NULL;
+                                var_data->freefunc = ReleaseSysCache;
+                            } else if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+                                var_data->statsTuple = get_gtt_att_statistic(index->indexoid,
+                                                                             Int16GetDatum(pos + 1));
+                                var_data->freefunc = release_gtt_statistic_cache;
                             } else {
                                 var_data->statsTuple = SearchSysCache4(STATRELKINDATTINH,
                                     ObjectIdGetDatum(indexid),
                                     CharGetDatum(stakind),
                                     Int16GetDatum(pos + 1),
                                     BoolGetDatum(false));
+                                var_data->freefunc = ReleaseSysCache;
                             }
-
-                            var_data->freefunc = ReleaseSysCache;
                             if (HeapTupleIsValid(var_data->statsTuple)) {
                                 /* Get index's table for permission check */
                                 RangeTblEntry *rte;
@@ -4853,17 +4859,22 @@ static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatDat
          *
          * We do not search system cache in upgrading
          */
+        char relPersistence = get_rel_persistence(rte->relid);
         if (u_sess->attr.attr_common.upgrade_mode != 0) {
             var_data->statsTuple = NULL;
+            var_data->freefunc = ReleaseSysCache;
+        } else if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+            var_data->statsTuple = get_gtt_att_statistic(rte->relid, var->varattno);
+            var_data->freefunc = release_gtt_statistic_cache;
         } else {
             var_data->statsTuple = SearchSysCache4(STATRELKINDATTINH,
                 ObjectIdGetDatum(sta_relid),
                 CharGetDatum(sta_kind),
                 Int16GetDatum(var->varattno),
                 BoolGetDatum(rte->inh));
+            var_data->freefunc = ReleaseSysCache;
         }
-        var_data->freefunc = ReleaseSysCache;
-
+        
         if (HeapTupleIsValid(var_data->statsTuple)) {
             /* check if user has permission to read this column */
             var_data->aclOk = (pg_class_aclcheck(rte->relid, GetUserId(), ACL_SELECT) == ACLCHECK_OK) ||
@@ -5800,7 +5811,6 @@ static Pattern_Prefix_Status regex_fixed_prefix(
 
     /* Use the regexp machinery to extract the prefix, if any */
     prefix = regexp_fixed_prefix(DatumGetTextPP(patt_const->constvalue), case_insensitive, collation, &exact);
-
     if (prefix == NULL) {
         *prefix_const = NULL;
 
@@ -6851,7 +6861,7 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
     if (index->indexkeys[0] != 0) {
         /* Simple variable --- look to stats for the underlying table */
         RangeTblEntry* rte = planner_rt_fetch(index->rel->relid, root);
-
+        char relPersistence = get_rel_persistence(rte->relid);
         Assert(rte->rtekind == RTE_RELATION);
         relid = rte->relid;
         Assert(relid != InvalidOid);
@@ -6868,16 +6878,22 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
 
         if (u_sess->attr.attr_common.upgrade_mode != 0) {
             var_data.statsTuple = NULL;
+            var_data.freefunc = ReleaseSysCache;
+        } else if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+            var_data.statsTuple = get_gtt_att_statistic(rte->relid, col_num);
+            var_data.freefunc = release_gtt_statistic_cache;
         } else {
             var_data.statsTuple = SearchSysCache4(STATRELKINDATTINH,
                 ObjectIdGetDatum(staoid),
                 CharGetDatum(stakind),
                 Int16GetDatum(col_num),
                 BoolGetDatum(rte->inh));
+            var_data.freefunc = ReleaseSysCache;
         }
-        var_data.freefunc = ReleaseSysCache;
+
     } else {
         /* Expression --- maybe there are stats for the index itself */
+        char relPersistence = get_rel_persistence(index->indexoid);
         relid = index->indexoid;
         col_num = 1;
 
@@ -6892,14 +6908,19 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
 
         if (u_sess->attr.attr_common.upgrade_mode != 0) {
             var_data.statsTuple = NULL;
+            var_data.freefunc = ReleaseSysCache;
+        } else if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+            var_data.statsTuple = get_gtt_att_statistic(relid, col_num);
+            var_data.freefunc = release_gtt_statistic_cache;
         } else {
             var_data.statsTuple = SearchSysCache4(STATRELKINDATTINH,
                 ObjectIdGetDatum(staoid),
                 CharGetDatum(stakind),
                 Int16GetDatum(col_num),
                 BoolGetDatum(false));
+            var_data.freefunc = ReleaseSysCache;
         }
-        var_data.freefunc = ReleaseSysCache;
+
     }
 
     if (HeapTupleIsValid(var_data.statsTuple)) {
@@ -8420,7 +8441,6 @@ void set_noanalyze_rellist(Oid relid, AttrNumber attid)
      * so only check the statistics of foreign table. do not check column statistic.
      */
     Relation rel = relation_open(relid, AccessShareLock);
-
     if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isSpecifiedSrvTypeFromRelId(relid, OBS_SERVER)) {
         is_obs_ft = true;
     }

@@ -1035,8 +1035,9 @@ static PGPing test_postmaster_connection(pgpid_t pm_pid, bool do_checkpoint, str
                          _("could not stat file gaussdb_state_file %s: %s\n"), 
                         gaussdb_state_file, 
                         strerror(errno));
-                } else {
-                    if (beforeStat.st_mtime != afterStat.st_mtime) {
+                } else if (errno != ENOENT) {
+                    if (beforeStat.st_mtim.tv_sec != afterStat.st_mtim.tv_sec || 
+                        beforeStat.st_mtim.tv_nsec != afterStat.st_mtim.tv_nsec) {
                         nRet = memset_s(&state, sizeof(state), 0, sizeof(state));
                         securec_check_c(nRet, "\0", "\0");
                         ReadDBStateFile(&state);
@@ -3410,7 +3411,7 @@ static void do_help(void)
              "                         (PostgreSQL server executable) or gs_initdb\n"));
     printf(_("  -p PATH-TO-POSTGRES    normally not necessary\n"));
     printf(_("\nOptions for stop or restart:\n"));
-    printf(_("  -m, --mode=MODE        MODE can be \"smart\", \"fast\", or \"immediate\"\n"));
+    printf(_("  -m, --mode=MODE        MODE can be \"fast\", or \"immediate\"\n"));
     printf(_("\nOptions for restore:\n"));
     printf(_("  --remove-backup        Remove the pg_rewind_bak dir after restore with \"restore\" command\n"));
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3420,7 +3421,6 @@ static void do_help(void)
     printf(_("  -n NAME    patch name, NAME should be patch name with path\n"));
 #endif
     printf(_("\nShutdown modes are:\n"));
-    printf(_("  smart       quit with fast shutdown on primary, and recovery done on standby\n"));
     printf(_("  fast        quit directly, with proper shutdown\n"));
     printf(_("  immediate   quit without complete shutdown; will lead to recovery on restart\n"));
 
@@ -3479,12 +3479,7 @@ static void do_help(void)
 
 static void set_mode(char* modeopt)
 {
-    if (strcmp(modeopt, "s") == 0 || strcmp(modeopt, "smart") == 0) {
-        shutdown_mode = SMART_MODE;
-        stop_mode = "smart";
-        switch_mode = SmartDemote;
-        sig = SIGTERM;
-    } else if (strcmp(modeopt, "f") == 0 || strcmp(modeopt, "fast") == 0) {
+    if (strcmp(modeopt, "f") == 0 || strcmp(modeopt, "fast") == 0) {
         shutdown_mode = FAST_MODE;
         stop_mode = "fast";
         switch_mode = FastDemote;

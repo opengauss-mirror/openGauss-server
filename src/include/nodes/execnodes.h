@@ -1221,6 +1221,8 @@ typedef struct PlanState {
     List* plan_issues;
     bool recursive_reset; /* node already reset? */
     bool qual_is_inited;
+
+    int64 ps_rownum;    /* store current rownum */
 } PlanState;
 
 static inline bool planstate_need_stub(PlanState* ps)
@@ -1455,7 +1457,6 @@ typedef struct RunTimeParamPredicateInfo {
     Oid datumType;           /* the parameter data type. */
     Oid varTypeOid;          /* var type oid. */
     int32 paramPosition;     /* the parameter predicate position in *hdfsScanPredicateArr. */
-
 } RunTimeParamPredicateInfo;
 
 /* ----------------
@@ -2360,6 +2361,17 @@ typedef struct PartIteratorState {
 struct VecLimitState : public LimitState {
     VectorBatch* subBatch;
 };
+
+
+/*
+ * RownumState node: used for computing the pseudo-column ROWNUM
+ */
+typedef struct RownumState {
+    ExprState  xprstate;
+    PlanState* ps;   /* the value of ROWNUM depends on its parent PlanState */
+} RownumState;
+
+
 
 /* ----------------
  *		GroupingFuncExprState node

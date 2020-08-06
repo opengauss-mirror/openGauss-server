@@ -285,6 +285,9 @@ void smgrclearowner(SMgrRelation* owner, SMgrRelation reln)
  */
 bool smgrexists(SMgrRelation reln, ForkNumber forknum)
 {
+    if (reln == NULL) {
+        return false;
+    }
     return (*(g_smgrsw[reln->smgr_which].smgr_exists))(reln, forknum);
 }
 
@@ -295,6 +298,10 @@ void smgrclose(SMgrRelation reln)
 {
     SMgrRelation* owner = NULL;
     int forknum;
+
+    if (reln == NULL) {
+        return;
+    }
 
     for (forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
         (*(g_smgrsw[reln->smgr_which].smgr_close))(reln, (ForkNumber)forknum);

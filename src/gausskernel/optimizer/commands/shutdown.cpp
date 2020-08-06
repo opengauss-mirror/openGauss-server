@@ -39,14 +39,12 @@ void DoShutdown(ShutdownStmt* stmt)
 
     if (shutdown_mode == NULL || strcmp(shutdown_mode, "fast") == 0) {
         /* default value is SIGINT, need to do nothing. */
-    } else if (strcmp(shutdown_mode, "smart") == 0) {
-        signal = SIGTERM;
     } else if (strcmp(shutdown_mode, "immediate") == 0) {
         signal = SIGQUIT;
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-             errmsg("unknow parameter: %s\nshutdown only support fast, smart and immediate mode.\n", shutdown_mode)));
+             errmsg("unknow parameter: %s\nshutdown only support fast and immediate mode.\n", shutdown_mode)));
     }
 
     if (gs_signal_send(PostmasterPid, signal)) {
