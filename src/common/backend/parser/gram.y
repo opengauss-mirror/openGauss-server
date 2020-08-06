@@ -9009,8 +9009,32 @@ callfunc_args:   func_arg_expr
 				}
 			;
 CreateProcedureStmt:
-			CREATE opt_or_replace PROCEDURE func_name_opt_arg proc_args
-			opt_createproc_opt_list as_is {u_sess->parser_cxt.eaten_declare = false; u_sess->parser_cxt.eaten_begin = false;} subprogram_body
+				CREATE opt_or_replace PROCEDURE func_name_opt_arg proc_args
+				as_is {u_sess->parser_cxt.eaten_declare = false; u_sess->parser_cxt.eaten_begin = false;} subprogram_body
+				{
+					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
+					int count = get_outarg_num($5);
+					n->isOraStyle = true;
+					n->replace = $2;
+					n->funcname = $4;
+					n->parameters = $5;
+					n->returnType = NULL;
+					n->isProcedure = true;
+					if (0 == count)
+					{
+						n->returnType = makeTypeName("void");
+						n->returnType->typmods = NULL;
+						n->returnType->arrayBounds = NULL;
+					}
+					n->options = list_make1(makeDefElem("as",
+										(Node *)list_make1(makeString($8))));
+					n->options = lappend(n->options, makeDefElem("language",
+										(Node *)makeString("plpgsql")));
+					n->withClause = NIL;
+					$$ = (Node *)n;
+				}	
+				| CREATE opt_or_replace PROCEDURE func_name_opt_arg proc_args
+				createfunc_opt_list as_is {u_sess->parser_cxt.eaten_declare = false; u_sess->parser_cxt.eaten_begin = false;} subprogram_body
 				{
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
 					int count = get_outarg_num($5);
