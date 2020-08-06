@@ -288,7 +288,7 @@ DROP FUNCTION func_def_arg;
 DROP PROCEDURE test_multi_level;
 DROP PROCEDURE proc_callas_definer;
 DROP PROCEDURE proc_callas_curr_user;
-DROP PROCDURE proc_callas_transaction;
+DROP PROCEDURE proc_callas_transaction;
 DROP TABLE t_priv;
 DROP TABLE t_transaction;
 
