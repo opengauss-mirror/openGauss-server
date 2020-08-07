@@ -131,8 +131,8 @@ select relname ,relkind, relpersistence, reloptions from pg_class where relname 
 -- ERROR
 create global temp table gtt3(a int primary key, b text) on commit drop;
 
--- ERROR
-create global temp table gtt4(a int primary key, b text) with(on_commit_delete_rows=true) on commit preserve rows;
+-- ok
+create global temp table gtt10(a int primary key, b text) with(on_commit_delete_rows=true) on commit preserve rows;
 
 -- ok
 create global temp table gtt4(a int primary key, b text) with(on_commit_delete_rows=true) on commit delete rows;
@@ -143,8 +143,11 @@ create global temp table gtt5(a int primary key, b text) with(on_commit_delete_r
 -- ok
 create table tb1 (like gtt2 including reloptions);
 
--- ERROR
-create global temp table gtt7 (like gtt2 including reloptions) on commit preserve rows;
+-- ok
+create temp table ltb1 (like gtt1 including reloptions) on commit delete rows;
+
+-- ok
+create global temp table gtt11 (like gtt2 including reloptions) on commit preserve rows;
 
 -- ok
 create global temp table gtt7 (like gtt2 including reloptions) on commit delete rows;

@@ -1612,8 +1612,7 @@ static void transformTableLikeClause(
         cxt->reloptions = untransformRelOptions(reloptions);
 
         /* remove on_commit_delete_rows option */
-        if (cxt->relation->relpersistence != RELPERSISTENCE_TEMP &&
-            cxt->relation->relpersistence != RELPERSISTENCE_GLOBAL_TEMP) {
+        if (cxt->relation->relpersistence != RELPERSISTENCE_GLOBAL_TEMP) {
             cxt->reloptions = RemoveRelOption(cxt->reloptions, "on_commit_delete_rows", NULL);
         }
 

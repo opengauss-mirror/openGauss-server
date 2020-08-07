@@ -136,9 +136,9 @@ select relname ,relkind, relpersistence, reloptions from pg_class where relname 
 -- ERROR
 create global temp table gtt3(a int primary key, b text) on commit drop;
 ERROR:  ON COMMIT only support PRESERVE ROWS or DELETE ROWS option
--- ERROR
-create global temp table gtt4(a int primary key, b text) with(on_commit_delete_rows=true) on commit preserve rows;
-ERROR:  could not create global temporary table with different on commit parameter and with clause options at same time
+-- ok
+create global temp table gtt10(a int primary key, b text) with(on_commit_delete_rows=true) on commit preserve rows;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt10_pkey" for table "gtt10"
 -- ok
 create global temp table gtt4(a int primary key, b text) with(on_commit_delete_rows=true) on commit delete rows;
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt4_pkey" for table "gtt4"
@@ -147,9 +147,10 @@ create global temp table gtt5(a int primary key, b text) with(on_commit_delete_r
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt5_pkey" for table "gtt5"
 -- ok
 create table tb1 (like gtt2 including reloptions);
--- ERROR
-create global temp table gtt7 (like gtt2 including reloptions) on commit preserve rows;
-ERROR:  could not create global temporary table with different on commit parameter and with clause options at same time
+-- ok
+create temp table ltb1 (like gtt1 including reloptions) on commit delete rows;
+-- ok
+create global temp table gtt11 (like gtt2 including reloptions) on commit preserve rows;
 -- ok
 create global temp table gtt7 (like gtt2 including reloptions) on commit delete rows;
 -- ok
@@ -381,16 +382,18 @@ create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='');
 ERROR:  parameter "on_commit_delete_rows" requires a Boolean value
 reset search_path;
 drop schema gtt_function cascade;
-NOTICE:  drop cascades to 32 other objects
+NOTICE:  drop cascades to 34 other objects
 DETAIL:  drop cascades to table gtt_function.gtt1
 drop cascades to table gtt_function.gtt2
 drop cascades to table gtt_function.gtt3
 drop cascades to table gtt_function.gtt6
 drop cascades to table gtt_function.tbl_inherits_parent
 drop cascades to table gtt_function.tbl_inherits_parent_global_temp
+drop cascades to table gtt_function.gtt10
 drop cascades to table gtt_function.gtt4
 drop cascades to table gtt_function.gtt5
 drop cascades to table gtt_function.tb1
+drop cascades to table gtt_function.gtt11
 drop cascades to table gtt_function.gtt7
 drop cascades to table gtt_function.gtt8
 drop cascades to table gtt_function.gtt9
