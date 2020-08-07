@@ -1587,13 +1587,12 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
     OnCommitAction oncommitAction = GttOncommitOption(stmt->options);
     if (stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP &&
         relkind == RELKIND_RELATION) {
-        if (oncommitAction != ONCOMMIT_NOOP) {
-            if (stmt->oncommit != ONCOMMIT_NOOP && stmt->oncommit != oncommitAction) {
-                elog(ERROR, "could not create global temporary table with different on commit parameter and with "
-                            "clause options at same time");
-            }
+        if (oncommitAction != ONCOMMIT_NOOP && stmt->oncommit == ONCOMMIT_NOOP) {
             stmt->oncommit = oncommitAction;
         } else {
+            if (oncommitAction != ONCOMMIT_NOOP && stmt->oncommit != ONCOMMIT_NOOP) {
+                stmt->options = RemoveRelOption(stmt->options, "on_commit_delete_rows", NULL);
+            }
             DefElem *opt = makeNode(DefElem);
 
             opt->type = T_DefElem;
