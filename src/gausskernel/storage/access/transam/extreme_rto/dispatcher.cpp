@@ -150,9 +150,13 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
         RmgrRecordInfoValid,
         RM_MULTIXACT_ID,
         XLOG_MULTIXACT_ZERO_OFF_PAGE,
-        XLOG_MULTIXACT_CREATE_ID},
+        XLOG_MULTIXACT_INT64_PAGENO},
     {DispatchRelMapRecord, RmgrRecordInfoValid, RM_RELMAP_ID, XLOG_RELMAP_UPDATE, XLOG_RELMAP_UPDATE},
+#ifndef ENABLE_MULTIPLE_NODES
+    {DispatchStandbyRecord, RmgrRecordInfoValid, RM_STANDBY_ID, XLOG_STANDBY_LOCK, XLOG_STANDBY_CSN_ABORTED},
+#else
     {DispatchStandbyRecord, RmgrRecordInfoValid, RM_STANDBY_ID, XLOG_STANDBY_LOCK, XLOG_STANDBY_CSN},
+#endif
     {DispatchHeap2Record, RmgrRecordInfoValid, RM_HEAP2_ID, XLOG_HEAP2_FREEZE, XLOG_HEAP2_LOGICAL_NEWPAGE},
     {DispatchHeapRecord, RmgrRecordInfoValid, RM_HEAP_ID, XLOG_HEAP_INSERT, XLOG_HEAP_INPLACE},
     {DispatchBtreeRecord, RmgrRecordInfoValid, RM_BTREE_ID, XLOG_BTREE_INSERT_LEAF, XLOG_BTREE_REUSE_PAGE},
