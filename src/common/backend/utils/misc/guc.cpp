@@ -888,6 +888,8 @@ static const struct config_enum_entry synchronous_commit_options[] = {{"local", 
     {"no", SYNCHRONOUS_COMMIT_OFF, true},
     {"1", SYNCHRONOUS_COMMIT_ON, true},
     {"0", SYNCHRONOUS_COMMIT_OFF, true},
+    {"2", SYNCHRONOUS_COMMIT_REMOTE_REPLAY, false},
+    {"remote_apply", SYNCHRONOUS_COMMIT_REMOTE_REPLAY, false},
     {NULL, 0, false}};
 
 static const struct config_enum_entry plan_cache_mode_options[] = {

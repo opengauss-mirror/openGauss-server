@@ -106,6 +106,7 @@ typedef enum {
     SYNCHRONOUS_COMMIT_REMOTE_RECEIVE, /* wait for local flush and remote receive */
     SYNCHRONOUS_COMMIT_REMOTE_WRITE,   /* wait for local flush and remote write */
     SYNCHRONOUS_COMMIT_REMOTE_FLUSH,   /* wait for local and remote flush */
+    SYNCHRONOUS_COMMIT_REMOTE_REPLAY,
     SYNCHRONOUS_BAD
 } SyncCommitLevel;
 
