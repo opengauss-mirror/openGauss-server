@@ -898,26 +898,6 @@ MotJitSelectFusion::MotJitSelectFusion(MemoryContext context, CachedPlanSource* 
     Node* node = NULL;
     node = (Node*)m_planstmt->planTree;
     initParams(params);
-    /* for mot jit we need to copy params to m_param even on initialization phase*/
-    for (int i = 0; i < params->numParams; i++) {
-        ParamExternData* oprm = &params->params[i];
-        ParamExternData* nprm = &m_params->params[i];
-        int16		typLen;
-        bool		typByVal = false;
-
-        /* give hook a chance in case parameter is dynamic */
-        if (!OidIsValid(oprm->ptype) && params->paramFetch != NULL)
-            (*params->paramFetch)(params, i + 1);
-
-        /* flat-copy the parameter info */
-        *nprm = *oprm;
-
-        /* need datumCopy in case it's a pass-by-reference datatype */
-        if (nprm->isnull || !OidIsValid(nprm->ptype))
-            continue;
-        get_typlenbyval(nprm->ptype, &typLen, &typByVal);
-        nprm->value = datumCopy(nprm->value, typByVal, typLen);
-    }
     m_receiver = NULL;
     m_isInsideRec = true;
 
@@ -936,6 +916,7 @@ MotJitSelectFusion::MotJitSelectFusion(MemoryContext context, CachedPlanSource* 
 bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
 {
     max_rows = FETCH_ALL;
+    ParamListInfo params = m_outParams != NULL ? m_outParams : m_params;
     bool success = false;
     setReceiver();
     unsigned long nprocessed = 0;
@@ -944,7 +925,7 @@ bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
     while (!finish) {
         uint64_t tpProcessed = 0;
         int scanEnded = 0;
-        rc = JitExec::JitExecQuery(m_cacheplan->mot_jit_context, m_params, m_reslot, &tpProcessed, &scanEnded);
+        rc = JitExec::JitExecQuery(m_cacheplan->mot_jit_context, params, m_reslot, &tpProcessed, &scanEnded);
         if (scanEnded || (tpProcessed == 0) || (rc != 0)) {
             finish = true; // raise flag so that next round we will bail out (current tuple still must be reported to user)
         }
@@ -1179,28 +1160,6 @@ MotJitModifyFusion::MotJitModifyFusion(MemoryContext context, CachedPlanSource* 
     /* init param */
     m_paramNum = 0;
     initParams(params);
-
-    /* for mot jit we need to copy params to m_param even on initialization phase*/
-    for (int i = 0; i < params->numParams; i++) {
-        ParamExternData* oprm = &params->params[i];
-        ParamExternData* nprm = &m_params->params[i];
-        int16		typLen;
-        bool		typByVal = false;
-
-        /* give hook a chance in case parameter is dynamic */
-        if (!OidIsValid(oprm->ptype) && params->paramFetch != NULL)
-            (*params->paramFetch)(params, i + 1);
-
-        /* flat-copy the parameter info */
-        *nprm = *oprm;
-
-        /* need datumCopy in case it's a pass-by-reference datatype */
-        if (nprm->isnull || !OidIsValid(nprm->ptype))
-            continue;
-        get_typlenbyval(nprm->ptype, &typLen, &typByVal);
-        nprm->value = datumCopy(nprm->value, typByVal, typLen);
-    }
-
     m_receiver = NULL;
     m_isInsideRec = true;
 
@@ -1212,7 +1171,8 @@ bool MotJitModifyFusion::execute(long max_rows, char* completionTag)
     bool success = false;
     uint64_t tpProcessed = 0;
     int scanEnded = 0;
-    int rc = JitExec::JitExecQuery(m_cacheplan->mot_jit_context, m_params, m_reslot, &tpProcessed, &scanEnded);
+    ParamListInfo params = m_outParams != NULL ? m_outParams : m_params;
+    int rc = JitExec::JitExecQuery(m_cacheplan->mot_jit_context, params, m_reslot, &tpProcessed, &scanEnded);
     if (rc == 0) {
         (void)ExecClearTuple(m_reslot);
         success = true;
