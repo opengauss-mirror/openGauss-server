@@ -577,3 +577,8 @@ test: gtt_function
 test: gtt_prepare
 test: gtt_parallel_1 gtt_parallel_2
 test: gtt_clean
+
+
+# procedure, Function Test
+test: create_procedure
+test: create_function
