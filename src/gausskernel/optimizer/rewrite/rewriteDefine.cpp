@@ -585,7 +585,7 @@ void DefineQueryRewrite(
         heap_freetuple_ext(classTup);
         heap_close(relationRelation, RowExclusiveLock);
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
         RemovePgxcClass(event_relid);
         (void)deleteDependencyRecordsFor(PgxcClassRelationId, event_relid, false);
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {

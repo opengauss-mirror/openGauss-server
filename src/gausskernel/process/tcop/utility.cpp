@@ -4242,10 +4242,10 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         } break;
 
         case T_RuleStmt: /* CREATE RULE */
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && !u_sess->attr.attr_sql.enable_cluster_resize && !u_sess->exec_cxt.extension_is_valid)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("RULE is not yet supported.")));
-#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
             DefineRule((RuleStmt*)parse_tree, query_string);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
@@ -8548,9 +8548,11 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
         case OBJECT_COLLATION:
             tag = "COLLATION";
             break;
+#ifdef ENABLE_MULTIPLE_NODES
         case OBJECT_RULE:
             tag = "RULE";
             break;
+#endif
         case OBJECT_TSDICTIONARY:
         case OBJECT_TSCONFIGURATION:
             ts_check_feature_disable();
@@ -8599,6 +8601,7 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
  */
 bool CheckExtensionInWhiteList(const char* extension_name, uint32 hash_value, bool hash_check)
 {
+#ifdef ENABLE_MULTIPLE_NODES
         /* 2902411162 hash for fastcheck, the sql file is much shorter than published version. */
     uint32 postgisHashHistory[POSTGIS_VERSION_NUM] = {2902411162, 2959454932};
 
@@ -8620,7 +8623,7 @@ bool CheckExtensionInWhiteList(const char* extension_name, uint32 hash_value, bo
             return true;
         }
     }
-
+#endif
     return true;
 }
 

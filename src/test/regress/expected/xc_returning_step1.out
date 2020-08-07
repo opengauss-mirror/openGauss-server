@@ -143,7 +143,6 @@ INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 
 create VIEW voo AS SELECT f1, f2 FROM foo;
 create OR REPLACE RULE voo_i AS ON INSERT TO voo DO INSTEAD
   INSERT INTO foo VALUES(new.*, 57) RETURNING f1, f2;
-ERROR:  RULE is not yet supported.
 INSERT INTO voo VALUES(11,'zit');
 ERROR:  cannot insert into view "voo"
 HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
@@ -385,7 +384,6 @@ truncate table fp;
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 create VIEW voo AS SELECT f1, f3 FROM foo;
 create OR REPLACE RULE voo_u AS ON UPDATE TO voo DO INSTEAD UPDATE foo SET f3 = new.f3 WHERE f1 = old.f1 RETURNING f3, f1;
-ERROR:  RULE is not yet supported.
 update voo set f3 = f1 + 1;
 ERROR:  cannot update view "voo"
 HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
@@ -591,7 +589,6 @@ truncate table fp;
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 create VIEW voo AS SELECT f1, f2 FROM foo;
 create OR REPLACE RULE voo_d AS ON DELETE TO voo DO INSTEAD  DELETE FROM foo WHERE f1 = old.f1  RETURNING f1, f2;
-ERROR:  RULE is not yet supported.
 DELETE FROM foo WHERE f1 = 1;
 DELETE FROM foo WHERE f1 < 2 RETURNING *, f3-f1;
  f1 | f2 | f3 | ?column? 

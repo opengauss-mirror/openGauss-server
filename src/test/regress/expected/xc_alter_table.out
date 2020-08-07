@@ -196,7 +196,6 @@ INSERT INTO xc_alter_table_3 VALUES (10, 'aaaaaaaaaa');
 -- Create some objects to check the effect of redistribution
 CREATE VIEW xc_alter_table_3_v AS SELECT count(*), sum(a), avg(a) FROM xc_alter_table_3;
 CREATE RULE xc_alter_table_3_insert AS ON UPDATE TO xc_alter_table_3 WHERE OLD.a = 11 DO INSERT INTO xc_alter_table_3 VALUES (OLD.a + 1, 'nnn');
-ERROR:  RULE is not yet supported.
 PREPARE xc_alter_table_insert AS INSERT INTO xc_alter_table_3 VALUES ($1, $2);
 PREPARE xc_alter_table_delete AS DELETE FROM xc_alter_table_3 WHERE a = $1;
 PREPARE xc_alter_table_update AS UPDATE xc_alter_table_3 SET b = $2 WHERE a = $1;
@@ -417,6 +416,7 @@ SELECT * FROM xc_alter_table_3_v;
 
 -- Drop column on table
 ALTER TABLE xc_alter_table_3 DROP COLUMN b CASCADE;
+NOTICE:  drop cascades to rule xc_alter_table_3_insert on table xc_alter_table_3
 SELECT count(*), sum(a), avg(a) FROM xc_alter_table_3;
  count | sum |        avg         
 -------+-----+--------------------
