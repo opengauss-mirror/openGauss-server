@@ -428,7 +428,7 @@ XLogRecParseState* xact_xlog_abort_parse_to_block(XLogReaderState* record, XLogR
 
     xl_xact_abort* xlrec = NULL;
     int nsubxacts = 0;
-    if (info == XLOG_XACT_COMMIT) {
+    if (info == XLOG_XACT_ABORT) {
         xlrec = (xl_xact_abort*)XLogRecGetData(record);
     } else {
         xl_xact_abort_prepared* xlrecpre = (xl_xact_abort_prepared*)XLogRecGetData(record);
