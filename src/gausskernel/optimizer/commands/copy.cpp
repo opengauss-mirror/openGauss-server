@@ -3396,6 +3396,7 @@ static uint64 CopyFrom(CopyState cstate)
     bool hasBucket = false;
     MemInfoArg* CopyMem = NULL;
     bool needflush = false;
+    bool isForeignTbl = false; /* Whether this foreign table support COPY */
     Assert(cstate->rel);
 
     if (cstate->rel->rd_rel->relkind != RELKIND_RELATION) {
@@ -3404,10 +3405,11 @@ static uint64 CopyFrom(CopyState cstate)
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("cannot copy to view \"%s\"", RelationGetRelationName(cstate->rel))));
         else if (cstate->rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
-            if (!isMOTFromTblOid(RelationGetRelid(cstate->rel)))
+            if (!CheckSupportedFDWType(RelationGetRelid(cstate->rel)))
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("cannot copy to foreign table \"%s\"", RelationGetRelationName(cstate->rel))));
+            isForeignTbl = true;
         } else if (cstate->rel->rd_rel->relkind == RELKIND_SEQUENCE)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -3953,8 +3955,7 @@ static uint64 CopyFrom(CopyState cstate)
                     tuple = ExecMaterializeSlot(slot);
             }
 
-            if (!skip_tuple && resultRelInfo->ri_FdwRoutine && resultRelInfo->ri_FdwRoutine->GetFdwType &&
-                    resultRelInfo->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
+            if (!skip_tuple && isForeignTbl) {
                 resultRelInfo->ri_FdwRoutine->ExecForeignInsert(estate, resultRelInfo, slot, NULL);
                 processed++;
             } else if (!skip_tuple) {
@@ -4167,6 +4168,13 @@ static uint64 CopyFrom(CopyState cstate)
 
     /* Handle queued AFTER triggers */
     AfterTriggerEndQuery(estate);
+
+    /* To free the statement allocated in ExecForeignInsert */
+    if (resultRelInfo->ri_FdwRoutine && resultRelInfo->ri_FdwRoutine->GetFdwType &&
+        (resultRelInfo->ri_FdwRoutine->GetFdwType() == MYSQL_ORC ||
+         resultRelInfo->ri_FdwRoutine->GetFdwType() == ORACLE_ORC)) {
+        resultRelInfo->ri_FdwRoutine->EndForeignModify(estate, resultRelInfo);
+    }
 
     pfree_ext(values);
     pfree_ext(nulls);

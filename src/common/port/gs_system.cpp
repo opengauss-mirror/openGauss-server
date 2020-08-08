@@ -157,12 +157,14 @@ FILE* popen_security(const char* command, char type)
             if (cmd == NULL) {
                 _exit(1);
             }
+            /* cmd should be freed after execvp, cause argv point to cmd */
             argv = parseStringToArgs(cmd, &argc);
-            free(cmd);
             if (argv == NULL || argc == 0) {
+                free(cmd);
                 _exit(1);
             }
             (void)execvp(argv[0], argv);
+            free(cmd);
             _exit(127);
         default: /* in parent process */
             break;
@@ -301,11 +303,14 @@ int gs_system_security(const char* command)
             cmd = strdup(command);
             if (cmd == NULL)
                 _exit(1);
+            /* cmd should be freed after execvp, cause argv point to cmd */
             argv = parseStringToArgs(cmd, &argc);
-            free(cmd);
-            if (argv == NULL || argc == 0)
+            if (argv == NULL || argc == 0) {
+                free(cmd);
                 _exit(1);
+            }
             (void)execvp(argv[0], argv);
+            free(cmd);
             _exit(127);
         default: /* parent */
             do {
