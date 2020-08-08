@@ -246,6 +246,44 @@ bool IsSpecifiedFDWFromRelid(Oid relId, const char* SepcifiedType)
     return IsSpecifiedTable;
 }
 
+/**
+ * @Description: Jude whether type of the foreign table support SELECT/INSERT/UPDATE/DELETE/COPY
+ * @in relId: The foreign table Oid.
+ * @return Rreturn true if the foreign table support those DML.
+ */
+bool CheckSupportedFDWType(Oid relId)
+{
+    static const char* supportFDWType[] = {MOT_FDW, MYSQL_FDW, ORACLE_FDW};
+    int size = sizeof(supportFDWType) / sizeof(supportFDWType[0]);
+    bool support = false;
+
+    if (u_sess->opt_cxt.ft_context == NULL) {
+        u_sess->opt_cxt.ft_context = AllocSetContextCreate(u_sess->top_mem_cxt,
+            "ForeignTableTemp1",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+    } else {
+        MemoryContextReset(u_sess->opt_cxt.ft_context);
+    }
+    MemoryContext oldContext = MemoryContextSwitchTo(u_sess->opt_cxt.ft_context);
+
+    ForeignTable* ftbl = GetForeignTable(relId);
+    ForeignServer* fsvr = GetForeignServer(ftbl->serverid);
+    ForeignDataWrapper* fdw = GetForeignDataWrapper(fsvr->fdwid);
+
+    for (int i = 0; i < size; i++) {
+        if (pg_strcasecmp(fdw->fdwname, supportFDWType[i]) == 0) {
+            support = true;
+            break;
+        }
+    }
+
+    MemoryContextSwitchTo(oldContext);
+    MemoryContextReset(u_sess->opt_cxt.ft_context);
+    return support;
+}
+
 bool isSpecifiedSrvTypeFromRelId(Oid relId, const char* SepcifiedType)
 {
     ForeignTable* ftbl = NULL;

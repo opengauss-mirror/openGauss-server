@@ -154,7 +154,10 @@ typedef struct VerifyDesc {
 
 enum FOREIGNTABLEFILETYPE_ {
     HDFS_ORC = 1,
-    MOT_ORC = 2
+    MOT_ORC = 2,
+    MYSQL_ORC = 3,
+    ORACLE_ORC = 4,
+    POSTGRES_ORC = 5
 };
 
 typedef enum FOREIGNTABLEFILETYPE_ FOREIGNTABLEFILETYPE;

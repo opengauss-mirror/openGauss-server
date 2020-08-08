@@ -41,7 +41,7 @@ index d5e7b362..34667e12 100644
  endif
  
 diff --git connection.cpp connection.cpp
-index a517a738..51554000 100644
+index a517a738..d9b097f0 100644
 --- connection.cpp
 +++ connection.cpp
 @@ -24,6 +24,7 @@
@@ -73,7 +73,7 @@ index a517a738..51554000 100644
  
  	/* First time through, initialize connection cache hashtable */
 -	if (ConnectionHash == NULL)
-+	if (u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
++	if (u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
  	{
  		HASHCTL	ctl;
  		MemSet(&ctl, 0, sizeof(ctl));
@@ -84,7 +84,7 @@ index a517a738..51554000 100644
 -		ctl.hcxt = CacheMemoryContext;
 -		ConnectionHash = hash_create("mysql_fdw connections", 8,
 +		ctl.hcxt = u_sess->cache_mem_cxt;
-+		u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList = hash_create("mysql_fdw connections", 8,
++		u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList = hash_create("mysql_fdw connections", 8,
  									&ctl,
  									HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
  
@@ -94,7 +94,7 @@ index a517a738..51554000 100644
  									  mysql_inval_callback, (Datum) 0);
 +		if (IS_THREAD_POOL_SESSION)
 +		{
-+			u_sess->fdw_ctx[MYSQL_TYPE_FDW].fdwExitFunc = mysql_fdw_exit;
++			u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].fdwExitFunc = mysql_fdw_exit;
 +		}
 +		else
 +		{
@@ -108,7 +108,7 @@ index a517a738..51554000 100644
  	 * Find or create cached entry for requested connection.
  	 */
 -	entry = hash_search(ConnectionHash, &key, HASH_ENTER, &found);
-+	entry = (ConnCacheEntry*)hash_search((HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList, &key, HASH_ENTER, &found);
++	entry = (ConnCacheEntry*)hash_search((HTAB*)u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList, &key, HASH_ENTER, &found);
  	if (!found)
  	{
  		/* initialize new hashtable entry (key is already filled in) */
@@ -117,11 +117,11 @@ index a517a738..51554000 100644
  	ConnCacheEntry *entry;
  
 -	if (ConnectionHash == NULL)
-+	if (u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
++	if (u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
  		return;
  
 -	hash_seq_init(&scan, ConnectionHash);
-+	hash_seq_init(&scan, (HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList);
++	hash_seq_init(&scan, (HTAB*)u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList);
  	while ((entry = (ConnCacheEntry *) hash_seq_search(&scan)))
  	{
  		if (entry->conn == NULL)
@@ -130,8 +130,8 @@ index a517a738..51554000 100644
  		entry->conn = NULL;
  	}
 +	/* clean-up memory */
-+	hash_destroy((HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList);
-+	u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList = NULL;
++	hash_destroy((HTAB*)u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList);
++	u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList = NULL;
  }
  
  /*
@@ -140,11 +140,11 @@ index a517a738..51554000 100644
  	ConnCacheEntry *entry;
  
 -	if (ConnectionHash == NULL)
-+	if (u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
++	if (u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList == NULL)
  		return;
  
 -	hash_seq_init(&scan, ConnectionHash);
-+	hash_seq_init(&scan, (HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList);
++	hash_seq_init(&scan, (HTAB*)u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList);
  	while ((entry = (ConnCacheEntry *) hash_seq_search(&scan)))
  	{
  		if (entry->conn == NULL)
@@ -153,12 +153,12 @@ index a517a738..51554000 100644
  
  	/* ConnectionHash must exist already, if we're registered */
 -	hash_seq_init(&scan, ConnectionHash);
-+	hash_seq_init(&scan, (HTAB*)u_sess->fdw_ctx[MYSQL_TYPE_FDW].connList);
++	hash_seq_init(&scan, (HTAB*)u_sess->ext_fdw_ctx[MYSQL_TYPE_FDW].connList);
  	while ((entry = (ConnCacheEntry *) hash_seq_search(&scan)))
  	{
  		/* Ignore invalid entries */
 diff --git deparse.cpp deparse.cpp
-index a75c2705..94b1799c 100644
+index a75c2705..ac72295e 100644
 --- deparse.cpp
 +++ deparse.cpp
 @@ -20,7 +20,7 @@
@@ -170,6 +170,15 @@ index a75c2705..94b1799c 100644
  #include "access/sysattr.h"
  #include "access/transam.h"
  #include "catalog/pg_collation.h"
+@@ -113,7 +113,7 @@ static void mysql_print_remote_placeholder(Oid paramtype, int32 paramtypmod,
+ static void mysql_deparse_relation(StringInfo buf, Relation rel);
+ static void mysql_deparse_target_list(StringInfo buf, PlannerInfo *root, Index rtindex, Relation rel,
+ 					Bitmapset *attrs_used, List **retrieved_attrs);
+-static void mysql_deparse_column_ref(StringInfo buf, int varno, int varattno, PlannerInfo *root);
++static void mysql_deparse_column_ref(StringInfo buf, int varno, int varattno, RangeTblEntry *rte);
+ 
+ /*
+  * Functions to construct string representation of a specific types.
 @@ -169,7 +169,7 @@ mysql_deparse_relation(StringInfo buf, Relation rel)
  static char *
  mysql_quote_identifier(const char *s , char q)
@@ -179,7 +188,55 @@ index a75c2705..94b1799c 100644
  	char  *r = result;
  
  	*r++ = q;
-@@ -451,7 +451,7 @@ mysql_deparse_string(StringInfo buf, const char *val, bool isstr)
+@@ -224,7 +224,7 @@ mysql_deparse_select(StringInfo buf,
+  * to *retrieved_attrs.
+  */
+ void
+-mysql_deparse_insert(StringInfo buf, PlannerInfo *root,
++mysql_deparse_insert(StringInfo buf, RangeTblEntry *rte,
+ 				 Index rtindex, Relation rel,
+ 				 List *targetAttrs)
+ {
+@@ -248,7 +248,7 @@ mysql_deparse_insert(StringInfo buf, PlannerInfo *root,
+ 				appendStringInfoString(buf, ", ");
+ 			first = false;
+ 
+-			mysql_deparse_column_ref(buf, rtindex, attnum, root);
++			mysql_deparse_column_ref(buf, rtindex, attnum, rte);
+ 		}
+ 
+ 		appendStringInfoString(buf, ") VALUES (");
+@@ -320,7 +320,7 @@ mysql_deparse_target_list(StringInfo buf,
+ 				appendStringInfoString(buf, ", ");
+ 			first = false;
+ 
+-			mysql_deparse_column_ref(buf, rtindex, i, root);
++			mysql_deparse_column_ref(buf, rtindex, i, planner_rt_fetch(rtindex, root));
+ 			*retrieved_attrs = lappend_int(*retrieved_attrs, i);
+ 		}
+ 	}
+@@ -389,9 +389,8 @@ mysql_append_where_clause(StringInfo buf,
+  * If it has a column_name FDW option, use that instead of attribute name.
+  */
+ static void
+-mysql_deparse_column_ref(StringInfo buf, int varno, int varattno, PlannerInfo *root)
++mysql_deparse_column_ref(StringInfo buf, int varno, int varattno, RangeTblEntry *rte)
+ {
+-	RangeTblEntry *rte;
+ 	char          *colname = NULL;
+ 	List          *options;
+ 	ListCell      *lc;
+@@ -399,9 +398,6 @@ mysql_deparse_column_ref(StringInfo buf, int varno, int varattno, PlannerInfo *r
+ 	/* varno must not be any of OUTER_VAR, INNER_VAR and INDEX_VAR. */
+ 	Assert(!IS_SPECIAL_VARNO(varno));
+ 
+-	/* Get RangeTblEntry from array in PlannerInfo. */
+-	rte = planner_rt_fetch(varno, root);
+-
+ 	/*
+ 	 * If it's a column of a foreign table, and it has the column_name FDW
+ 	 * option, use that value.
+@@ -451,7 +447,7 @@ mysql_deparse_string(StringInfo buf, const char *val, bool isstr)
  		 * Remove '{', '}' and \" character from the string. Because
  		 * this syntax is not recognize by the remote MySQL server.
  		 */
@@ -188,7 +245,25 @@ index a75c2705..94b1799c 100644
  			continue;
  
  		if (ch == ',' && isstr)
-@@ -869,11 +869,11 @@ mysql_deparse_array_ref(SubscriptingRef *node, deparse_expr_cxt *context)
+@@ -638,7 +634,7 @@ mysql_deparse_update(StringInfo buf, PlannerInfo *root,
+ 			appendStringInfoString(buf, ", ");
+ 		first = false;
+ 
+-		mysql_deparse_column_ref(buf, rtindex, attnum, root);
++		mysql_deparse_column_ref(buf, rtindex, attnum, planner_rt_fetch(rtindex, root));
+ 		appendStringInfo(buf, " = ?");
+ 		pindex++;
+ 	}
+@@ -680,7 +676,7 @@ mysql_deparse_var(Var *node, deparse_expr_cxt *context)
+ 		node->varlevelsup == 0)
+ 	{
+ 		/* Var belongs to foreign table */
+-		mysql_deparse_column_ref(buf, node->varno, node->varattno, context->root);
++		mysql_deparse_column_ref(buf, node->varno, node->varattno, planner_rt_fetch(node->varno, context->root));
+ 	}
+ 	else
+ 	{
+@@ -869,11 +865,11 @@ mysql_deparse_array_ref(SubscriptingRef *node, deparse_expr_cxt *context)
  		appendStringInfoChar(buf, '[');
  		if (lowlist_item)
  		{
@@ -202,7 +277,7 @@ index a75c2705..94b1799c 100644
  		appendStringInfoChar(buf, ']');
  	}
  
-@@ -965,7 +965,7 @@ mysql_deparse_op_expr(OpExpr *node, deparse_expr_cxt *context)
+@@ -965,7 +961,7 @@ mysql_deparse_op_expr(OpExpr *node, deparse_expr_cxt *context)
  	if (oprkind == 'r' || oprkind == 'b')
  	{
  		arg = list_head(node->args);
@@ -211,7 +286,7 @@ index a75c2705..94b1799c 100644
  		appendStringInfoChar(buf, ' ');
  	}
  
-@@ -977,7 +977,7 @@ mysql_deparse_op_expr(OpExpr *node, deparse_expr_cxt *context)
+@@ -977,7 +973,7 @@ mysql_deparse_op_expr(OpExpr *node, deparse_expr_cxt *context)
  	{
  		arg = list_tail(node->args);
  		appendStringInfoChar(buf, ' ');
@@ -220,7 +295,7 @@ index a75c2705..94b1799c 100644
  	}
  
  	appendStringInfoChar(buf, ')');
-@@ -1056,9 +1056,9 @@ mysql_deparse_distinct_expr(DistinctExpr *node, deparse_expr_cxt *context)
+@@ -1056,9 +1052,9 @@ mysql_deparse_distinct_expr(DistinctExpr *node, deparse_expr_cxt *context)
  	Assert(list_length(node->args) == 2);
  
  	appendStringInfoChar(buf, '(');
@@ -232,7 +307,7 @@ index a75c2705..94b1799c 100644
  	appendStringInfoChar(buf, ')');
  }
  
-@@ -1089,7 +1089,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
+@@ -1089,7 +1085,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
  	Assert(list_length(node->args) == 2);
  
  	/* Deparse left operand. */
@@ -241,7 +316,7 @@ index a75c2705..94b1799c 100644
  	deparseExpr(arg1, context);
  	appendStringInfoChar(buf, ' ');
  
-@@ -1101,7 +1101,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
+@@ -1101,7 +1097,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
  	appendStringInfo(buf, " IN (");
  
  	/* Deparse right operand. */
@@ -250,7 +325,7 @@ index a75c2705..94b1799c 100644
  	switch (nodeTag((Node*)arg2))
  	{
  		case T_Const:
-@@ -1116,7 +1116,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
+@@ -1116,7 +1112,7 @@ mysql_deparse_scalar_array_op_expr(ScalarArrayOpExpr *node, deparse_expr_cxt *co
  				switch (c->consttype)
  				{
  					case INT4ARRAYOID:
@@ -259,7 +334,7 @@ index a75c2705..94b1799c 100644
  						mysql_deparse_string(buf, extval, false);
  						break;
  					default:
-@@ -1172,7 +1172,7 @@ mysql_deparse_bool_expr(BoolExpr *node, deparse_expr_cxt *context)
+@@ -1172,7 +1168,7 @@ mysql_deparse_bool_expr(BoolExpr *node, deparse_expr_cxt *context)
  			break;
  		case NOT_EXPR:
  			appendStringInfoString(buf, "(NOT ");
@@ -268,7 +343,7 @@ index a75c2705..94b1799c 100644
  			appendStringInfoChar(buf, ')');
  			return;
  	}
-@@ -1220,7 +1220,7 @@ mysql_deparse_array_expr(ArrayExpr *node, deparse_expr_cxt *context)
+@@ -1220,7 +1216,7 @@ mysql_deparse_array_expr(ArrayExpr *node, deparse_expr_cxt *context)
  	{
  		if (!first)
  			appendStringInfoString(buf, ", ");
@@ -278,7 +353,7 @@ index a75c2705..94b1799c 100644
  	}
  	appendStringInfoChar(buf, ']');
 diff --git mysql_fdw.cpp mysql_fdw.cpp
-index d518e2ec..a56fae67 100644
+index d518e2ec..06469703 100644
 --- mysql_fdw.cpp
 +++ mysql_fdw.cpp
 @@ -53,7 +53,7 @@
@@ -350,7 +425,16 @@ index d518e2ec..a56fae67 100644
  /*
   * FDW callback routines
   */
-@@ -219,36 +261,36 @@ mysql_load_library(void)
+@@ -175,6 +217,8 @@ static void process_query_params(ExprContext *econtext,
+ 
+ static void create_cursor(ForeignScanState *node);
+ 
++static MySQLFdwExecState* getFdwState(EState* estate, ResultRelInfo* resultRelInfo);
++
+ void* mysql_dll_handle = NULL;
+ static int wait_timeout = WAIT_TIMEOUT;
+ static int interactive_timeout = INTERACTIVE_TIMEOUT;
+@@ -219,36 +263,36 @@ mysql_load_library(void)
  	if(mysql_dll_handle == NULL)
  		return false;
  
@@ -417,7 +501,7 @@ index d518e2ec..a56fae67 100644
  	
  	if (_mysql_stmt_bind_param == NULL ||
  		_mysql_stmt_bind_result == NULL ||
-@@ -297,43 +339,37 @@ _PG_init(void)
+@@ -297,43 +341,42 @@ _PG_init(void)
  				errmsg("failed to load the mysql query: \n%s", dlerror()),
  				errhint("export LD_LIBRARY_PATH to locate the library")));
  
@@ -449,7 +533,6 @@ index d518e2ec..a56fae67 100644
 -							NULL,
 -							NULL);
 -	on_proc_exit(&mysql_fdw_exit, PointerGetDatum(NULL));
--}
 +	if (GetConfigOption("mysql_fdw.wait_timeout", true, true) == NULL) {
 +		DefineCustomIntVariable("mysql_fdw.wait_timeout",
 +								"Server-side wait_timeout",
@@ -465,14 +548,7 @@ index d518e2ec..a56fae67 100644
 +								NULL,
 +								NULL);
 +	}
- 
--/*
-- * mysql_fdw_exit: Exit callback function.
-- */
--static void
--mysql_fdw_exit(int code, Datum arg)
--{
--	mysql_cleanup_connection();
++
 +	if (GetConfigOption("mysql_fdw.interactive_timeout", true, true) == NULL) {
 +		DefineCustomIntVariable("mysql_fdw.interactive_timeout",
 +								"Server-side interactive timeout",
@@ -490,8 +566,19 @@ index d518e2ec..a56fae67 100644
 +	}
  }
  
+-/*
+- * mysql_fdw_exit: Exit callback function.
+- */
+-static void
+-mysql_fdw_exit(int code, Datum arg)
++static int mysqlGetFdwType()
+ {
+-	mysql_cleanup_connection();
++	return MYSQL_ORC;
+ }
+ 
  /*
-@@ -348,7 +384,7 @@ mysql_fdw_handler(PG_FUNCTION_ARGS)
+@@ -348,7 +391,7 @@ mysql_fdw_handler(PG_FUNCTION_ARGS)
  	/* Callback functions for readable FDW */
  	fdwroutine->GetForeignRelSize = mysqlGetForeignRelSize;
  	fdwroutine->GetForeignPaths = mysqlGetForeignPaths;
@@ -500,7 +587,16 @@ index d518e2ec..a56fae67 100644
  	fdwroutine->GetForeignPlan = mysqlGetForeignPlan;
  	fdwroutine->ExplainForeignScan = mysqlExplainForeignScan;
  	fdwroutine->BeginForeignScan = mysqlBeginForeignScan;
-@@ -427,7 +463,7 @@ mysqlBeginForeignScan(ForeignScanState *node, int eflags)
+@@ -369,6 +412,8 @@ mysql_fdw_handler(PG_FUNCTION_ARGS)
+ 	fdwroutine->ExecForeignDelete = mysqlExecForeignDelete;
+ 	fdwroutine->EndForeignModify = mysqlEndForeignModify;
+ 
++	fdwroutine->GetFdwType = mysqlGetFdwType;
++
+ 	PG_RETURN_POINTER(fdwroutine);
+ }
+ 
+@@ -427,7 +472,7 @@ mysqlBeginForeignScan(ForeignScanState *node, int eflags)
  
  	/* Stash away the state info we have already */
  	festate->query = strVal(list_nth(fsplan->fdw_private, 0));
@@ -509,7 +605,7 @@ index d518e2ec..a56fae67 100644
  	festate->conn = conn;
  	festate->cursor_exists = false;
  
-@@ -1052,12 +1088,12 @@ mysqlGetForeignPaths(PlannerInfo *root,RelOptInfo *baserel,Oid foreigntableid)
+@@ -1052,12 +1097,12 @@ mysqlGetForeignPaths(PlannerInfo *root,RelOptInfo *baserel,Oid foreigntableid)
  	mysqlEstimateCosts(root, baserel, &startup_cost, &total_cost, foreigntableid);
  
  	/* Create a ForeignPath node and add it as only possible path */
@@ -524,7 +620,7 @@ index d518e2ec..a56fae67 100644
  									 startup_cost,
  									 total_cost,
  									 NIL,	/* no pathkeys */
-@@ -1160,7 +1196,7 @@ mysqlGetForeignPlan(
+@@ -1160,7 +1205,7 @@ mysqlGetForeignPlan(
  		mysql_append_where_clause(&sql, root, baserel, remote_conds,
  						  true, &params_list);
  
@@ -533,7 +629,7 @@ index d518e2ec..a56fae67 100644
  		(root->parse->commandType == CMD_UPDATE ||
  		root->parse->commandType == CMD_DELETE))
  		{
-@@ -1330,7 +1366,7 @@ mysqlPlanForeignModify(PlannerInfo *root,
+@@ -1330,7 +1375,7 @@ mysqlPlanForeignModify(PlannerInfo *root,
  #if PG_VERSION_NUM >= 90500
  		Bitmapset *tmpset = bms_copy(rte->updatedCols);
  #else
@@ -542,7 +638,37 @@ index d518e2ec..a56fae67 100644
  #endif
  		AttrNumber	col;
  
-@@ -1644,7 +1680,7 @@ mysqlExecForeignUpdate(EState *estate,
+@@ -1367,7 +1412,7 @@ mysqlPlanForeignModify(PlannerInfo *root,
+ 	switch (operation)
+ 	{
+ 		case CMD_INSERT:
+-			mysql_deparse_insert(&sql, root, resultRelation, rel, targetAttrs);
++			mysql_deparse_insert(&sql, planner_rt_fetch(resultRelation, root), resultRelation, rel, targetAttrs);
+ 			break;
+ 		case CMD_UPDATE:
+ 			mysql_deparse_update(&sql, root, resultRelation, rel, targetAttrs, attname);
+@@ -1517,7 +1562,6 @@ mysqlBeginForeignModify(ModifyTableState *mtstate,
+ 	resultRelInfo->ri_FdwState = fmstate;
+ }
+ 
+-
+ /*
+  * mysqlExecForeignInsert: Insert one row into a foreign table
+  */
+@@ -1535,6 +1579,12 @@ mysqlExecForeignInsert(EState *estate,
+ 	MemoryContext       oldcontext;
+ 
+ 	fmstate = (MySQLFdwExecState *) resultRelInfo->ri_FdwState;
++	if (fmstate == NULL)
++	{
++		fmstate = getFdwState(estate, resultRelInfo);
++		resultRelInfo->ri_FdwState = fmstate;
++	}
++
+ 	n_params = list_length(fmstate->retrieved_attrs);
+ 
+ 	oldcontext = MemoryContextSwitchTo(fmstate->temp_cxt);
+@@ -1644,7 +1694,7 @@ mysqlExecForeignUpdate(EState *estate,
  	n_params = list_length(fmstate->retrieved_attrs);
  
  	mysql_bind_buffer = (MYSQL_BIND*) palloc0(sizeof(MYSQL_BIND) * n_params);
@@ -551,7 +677,7 @@ index d518e2ec..a56fae67 100644
  
  	/* Bind the values */
  	foreach(lc, fmstate->retrieved_attrs)
-@@ -1833,7 +1869,7 @@ mysqlExecForeignDelete(EState *estate,
+@@ -1833,7 +1883,7 @@ mysqlExecForeignDelete(EState *estate,
  static void
  mysqlEndForeignModify(EState *estate, ResultRelInfo *resultRelInfo)
  {
@@ -560,8 +686,102 @@ index d518e2ec..a56fae67 100644
  
  	if (festate && festate->stmt)
  	{
+@@ -2115,6 +2165,93 @@ mysqlImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
+ }
+ #endif
+ 
++static MySQLFdwExecState* getFdwState(EState* estate, ResultRelInfo* resultRelInfo)
++{
++	Relation rel = resultRelInfo->ri_RelationDesc;
++	RangeTblEntry* rte = rt_fetch(resultRelInfo->ri_RangeTableIndex, estate->es_range_table);
++	Oid userid = rte->checkAsUser ? rte->checkAsUser : GetUserId();
++	Oid foreignTableId = RelationGetRelid(rel);
++
++	if (!mysql_is_column_unique(foreignTableId))
++		elog(ERROR, "first column of remote table must be unique for COPY operation");
++
++	ForeignTable* table = GetForeignTable(foreignTableId);
++	ForeignServer* server = GetForeignServer(table->serverid);
++	UserMapping* user = GetUserMapping(userid, server->serverid);
++	StringInfoData sql;
++
++	MySQLFdwExecState* fmstate = (MySQLFdwExecState *)palloc0(sizeof(MySQLFdwExecState));
++	fmstate->rel = rel;
++	fmstate->mysqlFdwOptions = mysql_get_options(foreignTableId);
++	fmstate->conn = mysql_get_connection(server, user, fmstate->mysqlFdwOptions);
++	fmstate->temp_cxt = AllocSetContextCreate(estate->es_query_cxt, "mysql_fdw temporary data",
++#if PG_VERSION_NUM >= 110000
++											  ALLOCSET_DEFAULT_SIZES);
++#else
++											  ALLOCSET_SMALL_MINSIZE,
++											  ALLOCSET_SMALL_INITSIZE,
++											  ALLOCSET_SMALL_MAXSIZE);
++#endif
++
++	TupleDesc tupdesc = RelationGetDescr(rel);
++	int attnum;
++	List* targetAttrs = NULL;
++
++	for (attnum = 1; attnum <= tupdesc->natts; attnum++)
++	{
++		Form_pg_attribute attr = TupleDescAttr(tupdesc, attnum - 1);
++
++		if (!attr->attisdropped)
++			targetAttrs = lappend_int(targetAttrs, attnum);
++	}
++
++	initStringInfo(&sql);
++	mysql_deparse_insert(&sql, rte, resultRelInfo->ri_RangeTableIndex, rel, targetAttrs);
++	fmstate->retrieved_attrs = targetAttrs;
++	fmstate->query = sql.data;
++	fmstate->stmt = _mysql_stmt_init(fmstate->conn);
++	if (!fmstate->stmt)
++	{
++		char *err = pstrdup(_mysql_error(fmstate->conn));
++		ereport(ERROR, (errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
++				errmsg("failed to initialize the MySQL query: \n%s", err)));
++	}
++
++	/* Prepare mysql statment */
++	if (_mysql_stmt_prepare(fmstate->stmt, fmstate->query, strlen(fmstate->query)) != 0)
++	{
++		switch(_mysql_stmt_errno(fmstate->stmt))
++		{
++			case CR_NO_ERROR:
++				break;
++
++			case CR_OUT_OF_MEMORY:
++			case CR_SERVER_GONE_ERROR:
++			case CR_SERVER_LOST:
++			{
++				char *err = pstrdup(_mysql_error(fmstate->conn));
++				mysql_rel_connection(fmstate->conn);
++				ereport(ERROR,
++							(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
++							errmsg("failed to prepare the MySQL query: \n%s", err)));
++			}
++			break;
++			case CR_COMMANDS_OUT_OF_SYNC:
++			case CR_UNKNOWN_ERROR:
++			default:
++			{
++				char *err = pstrdup(_mysql_error(fmstate->conn));
++				ereport(ERROR,
++							(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
++							errmsg("failed to prepare the MySQL query: \n%s", err)));
++			}
++			break;
++		}
++	}
++
++	return fmstate;
++}
++
+ /*
+  * Prepare for processing of parameters used in remote query.
+  */
 diff --git mysql_fdw.h mysql_fdw.h
-index 5b543cd0..ea58af7f 100644
+index 5b543cd0..93c2f63c 100644
 --- mysql_fdw.h
 +++ mysql_fdw.h
 @@ -135,31 +135,31 @@ extern bool is_foreign_expr(PlannerInfo *root,
@@ -643,6 +863,15 @@ index 5b543cd0..ea58af7f 100644
  
  
  /* option.c headers */
+@@ -185,7 +185,7 @@ extern mysql_opt *mysql_get_options(Oid foreigntableid);
+ /* depare.c headers */
+ extern void mysql_deparse_select(StringInfo buf, PlannerInfo *root, RelOptInfo *baserel,
+ 							 Bitmapset *attrs_used, char *svr_table, List **retrieved_attrs);
+-extern void mysql_deparse_insert(StringInfo buf, PlannerInfo *root, Index rtindex, Relation rel, List *targetAttrs);
++extern void mysql_deparse_insert(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *targetAttrs);
+ extern void mysql_deparse_update(StringInfo buf, PlannerInfo *root, Index rtindex, Relation rel, List *targetAttrs, char *attname);
+ extern void mysql_deparse_delete(StringInfo buf, PlannerInfo *root, Index rtindex, Relation rel, char *name);
+ extern void mysql_append_where_clause(StringInfo buf, PlannerInfo *root, RelOptInfo *baserel, List *exprs,
 diff --git mysql_query.cpp mysql_query.cpp
 index 8c25f5cc..64fd770a 100644
 --- mysql_query.cpp

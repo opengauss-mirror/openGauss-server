@@ -443,8 +443,8 @@ void sess_exit_prepare(int code)
 
     /* FDW exit callback, used to free connections to other server, check FDW code for detail. */
     for (int i = 0; i < MAX_TYPE_FDW; i++) {
-        if (u_sess->fdw_ctx[i].fdwExitFunc != NULL) {
-            (u_sess->fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
+        if (u_sess->ext_fdw_ctx[i].fdwExitFunc != NULL) {
+            (u_sess->ext_fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
         }
     }
 

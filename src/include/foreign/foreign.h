@@ -210,6 +210,13 @@ extern char* GetForeignServerName(Oid serverid);
 extern bool IsSpecifiedFDWFromRelid(Oid relId, const char* SepcifiedType);
 
 /**
+ * @Description: Jude whether type of the foreign table support SELECT/INSERT/UPDATE/DELETE/COPY
+ * @in relId: The foreign table Oid.
+ * @return Rreturn true if the foreign table support those DML.
+ */
+extern bool CheckSupportedFDWType(Oid relId);
+
+/**
  * @Description: Get the all options for the OBS foreign table.
  * we store the option into ObsOptions.
  * @in foreignTable, the foreign table oid.
