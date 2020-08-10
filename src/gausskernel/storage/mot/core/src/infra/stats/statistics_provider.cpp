@@ -27,7 +27,7 @@
 #include "thread_id.h"
 #include "session_context.h"
 
-#include "sys_numa_api.h"
+#include "mm_numa.h"
 #include "mm_api.h"
 #include "mot_error.h"
 
@@ -161,7 +161,7 @@ bool StatisticsProvider::ReserveThreadSlot()
             void* buffer = nullptr;
             // since statistics provider is created before MemInit(), it is preferred to keep it clean from MM API calls
             if (GetGlobalConfiguration().m_numaNodes > 1) {
-                buffer = MotSysNumaAllocOnNode(m_generator->GetObjectSize(), node);
+                buffer = MemNumaAllocLocal(m_generator->GetObjectSize(), node);
             } else {
                 buffer = malloc(m_generator->GetObjectSize());
             }
@@ -317,9 +317,10 @@ void StatisticsProvider::FreeThreadStats(MOTThreadId threadId, ThreadStatistics*
 {
     MOT_LOG_TRACE("Reclaiming %s statistics thread slot for thread id %" PRIu16, GetName(), threadId);
     void* buffer = (void*)threadStats->GetInPlaceBuffer();
+    int node = threadStats->GetNodeId();
     threadStats->~ThreadStatistics();
     if (GetGlobalConfiguration().m_numaNodes > 1) {
-        MotSysNumaFree(buffer, m_generator->GetObjectSize());
+        MemNumaFreeLocal(buffer, m_generator->GetObjectSize(), node);
     } else {
         free(buffer);
     }

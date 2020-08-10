@@ -1028,9 +1028,10 @@ static void* ReserveWorker(void* param)
     if (workerId > 0) {  // first worker is invoked in caller context and not spawned in a new thread
         AllocThreadId();
     }
+
     // we must be affined to the correct NUMA node for native allocation policy
     // but it is better anyway to be affined to the NUMA node of the pool
-    if (!GetTaskAffinity().SetNodeAffinity(chunkPool->m_node)) {
+    if (GetGlobalConfiguration().m_enableNuma && !GetTaskAffinity().SetNodeAffinity(chunkPool->m_node)) {
         if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_NATIVE) {
             MOT_LOG_WARN("Failed to set chunk reservation worker affinity, chunk pre-allocation performance may be "
                          "affected, and table data distribution may be affected");

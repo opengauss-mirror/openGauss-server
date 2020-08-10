@@ -431,11 +431,11 @@ void CheckpointManager::FillTasksQueue()
     MOT_LOG_DEBUG("CheckpointManager::fillTasksQueue:: got %d tasks", m_tasksList.size());
 }
 
-void CheckpointManager::UnlockAndClearTables(std::list<Table *>& tables)
+void CheckpointManager::UnlockAndClearTables(std::list<Table*>& tables)
 {
-    std::list<Table *>::iterator it;
+    std::list<Table*>::iterator it;
     for (it = tables.begin(); it != tables.end(); ++it) {
-        Table *table = *it;
+        Table* table = *it;
         if (table != nullptr) {
             table->Unlock();
         }

@@ -53,6 +53,9 @@ public:
     MOTConfiguration();
     ~MOTConfiguration();
 
+    /** @var Initialize configuration singleton. */
+    void Initialize();
+
     /** @brief Get reference to single instance of configuration class. */
     static MOTConfiguration& GetInstance()
     {
@@ -243,6 +246,9 @@ public:
     /**********************************************************************/
     // Memory configuration
     /**********************************************************************/
+    /** @var Specifies whether to use NUMA-aware memory allocation. */
+    bool m_enableNuma;
+
     /** @var Maximum number of threads. */
     uint16_t m_maxThreads;
 
@@ -503,6 +509,9 @@ private:
     static constexpr LogLevel DEFAULT_CFG_STARTUP_LOG_LEVEL = LogLevel::LL_TRACE;
 
     // default memory configuration
+    /** @var Default enable NUMA. */
+    static constexpr bool DEFAULT_ENABLE_NUMA = true;
+
     /** @var Default maximum number of threads in the system. */
     static constexpr uint16_t DEFAULT_MAX_THREADS = 1024;
 
@@ -636,8 +645,8 @@ private:
     }
 
     template <typename T>
-    static void UpdateConfigItem(uint32_t& oldValue, T newValue, const char* name,
-        uint32_t lowerBound = 0, uint32_t upperBound = UINT_MAX)
+    static void UpdateConfigItem(
+        uint32_t& oldValue, T newValue, const char* name, uint32_t lowerBound = 0, uint32_t upperBound = UINT_MAX)
     {
         if (newValue > upperBound) {
             MOT_LOG_WARN("Configuration of %s overflowed: keeping default value %u", name, oldValue);

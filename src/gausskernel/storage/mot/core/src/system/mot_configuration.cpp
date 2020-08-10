@@ -79,6 +79,7 @@ constexpr LogLevel MOTConfiguration::DEFAULT_NUMA_ERRORS_LOG_LEVEL;
 constexpr LogLevel MOTConfiguration::DEFAULT_NUMA_WARNINGS_LOG_LEVEL;
 constexpr LogLevel MOTConfiguration::DEFAULT_CFG_STARTUP_LOG_LEVEL;
 // memory configuration members
+constexpr bool MOTConfiguration::DEFAULT_ENABLE_NUMA;
 constexpr uint16_t MOTConfiguration::DEFAULT_MAX_THREADS;
 constexpr uint32_t MOTConfiguration::DEFAULT_MAX_CONNECTIONS;
 constexpr AffinityMode MOTConfiguration::DEFAULT_AFFINITY_MODE;
@@ -302,7 +303,7 @@ bool MOTConfiguration::FindNumaNodes(int* maxNodes)
     }
 
     *maxNodes = MotSysNumaConfiguredNodes();
-    if (*maxNodes < 0) {
+    if (*maxNodes <= 0) {
         MOT_LOG_ERROR("Invalid NUMA configuration max_nodes=%d", *maxNodes);
         return false;
     }
@@ -415,6 +416,7 @@ MOTConfiguration::MOTConfiguration()
       m_numaErrorsLogLevel(DEFAULT_NUMA_ERRORS_LOG_LEVEL),
       m_numaWarningsLogLevel(DEFAULT_NUMA_WARNINGS_LOG_LEVEL),
       m_cfgStartupLogLevel(DEFAULT_CFG_STARTUP_LOG_LEVEL),
+      m_enableNuma(DEFAULT_ENABLE_NUMA),
       m_maxThreads(DEFAULT_MAX_THREADS),
       m_maxConnections(DEFAULT_MAX_CONNECTIONS),
       m_sessionAffinityMode(DEFAULT_AFFINITY_MODE),
@@ -447,6 +449,9 @@ MOTConfiguration::MOTConfiguration()
       m_configMonitorPeriodSeconds(DEFAULT_CFG_MONITOR_PERIOD_SECONDS),
       m_runInternalConsistencyValidation(DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION),
       m_totalMemoryMb(DEFAULT_TOTAL_MEMORY_MB)
+{}
+
+void MOTConfiguration::Initialize()
 {
     // Since MOTConfiguration has a global instance it is initialized early (before main() or other code is called)
     // we must initialize the sys_numa API early enough. This look likes the right timing.
@@ -454,11 +459,15 @@ MOTConfiguration::MOTConfiguration()
     int numa = DEFAULT_NUMA_NODES;
     if (FindNumaNodes(&numa)) {
         m_numaNodes = (uint16_t)numa;
+    } else {
+        MOT_LOG_WARN("Failed to infer the number of NUMA nodes on current machine, defaulting to %d", numa);
     }
 
     uint16_t cores = DEFAULT_CORES_PER_CPU;
     if (FindNumProcessors(&cores, &m_cpuNodeMapper, &m_osCpuMap)) {
         m_coresPerCpu = cores;
+    } else {
+        MOT_LOG_WARN("Failed to infer the number of cores on the current machine, defaulting to %u", (unsigned)cores);
     }
 
     m_isSystemHyperThreaded = CheckHyperThreads();
@@ -506,6 +515,7 @@ bool MOTConfiguration::SetFlag(const std::string& name, const std::string& value
     } else if (ParseLogLevel(name, "numa_errors_log_level", value, &m_numaErrorsLogLevel)) {
     } else if (ParseLogLevel(name, "numa_warnings_log_level", value, &m_numaWarningsLogLevel)) {
     } else if (ParseLogLevel(name, "cfg_startup_log_level", value, &m_cfgStartupLogLevel)) {
+    } else if (ParseBool(name, "enable_numa", value, &m_enableNuma)) {
     } else if (ParseUint16(name, "max_threads", value, &m_maxThreads)) {
     } else if (ParseUint32(name, "max_connections", value, &m_maxConnections)) {
     } else if (ParseAffinity(name, "affinity_mode", value, &m_sessionAffinityMode)) {
@@ -687,6 +697,7 @@ void MOTConfiguration::LoadConfig()
     UPDATE_USER_CFG(m_cfgStartupLogLevel, "cfg_startup_log_level", DEFAULT_CFG_STARTUP_LOG_LEVEL);
 
     // memory configuration
+    UPDATE_CFG(m_enableNuma, "enable_numa", DEFAULT_ENABLE_NUMA);
     UPDATE_INT_CFG(m_maxThreads, "max_threads", DEFAULT_MAX_THREADS);
     UPDATE_INT_CFG(m_maxConnections, "max_connections", DEFAULT_MAX_CONNECTIONS);
     UPDATE_USER_CFG(m_sessionAffinityMode, "affinity_mode", DEFAULT_AFFINITY_MODE);

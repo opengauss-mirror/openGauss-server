@@ -32,7 +32,7 @@
 #include "mm_def.h"
 #include "mot_atomic_ops.h"
 #include "memory_statistics.h"
-
+#include "mot_configuration.h"
 #include "sys_numa_api.h"
 
 namespace MOT {
@@ -110,7 +110,7 @@ extern void MemNumaDestroy()
 extern void* MemNumaAllocLocal(uint64_t size, int node)
 {
     // do not impose hard limits!
-    void* result = MotSysNumaAllocOnNode(size, node);
+    void* result = GetGlobalConfiguration().m_enableNuma ? MotSysNumaAllocOnNode(size, node) : malloc(size);
     if (result != NULL) {
         // update statistics if succeeded
         UpdateLocalStats(size, node);
@@ -137,8 +137,7 @@ extern void* MemNumaAllocLocal(uint64_t size, int node)
 extern void* MemNumaAllocGlobal(uint64_t size)
 {
     // do not impose hard limits!
-    // void* result = (g_memGlobalCfg.m_nodeCount > 1) ? numa_alloc_interleaved(size) : malloc(size);
-    void* result = MotSysNumaAllocInterleaved(size);
+    void* result = GetGlobalConfiguration().m_enableNuma ? MotSysNumaAllocInterleaved(size) : malloc(size);
     if (result != NULL) {
         // update statistics if succeeded
         UpdateGlobalStats(size);
@@ -158,10 +157,19 @@ extern void* MemNumaAllocGlobal(uint64_t size)
     return result;
 }
 
+static inline void* MallocAligned(size_t align, size_t size)
+{
+    void* result = nullptr;
+    int rc = posix_memalign(&result, align, size);
+    errno = rc;
+    return result;
+}
+
 extern void* MemNumaAllocAlignedLocal(uint64_t size, uint64_t align, int node)
 {
     // do not impose hard limits!
-    void* result = MotSysNumaAllocAlignedOnNode(size, align, node);
+    void* result = GetGlobalConfiguration().m_enableNuma ? MotSysNumaAllocAlignedOnNode(size, align, node)
+                                                         : MallocAligned(align, size);
     if (result != NULL) {
         // update statistics if succeeded
         UpdateLocalStats(size, node);
@@ -192,7 +200,8 @@ extern void* MemNumaAllocAlignedLocal(uint64_t size, uint64_t align, int node)
 
 extern void* MemNumaAllocAlignedGlobal(uint64_t size, uint64_t align)
 {
-    void* result = MotSysNumaAllocAlignedInterleaved(size, align);
+    void* result = GetGlobalConfiguration().m_enableNuma ? MotSysNumaAllocAlignedInterleaved(size, align)
+                                                         : MallocAligned(align, size);
     if (result != NULL) {
         // update statistics if succeeded
         UpdateGlobalStats(size);
@@ -221,7 +230,11 @@ extern void* MemNumaAllocAlignedGlobal(uint64_t size, uint64_t align)
 
 extern void MemNumaFreeLocal(void* buf, uint64_t size, int node)
 {
-    MotSysNumaFree(buf, size);
+    if (GetGlobalConfiguration().m_enableNuma) {
+        MotSysNumaFree(buf, size);
+    } else {
+        free(buf);
+    }
     uint64_t memUsed = MOT_ATOMIC_SUB(localMemUsedBytes[node], size);
     MOT_LOG_DIAG1("Decreased local node %d memory usage to %" PRIu64 " bytes", node, memUsed);
     MemoryStatisticsProvider::m_provider->AddNumaLocalAllocated(-((int64_t)size));
@@ -230,7 +243,11 @@ extern void MemNumaFreeLocal(void* buf, uint64_t size, int node)
 
 extern void MemNumaFreeGlobal(void* buf, uint64_t size)
 {
-    MotSysNumaFree(buf, size);
+    if (GetGlobalConfiguration().m_enableNuma) {
+        MotSysNumaFree(buf, size);
+    } else {
+        free(buf);
+    }
     uint64_t memUsed = MOT_ATOMIC_SUB(globalMemUsedBytes, size);
     MOT_LOG_DIAG1("Decreased global memory usage to %" PRIu64 " bytes", memUsed);
     MemoryStatisticsProvider::m_provider->AddNumaInterleavedAllocated(-((int64_t)size));
