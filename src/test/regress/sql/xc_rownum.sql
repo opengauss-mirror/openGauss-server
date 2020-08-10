@@ -80,6 +80,14 @@ select rownum, name from (select name from distributors intersect all select nam
 select rownum, name from (select name from distributors intersect all select name from actors order by 1) as result where rownum < 3;
 select rownum, name from (select name from distributors intersect all select name from actors order by 1) as result where rownum < 6;
 select rownum, name from (select name from distributors where rownum <= 4 intersect all select name from actors where rownum <= 4 order by 1) as result;
+--test group by
+select rownum from distributors group by rownum;
+select rownum rn from distributors group by rn;
+select rownum + 1 from dual group by rownum;
+select rownum + 1 rn from dual group by rn;
+--test alias name after where
+select rownum rn, name from distributors where rn<3;
+select rownum rowno2, * from (select rownum rowno1, * from distributors order by id desc) where rowno2 < 2;
 
 --test except and minus
 --create test table

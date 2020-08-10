@@ -106,6 +106,12 @@ extern List* extract_function_outarguments(Oid funcid, List* parameters, List* f
 extern bool need_adjust_agg_inner_func_type(Aggref* aggref);
 
 extern bool contain_rownum_walker(Node *node, void *context); 
+
+static inline bool contain_rownum_expr(Node *node) 
+{
+    return contain_rownum_walker(node, NULL);
+}
+
 extern List* get_quals_lists(Node *jtnode);
 
 #endif /* CLAUSES_H */

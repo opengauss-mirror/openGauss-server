@@ -211,7 +211,47 @@ select rownum, name from (select name from distributors where rownum <= 4 inters
       2 | westward
 (2 rows)
 
+--test group by
+select rownum from distributors group by rownum;
+ rownum 
+--------
+      3
+      1
+      2
+      4
+(4 rows)
 
+select rownum rn from distributors group by rn;
+ rn 
+----
+  3
+  1
+  2
+  4
+(4 rows)
+
+select rownum + 1 from dual group by rownum;
+ ?column? 
+----------
+        2
+(1 row)
+
+select rownum + 1 rn from dual group by rn;
+ rn 
+----
+  2
+(1 row)
+
+--test alias name after where
+select rownum rn, name from distributors where rn<3;
+ERROR:  Alias "rn" reference with ROWNUM included is invalid.
+LINE 1: select rownum rn, name from distributors where rn<3;
+                                                       ^
+select rownum rowno2, * from (select rownum rowno1, * from distributors order by id desc) where rowno2 < 2;
+ERROR:  Alias "rowno2" reference with ROWNUM included is invalid.
+LINE 1: ...wno1, * from distributors order by id desc) where rowno2 < 2...
+                                                             ^
+															 
 --test except and minus
 --create test table
 create table except_table (a int, b int);

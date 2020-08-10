@@ -2432,6 +2432,14 @@ static bool _equalDropSynonymStmt(DropSynonymStmt* a, DropSynonymStmt* b)
     return true;
 }
 
+static bool _equalRownum(Rownum* a, Rownum* b)
+{
+    COMPARE_SCALAR_FIELD(rownumcollid);
+    COMPARE_LOCATION_FIELD(location);
+
+    return true;
+}
+
 /*
  * Stuff from pg_list.h
  */
@@ -3427,6 +3435,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_DropSynonymStmt:
             retval = _equalDropSynonymStmt((DropSynonymStmt*)a, (DropSynonymStmt*)b);
+            break;
+        case T_Rownum:
+            retval = _equalRownum((Rownum*)a, (Rownum*)b);
             break;
 
         default:
