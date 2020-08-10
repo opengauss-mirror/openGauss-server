@@ -331,7 +331,7 @@ private:
      * @brief Unlocks tables and clear the tables' list
      * @param tables Tables list to clear
      */
-    void UnlockAndClearTables(std::list<Table *>& tables);
+    void UnlockAndClearTables(std::list<Table*>& tables);
 
     /**
      * @brief Destroys all the checkpoint threads

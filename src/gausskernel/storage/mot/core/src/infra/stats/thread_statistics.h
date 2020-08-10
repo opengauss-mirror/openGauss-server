@@ -28,6 +28,7 @@
 #include "mot_string.h"
 #include "mot_vector.h"
 #include "statistic_variable.h"
+#include "session_context.h"
 
 namespace MOT {
 /**
@@ -50,7 +51,7 @@ public:
      * @see MakeName().
      */
     explicit ThreadStatistics(uint64_t threadId, void* inplaceBuffer = nullptr)
-        : m_threadId(threadId), m_inplaceBuffer(inplaceBuffer)
+        : m_threadId(threadId), m_node(MOTCurrentNumaNodeId), m_inplaceBuffer(inplaceBuffer)
     {}
 
     /** @brief Destructor. */
@@ -67,13 +68,21 @@ public:
     }
 
     /**
-     * @brief Retrieves the logical identifier of the thread that these statistics
-     * describe.
+     * @brief Retrieves the logical identifier of the thread that these statistics describe.
      * @return The logical thread identifier.
      */
     inline uint64_t GetThreadId() const
     {
         return m_threadId;
+    }
+
+    /**
+     * @brief Retrieves the identifier of the NUMA node from which this object's memory is allocated.
+     * @return The NUMA node identifier.
+     */
+    inline int GetNodeId() const
+    {
+        return m_node;
     }
 
     /**
@@ -165,6 +174,9 @@ protected:
 private:
     /** @var The logical identifier of the thread to which this set of statistic variables belong. */
     uint64_t m_threadId;
+
+    /** @var The identifier of the NUMA node from which this object's memory is allocated. */
+    int m_node;
 
     /** @var The set of managed statistic variables. */
     mot_vector<StatisticVariable*> m_statVars;

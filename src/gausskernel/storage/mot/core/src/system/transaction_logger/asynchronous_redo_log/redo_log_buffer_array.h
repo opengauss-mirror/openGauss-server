@@ -95,6 +95,7 @@ public:
     {
         return MAX_BUFFERS;
     }
+
 private:
     std::atomic<uint32_t> m_nextFree;
     RedoLogBuffer* m_array[MAX_BUFFERS];

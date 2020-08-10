@@ -42,8 +42,10 @@ constexpr uint32_t NUM_DELETE_MAX_INC = 500;
 bool RecoveryManager::Initialize()
 {
     // in a thread-pooled envelope the affinity could be disabled, so we use task affinity here
-    Affinity& affinity = GetTaskAffinity();
-    affinity.SetAffinity(m_threadId);
+    if (GetGlobalConfiguration().m_enableNuma) {
+        Affinity& affinity = GetTaskAffinity();
+        affinity.SetAffinity(m_threadId);
+    }
 
     if (m_enableLogStats) {
         m_logStats = new (std::nothrow) LogStats();
@@ -368,7 +370,7 @@ void RecoveryManager::CpWorkerFunc()
     int threadId = MOTCurrThreadId;
 
     // in a thread-pooled envelope the affinity could be disabled, so we use task affinity here
-    if (!GetTaskAffinity().SetAffinity(threadId)) {
+    if (GetGlobalConfiguration().m_enableNuma && !GetTaskAffinity().SetAffinity(threadId)) {
         MOT_LOG_WARN("Failed to set affinity of checkpoint recovery worker, recovery from checkpoint performance may be"
                      " affected");
     }

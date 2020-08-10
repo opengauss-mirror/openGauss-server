@@ -42,8 +42,11 @@ std::atomic<SessionId> SessionContext::m_nextSessionId(0);
 
 static int GetRealCurrentNumaMode()
 {
-    int cpu = sched_getcpu();
-    int node = MotSysNumaGetNode(cpu);
+    int node = 0;  // We default to Node 0 to avoid failures in other places in the code.
+    if (GetGlobalConfiguration().m_enableNuma) {
+        int cpu = sched_getcpu();
+        node = MotSysNumaGetNode(cpu);
+    }
     return node;
 }
 
@@ -166,7 +169,7 @@ TxnManager* SessionContext::CreateTransaction(
     // Do it before txn_man::init call since it allocates memory
     bool rc = true;
     if (isLightTxn == false) {
-        if (IS_AFFINITY_ACTIVE(GetSessionAffinity().GetAffinityMode())) {
+        if (GetGlobalConfiguration().m_enableNuma && IS_AFFINITY_ACTIVE(GetSessionAffinity().GetAffinityMode())) {
             if (!GetSessionAffinity().SetAffinity(threadId)) {
                 MOT_LOG_WARN("Failed to set current session affinity, performance may be affected");
             }

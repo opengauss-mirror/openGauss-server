@@ -302,8 +302,11 @@ extern MOTThreadId AllocThreadIdNumaHighest(int nodeId)
 
 extern MOTThreadId AllocThreadIdNumaCurrentHighest()
 {
-    int cpu = sched_getcpu();
-    int nodeId = MotSysNumaGetNode(cpu);
+    int nodeId = 0;  // We default to Node 0 to avoid failures in other places in the code.
+    if (GetGlobalConfiguration().m_enableNuma) {
+        int cpu = sched_getcpu();
+        nodeId = MotSysNumaGetNode(cpu);
+    }
     return AllocThreadIdNumaHighest(nodeId);
 }
 

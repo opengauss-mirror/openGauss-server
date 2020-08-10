@@ -217,7 +217,7 @@ void CheckpointWorkerPool::WorkerFunc()
     SessionContext* sessionContext = GetSessionManager()->CreateSessionContext();
 
     int threadId = MOTCurrThreadId;
-    if (!GetTaskAffinity().SetAffinity(threadId)) {
+    if (GetGlobalConfiguration().m_enableNuma && !GetTaskAffinity().SetAffinity(threadId)) {
         MOT_LOG_WARN("Failed to set affinity for checkpoint worker, checkpoint performance may be affected");
     }
 

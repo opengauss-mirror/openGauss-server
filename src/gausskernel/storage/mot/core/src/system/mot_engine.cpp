@@ -75,10 +75,8 @@ MOTEngine* MOTEngine::m_engine = nullptr;
 MOTEngine::MOTEngine()
     : m_initialized(false),
       m_recovering(false),
-      m_sessionAffinity(GetGlobalConfiguration().m_numaNodes, GetGlobalConfiguration().m_coresPerCpu,
-          GetGlobalConfiguration().m_sessionAffinityMode),
-      m_taskAffinity(GetGlobalConfiguration().m_numaNodes, GetGlobalConfiguration().m_coresPerCpu,
-          GetGlobalConfiguration().m_taskAffinityMode),
+      m_sessionAffinity(0, 0, AffinityMode::AFFINITY_INVALID),
+      m_taskAffinity(0, 0, AffinityMode::AFFINITY_INVALID),
       m_softMemoryLimitReached(0),
       m_sessionManager(nullptr),
       m_tableManager(nullptr),
@@ -168,6 +166,10 @@ bool MOTEngine::LoadConfig()
     if (!result) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "System Startup", "Failed to load configuration for the first time");
     } else {
+        if (!GetGlobalConfiguration().m_enableNuma) {
+            MOT_LOG_WARN("NUMA-aware memory allocation is disabled");
+        }
+
         // we must load also MM layer configuration so that max_process_memory initial check will see correct values
         int rc = MemCfgInit();
         if (rc != 0) {
@@ -568,6 +570,9 @@ bool MOTEngine::InitializeConfiguration(const char* configFilePath, int argc, ch
             free(resolvedPath);
         }
     }
+
+    // initialize  global configuration singleton
+    GetGlobalConfiguration().Initialize();
 
     // create manager, and configure it with configuration file loader
     if (!ConfigManager::CreateInstance(argv + 1, argc - 1)) {

@@ -706,12 +706,12 @@ void MOTAdaptor::Init()
         elog(FATAL, "Double attempt to initialize MOT engine, it is already initialized");
     }
 
-    MOT::GetGlobalConfiguration().SetTotalMemoryMb(g_instance.attr.attr_memory.max_process_memory / KILO_BYTE);
-
     m_engine = MOT::MOTEngine::CreateInstanceNoInit(g_instance.attr.attr_common.MOTConfigFileName, 0, nullptr);
     if (m_engine == nullptr) {
         elog(FATAL, "Failed to create MOT engine");
     }
+
+    MOT::GetGlobalConfiguration().SetTotalMemoryMb(g_instance.attr.attr_memory.max_process_memory / KILO_BYTE);
 
     gaussdbConfigLoader = new (std::nothrow) GaussdbConfigLoader();
     if (gaussdbConfigLoader == nullptr) {
