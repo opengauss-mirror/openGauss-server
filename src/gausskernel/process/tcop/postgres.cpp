@@ -3384,10 +3384,11 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
             plength = pq_getmsgint(input_message, 4);
             isNull = (plength == -1);
             /* add null value process for date type */
-            if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
-                    TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+            if (plength == 0 && DB_IS_CMPT(DB_CMPT_A) && 
+                (VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
+                 TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype)) {
                 isNull = true;
+            }
 
             /*
              * Insert into bind values support illegal characters import,
@@ -4063,7 +4064,7 @@ static void exec_bind_message(StringInfo input_message)
             /* add null value process for date type */
             if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
                     TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+                0 == plength && DB_IS_CMPT(DB_CMPT_A))
                 isNull = true;
 
             /*
@@ -10338,9 +10339,10 @@ static void exec_batch_bind_execute(StringInfo input_message)
                 isNull = (plength == -1);
                 /* add null value process for date type */
                 if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
-                        TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                    0 == plength && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+                     TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
+                    plength == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                     isNull = true;
+                }
 
                 /*
                  * Insert into bind values support illegal characters import,
@@ -10788,4 +10790,25 @@ OM_ONLINE_STATE get_om_online_state()
     } else {
         return OM_ONLINE_NODE_REPLACE;
     }
+}
+
+/*
+ * check whether sql_compatibility is valid
+ * sql_compatibility has 4 values: A, B, C, PG
+ */
+bool CheckCompArgs(const char *cmptFmt)
+{
+    /* make sure input is not null */
+    if (cmptFmt == NULL) {
+        return false;
+    }
+
+    if (pg_strcasecmp(cmptFmt, DB_CMPT_OPT_A) == 0 ||
+        pg_strcasecmp(cmptFmt, DB_CMPT_OPT_B) == 0 ||
+        pg_strcasecmp(cmptFmt, DB_CMPT_OPT_C) == 0 ||
+        pg_strcasecmp(cmptFmt, DB_CMPT_OPT_PG) == 0) {
+        return true;
+    }
+
+    return false;
 }

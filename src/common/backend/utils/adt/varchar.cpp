@@ -1482,7 +1482,7 @@ static void vlpad_internal(ScalarVector* parg1, ScalarVector* parg2, ScalarVecto
 
     SET_VARSIZE(ret, ptr_ret - (char*)ret);
 
-    if (VARSIZE_ANY_EXHDR(ret) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+    if (VARSIZE_ANY_EXHDR(ret) == 0 && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
         SET_NULL(pflags_res[idx]);
     } else {
         vec_ret->m_vals[idx] = PointerGetDatum(ret);

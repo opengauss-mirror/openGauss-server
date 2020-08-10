@@ -76,13 +76,13 @@ bool scanint8(const char* str, bool errorOK, int64* result)
         if (errorOK) {
             return false;
         }
-        else if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        else if (DB_IS_CMPT(DB_CMPT_A | DB_CMPT_PG)) {
             ereport(ERROR,
                 (errmodule(MOD_FUNCTION),
                     errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("invalid input syntax for type %s: \"%s\"", "bigint", str)));
         }
-        else if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        else if (DB_IS_CMPT(DB_CMPT_B)) {
             *result = tmp;
             return true;
         }
@@ -112,7 +112,7 @@ bool scanint8(const char* str, bool errorOK, int64* result)
             return false;
         }
         else {
-            /* Empty string will be treated as NULL if sql_compatibility == A_FORMAT,
+            /* Empty string will be treated as NULL if sql_compatibility == DB_CMPT_A,
                 Other wise whitespace will be convert to 0 */
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),

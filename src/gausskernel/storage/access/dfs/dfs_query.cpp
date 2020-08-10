@@ -2452,7 +2452,7 @@ void OrcCheckDataType(TypeName *typName, char *ColName, char *fileType)
         }
     }
 
-    if (DATEOID == TypeOid && C_FORMAT == u_sess->attr.attr_sql.sql_compatibility) {
+    if (DATEOID == TypeOid && DB_IS_CMPT(DB_CMPT_C)) {
         ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_DATA_TYPE),
                         errmsg("Date type is unsupported for hdfs table in TD-format database.")));
     }

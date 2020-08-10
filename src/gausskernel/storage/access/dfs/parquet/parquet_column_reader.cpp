@@ -169,8 +169,8 @@ Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type ph
             char *tmpValue = (char *)baValue.ptr;
             int64_t length = static_cast<int64_t>(baValue.len);
 
-            /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
+            /* Check compatibility and convert '' into null if the db is DB_FMT_A. */
+            if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                 isNull = true;
                 break;
             }
@@ -1092,8 +1092,8 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForChar(uint64
                 auto value = m_values[i];
                 auto length = (int32_t)value.len;
 
-                /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
+                /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
+                if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                     vec->SetNull(offset);
                 } else {
                     char *tmpValue = (char *)value.ptr;
@@ -1200,8 +1200,8 @@ void ParquetColumnReaderImpl<ReaderType>::fillScalarVectorInternalForVarchar(
                 auto value = m_values[i];
                 auto length = (int32_t)value.len;
 
-                /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
+                /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
+                if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                     vec->SetNull(offset);
                 } else {
                     char *tmpValue = (char *)value.ptr;
@@ -1455,8 +1455,8 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                             char *tmpValue = (char *)baValue.ptr;
                             int64_t length = static_cast<int64_t>(baValue.len);
 
-                            /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-                            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
+                            /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
+                            if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                                 tmpValue = NULL;
                             }
 
@@ -1491,8 +1491,8 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                             int64_t length = static_cast<int64_t>(baValue.len);
                             char lastChar = '\0';
 
-                            /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-                            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
+                            /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
+                            if (DB_IS_CMPT(DB_CMPT_A) && length == 0) {
                                 tmpValue = NULL;
                             } else {
                                 lastChar = tmpValue[length];

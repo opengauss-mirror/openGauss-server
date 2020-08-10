@@ -506,8 +506,8 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         funcexpr->refSynOid = refSynOid;
 
         retval = (Node*)funcexpr;
-        /* Return type of to_date function  will be changed from timestamp to date type in C_FORMAT */
-        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT &&
+        /* Return type of to_date function  will be changed from timestamp to date type in DB_CMPT_C */
+        if (DB_IS_CMPT(DB_CMPT_B | DB_CMPT_C) &&
             (funcid == TODATEFUNCOID || funcid == TODATEDEFAULTFUNCOID)) {
             FuncExpr* timestamp_date_fun = makeNode(FuncExpr);
 
@@ -1082,7 +1082,7 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
          * so we should also admit highest type conversion for operations
          * between different type categories
          */
-        if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && !different_category &&
+        if (DB_IS_CMPT(DB_CMPT_C) && !different_category &&
             slot_category[i] != TYPCATEGORY_UNKNOWN) {
             if (current_category == TYPCATEGORY_INVALID) {
                 current_category = slot_category[i];

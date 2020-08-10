@@ -531,7 +531,7 @@ Datum textregexreplace_noopt(PG_FUNCTION_ARGS)
 
     re = RE_compile_and_cache(p, REG_ADVANCED, PG_GET_COLLATION());
     result = replace_text_regexp(s, (void*)re, r, false);
-    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (DB_IS_CMPT(DB_CMPT_A) && VARHDRSZ == VARSIZE(result)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -577,7 +577,7 @@ Datum textregexreplace(PG_FUNCTION_ARGS)
 
     re = RE_compile_and_cache(p, flags.cflags, PG_GET_COLLATION());
     result = replace_text_regexp(s, (void*)re, r, flags.glob);
-    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (DB_IS_CMPT(DB_CMPT_A) && VARHDRSZ == VARSIZE(result)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -941,7 +941,7 @@ static ArrayType* build_regexp_matches_result(regexp_matches_ctx* matchctx)
 /* return value datatype must be text */
 #define RESET_NULL_FLAG(_result)                                                   \
     do {                                                                           \
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) { \
+        if (DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {                                 \
             if ((_result) == ((Datum)0)) {                                         \
                 fcinfo->isnull = true;                                             \
             } else {                                                               \

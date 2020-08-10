@@ -66,9 +66,12 @@ extern const uint32 GRAND_VERSION_NUM;
 #define MEGRE_UPDATE_MULTI (u_sess->utils_cxt.behavior_compat_flags & OPT_MEGRE_UPDATE_MULTI)
 #define CONVERT_STRING_DIGIT_TO_NUMERIC (u_sess->utils_cxt.behavior_compat_flags & OPT_CONVERT_TO_NUMERIC)
 
-#define DBCOMPATIBILITY_A "A"
-#define DBCOMPATIBILITY_B "B"
-#define DBCOMPATIBILITY_C "C"
+#define DB_CMPT_OPT_A "A"
+#define DB_CMPT_OPT_B "B"
+#define DB_CMPT_OPT_C "C"
+#define DB_CMPT_OPT_PG "PG"
+
+extern bool CheckCompArgs(const char *cmptFmt);
 
 /* in tcop/postgres.c */
 extern void ProcessInterrupts(void);

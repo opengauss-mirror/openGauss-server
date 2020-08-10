@@ -1,0 +1,31 @@
+-- pg compatibility case
+drop database if exists pg_type_databse;
+NOTICE:  database "pg_type_databse" does not exist, skipping
+create database pg_type_databse dbcompatibility 'PG';
+
+\c pg_type_databse
+create table d_format_test(a varchar(10) not null);
+insert into d_format_test values('');
+
+
+
+-- concat test
+select concat(null,'','','') is null;
+ ?column?
+----------
+ f
+(1 row)
+
+
+select concat('','') is null;
+ ?column?
+----------
+ f
+(1 row)
+
+
+select ''::int;
+ERROR:  invalid input syntax for integer: ""
+LINE 1: select ''::int;
+               ^
+CONTEXT:  referenced column: int4

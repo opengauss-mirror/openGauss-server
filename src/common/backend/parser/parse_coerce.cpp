@@ -1050,7 +1050,7 @@ int parser_coercion_errposition(ParseState* pstate, int coerce_location, Node* i
 }
 
 /* choose_specific_expr_type
- * Choose case when and coalesce return value type in C_FORMAT.
+ * Choose case when and coalesce return value type in DB_FMT_C.
  */
 static Oid choose_specific_expr_type(ParseState* pstate, List* exprs, const char* context)
 {
@@ -1327,7 +1327,7 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
         }
     }
 
-    if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && context != NULL &&
+    if (DB_IS_CMPT(DB_CMPT_C) && context != NULL &&
         (0 == strncmp(context, "CASE", sizeof("CASE")) || 0 == strncmp(context, "COALESCE", sizeof("COALESCE")))) {
         /* To TD format, we need handle numeric and string mix situation*/
         ptype = choose_specific_expr_type(pstate, exprs, context);

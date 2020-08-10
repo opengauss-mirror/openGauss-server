@@ -221,7 +221,7 @@ Datum convertToDatumT(orc::ColumnVectorBatch *primitiveBatch, uint64 rowId, int3
             int64_t length = static_cast<orc::StringVectorBatch *>(primitiveBatch)->length[rowId];
 
             /* Check compatibility and convert '' into null if the db is ORA_FORMAT. */
-            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
+            if (DB_IS_CMPT(DB_CMPT_A) && length == 0) {
                 isNull = true;
                 break;
             }
@@ -251,7 +251,7 @@ Datum convertToDatumT(orc::ColumnVectorBatch *primitiveBatch, uint64 rowId, int3
             int64_t length = static_cast<orc::StringVectorBatch *>(primitiveBatch)->length[rowId];
 
             /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
+            if (DB_IS_CMPT(DB_CMPT_A) && length == 0) {
                 isNull = true;
                 break;
             }
@@ -281,7 +281,7 @@ Datum convertToDatumT(orc::ColumnVectorBatch *primitiveBatch, uint64 rowId, int3
             int64_t length = static_cast<orc::StringVectorBatch *>(primitiveBatch)->length[rowId];
 
             /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && length == 0) {
+            if (DB_IS_CMPT(DB_CMPT_A) && length == 0) {
                 isNull = true;
                 break;
             }

@@ -458,7 +458,7 @@ Datum oidvectortypes(PG_FUNCTION_ARGS)
         left -= slen;
     }
 
-    if ((!strcmp(result, "")) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+    if ((!strcmp(result, "")) && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
         pfree_ext(result);
         PG_RETURN_NULL();
     }

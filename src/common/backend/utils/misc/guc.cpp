@@ -788,9 +788,11 @@ static const struct config_enum_entry xmloption_options[] = {
     {"content", XMLOPTION_CONTENT, false}, {"document", XMLOPTION_DOCUMENT, false}, {NULL, 0, false}};
 
 /* change the char * sql_compatibility to enum */
-static const struct config_enum_entry adapt_database[] = {{DBCOMPATIBILITY_A, A_FORMAT, false},
-    {DBCOMPATIBILITY_B, B_FORMAT, false},
-    {DBCOMPATIBILITY_C, C_FORMAT, false},
+static const struct config_enum_entry adapt_database[] = {
+    {DB_CMPT_OPT_A,       DB_CMPT_A,       false},
+    {DB_CMPT_OPT_B,       DB_CMPT_B,       false},
+    {DB_CMPT_OPT_C,       DB_CMPT_C,       false},
+    {DB_CMPT_OPT_PG, DB_CMPT_PG, false},
     {NULL, 0, false}};
 
 /* change the char * enable_performance_data to enum */
@@ -11426,7 +11428,7 @@ static void init_configure_names_enum()
                 GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE
             },
             &u_sess->attr.attr_sql.sql_compatibility,
-            A_FORMAT,
+            DB_CMPT_A,
             adapt_database,
             NULL,
             NULL,

@@ -130,6 +130,7 @@ typedef enum { OM_ONLINE_EXPANSION, OM_ONLINE_NODE_REPLACE } OM_ONLINE_STATE;
 extern void reload_configfile(void);
 extern void reload_online_pooler(void);
 extern OM_ONLINE_STATE get_om_online_state(void);
+extern bool CheckCompArgs(const char *cmptFmt);
 
 /* ----------------------------------------------------------------
  *				Section 1:	variable-length datatypes (TOAST support)
@@ -220,7 +221,15 @@ typedef struct {
 } varattrib_1b_e;
 
 /* Type of database; increase for sql compatibility */
-typedef enum { A_FORMAT, B_FORMAT, C_FORMAT } DatabaseType;
+typedef enum { 
+    DB_CMPT_A = 0x0001, 
+    DB_CMPT_B = 0x0002,
+    DB_CMPT_C = 0x0004,
+    DB_CMPT_PG = 0x0008  /* be compatible with Postgre SQL syntax */
+} DB_Compatibility;
+
+#define IS_CMPT(cmpt, flag) (((uint32)cmpt & (uint32)(flag)) != 0)
+#define DB_IS_CMPT(flag) IS_CMPT(u_sess->attr.attr_sql.sql_compatibility, (flag))
 
 typedef enum { EXPLAIN_NORMAL, EXPLAIN_PRETTY, EXPLAIN_SUMMARY, EXPLAIN_RUN } ExplainStyle;
 

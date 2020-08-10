@@ -203,7 +203,7 @@ Datum lpad(PG_FUNCTION_ARGS)
 
     SET_VARSIZE(ret, ptr_ret - (char*)ret);
 
-    if (VARSIZE_ANY_EXHDR(ret) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+    if (VARSIZE_ANY_EXHDR(ret) == 0 && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);
@@ -309,7 +309,7 @@ Datum rpad(PG_FUNCTION_ARGS)
 
     SET_VARSIZE(ret, ptr_ret - (char*)ret);
 
-    if (VARSIZE_ANY_EXHDR(ret) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+    if (VARSIZE_ANY_EXHDR(ret) == 0 && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);
@@ -337,7 +337,7 @@ Datum btrim(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), VARDATA_ANY(set), VARSIZE_ANY_EXHDR(set), true, true);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);
@@ -355,7 +355,7 @@ Datum btrim1(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, true, true);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);
@@ -601,7 +601,7 @@ Datum ltrim(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), VARDATA_ANY(set), VARSIZE_ANY_EXHDR(set), true, false);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);
@@ -619,7 +619,7 @@ Datum ltrim1(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, true, false);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);
@@ -647,7 +647,7 @@ Datum rtrim(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), VARDATA_ANY(set), VARSIZE_ANY_EXHDR(set), false, true);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);
@@ -665,7 +665,7 @@ Datum rtrim1(PG_FUNCTION_ARGS)
     text* ret = NULL;
 
     ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, false, true);
-    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((ret == NULL || VARSIZE_ANY_EXHDR(ret) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret);
@@ -778,7 +778,7 @@ Datum translate(PG_FUNCTION_ARGS)
         m -= source_len;
     }
 
-    if (retlen == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (retlen == 0 && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         SET_VARSIZE(result, retlen + VARHDRSZ);
@@ -991,7 +991,7 @@ Datum repeat(PG_FUNCTION_ARGS)
         tlen -= slen;
     }
 
-    if (VARSIZE_ANY_EXHDR(result) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+    if (VARSIZE_ANY_EXHDR(result) == 0 && DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
         PG_RETURN_NULL();
     } else
         PG_RETURN_TEXT_P(result);
