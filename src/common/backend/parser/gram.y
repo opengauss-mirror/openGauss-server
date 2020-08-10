@@ -185,7 +185,6 @@ static void check_outarg_info(const bool *have_assigend,
 				const char *argmodes,const int proargnum);
 bool IsValidIdent(char *input);
 bool IsValidGroupname(const char *input);
-static bool checkCompArgs(const char *compFormat);
 static bool checkNlssortArgs(const char *argname);
 static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yyscan_t yyscanner);
 
@@ -11277,7 +11276,7 @@ createdb_opt_item:
 				}
 			| DBCOMPATIBILITY_P opt_equal Sconst
 				{
-					if (checkCompArgs($3) == false)
+					if (CheckCompArgs($3) == false)
 					{
 						ereport(ERROR,
 							(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -14891,7 +14890,7 @@ ConstDatetime:
 				}
 			| DATE_P
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+					if (DB_IS_CMPT(DB_CMPT_A))
 					{
 						$$ = SystemTypeName("timestamp");
 						$$->typmods = list_make1(makeIntConst(0,-1));
@@ -16223,7 +16222,7 @@ func_expr_common_subexpr:
 				}
 			| TIMESTAMPDIFF '(' timestamp_arg_list ')'
 				{
-					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					if (DB_IS_CMPT(DB_CMPT_B))
 					{
 						FuncCall *n = makeNode(FuncCall);
 						n->funcname = SystemFuncName("timestamp_diff");
@@ -18248,7 +18247,7 @@ makeStringConst(char *str, int location)
 	A_Const *n = makeNode(A_Const);
 
 
-	if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+	if (DB_IS_CMPT(DB_CMPT_A))
 	{
 		if (NULL == str || 0 == strlen(str))
 		{
@@ -19488,26 +19487,6 @@ IsValidGroupname(const char *input)
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				errmsg("node group name is not allowed to contain multibyte characters")));
 		}	
-	}
-	return true;
-}
-
-/* 
- * check whether sql_compatibility is valid
- * sql_compatibility has 3 values: A, B, C.
- */
-static bool
-checkCompArgs(const char *compFormat)
-{
-	/* make sure input is not null */
-	if (compFormat == NULL)
-	{
-		return false;
-	}
-	if (pg_strncasecmp(compFormat, "A", sizeof("A")) != 0 && pg_strncasecmp(compFormat, "B", sizeof("B")) != 0 &&
-	   pg_strncasecmp(compFormat, "C", sizeof("C")) != 0)
-	{
-		return false;
 	}
 	return true;
 }

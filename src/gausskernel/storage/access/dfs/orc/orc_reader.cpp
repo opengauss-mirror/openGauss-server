@@ -2011,7 +2011,7 @@ void OrcColumnReaderImpl<fieldKind>::predicateFilter(uint64_t numValues, bool *i
                     char lastChar = '\0';
                     char *tmpValue = data[i];
                     int64_t length = lengths[i];
-                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && 0 == length) {
+                    if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                         tmpValue = NULL;
                     } else {
                         lastChar = tmpValue[length];
@@ -2259,8 +2259,8 @@ void OrcColumnReaderImpl<orc::CHAR>::fillScalarVectorInternal(uint64_t numValues
             } else {
                 int64_t length = lengths[i];
 
-                /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-                if (A_FORMAT == u_sess->attr.attr_sql.sql_compatibility && 0 == length) {
+                /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
+                if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                     vec->SetNull(offset);
                 } else {
                     char *tmpValue = values[i];
@@ -2371,8 +2371,8 @@ void OrcColumnReaderImpl<orc::VARCHAR>::fillScalarVectorInternal(uint64_t numVal
             } else {
                 int64_t length = lengths[i];
 
-                /* Check compatibility and convert '' into null if the db is A_FORMAT. */
-                if (A_FORMAT == u_sess->attr.attr_sql.sql_compatibility && 0 == length) {
+                /* Check compatibility and convert '' into null if the db is DB_CMPT_A. */
+                if (length == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                     vec->SetNull(offset);
                 } else {
                     char *tmpValue = values[i];

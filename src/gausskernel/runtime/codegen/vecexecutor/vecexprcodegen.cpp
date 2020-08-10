@@ -2869,7 +2869,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  * then we have to set 'isNull' flag to True,
                  * and then jump to the be_null block.
                  */
-                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                if (DB_IS_CMPT(DB_CMPT_A)) {
                     res1 = inner_builder.CreateCall(func_substr, {inargs[0], inargs[1], inargs[2], isNull});
                     llvm::Value* res_flag = inner_builder.CreateAlignedLoad(isNull, 1, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");
@@ -2892,7 +2892,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  * then we have to set 'isNull' flag to True,
                  * and then jump to the be_null block.
                  */
-                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                if (DB_IS_CMPT(DB_CMPT_A)) {
                     res1 = inner_builder.CreateCall(func_rtrim1, {inargs[0], isNull});
                     llvm::Value* res_flag = inner_builder.CreateAlignedLoad(isNull, 1, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");
@@ -2914,7 +2914,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  * then we have to set 'isNull' flag to True,
                  * and then jump to the be_null block.
                  */
-                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                if (DB_IS_CMPT(DB_CMPT_A)) {
                     res1 = inner_builder.CreateCall(func_btrim1, {inargs[0], isNull});
                     llvm::Value* res_flag = inner_builder.CreateAlignedLoad(isNull, 1, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");

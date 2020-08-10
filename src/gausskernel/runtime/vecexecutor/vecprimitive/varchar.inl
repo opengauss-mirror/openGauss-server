@@ -321,7 +321,7 @@ inline static Datum
 null_return(bool *is_null)
 {
 	text *result	= NULL;
-	if(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+	if(DB_IS_CMPT(DB_CMPT_A))
 	{
 		*is_null = true;
 		return (Datum)0;

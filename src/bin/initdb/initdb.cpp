@@ -1370,13 +1370,14 @@ static void bootstrap_template1(void)
      * If we do not assign compatibility, A is default.
      * Invalid input is avoided.
      */
-    if (pg_strcasecmp(dbcompatibility, DBCOMPATIBILITY_A) == 0 ||
-        pg_strcasecmp(dbcompatibility, DBCOMPATIBILITY_C) == 0 ||
-        pg_strcasecmp(dbcompatibility, DBCOMPATIBILITY_B) == 0) {
+    if (pg_strcasecmp(dbcompatibility, DB_CMPT_OPT_A) == 0 ||
+        pg_strcasecmp(dbcompatibility, DB_CMPT_OPT_C) == 0 ||
+        pg_strcasecmp(dbcompatibility, DB_CMPT_OPT_B) == 0 ||
+        pg_strcasecmp(dbcompatibility, DB_CMPT_OPT_PG) == 0) {
         bki_lines = replace_token(bki_lines, "DB_COMPATIBILITY", dbcompatibility);
     } else if (strlen(dbcompatibility) == 0) {
         /* If we do not specify database compatibility, set A defaultly */
-        bki_lines = replace_token(bki_lines, "DB_COMPATIBILITY", DBCOMPATIBILITY_A);
+        bki_lines = replace_token(bki_lines, "DB_COMPATIBILITY", DB_CMPT_OPT_A);
     } else {
         write_stderr(_("dbcompatibility \"%s\" is invalid\n"), dbcompatibility);
         exit_nicely();

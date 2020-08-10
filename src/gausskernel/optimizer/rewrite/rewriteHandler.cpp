@@ -950,7 +950,7 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
      * value to isExplicte args to true, to let bpchar know one explict cast has been added to
      * this default value already.
      */
-    if (u_sess->attr.attr_sql.td_compatible_truncation && u_sess->attr.attr_sql.sql_compatibility == C_FORMAT &&
+    if (u_sess->attr.attr_sql.td_compatible_truncation && DB_IS_CMPT(DB_CMPT_C) &&
         isInsertCmd && (atttype == BPCHAROID || atttype == VARCHAROID) && expr != NULL) {
         AssertEreport(IsA(expr, FuncExpr), MOD_OPT, "");
 

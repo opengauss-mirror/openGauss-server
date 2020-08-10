@@ -433,7 +433,7 @@ void CommonReader::parserFields(char **raw_fields, int fields)
              * 1. A db SQL compatibility requires; or
              * 2. This column donesn't accept any empty string.
              */
-            if ((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT || !m_accept_empty_str[i]) &&
+            if ((DB_IS_CMPT(DB_CMPT_A) || !m_accept_empty_str[i]) &&
                 (field_str != NULL && field_str[0] == '\0')) {
                 /* for any type, '' = null */
                 field_str = NULL;

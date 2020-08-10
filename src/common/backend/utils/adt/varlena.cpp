@@ -2944,8 +2944,7 @@ Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
 
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT ||
-            u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        if (DB_IS_CMPT(DB_CMPT_A | DB_CMPT_B)) {
             PG_RETURN_NULL();
         } else {
             result = PG_STR_GET_BYTEA("");
@@ -2958,7 +2957,7 @@ Datum bytea_substr_orclcompat(PG_FUNCTION_ARGS)
      */
     result = bytea_substring_orclcompat(str, start, length, false);
 
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_BYTEA_P(result);
@@ -2977,7 +2976,7 @@ Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
 
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (DB_IS_CMPT(DB_CMPT_A)) {
             PG_RETURN_NULL();
         } else {
             result = PG_STR_GET_BYTEA("");
@@ -2990,7 +2989,7 @@ Datum bytea_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
      */
     result = bytea_substring_orclcompat(str, start, -1, true);
 
-    if (( result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (( result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_BYTEA_P(result);
@@ -4020,7 +4019,7 @@ Datum replace_text(PG_FUNCTION_ARGS)
     ret_text = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if (VARHDRSZ == VARSIZE(ret_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (VARHDRSZ == VARSIZE(ret_text) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(ret_text);
@@ -4307,7 +4306,7 @@ Datum split_text(PG_FUNCTION_ARGS)
     /* return empty string for empty input string */
     if (inputstring_len < 1) {
         text_position_cleanup(&state);
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+        if (DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
             PG_RETURN_NULL();
         }
         PG_RETURN_TEXT_P(cstring_to_text(""));
@@ -4321,7 +4320,7 @@ Datum split_text(PG_FUNCTION_ARGS)
             PG_RETURN_TEXT_P(inputstring);
         }
         
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {
+        if (DB_IS_CMPT(DB_CMPT_A) && !RETURN_NS) {
             PG_RETURN_NULL();
         }
         
@@ -4340,7 +4339,7 @@ Datum split_text(PG_FUNCTION_ARGS)
             PG_RETURN_TEXT_P(inputstring);
         }
         
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (DB_IS_CMPT(DB_CMPT_A)) {
             PG_RETURN_NULL();
         }
         
@@ -4368,7 +4367,7 @@ Datum split_text(PG_FUNCTION_ARGS)
         result_text = text_substring(PointerGetDatum(inputstring), start_posn, end_posn - start_posn, false);
     }
 
-    if (TEXTISORANULL(result_text) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (TEXTISORANULL(result_text) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     }
     
@@ -4566,7 +4565,7 @@ Datum array_to_text(PG_FUNCTION_ARGS)
     result = array_to_text_internal(fcinfo, v, fldsep, NULL);
 
     /* To a, empty string need return NULL. */
-    if (VARSIZE_ANY_EXHDR(result) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (VARSIZE_ANY_EXHDR(result) == 0 && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -4603,7 +4602,7 @@ Datum array_to_text_null(PG_FUNCTION_ARGS)
     result = array_to_text_internal(fcinfo, v, fldsep, null_string);
 
     /* To a db, empty string need return NULL. */
-    if (VARSIZE_ANY_EXHDR(result) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (VARSIZE_ANY_EXHDR(result) == 0 && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -5700,7 +5699,7 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
             }
             getTypeOutputInfo(val_type, &typ_output, &typ_is_varlena);
             appendStringInfoString(&str, OidOutputFunctionCall(typ_output, value));
-        } else if (PG_ARGISNULL(i) && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && !is_concat_ws) {
+        } else if (PG_ARGISNULL(i) && DB_IS_CMPT(DB_CMPT_B) && !is_concat_ws) {
             pfree_ext(str.data);
             fcinfo->isnull = true;
             return NULL;
@@ -5711,8 +5710,8 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
     pfree_ext(str.data);
 
     if ((result == NULL ||
-            (VARSIZE_ANY_EXHDR(result) == 0 && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)) &&
-        (CONCAT_VARIADIC || u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)) {
+            (VARSIZE_ANY_EXHDR(result) == 0 && !DB_IS_CMPT(DB_CMPT_B | DB_CMPT_PG))) &&
+        (CONCAT_VARIADIC || DB_IS_CMPT(DB_CMPT_A))) {
         fcinfo->isnull = true;
         return NULL;
     } else {
@@ -5776,7 +5775,7 @@ Datum text_left(PG_FUNCTION_ARGS)
     }
 
     rlen = pg_mbcharcliplen(p, len, part_off);
-    if (rlen == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if (rlen == 0 && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(cstring_to_text_with_len(p, rlen));
@@ -5809,7 +5808,7 @@ Datum text_right(PG_FUNCTION_ARGS)
         }
     }
     off = pg_mbcharcliplen(p, len, part_off);
-    if ((len - off) == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((len - off) == 0 && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(cstring_to_text_with_len(p + off, len - off));
@@ -6106,7 +6105,7 @@ Datum text_format(PG_FUNCTION_ARGS)
     result = cstring_to_text_with_len(str.data, str.len);
     pfree_ext(str.data);
 
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     } else {
         PG_RETURN_TEXT_P(result);
@@ -6479,7 +6478,7 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (total == 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (DB_IS_CMPT(DB_CMPT_A)) {
             PG_RETURN_NULL();
         } else {
             result = cstring_to_text("");
@@ -6488,7 +6487,7 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     }
 
     result = get_substring_really(str, start, length, false);
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     }
     PG_RETURN_TEXT_P(result);
@@ -6504,7 +6503,7 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((total == 0) || (start > total) || (start + total < 0)) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (DB_IS_CMPT(DB_CMPT_A)) {
             PG_RETURN_NULL();
         } else {
             result = cstring_to_text("");
@@ -6513,7 +6512,7 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     }
 
     result = get_substring_really(str, start, -1, true);
-    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+    if ((result == NULL || VARSIZE_ANY_EXHDR(result) == 0) && DB_IS_CMPT(DB_CMPT_A)) {
         PG_RETURN_NULL();
     }
     PG_RETURN_TEXT_P(result);

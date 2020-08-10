@@ -178,7 +178,7 @@ typedef struct knl_session_attr_sql {
     int backslash_quote;
     int constraint_exclusion;
     int rewrite_rule;
-    int sql_compatibility;
+    int sql_compatibility;  /* reference to DB_Compatibility */
     int guc_explain_perf_mode;
     int skew_strategy_store;
     int codegen_strategy;

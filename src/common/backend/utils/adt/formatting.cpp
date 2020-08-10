@@ -6265,7 +6265,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                             }
                         }
                         if (!CORRECT_TO_NUMBER) {
-                            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && *Np->inout_p != ',') {
+                            if (DB_IS_CMPT(DB_CMPT_A) && *Np->inout_p != ',') {
                                 ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid data.")));
                             }
                         } else if (*Np->inout_p != ',') {

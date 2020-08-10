@@ -453,7 +453,7 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
             /* add null value process for date type */
             if ((VARCHAROID == ptype || TIMESTAMPOID == ptype || TIMESTAMPTZOID == ptype || TIMEOID == ptype ||
                     TIMETZOID == ptype || INTERVALOID == ptype || SMALLDATETIMEOID == ptype) &&
-                plength == 0 && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                plength == 0 && DB_IS_CMPT(DB_CMPT_A)) {
                 isNull = true;
             }
 

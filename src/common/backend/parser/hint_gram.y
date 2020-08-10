@@ -404,7 +404,7 @@ makeStringValue(char *str)
 {
 	Value	   *val = makeNode(Value);
 
-	if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+	if (DB_IS_CMPT(DB_CMPT_A))
 	{
 		if (NULL == str || 0 == strlen(str))
 		{

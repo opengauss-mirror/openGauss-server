@@ -47,14 +47,14 @@ int32 pg_atoi(char* s, int size, int c)
     if (s == NULL) {
         ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("NULL pointer")));
     }
-    if ((*s == 0) && (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)) {
+    if ((*s == 0) && DB_IS_CMPT(DB_CMPT_A | DB_CMPT_PG)) {
         ereport(ERROR, (errmodule(MOD_FUNCTION),
             errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
             errmsg("invalid input syntax for integer: \"%s\"", s)));
     }
 
     /* In b compatibility, empty str is treated as 0 */
-    if ((*s == 0) && (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)) {
+    if ((*s == 0) && DB_IS_CMPT(DB_CMPT_B)) {
         long l = 0;
         return (int32)l;
     }
@@ -64,16 +64,15 @@ int32 pg_atoi(char* s, int size, int c)
 
     /* We made no progress parsing the string, so bail out */
     if (s == badp) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (DB_IS_CMPT(DB_CMPT_A | DB_CMPT_PG)) {
             ereport(ERROR,
                 (errmodule(MOD_FUNCTION),
                     errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("invalid input syntax for integer: \"%s\"", s)));
         }
         /* string is treated as 0 in b compatibility */
-        if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
-            long l = 0;
-            return (int32)l;
+        if (DB_IS_CMPT(DB_CMPT_B)) {
+            return (int32)0;
         }
     }
 
@@ -116,7 +115,7 @@ int32 pg_atoi(char* s, int size, int c)
         badp++;
     }
 
-    if (*badp && *badp != c && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+    if (*badp && *badp != c && !DB_IS_CMPT(DB_CMPT_B)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
             errmsg("invalid input syntax for integer: \"%s\"", s)));
     }
@@ -155,10 +154,10 @@ int16 pg_strtoint16(const char* s)
 
     /* require at least one digit */
     if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (DB_IS_CMPT(DB_CMPT_A | DB_CMPT_PG)) {
             goto invalid_syntax;
-        }
-        if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        } 
+        if (DB_IS_CMPT(DB_CMPT_B)) {
             return tmp;
         }
     }
@@ -176,7 +175,7 @@ int16 pg_strtoint16(const char* s)
         ptr++;
     }
 
-    if (unlikely(*ptr != '\0') && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+    if (unlikely(*ptr != '\0') && !DB_IS_CMPT(DB_CMPT_B)) {
         goto invalid_syntax;
     }
 
@@ -231,10 +230,10 @@ int32 pg_strtoint32(const char* s)
 
     /* require at least one digit */
     if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (DB_IS_CMPT(DB_CMPT_A | DB_CMPT_PG)) {
             goto invalid_syntax;
         }
-        else if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        else if (DB_IS_CMPT(DB_CMPT_B)) {
             return tmp;
         }
     }
@@ -252,7 +251,7 @@ int32 pg_strtoint32(const char* s)
         ptr++;
     }
 
-    if (unlikely(*ptr != '\0') && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+    if (unlikely(*ptr != '\0') && !DB_IS_CMPT(DB_CMPT_B)) {
         goto invalid_syntax;
     }
     if (!neg) {

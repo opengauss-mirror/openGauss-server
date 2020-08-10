@@ -804,7 +804,7 @@ bool IsTypeSupportedByORCRelation(_in_ Oid typeOid)
         TIMETZOID,
         SMALLDATETIMEOID,
         CASHOID};
-    if (DATEOID == typeOid && C_FORMAT == u_sess->attr.attr_sql.sql_compatibility) {
+    if (typeOid == DATEOID && DB_IS_CMPT(DB_CMPT_C)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmodule(MOD_HDFS),

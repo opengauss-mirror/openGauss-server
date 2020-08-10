@@ -264,8 +264,8 @@ Datum numeric_in(PG_FUNCTION_ARGS)
         cp++;
     }
 
-    /* the first parameter is null, we should convert to 0 if u_sess->attr.attr_sql.sql_compatibility == C_FORMAT */
-    if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && *cp == '\0') {
+    /* the first parameter is null, we should convert to 0 if u_sess->attr.attr_sql.sql_compatibility is DB_CMPT_C */
+    if (DB_IS_CMPT(DB_CMPT_C) && *cp == '\0') {
         NumericVar value;
         init_var(&value);
 
@@ -3952,7 +3952,7 @@ static const char* set_var_from_str(const char* str, const char* cp, NumericVar*
         cp++;
     }
 
-    if (!isdigit((unsigned char)*cp) && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+    if (!isdigit((unsigned char)*cp) && DB_IS_CMPT(DB_CMPT_B)) {
         char* cp = (char*)palloc0(sizeof(char));
         return cp;
     }

@@ -192,7 +192,7 @@ Query* parse_sub_analyze(Node* parseTree, ParseState* parentParseState, CommonTa
     pstate->p_parent_cte = parentCTE;
     pstate->p_locked_from_parent = locked_from_parent;
     pstate->p_resolve_unknowns = resolve_unknowns;
-    if (u_sess->attr.attr_sql.td_compatible_truncation && u_sess->attr.attr_sql.sql_compatibility == C_FORMAT)
+    if (u_sess->attr.attr_sql.td_compatible_truncation && DB_IS_CMPT(DB_CMPT_C))
         set_subquery_is_under_insert(pstate); /* Set p_is_in_insert for parse state. */
 
     query = transformStmt(pstate, parseTree);
@@ -1221,7 +1221,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
          * If td_compatible_truncation equal true and no foreign table found,
          * the auto truncation funciton should be enabled.
          */
-        if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && pstate->p_target_relation != NULL &&
+        if (DB_IS_CMPT(DB_CMPT_C) && pstate->p_target_relation != NULL &&
             !RelationIsForeignTable(pstate->p_target_relation)) {
             if (u_sess->attr.attr_sql.td_compatible_truncation) {
                 pstate->p_is_td_compatible_truncation = true;
@@ -1296,7 +1296,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
              * If td_compatible_truncation equal true and no foreign table found,
              * the auto truncation funciton should be enabled.
              */
-            if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && pstate->p_target_relation != NULL &&
+            if (DB_IS_CMPT(DB_CMPT_C) && pstate->p_target_relation != NULL &&
                 !RelationIsForeignTable(pstate->p_target_relation)) {
                 if (u_sess->attr.attr_sql.td_compatible_truncation) {
                     pstate->p_is_td_compatible_truncation = true;
@@ -1398,7 +1398,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
          * If td_compatible_truncation equal true and no foreign table found,
          * the auto truncation funciton should be enabled.
          */
-        if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && pstate->p_target_relation != NULL &&
+        if (DB_IS_CMPT(DB_CMPT_C) && pstate->p_target_relation != NULL &&
             !RelationIsForeignTable(pstate->p_target_relation)) {
             if (u_sess->attr.attr_sql.td_compatible_truncation) {
                 pstate->p_is_td_compatible_truncation = true;
@@ -1737,7 +1737,7 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
      * If query is under one insert statement and include a foreign table,
      * then set top level parsestate p_is_foreignTbl_exist to true.
      */
-    if (u_sess->attr.attr_sql.td_compatible_truncation && u_sess->attr.attr_sql.sql_compatibility == C_FORMAT &&
+    if (u_sess->attr.attr_sql.td_compatible_truncation && DB_IS_CMPT(DB_CMPT_C) &&
         pstate->p_is_in_insert && checkForeignTableExist(pstate->p_rtable))
         set_ancestor_ps_contain_foreigntbl(pstate);
 
