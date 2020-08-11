@@ -1356,4 +1356,42 @@ void writeTupleDatum(TupleTableSlot* slot, int tuple_colid, Datum datum)
         slot->tts_values[tuple_colid],
         slot->tts_isnull[tuple_colid]);
 }
+
+Datum SelectSubQueryResult(int subQueryIndex)
+{
+    JitExec::JitContext* jitContext = u_sess->mot_cxt.jit_context;
+    return readTupleDatum(jitContext->m_subQueryData[subQueryIndex].m_slot, 0, 0);
+}
+
+void CopyAggregateToSubQueryResult(int subQueryIndex)
+{
+    MOT_LOG_DEBUG("Copying aggregate datum to sub-query %d slot", subQueryIndex);
+    JitExec::JitContext* jitContext = u_sess->mot_cxt.jit_context;
+    writeTupleDatum(jitContext->m_subQueryData[subQueryIndex].m_slot, 0, jitContext->m_aggValue);
+}
+
+TupleTableSlot* GetSubQuerySlot(int subQueryIndex)
+{
+    return u_sess->mot_cxt.jit_context->m_subQueryData[subQueryIndex].m_slot;
+}
+
+MOT::Table* GetSubQueryTable(int subQueryIndex)
+{
+    return u_sess->mot_cxt.jit_context->m_subQueryData[subQueryIndex].m_table;
+}
+
+MOT::Index* GetSubQueryIndex(int subQueryIndex)
+{
+    return u_sess->mot_cxt.jit_context->m_subQueryData[subQueryIndex].m_index;
+}
+
+MOT::Key* GetSubQuerySearchKey(int subQueryIndex)
+{
+    return u_sess->mot_cxt.jit_context->m_subQueryData[subQueryIndex].m_searchKey;
+}
+
+MOT::Key* GetSubQueryEndIteratorKey(int subQueryIndex)
+{
+    return u_sess->mot_cxt.jit_context->m_subQueryData[subQueryIndex].m_endIteratorKey;
+}
 }  // extern "C"

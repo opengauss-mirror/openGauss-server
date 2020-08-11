@@ -28,6 +28,7 @@
 #include "utils/memutils.h"
 #include "jit_statistics.h"
 #include "debug_utils.h"
+#include "mm_global_api.h"
 
 namespace JitExec {
 DECLARE_LOGGER(JitSource, JitExec);
@@ -191,10 +192,14 @@ static char* CloneQueryString(const char* queryString)
 {
     char* newQueryString = NULL;
     if (queryString != nullptr) {
-        MemoryContext oldContext = CurrentMemoryContext;
-        CurrentMemoryContext = g_instance.instance_context;
-        newQueryString = pstrdup(queryString);
-        CurrentMemoryContext = oldContext;
+        size_t len = strlen(queryString);
+        if (len > 0) {
+            newQueryString = (char*)MOT::MemGlobalAlloc(len + 1);
+            if (newQueryString != nullptr) {
+                errno_t erc = strcpy_s(newQueryString, len + 1, queryString);
+                securec_check(erc, "\0", "\0");
+            }
+        }
     }
     return newQueryString;
 }
@@ -202,10 +207,7 @@ static char* CloneQueryString(const char* queryString)
 static void FreeQueryString(char* queryString)
 {
     if (queryString != nullptr) {
-        MemoryContext oldContext = CurrentMemoryContext;
-        CurrentMemoryContext = g_instance.instance_context;
-        pfree(queryString);
-        CurrentMemoryContext = oldContext;
+        MOT::MemGlobalFree(queryString);
     }
 }
 
@@ -224,11 +226,7 @@ static char* ReallocQueryString(char* oldQueryString, const char* newQueryString
                 strncpy_s(oldQueryString, oldLength, newQueryString, newLength + 1);  // copy terminating null too
             securec_check(erc, "\0", "\0");
         } else {
-            MemoryContext oldContext = CurrentMemoryContext;
-            CurrentMemoryContext = g_instance.instance_context;
-            pfree(oldQueryString);
-            oldQueryString = pstrdup(newQueryString);
-            CurrentMemoryContext = oldContext;
+            newQueryString = (char*)MOT::MemGlobalRealloc(oldQueryString, newLength, MOT::MEM_REALLOC_COPY_ZERO);
         }
     }
     return oldQueryString;
@@ -351,6 +349,7 @@ static void JitSourcePurgeContextList(JitSource* jitSource, uint64_t relationId)
 
 static void RemoveJitSourceContextImpl(JitSource* jitSource, JitContext* jitContext)
 {
+    MOT_LOG_TRACE("Removing JIT context %p from source %p", jitContext, jitSource);
     JitContext* prev = nullptr;
     JitContext* curr = jitSource->m_contextList;
     while ((curr != nullptr) && (jitContext != curr)) {
@@ -358,12 +357,15 @@ static void RemoveJitSourceContextImpl(JitSource* jitSource, JitContext* jitCont
         curr = curr->m_nextInSource;
     }
     if (curr != nullptr) {
+        MOT_LOG_TRACE("JIT context %p found in source %p, now removing", jitContext, jitSource);
         if (prev != nullptr) {
             prev->m_nextInSource = curr->m_nextInSource;
         } else {  // curr is head
             MOT_ASSERT(curr == jitSource->m_contextList);
             jitSource->m_contextList = curr->m_nextInSource;
         }
+    } else {
+        MOT_LOG_WARN("Cannot remove JIT context %p from source %p: context not found", jitContext, jitSource);
     }
 }
 

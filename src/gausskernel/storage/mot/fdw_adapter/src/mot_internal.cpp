@@ -101,6 +101,9 @@ DECLARE_LOGGER(InternalExecutor, FDW)
 /** @brief on_proc_exit() callback for cleaning up current thread - only when thread pool is ENABLED. */
 static void MOTCleanupThread(int status, Datum ptr);
 
+/** @brief Helper for cleaning up all JIT context objects stored in all CachedPlanSource of the current session. */
+static void DestroySessionJitContexts();
+
 extern void MOTOnThreadShutdown();
 
 // in a thread-pooled environment we need to ensure thread-locals are initialized properly
@@ -211,6 +214,8 @@ static void SessionCleanup(void* key)
     if (sessionId != INVALID_SESSION_ID) {
         MOT_LOG_WARN("Encountered unclosed session %u (missing call to DestroyTxn()?)", (unsigned)sessionId);
         ClearSessionDetails(sessionId);
+        MOT_LOG_DEBUG("SessionCleanup(): Calling DestroySessionJitContext()");
+        DestroySessionJitContexts();
         if (MOTAdaptor::m_engine) {
             MOT::SessionContext* sessionContext = MOT::GetSessionManager()->GetSessionContext(sessionId);
             if (sessionContext != nullptr) {
@@ -925,6 +930,25 @@ MOT::TxnManager* MOTAdaptor::InitTxnManager(MOT::ConnectionId connection_id /* =
     return u_sess->mot_cxt.txn_manager;
 }
 
+static void DestroySessionJitContexts()
+{
+    // we must release all JIT context objects associated with this session now.
+    // it seems that when thread pool is disabled, all cached plan sources for the session are not
+    // released explicitly, but rather implicitly as part of the release of the memory context of the session.
+    // in any case, we guard against repeated destruction of the JIT context by nullifying it
+    MOT_LOG_DEBUG("Cleaning up all JIT context objects for current session");
+    CachedPlanSource* psrc = u_sess->pcache_cxt.first_saved_plan;
+    while (psrc != nullptr) {
+        if (psrc->mot_jit_context != nullptr) {
+            MOT_LOG_DEBUG("DestroySessionJitContexts(): Calling DestroyJitContext(%p)", psrc->mot_jit_context);
+            JitExec::DestroyJitContext(psrc->mot_jit_context);
+            psrc->mot_jit_context = nullptr;
+        }
+        psrc = psrc->next_saved;
+    }
+    MOT_LOG_DEBUG("DONE Cleaning up all JIT context objects for current session");
+}
+
 /** @brief Notification from thread pool that a session ended (only when thread pool is ENABLED). */
 extern void MOTOnSessionClose()
 {
@@ -933,6 +957,8 @@ extern void MOTOnSessionClose()
         u_sess->mot_cxt.connection_id);
     if (u_sess->mot_cxt.session_id != INVALID_SESSION_ID) {
         ClearCurrentSessionDetails();
+        MOT_LOG_DEBUG("MOTOnSessionClose(): Calling DestroySessionJitContexts()");
+        DestroySessionJitContexts();
         if (!MOTAdaptor::m_engine) {
             MOT_LOG_ERROR("MOTOnSessionClose(): MOT engine is not initialized");
         } else {
@@ -957,7 +983,7 @@ extern void MOTOnThreadShutdown()
         return;
     }
 
-    MOT_LOG_DEBUG("Received thread shutdown notification");
+    MOT_LOG_TRACE("Received thread shutdown notification");
     if (!MOTAdaptor::m_engine) {
         MOT_LOG_ERROR("MOTOnThreadShutdown(): MOT engine is not initialized");
     } else {
@@ -973,6 +999,7 @@ extern void MOTOnThreadShutdown()
 static void MOTCleanupThread(int status, Datum ptr)
 {
     MOT_ASSERT(g_instance.attr.attr_common.enable_thread_pool);
+    MOT_LOG_TRACE("Received thread cleanup notification (thread-pool ON)");
 
     // when thread pool is used we just cleanup current thread
     // this might be a duplicate because thread pool also calls MOTOnThreadShutdown() - this is still ok
@@ -989,6 +1016,8 @@ void MOTAdaptor::DestroyTxn(int status, Datum ptr)
         CancelSessionCleanup();
     }
     ClearCurrentSessionDetails();
+    MOT_LOG_DEBUG("DestroyTxn(): Calling DestroySessionJitContexts()");
+    DestroySessionJitContexts();
     MOT::SessionContext* session = (MOT::SessionContext*)DatumGetPointer(ptr);
     if (m_engine == nullptr) {
         elog(ERROR, "destroyTxn: MOT engine is not initialized");
@@ -1003,7 +1032,7 @@ void MOTAdaptor::DestroyTxn(int status, Datum ptr)
         if (gc != nullptr) {
             gc->GcEndTxn();
         }
-        MOT::GetSessionManager()->DestroySessionContext(session);
+        DestroySession(session);
     }
 
     // clean up thread
@@ -1691,7 +1720,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
         tname.append(table->base.relation->relname);
 
         if (!currentTable->Init(
-            table->base.relation->relname, tname.c_str(), columnCount, table->base.relation->foreignOid)) {
+                table->base.relation->relname, tname.c_str(), columnCount, table->base.relation->foreignOid)) {
             delete currentTable;
             currentTable = nullptr;
             report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, txn);

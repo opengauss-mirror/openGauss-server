@@ -69,6 +69,7 @@ using namespace dorado;
 
 // forward declarations
 struct JitLlvmCodeGenContext;
+static void DestroyCodeGenContext(JitLlvmCodeGenContext* ctx);
 static bool ProcessJoinOpExpr(
     JitLlvmCodeGenContext* ctx, const OpExpr* op_expr, int* column_count, int* column_array, int* max_arg);
 static bool ProcessJoinBoolExpr(
@@ -198,6 +199,15 @@ struct JitLlvmCodeGenContext {
     llvm::Constant* readTupleDatumFunc;
     llvm::Constant* writeTupleDatumFunc;
 
+    llvm::Constant* selectSubQueryResultFunc;
+    llvm::Constant* copyAggregateToSubQueryResultFunc;
+
+    llvm::Constant* GetSubQuerySlotFunc;
+    llvm::Constant* GetSubQueryTableFunc;
+    llvm::Constant* GetSubQueryIndexFunc;
+    llvm::Constant* GetSubQuerySearchKeyFunc;
+    llvm::Constant* GetSubQueryEndIteratorKeyFunc;
+
     // builtins
 #define APPLY_UNARY_OPERATOR(funcid, name) llvm::Constant* _builtin_##name;
 #define APPLY_BINARY_OPERATOR(funcid, name) llvm::Constant* _builtin_##name;
@@ -233,9 +243,21 @@ struct JitLlvmCodeGenContext {
     llvm::Value* inner_key_value;
     llvm::Value* inner_end_iterator_key_value;
 
+    // sub-query data access (see JitContext::SubQueryData)
+    struct SubQueryData {
+        llvm::Value* m_slot;
+        llvm::Value* m_table;
+        llvm::Value* m_index;
+        llvm::Value* m_searchKey;
+        llvm::Value* m_endIteratorKey;
+    };
+    uint64_t m_subQueryCount;
+    SubQueryData* m_subQueryData;
+
     // compile context
     TableInfo _table_info;
     TableInfo _inner_table_info;
+    TableInfo* m_subQueryTableInfo;
 
     GsCodeGen* _code_gen;
     GsCodeGen::LlvmBuilder* _builder;
@@ -243,8 +265,8 @@ struct JitLlvmCodeGenContext {
 };
 
 /** @brief Gets a key from the execution context. */
-static llvm::Value* getExecContextKey(
-    JitLlvmCodeGenContext* ctx, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+static llvm::Value* getExecContextKey(JitLlvmCodeGenContext* ctx, JitRangeIteratorType range_itr_type,
+    JitRangeScanType range_scan_type, int subQueryIndex)
 {
     llvm::Value* key = nullptr;
     if (range_scan_type == JIT_RANGE_SCAN_INNER) {
@@ -253,14 +275,33 @@ static llvm::Value* getExecContextKey(
         } else {
             key = ctx->inner_key_value;
         }
-    } else {
+    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
         if (range_itr_type == JIT_RANGE_ITERATOR_END) {
             key = ctx->end_iterator_key_value;
         } else {
             key = ctx->key_value;
         }
+    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+        if (range_itr_type == JIT_RANGE_ITERATOR_END) {
+            key = ctx->m_subQueryData[subQueryIndex].m_endIteratorKey;
+        } else {
+            key = ctx->m_subQueryData[subQueryIndex].m_searchKey;
+        }
     }
     return key;
+}
+
+llvm::Value* getExecContextIndex(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
+{
+    llvm::Value* indexValue = nullptr;
+    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
+        indexValue = ctx->inner_index_value;
+    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
+        indexValue = ctx->index_value;
+    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+        indexValue = ctx->m_subQueryData[subQueryIndex].m_index;
+    }
+    return indexValue;
 }
 
 /*--------------------------- Define LLVM Helper Prototypes  ---------------------------*/
@@ -774,6 +815,47 @@ static void defineWriteTupleDatum(JitLlvmCodeGenContext* ctx, llvm::Module* modu
         nullptr);
 }
 
+static void DefineSelectSubQueryResultFunc(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->selectSubQueryResultFunc = defineFunction(module, ctx->DATUM_T, "SelectSubQueryResult", ctx->INT32_T, nullptr);
+}
+
+static void DefineCopyAggregateToSubQueryResultFunc(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->copyAggregateToSubQueryResultFunc =
+        defineFunction(module, ctx->VOID_T, "CopyAggregateToSubQueryResult", ctx->INT32_T, nullptr);
+}
+
+static void DefineGetSubQuerySlot(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->GetSubQuerySlotFunc =
+        defineFunction(module, ctx->TupleTableSlotType->getPointerTo(), "GetSubQuerySlot", ctx->INT32_T, nullptr);
+}
+
+static void DefineGetSubQueryTable(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->GetSubQueryTableFunc =
+        defineFunction(module, ctx->TableType->getPointerTo(), "GetSubQueryTable", ctx->INT32_T, nullptr);
+}
+
+static void DefineGetSubQueryIndex(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->GetSubQueryIndexFunc =
+        defineFunction(module, ctx->IndexType->getPointerTo(), "GetSubQueryIndex", ctx->INT32_T, nullptr);
+}
+
+static void DefineGetSubQuerySearchKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->GetSubQuerySearchKeyFunc =
+        defineFunction(module, ctx->KeyType->getPointerTo(), "GetSubQuerySearchKey", ctx->INT32_T, nullptr);
+}
+
+static void DefineGetSubQueryEndIteratorKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->GetSubQueryEndIteratorKeyFunc =
+        defineFunction(module, ctx->KeyType->getPointerTo(), "GetSubQueryEndIteratorKey", ctx->INT32_T, nullptr);
+}
+
 /*--------------------------- End of LLVM Helper Prototypes ---------------------------*/
 /** @brief Define all LLVM prototypes. */
 static void InitCodeGenContextFuncs(JitLlvmCodeGenContext* ctx)
@@ -859,6 +941,15 @@ static void InitCodeGenContextFuncs(JitLlvmCodeGenContext* ctx)
     defineResetTupleDatum(ctx, module);
     defineReadTupleDatum(ctx, module);
     defineWriteTupleDatum(ctx, module);
+
+    DefineSelectSubQueryResultFunc(ctx, module);
+    DefineCopyAggregateToSubQueryResultFunc(ctx, module);
+
+    DefineGetSubQuerySlot(ctx, module);
+    DefineGetSubQueryTable(ctx, module);
+    DefineGetSubQueryIndex(ctx, module);
+    DefineGetSubQuerySearchKey(ctx, module);
+    DefineGetSubQueryEndIteratorKey(ctx, module);
 }
 
 #define APPLY_UNARY_OPERATOR(funcid, name)                                                              \
@@ -982,14 +1073,96 @@ static bool InitCodeGenContext(JitLlvmCodeGenContext* ctx, GsCodeGen* code_gen, 
     return true;
 }
 
+/** @brief Initializes a context for compilation. */
+static bool InitCompoundCodeGenContext(JitLlvmCodeGenContext* ctx, GsCodeGen* code_gen, GsCodeGen::LlvmBuilder* builder,
+    MOT::Table* table, MOT::Index* index, JitCompoundPlan* plan)
+{
+    // execute normal initialization
+    if (!InitCodeGenContext(ctx, code_gen, builder, table, index)) {
+        return false;
+    }
+
+    // prepare sub-query table info
+    ctx->m_subQueryCount = plan->_sub_query_count;
+    uint32_t allocSize = sizeof(TableInfo) * ctx->m_subQueryCount;
+    ctx->m_subQueryTableInfo = (TableInfo*)MOT::MemSessionAlloc(allocSize);
+    if (ctx->m_subQueryTableInfo == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "JIT Compile",
+            "Failed to allocate %u bytes for %u sub-query table information objects in code-generation context",
+            allocSize,
+            (unsigned)ctx->m_subQueryCount);
+        DestroyTableInfo(&ctx->_table_info);
+        return false;
+    }
+
+    // initialize sub-query table info
+    bool result = true;
+    for (uint32_t i = 0; i < ctx->m_subQueryCount; ++i) {
+        JitPlan* subPlan = plan->_sub_query_plans[i];
+        MOT::Table* subTable = nullptr;
+        MOT::Index* subIndex = nullptr;
+        if (subPlan->_plan_type == JIT_PLAN_POINT_QUERY) {
+            subTable = ((JitSelectPlan*)subPlan)->_query._table;
+            subIndex = subTable->GetPrimaryIndex();
+        } else if (subPlan->_plan_type == JIT_PLAN_RANGE_SCAN) {
+            subTable = ((JitRangeSelectPlan*)subPlan)->_index_scan._table;
+            subIndex = subTable->GetIndex(((JitRangeSelectPlan*)subPlan)->_index_scan._index_id);
+        } else {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INTERNAL, "JIT Compile", "Invalid sub-plan %u type: %d", i, (int)subPlan->_plan_type);
+            result = false;
+        }
+        if (result && !InitTableInfo(&ctx->m_subQueryTableInfo[i], subTable, subIndex)) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                "JIT Compile",
+                "Failed to initialize sub-query table information for code-generation context");
+            result = false;
+        }
+        if (!result) {
+            for (uint32_t j = 0; j < i; ++j) {
+                DestroyTableInfo(&ctx->m_subQueryTableInfo[j]);
+            }
+            MOT::MemSessionFree(ctx->m_subQueryTableInfo);
+            ctx->m_subQueryTableInfo = nullptr;
+            DestroyTableInfo(&ctx->_table_info);
+            return false;
+        }
+    }
+
+    // prepare sub-query data array (for sub-query runtime context)
+    allocSize = sizeof(JitLlvmCodeGenContext::SubQueryData) * ctx->m_subQueryCount;
+    ctx->m_subQueryData = (JitLlvmCodeGenContext::SubQueryData*)MOT::MemSessionAlloc(allocSize);
+    if (ctx->m_subQueryData == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "JIT Compile",
+            "Failed to allocate %u bytes for %u sub-query data items in code-generation context",
+            allocSize,
+            (unsigned)ctx->m_subQueryCount);
+        DestroyCodeGenContext(ctx);
+    }
+    errno_t erc = memset_s(ctx->m_subQueryData, allocSize, 0, allocSize);
+    securec_check(erc, "\0", "\0");
+
+    return true;
+}
+
 /** @brief Destroys a code generation context. */
 static void DestroyCodeGenContext(JitLlvmCodeGenContext* ctx)
 {
     DestroyTableInfo(&ctx->_table_info);
     DestroyTableInfo(&ctx->_inner_table_info);
+    for (uint32_t i = 0; i < ctx->m_subQueryCount; ++i) {
+        DestroyTableInfo(&ctx->m_subQueryTableInfo[i]);
+    }
+    if (ctx->m_subQueryData != nullptr) {
+        MOT::MemSessionFree(ctx->m_subQueryData);
+        ctx->m_subQueryData = nullptr;
+    }
     if (ctx->_code_gen != nullptr) {
         ctx->_code_gen->releaseResource();
         delete ctx->_code_gen;
+        ctx->_code_gen = nullptr;
     }
 }
 
@@ -1022,20 +1195,30 @@ static void AddInitKey(JitLlvmCodeGenContext* ctx, llvm::Value* key, llvm::Value
 }
 
 /** @brief Adds a call to initSearchKey(key, index). */
-static void AddInitSearchKey(JitLlvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+static void AddInitSearchKey(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
+    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
         AddInitKey(ctx, ctx->inner_key_value, ctx->inner_index_value);
-    } else {
+    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
         AddInitKey(ctx, ctx->key_value, ctx->index_value);
+    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
+        AddInitKey(ctx, ctx->m_subQueryData[subQueryIndex].m_searchKey, ctx->m_subQueryData[subQueryIndex].m_index);
     }
 }
 
 /** @brief Adds a call to getColumnAt(table, colid). */
-static llvm::Value* AddGetColumnAt(JitLlvmCodeGenContext* ctx, int colid, JitRangeScanType range_scan_type)
+static llvm::Value* AddGetColumnAt(
+    JitLlvmCodeGenContext* ctx, int colid, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     llvm::ConstantInt* colid_value = llvm::ConstantInt::get(ctx->INT32_T, colid, true);
-    llvm::Value* table = (range_scan_type == JIT_RANGE_SCAN_INNER) ? ctx->inner_table_value : ctx->table_value;
+    llvm::Value* table = nullptr;
+    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
+        table = ctx->inner_table_value;
+    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
+        table = ctx->table_value;
+    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+        table = ctx->m_subQueryData[subQueryIndex].m_table;
+    }
     return AddFunctionCall(ctx, ctx->getColumnAtFunc, table, colid_value, nullptr);
 }
 
@@ -1084,23 +1267,25 @@ static llvm::Value* AddWriteDatumColumn(
 
 /** @brief Adds a call to buildDatumKey(column, key, value, index_colid, offset, value). */
 static void AddBuildDatumKey(JitLlvmCodeGenContext* ctx, llvm::Value* column, int index_colid, llvm::Value* value,
-    int value_type, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+    int value_type, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     int offset = -1;
     int size = -1;
-    int inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    if (inner_scan) {
+    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
         offset = ctx->_inner_table_info.m_indexColumnOffsets[index_colid];
         size = ctx->_inner_table_info.m_index->GetLengthKeyFields()[index_colid];
-    } else {
+    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
         offset = ctx->_table_info.m_indexColumnOffsets[index_colid];
         size = ctx->_table_info.m_index->GetLengthKeyFields()[index_colid];
+    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+        offset = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets[index_colid];
+        size = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields()[index_colid];
     }
     llvm::ConstantInt* colid_value = llvm::ConstantInt::get(ctx->INT32_T, index_colid, true);
     llvm::ConstantInt* offset_value = llvm::ConstantInt::get(ctx->INT32_T, offset, true);
     llvm::ConstantInt* value_type_value = llvm::ConstantInt::get(ctx->INT32_T, value_type, true);
     llvm::ConstantInt* size_value = llvm::ConstantInt::get(ctx->INT32_T, size, true);
-    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type);
+    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type, subQueryIndex);
     AddFunctionCall(ctx,
         ctx->buildDatumKeyFunc,
         column,
@@ -1134,15 +1319,19 @@ static llvm::Value* AddWriteRow(JitLlvmCodeGenContext* ctx, llvm::Value* row)
 
 /** @brief Adds a call to searchRow(table, key, access_mode). */
 static llvm::Value* AddSearchRow(
-    JitLlvmCodeGenContext* ctx, MOT::AccessType access_mode, JitRangeScanType range_scan_type)
+    JitLlvmCodeGenContext* ctx, MOT::AccessType access_mode, JitRangeScanType range_scan_type, int subQueryIndex)
 {
     llvm::Value* row = nullptr;
     llvm::ConstantInt* access_mode_value = llvm::ConstantInt::get(ctx->INT32_T, access_mode, true);
     if (range_scan_type == JIT_RANGE_SCAN_INNER) {
         row = AddFunctionCall(
             ctx, ctx->searchRowFunc, ctx->inner_table_value, ctx->inner_key_value, access_mode_value, nullptr);
-    } else {
+    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
         row = AddFunctionCall(ctx, ctx->searchRowFunc, ctx->table_value, ctx->key_value, access_mode_value, nullptr);
+    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
+        row = AddFunctionCall(
+            ctx, ctx->searchRowFunc, subQueryData->m_table, subQueryData->m_searchKey, access_mode_value, nullptr);
     }
     return row;
 }
@@ -1189,13 +1378,13 @@ static void AddExecStoreVirtualTuple(JitLlvmCodeGenContext* ctx)
 }
 
 /** @brief Adds a call to selectColumn(table, row, slot, colid, column_count). */
-static bool AddSelectColumn(
-    JitLlvmCodeGenContext* ctx, llvm::Value* row, int table_colid, int tuple_colid, JitRangeScanType range_scan_type)
+static bool AddSelectColumn(JitLlvmCodeGenContext* ctx, llvm::Value* row, int tableColumnId, int tupleColumnId,
+    JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    llvm::ConstantInt* table_colid_value = llvm::ConstantInt::get(ctx->INT32_T, table_colid, true);
-    llvm::ConstantInt* tuple_colid_value = llvm::ConstantInt::get(ctx->INT32_T, tuple_colid, true);
+    llvm::ConstantInt* table_colid_value = llvm::ConstantInt::get(ctx->INT32_T, tableColumnId, true);
+    llvm::ConstantInt* tuple_colid_value = llvm::ConstantInt::get(ctx->INT32_T, tupleColumnId, true);
     llvm::Value* value = nullptr;
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
+    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
         value = AddFunctionCall(ctx,
             ctx->selectColumnFunc,
             ctx->inner_table_value,
@@ -1204,12 +1393,22 @@ static bool AddSelectColumn(
             table_colid_value,
             tuple_colid_value,
             nullptr);
-    } else {
+    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
         value = AddFunctionCall(ctx,
             ctx->selectColumnFunc,
             ctx->table_value,
             row,
             ctx->slot_value,
+            table_colid_value,
+            tuple_colid_value,
+            nullptr);
+    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
+        value = AddFunctionCall(ctx,
+            ctx->selectColumnFunc,
+            subQueryData->m_table,
+            row,
+            subQueryData->m_slot,
             table_colid_value,
             tuple_colid_value,
             nullptr);
@@ -1236,45 +1435,53 @@ static void AddSetScanEnded(JitLlvmCodeGenContext* ctx, int result)
 }
 
 /** @brief Adds a call to copyKey(index, key, end_iterator_key). */
-static void AddCopyKey(JitLlvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+static void AddCopyKey(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
+    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
         AddFunctionCall(ctx,
             ctx->copyKeyFunc,
             ctx->inner_index_value,
             ctx->inner_key_value,
             ctx->inner_end_iterator_key_value,
             nullptr);
-    } else {
+    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
         AddFunctionCall(ctx, ctx->copyKeyFunc, ctx->index_value, ctx->key_value, ctx->end_iterator_key_value, nullptr);
+    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
+        AddFunctionCall(ctx,
+            ctx->copyKeyFunc,
+            subQueryData->m_index,
+            subQueryData->m_searchKey,
+            subQueryData->m_endIteratorKey,
+            nullptr);
     }
 }
 
 /** @brief Adds a call to FillKeyPattern(key, pattern, offset, size) or FillKeyPattern(end_iterator_key, pattern,
  * offset, size). */
 static void AddFillKeyPattern(JitLlvmCodeGenContext* ctx, unsigned char pattern, int offset, int size,
-    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, int subQueryIndex)
 {
     llvm::ConstantInt* pattern_value = llvm::ConstantInt::get(ctx->INT8_T, pattern, true);
     llvm::ConstantInt* offset_value = llvm::ConstantInt::get(ctx->INT32_T, offset, true);
     llvm::ConstantInt* size_value = llvm::ConstantInt::get(ctx->INT32_T, size, true);
-    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type);
+    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type, subQueryIndex);
     AddFunctionCall(ctx, ctx->fillKeyPatternFunc, key_value, pattern_value, offset_value, size_value, nullptr);
 }
 
 /** @brief Adds a call to adjustKey(key, index, pattern) or adjustKey(end_iterator_key, index, pattern). */
 static void AddAdjustKey(JitLlvmCodeGenContext* ctx, unsigned char pattern, JitRangeIteratorType range_itr_type,
-    JitRangeScanType range_scan_type)
+    JitRangeScanType range_scan_type, int subQueryIndex)
 {
     llvm::ConstantInt* pattern_value = llvm::ConstantInt::get(ctx->INT8_T, pattern, true);
-    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type);
-    llvm::Value* index_value = (range_scan_type == JIT_RANGE_SCAN_INNER) ? ctx->inner_index_value : ctx->index_value;
+    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type, subQueryIndex);
+    llvm::Value* index_value = getExecContextIndex(ctx, range_scan_type, subQueryIndex);
     AddFunctionCall(ctx, ctx->adjustKeyFunc, key_value, index_value, pattern_value, nullptr);
 }
 
 /** @brief Adds a call to searchIterator(index, key). */
 static llvm::Value* AddSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type)
+    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex)
 {
     llvm::Value* itr = nullptr;
     uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
@@ -1289,11 +1496,20 @@ static llvm::Value* AddSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDi
             forward_iterator_value,
             include_bound_value,
             nullptr);
-    } else {
+    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
         itr = AddFunctionCall(ctx,
             ctx->searchIteratorFunc,
             ctx->index_value,
             ctx->key_value,
+            forward_iterator_value,
+            include_bound_value,
+            nullptr);
+    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
+        itr = AddFunctionCall(ctx,
+            ctx->searchIteratorFunc,
+            subQueryData->m_index,
+            subQueryData->m_searchKey,
             forward_iterator_value,
             include_bound_value,
             nullptr);
@@ -1303,7 +1519,7 @@ static llvm::Value* AddSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDi
 
 /** @brief Adds a call to createEndIterator(index, end_iterator_key). */
 static llvm::Value* AddCreateEndIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type)
+    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     llvm::Value* itr = nullptr;
     uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
@@ -1318,11 +1534,20 @@ static llvm::Value* AddCreateEndIterator(JitLlvmCodeGenContext* ctx, JitIndexSca
             forward_scan_value,
             include_bound_value,
             nullptr);
-    } else {
+    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
         itr = AddFunctionCall(ctx,
             ctx->createEndIteratorFunc,
             ctx->index_value,
             ctx->end_iterator_key_value,
+            forward_scan_value,
+            include_bound_value,
+            nullptr);
+    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
+        itr = AddFunctionCall(ctx,
+            ctx->createEndIteratorFunc,
+            subQueryData->m_index,
+            subQueryData->m_endIteratorKey,
             forward_scan_value,
             include_bound_value,
             nullptr);
@@ -1332,23 +1557,24 @@ static llvm::Value* AddCreateEndIterator(JitLlvmCodeGenContext* ctx, JitIndexSca
 
 /** @brief Adds a call to isScanEnd(index, iterator, end_iterator). */
 static llvm::Value* AddIsScanEnd(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitLlvmRuntimeCursor* cursor, JitRangeScanType range_scan_type)
+    JitLlvmRuntimeCursor* cursor, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
     llvm::ConstantInt* forward_scan_value = llvm::ConstantInt::get(ctx->INT32_T, forward_scan, true);
-    llvm::Value* index_value = (range_scan_type == JIT_RANGE_SCAN_INNER) ? ctx->inner_index_value : ctx->index_value;
+    llvm::Value* index_value = getExecContextIndex(ctx, range_scan_type, subQueryIndex);
     return AddFunctionCall(
         ctx, ctx->isScanEndFunc, index_value, cursor->begin_itr, cursor->end_itr, forward_scan_value, nullptr);
 }
 
 /** @brief Adds a cal to getRowFromIterator(index, iterator, end_iterator). */
 static llvm::Value* AddGetRowFromIterator(JitLlvmCodeGenContext* ctx, MOT::AccessType access_mode,
-    JitIndexScanDirection index_scan_direction, JitLlvmRuntimeCursor* cursor, JitRangeScanType range_scan_type)
+    JitIndexScanDirection index_scan_direction, JitLlvmRuntimeCursor* cursor, JitRangeScanType range_scan_type,
+    int subQueryIndex)
 {
     uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
     llvm::ConstantInt* access_mode_value = llvm::ConstantInt::get(ctx->INT32_T, access_mode, true);
     llvm::ConstantInt* forward_scan_value = llvm::ConstantInt::get(ctx->INT32_T, forward_scan, true);
-    llvm::Value* index_value = (range_scan_type == JIT_RANGE_SCAN_INNER) ? ctx->inner_index_value : ctx->index_value;
+    llvm::Value* index_value = getExecContextIndex(ctx, range_scan_type, subQueryIndex);
     return AddFunctionCall(ctx,
         ctx->getRowFromIteratorFunc,
         index_value,
@@ -1574,6 +1800,48 @@ static void AddWriteTupleDatum(JitLlvmCodeGenContext* ctx, int tuple_colid, llvm
     AddFunctionCall(ctx, ctx->writeTupleDatumFunc, ctx->slot_value, tuple_colid_value, value, nullptr);
 }
 
+static llvm::Value* AddSelectSubQueryResult(JitLlvmCodeGenContext* ctx, int subQueryIndex)
+{
+    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
+    return AddFunctionCall(ctx, ctx->selectSubQueryResultFunc, subQueryIndexValue, nullptr);
+}
+
+static void AddCopyAggregateToSubQueryResult(JitLlvmCodeGenContext* ctx, int subQueryIndex)
+{
+    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
+    AddFunctionCall(ctx, ctx->copyAggregateToSubQueryResultFunc, subQueryIndexValue, nullptr);
+}
+
+static llvm::Value* AddGetSubQuerySlot(JitLlvmCodeGenContext* ctx, int subQueryIndex)
+{
+    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
+    return AddFunctionCall(ctx, ctx->GetSubQuerySlotFunc, subQueryIndexValue, nullptr);
+}
+
+static llvm::Value* AddGetSubQueryTable(JitLlvmCodeGenContext* ctx, int subQueryIndex)
+{
+    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
+    return AddFunctionCall(ctx, ctx->GetSubQueryTableFunc, subQueryIndexValue, nullptr);
+}
+
+static llvm::Value* AddGetSubQueryIndex(JitLlvmCodeGenContext* ctx, int subQueryIndex)
+{
+    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
+    return AddFunctionCall(ctx, ctx->GetSubQueryIndexFunc, subQueryIndexValue, nullptr);
+}
+
+static llvm::Value* AddGetSubQuerySearchKey(JitLlvmCodeGenContext* ctx, int subQueryIndex)
+{
+    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
+    return AddFunctionCall(ctx, ctx->GetSubQuerySearchKeyFunc, subQueryIndexValue, nullptr);
+}
+
+static llvm::Value* AddGetSubQueryEndIteratorKey(JitLlvmCodeGenContext* ctx, int subQueryIndex)
+{
+    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
+    return AddFunctionCall(ctx, ctx->GetSubQueryEndIteratorKeyFunc, subQueryIndexValue, nullptr);
+}
+
 /** @brief Adds a call to issueDebugLog(function, msg). */
 #ifdef MOT_JIT_DEBUG
 static void IssueDebugLogImpl(JitLlvmCodeGenContext* ctx, const char* function, const char* msg)
@@ -1778,7 +2046,7 @@ static void CreateJittedFunction(JitLlvmCodeGenContext* ctx, const char* functio
     fn_prototype.addArgument(GsCodeGen::NamedVariable("inner_table", ctx->TableType->getPointerTo()));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("inner_index", ctx->IndexType->getPointerTo()));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("inner_key", ctx->KeyType->getPointerTo()));
-    fn_prototype.addArgument(GsCodeGen::NamedVariable("innerm_endIteratorKey", ctx->KeyType->getPointerTo()));
+    fn_prototype.addArgument(GsCodeGen::NamedVariable("inner_end_iterator_key", ctx->KeyType->getPointerTo()));
 
     ctx->m_jittedQuery = fn_prototype.generatePrototype(ctx->_builder, &llvmargs[0]);
 
@@ -1797,6 +2065,14 @@ static void CreateJittedFunction(JitLlvmCodeGenContext* ctx, const char* functio
     ctx->inner_index_value = llvmargs[arg_index++];
     ctx->inner_key_value = llvmargs[arg_index++];
     ctx->inner_end_iterator_key_value = llvmargs[arg_index++];
+
+    for (uint32_t i = 0; i < ctx->m_subQueryCount; ++i) {
+        ctx->m_subQueryData[i].m_slot = AddGetSubQuerySlot(ctx, i);
+        ctx->m_subQueryData[i].m_table = AddGetSubQueryTable(ctx, i);
+        ctx->m_subQueryData[i].m_index = AddGetSubQueryIndex(ctx, i);
+        ctx->m_subQueryData[i].m_searchKey = AddGetSubQuerySearchKey(ctx, i);
+        ctx->m_subQueryData[i].m_endIteratorKey = AddGetSubQueryEndIteratorKey(ctx, i);
+    }
 
     IssueDebugLog("Starting execution of jitted function");
 }
@@ -1830,10 +2106,10 @@ static llvm::Value* buildCreateNewRow(JitLlvmCodeGenContext* ctx)
 
 /** @brief Adds code to search for a row by a key. */
 static llvm::Value* buildSearchRow(
-    JitLlvmCodeGenContext* ctx, MOT::AccessType access_type, JitRangeScanType range_scan_type)
+    JitLlvmCodeGenContext* ctx, MOT::AccessType access_type, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     IssueDebugLog("Searching row");
-    llvm::Value* row = AddSearchRow(ctx, access_type, range_scan_type);
+    llvm::Value* row = AddSearchRow(ctx, access_type, range_scan_type, subQueryIndex);
 
     JIT_IF_BEGIN(check_row_found)
     JIT_IF_EVAL_NOT(row)
@@ -1922,11 +2198,11 @@ static void buildDeleteRow(JitLlvmCodeGenContext* ctx)
 
 /** @brief Adds code to search for an iterator. */
 static llvm::Value* buildSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type)
+    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     // search the row, execute: IndexIterator* itr = searchIterator(table, key);
     IssueDebugLog("Searching range start");
-    llvm::Value* itr = AddSearchIterator(ctx, index_scan_direction, range_bound_mode, range_scan_type);
+    llvm::Value* itr = AddSearchIterator(ctx, index_scan_direction, range_bound_mode, range_scan_type, subQueryIndex);
 
     JIT_IF_BEGIN(check_itr_found)
     JIT_IF_EVAL_NOT(itr)
@@ -1941,10 +2217,11 @@ static llvm::Value* buildSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScan
 /** @brief Adds code to get row from iterator. */
 static llvm::Value* buildGetRowFromIterator(JitLlvmCodeGenContext* ctx, llvm::BasicBlock* endLoopBlock,
     MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction, JitLlvmRuntimeCursor* cursor,
-    JitRangeScanType range_scan_type)
+    JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     IssueDebugLog("Retrieving row from iterator");
-    llvm::Value* row = AddGetRowFromIterator(ctx, access_mode, index_scan_direction, cursor, range_scan_type);
+    llvm::Value* row =
+        AddGetRowFromIterator(ctx, access_mode, index_scan_direction, cursor, range_scan_type, subQueryIndex);
 
     JIT_IF_BEGIN(check_itr_row_found)
     JIT_IF_EVAL_NOT(row)
@@ -2401,6 +2678,11 @@ static llvm::Value* ProcessFuncExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row
 #undef APPLY_BINARY_CAST_OPERATOR
 #undef APPLY_TERNARY_CAST_OPERATOR
 
+static llvm::Value* ProcessSubLinkExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSubLinkExpr* expr, int* max_arg)
+{
+    return AddSelectSubQueryResult(ctx, expr->_sub_query_index);
+}
+
 static llvm::Value* ProcessExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitExpr* expr, int* max_arg)
 {
     llvm::Value* result = nullptr;
@@ -2415,6 +2697,8 @@ static llvm::Value* ProcessExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, Ji
         result = ProcessOpExpr(ctx, row, (JitOpExpr*)expr, max_arg);
     } else if (expr->_expr_type == JIT_EXPR_TYPE_FUNC) {
         result = ProcessFuncExpr(ctx, row, (JitFuncExpr*)expr, max_arg);
+    } else if (expr->_expr_type == JIT_EXPR_TYPE_SUBLINK) {
+        result = ProcessSubLinkExpr(ctx, row, (JitSubLinkExpr*)expr, max_arg);
     } else {
         MOT_LOG_TRACE(
             "Failed to generate jitted code for query: unsupported target expression type: %d", (int)expr->_expr_type);
@@ -2438,7 +2722,7 @@ static bool _arm_compile_lock_ready = false;
 extern bool InitArmCompileLock()
 {
     bool result = true;
-    if (__sync_bool_compare_and_swap(&_arm_compile_lock_initialized, 0, 1)) {
+    if (MOT_ATOMIC_CAS(_arm_compile_lock_initialized, 0, 1)) {
         int res = pthread_spin_init(&_arm_compile_lock, 0);
         if (res != 0) {
             MOT_REPORT_SYSTEM_ERROR_CODE(
@@ -2461,6 +2745,9 @@ extern void DestroyArmCompileLock()
         if (res != 0) {
             MOT_REPORT_SYSTEM_ERROR_CODE(
                 res, pthread_spin_init, "Initialize LLVM", "Failed to destroy compile spin-lock for ARM platform");
+        } else {
+            _arm_compile_lock_ready = false;
+            MOT_ATOMIC_STORE(_arm_compile_lock_initialized, 0);
         }
     }
 }
@@ -2614,7 +2901,7 @@ static JitContext* FinalizeCodegen(JitLlvmCodeGenContext* ctx, int max_arg, JitC
 }
 
 static bool buildScanExpression(JitLlvmCodeGenContext* ctx, JitColumnExpr* expr, int* max_arg,
-    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, llvm::Value* outer_row)
+    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, llvm::Value* outer_row, int subQueryIndex)
 {
     llvm::Value* value = ProcessExpr(ctx, outer_row, expr->_expr, max_arg);
     if (value == nullptr) {
@@ -2623,31 +2910,35 @@ static bool buildScanExpression(JitLlvmCodeGenContext* ctx, JitColumnExpr* expr,
     } else {
         llvm::Value* column = AddGetColumnAt(ctx,
             expr->_table_column_id,
-            range_scan_type);  // no need to translate to zero-based index (first column is null bits)
+            range_scan_type,  // no need to translate to zero-based index (first column is null bits)
+            subQueryIndex);
         int index_colid = -1;
         if (range_scan_type == JIT_RANGE_SCAN_INNER) {
             index_colid = ctx->_inner_table_info.m_columnMap[expr->_table_column_id];
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             index_colid = ctx->_table_info.m_columnMap[expr->_table_column_id];
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            index_colid = ctx->m_subQueryTableInfo[subQueryIndex].m_columnMap[expr->_table_column_id];
         }
-        AddBuildDatumKey(ctx, column, index_colid, value, expr->_column_type, range_itr_type, range_scan_type);
+        AddBuildDatumKey(
+            ctx, column, index_colid, value, expr->_column_type, range_itr_type, range_scan_type, subQueryIndex);
     }
     return true;
 }
 
-static bool buildPointScan(JitLlvmCodeGenContext* ctx, JitColumnExprArray* expr_array, int* max_arg,
-    JitRangeScanType range_scan_type, llvm::Value* outer_row, int expr_count = 0)
+static bool buildPointScan(JitLlvmCodeGenContext* ctx, JitColumnExprArray* exprArray, int* maxArg,
+    JitRangeScanType rangeScanType, llvm::Value* outerRow, int exprCount = 0, int subQueryIndex = -1)
 {
-    if (expr_count == 0) {
-        expr_count = expr_array->_count;
+    if (exprCount == 0) {
+        exprCount = exprArray->_count;
     }
-    AddInitSearchKey(ctx, range_scan_type);
-    for (int i = 0; i < expr_count; ++i) {
-        JitColumnExpr* expr = &expr_array->_exprs[i];
+    AddInitSearchKey(ctx, rangeScanType, subQueryIndex);
+    for (int i = 0; i < exprCount; ++i) {
+        JitColumnExpr* expr = &exprArray->_exprs[i];
 
         // validate the expression refers to the right table (in search expressions array, all expressions refer to the
         // same table)
-        if (range_scan_type == JIT_RANGE_SCAN_INNER) {
+        if (rangeScanType == JIT_RANGE_SCAN_INNER) {
             if (expr->_table != ctx->_inner_table_info.m_table) {
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                     "Generate LLVM JIT Code",
@@ -2656,7 +2947,7 @@ static bool buildPointScan(JitLlvmCodeGenContext* ctx, JitColumnExprArray* expr_
                     expr->_table->GetTableName().c_str());
                 return false;
             }
-        } else {
+        } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
             if (expr->_table != ctx->_table_info.m_table) {
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                     "Generate LLVM JIT Code",
@@ -2665,10 +2956,19 @@ static bool buildPointScan(JitLlvmCodeGenContext* ctx, JitColumnExprArray* expr_
                     expr->_table->GetTableName().c_str());
                 return false;
             }
+        } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+            if (expr->_table != ctx->m_subQueryTableInfo[subQueryIndex].m_table) {
+                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                    "Generate TVM JIT Code",
+                    "Invalid expression table (expected sub-query table %s, got %s)",
+                    ctx->m_subQueryTableInfo[subQueryIndex].m_table->GetTableName().c_str(),
+                    expr->_table->GetTableName().c_str());
+                return false;
+            }
         }
 
         // prepare the sub-expression
-        if (!buildScanExpression(ctx, expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row)) {
+        if (!buildScanExpression(ctx, expr, maxArg, JIT_RANGE_ITERATOR_START, rangeScanType, outerRow, subQueryIndex)) {
             return false;
         }
     }
@@ -2700,7 +3000,7 @@ static bool writeRowColumns(
 }
 
 static bool selectRowColumns(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSelectExprArray* expr_array, int* max_arg,
-    JitRangeScanType range_scan_type)
+    JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     bool result = true;
     for (int i = 0; i < expr_array->_count; ++i) {
@@ -2710,12 +3010,17 @@ static bool selectRowColumns(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSe
             if (expr->_column_expr->_table != ctx->_inner_table_info.m_table) {
                 continue;
             }
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             if (expr->_column_expr->_table != ctx->_table_info.m_table) {
                 continue;
             }
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            if (expr->_column_expr->_table != ctx->m_subQueryTableInfo[subQueryIndex].m_table) {
+                continue;
+            }
         }
-        result = AddSelectColumn(ctx, row, expr->_column_expr->_column_id, expr->_tuple_column_id, range_scan_type);
+        result = AddSelectColumn(
+            ctx, row, expr->_column_expr->_column_id, expr->_tuple_column_id, range_scan_type, subQueryIndex);
         if (!result) {
             break;
         }
@@ -2725,12 +3030,13 @@ static bool selectRowColumns(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSe
 }
 
 static bool buildClosedRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, llvm::Value* outer_row)
+    JitRangeScanType range_scan_type, llvm::Value* outer_row, int subQueryIndex)
 {
     // a closed range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
-    bool result = buildPointScan(ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row);
+    bool result =
+        buildPointScan(ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row, 0, subQueryIndex);
     if (result) {
-        AddCopyKey(ctx, range_scan_type);
+        AddCopyKey(ctx, range_scan_type, subQueryIndex);
 
         // now fill each key with the right pattern for the missing pkey columns in the where clause
         bool ascending = (index_scan->_sort_order == JIT_QUERY_SORT_ASCENDING);
@@ -2742,10 +3048,14 @@ static bool buildClosedRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index
             index_column_offsets = ctx->_inner_table_info.m_indexColumnOffsets;
             key_length = ctx->_inner_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_inner_table_info.m_index->GetNumFields();
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             index_column_offsets = ctx->_table_info.m_indexColumnOffsets;
             key_length = ctx->_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_table_info.m_index->GetNumFields();
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            index_column_offsets = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets;
+            key_length = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields();
+            index_column_count = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetNumFields();
         }
 
         int first_zero_column = index_scan->_column_count;
@@ -2754,130 +3064,154 @@ static bool buildClosedRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index
             int size = key_length[i];
             MOT_LOG_DEBUG(
                 "Filling begin/end iterator pattern for missing pkey fields at offset %d, size %d", offset, size);
-            AddFillKeyPattern(ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-            AddFillKeyPattern(ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
+            AddFillKeyPattern(
+                ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type, subQueryIndex);
+            AddFillKeyPattern(
+                ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type, subQueryIndex);
         }
 
         AddAdjustKey(ctx,
             ascending ? 0x00 : 0xFF,
             JIT_RANGE_ITERATOR_START,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            range_scan_type,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
         AddAdjustKey(ctx,
             ascending ? 0xFF : 0x00,
             JIT_RANGE_ITERATOR_END,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            range_scan_type,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
     }
     return result;
 }
 
-static bool buildSemiOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
-    llvm::Value* outer_row)
+static bool buildSemiOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
+    llvm::Value* outerRow, int subQueryIndex)
 {
     // an open range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
     // we do not use the last search expression
-    bool result = buildPointScan(
-        ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row, index_scan->_search_exprs._count - 1);
+    bool result = buildPointScan(ctx,
+        &indexScan->_search_exprs,
+        maxArg,
+        rangeScanType,
+        outerRow,
+        indexScan->_search_exprs._count - 1,
+        subQueryIndex);
     if (result) {
-        AddCopyKey(ctx, range_scan_type);
+        AddCopyKey(ctx, rangeScanType, subQueryIndex);
 
         // now fill each key with the right pattern for the missing pkey columns in the where clause
-        bool ascending = (index_scan->_sort_order == JIT_QUERY_SORT_ASCENDING);
+        bool ascending = (indexScan->_sort_order == JIT_QUERY_SORT_ASCENDING);
 
         int* index_column_offsets = nullptr;
         const uint16_t* key_length = nullptr;
         int index_column_count = 0;
-        if (range_scan_type == JIT_RANGE_SCAN_INNER) {
+        if (rangeScanType == JIT_RANGE_SCAN_INNER) {
             index_column_offsets = ctx->_inner_table_info.m_indexColumnOffsets;
             key_length = ctx->_inner_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_inner_table_info.m_index->GetNumFields();
-        } else {
+        } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
             index_column_offsets = ctx->_table_info.m_indexColumnOffsets;
             key_length = ctx->_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_table_info.m_index->GetNumFields();
+        } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+            index_column_offsets = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets;
+            key_length = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields();
+            index_column_count = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetNumFields();
         }
 
         // prepare offset and size for last column in search
-        int last_dim_column = index_scan->_column_count - 1;
+        int last_dim_column = indexScan->_column_count - 1;
         int offset = index_column_offsets[last_dim_column];
         int size = key_length[last_dim_column];
 
         // now we fill the last dimension (override extra work of point scan above)
-        int last_expr_index = index_scan->_search_exprs._count - 1;
-        JitColumnExpr* last_expr = &index_scan->_search_exprs._exprs[last_expr_index];
+        int last_expr_index = indexScan->_search_exprs._count - 1;
+        JitColumnExpr* last_expr = &indexScan->_search_exprs._exprs[last_expr_index];
         if (ascending) {
-            if ((index_scan->_last_dim_op1 == JIT_WOC_LESS_THAN) ||
-                (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
+            if ((indexScan->_last_dim_op1 == JIT_WOC_LESS_THAN) || (indexScan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
                 // this is an upper bound operator on an ascending semi-open scan so we fill the begin key with zeros,
                 // and the end key with the value
-                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-                buildScanExpression(ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_END, range_scan_type, outer_row);
-                *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
-                *end_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
-                                                                                      : JIT_RANGE_BOUND_EXCLUDE;
+                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+                buildScanExpression(
+                    ctx, last_expr, maxArg, JIT_RANGE_ITERATOR_END, rangeScanType, outerRow, subQueryIndex);
+                *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
+                *endRangeBound = (indexScan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
+                                                                                   : JIT_RANGE_BOUND_EXCLUDE;
             } else {
                 // this is a lower bound operator on an ascending semi-open scan so we fill the begin key with the
                 // value, and the end key with 0xFF
-                buildScanExpression(ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row);
-                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
-                *begin_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
-                                                                                           : JIT_RANGE_BOUND_EXCLUDE;
-                *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
+                buildScanExpression(
+                    ctx, last_expr, maxArg, JIT_RANGE_ITERATOR_START, rangeScanType, outerRow, subQueryIndex);
+                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_END, rangeScanType, subQueryIndex);
+                *beginRangeBound = (indexScan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
+                                                                                        : JIT_RANGE_BOUND_EXCLUDE;
+                *endRangeBound = JIT_RANGE_BOUND_INCLUDE;
             }
         } else {
-            if ((index_scan->_last_dim_op1 == JIT_WOC_LESS_THAN) ||
-                (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
+            if ((indexScan->_last_dim_op1 == JIT_WOC_LESS_THAN) || (indexScan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
                 // this is an upper bound operator on a descending semi-open scan so we fill the begin key with value,
                 // and the end key with zeroes
-                buildScanExpression(ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row);
-                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
-                *begin_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
-                                                                                        : JIT_RANGE_BOUND_EXCLUDE;
-                *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
+                buildScanExpression(
+                    ctx, last_expr, maxArg, JIT_RANGE_ITERATOR_START, rangeScanType, outerRow, subQueryIndex);
+                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_END, rangeScanType, subQueryIndex);
+                *beginRangeBound = (indexScan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
+                                                                                     : JIT_RANGE_BOUND_EXCLUDE;
+                *endRangeBound = JIT_RANGE_BOUND_INCLUDE;
             } else {
                 // this is a lower bound operator on a descending semi-open scan so we fill the begin key with 0xFF, and
                 // the end key with the value
-                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-                buildScanExpression(ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_END, range_scan_type, outer_row);
-                *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
-                *end_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
-                                                                                         : JIT_RANGE_BOUND_EXCLUDE;
+                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+                buildScanExpression(
+                    ctx, last_expr, maxArg, JIT_RANGE_ITERATOR_END, rangeScanType, outerRow, subQueryIndex);
+                *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
+                *endRangeBound = (indexScan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
+                                                                                      : JIT_RANGE_BOUND_EXCLUDE;
             }
         }
 
         // now fill the rest as usual
-        int first_zero_column = index_scan->_column_count;
+        int first_zero_column = indexScan->_column_count;
         for (int i = first_zero_column; i < index_column_count; ++i) {
             int offset = index_column_offsets[i];
             int size = key_length[i];
             MOT_LOG_DEBUG(
                 "Filling begin/end iterator pattern for missing pkey fields at offset %d, size %d", offset, size);
-            AddFillKeyPattern(ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-            AddFillKeyPattern(ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
+            AddFillKeyPattern(
+                ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+            AddFillKeyPattern(
+                ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, rangeScanType, subQueryIndex);
         }
 
         AddAdjustKey(ctx,
             ascending ? 0x00 : 0xFF,
             JIT_RANGE_ITERATOR_START,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            rangeScanType,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
         AddAdjustKey(ctx,
             ascending ? 0xFF : 0x00,
             JIT_RANGE_ITERATOR_END,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            rangeScanType,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
     }
     return result;
 }
 
 static bool buildOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
-    llvm::Value* outer_row)
+    llvm::Value* outer_row, int subQueryIndex)
 {
     // an open range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
     // we do not use the last two expressions
-    bool result = buildPointScan(
-        ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row, index_scan->_search_exprs._count - 2);
+    bool result = buildPointScan(ctx,
+        &index_scan->_search_exprs,
+        max_arg,
+        range_scan_type,
+        outer_row,
+        index_scan->_search_exprs._count - 2,
+        subQueryIndex);
     if (result) {
-        AddCopyKey(ctx, range_scan_type);
+        AddCopyKey(ctx, range_scan_type, subQueryIndex);
 
         // now fill each key with the right pattern for the missing pkey columns in the where clause
         bool ascending = (index_scan->_sort_order == JIT_QUERY_SORT_ASCENDING);
@@ -2889,10 +3223,14 @@ static bool buildOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_s
             index_column_offsets = ctx->_inner_table_info.m_indexColumnOffsets;
             key_length = ctx->_inner_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_inner_table_info.m_index->GetNumFields();
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             index_column_offsets = ctx->_table_info.m_indexColumnOffsets;
             key_length = ctx->_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_table_info.m_index->GetNumFields();
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            index_column_offsets = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets;
+            key_length = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields();
+            index_column_count = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetNumFields();
         }
 
         // now we fill the last dimension (override extra work of point scan above)
@@ -2911,13 +3249,15 @@ static bool buildOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_s
                     max_arg,
                     JIT_RANGE_ITERATOR_START,
                     range_scan_type,
-                    outer_row);  // lower bound on begin iterator key
+                    outer_row,  // lower bound on begin iterator key
+                    subQueryIndex);
                 buildScanExpression(ctx,
                     before_last_expr,
                     max_arg,
                     JIT_RANGE_ITERATOR_END,
                     range_scan_type,
-                    outer_row);  // upper bound on end iterator key
+                    outer_row,  // upper bound on end iterator key
+                    subQueryIndex);
                 *begin_range_bound =
                     (last_dim_op == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound =
@@ -2931,13 +3271,15 @@ static bool buildOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_s
                     max_arg,
                     JIT_RANGE_ITERATOR_START,
                     range_scan_type,
-                    outer_row);  // lower bound on begin iterator key
+                    outer_row,  // lower bound on begin iterator key
+                    subQueryIndex);
                 buildScanExpression(ctx,
                     last_expr,
                     max_arg,
                     JIT_RANGE_ITERATOR_END,
                     range_scan_type,
-                    outer_row);  // upper bound on end iterator key
+                    outer_row,  // upper bound on end iterator key
+                    subQueryIndex);
                 *begin_range_bound =
                     (before_last_dim_op == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound =
@@ -2953,13 +3295,15 @@ static bool buildOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_s
                     max_arg,
                     JIT_RANGE_ITERATOR_START,
                     range_scan_type,
-                    outer_row);  // upper bound on begin iterator key
+                    outer_row,  // upper bound on begin iterator key
+                    subQueryIndex);
                 buildScanExpression(ctx,
                     last_expr,
                     max_arg,
                     JIT_RANGE_ITERATOR_END,
                     range_scan_type,
-                    outer_row);  // lower bound on end iterator key
+                    outer_row,  // lower bound on end iterator key
+                    subQueryIndex);
                 *begin_range_bound =
                     (before_last_dim_op == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound =
@@ -2973,13 +3317,15 @@ static bool buildOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_s
                     max_arg,
                     JIT_RANGE_ITERATOR_START,
                     range_scan_type,
-                    outer_row);  // upper bound on begin iterator key
+                    outer_row,  // upper bound on begin iterator key
+                    subQueryIndex);
                 buildScanExpression(ctx,
                     before_last_expr,
                     max_arg,
                     JIT_RANGE_ITERATOR_END,
                     range_scan_type,
-                    outer_row);  // lower bound on end iterator key
+                    outer_row,  // lower bound on end iterator key
+                    subQueryIndex);
                 *begin_range_bound =
                     (last_dim_op == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound =
@@ -2994,48 +3340,52 @@ static bool buildOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_s
             int size = key_length[i];
             MOT_LOG_DEBUG(
                 "Filling begin/end iterator pattern for missing pkey fields at offset %d, size %d", offset, size);
-            AddFillKeyPattern(ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-            AddFillKeyPattern(ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
+            AddFillKeyPattern(
+                ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type, subQueryIndex);
+            AddFillKeyPattern(
+                ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type, subQueryIndex);
         }
 
         AddAdjustKey(ctx,
             ascending ? 0x00 : 0xFF,
             JIT_RANGE_ITERATOR_START,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            range_scan_type,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
         AddAdjustKey(ctx,
             ascending ? 0xFF : 0x00,
             JIT_RANGE_ITERATOR_END,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            range_scan_type,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
     }
     return result;
 }
 
 static bool buildRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
-    llvm::Value* outer_row)
+    llvm::Value* outer_row, int subQueryIndex = -1)
 {
     bool result = false;
 
     // if this is a point scan we generate two identical keys for the iterators
     if (index_scan->_scan_type == JIT_INDEX_SCAN_POINT) {
-        result = buildPointScan(ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row);
+        result = buildPointScan(ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row, subQueryIndex);
         if (result) {
-            AddCopyKey(ctx, range_scan_type);
+            AddCopyKey(ctx, range_scan_type, subQueryIndex);
             *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
             *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
         }
     } else if (index_scan->_scan_type == JIT_INDEX_SCAN_CLOSED) {
-        result = buildClosedRangeScan(ctx, index_scan, max_arg, range_scan_type, outer_row);
+        result = buildClosedRangeScan(ctx, index_scan, max_arg, range_scan_type, outer_row, subQueryIndex);
         if (result) {
             *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
             *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
         }
     } else if (index_scan->_scan_type == JIT_INDEX_SCAN_SEMI_OPEN) {
         result = buildSemiOpenRangeScan(
-            ctx, index_scan, max_arg, range_scan_type, begin_range_bound, end_range_bound, outer_row);
+            ctx, index_scan, max_arg, range_scan_type, begin_range_bound, end_range_bound, outer_row, subQueryIndex);
     } else if (index_scan->_scan_type == JIT_INDEX_SCAN_OPEN) {
         result = buildOpenRangeScan(
-            ctx, index_scan, max_arg, range_scan_type, begin_range_bound, end_range_bound, outer_row);
+            ctx, index_scan, max_arg, range_scan_type, begin_range_bound, end_range_bound, outer_row, subQueryIndex);
     }
     return result;
 }
@@ -3187,22 +3537,25 @@ static llvm::Value* buildPrepareStateScanRow(JitLlvmCodeGenContext* ctx, JitInde
     return row;
 }
 
-static JitLlvmRuntimeCursor buildRangeCursor(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, JitIndexScanDirection index_scan_direction, llvm::Value* outer_row)
+static JitLlvmRuntimeCursor buildRangeCursor(JitLlvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitIndexScanDirection indexScanDirection, llvm::Value* outerRow,
+    int subQueryIndex = -1)
 {
     JitLlvmRuntimeCursor result = {nullptr, nullptr};
-    JitRangeBoundMode begin_range_bound = JIT_RANGE_BOUND_NONE;
-    JitRangeBoundMode end_range_bound = JIT_RANGE_BOUND_NONE;
-    if (!buildRangeScan(ctx, index_scan, max_arg, range_scan_type, &begin_range_bound, &end_range_bound, outer_row)) {
+    JitRangeBoundMode beginRangeBound = JIT_RANGE_BOUND_NONE;
+    JitRangeBoundMode endRangeBound = JIT_RANGE_BOUND_NONE;
+    if (!buildRangeScan(
+            ctx, indexScan, maxArg, rangeScanType, &beginRangeBound, &endRangeBound, outerRow, subQueryIndex)) {
         MOT_LOG_TRACE(
             "Failed to generate jitted code for aggregate range JOIN query: unsupported %s-loop WHERE clause type",
-            outer_row ? "inner" : "outer");
+            outerRow ? "inner" : "outer");
         return result;
     }
 
     // build range iterators
-    result.begin_itr = buildSearchIterator(ctx, index_scan_direction, begin_range_bound, range_scan_type);
-    result.end_itr = AddCreateEndIterator(ctx, index_scan_direction, end_range_bound, range_scan_type);  // forward scan
+    result.begin_itr = buildSearchIterator(ctx, indexScanDirection, beginRangeBound, rangeScanType, subQueryIndex);
+    result.end_itr =
+        AddCreateEndIterator(ctx, indexScanDirection, endRangeBound, rangeScanType, subQueryIndex);  // forward scan
 
     return result;
 }
@@ -4268,12 +4621,12 @@ static JitContext* JitAggregateRangeSelectCodegen(
 
     // begin the WHERE clause
     int max_arg = 0;
-    JitIndexScanDirection index_scan_direction = JIT_INDEX_SCAN_FORWARD;
+    JitIndexScanDirection indexScanDirection = JIT_INDEX_SCAN_FORWARD;
 
     // build range iterators
     MOT_LOG_DEBUG("Generating range cursor for range SELECT query");
     JitLlvmRuntimeCursor cursor =
-        buildRangeCursor(ctx, &plan->_index_scan, &max_arg, JIT_RANGE_SCAN_MAIN, index_scan_direction, nullptr);
+        buildRangeCursor(ctx, &plan->_index_scan, &max_arg, JIT_RANGE_SCAN_MAIN, indexScanDirection, nullptr);
     if (cursor.begin_itr == nullptr) {
         MOT_LOG_TRACE("Failed to generate jitted code for aggregate range SELECT query: unsupported WHERE clause type");
         DestroyCodeGenContext(ctx);
@@ -4281,7 +4634,7 @@ static JitContext* JitAggregateRangeSelectCodegen(
     }
 
     JIT_WHILE_BEGIN(cursor_aggregate_loop)
-    llvm::Value* res = AddIsScanEnd(ctx, index_scan_direction, &cursor, JIT_RANGE_SCAN_MAIN);
+    llvm::Value* res = AddIsScanEnd(ctx, indexScanDirection, &cursor, JIT_RANGE_SCAN_MAIN);
     JIT_WHILE_EVAL_NOT(res)
     llvm::Value* row = buildGetRowFromIterator(
         ctx, JIT_WHILE_POST_BLOCK(), access_mode, JIT_INDEX_SCAN_FORWARD, &cursor, JIT_RANGE_SCAN_MAIN);
@@ -4630,7 +4983,7 @@ static JitContext* JitPointInnerJoinCodegen(const Query* query, const char* quer
     // if a limit clause exists, then increment limit counter and check if reached limit
     buildCheckLimit(ctx, plan->_limit_count);
 
-    // execute *tp_processed = rows_processed
+    // generate code for setting output parameter tp_processed value to rows_processed
     AddSetTpProcessed(ctx);
 
     // return success from calling function
@@ -4740,18 +5093,18 @@ static JitContext* JitAggregateRangeJoinCodegen(Query* query, const char* query_
 {
     MOT_LOG_DEBUG("Generating code for MOT aggregate range JOIN at thread %p", (void*)pthread_self());
 
-    GsCodeGen* code_gen = SetupCodegenEnv();
-    if (code_gen == nullptr) {
+    GsCodeGen* codeGen = SetupCodegenEnv();
+    if (codeGen == nullptr) {
         return nullptr;
     }
-    GsCodeGen::LlvmBuilder builder(code_gen->context());
+    GsCodeGen::LlvmBuilder builder(codeGen->context());
 
     JitLlvmCodeGenContext cg_ctx = {0};
     MOT::Table* outer_table = plan->_outer_scan._table;
     MOT::Index* outer_index = outer_table->GetIndex(plan->_outer_scan._index_id);
     MOT::Table* inner_table = plan->_inner_scan._table;
     MOT::Index* inner_index = inner_table->GetIndex(plan->_inner_scan._index_id);
-    if (!InitCodeGenContext(&cg_ctx, code_gen, &builder, outer_table, outer_index, inner_table, inner_index)) {
+    if (!InitCodeGenContext(&cg_ctx, codeGen, &builder, outer_table, outer_index, inner_table, inner_index)) {
         return nullptr;
     }
     JitLlvmCodeGenContext* ctx = &cg_ctx;
@@ -4771,7 +5124,7 @@ static JitContext* JitAggregateRangeJoinCodegen(Query* query, const char* query_
     AddResetStateLimitCounter(ctx);
 
     // pay attention: aggregated range scan is not stateful, since we scan all tuples in one call
-    MOT::AccessType access_mode = query->hasForUpdate ? MOT::AccessType::RD_FOR_UPDATE : MOT::AccessType::RD;
+    MOT::AccessType accessMode = query->hasForUpdate ? MOT::AccessType::RD_FOR_UPDATE : MOT::AccessType::RD;
 
     // begin the WHERE clause
     int max_arg = 0;
@@ -4792,7 +5145,7 @@ static JitContext* JitAggregateRangeJoinCodegen(Query* query, const char* query_
     llvm::Value* res = AddIsScanEnd(ctx, JIT_INDEX_SCAN_FORWARD, &outer_cursor, JIT_RANGE_SCAN_MAIN);
     JIT_WHILE_EVAL_NOT(res)
     llvm::Value* outer_row = buildGetRowFromIterator(
-        ctx, JIT_WHILE_POST_BLOCK(), access_mode, JIT_INDEX_SCAN_FORWARD, &outer_cursor, JIT_RANGE_SCAN_MAIN);
+        ctx, JIT_WHILE_POST_BLOCK(), accessMode, JIT_INDEX_SCAN_FORWARD, &outer_cursor, JIT_RANGE_SCAN_MAIN);
 
     // check for additional filters, if not try to fetch next row
     if (!buildFilterRow(ctx, outer_row, &plan->_outer_scan._filters, &max_arg, JIT_WHILE_COND_BLOCK())) {
@@ -4821,7 +5174,7 @@ static JitContext* JitAggregateRangeJoinCodegen(Query* query, const char* query_
     llvm::Value* res = AddIsScanEnd(ctx, JIT_INDEX_SCAN_FORWARD, &inner_cursor, JIT_RANGE_SCAN_INNER);
     JIT_WHILE_EVAL_NOT(res)
     llvm::Value* inner_row = buildGetRowFromIterator(
-        ctx, JIT_WHILE_POST_BLOCK(), access_mode, JIT_INDEX_SCAN_FORWARD, &inner_cursor, JIT_RANGE_SCAN_INNER);
+        ctx, JIT_WHILE_POST_BLOCK(), accessMode, JIT_INDEX_SCAN_FORWARD, &inner_cursor, JIT_RANGE_SCAN_INNER);
 
     // check for additional filters, if not try to fetch next row
     if (!buildFilterRow(ctx, inner_row, &plan->_inner_scan._filters, &max_arg, JIT_WHILE_COND_BLOCK())) {
@@ -4845,8 +5198,8 @@ static JitContext* JitAggregateRangeJoinCodegen(Query* query, const char* query_
     if (plan->_limit_count > 0) {
         AddIncrementStateLimitCounter(ctx);
         JIT_IF_BEGIN(limit_count_reached)
-        llvm::Value* current_limit_count = AddGetStateLimitCounter(ctx);
-        JIT_IF_EVAL_CMP(current_limit_count, JIT_CONST(plan->_limit_count), JIT_ICMP_EQ);
+        llvm::Value* currentLimitCount = AddGetStateLimitCounter(ctx);
+        JIT_IF_EVAL_CMP(currentLimitCount, JIT_CONST(plan->_limit_count), JIT_ICMP_EQ);
         IssueDebugLog("Reached limit specified in limit clause, raising internal state scan end flag");
         AddDestroyCursor(ctx, &outer_cursor);
         AddDestroyCursor(ctx, &inner_cursor);
@@ -4924,6 +5277,269 @@ static JitContext* JitJoinCodegen(Query* query, const char* query_string, JitJoi
     }
 
     return jit_context;
+}
+
+static bool JitSubSelectCodegen(JitLlvmCodeGenContext* ctx, JitCompoundPlan* plan, int subQueryIndex)
+{
+    MOT_LOG_DEBUG("Generating code for MOT sub-select at thread %p", (intptr_t)pthread_self());
+    IssueDebugLog("Executing simple SELECT sub-query");
+
+    // get the sub-query plan
+    JitSelectPlan* subPlan = (JitSelectPlan*)plan->_sub_query_plans[subQueryIndex];
+
+    // begin the WHERE clause
+    int max_arg = 0;
+    if (!buildPointScan(
+            ctx, &subPlan->_query._search_exprs, &max_arg, JIT_RANGE_SCAN_SUB_QUERY, nullptr, 0, subQueryIndex)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for SELECT sub-query: unsupported WHERE clause type");
+        return false;
+    }
+
+    // fetch row for read
+    llvm::Value* row = buildSearchRow(ctx, MOT::AccessType::RD, JIT_RANGE_SCAN_SUB_QUERY, subQueryIndex);
+
+    // check for additional filters
+    if (!buildFilterRow(ctx, row, &subPlan->_query._filters, &max_arg, nullptr)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for SELECT sub-query: unsupported filter");
+        return false;
+    }
+
+    // now begin selecting columns into result
+    IssueDebugLog("Selecting column into result");
+    if (!selectRowColumns(ctx, row, &subPlan->_select_exprs, &max_arg, JIT_RANGE_SCAN_SUB_QUERY, subQueryIndex)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for SELECT sub-query: failed to process target entry");
+        return false;
+    }
+
+    return true;
+}
+
+/** @brief Generates code for range SELECT sub-query with aggregator. */
+static bool JitSubAggregateRangeSelectCodegen(JitLlvmCodeGenContext* ctx, JitCompoundPlan* plan, int subQueryIndex)
+{
+    MOT_LOG_DEBUG("Generating code for MOT aggregate range sub-select at thread %p", (intptr_t)pthread_self());
+    IssueDebugLog("Executing aggregated range select sub-query");
+
+    // get the sub-query plan
+    JitRangeSelectPlan* subPlan = (JitRangeSelectPlan*)plan->_sub_query_plans[subQueryIndex];
+
+    // prepare for aggregation
+    prepareAggregate(ctx, &subPlan->_aggregate);
+    AddResetStateLimitCounter(ctx);
+
+    // pay attention: aggregated range scan is not stateful, since we scan all tuples in one call
+    MOT::AccessType access_mode = MOT::AccessType::RD;
+
+    // begin the WHERE clause
+    int max_arg = 0;
+    JitIndexScanDirection index_scan_direction = JIT_INDEX_SCAN_FORWARD;
+
+    // build range iterators
+    MOT_LOG_DEBUG("Generating range cursor for range SELECT sub-query");
+    JitLlvmRuntimeCursor cursor = buildRangeCursor(
+        ctx, &subPlan->_index_scan, &max_arg, JIT_RANGE_SCAN_SUB_QUERY, index_scan_direction, nullptr, subQueryIndex);
+    if (cursor.begin_itr == nullptr) {
+        MOT_LOG_TRACE(
+            "Failed to generate jitted code for aggregate range SELECT sub-query: unsupported WHERE clause type");
+        return false;
+    }
+
+    JIT_WHILE_BEGIN(cursor_aggregate_loop)
+    llvm::Value* res = AddIsScanEnd(ctx, index_scan_direction, &cursor, JIT_RANGE_SCAN_SUB_QUERY, subQueryIndex);
+    JIT_WHILE_EVAL_NOT(res)
+    llvm::Value* row = buildGetRowFromIterator(ctx,
+        JIT_WHILE_POST_BLOCK(),
+        access_mode,
+        JIT_INDEX_SCAN_FORWARD,
+        &cursor,
+        JIT_RANGE_SCAN_SUB_QUERY,
+        subQueryIndex);
+
+    // check for additional filters, if not try to fetch next row
+    if (!buildFilterRow(ctx, row, &subPlan->_index_scan._filters, &max_arg, JIT_WHILE_COND_BLOCK())) {
+        MOT_LOG_TRACE("Failed to generate jitted code for aggregate range SELECT sub-query: unsupported filter");
+        DestroyCodeGenContext(ctx);
+        return false;
+    }
+
+    // aggregate into tuple (we use tuple's resno column as aggregated sum instead of defining local variable)
+    // if row disqualified due to DISTINCT operator then go back to loop test block
+    buildAggregateRow(ctx, &subPlan->_aggregate, row, JIT_WHILE_COND_BLOCK());
+
+    // if a limit clause exists, then increment limit counter and check if reached limit
+    if (subPlan->_limit_count > 0) {
+        AddIncrementStateLimitCounter(ctx);
+        JIT_IF_BEGIN(limit_count_reached)
+        llvm::Value* current_limit_count = AddGetStateLimitCounter(ctx);
+        JIT_IF_EVAL_CMP(current_limit_count, JIT_CONST(subPlan->_limit_count), JIT_ICMP_EQ);
+        IssueDebugLog("Reached limit specified in limit clause, raising internal state scan end flag");
+        JIT_WHILE_BREAK()  // break from loop
+        JIT_IF_END()
+    }
+    JIT_WHILE_END()
+
+    // cleanup
+    IssueDebugLog("Reached end of aggregate range select sub-query loop");
+    AddDestroyCursor(ctx, &cursor);
+
+    // wrap up aggregation and write to result tuple (even though this is unfitting to outer query tuple...)
+    buildAggregateResult(ctx, &subPlan->_aggregate);
+
+    // coy aggregate result from outer query result tuple into sub-query result tuple
+    AddCopyAggregateToSubQueryResult(ctx, subQueryIndex);
+
+    return true;
+}
+
+static bool JitSubQueryCodeGen(JitLlvmCodeGenContext* ctx, JitCompoundPlan* plan, int subQueryIndex)
+{
+    bool result = false;
+    JitPlan* subPlan = plan->_sub_query_plans[subQueryIndex];
+    if (subPlan->_plan_type == JIT_PLAN_POINT_QUERY) {
+        result = JitSubSelectCodegen(ctx, plan, subQueryIndex);
+    } else if (subPlan->_plan_type == JIT_PLAN_RANGE_SCAN) {
+        result = JitSubAggregateRangeSelectCodegen(ctx, plan, subQueryIndex);
+    } else {
+        MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG,
+            "Generate JIT Code",
+            "Cannot generate JIT code for sub-query plan: Invalid plan type %d",
+            (int)subPlan->_plan_type);
+    }
+    return result;
+}
+
+static JitContext* JitCompoundOuterSelectCodegen(
+    JitLlvmCodeGenContext* ctx, Query* query, const char* queryString, JitSelectPlan* plan)
+{
+    // begin the WHERE clause
+    int max_arg = 0;
+    if (!buildPointScan(ctx, &plan->_query._search_exprs, &max_arg, JIT_RANGE_SCAN_MAIN, nullptr)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for COMPOUND SELECT query: unsupported WHERE clause type");
+        return nullptr;
+    }
+
+    // fetch row for read
+    MOT::AccessType access_mode = query->hasForUpdate ? MOT::AccessType::RD_FOR_UPDATE : MOT::AccessType::RD;
+    llvm::Value* row = buildSearchRow(ctx, access_mode, JIT_RANGE_SCAN_MAIN);
+
+    // check for additional filters
+    if (!buildFilterRow(ctx, row, &plan->_query._filters, &max_arg, nullptr)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for COMPOUND SELECT query: unsupported filter");
+        return nullptr;
+    }
+
+    // now begin selecting columns into result
+    IssueDebugLog("Selecting columns into result");
+    if (!selectRowColumns(ctx, row, &plan->_select_exprs, &max_arg, JIT_RANGE_SCAN_MAIN)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for COMPOUND SELECT query: failed to process target entry");
+        return nullptr;
+    }
+
+    AddExecStoreVirtualTuple(ctx);
+
+    // update number of rows processed
+    buildIncrementRowsProcessed(ctx);
+
+    // execute *tp_processed = rows_processed
+    AddSetTpProcessed(ctx);
+
+    // signal to envelope executor scan ended (this is a point query)
+    AddSetScanEnded(ctx, 1);
+
+    // return success from calling function
+    ctx->_builder->CreateRet(llvm::ConstantInt::get(ctx->INT32_T, (int)MOT::RC_OK, true));
+
+    // wrap up
+    return FinalizeCodegen(ctx, max_arg, JIT_COMMAND_COMPOUND_SELECT);
+}
+
+static JitContext* JitCompoundOuterCodegen(
+    JitLlvmCodeGenContext* ctx, Query* query, const char* query_string, JitCompoundPlan* plan)
+{
+    JitContext* jitContext = nullptr;
+    if (plan->_command_type == JIT_COMMAND_SELECT) {
+        jitContext = JitCompoundOuterSelectCodegen(ctx, query, query_string, (JitSelectPlan*)plan->_outer_query_plan);
+    }
+    // currently other outer query types are not supported
+    return jitContext;
+}
+
+static JitContext* JitCompoundCodegen(Query* query, const char* query_string, JitCompoundPlan* plan)
+{
+    // a compound query plan contains one or more sub-queries that evaluate to a datum that next needs to be fed as a
+    // parameter to the outer query. We are currently imposing the following limitations:
+    // 1. one sub-query that can only be a MAX aggregate
+    // 2. outer query must be a simple point select query.
+    //
+    // our main strategy is as follows (based on the fact that each sub-query evaluates into a single value)
+    // 1. for each sub-query:
+    //  1.1 execute sub-query and put datum result in sub-query result slot, according to sub-query index
+    // 2. execute the outer query as a simple query
+    // 3. whenever we encounter a sub-link expression, it is evaluated as an expression that reads the pre-computed
+    //    sub-query result in step 1.1, according to sub-query index
+    MOT_LOG_DEBUG("Generating code for MOT compound select at thread %p", (intptr_t)pthread_self());
+
+    // prepare code generation context
+    GsCodeGen* code_gen = SetupCodegenEnv();
+    if (code_gen == nullptr) {
+        return nullptr;
+    }
+    GsCodeGen::LlvmBuilder builder(code_gen->context());
+
+    JitLlvmCodeGenContext cg_ctx = {0};
+    MOT::Table* table = plan->_outer_query_plan->_query._table;
+    if (!InitCompoundCodeGenContext(&cg_ctx, code_gen, &builder, table, table->GetPrimaryIndex(), plan)) {
+        return nullptr;
+    }
+    JitLlvmCodeGenContext* ctx = &cg_ctx;
+
+    // prepare the jitted function (declare, get arguments into context and define locals)
+    CreateJittedFunction(ctx, "MotJittedCompoundSelect");
+    IssueDebugLog("Starting execution of jitted COMPOUND SELECT");
+
+    // initialize rows_processed local variable (required for sub-queries)
+    buildResetRowsProcessed(ctx);
+
+    // generate code for sub-query execution
+    uint32_t subQueryCount = 0;
+    for (int i = 0; i < plan->_outer_query_plan->_query._search_exprs._count; ++i) {
+        if (plan->_outer_query_plan->_query._search_exprs._exprs[i]._expr->_expr_type == JIT_EXPR_TYPE_SUBLINK) {
+            JitSubLinkExpr* subLinkExpr =
+                (JitSubLinkExpr*)plan->_outer_query_plan->_query._search_exprs._exprs[i]._expr;
+            if (!JitSubQueryCodeGen(ctx, plan, subLinkExpr->_sub_query_index)) {
+                MOT_LOG_TRACE(
+                    "Failed to generate jitted code for COMPOUND SELECT query: Failed to generate code for sub-query");
+                DestroyCodeGenContext(ctx);
+                return nullptr;
+            }
+            ++subQueryCount;
+        }
+    }
+
+    // clear tuple early, so that we will have a null datum in case outer query finds nothing
+    AddExecClearTuple(ctx);
+
+    // generate code for the outer query
+    JitContext* jitContext = JitCompoundOuterCodegen(ctx, query, query_string, plan);
+    if (jitContext == nullptr) {
+        MOT_LOG_TRACE("Failed to generate code for outer query in compound select");
+        DestroyCodeGenContext(ctx);
+        return nullptr;
+    }
+
+    // prepare sub-query data in resulting JIT context (for later execution)
+    MOT_ASSERT(subQueryCount > 0);
+    MOT_ASSERT(subQueryCount == plan->_sub_query_count);
+    if ((subQueryCount > 0) && !PrepareSubQueryData(jitContext, plan)) {
+        MOT_LOG_TRACE("Failed to prepare tuple table slot array for sub-queries in JIT context object");
+        DestroyJitContext(jitContext);
+        jitContext = nullptr;
+    }
+
+    // cleanup
+    DestroyCodeGenContext(ctx);
+
+    return jitContext;
 }
 
 static JitContext* JitRangeScanCodegen(Query* query, const char* query_string, JitRangeScanPlan* plan)
@@ -5009,6 +5625,10 @@ extern JitContext* JitCodegenLlvmQuery(Query* query, const char* query_string, J
 
         case JIT_PLAN_JOIN:
             jit_context = JitJoinCodegen(query, query_string, (JitJoinPlan*)plan);
+            break;
+
+        case JIT_PLAN_COMPOUND:
+            jit_context = JitCompoundCodegen(query, query_string, (JitCompoundPlan*)plan);
             break;
 
         default:

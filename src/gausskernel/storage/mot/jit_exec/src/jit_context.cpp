@@ -32,18 +32,21 @@
 #include "jit_tvm.h"
 #include "mot_internal.h"
 #include "jit_source.h"
+#include "mm_global_api.h"
 
 namespace JitExec {
 DECLARE_LOGGER(JitContext, JitExec);
 
 // The global JIT context pool
-static JitContextPool g_globalJitCtxPool;
+static JitContextPool g_globalJitCtxPool __attribute__((aligned(64))) = {0};
 
 // forward declarations
 static JitContextPool* AllocSessionJitContextPool();
 static MOT::Key* PrepareJitSearchKey(JitContext* jitContext, MOT::Index* index);
 static void CleanupJitContextPrimary(JitContext* jitContext);
 static void CleanupJitContextInner(JitContext* jitContext);
+static void CleanupJitContextSubQueryDataArray(JitContext* jitContext);
+static void CleanupJitContextSubQueryData(JitContext::SubQueryData* subQueryData);
 
 // Helpers to allocate/free from top memory context
 inline void* palloc_top(size_t size_bytes)
@@ -122,9 +125,127 @@ extern JitContext* CloneJitContext(JitContext* sourceJitContext)
         result->m_queryString = sourceJitContext->m_queryString;
         result->m_innerTable = sourceJitContext->m_innerTable;
         result->m_innerIndex = sourceJitContext->m_innerIndex;
+        result->m_subQueryCount = sourceJitContext->m_subQueryCount;
+
+        // clone sub-query tuple descriptor array
+        MOT_LOG_TRACE("Cloning %u sub-query data items", (unsigned)sourceJitContext->m_subQueryCount);
+        if (sourceJitContext->m_subQueryCount > 0) {
+            uint32_t allocSize = sizeof(JitContext::SubQueryData) * sourceJitContext->m_subQueryCount;
+            result->m_subQueryData = (JitContext::SubQueryData*)MOT::MemGlobalAllocAligned(allocSize, L1_CACHE_LINE);
+            if (result->m_subQueryData == nullptr) {
+                MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                    "Generate JIT Code",
+                    "Failed to allocate %u bytes for %u sub-query data array in JIT context object",
+                    allocSize,
+                    (unsigned)sourceJitContext->m_subQueryCount);
+                FreeJitContext(result);
+                result = nullptr;
+            } else {
+                for (uint32_t i = 0; i < sourceJitContext->m_subQueryCount; ++i) {
+                    // copy known members
+                    result->m_subQueryData[i].m_commandType = sourceJitContext->m_subQueryData[i].m_commandType;
+                    result->m_subQueryData[i].m_table = sourceJitContext->m_subQueryData[i].m_table;
+                    result->m_subQueryData[i].m_index = sourceJitContext->m_subQueryData[i].m_index;
+
+                    // nullify other members
+                    result->m_subQueryData[i].m_tupleDesc = nullptr;
+                    result->m_subQueryData[i].m_slot = nullptr;
+                    result->m_subQueryData[i].m_searchKey = nullptr;
+                    result->m_subQueryData[i].m_endIteratorKey = nullptr;
+                }
+            }
+        }
+    }
+
+    if (result != nullptr) {
         MOT_LOG_TRACE("Cloned JIT context %p into %p (table=%p)", sourceJitContext, result, result->m_table);
     }
     return result;
+}
+
+static inline List* GetSubExprTargetList(Query* query, Expr* expr, int subQueryIndex, int* subQueryCount);
+
+static List* GetSubExprListTargetList(Query* query, List* exprList, int subQueryIndex, int* subQueryCount)
+{
+    // traverse all arguments, for each encountered sub-link increment the global sub-query count
+    // if encountered the sub-link at the searched index, then return its target list
+    List* targetList = nullptr;
+    ListCell* lc = nullptr;
+    foreach (lc, exprList) {
+        Expr* expr = (Expr*)lfirst(lc);
+        if (expr->type == T_SubLink) {
+            if (*subQueryCount == subQueryIndex) {
+                SubLink* subLink = (SubLink*)expr;
+                Query* subQuery = (Query*)subLink->subselect;
+                targetList = subQuery->targetList;
+                break;
+            } else {
+                ++(*subQueryCount);
+            }
+        } else {
+            // go deeper recursively
+            targetList = GetSubExprTargetList(query, expr, subQueryIndex, subQueryCount);
+            if (targetList != nullptr) {  // we are done
+                break;
+            }
+            // continue searching
+        }
+    }
+    return targetList;
+}
+
+static inline List* GetSubOpExprTargetList(Query* query, OpExpr* op_expr, int subQueryIndex, int* subQueryCount)
+{
+    // check the operator argument list
+    List* targetList = GetSubExprListTargetList(query, op_expr->args, subQueryIndex, subQueryCount);
+    return targetList;
+}
+
+static inline List* GetSubBoolExprTargetList(Query* query, BoolExpr* bool_expr, int subQueryIndex, int* subQueryCount)
+{
+    // check the operator argument list
+    List* targetList = GetSubExprListTargetList(query, bool_expr->args, subQueryIndex, subQueryCount);
+    return targetList;
+}
+
+static inline List* GetSubExprTargetList(Query* query, Expr* expr, int subQueryIndex, int* subQueryCount)
+{
+    // we expect either an operator or boolean expression
+    List* targetList = nullptr;
+    if (expr->type == T_OpExpr) {
+        targetList = GetSubOpExprTargetList(query, (OpExpr*)expr, subQueryIndex, subQueryCount);
+    } else if (expr->type == T_BoolExpr) {
+        targetList = GetSubBoolExprTargetList(query, (BoolExpr*)expr, subQueryIndex, subQueryCount);
+    }
+    return targetList;
+}
+
+static inline List* GetSubQueryTargetList(Query* query, int subQueryIndex, int* subQueryCount)
+{
+    // search in the qualifier list for the sub-link expression at the specified index
+    Node* quals = query->jointree->quals;
+    Expr* expr = (Expr*)&quals[0];
+    List* targetList = GetSubExprTargetList(query, expr, subQueryIndex, subQueryCount);
+    return targetList;
+}
+
+static List* GetSubQueryTargetList(const char* queryString, int subQueryIndex)
+{
+    // search in all saved plans of current session for the plan matching the given query text
+    List* targetList = nullptr;
+    CachedPlanSource* psrc = u_sess->pcache_cxt.first_saved_plan;
+    int subQueryCount = 0;
+    while (psrc != nullptr) {
+        if (strcmp(psrc->query_string, queryString) == 0) {  // query plan source found
+            List* stmtList = psrc->query_list;
+            Query* query = (Query*)linitial(stmtList);
+            // get the target list from the sub-query in the specified index
+            targetList = GetSubQueryTargetList(query, subQueryIndex, &subQueryCount);
+            break;  // whether found or not, we are done
+        }
+        psrc = psrc->next_saved;
+    }
+    return targetList;
 }
 
 extern bool PrepareJitContext(JitContext* jitContext)
@@ -194,6 +315,7 @@ extern bool PrepareJitContext(JitContext* jitContext)
         }
     }
 
+    // allocate inner loop search key for JOIN commands
     if ((jitContext->m_innerSearchKey == NULL) && IsJoinCommand(jitContext->m_commandType)) {
         MOT_LOG_TRACE(
             "Preparing inner search key  for JOIN command from index %s", jitContext->m_innerIndex->GetName().c_str());
@@ -210,6 +332,7 @@ extern bool PrepareJitContext(JitContext* jitContext)
         }
     }
 
+    // allocate inner loop end-iterator search key for JOIN commands
     if ((jitContext->m_innerEndIteratorKey == NULL) && IsJoinCommand(jitContext->m_commandType)) {
         MOT_LOG_TRACE("Preparing inner end iterator key for JOIN command from index %s",
             jitContext->m_innerIndex->GetName().c_str());
@@ -226,6 +349,7 @@ extern bool PrepareJitContext(JitContext* jitContext)
         }
     }
 
+    // preparing outer row copy for JOIN commands
     if ((jitContext->m_outerRowCopy == NULL) && IsJoinCommand(jitContext->m_commandType)) {
         MOT_LOG_TRACE("Preparing outer row copy for JOIN command");
         jitContext->m_outerRowCopy = jitContext->m_table->CreateNewRow();
@@ -233,6 +357,65 @@ extern bool PrepareJitContext(JitContext* jitContext)
             MOT_LOG_TRACE("Failed to allocate reusable outer row copy for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
         }
+    }
+
+    // prepare sub-query data for COMPOUND commands
+    if (jitContext->m_subQueryCount > 0) {
+        // allocate sub-query search keys and generate tuple table slot array using session top memory context
+        MemoryContext oldCtx = CurrentMemoryContext;
+        CurrentMemoryContext = u_sess->top_mem_cxt;
+        for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
+            JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
+            if (subQueryData->m_tupleDesc == nullptr) {
+                MOT_LOG_TRACE("Preparing sub-query %u tuple descriptor", i);
+                List* targetList = GetSubQueryTargetList(jitContext->m_queryString, i);
+                if (targetList == nullptr) {
+                    MOT_LOG_TRACE("Failed to locate sub-query %u target list", i);
+                    CurrentMemoryContext = oldCtx;
+                    return false;  // safe cleanup during destroy
+                } else {
+                    subQueryData->m_tupleDesc = ExecCleanTypeFromTL(targetList, false);
+                    if (subQueryData->m_tupleDesc == nullptr) {
+                        MOT_LOG_TRACE("Failed to create sub-query %u tuple descriptor from target list", i);
+                        CurrentMemoryContext = oldCtx;
+                        return false;  // safe cleanup during destroy
+                    }
+                }
+            }
+            if (subQueryData->m_slot == nullptr) {
+                MOT_ASSERT(subQueryData->m_tupleDesc != nullptr);
+                MOT_LOG_TRACE("Preparing sub-query %u result slot", i);
+                subQueryData->m_slot = MakeSingleTupleTableSlot(subQueryData->m_tupleDesc);
+                if (subQueryData->m_slot == nullptr) {
+                    MOT_LOG_TRACE("Failed to generate sub-query %u tuple table slot", i);
+                    CurrentMemoryContext = oldCtx;
+                    return false;  // safe cleanup during destroy
+                }
+            }
+            if (subQueryData->m_searchKey == nullptr) {
+                MOT_LOG_TRACE(
+                    "Preparing sub-query %u search key from index %s", i, subQueryData->m_index->GetName().c_str());
+                subQueryData->m_searchKey = PrepareJitSearchKey(jitContext, subQueryData->m_index);
+                if (subQueryData->m_searchKey == nullptr) {
+                    MOT_LOG_TRACE("Failed to generate sub-query %u search key", i);
+                    CurrentMemoryContext = oldCtx;
+                    return false;  // safe cleanup during destroy
+                }
+            }
+            if ((subQueryData->m_commandType == JIT_COMMAND_AGGREGATE_RANGE_SELECT) &&
+                (subQueryData->m_endIteratorKey == nullptr)) {
+                MOT_LOG_TRACE("Preparing sub-query %u end-iterator search key from index %s",
+                    i,
+                    subQueryData->m_index->GetName().c_str());
+                subQueryData->m_endIteratorKey = PrepareJitSearchKey(jitContext, subQueryData->m_index);
+                if (subQueryData->m_endIteratorKey == nullptr) {
+                    MOT_LOG_TRACE("Failed to generate sub-query %u end-iterator search key", i);
+                    CurrentMemoryContext = oldCtx;
+                    return false;  // safe cleanup during destroy
+                }
+            }
+        }
+        CurrentMemoryContext = oldCtx;
     }
 
     return true;
@@ -258,6 +441,9 @@ extern void DestroyJitContext(JitContext* jitContext)
             RemoveJitSourceContext(jitContext->m_jitSource, jitContext);
             jitContext->m_jitSource = nullptr;
         }
+
+        // cleanup sub-query data array
+        CleanupJitContextSubQueryDataArray(jitContext);
 
         // cleanup keys(s)
         CleanupJitContextPrimary(jitContext);
@@ -327,6 +513,13 @@ extern void PurgeJitContext(JitContext* jitContext, uint64_t relationId)
         if ((jitContext->m_innerTable != nullptr) && (jitContext->m_innerTable->GetTableExId() == relationId)) {
             CleanupJitContextInner(jitContext);
         }
+
+        // cleanup sub-query keys
+        for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
+            JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
+            MOT_LOG_TRACE("Cleaning up sub-query %u data in JIT context %p", i, jitContext);
+            CleanupJitContextSubQueryData(subQueryData);
+        }
     }
 }
 
@@ -369,9 +562,45 @@ static void CleanupJitContextInner(JitContext* jitContext)
     }
 }
 
+static void CleanupJitContextSubQueryDataArray(JitContext* jitContext)
+{
+    MOT_LOG_TRACE("Cleaning up sub-query data array in JIT context %p", jitContext);
+    for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
+        JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
+        MOT_LOG_TRACE("Cleaning up sub-query %u data in JIT context %p", i, jitContext);
+        CleanupJitContextSubQueryData(subQueryData);
+    }
+    if (jitContext->m_subQueryData != nullptr) {
+        MOT::MemGlobalFree(jitContext->m_subQueryData);
+        jitContext->m_subQueryData = nullptr;
+    }
+}
+
+static void CleanupJitContextSubQueryData(JitContext::SubQueryData* subQueryData)
+{
+    if (subQueryData->m_slot != nullptr) {
+        ExecDropSingleTupleTableSlot(subQueryData->m_slot);
+        subQueryData->m_slot = nullptr;
+    }
+    if (subQueryData->m_tupleDesc != nullptr) {
+        FreeTupleDesc(subQueryData->m_tupleDesc);
+        subQueryData->m_tupleDesc = nullptr;
+    }
+    if (subQueryData->m_index != nullptr) {
+        if (subQueryData->m_searchKey != nullptr) {
+            subQueryData->m_index->DestroyKey(subQueryData->m_searchKey);
+            subQueryData->m_searchKey = nullptr;
+        }
+        if (subQueryData->m_endIteratorKey != nullptr) {
+            subQueryData->m_index->DestroyKey(subQueryData->m_endIteratorKey);
+            subQueryData->m_endIteratorKey = nullptr;
+        }
+    }
+}
+
 static JitContextPool* AllocSessionJitContextPool()
 {
-    JitContextPool* result = (JitContextPool*)palloc_top(sizeof(JitContextPool));
+    JitContextPool* result = (JitContextPool*)MOT::MemGlobalAllocAligned(sizeof(JitContextPool), L1_CACHE_LINE);
     if (result == NULL) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Allocate JIT Context", "Failed to allocate buffer for JIT context");
         return NULL;
@@ -387,7 +616,7 @@ static JitContextPool* AllocSessionJitContextPool()
 extern void FreeSessionJitContextPool(JitContextPool* jitContextPool)
 {
     DestroyJitContextPool(jitContextPool);
-    pfree_top(jitContextPool);
+    MOT::MemGlobalFree(jitContextPool);
 }
 
 static MOT::Key* PrepareJitSearchKey(JitContext* jitContext, MOT::Index* index)

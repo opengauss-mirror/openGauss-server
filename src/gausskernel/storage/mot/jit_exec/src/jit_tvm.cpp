@@ -91,28 +91,28 @@ extern uint64_t getRegisterValue(ExecContext* exec_context, int register_ref)
     return result;
 }
 
-uint64_t Instruction::exec(ExecContext* exec_context)
+uint64_t Instruction::Exec(ExecContext* exec_context)
 {
 #ifdef MOT_JIT_DEBUG
     if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_DEBUG)) {
         MOT_LOG_DEBUG("Executing instruction:");
-        dump();
+        Dump();
         fprintf(stderr, "\n");
     }
 #endif
-    uint64_t value = execImpl(exec_context);
+    uint64_t value = ExecImpl(exec_context);
     if (_type == Regular) {
         setRegisterValue(exec_context, _register_ref, value);
     }
     return value;
 }
 
-void Instruction::dump()
+void Instruction::Dump()
 {
     if (_register_ref != -1) {
         fprintf(stderr, "%%%d = ", _register_ref);
     }
-    dumpImpl();
+    DumpImpl();
 }
 
 Datum ConstExpression::eval(ExecContext* exec_context)
@@ -144,44 +144,44 @@ void ParamExpression::dump()
     fprintf(stderr, "getDatumParam(%%params, param_id=%d, arg_pos=%d)", _param_id, _arg_pos);
 }
 
-uint64_t RegisterRefInstruction::exec(ExecContext* exec_context)
+uint64_t RegisterRefInstruction::Exec(ExecContext* exec_context)
 {
-    return getRegisterValue(exec_context, getRegisterRef());
+    return getRegisterValue(exec_context, GetRegisterRef());
 }
 
-void RegisterRefInstruction::dump()
+void RegisterRefInstruction::Dump()
 {
-    fprintf(stderr, "%%%d", getRegisterRef());
+    fprintf(stderr, "%%%d", GetRegisterRef());
 }
 
-uint64_t ReturnInstruction::exec(ExecContext* exec_context)
+uint64_t ReturnInstruction::Exec(ExecContext* exec_context)
 {
-    return _return_value->exec(exec_context);
+    return _return_value->Exec(exec_context);
 }
 
-void ReturnInstruction::dump()
+void ReturnInstruction::Dump()
 {
     fprintf(stderr, "return ");
-    _return_value->dump();
+    _return_value->Dump();
 }
 
-uint64_t ReturnNextInstruction::exec(ExecContext* exec_context)
+uint64_t ReturnNextInstruction::Exec(ExecContext* exec_context)
 {
-    return _return_value->exec(exec_context);
+    return _return_value->Exec(exec_context);
 }
 
-void ReturnNextInstruction::dump()
+void ReturnNextInstruction::Dump()
 {
     fprintf(stderr, "return next ");
-    _return_value->dump();
+    _return_value->Dump();
 }
 
-uint64_t ConstInstruction::exec(ExecContext* exec_context)
+uint64_t ConstInstruction::Exec(ExecContext* exec_context)
 {
     return _value;
 }
 
-void ConstInstruction::dump()
+void ConstInstruction::Dump()
 {
     fprintf(stderr, "%" PRIu64, _value);
 }
@@ -192,33 +192,33 @@ ExpressionInstruction::~ExpressionInstruction()
     delete _expr;
 }
 
-uint64_t ExpressionInstruction::execImpl(ExecContext* exec_context)
+uint64_t ExpressionInstruction::ExecImpl(ExecContext* exec_context)
 {
     return _expr->eval(exec_context);
 }
 
-void ExpressionInstruction::dumpImpl()
+void ExpressionInstruction::DumpImpl()
 {
     _expr->dump();
 }
 
-uint64_t GetExpressionRCInstruction::execImpl(ExecContext* exec_context)
+uint64_t GetExpressionRCInstruction::ExecImpl(ExecContext* exec_context)
 {
     return exec_context->_expr_rc;
 }
 
-void GetExpressionRCInstruction::dumpImpl()
+void GetExpressionRCInstruction::DumpImpl()
 {
     fprintf(stderr, "getExpressionRC()");
 }
 
-uint64_t DebugLogInstruction::exec(ExecContext* exec_context)
+uint64_t DebugLogInstruction::Exec(ExecContext* exec_context)
 {
     debugLog(_function, _msg);
     return (uint64_t)MOT::RC_OK;
 }
 
-void DebugLogInstruction::dump()
+void DebugLogInstruction::Dump()
 {
     fprintf(stderr, "debugLog(function='%s', msg='%s')", _function, _msg);
 }
@@ -236,7 +236,7 @@ void BasicBlock::addInstruction(Instruction* instruction)
     _instructions.push_back(instruction);
 
     // update predecessors if necessary
-    if (instruction->getType() == Instruction::Branch) {
+    if (instruction->GetType() == Instruction::Branch) {
         AbstractBranchInstruction* branch_instruction = (AbstractBranchInstruction*)instruction;
         int branch_count = branch_instruction->getBranchCount();
         for (int i = 0; i < branch_count; ++i) {
@@ -274,7 +274,7 @@ bool BasicBlock::isTrivial() const
     bool result = false;
     if (_instructions.size() == 1) {
         Instruction* instruction = _instructions.front();
-        if (instruction->getType() == Instruction::Branch) {
+        if (instruction->GetType() == Instruction::Branch) {
             AbstractBranchInstruction* branch_instruction = (AbstractBranchInstruction*)instruction;
             if (branch_instruction->getBranchType() == AbstractBranchInstruction::Unconditional) {
                 result = true;
@@ -290,8 +290,8 @@ BasicBlock* BasicBlock::getNextTrivalBlock()
     MOT_ASSERT(_instructions.size() == 1);
     if (_instructions.size() == 1) {
         Instruction* instruction = _instructions.front();
-        MOT_ASSERT(instruction->getType() == Instruction::Branch);
-        if (instruction->getType() == Instruction::Branch) {
+        MOT_ASSERT(instruction->GetType() == Instruction::Branch);
+        if (instruction->GetType() == Instruction::Branch) {
             AbstractBranchInstruction* branch_instruction = (AbstractBranchInstruction*)instruction;
             MOT_ASSERT(branch_instruction->getBranchType() == AbstractBranchInstruction::Unconditional);
             if (branch_instruction->getBranchType() == AbstractBranchInstruction::Unconditional) {
@@ -307,7 +307,7 @@ void BasicBlock::replaceTrivialBlockReference(BasicBlock* trivial_block, BasicBl
     InstructionList::iterator itr = _instructions.begin();
     while (itr != _instructions.end()) {
         Instruction* instruction = *itr;
-        if (instruction->getType() == Instruction::Branch) {
+        if (instruction->GetType() == Instruction::Branch) {
             AbstractBranchInstruction* branch_instruction = (AbstractBranchInstruction*)instruction;
             branch_instruction->replaceTrivialBlockReference(trivial_block, next_block);
         }
@@ -323,8 +323,8 @@ uint64_t BasicBlock::exec(ExecContext* exec_context)
     InstructionList::iterator itr = _instructions.begin();
     while (itr != _instructions.end()) {
         Instruction* instruction = *itr;
-        uint64_t rc = instruction->exec(exec_context);
-        Instruction::Type itype = instruction->getType();
+        uint64_t rc = instruction->Exec(exec_context);
+        Instruction::Type itype = instruction->GetType();
         if (itype == Instruction::Return) {
             return rc;
         }
@@ -360,10 +360,10 @@ uint64_t BasicBlock::execNext(ExecContext* exec_context)
     while (_next_instruction != _instructions.end()) {
         Instruction* instruction = *_next_instruction;
         ++_next_instruction;
-        uint64_t rc = instruction->exec(exec_context);
+        uint64_t rc = instruction->Exec(exec_context);
 
         // check instruction type to understand what happened
-        Instruction::Type itype = instruction->getType();
+        Instruction::Type itype = instruction->GetType();
 
         // case 1: function execution terminated
         if (itype == Instruction::Return) {
@@ -396,7 +396,7 @@ bool BasicBlock::endsInBranch()
 {
     bool result = false;
     if (!_instructions.empty()) {
-        Instruction::Type last_instr_type = _instructions.back()->getType();
+        Instruction::Type last_instr_type = _instructions.back()->GetType();
         result = (last_instr_type == Instruction::Branch) || (last_instr_type == Instruction::Return);
     }
     return result;
@@ -456,7 +456,7 @@ void BasicBlock::dumpInstructions()
     InstructionList::iterator itr = _instructions.begin();
     while (itr != _instructions.end()) {
         fprintf(stderr, "  ");
-        (*itr)->dump();
+        (*itr)->Dump();
         fprintf(stderr, ";\n");
         ++itr;
     }
@@ -470,7 +470,7 @@ bool BasicBlock::hasIllegalInstruction()
         Instruction* instruction = *itr;
         if (!isInstructionLegal(instruction)) {
             MOT_LOG_ERROR("Found illegal instruction:");
-            instruction->dump();
+            instruction->Dump();
             fprintf(stderr, "\n");
             return true;
         }
@@ -485,21 +485,21 @@ bool BasicBlock::isInstructionLegal(Instruction* instruction)
     // otherwise check that all sub-instructions are visible
     if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
         MOT_LOG_TRACE("Checking whether instruction is legal:");
-        instruction->dump();
+        instruction->Dump();
         fprintf(stderr, "\n");
     }
 
-    if (instruction->getType() == Instruction::RegisterRef) {
+    if (instruction->GetType() == Instruction::RegisterRef) {
         BasicBlockList visited_blocks;
-        if (!isRegisterRefVisible(instruction->getRegisterRef(), &visited_blocks)) {
+        if (!isRegisterRefVisible(instruction->GetRegisterRef(), &visited_blocks)) {
             MOT_LOG_ERROR("Register reference instruction is invisible from current block %s:", getName());
-            instruction->dump();
+            instruction->Dump();
             fprintf(stderr, "\n");
             return false;
         }
     } else if (hasInvisibleRegisterRef(instruction)) {
         MOT_LOG_ERROR("Found instruction with invisible register ref:");
-        instruction->dump();
+        instruction->Dump();
         fprintf(stderr, "\n");
         return false;
     }
@@ -509,17 +509,17 @@ bool BasicBlock::isInstructionLegal(Instruction* instruction)
 bool BasicBlock::hasInvisibleRegisterRef(Instruction* instruction)
 {
     MOT_LOG_TRACE("Checking if instruction contains invisible register reference");
-    int sub_inst_count = instruction->getSubInstructionCount();
+    int sub_inst_count = instruction->GetSubInstructionCount();
     for (int i = 0; i < sub_inst_count; ++i) {
-        Instruction* sub_instruction = instruction->getSubInstructionAt(i);
+        Instruction* sub_instruction = instruction->GetSubInstructionAt(i);
         if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
             MOT_LOG_TRACE("Checking sub-instruction:")
-            sub_instruction->dump();
+            sub_instruction->Dump();
             fprintf(stderr, "\n");
         }
         if (!isInstructionLegal(sub_instruction)) {
             MOT_LOG_ERROR("Found illegal sub-instruction:");
-            sub_instruction->dump();
+            sub_instruction->Dump();
             fprintf(stderr, "\n");
             return true;
         }
@@ -584,17 +584,17 @@ bool BasicBlock::containsRegRefDefinition(int ref_ref_value)
     return result;
 }
 
-uint64_t ICmpInstruction::execImpl(ExecContext* exec_context)
+uint64_t ICmpInstruction::ExecImpl(ExecContext* exec_context)
 {
-    uint64_t lhs_res = _lhs_instruction->exec(exec_context);
-    uint64_t rhs_res = _rhs_instruction->exec(exec_context);
+    uint64_t lhs_res = _lhs_instruction->Exec(exec_context);
+    uint64_t rhs_res = _rhs_instruction->Exec(exec_context);
     return exec_cmp(lhs_res, rhs_res);
 }
 
-void ICmpInstruction::dumpImpl()
+void ICmpInstruction::DumpImpl()
 {
     fprintf(stderr, "icmp ");
-    _lhs_instruction->dump();
+    _lhs_instruction->Dump();
 
     switch (_cmp_op) {
         case JitExec::JIT_ICMP_EQ:
@@ -619,7 +619,7 @@ void ICmpInstruction::dumpImpl()
             fprintf(stderr, " cmp? ");
     }
 
-    _rhs_instruction->dump();
+    _rhs_instruction->Dump();
 }
 
 int ICmpInstruction::exec_cmp(uint64_t lhs_res, uint64_t rhs_res)
@@ -677,10 +677,10 @@ void CondBranchInstruction::replaceTrivialBlockReference(BasicBlock* trivial_blo
     }
 }
 
-uint64_t CondBranchInstruction::exec(ExecContext* exec_context)
+uint64_t CondBranchInstruction::Exec(ExecContext* exec_context)
 {
     BasicBlock* result = NULL;
-    uint64_t rc = _if_test->exec(exec_context);
+    uint64_t rc = _if_test->Exec(exec_context);
     if (rc) {
         result = _true_branch;
     } else {
@@ -689,10 +689,10 @@ uint64_t CondBranchInstruction::exec(ExecContext* exec_context)
     return (uint64_t)result;
 }
 
-void CondBranchInstruction::dump()
+void CondBranchInstruction::Dump()
 {
     fprintf(stderr, "br ");  // format compatible with IR (meaning if non-zero jump to true branch)
-    _if_test->dump();
+    _if_test->Dump();
     fprintf(stderr, ", label %%%s, label %%%s", _true_branch->getName(), _false_branch->getName());
 }
 
@@ -721,12 +721,12 @@ void BranchInstruction::replaceTrivialBlockReference(BasicBlock* trivial_block, 
     }
 }
 
-uint64_t BranchInstruction::exec(ExecContext* exec_context)
+uint64_t BranchInstruction::Exec(ExecContext* exec_context)
 {
     return (uint64_t)_target_branch;
 }
 
-void BranchInstruction::dump()
+void BranchInstruction::Dump()
 {
     fprintf(stderr, "br label %%%s", _target_branch->getName());
 }
@@ -784,8 +784,8 @@ uint64_t Function::execNext(ExecContext* exec_context)
 void Function::addInstruction(Instruction* instruction)
 {
     _all_instructions.push_back(instruction);
-    if (instruction->getRegisterRef() > _max_register_ref) {
-        _max_register_ref = instruction->getRegisterRef();
+    if (instruction->GetRegisterRef() > _max_register_ref) {
+        _max_register_ref = instruction->GetRegisterRef();
     }
 }
 
@@ -935,8 +935,8 @@ Function* Builder::createFunction(const char* function_name, const char* query_s
 Instruction* Builder::addInstruction(Instruction* instruction)
 {
     Instruction* result = instruction;
-    if (instruction->getType() == Instruction::Regular) {
-        instruction->setRegisterRef(_next_register_ref);
+    if (instruction->GetType() == Instruction::Regular) {
+        instruction->SetRegisterRef(_next_register_ref);
         result = new (std::nothrow) RegisterRefInstruction(_next_register_ref);
         _current_block->recordRegisterReferenceDefinition(_next_register_ref);  // for later validation
         _current_function->addInstruction(result);                              // for cleanup only
