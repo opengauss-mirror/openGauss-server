@@ -165,7 +165,6 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 			   bool *deferrable, bool *initdeferred, bool *not_valid,
 			   bool *no_inherit, core_yyscan_t yyscanner);
 static Expr *makeNodeDecodeCondtion(Expr* firstCond,Expr* secondCond);
-static void is_kill_session(List *actionlist);
 static List *make_action_func(List *arguments);
 static List *get_func_args(char *sid);
 static char *pg_strsep(char **stringp, const char *delim);
@@ -451,7 +450,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 
 %type <mergewhen>	merge_insert merge_update
 
-%type <vsetstmt> set_rest set_rest_more SetResetClause FunctionSetResetClause
+%type <vsetstmt> generic_set set_rest set_rest_more SetResetClause FunctionSetResetClause
 
 %type <node>	TableElement TypedTableElement ConstraintElem TableFuncElement
 				ForeignTableElement
@@ -637,7 +636,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 /* PGXC_BEGIN */
 	DICTIONARY DIRECT DIRECTORY DISABLE_P DISCARD DISTINCT DISTRIBUTE DISTRIBUTION DO DOCUMENT_P DOMAIN_P DOUBLE_P
 /* PGXC_END */
-	DROP DUPLICATE
+	DROP DUPLICATE DISCONNECT
 
 	EACH ELASTIC ELSE ENABLE_P ENCODING ENCRYPTED END_P ENFORCED ENUM_P ERRORS ESCAPE EOL ESCAPING EVERY EXCEPT EXCHANGE
 	EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN
@@ -657,7 +656,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 
 	JOIN
 
-	KEY
+	KEY KILL
 
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF
 	LEAST LESS LEFT LEVEL LIKE LIMIT LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
@@ -1507,17 +1506,19 @@ AlterSessionStmt:
 /* "alter system" */
 /*****************************************************************************
  *
- * Alter SYSTEM (kill a session)
+ * Alter SYSTEM 
+ * (1. kill a session by "select pg_terminate_backend(pid)", so it only needs a SelectStmt node.)
+ * (2. disconnect a session. unsupported currently.)
+ * (3. set system parameter to, this is used to change configuration parameters persistently.)
  *
  *****************************************************************************/
 
 AlterSystemStmt:
-			ALTER SYSTEM_P name_list SESSION Sconst altersys_option
+			ALTER SYSTEM_P KILL SESSION Sconst altersys_option
 				{
 					SelectStmt *n = NULL;
 					List *pid = NULL;
 
-					is_kill_session($3);
 					pid = get_func_args($5);
 
 					n = makeNode(SelectStmt);
@@ -1531,7 +1532,22 @@ AlterSystemStmt:
 					n->windowClause = NIL;
 					$$ = (Node *)n;
 				}
+
+                        | ALTER SYSTEM_P DISCONNECT SESSION Sconst altersys_option
+                                {
+                                       ereport(ERROR,
+                                               (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                                errmsg("unsupported action \"DISCONNECT\" for statement \" alter system \"")));
+                                }
+
+                        | ALTER SYSTEM_P SET generic_set
+                                {
+                                       AlterSystemStmt *n = makeNode(AlterSystemStmt);
+                                       n->setstmt = $4;
+                                       $$ = (Node *)n;
+                                }
 			;
+
 altersys_option:
 			IMMEDIATE			{/* empty */}
 			|				{/* empty */}
@@ -1666,7 +1682,7 @@ set_rest:
 			| set_rest_more
 			;
 
-set_rest_more:	/* Generic SET syntaxes: */
+generic_set:
 			var_name TO var_list
 				{
 					VariableSetStmt *n = makeNode(VariableSetStmt);
@@ -1751,6 +1767,13 @@ set_rest_more:	/* Generic SET syntaxes: */
 					n->name = "current_schema";
 					$$ = n;
 				}
+                ;
+
+set_rest_more:  /* Generic SET syntaxes: */
+                        generic_set
+                                {
+                                        $$ = $1;
+                                }
 			| var_name FROM CURRENT_P
 				{
 					VariableSetStmt *n = makeNode(VariableSetStmt);
@@ -11398,7 +11421,6 @@ DropdbStmt: DROP DATABASE database_name
 				}
 		;
 
-
 /*****************************************************************************
  *
  * Manipulate a domain
@@ -17671,6 +17693,7 @@ unreserved_keyword:
 			| DIRECTORY
 			| DISABLE_P
 			| DISCARD
+			| DISCONNECT
 /* PGXC_BEGIN */
 			| DISTRIBUTE
 			| DISTRIBUTION
@@ -17742,6 +17765,7 @@ unreserved_keyword:
 			| ISNULL
 			| ISOLATION
 			| KEY
+			| KILL
 			| LABEL
 			| LANGUAGE
 			| LARGE_P
@@ -18856,45 +18880,6 @@ makeNodeDecodeCondtion(Expr* firstCond,Expr* secondCond)
 	c->defresult = (Expr*)equal_oper;
 
 	return (Expr*)c;
-}
-
-// check weather is an action of "kill session"
-// unsupported action "disconnect"
-static void
-is_kill_session(List *actionlist)
-{
-	char		*actionopt = NULL;
-	ListCell	*lc = NULL;
-
-	if (1 != actionlist->length)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_OBJECT),
-				errmsg("undefined or invalid action for statement \" alter system \"")));
-		return;
-	}
-
-	lc = list_head(actionlist);
-	actionopt = ((Value *)(lfirst(lc)))->val.str;
-
-	if (!pg_strcasecmp(actionopt, "KILL"))
-		return;
-	else if (!pg_strcasecmp(actionopt,  "DISCONNECT"))
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_OBJECT),
-				errmsg("unsupported action \"%s\" for statement \" alter system \"",
-						actionopt)));
-		return;
-	}
-	else
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_OBJECT),
-				errmsg("undefined action \"%s\" for statement \" alter system \"",
-						actionopt)));
-		return;
-	}
 }
 
 // make function infomation to kill the session

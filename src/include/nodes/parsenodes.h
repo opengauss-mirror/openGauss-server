@@ -2902,6 +2902,15 @@ typedef struct DropdbStmt {
 } DropdbStmt;
 
 /* ----------------------
+ *             Alter System Statement
+ * ----------------------
+ */
+typedef struct AlterSystemStmt {
+    NodeTag type;
+    VariableSetStmt *setstmt;   /* SET subcommand */
+} AlterSystemStmt;
+
+/* ----------------------
  *		Cluster Statement (support pbrown's cluster index implementation)
  * ----------------------
  */

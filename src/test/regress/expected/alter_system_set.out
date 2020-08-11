@@ -1,0 +1,406 @@
+----------------------------------------------------------
+-- The common user should not have the permission.
+---------------------------------------------------------
+DROP ROLE IF EXISTS alter_system_testuser;
+NOTICE:  role "alter_system_testuser" does not exist, skipping
+CREATE USER alter_system_testuser PASSWORD 'test@1233';
+SET SESSION AUTHORIZATION alter_system_testuser PASSWORD 'test@1233';
+show use_workload_manager;
+ use_workload_manager 
+----------------------
+ on
+(1 row)
+
+ALTER SYSTEM SET use_workload_manager to off;
+ERROR:  must be superuser to execute ALTER SYSTEM SET command
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+ALTER SYSTEM SET io_limits to 100;
+ERROR:  must be superuser to execute ALTER SYSTEM SET command
+select pg_sleep(1); -- wait to reload postgres.conf file
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show use_workload_manager;
+ use_workload_manager 
+----------------------
+ on
+(1 row)
+
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+\c
+DROP user alter_system_testuser;
+-------------------------------------------------------
+-- clear pg_query_audit for the last test
+-------------------------------------------------------
+show audit_enabled;
+ audit_enabled 
+---------------
+ on
+(1 row)
+
+show audit_set_parameter;
+ audit_set_parameter 
+---------------------
+ 1
+(1 row)
+
+show audit_user_violation;
+ audit_user_violation 
+----------------------
+ 1
+(1 row)
+
+SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+--------------------------------------------------------
+-- for POSTMASTER GUC
+--------------------------------------------------------
+SHOW enable_thread_pool;
+ enable_thread_pool 
+--------------------
+ on
+(1 row)
+
+ALTER SYSTEM SET enable_thread_pool to off;
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+ALTER SYSTEM SET enable_thread_pool to on;
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+------------------------------------------------------
+-- for SIGHUP GUC
+------------------------------------------------------
+-- change
+SHOW password_lock_time;
+ password_lock_time 
+--------------------
+ 1
+(1 row)
+
+ALTER SYSTEM SET  password_lock_time to 1.1;
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+ALTER SYSTEM SET autovacuum to off;
+SHOW log_destination;
+ log_destination 
+-----------------
+ stderr
+(1 row)
+
+ALTER SYSTEM SET log_destination to 'stderr,csvlog';
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ mix
+(1 row)
+
+ALTER SYSTEM SET autovacuum_mode to 'analyze';
+SHOW parctl_min_cost;
+ parctl_min_cost 
+-----------------
+ 100000
+(1 row)
+
+ALTER SYSTEM SET parctl_min_cost TO 1000;
+select pg_sleep(2);  -- wait to reload postgres.conf file
+ pg_sleep 
+----------
+ 
+(1 row)
+
+-- check result and change back.
+SHOW password_lock_time;
+ password_lock_time 
+--------------------
+ 1.1
+(1 row)
+
+ALTER SYSTEM SET  password_lock_time to 1;
+SHOW autovacuum;
+ autovacuum 
+------------
+ off
+(1 row)
+
+ALTER SYSTEM SET autovacuum to on;
+SHOW log_destination;
+ log_destination 
+-----------------
+ stderr,csvlog
+(1 row)
+
+ALTER SYSTEM SET log_destination to 'stderr';
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ analyze
+(1 row)
+
+ALTER SYSTEM SET autovacuum_mode to mix;
+SHOW parctl_min_cost;
+ parctl_min_cost 
+-----------------
+ 1000
+(1 row)
+
+ALTER SYSTEM SET parctl_min_cost TO 100000;
+select pg_sleep(2);  -- wait to reload postgres.conf file
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SHOW password_lock_time;
+ password_lock_time 
+--------------------
+ 1
+(1 row)
+
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+SHOW log_destination;
+ log_destination 
+-----------------
+ stderr
+(1 row)
+
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ mix
+(1 row)
+
+SHOW parctl_min_cost;
+ parctl_min_cost 
+-----------------
+ 100000
+(1 row)
+
+-- some err case
+ALTER SYSTEM SET password_lock_time to true;
+ERROR:  parameter "password_lock_time" requires a numeric value
+ALTER SYSTEM SET autovacuum to 'lalala';
+ERROR:  parameter "autovacuum" requires a Boolean value
+ALTER SYSTEM SET log_destination to 'abcdefg';
+ERROR:  invalid value for parameter "log_destination": "abcdefg"
+DETAIL:  Unrecognized key word: "abcdefg".
+ALTER SYSTEM SET autovacuum_mode to 123;
+ERROR:  invalid value for parameter "autovacuum_mode": "123"
+HINT:  Available values: analyze, vacuum, mix, none.
+ALTER SYSTEM SET autovacuum_mode to lalala;
+ERROR:  invalid value for parameter "autovacuum_mode": "lalala"
+HINT:  Available values: analyze, vacuum, mix, none.
+ALTER SYSTEM SET parctl_min_cost TO -100;
+ERROR:  -100 is outside the valid range for parameter "parctl_min_cost" (-1 .. 2147483647)
+ALTER SYSTEM SET parctl_min_cost TO 1.1;
+ERROR:  invalid value for parameter "parctl_min_cost": "1.1"
+select pg_sleep(2);  -- wait to reload postgres.conf file
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SHOW password_lock_time;
+ password_lock_time 
+--------------------
+ 1
+(1 row)
+
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+SHOW log_destination;
+ log_destination 
+-----------------
+ stderr
+(1 row)
+
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ mix
+(1 row)
+
+SHOW parctl_min_cost;
+ parctl_min_cost 
+-----------------
+ 100000
+(1 row)
+
+------------------------------------------------------
+-- FOR BACKEND GUC
+------------------------------------------------------
+show ignore_system_indexes;
+ ignore_system_indexes 
+-----------------------
+ off
+(1 row)
+
+ALTER SYSTEM SET ignore_system_indexes TO on;
+NOTICE:  please reconnect the database for the BACKEND level parameter to take effect.
+show ignore_system_indexes;
+ ignore_system_indexes 
+-----------------------
+ off
+(1 row)
+
+ALTER SYSTEM SET ignore_system_indexes TO off;
+NOTICE:  please reconnect the database for the BACKEND level parameter to take effect.
+show ignore_system_indexes;
+ ignore_system_indexes 
+-----------------------
+ off
+(1 row)
+
+----------------------------------------------------
+-- for USERSET GUC
+----------------------------------------------------
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+ALTER SYSTEM SET io_limits to 100;
+ERROR:  unsupport parameter: io_limits
+ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,
+and it must be allowed to set in postgresql.conf.
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+ALTER SYSTEM SET io_limits to 0;
+ERROR:  unsupport parameter: io_limits
+ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,
+and it must be allowed to set in postgresql.conf.
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+-----------------------------------------------------
+-- for SUSET GUC
+----------------------------------------------------
+show autoanalyze;
+ autoanalyze 
+-------------
+ off
+(1 row)
+
+ALTER SYSTEM SET autoanalyze to on;
+ERROR:  unsupport parameter: autoanalyze
+ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,
+and it must be allowed to set in postgresql.conf.
+show autoanalyze;
+ autoanalyze 
+-------------
+ off
+(1 row)
+
+ALTER SYSTEM SET autoanalyze to off;
+ERROR:  unsupport parameter: autoanalyze
+ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,
+and it must be allowed to set in postgresql.conf.
+show autoanalyze;
+ autoanalyze 
+-------------
+ off
+(1 row)
+
+-----------------------------------------------------
+-- UNSUPPORT SET TO DEFAULT
+-----------------------------------------------------
+SHOW parctl_min_cost;
+ parctl_min_cost 
+-----------------
+ 100000
+(1 row)
+
+ALTER SYSTEM SET parctl_min_cost TO 1000;
+ALTER SYSTEM SET parctl_min_cost TO default;
+ERROR:  ALTER SYSTEM SET does not support 'set to default'.
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SHOW parctl_min_cost;
+ parctl_min_cost 
+-----------------
+ 1000
+(1 row)
+
+ALTER SYSTEM SET parctl_min_cost TO 100000;
+-------------------------------------------------------
+-- can not in a transaction
+-------------------------------------------------------
+BEGIN;
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+ALTER SYSTEM SET autovacuum to off;
+ERROR:  ALTER SYSTEM SET cannot run inside a transaction block
+SHOW autovacuum;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ALTER SYSTEM SET autovacuum to on;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+SHOW autovacuum;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+END;
+-------------------------------------------------------
+-- shoule be audited.
+------------------------------------------------------
+SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM pg_query_audit('2000-01-01 08:00:00','9999-01-01 08:00:00');
+      type      | result | userid |  database  | client_conninfo |      object_name      |                     detail_info                      
+----------------+--------+--------+------------+-----------------+-----------------------+------------------------------------------------------
+ internal_event | ok     | 10     | regression | gsql@[local]    | null                  | SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool    | ALTER SYSTEM SET enable_thread_pool to off;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool    | ALTER SYSTEM SET enable_thread_pool to on;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | password_lock_time    | ALTER SYSTEM SET  password_lock_time to 1.1;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum            | ALTER SYSTEM SET autovacuum to off;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | log_destination       | ALTER SYSTEM SET log_destination to 'stderr,csvlog';
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum_mode       | ALTER SYSTEM SET autovacuum_mode to 'analyze';
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost       | ALTER SYSTEM SET parctl_min_cost TO 1000;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | password_lock_time    | ALTER SYSTEM SET  password_lock_time to 1;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum            | ALTER SYSTEM SET autovacuum to on;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | log_destination       | ALTER SYSTEM SET log_destination to 'stderr';
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum_mode       | ALTER SYSTEM SET autovacuum_mode to mix;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost       | ALTER SYSTEM SET parctl_min_cost TO 100000;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | ignore_system_indexes | ALTER SYSTEM SET ignore_system_indexes TO on;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | ignore_system_indexes | ALTER SYSTEM SET ignore_system_indexes TO off;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost       | ALTER SYSTEM SET parctl_min_cost TO 1000;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost       | ALTER SYSTEM SET parctl_min_cost TO 100000;
+(17 rows)
+
