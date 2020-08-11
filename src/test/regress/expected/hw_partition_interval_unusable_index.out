@@ -334,7 +334,8 @@ select class.relname, ind.indisclustered
 ALTER INDEX idx1_partition_unsable_index_1 MODIFY PARTITION idx1_partition_unsable_index_1_p1 UNUSABLE;
 ALTER TABLE partition_unsable_index_1 MERGE PARTITIONS partition_unsable_index_1_p0, p2_partition_unsable_index_3 
 	INTO PARTITION px_partition_unsable_index_3;
-ERROR:  can not merge partition against interval partitioned table
+ERROR:  can't merge partition bacause partition partition_unsable_index_1_p0 has unusable local index
+HINT:  please reindex the unusable index first.
 --rebuild unusable index partition
 ALTER INDEX idx1_partition_unsable_index_1 REBUILD PARTITION idx1_partition_unsable_index_1_p1;
 --5.3 exchange

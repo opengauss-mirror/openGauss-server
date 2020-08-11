@@ -138,13 +138,9 @@ select * from interval_normal_date order by logdate;
 -- split partition
 ALTER TABLE interval_normal_date SPLIT PARTITION sys_p1 AT ('2020-04-01 00:00:00') INTO
 (
-    PARTITION sys_p6,
-    PARTITION sys_p7
+    PARTITION sys_p1_1,
+    PARTITION sys_p1_2
 );
-
--- mgerge partition
-ALTER TABLE interval_normal_date MERGE PARTITIONS interval_normal_date_p1, sys_p1 into PARTITION sys_p8;
-ALTER TABLE interval_normal_date MERGE PARTITIONS sys_p1, sys_p4 into PARTITION sys_p9;
 
 --
 ---- add partition is not supported;
@@ -172,7 +168,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition
 	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
 	order by relname;
 
-ALTER TABLE interval_normal_date RENAME PARTITION sys_p2 To sys_p32780;
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p1 To sys_p32780;
 insert into interval_normal_date values ('2040-06-24');
 select relname, parttype, partstrategy, boundaries from pg_partition
 	where parentid = (select oid from pg_class where relname = 'interval_normal_date')

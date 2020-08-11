@@ -24,3 +24,5 @@ test: hw_partition_interval_check_syntax
 # Below two teste are unstable, temporarily ignoring. This is same to distribute_dattistic, relallvisible, Dongwang will solve the problem.
 #test: hw_partition_vacuum_full
 #test: hw_partition_vacuum
+test: hw_partition_interval_split
+test: hw_partition_interval_merge

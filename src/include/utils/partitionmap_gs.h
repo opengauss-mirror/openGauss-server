@@ -363,5 +363,5 @@ extern Oid GetNeedDegradToRangePartOid(Relation rel, Oid partOid);
 extern RangeElement* CopyRangeElementsWithoutBoundary(const RangeElement* src, int elementNum);
 extern char* ReadIntervalStr(HeapTuple tuple, TupleDesc tupleDesc);
 extern oidvector* ReadIntervalTablespace(HeapTuple tuple, TupleDesc tupleDesc);
-
+int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Interval* intervalValue);
 #endif /* PARTITIONMAP_GS_H_ */

@@ -323,11 +323,11 @@ INTERVAL('1 MONTH')
   PARTITION p1 VALUES LESS THAN (TO_DATE('6-5-2008', 'DD-MM-YYYY'))
 );
 
-select relname, parentid, reltoastrelid, boundaries from pg_partition;
+select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition;
 
 insert into interval_sales values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('2020-01-01', 'YYYY-MM-DD'),TO_DATE('2020-07-01', 'YYYY-MM-DD'),'1 day'), 1, 1, 1, 1);
 
-select relname, parentid, reltoastrelid, boundaries from pg_partition;
+select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition;
 
 drop table interval_sales;
 

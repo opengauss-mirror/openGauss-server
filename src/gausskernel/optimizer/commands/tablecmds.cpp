@@ -543,6 +543,8 @@ static void ATExecModifyRowMovement(Relation rel, bool rowMovement);
 static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd);
 static void checkColStoreForExchange(Relation partTableRel, Relation ordTableRel);
 static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd);
+static void UpdatePrevIntervalPartToRange(
+    Relation srcRel, Relation pgPartition, int srcPartIndex, const char* briefCmd);
 static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd);
 static void checkCompressForExchange(Relation partTableRel, Relation ordTableRel);
 static void checkColumnForExchange(Relation partTableRel, Relation ordTableRel);
@@ -573,7 +575,7 @@ static void checkValidationForExchange(Relation partTableRel, Relation ordTableR
 static void finishIndexSwap(List* partIndexList, List* ordIndexList);
 static Oid getPartitionOid(Relation partTableRel, const char* partName, RangePartitionDefState* rangePartDef);
 static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd);
-static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation partTableRel, int srcPartSeq);
+static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation partTableRel, int srcPartIndex);
 static void checkDestPartitionNameForSplit(Oid partTableOid, List* partDefList);
 static List* getDestPartBoundaryList(Relation partTableRel, List* destPartDefList, List** listForFree);
 static void freeDestPartBoundaryList(List* list1, List* list2);
@@ -16169,12 +16171,7 @@ static void ATPrepMergePartition(Relation rel)
 {
     if (!RELATION_IS_PARTITIONED(rel)) {
         ereport(ERROR,
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not merge partition against NON-PARTITIONED table")));
-    }
-
-    if (rel->partMap->type == PART_TYPE_INTERVAL) {
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
-            errmsg("can not merge partition against interval partitioned table")));
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not merge partitions against NON-PARTITIONED table")));
     }
 }
 
@@ -16183,11 +16180,6 @@ static void ATPrepSplitPartition(Relation rel)
     if (!RELATION_IS_PARTITIONED(rel)) {
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not split partition against NON-PARTITIONED table")));
-    }
-
-    if (rel->partMap->type == PART_TYPE_INTERVAL) {
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
-            errmsg("can not split partition against interval partitioned table")));
     }
 }
 
@@ -16370,8 +16362,10 @@ static void UpdateIntervalPartToRange(Relation relPartition, Oid partOid, const 
 
     /* If anything changed, write out the tuple. */
     if (dirty) {
-        heap_inplace_update(relPartition, parttup);
+        simple_heap_update(relPartition, &parttup->t_self, parttup);
+        CatalogUpdateIndexes(relPartition, parttup);
     }
+    heap_freetuple_ext(parttup);
 }
 
 /* assume caller already hold AccessExclusiveLock on the partition being dropped
@@ -17320,6 +17314,16 @@ static void mergePartitionHeapData(Relation partTableRel, Relation tempTableRel,
     }
 }
 
+static void UpdatePrevIntervalPartToRange(Relation srcRel, Relation pgPartition, int srcPartIndex, const char* briefCmd)
+{
+    RangePartitionMap *parts = reinterpret_cast<RangePartitionMap *>(srcRel->partMap);
+    for (int i = srcPartIndex - 1; i > 0; --i) {
+        if (parts->rangeElements[i].isInterval) {
+            UpdateIntervalPartToRange(pgPartition, parts->rangeElements[i].partitionOid, briefCmd);
+        }
+    }
+}
+
 /*
  * MERGE partitions p1, p2...pn into partition px
  * infact, pn is the same partition with px
@@ -17340,8 +17344,10 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     Partition destPart = NULL;
     Relation destPartRel = NULL;
     bool renameTargetPart = false;
-    int curPartSeq = 0;
-    int prevPartSeq = -1;
+    bool needUpdateIntervalToRange = false;
+    int firstPartIndex = -1;
+    int curPartIndex = 0;
+    int prevPartIndex = -1;
     int iterator = 0;
     int partNum = 0;
     Oid targetPartTablespaceOid = InvalidOid;
@@ -17353,6 +17359,8 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     Relation tempTableRel = NULL;
     ObjectAddress object;
     TransactionId FreezeXid;
+    RangePartitionMap* partMap = reinterpret_cast<RangePartitionMap*>(partTableRel->partMap);
+    RangeElement* ranges = partMap->rangeElements;
 
     srcPartitions = (List*)cmd->def;
     destPartName = cmd->name;
@@ -17408,16 +17416,28 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
         }
 
         /* from partitionoid to partition sequence */
-        curPartSeq = partOidGetPartSequence(partTableRel, srcPartOid);
+        curPartIndex = partOidGetPartSequence(partTableRel, srcPartOid) - 1;
 
         /* check the continuity of sequence, not the first round loop */
         if (iterator != 1) {
-            if (curPartSeq - prevPartSeq != 1)
+            if (curPartIndex - prevPartIndex != 1)
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("source partitions must be continuous and in ascending order of boundary")));
+            if (ranges[curPartIndex].isInterval) {
+                // previous partition's upperBound should be equal with current partition's lowerBound
+                Const* prevUpper = ranges[prevPartIndex].boundary[0];
+                if (ValueCmpLowBoudary(&prevUpper, ranges + curPartIndex, partMap->intervalValue) != 0) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("source partitions must be continuous and in ascending order of boundary")));
+                }
+                needUpdateIntervalToRange = true;
+            }
+        } else {
+            firstPartIndex = curPartIndex;
         }
-        prevPartSeq = curPartSeq;
+        prevPartIndex = curPartIndex;
 
         /* save the last source partition name */
         if (iterator == partNum) {
@@ -17600,12 +17620,22 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
 
     /* swap the heap relfilenode */
     mergePartitionHeapSwap(partTableRel, destPartOid, tempTableOid, FreezeXid);
+    CommandCounterIncrement();
 
     /* free index list */
     list_free_ext(index_list);
     list_free_ext(clonedIndexRelId_list);
     list_free_ext(indexDestPartOid_list);
+    const char* BRIEF_CMD_MERGE = "MERGE PARTITIONS";
+    if (needUpdateIntervalToRange) {
+        /* update previous partition and the new partition to range partition */
+        Relation pgPartition = relation_open(PartitionRelationId, RowExclusiveLock);
+        UpdatePrevIntervalPartToRange(partTableRel, pgPartition, firstPartIndex, BRIEF_CMD_MERGE);
 
+        /* update merge result partition to range partition */
+        UpdateIntervalPartToRange(pgPartition, destPartOid, BRIEF_CMD_MERGE);
+        relation_close(pgPartition, NoLock);
+    }
     /* ensure that preceding changes are all visible to the next deletion step. */
     CommandCounterIncrement();
 
@@ -18916,7 +18946,7 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
     RangePartitionMap* partMap = NULL;
     Oid partTableOid = InvalidOid;
     Oid srcPartOid = InvalidOid;
-    int srcPartSeq = -1;
+    int srcPartIndex = -1;
     ListCell* cell = NULL;
     int currentPartNum = 0;
     int partKeyNum = 0;
@@ -18991,8 +19021,8 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
     }
 
     // get src partition sequence
-    srcPartSeq = partOidGetPartSequence(partTableRel, srcPartOid);
-    if (srcPartSeq < 1) {
+    srcPartIndex = partOidGetPartSequence(partTableRel, srcPartOid) - 1;
+    if (srcPartIndex < 0) {
         Assert(false);
         ereport(ERROR,
             (errcode(ERRCODE_NO_DATA_FOUND),
@@ -19000,16 +19030,14 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
                     srcPartOid,
                     splitPart->src_partition_name ? splitPart->src_partition_name : "NULL",
                     partTableRel->rd_id)));
-    } else {
-        --srcPartSeq;
     }
-
+    bool isPrevInterval = srcPartIndex > 0 && partMap->rangeElements[srcPartIndex - 1].isInterval;
     // if split point
     if (PointerIsValid(splitPart->split_point)) {
         RangePartitionDefState* rangePartDef = NULL;
 
         // check split point value
-        checkSplitPointForSplit(splitPart, partTableRel, srcPartSeq);
+        checkSplitPointForSplit(splitPart, partTableRel, srcPartIndex);
 
         Assert(list_length(destPartDefList) == 2);
 
@@ -19021,7 +19049,7 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
          * generate boundary for the second partititon
          */
         rangePartDef = (RangePartitionDefState*)list_nth(destPartDefList, 1);
-        rangePartDef->boundary = getPartitionBoundaryList(partTableRel, srcPartSeq);
+        rangePartDef->boundary = getPartitionBoundaryList(partTableRel, srcPartIndex);
     } else {
         // not split point
         int compare = 0;
@@ -19037,11 +19065,15 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
         destPartBoundaryList = getDestPartBoundaryList(partTableRel, destPartDefList, &listForFree);
 
         // check the first dest partition boundary
-        if (srcPartSeq != 0) {
-            compare = comparePartitionKey(partMap,
-                partMap->rangeElements[srcPartSeq - 1].boundary,
-                (Const**)lfirst(list_head(destPartBoundaryList)),
-                partKeyNum);
+        if (srcPartIndex != 0) {
+            if (!partMap->rangeElements[srcPartIndex].isInterval) {
+                compare = comparePartitionKey(partMap, partMap->rangeElements[srcPartIndex - 1].boundary,
+                                              (Const**)lfirst(list_head(destPartBoundaryList)), partKeyNum);
+            } else {
+                Const** partKeyValue = (Const**)lfirst(list_head(destPartBoundaryList));
+                RangeElement& srcPartition = partMap->rangeElements[srcPartIndex];
+                compare = -ValueCmpLowBoudary(partKeyValue, &srcPartition, partMap->intervalValue);
+            }
             if (compare >= 0) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_OPERATION),
@@ -19075,7 +19107,7 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
         // check the last dest partition boundary equal the src partition boundary
         compare = comparePartitionKey(partMap,
             (Const**)lfirst(list_tail(destPartBoundaryList)),
-            partMap->rangeElements[srcPartSeq].boundary,
+            partMap->rangeElements[srcPartIndex].boundary,
             partKeyNum);
         if (compare != 0) {
             ereport(ERROR,
@@ -19087,7 +19119,12 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
     // add dest partitions
     fastAddPartition(partTableRel, destPartDefList, &newPartOidList);
     freeDestPartBoundaryList(destPartBoundaryList, listForFree);
-
+    if (isPrevInterval) {
+        // modify all previous *interval* partitions to range partitions, *possibly* no such partitions
+        Relation pgPartition = relation_open(PartitionRelationId, RowExclusiveLock);
+        UpdatePrevIntervalPartToRange(partTableRel, pgPartition, srcPartIndex, "SPLIT PARTITION");
+        relation_close(pgPartition, NoLock);
+    }
 #ifdef PGXC
     if (IS_PGXC_DATANODE) {
 #endif
@@ -19137,7 +19174,7 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
 }
 
 // check split point
-static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation partTableRel, int srcPartSeq)
+static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation partTableRel, int srcPartIndex)
 {
     RangePartitionMap* partMap = NULL;
     ParseState* pstate = NULL;
@@ -19146,7 +19183,6 @@ static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation par
     int i = 0;
     int partKeyNum = 0;
     int compareSrcPart = 0;
-    int comparePrePart = 0;
 
     // get partition key number
     partMap = (RangePartitionMap*)partTableRel->partMap;
@@ -19170,25 +19206,27 @@ static void checkSplitPointForSplit(SplitPartitionState* splitPart, Relation par
         partKeyValueArr[i++] = (Const*)lfirst(cell);
     }
 
-    // compare splint point with src partition
+    // compare split point with src partition
     compareSrcPart =
-        comparePartitionKey(partMap, partKeyValueArr, partMap->rangeElements[srcPartSeq].boundary, partKeyNum);
-
-    // compare splint point with the previous partition of src partition
-    if (srcPartSeq == 0) {
-        comparePrePart = 1;
-    } else {
-        comparePrePart =
-            comparePartitionKey(partMap, partKeyValueArr, partMap->rangeElements[srcPartSeq - 1].boundary, partKeyNum);
-    }
-
-    // splint point should be between the previous partition and the src partition
-    if (comparePrePart <= 0) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("split point is too low")));
-    }
-
+        comparePartitionKey(partMap, partKeyValueArr, partMap->rangeElements[srcPartIndex].boundary, partKeyNum);
     if (compareSrcPart >= 0) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("split point is too high")));
+    }
+    bool lowerOverflow = false;
+    if (partMap->rangeElements[srcPartIndex].isInterval) {
+        // compare split point with the lower boundary of src partition
+        RangeElement& srcPart = partMap->rangeElements[srcPartIndex];
+        Interval *interval = partMap->intervalValue;
+        lowerOverflow = !ValueSatisfyLowBoudary(&partKeyValueArr[0], &srcPart, interval, false);
+    } else {
+        // compare split point with the previous partition of src partition
+        if (srcPartIndex != 0) {
+            lowerOverflow = comparePartitionKey(
+                partMap, partKeyValueArr, partMap->rangeElements[srcPartIndex - 1].boundary, partKeyNum) <= 0;
+        }
+    }
+    if (lowerOverflow) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("split point is too low")));
     }
 }
 

@@ -298,15 +298,9 @@ select * from interval_normal_date order by logdate;
 -- split partition
 ALTER TABLE interval_normal_date SPLIT PARTITION sys_p1 AT ('2020-04-01 00:00:00') INTO
 (
-    PARTITION sys_p6,
-    PARTITION sys_p7
+    PARTITION sys_p1_1,
+    PARTITION sys_p1_2
 );
-ERROR:  can not split partition against interval partitioned table
--- mgerge partition
-ALTER TABLE interval_normal_date MERGE PARTITIONS interval_normal_date_p1, sys_p1 into PARTITION sys_p8;
-ERROR:  can not merge partition against interval partitioned table
-ALTER TABLE interval_normal_date MERGE PARTITIONS sys_p1, sys_p4 into PARTITION sys_p9;
-ERROR:  can not merge partition against interval partitioned table
 --
 ---- add partition is not supported;
 --
@@ -326,10 +320,11 @@ select relname, parttype, partstrategy, boundaries from pg_partition
  interval_normal_date_p1 | p        | r            | {2020-03-01}
  my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
  my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
- sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p1_1                | p        | r            | {"Wed Apr 01 00:00:00 2020"}
+ sys_p1_2                | p        | r            | {"Tue Jun 02 00:00:00 2020"}
  sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
  sys_p6                  | p        | i            | {"Thu Jun 21 00:00:00 2040"}
-(7 rows)
+(8 rows)
 
 ALTER TABLE interval_normal_date RENAME PARTITION sys_p6 To my_sys_p6;
 insert into interval_normal_date values ('2040-06-21');
@@ -343,10 +338,11 @@ select relname, parttype, partstrategy, boundaries from pg_partition
  my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
  my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
  my_sys_p6               | p        | i            | {"Thu Jun 21 00:00:00 2040"}
- sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
+ sys_p1_1                | p        | r            | {"Wed Apr 01 00:00:00 2020"}
+ sys_p1_2                | p        | r            | {"Tue Jun 02 00:00:00 2020"}
  sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
  sys_p4                  | p        | i            | {"Fri Jun 22 00:00:00 2040"}
-(8 rows)
+(9 rows)
 
 ALTER TABLE interval_normal_date RENAME PARTITION sys_p4 To sys_p32767;
 insert into interval_normal_date values ('2040-06-22');
@@ -360,13 +356,14 @@ select relname, parttype, partstrategy, boundaries from pg_partition
  my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
  my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
  my_sys_p6               | p        | i            | {"Thu Jun 21 00:00:00 2040"}
- sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
- sys_p2                  | p        | i            | {"Sat Jun 23 00:00:00 2040"}
+ sys_p1                  | p        | i            | {"Sat Jun 23 00:00:00 2040"}
+ sys_p1_1                | p        | r            | {"Wed Apr 01 00:00:00 2020"}
+ sys_p1_2                | p        | r            | {"Tue Jun 02 00:00:00 2020"}
  sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
  sys_p32767              | p        | i            | {"Fri Jun 22 00:00:00 2040"}
-(9 rows)
+(10 rows)
 
-ALTER TABLE interval_normal_date RENAME PARTITION sys_p2 To sys_p32780;
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p1 To sys_p32780;
 insert into interval_normal_date values ('2040-06-24');
 select relname, parttype, partstrategy, boundaries from pg_partition
 	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
@@ -378,12 +375,13 @@ select relname, parttype, partstrategy, boundaries from pg_partition
  my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
  my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
  my_sys_p6               | p        | i            | {"Thu Jun 21 00:00:00 2040"}
- sys_p1                  | p        | r            | {"Tue Jun 02 00:00:00 2020"}
  sys_p14                 | p        | i            | {"Mon Jun 25 00:00:00 2040"}
+ sys_p1_1                | p        | r            | {"Wed Apr 01 00:00:00 2020"}
+ sys_p1_2                | p        | r            | {"Tue Jun 02 00:00:00 2020"}
  sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
  sys_p32767              | p        | i            | {"Fri Jun 22 00:00:00 2040"}
  sys_p32780              | p        | i            | {"Sat Jun 23 00:00:00 2040"}
-(10 rows)
+(11 rows)
 
 --clean up
 drop table interval_normal_date;
