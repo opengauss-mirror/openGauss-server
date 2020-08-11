@@ -144,6 +144,9 @@ SELECT DISTINCT * FROM alter_addcols_64;
 CREATE TABLE alter_addcols_79(a int, b int) WITH ( ORIENTATION = COLUMN);
 ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE bigint;
 ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl';
+CREATE TABLE alter_cons (a int, b int) WITH (ORIENTATION = ROW);
+ALTER TABLE alter_cons ALTER a DROP NOT NULL, ALTER a SET NOT NULL;
+DROP TABLE alter_cons;
 
 -- test multiple SET DATA TYPE within one sql clause.
 CREATE TABLE alter_addcols_80(a int, b int, c varchar(10)) WITH ( ORIENTATION = COLUMN);

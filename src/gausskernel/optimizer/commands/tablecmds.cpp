@@ -610,6 +610,8 @@ static void ResetRelRedisCtidRelOptions(
 static bool WLMRelationCanTruncate(Relation rel);
 static void alter_partition_policy_if_needed(Relation rel, List* defList);
 static OnCommitAction GttOncommitOption(const List *options);
+static void ATCheckDuplicateColumn(AlterTableCmd* cmd, List* tabCmds);
+static void ATCheckNotNullConstr(AlterTableCmd* cmd, AlteredTableInfo* tab);
 
 
 /* get all partitions oid */
@@ -5935,12 +5937,14 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
             ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
             /* No command-specific prep needed */
             pass = AT_PASS_DROP;
+            ATCheckNotNullConstr(cmd, tab);
             break;
         case AT_SetNotNull: /* ALTER COLUMN SET NOT NULL */
             ATSimplePermissions(rel, ATT_TABLE | ATT_FOREIGN_TABLE);
             ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
             /* No command-specific prep needed */
             pass = AT_PASS_ADD_CONSTR;
+            ATCheckNotNullConstr(cmd, tab);
             break;
         case AT_SetStatistics: /* ALTER COLUMN SET STATISTICS */
             ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
@@ -6032,6 +6036,7 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
             /* Performs own recursion */
             ATPrepAlterColumnType(wqueue, tab, rel, recurse, recursing, cmd, lockmode);
             pass = AT_PASS_ALTER_TYPE;
+            ATCheckDuplicateColumn(cmd, tab->subcmds[pass]);
             break;
         case AT_AlterColumnGenericOptions:
             ATSimplePermissions(rel, ATT_FOREIGN_TABLE);
@@ -6216,6 +6221,31 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
 
     /* Add the subcommand to the appropriate list for phase 2 */
     tab->subcmds[pass] = lappend(tab->subcmds[pass], cmd);
+}
+
+/*
+ * ATCheckDuplicateColumn: Check AT if exists duplicate column name
+ */
+static void ATCheckDuplicateColumn(AlterTableCmd* cmd, List* tabCmds)
+{
+    ListCell* tcmd = NULL;
+    foreach (tcmd, tabCmds) {
+        AlterTableCmd* acmd = (AlterTableCmd*)lfirst(tcmd);
+        if (strcmp(acmd->name, cmd->name) == 0) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cannot alter type of column \"%s\" twice", cmd->name)));
+        }
+    }
+}
+
+/*
+ * ATCheckNotNullConstr: Check AT set/drop not null if exists duplicate column name
+ */
+static void ATCheckNotNullConstr(AlterTableCmd* cmd, AlteredTableInfo* tab)
+{
+    ATCheckDuplicateColumn(cmd, tab->subcmds[AT_PASS_ADD_CONSTR]);
+    ATCheckDuplicateColumn(cmd, tab->subcmds[AT_PASS_DROP]);
 }
 
 /*

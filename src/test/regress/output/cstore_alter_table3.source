@@ -283,6 +283,10 @@ ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldi
 ERROR:  cannot alter type of column "b" twice
 ALTER TABLE alter_addcols_79 ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl', ALTER COLUMN b SET DATA TYPE varchar(40) USING 'ldiloveyouhelloworldiloveyouhelloworl';
 ERROR:  cannot alter type of column "b" twice
+CREATE TABLE alter_cons (a int, b int) WITH (ORIENTATION = ROW);
+ALTER TABLE alter_cons ALTER a DROP NOT NULL, ALTER a SET NOT NULL;
+ERROR:  cannot alter type of column "a" twice
+DROP TABLE alter_cons;
 -- test multiple SET DATA TYPE within one sql clause.
 CREATE TABLE alter_addcols_80(a int, b int, c varchar(10)) WITH ( ORIENTATION = COLUMN);
 create table base_alter_addcols(a int, b int, c varchar(10));
