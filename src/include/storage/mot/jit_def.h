@@ -27,7 +27,6 @@
 
 #include <stdint.h>
 
-
 /** @define Impose a hard coded limit on depth of parsed expression. */
 #define MOT_JIT_MAX_EXPR_DEPTH 10
 
@@ -36,7 +35,6 @@
 
 /** @define The maximum number of registers used in a pseudo-function execution. */
 #define MOT_JIT_MAX_FUNC_REGISTERS 4096
-
 
 namespace JitExec {
 
@@ -79,7 +77,10 @@ enum JitCommandType : uint8_t {
     JIT_COMMAND_RANGE_JOIN,
 
     /** @var Join aggregate command. */
-    JIT_COMMAND_AGGREGATE_JOIN
+    JIT_COMMAND_AGGREGATE_JOIN,
+
+    /** @var Compound select command (point-select with sub-queries). */
+    JIT_COMMAND_COMPOUND_SELECT
 };
 
 /** @enum JIT context usage constants. */
@@ -142,7 +143,10 @@ enum JitRangeScanType {
     JIT_RANGE_SCAN_MAIN,
 
     /** @var Designates inner loop range scan. Can be specified only on JOIN queries.*/
-    JIT_RANGE_SCAN_INNER
+    JIT_RANGE_SCAN_INNER,
+
+    /** @var Sub-query range scan. */
+    JIT_RANGE_SCAN_SUB_QUERY
 };
 
 /** @enum Range bound mode constants. */
@@ -173,14 +177,13 @@ enum JitRangeIteratorType {
 enum JitQuerySortOrder {
     /** @var Invalid query sort order. */
     JIT_QUERY_SORT_INVALID,
-    
+
     /** @var Ascending query sort order. */
     JIT_QUERY_SORT_ASCENDING,
-    
+
     /** @var Descending query sort order. */
     JIT_QUERY_SORT_DESCENDING
 };
-
-} // namespace JitExec
+}  // namespace JitExec
 
 #endif

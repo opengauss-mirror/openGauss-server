@@ -395,10 +395,10 @@ void destroyStateIterators(int inner_scan);
 
 /**
  * @brief Sets the stateful range scan ended flag.
- * @param scan_ended Non-zero if the stateful range scan ended.
- * @param inner_scan Specifies whether this is an inner scan iterator in a JOIN query.
+ * @param scanEnded Non-zero if the stateful range scan ended.
+ * @param innerScan Specifies whether this is an inner scan iterator in a JOIN query.
  */
-void setStateScanEndFlag(int scan_ended, int inner_scan);
+void setStateScanEndFlag(int scanEnded, int innerScan);
 
 /**
  * @brief Retrieves the value of the stateful range scan ended flag.
@@ -501,10 +501,10 @@ void destroyDistinctSet(int element_type);
 /**
  * @brief Resets a tuple datum to zero value.
  * @param slot The tuple.
- * @param tuple_colid The zero-based column index of the tuple in which to store the zero value.
- * @param zero_type The Oid of the zero type.
+ * @param tupleColumnId The zero-based column index of the tuple in which to store the zero value.
+ * @param zeroType The Oid of the zero type.
  */
-void resetTupleDatum(TupleTableSlot* slot, int tuple_colid, int zero_type);
+void resetTupleDatum(TupleTableSlot* slot, int tupleColumnId, int zeroType);
 
 /**
  * @brief Reads a tuple datum.
@@ -523,6 +523,33 @@ Datum readTupleDatum(TupleTableSlot* slot, int tuple_colid, int arg_pos);
  */
 void writeTupleDatum(TupleTableSlot* slot, int tuple_colid, Datum datum);
 
+/**
+ * @brief Reads the datum result of a sub-query.
+ * @param subQueryIndex The sub-query index.
+ * @return The sub-query result.
+ */
+Datum SelectSubQueryResult(int subQueryIndex);
+
+/**
+ * @brief Copies the aggregate result to a sub-query slot.
+ * @param subQueryIndex The sub-query index.
+ */
+void CopyAggregateToSubQueryResult(int subQueryIndex);
+
+/** @brief Retrieves the result slot of a sub-query (LLVM only). */
+TupleTableSlot* GetSubQuerySlot(int subQueryIndex);
+
+/** @brief Retrieves the table of a sub-query (LLVM only). */
+MOT::Table* GetSubQueryTable(int subQueryIndex);
+
+/** @brief Retrieves the index of a sub-query (LLVM only). */
+MOT::Index* GetSubQueryIndex(int subQueryIndex);
+
+/** @brief Retrieves the search-key of a sub-query (LLVM only). */
+MOT::Key* GetSubQuerySearchKey(int subQueryIndex);
+
+/** @brief Retrieves the end-iterator key of a sub-query (LLVM only). */
+MOT::Key* GetSubQueryEndIteratorKey(int subQueryIndex);
 }  // extern "C"
 
 #endif

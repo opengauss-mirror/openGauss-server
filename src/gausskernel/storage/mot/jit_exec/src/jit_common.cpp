@@ -27,6 +27,8 @@
 #include "catalog/pg_operator.h"
 #include "jit_common.h"
 #include "utilities.h"
+#include "jit_plan.h"
+#include "mm_global_api.h"
 
 namespace JitExec {
 DECLARE_LOGGER(JitCommon, JitExec)
@@ -86,6 +88,8 @@ extern const char* CommandToString(JitCommandType commandType)
             return "Range-Join";
         case JIT_COMMAND_AGGREGATE_JOIN:
             return "Aggregate-Range-Join";
+        case JIT_COMMAND_COMPOUND_SELECT:
+            return "Compound-Select";
 
         case JIT_COMMAND_INVALID:
         default:
@@ -161,7 +165,11 @@ extern int MapTableColumnToIndex(MOT::Table* table, const MOT::Index* index, int
     int keyColumnCount = index->GetNumFields();
     for (int i = 0; i < keyColumnCount; ++i) {
         if (indexColumnIds[i] == columnId) {
-            MOT_LOG_DEBUG("Table column %d mapped to index column %d", columnId, i);
+            MOT_LOG_TRACE("Table %s column %d mapped to index %s column %d",
+                table->GetTableName().c_str(),
+                columnId,
+                index->GetName().c_str(),
+                i);
             return i;
         }
     }
@@ -193,6 +201,7 @@ extern int BuildIndexColumnOffsets(MOT::Table* table, const MOT::Index* index, i
     if (*offsets) {
         int offset = 0;
         for (int i = 0; i < indexColumnCount; ++i) {
+            MOT_LOG_TRACE("Setting index %s column %d offset to %d", index->GetName().c_str(), i, offset);
             (*offsets)[i] = offset;
             offset += keyLength[i];
         }
@@ -452,7 +461,7 @@ extern bool InitTableInfo(TableInfo* tableInfo, MOT::Table* table, MOT::Index* i
     }
     tableInfo->m_indexColumnCount = BuildIndexColumnOffsets(table, index, &tableInfo->m_indexColumnOffsets);
     if (tableInfo->m_indexColumnOffsets == nullptr) {
-        pfree(tableInfo->m_columnMap);
+        MOT::MemSessionFree(tableInfo->m_columnMap);
         return false;
     }
 
@@ -470,5 +479,102 @@ extern void DestroyTableInfo(TableInfo* tableInfo)
             MOT::MemSessionFree(tableInfo->m_indexColumnOffsets);
         }
     }
+}
+
+extern bool PrepareSubQueryData(JitContext* jitContext, JitCompoundPlan* plan)
+{
+    bool result = true;
+
+    // allocate sub-query data array
+    int subQueryCount = plan->_sub_query_count;
+    MOT_LOG_TRACE("Preparing %u sub-query data items", subQueryCount);
+    uint32_t allocSize = sizeof(JitContext::SubQueryData) * subQueryCount;
+    jitContext->m_subQueryData = (JitContext::SubQueryData*)MOT::MemGlobalAllocAligned(allocSize, L1_CACHE_LINE);
+    if (jitContext->m_subQueryData == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "Generate JIT code",
+            "Failed to allocate %u bytes for %d sub-query data items in JIT context object",
+            allocSize,
+            subQueryCount);
+        result = false;
+    } else {
+        // traverse all search expressions and for each sub-link expression prepare a sub-query data item
+        jitContext->m_subQueryCount = subQueryCount;
+        for (int i = 0; i < plan->_outer_query_plan->_query._search_exprs._count; ++i) {
+            if (plan->_outer_query_plan->_query._search_exprs._exprs[i]._expr->_expr_type == JIT_EXPR_TYPE_SUBLINK) {
+                // get sub-query index from sub-link expression
+                JitSubLinkExpr* subLinkExpr =
+                    (JitSubLinkExpr*)plan->_outer_query_plan->_query._search_exprs._exprs[i]._expr;
+                int subQueryIndex = subLinkExpr->_sub_query_index;
+                MOT_ASSERT(subQueryIndex < subQueryCount);
+                MOT_LOG_TRACE("Preparing sub-query %u data", subQueryIndex);
+                JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[subQueryIndex];
+
+                // nullify unknown members
+                subQueryData->m_tupleDesc = nullptr;
+                subQueryData->m_slot = nullptr;
+                subQueryData->m_searchKey = nullptr;
+                subQueryData->m_endIteratorKey = nullptr;
+
+                // prepare sub-query data items according to sub-plan type
+                JitPlan* subPlan = plan->_sub_query_plans[subQueryIndex];
+                JitPlanType subPlanType = subPlan->_plan_type;
+                MOT_ASSERT((subPlanType == JIT_PLAN_POINT_QUERY) || (subPlanType == JIT_PLAN_RANGE_SCAN));
+
+                if (subPlanType == JIT_PLAN_POINT_QUERY) {  // simple point-select
+                    MOT_ASSERT(((JitPointQueryPlan*)subPlan)->_command_type == JIT_COMMAND_SELECT);
+                    JitPointQueryPlan* subPointQueryPlan = (JitPointQueryPlan*)subPlan;
+                    if (subPointQueryPlan->_command_type == JIT_COMMAND_SELECT) {
+                        MOT_LOG_TRACE("Detected point-query select sub-plan");
+                        subQueryData->m_commandType = JIT_COMMAND_SELECT;
+                        JitSelectPlan* selectPlan = (JitSelectPlan*)subPlan;
+                        subQueryData->m_table = selectPlan->_query._table;
+                        subQueryData->m_index = subQueryData->m_table->GetPrimaryIndex();
+                    } else {
+                        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                            "Generate JIT code",
+                            "Invalid sub-point-query plan command type: %s",
+                            CommandToString(subPointQueryPlan->_command_type));
+                        result = false;
+                        break;
+                    }
+                } else if (subPlanType == JIT_PLAN_RANGE_SCAN) {  // aggregate or "limit 1" range select
+                    MOT_ASSERT(((JitRangeScanPlan*)subPlan)->_command_type == JIT_COMMAND_SELECT);
+                    JitRangeScanPlan* subRangeScanPlan = (JitRangeScanPlan*)subPlan;
+                    if (subRangeScanPlan->_command_type == JIT_COMMAND_SELECT) {
+                        MOT_LOG_TRACE("Detected range-scan select sub-plan");
+                        JitRangeSelectPlan* rangeSelectPlan = (JitRangeSelectPlan*)subPlan;
+                        subQueryData->m_table = rangeSelectPlan->_index_scan._table;
+                        subQueryData->m_index = subQueryData->m_table->GetIndex(rangeSelectPlan->_index_scan._index_id);
+                        if (rangeSelectPlan->_aggregate._aggreaget_op != JIT_AGGREGATE_NONE) {  // aggregate range-scan
+                            subQueryData->m_commandType = JIT_COMMAND_AGGREGATE_RANGE_SELECT;
+                        } else if (rangeSelectPlan->_limit_count == 1) {
+                            subQueryData->m_commandType = JIT_COMMAND_RANGE_SELECT;  // implies "limit 1" clause
+                        } else {
+                            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                                "Generate JIT code",
+                                "Invalid sub-query range-scan plan: neither aggregate nor \"limit 1\" clause found");
+                            result = false;
+                            break;
+                        }
+                    } else {
+                        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                            "Generate JIT code",
+                            "Invalid sub-query range-scan plan command type: %s",
+                            CommandToString(subRangeScanPlan->_command_type));
+                        result = false;
+                        break;
+                    }
+                } else {
+                    MOT_REPORT_ERROR(
+                        MOT_ERROR_INTERNAL, "Generate JIT code", "Invalid sub-query plan type: %d", (int)subPlanType);
+                    result = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    return result;
 }
 }  // namespace JitExec

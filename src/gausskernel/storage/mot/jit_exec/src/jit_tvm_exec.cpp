@@ -84,6 +84,12 @@ struct JitTvmCodeGenContext {
     /** @var Inner table info (in JOIN queries). */
     TableInfo m_innerTable_info;
 
+    /** @var Sub-query table info (in COMPOUND queries). */
+    TableInfo* m_subQueryTableInfo;
+
+    /** @var Sub-query count (in COMPOUND queries). */
+    uint64_t m_subQueryCount;
+
     /** @var The builder used for emitting code. */
     Builder* _builder;
 
@@ -117,18 +123,80 @@ static bool InitCodeGenContext(JitTvmCodeGenContext* ctx, Builder* builder, MOT:
     return true;
 }
 
+/** @brief Initializes a context for compilation. */
+static bool InitCompoundCodeGenContext(
+    JitTvmCodeGenContext* ctx, Builder* builder, MOT::Table* table, MOT::Index* index, JitCompoundPlan* plan)
+{
+    // initialize outer query table info
+    errno_t erc = memset_s(ctx, sizeof(JitTvmCodeGenContext), 0, sizeof(JitTvmCodeGenContext));
+    securec_check(erc, "\0", "\0");
+    ctx->_builder = builder;
+    if (!InitTableInfo(&ctx->_table_info, table, index)) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "JIT Compile", "Failed to initialize table information for code-generation context");
+        return false;
+    }
+    ctx->m_subQueryCount = plan->_sub_query_count;
+    ctx->m_subQueryTableInfo = (TableInfo*)MOT::MemSessionAlloc(sizeof(TableInfo) * ctx->m_subQueryCount);
+    if (ctx->m_subQueryTableInfo == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "JIT Compile", "Failed to initialize table information for code-generation context");
+        DestroyTableInfo(&ctx->_table_info);
+        return false;
+    }
+
+    // initialize sub-query table info
+    bool result = true;
+    for (uint32_t i = 0; i < ctx->m_subQueryCount; ++i) {
+        JitPlan* subPlan = plan->_sub_query_plans[i];
+        MOT::Table* subTable = nullptr;
+        MOT::Index* subIndex = nullptr;
+        if (subPlan->_plan_type == JIT_PLAN_POINT_QUERY) {
+            subTable = ((JitSelectPlan*)subPlan)->_query._table;
+            subIndex = subTable->GetPrimaryIndex();
+        } else if (subPlan->_plan_type == JIT_PLAN_RANGE_SCAN) {
+            subTable = ((JitRangeSelectPlan*)subPlan)->_index_scan._table;
+            subIndex = subTable->GetIndex(((JitRangeSelectPlan*)subPlan)->_index_scan._index_id);
+        } else {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INTERNAL, "JIT Compile", "Invalid sub-plan %u type: %d", i, (int)subPlan->_plan_type);
+            result = false;
+        }
+        if (result && !InitTableInfo(&ctx->m_subQueryTableInfo[i], subTable, subIndex)) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                "JIT Compile",
+                "Failed to initialize sub-query table information for code-generation context");
+            result = false;
+        }
+        if (!result) {
+            for (uint32_t j = 0; j < i; ++j) {
+                DestroyTableInfo(&ctx->m_subQueryTableInfo[j]);
+            }
+            MOT::MemSessionFree(ctx->m_subQueryTableInfo);
+            ctx->m_subQueryTableInfo = nullptr;
+            DestroyTableInfo(&ctx->_table_info);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /** @brief Destroys a compilation context. */
 static void DestroyCodeGenContext(JitTvmCodeGenContext* ctx)
 {
     if (ctx != nullptr) {
         DestroyTableInfo(&ctx->_table_info);
         DestroyTableInfo(&ctx->m_innerTable_info);
+        for (uint32_t i = 0; i < ctx->m_subQueryCount; ++i) {
+            DestroyTableInfo(&ctx->m_subQueryTableInfo[i]);
+        }
     }
 }
 
 /** @brief Gets a key from the execution context. */
 static MOT::Key* getExecContextKey(
-    ExecContext* exec_context, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+    ExecContext* exec_context, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, int subQueryIndex)
 {
     MOT::Key* key = nullptr;
     if (range_scan_type == JIT_RANGE_SCAN_INNER) {
@@ -137,11 +205,17 @@ static MOT::Key* getExecContextKey(
         } else {
             key = exec_context->_jit_context->m_innerSearchKey;
         }
-    } else {
+    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
         if (range_itr_type == JIT_RANGE_ITERATOR_END) {
             key = exec_context->_jit_context->m_endIteratorKey;
         } else {
             key = exec_context->_jit_context->m_searchKey;
+        }
+    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+        if (range_itr_type == JIT_RANGE_ITERATOR_END) {
+            key = exec_context->_jit_context->m_subQueryData[subQueryIndex].m_endIteratorKey;
+        } else {
+            key = exec_context->_jit_context->m_subQueryData[subQueryIndex].m_searchKey;
         }
     }
     return key;
@@ -167,14 +241,14 @@ public:
     Datum eval(ExecContext* exec_context) final
     {
         exec_context->_expr_rc = MOT_NO_ERROR;
-        MOT::Row* row = (MOT::Row*)_row_inst->exec(exec_context);
+        MOT::Row* row = (MOT::Row*)_row_inst->Exec(exec_context);
         return readDatumColumn(_table, row, _table_colid, _arg_pos);
     }
 
     void dump() final
     {
         (void)fprintf(stderr, "readDatumColumn(%%table, %%row=");
-        _row_inst->dump();
+        _row_inst->Dump();
         (void)fprintf(stderr, ", table_colid=%d, arg_pos=%d)", _table_colid, _arg_pos);
     }
 
@@ -604,12 +678,12 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         return (uint64_t)isSoftMemoryLimitReached();
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "isSoftMemoryLimitReached()");
     }
@@ -618,70 +692,86 @@ protected:
 /** InitSearchKeyInstruction */
 class InitSearchKeyInstruction : public Instruction {
 public:
-    explicit InitSearchKeyInstruction(JitRangeScanType range_scan_type)
-        : Instruction(Instruction::Void), _range_scan_type(range_scan_type)
+    explicit InitSearchKeyInstruction(JitRangeScanType range_scan_type, int subQueryIndex)
+        : Instruction(Instruction::Void), _range_scan_type(range_scan_type), m_subQueryIndex(subQueryIndex)
     {}
 
     ~InitSearchKeyInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             InitKey(exec_context->_jit_context->m_innerSearchKey, exec_context->_jit_context->m_innerIndex);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             InitKey(exec_context->_jit_context->m_searchKey, exec_context->_jit_context->m_index);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            JitContext::SubQueryData* subQueryData = &exec_context->_jit_context->m_subQueryData[m_subQueryIndex];
+            InitKey(subQueryData->m_searchKey, subQueryData->m_index);
+        } else {
+            return (uint64_t)MOT::RC_ERROR;
         }
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             (void)fprintf(stderr, "InitKey(%%inner_search_key, %%inner_index)");
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(stderr, "InitKey(%%search_key, %%index)");
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(
+                stderr, "InitKey(%%sub_query_key[%d], %%sub_query_index[%d])", m_subQueryIndex, m_subQueryIndex);
         }
     }
 
 private:
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** GetColumnAtInstruction */
 class GetColumnAtInstruction : public Instruction {
 public:
-    GetColumnAtInstruction(int table_colid, JitRangeScanType range_scan_type)
-        : _table_colid(table_colid), _range_scan_type(range_scan_type)
+    GetColumnAtInstruction(int table_colid, JitRangeScanType range_scan_type, int subQueryIndex)
+        : _table_colid(table_colid), _range_scan_type(range_scan_type), m_subQueryIndex(subQueryIndex)
     {}
 
     ~GetColumnAtInstruction() final
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         MOT::Column* column = nullptr;
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             column = getColumnAt(exec_context->_jit_context->m_innerTable, _table_colid);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             column = getColumnAt(exec_context->_jit_context->m_table, _table_colid);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            column = getColumnAt(exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_table, _table_colid);
+        } else {
+            return (uint64_t) nullptr;
         }
         return (uint64_t)column;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             (void)fprintf(stderr, "%%column = %%inner_table->columns[%d]", _table_colid);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(stderr, "%%column = %%table->columns[%d]", _table_colid);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr, "%%column = %%sub_query[%d].table->columns[%d]", m_subQueryIndex, _table_colid);
         }
     }
 
 private:
     int _table_colid;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** SetExprArgIsNullInstruction */
@@ -694,13 +784,13 @@ public:
     ~SetExprArgIsNullInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         setExprArgIsNull(_arg_pos, _is_null);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "setExprArgIsNull(%d, %d)", _arg_pos, _is_null);
     }
@@ -720,12 +810,12 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         return (uint64_t)getExprArgIsNull(_arg_pos);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "getExprArgIsNull(%d)", _arg_pos);
     }
@@ -740,9 +830,9 @@ public:
     WriteDatumColumnInstruction(Instruction* row_inst, Instruction* column_inst, Instruction* sub_expr)
         : Instruction(Instruction::Void), _row_inst(row_inst), _column_inst(column_inst), _sub_expr(sub_expr)
     {
-        addSubInstruction(row_inst);
-        addSubInstruction(column_inst);
-        addSubInstruction(sub_expr);
+        AddSubInstruction(row_inst);
+        AddSubInstruction(column_inst);
+        AddSubInstruction(sub_expr);
     }
 
     ~WriteDatumColumnInstruction() final
@@ -751,23 +841,23 @@ public:
         _column_inst = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
-        Datum arg = (Datum)_sub_expr->exec(exec_context);
-        MOT::Row* row = (MOT::Row*)_row_inst->exec(exec_context);
-        MOT::Column* column = (MOT::Column*)_column_inst->exec(exec_context);
+        Datum arg = (Datum)_sub_expr->Exec(exec_context);
+        MOT::Row* row = (MOT::Row*)_row_inst->Exec(exec_context);
+        MOT::Column* column = (MOT::Column*)_column_inst->Exec(exec_context);
         writeDatumColumn(row, column, arg);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "writeDatumColumn(%%row=");
-        _row_inst->dump();
+        _row_inst->Dump();
         (void)fprintf(stderr, ", %%column=");
-        _column_inst->dump();
+        _column_inst->Dump();
         (void)fprintf(stderr, ", ");
-        _sub_expr->dump();
+        _sub_expr->Dump();
         (void)fprintf(stderr, ")");
     }
 
@@ -781,7 +871,7 @@ private:
 class BuildDatumKeyInstruction : public Instruction {
 public:
     BuildDatumKeyInstruction(Instruction* column_inst, Instruction* sub_expr, int index_colid, int offset, int size,
-        int value_type, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+        int value_type, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, int subQueryIndex)
         : Instruction(Instruction::Void),
           _column_inst(column_inst),
           _sub_expr(sub_expr),
@@ -790,10 +880,11 @@ public:
           _size(size),
           _value_type(value_type),
           _range_itr_type(range_itr_type),
-          _range_scan_type(range_scan_type)
+          _range_scan_type(range_scan_type),
+          m_subQueryIndex(subQueryIndex)
     {
-        addSubInstruction(_column_inst);
-        addSubInstruction(_sub_expr);
+        AddSubInstruction(_column_inst);
+        AddSubInstruction(_sub_expr);
     }
 
     ~BuildDatumKeyInstruction() final
@@ -802,33 +893,39 @@ public:
         _sub_expr = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
-        Datum arg = (Datum)_sub_expr->exec(exec_context);
-        MOT::Column* column = (MOT::Column*)_column_inst->exec(exec_context);
-        MOT::Key* key = getExecContextKey(exec_context, _range_itr_type, _range_scan_type);
+        Datum arg = (Datum)_sub_expr->Exec(exec_context);
+        MOT::Column* column = (MOT::Column*)_column_inst->Exec(exec_context);
+        MOT::Key* key = getExecContextKey(exec_context, _range_itr_type, _range_scan_type, m_subQueryIndex);
         buildDatumKey(column, key, arg, _index_colid, _offset, _size, _value_type);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "buildDatumKey(%%column=");
-        _column_inst->dump();
+        _column_inst->Dump();
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             if (_range_itr_type == JIT_RANGE_ITERATOR_END) {
-                (void)fprintf(stderr, ", %%innerm_endIteratorKey, ");
+                (void)fprintf(stderr, ", %%inner_end_iterator_key, ");
             } else {
                 (void)fprintf(stderr, ", %%inner_search_key, ");
             }
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             if (_range_itr_type == JIT_RANGE_ITERATOR_END) {
                 (void)fprintf(stderr, ", %%end_iterator_key, ");
             } else {
                 (void)fprintf(stderr, ", %%search_key, ");
             }
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            if (_range_itr_type == JIT_RANGE_ITERATOR_END) {
+                (void)fprintf(stderr, ", %%sub_query[%d].end_iterator_key, ", m_subQueryIndex);
+            } else {
+                (void)fprintf(stderr, ", %%sub_query[%d].search_key, ", m_subQueryIndex);
+            }
         }
-        _sub_expr->dump();
+        _sub_expr->Dump();
         (void)fprintf(
             stderr, ", index_colid=%d, offset=%d, size=%d, value_type=%d)", _index_colid, _offset, _size, _value_type);
     }
@@ -842,6 +939,7 @@ private:
     int _value_type;
     JitRangeIteratorType _range_itr_type;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** SetBitInstruction */
@@ -853,13 +951,13 @@ public:
     ~SetBitInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         setBit(exec_context->_jit_context->m_bitmapSet, _col);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "setBit(%%bitmap_set, col=%d)", _col);
     }
@@ -877,13 +975,13 @@ public:
     ~ResetBitmapSetInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         resetBitmapSet(exec_context->_jit_context->m_bitmapSet);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "resetBitmapSet(%%bitmap_set)");
     }
@@ -894,7 +992,7 @@ class WriteRowInstruction : public Instruction {
 public:
     explicit WriteRowInstruction(Instruction* row_inst) : _row_inst(row_inst)
     {
-        addSubInstruction(_row_inst);
+        AddSubInstruction(_row_inst);
     }
 
     ~WriteRowInstruction() final
@@ -903,16 +1001,16 @@ public:
     }
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
-        MOT::Row* row = (MOT::Row*)_row_inst->exec(exec_context);
+        MOT::Row* row = (MOT::Row*)_row_inst->Exec(exec_context);
         return (uint64_t)writeRow(row, exec_context->_jit_context->m_bitmapSet);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "writeRow(%%row=");
-        _row_inst->dump();
+        _row_inst->Dump();
         (void)fprintf(stderr, ", %%bitmap_set)");
     }
 
@@ -923,43 +1021,55 @@ private:
 /** SearchRowInstruction */
 class SearchRowInstruction : public Instruction {
 public:
-    SearchRowInstruction(MOT::AccessType access_mode_value, JitRangeScanType range_scan_type)
-        : _access_mode_value(access_mode_value), _range_scan_type(range_scan_type)
+    SearchRowInstruction(MOT::AccessType access_mode_value, JitRangeScanType range_scan_type, int subQueryIndex)
+        : _access_mode_value(access_mode_value), _range_scan_type(range_scan_type), m_subQueryIndex(subQueryIndex)
     {}
 
     ~SearchRowInstruction() final
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         MOT::Row* row = nullptr;
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             row = searchRow(exec_context->_jit_context->m_innerTable,
                 exec_context->_jit_context->m_innerSearchKey,
                 _access_mode_value);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             row = searchRow(
                 exec_context->_jit_context->m_table, exec_context->_jit_context->m_searchKey, _access_mode_value);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            JitContext::SubQueryData* subQueryData = &exec_context->_jit_context->m_subQueryData[m_subQueryIndex];
+            row = searchRow(subQueryData->m_table, subQueryData->m_searchKey, _access_mode_value);
+        } else {
+            return (uint64_t) nullptr;
         }
         return (uint64_t)row;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             (void)fprintf(stderr,
                 "%%row = searchRow(%%inner_table, %%inner_search_key, access_mode_value=%d)",
                 (int)_access_mode_value);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(
                 stderr, "%%row = searchRow(%%table, %%search_key, access_mode_value=%d)", (int)_access_mode_value);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr,
+                "%%row = searchRow(%%sub_query[%d].table, %%sub_query[%d].search_key, access_mode_value=%d)",
+                m_subQueryIndex,
+                m_subQueryIndex,
+                (int)_access_mode_value);
         }
     }
 
 private:
     MOT::AccessType _access_mode_value;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** @class CreateNewRowInstruction */
@@ -972,13 +1082,13 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         MOT::Row* row = createNewRow(exec_context->_jit_context->m_table);
         return (uint64_t)row;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "%%row = createNewRow(%%table)");
     }
@@ -989,7 +1099,7 @@ class InsertRowInstruction : public Instruction {
 public:
     explicit InsertRowInstruction(Instruction* row_inst) : _row_inst(row_inst)
     {
-        addSubInstruction(_row_inst);
+        AddSubInstruction(_row_inst);
     }
 
     ~InsertRowInstruction() final
@@ -998,16 +1108,16 @@ public:
     }
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
-        MOT::Row* row = (MOT::Row*)_row_inst->exec(exec_context);
+        MOT::Row* row = (MOT::Row*)_row_inst->Exec(exec_context);
         return (uint64_t)insertRow(exec_context->_jit_context->m_table, row);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "insertRow(%%table, %%row=");
-        _row_inst->dump();
+        _row_inst->Dump();
         (void)fprintf(stderr, ")");
     }
 
@@ -1024,12 +1134,12 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         return (uint64_t)deleteRow();
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "deleteRow()");
     }
@@ -1040,7 +1150,7 @@ class SetRowNullBitsInstruction : public Instruction {
 public:
     explicit SetRowNullBitsInstruction(Instruction* row_inst) : Instruction(Instruction::Void), _row_inst(row_inst)
     {
-        addSubInstruction(_row_inst);
+        AddSubInstruction(_row_inst);
     }
 
     ~SetRowNullBitsInstruction() final
@@ -1048,17 +1158,17 @@ public:
         _row_inst = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
-        MOT::Row* row = (MOT::Row*)_row_inst->exec(exec_context);
+        MOT::Row* row = (MOT::Row*)_row_inst->Exec(exec_context);
         setRowNullBits(exec_context->_jit_context->m_table, row);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "setRowNullBits(%%table, %%row=");
-        _row_inst->dump();
+        _row_inst->Dump();
         (void)fprintf(stderr, ")");
     }
 
@@ -1072,7 +1182,7 @@ public:
     SetExprResultNullBitInstruction(Instruction* row_inst, int table_colid)
         : _row_inst(row_inst), _table_colid(table_colid)
     {
-        addSubInstruction(_row_inst);
+        AddSubInstruction(_row_inst);
     }
 
     ~SetExprResultNullBitInstruction() final
@@ -1081,17 +1191,17 @@ public:
     }
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         // always performed on main table (there is no inner table in UPDATE command)
-        MOT::Row* row = (MOT::Row*)_row_inst->exec(exec_context);
+        MOT::Row* row = (MOT::Row*)_row_inst->Exec(exec_context);
         return (uint64_t)setExprResultNullBit(exec_context->_jit_context->m_table, row, _table_colid);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "setExprResultNullBit(%%table, %%row=");
-        _row_inst->dump();
+        _row_inst->Dump();
         (void)fprintf(stderr, ", table_colid=%d)", _table_colid);
     }
 
@@ -1109,13 +1219,13 @@ public:
     ~ExecClearTupleInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         execClearTuple(exec_context->_slot);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "execClearTuple(%%slot)");
     }
@@ -1130,13 +1240,13 @@ public:
     ~ExecStoreVirtualTupleInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         execStoreVirtualTuple(exec_context->_slot);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "execStoreVirtualTuple(%%slot)");
     }
@@ -1145,14 +1255,16 @@ public:
 /** @class SelectColumnInstruction */
 class SelectColumnInstruction : public Instruction {
 public:
-    SelectColumnInstruction(Instruction* row_inst, int table_colid, int tuple_colid, JitRangeScanType range_scan_type)
+    SelectColumnInstruction(
+        Instruction* row_inst, int table_colid, int tuple_colid, JitRangeScanType range_scan_type, int subQueryIndex)
         : Instruction(Instruction::Void),
           _row_inst(row_inst),
           _table_colid(table_colid),
           _tuple_colid(tuple_colid),
-          _range_scan_type(range_scan_type)
+          _range_scan_type(range_scan_type),
+          m_subQueryIndex(subQueryIndex)
     {
-        addSubInstruction(_row_inst);
+        AddSubInstruction(_row_inst);
     }
 
     ~SelectColumnInstruction() final
@@ -1160,27 +1272,42 @@ public:
         _row_inst = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
-        MOT::Row* row = (MOT::Row*)_row_inst->exec(exec_context);
+        MOT::Row* row = (MOT::Row*)_row_inst->Exec(exec_context);
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             selectColumn(
                 exec_context->_jit_context->m_innerTable, row, exec_context->_slot, _table_colid, _tuple_colid);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             selectColumn(exec_context->_jit_context->m_table, row, exec_context->_slot, _table_colid, _tuple_colid);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            JitContext::SubQueryData* subQueryData = &exec_context->_jit_context->m_subQueryData[m_subQueryIndex];
+            selectColumn(subQueryData->m_table, row, subQueryData->m_slot, _table_colid, _tuple_colid);
+        } else {
+            return (uint64_t)MOT::RC_ERROR;
         }
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             (void)fprintf(stderr, "selectColumn(%%inner_table, %%row=");
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(stderr, "selectColumn(%%table, %%row=");
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr, "selectColumn(%%sub_query[%d].table, %%row=", m_subQueryIndex);
         }
-        _row_inst->dump();
-        (void)fprintf(stderr, ", %%slot, table_colid=%d, tuple_colid=%d)", _table_colid, _tuple_colid);
+        _row_inst->Dump();
+        if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr,
+                ", %%sub_query[%d].slot, table_colid=%d, tuple_colid=%d)",
+                m_subQueryIndex,
+                _table_colid,
+                _tuple_colid);
+        } else {
+            (void)fprintf(stderr, ", %%slot, table_colid=%d, tuple_colid=%d)", _table_colid, _tuple_colid);
+        }
     }
 
 private:
@@ -1188,6 +1315,7 @@ private:
     int _table_colid;
     int _tuple_colid;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /**
@@ -1209,14 +1337,14 @@ public:
      * @param exec_context The execution context.
      * @return Not used.
      */
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         setTpProcessed(exec_context->_tp_processed, exec_context->_rows_processed);
         return (uint64_t)MOT::RC_OK;
     }
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "setTpProcessed(%%tp_processed, %%rows_processed)");
     }
@@ -1245,14 +1373,14 @@ public:
      * @param exec_context The execution context.
      * @return Not used.
      */
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         setScanEnded(exec_context->_scan_ended, _result);
         return (uint64_t)MOT::RC_OK;
     }
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "setScanEnded(%%scan_ended, %d)", _result);
     }
@@ -1271,13 +1399,13 @@ public:
     ~ResetRowsProcessedInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         exec_context->_rows_processed = 0;
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "%%rows_processed = 0");
     }
@@ -1292,13 +1420,13 @@ public:
     ~IncrementRowsProcessedInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         ++exec_context->_rows_processed;
         return 0;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "%%rows_processed += 1");
     }
@@ -1307,93 +1435,116 @@ public:
 /** @class CopyKeyInstruction */
 class CopyKeyInstruction : public Instruction {
 public:
-    explicit CopyKeyInstruction(JitRangeScanType range_scan_type)
-        : Instruction(Instruction::Void), _range_scan_type(range_scan_type)
+    explicit CopyKeyInstruction(JitRangeScanType range_scan_type, int subQueryIndex)
+        : Instruction(Instruction::Void), _range_scan_type(range_scan_type), m_subQueryIndex(subQueryIndex)
     {}
 
     ~CopyKeyInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             copyKey(exec_context->_jit_context->m_innerIndex,
                 exec_context->_jit_context->m_innerSearchKey,
                 exec_context->_jit_context->m_innerEndIteratorKey);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             copyKey(exec_context->_jit_context->m_index,
                 exec_context->_jit_context->m_searchKey,
                 exec_context->_jit_context->m_endIteratorKey);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            JitContext::SubQueryData* subQueryData = &exec_context->_jit_context->m_subQueryData[m_subQueryIndex];
+            copyKey(subQueryData->m_index, subQueryData->m_searchKey, subQueryData->m_endIteratorKey);
         }
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
-            (void)fprintf(stderr, "copyKey(%%inner_index, %%inner_search_key, %%innerm_endIteratorKey)");
-        } else {
+            (void)fprintf(stderr, "copyKey(%%inner_index, %%inner_search_key, %%inner_end_iterator_key)");
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(stderr, "copyKey(%%index, %%search_key, %%end_iterator_key)");
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr,
+                "copyKey(%%sub_query[%d].index, %%sub_query[%d].search_key, %%sub_query[%d].end_iterator_key)",
+                m_subQueryIndex,
+                m_subQueryIndex,
+                m_subQueryIndex);
         }
     }
 
 private:
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** @class FillKeyPatternInstruction */
 class FillKeyPatternInstruction : public Instruction {
 public:
-    FillKeyPatternInstruction(
-        JitRangeIteratorType itr_type, unsigned char pattern, int offset, int size, JitRangeScanType range_scan_type)
+    FillKeyPatternInstruction(JitRangeIteratorType itr_type, unsigned char pattern, int offset, int size,
+        JitRangeScanType range_scan_type, int subQueryIndex)
         : Instruction(Instruction::Void),
           _itr_type(itr_type),
           _pattern(pattern),
           _offset(offset),
           _size(size),
-          _range_scan_type(range_scan_type)
+          _range_scan_type(range_scan_type),
+          m_subQueryIndex(subQueryIndex)
     {}
 
     ~FillKeyPatternInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
-        MOT::Key* key = getExecContextKey(exec_context, _itr_type, _range_scan_type);
+        MOT::Key* key = getExecContextKey(exec_context, _itr_type, _range_scan_type, m_subQueryIndex);
         FillKeyPattern(key, _pattern, _offset, _size);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             if (_itr_type == JIT_RANGE_ITERATOR_END) {
                 (void)fprintf(stderr,
-                    "FillKeyPattern(%%%s, pattern=0x%X, offset=%d, size=%d)",
-                    "innerm_endIteratorKey",
+                    "FillKeyPattern(%%inner_end_iterator_key, pattern=0x%X, offset=%d, size=%d)",
                     (unsigned)_pattern,
                     _offset,
                     _size);
             } else {
                 (void)fprintf(stderr,
-                    "FillKeyPattern(%%%s, pattern=0x%X, offset=%d, size=%d)",
-                    "inner_search_key",
+                    "FillKeyPattern(%%inner_search_key, pattern=0x%X, offset=%d, size=%d)",
                     (unsigned)_pattern,
                     _offset,
                     _size);
             }
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             if (_itr_type == JIT_RANGE_ITERATOR_END) {
                 (void)fprintf(stderr,
-                    "FillKeyPattern(%%%s, pattern=0x%X, offset=%d, size=%d)",
-                    "end_iterator_key",
+                    "FillKeyPattern(%%end_iterator_key, pattern=0x%X, offset=%d, size=%d)",
                     (unsigned)_pattern,
                     _offset,
                     _size);
             } else {
                 (void)fprintf(stderr,
-                    "FillKeyPattern(%%%s, pattern=0x%X, offset=%d, size=%d)",
-                    "search_key",
+                    "FillKeyPattern(%%search_key, pattern=0x%X, offset=%d, size=%d)",
+                    (unsigned)_pattern,
+                    _offset,
+                    _size);
+            }
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            if (_itr_type == JIT_RANGE_ITERATOR_END) {
+                (void)fprintf(stderr,
+                    "FillKeyPattern(%%sub_query[%d].end_iterator_key, pattern=0x%X, offset=%d, size=%d)",
+                    m_subQueryIndex,
+                    (unsigned)_pattern,
+                    _offset,
+                    _size);
+            } else {
+                (void)fprintf(stderr,
+                    "FillKeyPattern(%%sub_query[%d].search_key, pattern=0x%X, offset=%d, size=%d)",
+                    m_subQueryIndex,
                     (unsigned)_pattern,
                     _offset,
                     _size);
@@ -1407,44 +1558,67 @@ private:
     int _offset;
     int _size;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** @class AdjustKeyInstruction */
 class AdjustKeyInstruction : public Instruction {
 public:
-    AdjustKeyInstruction(JitRangeIteratorType itr_type, unsigned char pattern, JitRangeScanType range_scan_type)
-        : Instruction(Instruction::Void), _itr_type(itr_type), _pattern(pattern), _range_scan_type(range_scan_type)
+    AdjustKeyInstruction(
+        JitRangeIteratorType itr_type, unsigned char pattern, JitRangeScanType range_scan_type, int subQueryIndex)
+        : Instruction(Instruction::Void),
+          _itr_type(itr_type),
+          _pattern(pattern),
+          _range_scan_type(range_scan_type),
+          m_subQueryIndex(subQueryIndex)
     {}
 
     ~AdjustKeyInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
-        MOT::Key* key = getExecContextKey(exec_context, _itr_type, _range_scan_type);
-        MOT::Index* index = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? exec_context->_jit_context->m_innerIndex
-                                                                       : exec_context->_jit_context->m_index;
+        MOT::Key* key = getExecContextKey(exec_context, _itr_type, _range_scan_type, m_subQueryIndex);
+        MOT::Index* index = nullptr;
+        if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
+            index = exec_context->_jit_context->m_innerIndex;
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
+            index = exec_context->_jit_context->m_index;
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            index = exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_index;
+        }
         adjustKey(key, index, _pattern);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             if (_itr_type == JIT_RANGE_ITERATOR_END) {
+                (void)fprintf(
+                    stderr, "adjustKey(%%inner_end_iterator_key, %%inner_index, pattern=0x%X)", (unsigned)_pattern);
+            } else {
+                (void)fprintf(stderr, "adjustKey(%%inner_search_key, %%inner_index, pattern=0x%X)", (unsigned)_pattern);
+            }
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
+            if (_itr_type == JIT_RANGE_ITERATOR_END) {
+                (void)fprintf(stderr, "adjustKey(%%end_iterator_key, %%index, pattern=0x%X)", (unsigned)_pattern);
+            } else {
+                (void)fprintf(stderr, "adjustKey(%%search_key, %%index, pattern=0x%X)", (unsigned)_pattern);
+            }
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            if (_itr_type == JIT_RANGE_ITERATOR_END) {
                 (void)fprintf(stderr,
-                    "adjustKey(%%%s, %%inner_index, pattern=0x%X)",
-                    "innerm_endIteratorKey",
+                    "adjustKey(%%sub_query[%d].end_iterator_key, %%sub_query[%d].index, pattern=0x%X)",
+                    m_subQueryIndex,
+                    m_subQueryIndex,
                     (unsigned)_pattern);
             } else {
-                (void)fprintf(
-                    stderr, "adjustKey(%%%s, %%inner_index, pattern=0x%X)", "inner_search_key", (unsigned)_pattern);
-            }
-        } else {
-            if (_itr_type == JIT_RANGE_ITERATOR_END) {
-                (void)fprintf(stderr, "adjustKey(%%%s, %%index, pattern=0x%X)", "end_iterator_key", (unsigned)_pattern);
-            } else {
-                (void)fprintf(stderr, "adjustKey(%%%s, %%index, pattern=0x%X)", "search_key", (unsigned)_pattern);
+                (void)fprintf(stderr,
+                    "adjustKey(%%sub_query[%d].search_key, %%sub_query[%d].index, pattern=0x%X)",
+                    m_subQueryIndex,
+                    m_subQueryIndex,
+                    (unsigned)_pattern);
             }
         }
     }
@@ -1453,23 +1627,25 @@ private:
     JitRangeIteratorType _itr_type;
     unsigned char _pattern;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** @class SearchIteratorInstruction */
 class SearchIteratorInstruction : public Instruction {
 public:
     SearchIteratorInstruction(JitIndexScanDirection index_scan_direction, JitRangeBoundMode range_bound_mode,
-        JitRangeScanType range_scan_type)
+        JitRangeScanType range_scan_type, int subQueryIndex)
         : _index_scan_direction(index_scan_direction),
           _range_bound_mode(range_bound_mode),
-          _range_scan_type(range_scan_type)
+          _range_scan_type(range_scan_type),
+          m_subQueryIndex(subQueryIndex)
     {}
 
     ~SearchIteratorInstruction() final
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         MOT::IndexIterator* iterator = nullptr;
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
@@ -1479,16 +1655,21 @@ protected:
                 exec_context->_jit_context->m_innerSearchKey,
                 forward_scan,
                 include_bound);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             iterator = searchIterator(exec_context->_jit_context->m_index,
                 exec_context->_jit_context->m_searchKey,
+                forward_scan,
+                include_bound);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            iterator = searchIterator(exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_index,
+                exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_searchKey,
                 forward_scan,
                 include_bound);
         }
         return (uint64_t)iterator;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         int include_bound = (_range_bound_mode == JIT_RANGE_BOUND_INCLUDE) ? 1 : 0;
@@ -1497,9 +1678,16 @@ protected:
                 "searchIterator(%%inner_index, %%inner_search_key, forward_scan=%d, include_bound=%d)",
                 forward_scan,
                 include_bound);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(stderr,
                 "searchIterator(%%index, %%search_key, forward_scan=%d, include_bound=%d)",
+                forward_scan,
+                include_bound);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr,
+                "searchIterator(%%sub_query[%d].index, %%sub_query[%d].search_key, forward_scan=%d, include_bound=%d)",
+                m_subQueryIndex,
+                m_subQueryIndex,
                 forward_scan,
                 include_bound);
         }
@@ -1509,23 +1697,25 @@ private:
     JitIndexScanDirection _index_scan_direction;
     JitRangeBoundMode _range_bound_mode;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** @class CreateEndIteratorInstruction */
 class CreateEndIteratorInstruction : public Instruction {
 public:
     CreateEndIteratorInstruction(JitIndexScanDirection index_scan_direction, JitRangeBoundMode range_bound_mode,
-        JitRangeScanType range_scan_type)
+        JitRangeScanType range_scan_type, int subQueryIndex)
         : _index_scan_direction(index_scan_direction),
           _range_bound_mode(range_bound_mode),
-          _range_scan_type(range_scan_type)
+          _range_scan_type(range_scan_type),
+          m_subQueryIndex(subQueryIndex)
     {}
 
     ~CreateEndIteratorInstruction() final
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         MOT::IndexIterator* iterator = nullptr;
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
@@ -1535,27 +1725,40 @@ protected:
                 exec_context->_jit_context->m_innerEndIteratorKey,
                 forward_scan,
                 include_bound);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             iterator = createEndIterator(exec_context->_jit_context->m_index,
                 exec_context->_jit_context->m_endIteratorKey,
+                forward_scan,
+                include_bound);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            iterator = createEndIterator(exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_index,
+                exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_endIteratorKey,
                 forward_scan,
                 include_bound);
         }
         return (uint64_t)iterator;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         int include_bound = (_range_bound_mode == JIT_RANGE_BOUND_INCLUDE) ? 1 : 0;
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             (void)fprintf(stderr,
-                "createEndIterator(%%inner_index, %%innerm_endIteratorKey, forward_scan=%d, include_bound=%d)",
+                "createEndIterator(%%inner_index, %%inner_end_iterator_key, forward_scan=%d, include_bound=%d)",
                 forward_scan,
                 include_bound);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(stderr,
                 "createEndIterator(%%index, %%end_iterator_key, forward_scan=%d, include_bound=%d)",
+                forward_scan,
+                include_bound);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr,
+                "createEndIterator(%%sub_query[%d].index, %%sub_query[%d].end_iterator_key, forward_scan=%d, "
+                "include_bound=%d)",
+                m_subQueryIndex,
+                m_subQueryIndex,
                 forward_scan,
                 include_bound);
         }
@@ -1565,20 +1768,22 @@ private:
     JitIndexScanDirection _index_scan_direction;
     JitRangeBoundMode _range_bound_mode;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** @class IsScanEndInstruction */
 class IsScanEndInstruction : public Instruction {
 public:
     IsScanEndInstruction(JitIndexScanDirection index_scan_direction, Instruction* begin_itr_inst,
-        Instruction* end_itr_inst, JitRangeScanType range_scan_type)
+        Instruction* end_itr_inst, JitRangeScanType range_scan_type, int subQueryIndex)
         : _index_scan_direction(index_scan_direction),
           _begin_itr_inst(begin_itr_inst),
           _end_itr_inst(end_itr_inst),
-          _range_scan_type(range_scan_type)
+          _range_scan_type(range_scan_type),
+          m_subQueryIndex(subQueryIndex)
     {
-        addSubInstruction(_begin_itr_inst);
-        addSubInstruction(_end_itr_inst);
+        AddSubInstruction(_begin_itr_inst);
+        AddSubInstruction(_end_itr_inst);
     }
 
     ~IsScanEndInstruction() final
@@ -1588,31 +1793,36 @@ public:
     }
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         uint64_t result = 0;
-        MOT::IndexIterator* begin_itr = (MOT::IndexIterator*)_begin_itr_inst->exec(exec_context);
-        MOT::IndexIterator* end_itr = (MOT::IndexIterator*)_end_itr_inst->exec(exec_context);
+        MOT::IndexIterator* begin_itr = (MOT::IndexIterator*)_begin_itr_inst->Exec(exec_context);
+        MOT::IndexIterator* end_itr = (MOT::IndexIterator*)_end_itr_inst->Exec(exec_context);
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             result = isScanEnd(exec_context->_jit_context->m_innerIndex, begin_itr, end_itr, forward_scan);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             result = isScanEnd(exec_context->_jit_context->m_index, begin_itr, end_itr, forward_scan);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            result = isScanEnd(
+                exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_index, begin_itr, end_itr, forward_scan);
         }
         return result;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             (void)fprintf(stderr, "isScanEnd(%%inner_index, %%iterator=");
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(stderr, "isScanEnd(%%index, %%iterator=");
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr, "isScanEnd(%%sub_query[%d].index, %%iterator=", m_subQueryIndex);
         }
-        _begin_itr_inst->dump();
+        _begin_itr_inst->Dump();
         (void)fprintf(stderr, ", %%end_iterator=");
-        _end_itr_inst->dump();
+        _end_itr_inst->Dump();
         (void)fprintf(stderr, ", forward_scan=%d)", forward_scan);
     }
 
@@ -1621,21 +1831,23 @@ private:
     Instruction* _begin_itr_inst;
     Instruction* _end_itr_inst;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** @class GetRowFromIteratorInstruction */
 class GetRowFromIteratorInstruction : public Instruction {
 public:
     GetRowFromIteratorInstruction(MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction,
-        Instruction* begin_itr_inst, Instruction* end_itr_inst, JitRangeScanType range_scan_type)
+        Instruction* begin_itr_inst, Instruction* end_itr_inst, JitRangeScanType range_scan_type, int subQueryIndex)
         : _access_mode(access_mode),
           _index_scan_direction(index_scan_direction),
           _begin_itr_inst(begin_itr_inst),
           _end_itr_inst(end_itr_inst),
-          _range_scan_type(range_scan_type)
+          _range_scan_type(range_scan_type),
+          m_subQueryIndex(subQueryIndex)
     {
-        addSubInstruction(_begin_itr_inst);
-        addSubInstruction(_end_itr_inst);
+        AddSubInstruction(_begin_itr_inst);
+        AddSubInstruction(_end_itr_inst);
     }
 
     ~GetRowFromIteratorInstruction() final
@@ -1645,33 +1857,41 @@ public:
     }
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         MOT::Row* row = nullptr;
-        MOT::IndexIterator* begin_itr = (MOT::IndexIterator*)_begin_itr_inst->exec(exec_context);
-        MOT::IndexIterator* end_itr = (MOT::IndexIterator*)_end_itr_inst->exec(exec_context);
+        MOT::IndexIterator* begin_itr = (MOT::IndexIterator*)_begin_itr_inst->Exec(exec_context);
+        MOT::IndexIterator* end_itr = (MOT::IndexIterator*)_end_itr_inst->Exec(exec_context);
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             row = getRowFromIterator(
                 exec_context->_jit_context->m_innerIndex, begin_itr, end_itr, _access_mode, forward_scan);
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             row =
                 getRowFromIterator(exec_context->_jit_context->m_index, begin_itr, end_itr, _access_mode, forward_scan);
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            row = getRowFromIterator(exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_index,
+                begin_itr,
+                end_itr,
+                _access_mode,
+                forward_scan);
         }
         return (uint64_t)row;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         if (_range_scan_type == JIT_RANGE_SCAN_INNER) {
             (void)fprintf(stderr, "%%row = getRowFromIterator(%%inner_index, %%iterator=");
-        } else {
+        } else if (_range_scan_type == JIT_RANGE_SCAN_MAIN) {
             (void)fprintf(stderr, "%%row = getRowFromIterator(%%index, %%iterator=");
+        } else if (_range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr, "%%row = getRowFromIterator(%%sub_query[%d].index, %%iterator=", m_subQueryIndex);
         }
-        _begin_itr_inst->dump();
+        _begin_itr_inst->Dump();
         (void)fprintf(stderr, ", %%end_iterator=");
-        _end_itr_inst->dump();
+        _end_itr_inst->Dump();
         (void)fprintf(stderr, ", access_mode=%d, forward_scan=%d)", (int)_access_mode, forward_scan);
     }
 
@@ -1681,6 +1901,7 @@ private:
     Instruction* _begin_itr_inst;
     Instruction* _end_itr_inst;
     JitRangeScanType _range_scan_type;
+    int m_subQueryIndex;
 };
 
 /** @class DestroyIteratorInstruction */
@@ -1688,7 +1909,7 @@ class DestroyIteratorInstruction : public Instruction {
 public:
     explicit DestroyIteratorInstruction(Instruction* itr_inst) : Instruction(Instruction::Void), _itr_inst(itr_inst)
     {
-        addSubInstruction(_itr_inst);
+        AddSubInstruction(_itr_inst);
     }
 
     ~DestroyIteratorInstruction() final
@@ -1696,17 +1917,17 @@ public:
         _itr_inst = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
-        MOT::IndexIterator* itr = (MOT::IndexIterator*)_itr_inst->exec(exec_context);
+        MOT::IndexIterator* itr = (MOT::IndexIterator*)_itr_inst->Exec(exec_context);
         destroyIterator(itr);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "destroyIterator(%%iterator=");
-        _itr_inst->dump();
+        _itr_inst->Dump();
         (void)fprintf(stderr, ")");
     }
 
@@ -1720,7 +1941,7 @@ public:
     SetStateIteratorInstruction(Instruction* itr, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
         : Instruction(Instruction::Void), _itr(itr), _range_itr_type(range_itr_type), _range_scan_type(range_scan_type)
     {
-        addSubInstruction(_itr);
+        AddSubInstruction(_itr);
     }
 
     ~SetStateIteratorInstruction() final
@@ -1728,21 +1949,21 @@ public:
         _itr = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
-        MOT::IndexIterator* itr = (MOT::IndexIterator*)_itr->exec(exec_context);
+        MOT::IndexIterator* itr = (MOT::IndexIterator*)_itr->Exec(exec_context);
         int begin_itr = (_range_itr_type == JIT_RANGE_ITERATOR_START) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         setStateIterator(itr, begin_itr, inner_scan);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         int begin_itr = (_range_itr_type == JIT_RANGE_ITERATOR_START) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         (void)fprintf(stderr, "setStateIterator(");
-        _itr->dump();
+        _itr->Dump();
         (void)fprintf(stderr, ", begin_itr=%d, inner_scan=%d)", begin_itr, inner_scan);
     }
 
@@ -1763,14 +1984,14 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         int begin_itr = (_range_itr_type == JIT_RANGE_ITERATOR_START) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         return (uint64_t)getStateIterator(begin_itr, inner_scan);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int begin_itr = (_range_itr_type == JIT_RANGE_ITERATOR_START) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
@@ -1793,14 +2014,14 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         int begin_itr = (_range_itr_type == JIT_RANGE_ITERATOR_START) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         return (uint64_t)isStateIteratorNull(begin_itr, inner_scan);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int begin_itr = (_range_itr_type == JIT_RANGE_ITERATOR_START) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
@@ -1823,14 +2044,14 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         return (uint64_t)isStateScanEnd(forward_scan, inner_scan);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
@@ -1854,7 +2075,7 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
@@ -1862,7 +2083,7 @@ protected:
         return (uint64_t)row;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int forward_scan = (_index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
@@ -1889,14 +2110,14 @@ public:
     ~DestroyStateIteratorsInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         destroyStateIterators(inner_scan);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         (void)fprintf(stderr, "destroyStateIterators(inner_scan=%d)", inner_scan);
@@ -1916,14 +2137,14 @@ public:
     ~SetStateScanEndFlagInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         setStateScanEndFlag(_scan_ended, inner_scan);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         (void)fprintf(stderr, "setStateScanEndFlag(scan_ended=%d, inner_scan=%d)", _scan_ended, inner_scan);
@@ -1944,13 +2165,13 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         return (uint64_t)getStateScanEndFlag(inner_scan);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         (void)fprintf(stderr, "getStateScanEndFlag(inner_scan=%d)", inner_scan);
@@ -1969,14 +2190,14 @@ public:
     ~ResetStateRowInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         resetStateRow(inner_scan);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         (void)fprintf(stderr, "resetStateRow(inner_scan=%d)", inner_scan);
@@ -1991,7 +2212,7 @@ public:
     SetStateRowInstruction(Instruction* row, JitRangeScanType range_scan_type)
         : Instruction(Instruction::Void), _row(row), _range_scan_type(range_scan_type)
     {
-        addSubInstruction(_row);
+        AddSubInstruction(_row);
     }
 
     ~SetStateRowInstruction() final
@@ -1999,19 +2220,19 @@ public:
         _row = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-        MOT::Row* row = (MOT::Row*)_row->exec(exec_context);
+        MOT::Row* row = (MOT::Row*)_row->Exec(exec_context);
         setStateRow(row, inner_scan);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         (void)fprintf(stderr, "setStateRow(row=");
-        _row->dump();
+        _row->Dump();
         (void)fprintf(stderr, ", inner_scan=%d)", inner_scan);
     }
 
@@ -2029,13 +2250,13 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         return (uint64_t)getStateRow(inner_scan);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         (void)fprintf(stderr, "getStateRow(inner_scan=%d)", inner_scan);
@@ -2053,13 +2274,13 @@ public:
     ~CopyOuterStateRowInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         copyOuterStateRow();
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "copyOuterStateRow()");
     }
@@ -2074,12 +2295,12 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         return (uint64_t)getOuterStateRowCopy();
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "getOuterStateRowCopy()");
     }
@@ -2094,13 +2315,13 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         return (uint64_t)isStateRowNull(inner_scan);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         int inner_scan = (_range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
         (void)fprintf(stderr, "isStateRowNull(inner_scan=%d)", inner_scan);
@@ -2119,13 +2340,13 @@ public:
     ~ResetStateLimitCounterInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         resetStateLimitCounter();
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "resetStateLimitCounter()");
     }
@@ -2140,13 +2361,13 @@ public:
     ~IncrementStateLimitCounterInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         incrementStateLimitCounter();
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "incrementStateLimitCounter()");
     }
@@ -2162,13 +2383,13 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         uint64_t value = getStateLimitCounter();
         return (uint64_t)value;
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "getStateLimitCounter()");
     }
@@ -2184,13 +2405,13 @@ public:
     ~PrepareAvgArrayInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         prepareAvgArray(_element_type, _element_count);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "prepareAvgArray(element_type=%d, element_count=%d)", _element_type, _element_count);
     }
@@ -2231,14 +2452,14 @@ public:
         _avg_array = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         Datum avg_array = _avg_array->eval(exec_context);
         saveAvgArray(avg_array);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "saveAvgArray(avg_array=");
         _avg_array->dump();
@@ -2259,12 +2480,12 @@ public:
     {}
 
 protected:
-    Datum execImpl(ExecContext* exec_context) final
+    Datum ExecImpl(ExecContext* exec_context) final
     {
         return (uint64_t)computeAvgFromArray(_element_type);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "computeAvgFromArray(element_type=%d)", _element_type);
     }
@@ -2282,13 +2503,13 @@ public:
     ~ResetAggValueInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         resetAggValue(_element_type);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "resetAggValue(element_type=%d)", _element_type);
     }
@@ -2328,14 +2549,14 @@ public:
         _value = nullptr;
     }
 
-    Datum exec(ExecContext* exec_context) final
+    Datum Exec(ExecContext* exec_context) final
     {
         Datum value = (Datum)_value->eval(exec_context);
         setAggValue(value);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "setAggValue(value=");
         _value->dump();
@@ -2355,13 +2576,13 @@ public:
     ~ResetAggMaxMinNullInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         resetAggMaxMinNull();
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "resetAggMaxMinNull()");
     }
@@ -2376,13 +2597,13 @@ public:
     ~SetAggMaxMinNotNullInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         setAggMaxMinNotNull();
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "setAggMaxMinNotNull()");
     }
@@ -2398,12 +2619,12 @@ public:
     {}
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         return (uint64_t)getAggMaxMinIsNull();
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "getAggMaxMinIsNull()");
     }
@@ -2419,13 +2640,13 @@ public:
     ~PrepareDistinctSetInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         prepareDistinctSet(_element_type);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "prepareDistinctSet(element_type=%d)", _element_type);
     }
@@ -2446,13 +2667,13 @@ public:
     }
 
 protected:
-    uint64_t execImpl(ExecContext* exec_context) final
+    uint64_t ExecImpl(ExecContext* exec_context) final
     {
         Datum value = (Datum)_value->eval(exec_context);
         return (uint64_t)insertDistinctItem(_element_type, value);
     }
 
-    void dumpImpl() final
+    void DumpImpl() final
     {
         (void)fprintf(stderr, "insertDistinctItem(element_type=%d, ", _element_type);
         _value->dump();
@@ -2474,13 +2695,13 @@ public:
     ~DestroyDistinctSetInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         destroyDistinctSet(_element_type);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "destroyDistinctSet(element_type=%d)", _element_type);
     }
@@ -2499,13 +2720,13 @@ public:
     ~ResetTupleDatumInstruction() final
     {}
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* exec_context) final
     {
         resetTupleDatum(exec_context->_slot, _tuple_colid, _zero_type);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "resetTupleDatum(%%slot, tuple_colid=%d, zero_type=%d)", _tuple_colid, _zero_type);
     }
@@ -2547,7 +2768,7 @@ public:
     WriteTupleDatumInstruction(int tuple_colid, Instruction* value)
         : Instruction(Instruction::Void), _tuple_colid(tuple_colid), _value(value)
     {
-        addSubInstruction(_value);
+        AddSubInstruction(_value);
     }
 
     ~WriteTupleDatumInstruction() final
@@ -2555,17 +2776,17 @@ public:
         _value = nullptr;
     }
 
-    uint64_t exec(ExecContext* exec_context) final
+    uint64_t Exec(ExecContext* execContext) final
     {
-        Datum datum_value = (Datum)_value->exec(exec_context);
-        writeTupleDatum(exec_context->_slot, _tuple_colid, datum_value);
+        Datum datum_value = (Datum)_value->Exec(execContext);
+        writeTupleDatum(execContext->_slot, _tuple_colid, datum_value);
         return (uint64_t)MOT::RC_OK;
     }
 
-    void dump() final
+    void Dump() final
     {
         (void)fprintf(stderr, "writeTupleDatum(%%slot, tuple_colid=%d, ", _tuple_colid);
-        _value->dump();
+        _value->Dump();
         (void)fprintf(stderr, ")");
     }
 
@@ -2574,19 +2795,69 @@ private:
     Instruction* _value;
 };
 
+class SelectSubQueryResultExpression : public Expression {
+public:
+    explicit SelectSubQueryResultExpression(int subQueryIndex)
+        : Expression(Expression::CannotFail), m_subQueryIndex(subQueryIndex)
+    {}
+
+    ~SelectSubQueryResultExpression() final
+    {}
+
+    Datum eval(ExecContext* exec_context) final
+    {
+        exec_context->_expr_rc = MOT_NO_ERROR;
+        return (uint64_t)SelectSubQueryResult(m_subQueryIndex);
+    }
+
+    void dump() final
+    {
+        (void)fprintf(stderr, "SelectSubQueryResult(%%sub_query_index=%d)", m_subQueryIndex);
+    }
+
+private:
+    int m_subQueryIndex;
+};
+
+class CopyAggregateToSubQueryResultInstruction : public Instruction {
+public:
+    explicit CopyAggregateToSubQueryResultInstruction(int subQueryIndex)
+        : Instruction(Instruction::Void), m_subQueryIndex(subQueryIndex)
+    {}
+
+    ~CopyAggregateToSubQueryResultInstruction() final
+    {}
+
+    uint64_t Exec(ExecContext* exec_context) final
+    {
+        CopyAggregateToSubQueryResult(m_subQueryIndex);
+        return (uint64_t)MOT::RC_OK;
+    }
+
+    void Dump() final
+    {
+        (void)fprintf(stderr, "CopyAggregateToSubQueryResult(%%sub_query_index=%d)", m_subQueryIndex);
+    }
+
+private:
+    int m_subQueryIndex;
+};
+
 static Instruction* AddIsSoftMemoryLimitReached(JitTvmCodeGenContext* ctx)
 {
     return ctx->_builder->addInstruction(new (std::nothrow) IsSoftMemoryLimitReachedInstruction());
 }
 
-static void AddInitSearchKey(JitTvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+static void AddInitSearchKey(JitTvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    (void)ctx->_builder->addInstruction(new (std::nothrow) InitSearchKeyInstruction(range_scan_type));
+    (void)ctx->_builder->addInstruction(new (std::nothrow) InitSearchKeyInstruction(rangeScanType, subQueryIndex));
 }
 
-static Instruction* AddGetColumnAt(JitTvmCodeGenContext* ctx, int colid, JitRangeScanType range_scan_type)
+static Instruction* AddGetColumnAt(
+    JitTvmCodeGenContext* ctx, int colid, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
-    return ctx->_builder->addInstruction(new (std::nothrow) GetColumnAtInstruction(colid, range_scan_type));
+    return ctx->_builder->addInstruction(
+        new (std::nothrow) GetColumnAtInstruction(colid, range_scan_type, subQueryIndex));
 }
 
 static Instruction* AddSetExprArgIsNull(JitTvmCodeGenContext* ctx, int arg_pos, int isnull)
@@ -2620,19 +2891,23 @@ static Instruction* AddWriteDatumColumn(
 }
 
 static void AddBuildDatumKey(JitTvmCodeGenContext* ctx, Instruction* column_inst, int index_colid,
-    Instruction* sub_expr, int value_type, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+    Instruction* sub_expr, int value_type, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type,
+    int subQueryIndex = -1)
 {
     int offset = -1;
     int size = -1;
     if (range_scan_type == JIT_RANGE_SCAN_INNER) {
         offset = ctx->m_innerTable_info.m_indexColumnOffsets[index_colid];
         size = ctx->m_innerTable_info.m_index->GetLengthKeyFields()[index_colid];
-    } else {
+    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
         offset = ctx->_table_info.m_indexColumnOffsets[index_colid];
         size = ctx->_table_info.m_index->GetLengthKeyFields()[index_colid];
+    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+        offset = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets[index_colid];
+        size = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields()[index_colid];
     }
     (void)ctx->_builder->addInstruction(new (std::nothrow) BuildDatumKeyInstruction(
-        column_inst, sub_expr, index_colid, offset, size, value_type, range_itr_type, range_scan_type));
+        column_inst, sub_expr, index_colid, offset, size, value_type, range_itr_type, range_scan_type, subQueryIndex));
 }
 
 static void AddSetBit(JitTvmCodeGenContext* ctx, int colid)
@@ -2651,9 +2926,10 @@ static Instruction* AddWriteRow(JitTvmCodeGenContext* ctx, Instruction* row_inst
 }
 
 static Instruction* AddSearchRow(
-    JitTvmCodeGenContext* ctx, MOT::AccessType access_mode_value, JitRangeScanType range_scan_type)
+    JitTvmCodeGenContext* ctx, MOT::AccessType access_mode_value, JitRangeScanType range_scan_type, int subQueryIndex)
 {
-    return ctx->_builder->addInstruction(new (std::nothrow) SearchRowInstruction(access_mode_value, range_scan_type));
+    return ctx->_builder->addInstruction(
+        new (std::nothrow) SearchRowInstruction(access_mode_value, range_scan_type, subQueryIndex));
 }
 
 static Instruction* AddCreateNewRow(JitTvmCodeGenContext* ctx)
@@ -2691,11 +2967,11 @@ static void AddExecStoreVirtualTuple(JitTvmCodeGenContext* ctx)
     ctx->_builder->addInstruction(new (std::nothrow) ExecStoreVirtualTupleInstruction());
 }
 
-static void AddSelectColumn(JitTvmCodeGenContext* ctx, Instruction* row_inst, int table_colid, int tuple_colid,
-    JitRangeScanType range_scan_type)
+static void AddSelectColumn(JitTvmCodeGenContext* ctx, Instruction* rowInst, int tableColumnId, int tupleColumnId,
+    JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    ctx->_builder->addInstruction(
-        new (std::nothrow) SelectColumnInstruction(row_inst, table_colid, tuple_colid, range_scan_type));
+    ctx->_builder->addInstruction(new (std::nothrow)
+            SelectColumnInstruction(rowInst, tableColumnId, tupleColumnId, rangeScanType, subQueryIndex));
 }
 
 static void AddSetTpProcessed(JitTvmCodeGenContext* ctx)
@@ -2708,51 +2984,52 @@ static void AddSetScanEnded(JitTvmCodeGenContext* ctx, int result)
     ctx->_builder->addInstruction(new (std::nothrow) SetScanEndedInstruction(result));
 }
 
-static void AddCopyKey(JitTvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+static void AddCopyKey(JitTvmCodeGenContext* ctx, JitRangeScanType range_scan_type, int subQueryIndex)
 {
-    ctx->_builder->addInstruction(new (std::nothrow) CopyKeyInstruction(range_scan_type));
+    ctx->_builder->addInstruction(new (std::nothrow) CopyKeyInstruction(range_scan_type, subQueryIndex));
 }
 
 static void AddFillKeyPattern(JitTvmCodeGenContext* ctx, unsigned char pattern, int offset, int size,
-    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+    JitRangeIteratorType rangeItrType, JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    ctx->_builder->addInstruction(
-        new (std::nothrow) FillKeyPatternInstruction(range_itr_type, pattern, offset, size, range_scan_type));
+    ctx->_builder->addInstruction(new (std::nothrow)
+            FillKeyPatternInstruction(rangeItrType, pattern, offset, size, rangeScanType, subQueryIndex));
 }
 
 static void AddAdjustKey(JitTvmCodeGenContext* ctx, unsigned char pattern, JitRangeIteratorType range_itr_type,
-    JitRangeScanType range_scan_type)
+    JitRangeScanType range_scan_type, int subQueryIndex)
 {
     (void)ctx->_builder->addInstruction(
-        new (std::nothrow) AdjustKeyInstruction(range_itr_type, pattern, range_scan_type));
+        new (std::nothrow) AdjustKeyInstruction(range_itr_type, pattern, range_scan_type, subQueryIndex));
 }
 
 static Instruction* AddSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type)
+    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex)
 {
-    return ctx->_builder->addInstruction(
-        new (std::nothrow) SearchIteratorInstruction(index_scan_direction, range_bound_mode, range_scan_type));
+    return ctx->_builder->addInstruction(new (std::nothrow)
+            SearchIteratorInstruction(index_scan_direction, range_bound_mode, range_scan_type, subQueryIndex));
 }
 
 static Instruction* AddCreateEndIterator(JitTvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type)
+    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
-    return ctx->_builder->addInstruction(
-        new (std::nothrow) CreateEndIteratorInstruction(index_scan_direction, range_bound_mode, range_scan_type));
+    return ctx->_builder->addInstruction(new (std::nothrow)
+            CreateEndIteratorInstruction(index_scan_direction, range_bound_mode, range_scan_type, subQueryIndex));
 }
 
 static Instruction* AddIsScanEnd(JitTvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitTvmRuntimeCursor* cursor, JitRangeScanType range_scan_type)
+    JitTvmRuntimeCursor* cursor, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
-    return ctx->_builder->addInstruction(new (std::nothrow)
-            IsScanEndInstruction(index_scan_direction, cursor->begin_itr, cursor->end_itr, range_scan_type));
+    return ctx->_builder->addInstruction(new (std::nothrow) IsScanEndInstruction(
+        index_scan_direction, cursor->begin_itr, cursor->end_itr, range_scan_type, subQueryIndex));
 }
 
 static Instruction* AddGetRowFromIterator(JitTvmCodeGenContext* ctx, MOT::AccessType access_mode,
-    JitIndexScanDirection index_scan_direction, JitTvmRuntimeCursor* cursor, JitRangeScanType range_scan_type)
+    JitIndexScanDirection index_scan_direction, JitTvmRuntimeCursor* cursor, JitRangeScanType range_scan_type,
+    int subQueryIndex)
 {
     return ctx->_builder->addInstruction(new (std::nothrow) GetRowFromIteratorInstruction(
-        access_mode, index_scan_direction, cursor->begin_itr, cursor->end_itr, range_scan_type));
+        access_mode, index_scan_direction, cursor->begin_itr, cursor->end_itr, range_scan_type, subQueryIndex));
 }
 
 static void AddDestroyIterator(JitTvmCodeGenContext* ctx, Instruction* itr_inst)
@@ -2928,6 +3205,16 @@ static void AddDestroyDistinctSet(JitTvmCodeGenContext* ctx, int element_type)
 static void AddWriteTupleDatum(JitTvmCodeGenContext* ctx, int tuple_colid, Instruction* datum_value)
 {
     (void)ctx->_builder->addInstruction(new (std::nothrow) WriteTupleDatumInstruction(tuple_colid, datum_value));
+}
+
+static Expression* AddSelectSubQueryResult(JitTvmCodeGenContext* ctx, int subQueryIndex)
+{
+    return new (std::nothrow) SelectSubQueryResultExpression(subQueryIndex);
+}
+
+static void AddCopyAggregateToSubQueryResult(JitTvmCodeGenContext* ctx, int subQueryIndex)
+{
+    ctx->_builder->addInstruction(new (std::nothrow) CopyAggregateToSubQueryResultInstruction(subQueryIndex));
 }
 
 #ifdef MOT_JIT_DEBUG
@@ -3167,10 +3454,10 @@ static Instruction* buildCreateNewRow(JitTvmCodeGenContext* ctx)
 }
 
 static Instruction* buildSearchRow(
-    JitTvmCodeGenContext* ctx, MOT::AccessType access_type, JitRangeScanType range_scan_type)
+    JitTvmCodeGenContext* ctx, MOT::AccessType access_type, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     IssueDebugLog("Searching row");
-    Instruction* row = AddSearchRow(ctx, access_type, range_scan_type);
+    Instruction* row = AddSearchRow(ctx, access_type, range_scan_type, subQueryIndex);
 
     JIT_IF_BEGIN(check_row_found)
     JIT_IF_EVAL_NOT(row)
@@ -3261,11 +3548,11 @@ static void buildDeleteRow(JitTvmCodeGenContext* ctx)
 }
 
 static Instruction* buildSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type)
+    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     // search the row, execute: IndexIterator* itr = searchIterator(table, key);
     IssueDebugLog("Searching range start");
-    Instruction* itr = AddSearchIterator(ctx, index_scan_direction, range_bound_mode, range_scan_type);
+    Instruction* itr = AddSearchIterator(ctx, index_scan_direction, range_bound_mode, range_scan_type, subQueryIndex);
 
     JIT_IF_BEGIN(check_itr_found)
     JIT_IF_EVAL_NOT(itr)
@@ -3279,10 +3566,11 @@ static Instruction* buildSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanD
 
 static Instruction* buildGetRowFromIterator(JitTvmCodeGenContext* ctx, BasicBlock* endLoopBlock,
     MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction, JitTvmRuntimeCursor* cursor,
-    JitRangeScanType range_scan_type)
+    JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     IssueDebugLog("Retrieving row from iterator");
-    Instruction* row = AddGetRowFromIterator(ctx, access_mode, index_scan_direction, cursor, range_scan_type);
+    Instruction* row =
+        AddGetRowFromIterator(ctx, access_mode, index_scan_direction, cursor, range_scan_type, subQueryIndex);
 
     JIT_IF_BEGIN(check_itr_row_found)
     JIT_IF_EVAL_NOT(row)
@@ -3737,6 +4025,11 @@ static Expression* ProcessFilterExpr(JitTvmCodeGenContext* ctx, Instruction* row
 #undef APPLY_BINARY_CAST_OPERATOR
 #undef APPLY_TERNARY_CAST_OPERATOR
 
+static Expression* ProcessSubLinkExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitSubLinkExpr* expr, int* max_arg)
+{
+    return AddSelectSubQueryResult(ctx, expr->_sub_query_index);
+}
+
 static Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitExpr* expr, int* max_arg)
 {
     Expression* result = nullptr;
@@ -3751,6 +4044,8 @@ static Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitE
         result = ProcessOpExpr(ctx, row, (JitOpExpr*)expr, max_arg);
     } else if (expr->_expr_type == JIT_EXPR_TYPE_FUNC) {
         result = ProcessFuncExpr(ctx, row, (JitFuncExpr*)expr, max_arg);
+    } else if (expr->_expr_type == JIT_EXPR_TYPE_SUBLINK) {
+        result = ProcessSubLinkExpr(ctx, row, (JitSubLinkExpr*)expr, max_arg);
     } else {
         MOT_LOG_TRACE(
             "Failed to generate jitted code for query: unsupported target expression type: %d", (int)expr->_expr_type);
@@ -3797,12 +4092,13 @@ static JitContext* FinalizeCodegen(JitTvmCodeGenContext* ctx, int max_arg, JitCo
     jit_context->m_innerTable = ctx->m_innerTable_info.m_table;
     jit_context->m_innerIndex = ctx->m_innerTable_info.m_index;
     jit_context->m_commandType = command_type;
+    jit_context->m_subQueryCount = 0;
 
     return jit_context;
 }
 
 static bool buildScanExpression(JitTvmCodeGenContext* ctx, JitColumnExpr* expr, int* max_arg,
-    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, Instruction* outer_row)
+    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, Instruction* outer_row, int subQueryIndex)
 {
     Expression* value_expr = ProcessExpr(ctx, outer_row, expr->_expr, max_arg);
     if (value_expr == nullptr) {
@@ -3812,25 +4108,29 @@ static bool buildScanExpression(JitTvmCodeGenContext* ctx, JitColumnExpr* expr, 
         Instruction* value = buildExpression(ctx, value_expr);
         Instruction* column = AddGetColumnAt(ctx,
             expr->_table_column_id,
-            range_scan_type);  // no need to translate to zero-based index (first column is null bits)
+            range_scan_type,  // no need to translate to zero-based index (first column is null bits)
+            subQueryIndex);
         int index_colid = -1;
         if (range_scan_type == JIT_RANGE_SCAN_INNER) {
             index_colid = ctx->m_innerTable_info.m_columnMap[expr->_table_column_id];
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             index_colid = ctx->_table_info.m_columnMap[expr->_table_column_id];
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            index_colid = ctx->m_subQueryTableInfo[subQueryIndex].m_columnMap[expr->_table_column_id];
         }
-        AddBuildDatumKey(ctx, column, index_colid, value, expr->_column_type, range_itr_type, range_scan_type);
+        AddBuildDatumKey(
+            ctx, column, index_colid, value, expr->_column_type, range_itr_type, range_scan_type, subQueryIndex);
     }
     return true;
 }
 
 static bool buildPointScan(JitTvmCodeGenContext* ctx, JitColumnExprArray* expr_array, int* max_arg,
-    JitRangeScanType range_scan_type, Instruction* outer_row, int expr_count = 0)
+    JitRangeScanType range_scan_type, Instruction* outer_row, int expr_count = 0, int subQueryIndex = -1)
 {
     if (expr_count == 0) {
         expr_count = expr_array->_count;
     }
-    AddInitSearchKey(ctx, range_scan_type);
+    AddInitSearchKey(ctx, range_scan_type, subQueryIndex);
     for (int i = 0; i < expr_count; ++i) {
         JitColumnExpr* expr = &expr_array->_exprs[i];
 
@@ -3845,7 +4145,7 @@ static bool buildPointScan(JitTvmCodeGenContext* ctx, JitColumnExprArray* expr_a
                     expr->_table->GetTableName().c_str());
                 return false;
             }
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             if (expr->_table != ctx->_table_info.m_table) {
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                     "Generate TVM JIT Code",
@@ -3854,10 +4154,20 @@ static bool buildPointScan(JitTvmCodeGenContext* ctx, JitColumnExprArray* expr_a
                     expr->_table->GetTableName().c_str());
                 return false;
             }
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            if (expr->_table != ctx->m_subQueryTableInfo[subQueryIndex].m_table) {
+                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                    "Generate TVM JIT Code",
+                    "Invalid expression table (expected sub-query table %s, got %s)",
+                    ctx->m_subQueryTableInfo[subQueryIndex].m_table->GetTableName().c_str(),
+                    expr->_table->GetTableName().c_str());
+                return false;
+            }
         }
 
         // prepare the sub-expression
-        if (!buildScanExpression(ctx, expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row)) {
+        if (!buildScanExpression(
+                ctx, expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row, subQueryIndex)) {
             return false;
         }
     }
@@ -3890,7 +4200,7 @@ static bool writeRowColumns(
 }
 
 static bool selectRowColumns(JitTvmCodeGenContext* ctx, Instruction* row, JitSelectExprArray* expr_array, int* max_arg,
-    JitRangeScanType range_scan_type)
+    JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     for (int i = 0; i < expr_array->_count; ++i) {
         JitSelectExpr* expr = &expr_array->_exprs[i];
@@ -3899,73 +4209,91 @@ static bool selectRowColumns(JitTvmCodeGenContext* ctx, Instruction* row, JitSel
             if (expr->_column_expr->_table != ctx->m_innerTable_info.m_table) {
                 continue;
             }
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             if (expr->_column_expr->_table != ctx->_table_info.m_table) {
                 continue;
             }
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            if (expr->_column_expr->_table != ctx->m_subQueryTableInfo[subQueryIndex].m_table) {
+                continue;
+            }
         }
-        AddSelectColumn(ctx, row, expr->_column_expr->_column_id, expr->_tuple_column_id, range_scan_type);
+        AddSelectColumn(
+            ctx, row, expr->_column_expr->_column_id, expr->_tuple_column_id, range_scan_type, subQueryIndex);
     }
 
     return true;
 }
 
-static bool buildClosedRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, Instruction* outer_row)
+static bool buildClosedRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, Instruction* outerRow, int subQueryIndex)
 {
     // a closed range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
-    bool result = buildPointScan(ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row);
+    bool result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, 0, subQueryIndex);
     if (result) {
-        AddCopyKey(ctx, range_scan_type);
+        AddCopyKey(ctx, rangeScanType, subQueryIndex);
 
         // now fill each key with the right pattern for the missing pkey columns in the where clause
-        bool ascending = (index_scan->_sort_order == JIT_QUERY_SORT_ASCENDING);
+        bool ascending = (indexScan->_sort_order == JIT_QUERY_SORT_ASCENDING);
 
         int* index_column_offsets = nullptr;
         const uint16_t* key_length = nullptr;
         int index_column_count = 0;
-        if (range_scan_type == JIT_RANGE_SCAN_INNER) {
+        if (rangeScanType == JIT_RANGE_SCAN_INNER) {
             index_column_offsets = ctx->m_innerTable_info.m_indexColumnOffsets;
             key_length = ctx->m_innerTable_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->m_innerTable_info.m_index->GetNumFields();
-        } else {
+        } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
             index_column_offsets = ctx->_table_info.m_indexColumnOffsets;
             key_length = ctx->_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_table_info.m_index->GetNumFields();
+        } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+            index_column_offsets = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets;
+            key_length = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields();
+            index_column_count = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetNumFields();
         }
 
-        int first_zero_column = index_scan->_column_count;
+        int first_zero_column = indexScan->_column_count;
         for (int i = first_zero_column; i < index_column_count; ++i) {
             int offset = index_column_offsets[i];
             int size = key_length[i];
             MOT_LOG_DEBUG(
                 "Filling begin/end iterator pattern for missing pkey fields at offset %d, size %d", offset, size);
-            AddFillKeyPattern(ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-            AddFillKeyPattern(ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
+            AddFillKeyPattern(
+                ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+            AddFillKeyPattern(
+                ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, rangeScanType, subQueryIndex);
         }
 
         AddAdjustKey(ctx,
             ascending ? 0x00 : 0xFF,
             JIT_RANGE_ITERATOR_START,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            rangeScanType,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
         AddAdjustKey(ctx,
             ascending ? 0xFF : 0x00,
             JIT_RANGE_ITERATOR_END,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            rangeScanType,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
     }
     return result;
 }
 
 static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
-    Instruction* outer_row)
+    Instruction* outer_row, int subQueryIndex)
 {
     // an open range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
     // we do not use the last search expression
-    bool result = buildPointScan(
-        ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row, index_scan->_search_exprs._count - 1);
+    bool result = buildPointScan(ctx,
+        &index_scan->_search_exprs,
+        max_arg,
+        range_scan_type,
+        outer_row,
+        index_scan->_search_exprs._count - 1,
+        subQueryIndex);
     if (result) {
-        AddCopyKey(ctx, range_scan_type);
+        AddCopyKey(ctx, range_scan_type, subQueryIndex);
 
         // now fill each key with the right pattern for the missing pkey columns in the where clause
         bool ascending = (index_scan->_sort_order == JIT_QUERY_SORT_ASCENDING);
@@ -3977,10 +4305,14 @@ static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* inde
             index_column_offsets = ctx->m_innerTable_info.m_indexColumnOffsets;
             key_length = ctx->m_innerTable_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->m_innerTable_info.m_index->GetNumFields();
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             index_column_offsets = ctx->_table_info.m_indexColumnOffsets;
             key_length = ctx->_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_table_info.m_index->GetNumFields();
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            index_column_offsets = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets;
+            key_length = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields();
+            index_column_count = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetNumFields();
         }
 
         // prepare offset and size for last column in search
@@ -3996,16 +4328,18 @@ static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* inde
                 (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
                 // this is an upper bound operator on an ascending semi-open scan so we fill the begin key with zeros,
                 // and the end key with the value
-                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-                buildScanExpression(ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_END, range_scan_type, outer_row);
+                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type, subQueryIndex);
+                buildScanExpression(
+                    ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_END, range_scan_type, outer_row, subQueryIndex);
                 *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
                 *end_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
                                                                                       : JIT_RANGE_BOUND_EXCLUDE;
             } else {
                 // this is a lower bound operator on an ascending semi-open scan so we fill the begin key with the
                 // value, and the end key with 0xFF
-                buildScanExpression(ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row);
-                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
+                buildScanExpression(
+                    ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row, subQueryIndex);
+                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type, subQueryIndex);
                 *begin_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
                                                                                            : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
@@ -4015,16 +4349,18 @@ static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* inde
                 (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
                 // this is an upper bound operator on a descending semi-open scan so we fill the begin key with value,
                 // and the end key with zeroes
-                buildScanExpression(ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row);
-                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
+                buildScanExpression(
+                    ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row, subQueryIndex);
+                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type, subQueryIndex);
                 *begin_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
                                                                                         : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
             } else {
                 // this is a lower bound operator on a descending semi-open scan so we fill the begin key with 0xFF, and
                 // the end key with the value
-                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-                buildScanExpression(ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_END, range_scan_type, outer_row);
+                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type, subQueryIndex);
+                buildScanExpression(
+                    ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_END, range_scan_type, outer_row, subQueryIndex);
                 *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
                 *end_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
                                                                                          : JIT_RANGE_BOUND_EXCLUDE;
@@ -4039,34 +4375,51 @@ static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* inde
             MOT_LOG_DEBUG("Filling begin/end iterator pattern for missing pkey fields at offset %d, size %d",
                 col_offset,
                 key_len);
-            AddFillKeyPattern(
-                ctx, ascending ? 0x00 : 0xFF, col_offset, key_len, JIT_RANGE_ITERATOR_START, range_scan_type);
-            AddFillKeyPattern(
-                ctx, ascending ? 0xFF : 0x00, col_offset, key_len, JIT_RANGE_ITERATOR_END, range_scan_type);
+            AddFillKeyPattern(ctx,
+                ascending ? 0x00 : 0xFF,
+                col_offset,
+                key_len,
+                JIT_RANGE_ITERATOR_START,
+                range_scan_type,
+                subQueryIndex);
+            AddFillKeyPattern(ctx,
+                ascending ? 0xFF : 0x00,
+                col_offset,
+                key_len,
+                JIT_RANGE_ITERATOR_END,
+                range_scan_type,
+                subQueryIndex);
         }
 
         AddAdjustKey(ctx,
             ascending ? 0x00 : 0xFF,
             JIT_RANGE_ITERATOR_START,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            range_scan_type,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
         AddAdjustKey(ctx,
             ascending ? 0xFF : 0x00,
             JIT_RANGE_ITERATOR_END,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            range_scan_type,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
     }
     return result;
 }
 
 static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
-    Instruction* outer_row)
+    Instruction* outer_row, int subQueryIndex)
 {
     // an open range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
     // we do not use the last two expressions
-    bool result = buildPointScan(
-        ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row, index_scan->_search_exprs._count - 2);
+    bool result = buildPointScan(ctx,
+        &index_scan->_search_exprs,
+        max_arg,
+        range_scan_type,
+        outer_row,
+        index_scan->_search_exprs._count - 2,
+        subQueryIndex);
     if (result) {
-        AddCopyKey(ctx, range_scan_type);
+        AddCopyKey(ctx, range_scan_type, subQueryIndex);
 
         // now fill each key with the right pattern for the missing pkey columns in the where clause
         bool ascending = (index_scan->_sort_order == JIT_QUERY_SORT_ASCENDING);
@@ -4078,10 +4431,14 @@ static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_sc
             index_column_offsets = ctx->m_innerTable_info.m_indexColumnOffsets;
             key_length = ctx->m_innerTable_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->m_innerTable_info.m_index->GetNumFields();
-        } else {
+        } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
             index_column_offsets = ctx->_table_info.m_indexColumnOffsets;
             key_length = ctx->_table_info.m_index->GetLengthKeyFields();
             index_column_count = ctx->_table_info.m_index->GetNumFields();
+        } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
+            index_column_offsets = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets;
+            key_length = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields();
+            index_column_count = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetNumFields();
         }
 
         // now we fill the last dimension (override extra work of point scan above)
@@ -4100,13 +4457,15 @@ static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_sc
                     max_arg,
                     JIT_RANGE_ITERATOR_START,
                     range_scan_type,
-                    outer_row);  // lower bound on begin iterator key
+                    outer_row,  // lower bound on begin iterator key
+                    subQueryIndex);
                 buildScanExpression(ctx,
                     before_last_expr,
                     max_arg,
                     JIT_RANGE_ITERATOR_END,
                     range_scan_type,
-                    outer_row);  // upper bound on end iterator key
+                    outer_row,  // upper bound on end iterator key
+                    subQueryIndex);
                 *begin_range_bound =
                     (last_dim_op == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound =
@@ -4120,13 +4479,15 @@ static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_sc
                     max_arg,
                     JIT_RANGE_ITERATOR_START,
                     range_scan_type,
-                    outer_row);  // lower bound on begin iterator key
+                    outer_row,  // lower bound on begin iterator key
+                    subQueryIndex);
                 buildScanExpression(ctx,
                     last_expr,
                     max_arg,
                     JIT_RANGE_ITERATOR_END,
                     range_scan_type,
-                    outer_row);  // upper bound on end iterator key
+                    outer_row,  // upper bound on end iterator key
+                    subQueryIndex);
                 *begin_range_bound =
                     (before_last_dim_op == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound =
@@ -4142,13 +4503,15 @@ static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_sc
                     max_arg,
                     JIT_RANGE_ITERATOR_START,
                     range_scan_type,
-                    outer_row);  // upper bound on begin iterator key
+                    outer_row,  // upper bound on begin iterator key
+                    subQueryIndex);
                 buildScanExpression(ctx,
                     last_expr,
                     max_arg,
                     JIT_RANGE_ITERATOR_END,
                     range_scan_type,
-                    outer_row);  // lower bound on end iterator key
+                    outer_row,  // lower bound on end iterator key
+                    subQueryIndex);
                 *begin_range_bound =
                     (before_last_dim_op == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound =
@@ -4162,13 +4525,15 @@ static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_sc
                     max_arg,
                     JIT_RANGE_ITERATOR_START,
                     range_scan_type,
-                    outer_row);  // upper bound on begin iterator key
+                    outer_row,  // upper bound on begin iterator key
+                    subQueryIndex);
                 buildScanExpression(ctx,
                     before_last_expr,
                     max_arg,
                     JIT_RANGE_ITERATOR_END,
                     range_scan_type,
-                    outer_row);  // lower bound on end iterator key
+                    outer_row,  // lower bound on end iterator key
+                    subQueryIndex);
                 *begin_range_bound =
                     (last_dim_op == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
                 *end_range_bound =
@@ -4183,48 +4548,52 @@ static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_sc
             int size = key_length[i];
             MOT_LOG_DEBUG(
                 "Filling begin/end iterator pattern for missing pkey fields at offset %d, size %d", offset, size);
-            AddFillKeyPattern(ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type);
-            AddFillKeyPattern(ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type);
+            AddFillKeyPattern(
+                ctx, ascending ? 0x00 : 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type, subQueryIndex);
+            AddFillKeyPattern(
+                ctx, ascending ? 0xFF : 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type, subQueryIndex);
         }
 
         AddAdjustKey(ctx,
             ascending ? 0x00 : 0xFF,
             JIT_RANGE_ITERATOR_START,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            range_scan_type,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
         AddAdjustKey(ctx,
             ascending ? 0xFF : 0x00,
             JIT_RANGE_ITERATOR_END,
-            range_scan_type);  // currently this is relevant only for secondary index searches
+            range_scan_type,  // currently this is relevant only for secondary index searches
+            subQueryIndex);
     }
     return result;
 }
 
-static bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
-    Instruction* outer_row)
+static bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
+    Instruction* outerRow, int subQueryIndex = -1)
 {
     bool result = false;
 
     // if this is a point scan we generate two identical keys for the iterators
-    if (index_scan->_scan_type == JIT_INDEX_SCAN_POINT) {
-        result = buildPointScan(ctx, &index_scan->_search_exprs, max_arg, range_scan_type, outer_row);
+    if (indexScan->_scan_type == JIT_INDEX_SCAN_POINT) {
+        result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, 0, subQueryIndex);
         if (result) {
-            AddCopyKey(ctx, range_scan_type);
-            *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
-            *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
+            AddCopyKey(ctx, rangeScanType, subQueryIndex);
+            *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
+            *endRangeBound = JIT_RANGE_BOUND_INCLUDE;
         }
-    } else if (index_scan->_scan_type == JIT_INDEX_SCAN_CLOSED) {
-        result = buildClosedRangeScan(ctx, index_scan, max_arg, range_scan_type, outer_row);
+    } else if (indexScan->_scan_type == JIT_INDEX_SCAN_CLOSED) {
+        result = buildClosedRangeScan(ctx, indexScan, maxArg, rangeScanType, outerRow, subQueryIndex);
         if (result) {
-            *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
-            *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
+            *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
+            *endRangeBound = JIT_RANGE_BOUND_INCLUDE;
         }
-    } else if (index_scan->_scan_type == JIT_INDEX_SCAN_SEMI_OPEN) {
+    } else if (indexScan->_scan_type == JIT_INDEX_SCAN_SEMI_OPEN) {
         result = buildSemiOpenRangeScan(
-            ctx, index_scan, max_arg, range_scan_type, begin_range_bound, end_range_bound, outer_row);
-    } else if (index_scan->_scan_type == JIT_INDEX_SCAN_OPEN) {
+            ctx, indexScan, maxArg, rangeScanType, beginRangeBound, endRangeBound, outerRow, subQueryIndex);
+    } else if (indexScan->_scan_type == JIT_INDEX_SCAN_OPEN) {
         result = buildOpenRangeScan(
-            ctx, index_scan, max_arg, range_scan_type, begin_range_bound, end_range_bound, outer_row);
+            ctx, indexScan, maxArg, rangeScanType, beginRangeBound, endRangeBound, outerRow, subQueryIndex);
     }
     return result;
 }
@@ -4367,22 +4736,25 @@ static Instruction* buildPrepareStateScanRow(JitTvmCodeGenContext* ctx, JitIndex
     return row;
 }
 
-static JitTvmRuntimeCursor buildRangeCursor(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, JitIndexScanDirection index_scan_direction, Instruction* outer_row)
+static JitTvmRuntimeCursor buildRangeCursor(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitIndexScanDirection indexScanDirection, Instruction* outerRow,
+    int subQueryIndex = -1)
 {
     JitTvmRuntimeCursor result = {nullptr, nullptr};
-    JitRangeBoundMode begin_range_bound = JIT_RANGE_BOUND_NONE;
-    JitRangeBoundMode end_range_bound = JIT_RANGE_BOUND_NONE;
-    if (!buildRangeScan(ctx, index_scan, max_arg, range_scan_type, &begin_range_bound, &end_range_bound, outer_row)) {
+    JitRangeBoundMode beginRangeBound = JIT_RANGE_BOUND_NONE;
+    JitRangeBoundMode endRangeBound = JIT_RANGE_BOUND_NONE;
+    if (!buildRangeScan(
+            ctx, indexScan, maxArg, rangeScanType, &beginRangeBound, &endRangeBound, outerRow, subQueryIndex)) {
         MOT_LOG_TRACE(
             "Failed to generate jitted code for aggregate range JOIN query: unsupported %s-loop WHERE clause type",
-            outer_row ? "inner" : "outer");
+            outerRow ? "inner" : "outer");
         return result;
     }
 
     // build range iterators
-    result.begin_itr = buildSearchIterator(ctx, index_scan_direction, begin_range_bound, range_scan_type);
-    result.end_itr = AddCreateEndIterator(ctx, index_scan_direction, end_range_bound, range_scan_type);  // forward scan
+    result.begin_itr = buildSearchIterator(ctx, indexScanDirection, beginRangeBound, rangeScanType, subQueryIndex);
+    result.end_itr =
+        AddCreateEndIterator(ctx, indexScanDirection, endRangeBound, rangeScanType, subQueryIndex);  // forward scan
 
     return result;
 }
@@ -5578,7 +5950,7 @@ static JitContext* JitPointJoinCodegen(const Query* query, const char* query_str
     // update number of rows processed
     buildIncrementRowsProcessed(ctx);
 
-    // execute *tp_processed = rows_processed
+    // generate code for setting output parameter tp_processed value to rows_processed
     AddSetTpProcessed(ctx);
 
     // signal to envelope executor scan ended (this is a point query)
@@ -5914,12 +6286,12 @@ static JitContext* JitAggregateRangeJoinCodegen(const Query* query, const char* 
     MOT::AccessType access_mode = query->hasForUpdate ? MOT::AccessType::RD_FOR_UPDATE : MOT::AccessType::RD;
 
     // begin the WHERE clause
-    int max_arg = 0;
+    int maxArg = 0;
 
     // build range iterators
     MOT_LOG_DEBUG("Generating outer loop cursor for range JOIN query");
     JitTvmRuntimeCursor outer_cursor =
-        buildRangeCursor(ctx, &plan->_outer_scan, &max_arg, JIT_RANGE_SCAN_MAIN, JIT_INDEX_SCAN_FORWARD, nullptr);
+        buildRangeCursor(ctx, &plan->_outer_scan, &maxArg, JIT_RANGE_SCAN_MAIN, JIT_INDEX_SCAN_FORWARD, nullptr);
     if (outer_cursor.begin_itr == nullptr) {
         MOT_LOG_TRACE(
             "Failed to generate jitted code for aggregate range JOIN query: unsupported outer-loop WHERE clause type");
@@ -5935,7 +6307,7 @@ static JitContext* JitAggregateRangeJoinCodegen(const Query* query, const char* 
         ctx, JIT_WHILE_POST_BLOCK(), access_mode, JIT_INDEX_SCAN_FORWARD, &outer_cursor, JIT_RANGE_SCAN_MAIN);
 
     // check for additional filters, if not try to fetch next row
-    if (!buildFilterRow(ctx, outer_row, &plan->_outer_scan._filters, &max_arg, JIT_WHILE_COND_BLOCK())) {
+    if (!buildFilterRow(ctx, outer_row, &plan->_outer_scan._filters, &maxArg, JIT_WHILE_COND_BLOCK())) {
         MOT_LOG_TRACE("Failed to generate jitted code for aggregate range JOIN query: unsupported outer-loop filter");
         DestroyCodeGenContext(ctx);
         return nullptr;
@@ -5949,7 +6321,7 @@ static JitContext* JitAggregateRangeJoinCodegen(const Query* query, const char* 
     // now build the inner loop
     MOT_LOG_DEBUG("Generating inner loop cursor for range JOIN query");
     JitTvmRuntimeCursor inner_cursor =
-        buildRangeCursor(ctx, &plan->_inner_scan, &max_arg, JIT_RANGE_SCAN_INNER, JIT_INDEX_SCAN_FORWARD, outer_row);
+        buildRangeCursor(ctx, &plan->_inner_scan, &maxArg, JIT_RANGE_SCAN_INNER, JIT_INDEX_SCAN_FORWARD, outer_row);
     if (inner_cursor.begin_itr == nullptr) {
         MOT_LOG_TRACE(
             "Failed to generate jitted code for aggregate range JOIN query: unsupported inner-loop WHERE clause type");
@@ -5964,7 +6336,7 @@ static JitContext* JitAggregateRangeJoinCodegen(const Query* query, const char* 
         ctx, JIT_WHILE_POST_BLOCK(), access_mode, JIT_INDEX_SCAN_FORWARD, &inner_cursor, JIT_RANGE_SCAN_INNER);
 
     // check for additional filters, if not try to fetch next row
-    if (!buildFilterRow(ctx, inner_row, &plan->_inner_scan._filters, &max_arg, JIT_WHILE_COND_BLOCK())) {
+    if (!buildFilterRow(ctx, inner_row, &plan->_inner_scan._filters, &maxArg, JIT_WHILE_COND_BLOCK())) {
         MOT_LOG_TRACE("Failed to generate jitted code for aggregate range JOIN query: unsupported inner-loop filter");
         DestroyCodeGenContext(ctx);
         return nullptr;
@@ -5985,8 +6357,8 @@ static JitContext* JitAggregateRangeJoinCodegen(const Query* query, const char* 
     if (plan->_limit_count > 0) {
         AddIncrementStateLimitCounter(ctx);
         JIT_IF_BEGIN(limit_count_reached)
-        Instruction* current_limit_count = AddGetStateLimitCounter(ctx);
-        JIT_IF_EVAL_CMP(current_limit_count, JIT_CONST(plan->_limit_count), JIT_ICMP_EQ);
+        Instruction* currentLimitCount = AddGetStateLimitCounter(ctx);
+        JIT_IF_EVAL_CMP(currentLimitCount, JIT_CONST(plan->_limit_count), JIT_ICMP_EQ);
         IssueDebugLog("Reached limit specified in limit clause, raising internal state scan end flag");
         AddDestroyCursor(ctx, &outer_cursor);
         AddDestroyCursor(ctx, &inner_cursor);
@@ -6021,7 +6393,7 @@ static JitContext* JitAggregateRangeJoinCodegen(const Query* query, const char* 
     builder.CreateRet(builder.CreateConst((uint64_t)MOT::RC_OK));
 
     // wrap up
-    JitContext* jit_context = FinalizeCodegen(ctx, max_arg, JIT_COMMAND_AGGREGATE_JOIN);
+    JitContext* jit_context = FinalizeCodegen(ctx, maxArg, JIT_COMMAND_AGGREGATE_JOIN);
 
     // cleanup
     DestroyCodeGenContext(ctx);
@@ -6064,6 +6436,263 @@ static JitContext* JitJoinCodegen(Query* query, const char* query_string, JitJoi
     }
 
     return jit_context;
+}
+
+static bool JitSubSelectCodegen(JitTvmCodeGenContext* ctx, JitCompoundPlan* plan, int subQueryIndex)
+{
+    MOT_LOG_DEBUG("Generating code for MOT sub-select at thread %p", (intptr_t)pthread_self());
+    IssueDebugLog("Executing simple SELECT sub-query");
+
+    // get the sub-query plan
+    JitSelectPlan* subPlan = (JitSelectPlan*)plan->_sub_query_plans[subQueryIndex];
+
+    // begin the WHERE clause
+    int maxArg = 0;
+    if (!buildPointScan(
+            ctx, &subPlan->_query._search_exprs, &maxArg, JIT_RANGE_SCAN_SUB_QUERY, nullptr, 0, subQueryIndex)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for SELECT sub-query: unsupported WHERE clause type");
+        return false;
+    }
+
+    // fetch row for read
+    Instruction* row = buildSearchRow(ctx, MOT::AccessType::RD, JIT_RANGE_SCAN_SUB_QUERY, subQueryIndex);
+
+    // check for additional filters
+    if (!buildFilterRow(ctx, row, &subPlan->_query._filters, &maxArg, nullptr)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for SELECT sub-query: unsupported filter");
+        return false;
+    }
+
+    // now begin selecting columns into result
+    IssueDebugLog("Selecting column into result");
+    if (!selectRowColumns(ctx, row, &subPlan->_select_exprs, &maxArg, JIT_RANGE_SCAN_SUB_QUERY, subQueryIndex)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for SELECT sub-query: failed to process target entry");
+        return false;
+    }
+
+    return true;
+}
+
+/** @brief Generates code for range SELECT sub-query with aggregator. */
+static bool JitSubAggregateRangeSelectCodegen(JitTvmCodeGenContext* ctx, JitCompoundPlan* plan, int subQueryIndex)
+{
+    MOT_LOG_DEBUG("Generating code for MOT aggregate range select sub-query at thread %p", (intptr_t)pthread_self());
+    IssueDebugLog("Executing aggregated range select sub-query");
+
+    // get the sub-query plan
+    JitRangeSelectPlan* subPlan = (JitRangeSelectPlan*)plan->_sub_query_plans[subQueryIndex];
+
+    // prepare for aggregation
+    prepareAggregate(ctx, &subPlan->_aggregate);
+    AddResetStateLimitCounter(ctx);
+
+    // pay attention: aggregated range scan is not stateful, since we scan all tuples in one call
+    MOT::AccessType accessMode = MOT::AccessType::RD;
+
+    // begin the WHERE clause
+    int maxArg = 0;
+    JitIndexScanDirection index_scan_direction = JIT_INDEX_SCAN_FORWARD;
+
+    // build range iterators
+    MOT_LOG_DEBUG("Generating range cursor for range SELECT sub-query");
+    JitTvmRuntimeCursor cursor = buildRangeCursor(
+        ctx, &subPlan->_index_scan, &maxArg, JIT_RANGE_SCAN_SUB_QUERY, index_scan_direction, nullptr, subQueryIndex);
+    if (cursor.begin_itr == nullptr) {
+        MOT_LOG_TRACE(
+            "Failed to generate jitted code for aggregate range SELECT sub-query: unsupported WHERE clause type");
+        return false;
+    }
+
+    JIT_WHILE_BEGIN(cursor_aggregate_loop)
+    Instruction* res = AddIsScanEnd(ctx, index_scan_direction, &cursor, JIT_RANGE_SCAN_SUB_QUERY, subQueryIndex);
+    JIT_WHILE_EVAL_NOT(res)
+    Instruction* row = buildGetRowFromIterator(ctx,
+        JIT_WHILE_POST_BLOCK(),
+        accessMode,
+        JIT_INDEX_SCAN_FORWARD,
+        &cursor,
+        JIT_RANGE_SCAN_SUB_QUERY,
+        subQueryIndex);
+
+    // check for additional filters, if not try to fetch next row
+    if (!buildFilterRow(ctx, row, &subPlan->_index_scan._filters, &maxArg, JIT_WHILE_COND_BLOCK())) {
+        MOT_LOG_TRACE("Failed to generate jitted code for aggregate range SELECT sub-query: unsupported filter");
+        return false;
+    }
+
+    // aggregate into tuple (we use tuple's resno column as aggregated sum instead of defining local variable)
+    // if row disqualified due to DISTINCT operator then go back to loop test block
+    buildAggregateRow(ctx, &subPlan->_aggregate, row, JIT_WHILE_COND_BLOCK());
+
+    // if a limit clause exists, then increment limit counter and check if reached limit
+    if (subPlan->_limit_count > 0) {
+        AddIncrementStateLimitCounter(ctx);
+        JIT_IF_BEGIN(limit_count_reached)
+        Instruction* current_limit_count = AddGetStateLimitCounter(ctx);
+        JIT_IF_EVAL_CMP(current_limit_count, JIT_CONST(subPlan->_limit_count), JIT_ICMP_EQ);
+        IssueDebugLog("Reached limit specified in limit clause, raising internal state scan end flag");
+        JIT_WHILE_BREAK()  // break from loop
+        JIT_IF_END()
+    }
+    JIT_WHILE_END()
+
+    // cleanup
+    IssueDebugLog("Reached end of aggregate range select sub-query loop");
+    AddDestroyCursor(ctx, &cursor);
+
+    // wrap up aggregation and write to result tuple (even though this is unfitting to outer query tuple...)
+    buildAggregateResult(ctx, &subPlan->_aggregate);
+
+    // coy aggregate result from outer query result tuple into sub-query result tuple
+    AddCopyAggregateToSubQueryResult(ctx, subQueryIndex);
+
+    return true;
+}
+
+static bool JitSubQueryCodeGen(JitTvmCodeGenContext* ctx, JitCompoundPlan* plan, int subQueryIndex)
+{
+    bool result = false;
+    JitPlan* subPlan = plan->_sub_query_plans[subQueryIndex];
+    if (subPlan->_plan_type == JIT_PLAN_POINT_QUERY) {
+        result = JitSubSelectCodegen(ctx, plan, subQueryIndex);
+    } else if (subPlan->_plan_type == JIT_PLAN_RANGE_SCAN) {
+        result = JitSubAggregateRangeSelectCodegen(ctx, plan, subQueryIndex);
+    } else {
+        MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG,
+            "Generate JIT Code",
+            "Cannot generate JIT code for sub-query plan: Invalid plan type %d",
+            (int)subPlan->_plan_type);
+    }
+    return result;
+}
+
+static JitContext* JitCompoundOuterSelectCodegen(
+    JitTvmCodeGenContext* ctx, Query* query, const char* query_string, JitSelectPlan* plan)
+{
+    // begin the WHERE clause
+    int max_arg = 0;
+    if (!buildPointScan(ctx, &plan->_query._search_exprs, &max_arg, JIT_RANGE_SCAN_MAIN, nullptr)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for COMPOUND SELECT query: unsupported WHERE clause type");
+        return nullptr;
+    }
+
+    // fetch row for read
+    MOT::AccessType access_mode = query->hasForUpdate ? MOT::AccessType::RD_FOR_UPDATE : MOT::AccessType::RD;
+    Instruction* row = buildSearchRow(ctx, access_mode, JIT_RANGE_SCAN_MAIN);
+
+    // check for additional filters
+    if (!buildFilterRow(ctx, row, &plan->_query._filters, &max_arg, nullptr)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for COMPOUND SELECT query: unsupported filter");
+        return nullptr;
+    }
+
+    // now begin selecting columns into result
+    IssueDebugLog("Selecting columns into result");
+    if (!selectRowColumns(ctx, row, &plan->_select_exprs, &max_arg, JIT_RANGE_SCAN_MAIN)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for COMPOUND SELECT query: failed to process target entry");
+        return nullptr;
+    }
+
+    AddExecStoreVirtualTuple(ctx);
+
+    // update number of rows processed
+    buildIncrementRowsProcessed(ctx);
+
+    // execute *tp_processed = rows_processed
+    AddSetTpProcessed(ctx);
+
+    // signal to envelope executor scan ended (this is a point query)
+    AddSetScanEnded(ctx, 1);
+
+    // return success from calling function
+    ctx->_builder->CreateRet(ctx->_builder->CreateConst((uint64_t)MOT::RC_OK));
+
+    // wrap up
+    return FinalizeCodegen(ctx, max_arg, JIT_COMMAND_COMPOUND_SELECT);
+}
+
+static JitContext* JitCompoundOuterCodegen(
+    JitTvmCodeGenContext* ctx, Query* query, const char* queryString, JitCompoundPlan* plan)
+{
+    JitContext* jitContext = nullptr;
+    if (plan->_command_type == JIT_COMMAND_SELECT) {
+        jitContext = JitCompoundOuterSelectCodegen(ctx, query, queryString, (JitSelectPlan*)plan->_outer_query_plan);
+    }
+    // currently other outer query types are not supported
+    return jitContext;
+}
+
+static JitContext* JitCompoundCodegen(Query* query, const char* query_string, JitCompoundPlan* plan)
+{
+    // a compound query plan contains one or more sub-queries that evaluate to a datum that next needs to be fed as a
+    // parameter to the outer query. We are currently imposing the following limitations:
+    // 1. one sub-query that can only be a MAX aggregate
+    // 2. outer query must be a simple point select query.
+    //
+    // our main strategy is as follows (based on the fact that each sub-query evaluates into a single value)
+    // 1. for each sub-query:
+    //  1.1 execute sub-query and put datum result in sub-query result slot, according to sub-query index
+    // 2. execute the outer query as a simple query
+    // 3. whenever we encounter a sub-link expression, it is evaluated as an expression that reads the pre-computed
+    //    sub-query result in step 1.1, according to sub-query index
+    MOT_LOG_DEBUG("Generating code for MOT compound select at thread %p", (intptr_t)pthread_self());
+
+    // prepare code generation context
+    Builder builder;
+    JitTvmCodeGenContext cg_ctx = {0};
+    MOT::Table* table = plan->_outer_query_plan->_query._table;
+    if (!InitCompoundCodeGenContext(&cg_ctx, &builder, table, table->GetPrimaryIndex(), plan)) {
+        return nullptr;
+    }
+    JitTvmCodeGenContext* ctx = &cg_ctx;
+
+    // prepare the jitted function (declare, get arguments into context and define locals)
+    CreateJittedFunction(ctx, "MotJittedCompoundSelect", query_string);
+    IssueDebugLog("Starting execution of jitted COMPOUND SELECT");
+
+    // initialize rows_processed local variable
+    buildResetRowsProcessed(ctx);
+
+    // generate code for sub-query execution
+    uint32_t subQueryCount = 0;
+    for (int i = 0; i < plan->_outer_query_plan->_query._search_exprs._count; ++i) {
+        if (plan->_outer_query_plan->_query._search_exprs._exprs[i]._expr->_expr_type == JIT_EXPR_TYPE_SUBLINK) {
+            JitSubLinkExpr* subLinkExpr =
+                (JitSubLinkExpr*)plan->_outer_query_plan->_query._search_exprs._exprs[i]._expr;
+            if (!JitSubQueryCodeGen(ctx, plan, subLinkExpr->_sub_query_index)) {
+                MOT_LOG_TRACE(
+                    "Failed to generate jitted code for COMPOUND SELECT query: Failed to generate code for sub-query");
+                DestroyCodeGenContext(ctx);
+                return nullptr;
+            }
+            ++subQueryCount;
+        }
+    }
+
+    // clear tuple early, so that we will have a null datum in case outer query finds nothing
+    AddExecClearTuple(ctx);
+
+    // generate code for the outer query
+    JitContext* jitContext = JitCompoundOuterCodegen(ctx, query, query_string, plan);
+    if (jitContext == nullptr) {
+        MOT_LOG_TRACE("Failed to generate code for outer query in compound select");
+        DestroyCodeGenContext(ctx);
+        return nullptr;
+    }
+
+    // prepare sub-query data in resulting JIT context (for later execution)
+    MOT_ASSERT(subQueryCount > 0);
+    MOT_ASSERT(subQueryCount == plan->_sub_query_count);
+    if ((subQueryCount > 0) && !PrepareSubQueryData(jitContext, plan)) {
+        MOT_LOG_TRACE("Failed to prepare tuple table slot array for sub-queries in JIT context object");
+        DestroyJitContext(jitContext);
+        jitContext = nullptr;
+    }
+
+    // cleanup
+    DestroyCodeGenContext(ctx);
+
+    return jitContext;
 }
 
 static JitContext* JitRangeScanCodegen(const Query* query, const char* query_string, JitRangeScanPlan* plan)
@@ -6144,6 +6773,10 @@ extern JitContext* JitCodegenTvmQuery(Query* query, const char* query_string, Ji
 
         case JIT_PLAN_JOIN:
             jit_context = JitJoinCodegen(query, query_string, (JitJoinPlan*)plan);
+            break;
+
+        case JIT_PLAN_COMPOUND:
+            jit_context = JitCompoundCodegen(query, query_string, (JitCompoundPlan*)plan);
             break;
 
         default:

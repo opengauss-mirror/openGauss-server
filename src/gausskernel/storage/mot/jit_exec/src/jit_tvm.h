@@ -147,38 +147,38 @@ public:
 
     /**
      * @brief Executes the instruction.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return The execution result, or zero if instruction does not return a value. The returned
      * value is saved in the register associated with the instruction.
      */
-    virtual uint64_t exec(ExecContext* exec_context);
+    virtual uint64_t Exec(ExecContext* execContext);
 
     /** @brief Retrieves the instruction type. */
-    inline Type getType() const
+    inline Type GetType() const
     {
         return _type;
     }
 
     /** @brief Dumps the instruction into the standard error stream. */
-    virtual void dump();
+    virtual void Dump();
 
     /**
      * @brief Sets the index of the register with which the instruction is associated.
-     * @param register_ref
+     * @param registerRef
      */
-    inline void setRegisterRef(int register_ref)
+    inline void SetRegisterRef(int registerRef)
     {
-        _register_ref = register_ref;
+        _register_ref = registerRef;
     }
 
     /** @brief Retrieves the index of the register with which the instruction is associated. */
-    inline int getRegisterRef() const
+    inline int GetRegisterRef() const
     {
         return _register_ref;
     }
 
     /** @brief Retrieves the number of sub-instructions referred to by this instruction. */
-    inline int getSubInstructionCount() const
+    inline int GetSubInstructionCount() const
     {
         return _sub_instructions.size();
     }
@@ -188,7 +188,7 @@ public:
      * @param index The sub-instruction index.
      * @return The sub-instruction.
      */
-    inline Instruction* getSubInstructionAt(int index)
+    inline Instruction* GetSubInstructionAt(int index)
     {
         MOT_ASSERT(index < (int)_sub_instructions.size());
         return _sub_instructions[index];
@@ -204,17 +204,17 @@ protected:
 
     /**
      * @brief Implements the execution of the instruction. Must be overridden by sub-classes.
-     * @param exec_context
+     * @param execContext
      * @return
      */
-    virtual uint64_t execImpl(ExecContext* exec_context)
+    virtual uint64_t ExecImpl(ExecContext* execContext)
     {
         MOT_ASSERT(false);
         return 0;
     }
 
     /** @brief Implements dumping the instruction to standard error stream. */
-    virtual void dumpImpl()
+    virtual void DumpImpl()
     {}
 
     /**
@@ -223,7 +223,7 @@ protected:
      * @note Every derived class who refers to sub-instruction must update the @ref Instruction
      * base-class, otherwise function verification might fail, or result in unexpected runtime behavior.
      */
-    inline void addSubInstruction(Instruction* sub_instruction)
+    inline void AddSubInstruction(Instruction* sub_instruction)
     {
         _sub_instructions.push_back(sub_instruction);
     }
@@ -380,7 +380,7 @@ public:
      */
     explicit RegisterRefInstruction(int register_ref) : Instruction(Instruction::RegisterRef)
     {
-        setRegisterRef(register_ref);
+        SetRegisterRef(register_ref);
     }
 
     /** @brief Destructor. */
@@ -389,15 +389,15 @@ public:
 
     /**
      * @brief Executes the instruction by the retrieving the cached result from the appropriate register.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return The execution result.
      * @note The returned value is NOT saved in any register (as it is by itself being retrieved from
      * a register).
      */
-    uint64_t exec(ExecContext* exec_context) override;
+    uint64_t Exec(ExecContext* execContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dump() override;
+    void Dump() override;
 };
 
 /*---------------------------------  ReturnInstruction --------------------------------*/
@@ -411,7 +411,7 @@ public:
     explicit ReturnInstruction(Instruction* return_value)
         : Instruction(Instruction::Return), _return_value(return_value)
     {
-        addSubInstruction(return_value);
+        AddSubInstruction(return_value);
     }
 
     /** @brief Destructor. */
@@ -423,16 +423,16 @@ public:
     /**
      * @brief Executes the instruction by evaluating the sub-instruction and returning the resulting
      * value.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return The execution result.
      * @note The returned value is saved in NOT saved in any register, since it is executed only once
      * (although the underlying sub-instruction could be very well a @ref RegisterRefInstruction
      * instruction).
      */
-    uint64_t exec(ExecContext* exec_context) override;
+    uint64_t Exec(ExecContext* execContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dump() override;
+    void Dump() override;
 
 private:
     /** @brief The sub-instruction that should be evaluated as the return value. */
@@ -452,7 +452,7 @@ public:
      */
     ReturnNextInstruction(Instruction* return_value) : Instruction(Instruction::ReturnNext), _return_value(return_value)
     {
-        addSubInstruction(return_value);
+        AddSubInstruction(return_value);
     }
 
     /** @brief Destructor. */
@@ -464,16 +464,16 @@ public:
     /**
      * @brief Executes the instruction by evaluating the sub-instruction and returning the resulting
      * value.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return The execution result.
      * @note The returned value is saved in NOT saved in any register, since it is executed only once
      * (although the underlying sub-instruction could be very well a @ref RegisterRefInstruction
      * instruction).
      */
-    uint64_t exec(ExecContext* exec_context) override;
+    uint64_t Exec(ExecContext* execContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dump() override;
+    void Dump() override;
 
 private:
     /** @brief The sub-instruction that should be evaluated as the return value. */
@@ -501,14 +501,14 @@ public:
 
     /**
      * @brief Executes the instruction by returning the constant value.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return The execution result.
      * @note The returned value is NOT saved in any register.
      */
-    uint64_t exec(ExecContext* exec_context) override;
+    uint64_t Exec(ExecContext* exec_cContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dump() override;
+    void Dump() override;
 
 private:
     /** @var The constant value. */
@@ -536,14 +536,14 @@ public:
 protected:
     /**
      * @brief Implements the execution of the instruction by evaluating the sub-expression.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return The execution result.
      * @note The returned value is saved in a register.
      */
-    uint64_t execImpl(ExecContext* exec_context) override;
+    uint64_t ExecImpl(ExecContext* execContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dumpImpl() override;
+    void DumpImpl() override;
 
 private:
     /** @var The sub-expression. */
@@ -572,15 +572,15 @@ protected:
     /**
      * @brief Implements the execution of the instruction by retrieving the execution result of the
      * recently evaluated expression from the execution context.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return The execution result.
      * @note The returned value is saved in a register, since a subsequent expression evaluation will
      * override the recent expression evaluation execution result in the execution context.
      */
-    uint64_t execImpl(ExecContext* exec_context) override;
+    uint64_t ExecImpl(ExecContext* execContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dumpImpl() override;
+    void DumpImpl() override;
 };
 
 /*---------------------------------  DebugLogInstruction --------------------------------*/
@@ -605,13 +605,13 @@ public:
 
     /**
      * @brief Executes the instruction by printing the debug message.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return Not used.
      */
-    uint64_t exec(ExecContext* exec_context) override;
+    uint64_t Exec(ExecContext* execContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dump() override;
+    void Dump() override;
 
 private:
     /** @brief The issuing function. */
@@ -887,13 +887,13 @@ public:
 protected:
     /**
      * @brief Implements the execution of the instruction.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return Non-zero value if the comparison resulted in true, otherwise zero.
      */
-    uint64_t execImpl(ExecContext* exec_context) override;
+    uint64_t ExecImpl(ExecContext* execContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dumpImpl() override;
+    void DumpImpl() override;
 
 private:
     /** @var The left-hand side operand. */
@@ -960,13 +960,13 @@ public:
 
     /**
      * @brief Executes the instruction. Evaluates the condition and returns the next block to execute.
-     * @param exec_context The execution context.
+     * @param execContext The execution context.
      * @return The next block to execute.
      */
-    uint64_t exec(ExecContext* exec_context) override;
+    uint64_t Exec(ExecContext* execContext) override;
 
     /** @brief Dumps the instruction to the standard error stream. */
-    void dump() override;
+    void Dump() override;
 
 private:
     /** @var The condition to test. */
@@ -1021,10 +1021,10 @@ public:
      * @param exec_context The execution context.
      * @return The next block to execute.
      */
-    uint64_t exec(ExecContext* exec_context) override;
+    uint64_t Exec(ExecContext* exec_context) override;
 
     /** @brief Dumps the block to the standard error stream. */
-    void dump() override;
+    void Dump() override;
 
 private:
     /** @var The next block to execute. */
@@ -1170,13 +1170,13 @@ public:
 
     /**
      * @brief Creates a function. This is the first step to do.
-     * @param function_name The name of the function.
-     * @param query_string The string of the query/function it executes.
+     * @param functionName The name of the function.
+     * @param queryString The string of the query/function it executes.
      * @return The resulting object or NULL if allocation failed.
      * @note The function is initialized with an initial empty entry blocks. New instructions will be
      * added to the entry block until a new block is started.
      */
-    Function* createFunction(const char* function_name, const char* query_string);
+    Function* createFunction(const char* functionName, const char* queryString);
 
     /**
      * @brief Adds an instruction to the current block.
@@ -1214,13 +1214,13 @@ public:
 
     /**
      * @brief Creates an integer comparison instruction.
-     * @param lhs_instruction The left-hand side operand.
-     * @param rhs_instruction The right-hand side operand.
-     * @param cmp_op The comparison operator.
+     * @param lhsInstruction The left-hand side operand.
+     * @param rhsInstruction The right-hand side operand.
+     * @param cmpOp The comparison operator.
      * @return The resulting instruction. This is a @ref RegisterRefInstruction to the cached result
      * of the original instruction.
      */
-    Instruction* CreateICmp(Instruction* lhs_instruction, Instruction* rhs_instruction, JitExec::JitICmpOp cmp_op);
+    Instruction* CreateICmp(Instruction* lhsInstruction, Instruction* rhsInstruction, JitExec::JitICmpOp cmpOp);
 
     /**
      * @brief Creates an integer EQUALS comparison instruction.

@@ -28,6 +28,7 @@
 
 #include "jit_source_pool.h"
 #include "utilities.h"
+#include "mm_global_api.h"
 
 namespace JitExec {
 DECLARE_LOGGER(JitSourcePool, JitExec)
@@ -57,15 +58,14 @@ struct __attribute__((packed)) JitSourcePool {
 };
 
 // Globals
-static JitSourcePool g_jitSourcePool __attribute__((aligned(64)));
+static JitSourcePool g_jitSourcePool __attribute__((aligned(64))) = {0};
 
 // forward declarations
 static void FreeJitSourceArray(uint32_t count);
 
 extern bool InitJitSourcePool(uint32_t poolSize)
 {
-    bool result = false;
-
+    MOT_ASSERT(g_jitSourcePool.m_sourcePool == nullptr);
     errno_t erc = memset_s((void*)&g_jitSourcePool, sizeof(JitSourcePool), 0, sizeof(JitSourcePool));
     securec_check(erc, "\0", "\0");
     int res = pthread_spin_init(&g_jitSourcePool.m_lock, 0);
@@ -78,12 +78,12 @@ extern bool InitJitSourcePool(uint32_t poolSize)
     }
 
     size_t allocSize = sizeof(JitSource) * poolSize;
-    res = posix_memalign((void**)&g_jitSourcePool.m_sourcePool, 64, allocSize);
-    if (res != 0) {
-        MOT_REPORT_SYSTEM_ERROR_CODE(res,
-            posix_memalign,
+    g_jitSourcePool.m_sourcePool = (JitSource*)MOT::MemGlobalAllocAligned(allocSize, L1_CACHE_LINE);
+    if (g_jitSourcePool.m_sourcePool == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
             "JIT Source Pool Initialization",
-            "Failed to allocate 64-byte aligned %u bytes for global JIT Source pool",
+            "Failed to allocate %u JIT source objects (64-byte aligned %u bytes) for global JIT source pool",
+            poolSize,
             allocSize);
         pthread_spin_destroy(&g_jitSourcePool.m_lock);
         return false;
@@ -91,43 +91,38 @@ extern bool InitJitSourcePool(uint32_t poolSize)
     erc = memset_s(g_jitSourcePool.m_sourcePool, allocSize, 0, allocSize);
     securec_check(erc, "\0", "\0");
 
-    if (g_jitSourcePool.m_sourcePool == NULL) {
-        pthread_spin_destroy(&g_jitSourcePool.m_lock);
-        MOT_REPORT_ERROR(
-            MOT_ERROR_OOM, "JIT Source Pool Initialization", "Failed to allocate %u JIT source objects", poolSize);
-    } else {
-        // we need now to construct each object
-        for (uint32_t i = 0; i < poolSize; ++i) {
-            JitSource* jitSource = &g_jitSourcePool.m_sourcePool[i];
-            if (!InitJitSource(jitSource, "")) {
-                MOT_REPORT_ERROR(
-                    MOT_ERROR_INTERNAL, "JIT Source Pool Initialization", "Failed to initialize JIT source %u", i);
-                // cleanup
-                FreeJitSourceArray(i);
-                pthread_spin_destroy(&g_jitSourcePool.m_lock);
-                return false;
-            }
+    // we need now to construct each object
+    for (uint32_t i = 0; i < poolSize; ++i) {
+        JitSource* jitSource = &g_jitSourcePool.m_sourcePool[i];
+        if (!InitJitSource(jitSource, "")) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INTERNAL, "JIT Source Pool Initialization", "Failed to initialize JIT source %u", i);
+            // cleanup
+            FreeJitSourceArray(i);
+            pthread_spin_destroy(&g_jitSourcePool.m_lock);
+            return false;
         }
-
-        // fill the free list
-        result = true;
-        g_jitSourcePool.m_poolSize = poolSize;
-        for (uint32_t i = 0; i < g_jitSourcePool.m_poolSize; ++i) {
-            JitSource* jitSource = &g_jitSourcePool.m_sourcePool[i];
-            jitSource->_next = g_jitSourcePool.m_freeSourceList;
-            g_jitSourcePool.m_freeSourceList = jitSource;
-        }
-        g_jitSourcePool.m_freeSourceCount = g_jitSourcePool.m_poolSize;
     }
-    return result;
+
+    // fill the free list
+    g_jitSourcePool.m_poolSize = poolSize;
+    for (uint32_t i = 0; i < g_jitSourcePool.m_poolSize; ++i) {
+        JitSource* jitSource = &g_jitSourcePool.m_sourcePool[i];
+        jitSource->_next = g_jitSourcePool.m_freeSourceList;
+        g_jitSourcePool.m_freeSourceList = jitSource;
+    }
+    g_jitSourcePool.m_freeSourceCount = g_jitSourcePool.m_poolSize;
+
+    return true;
 }
 
 extern void DestroyJitSourcePool()
 {
-    if (g_jitSourcePool.m_sourcePool == NULL)
+    if (g_jitSourcePool.m_sourcePool == nullptr) {
         return;
+    }
 
-    FreeJitSourceArray(0);
+    FreeJitSourceArray(g_jitSourcePool.m_poolSize);
 
     int res = pthread_spin_destroy(&g_jitSourcePool.m_lock);
     if (res != 0) {
@@ -137,9 +132,9 @@ extern void DestroyJitSourcePool()
             "Failed to destroy spin lock for global JIT source pool");
     }
 
-    g_jitSourcePool.m_sourcePool = NULL;
+    g_jitSourcePool.m_sourcePool = nullptr;
     g_jitSourcePool.m_poolSize = 0;
-    g_jitSourcePool.m_freeSourceList = NULL;
+    g_jitSourcePool.m_freeSourceList = nullptr;
     g_jitSourcePool.m_freeSourceCount = 0;
 }
 
@@ -209,13 +204,10 @@ extern void FreePooledJitSource(JitSource* jitSource)
 
 static void FreeJitSourceArray(uint32_t count)
 {
-    if (count == 0) {
-        count = g_jitSourcePool.m_poolSize;
-    }
     for (uint32_t i = 0; i < count; ++i) {
         DestroyJitSource(&g_jitSourcePool.m_sourcePool[i]);
     }
-    free(g_jitSourcePool.m_sourcePool);
-    g_jitSourcePool.m_sourcePool = NULL;
+    MOT::MemGlobalFree(g_jitSourcePool.m_sourcePool);
+    g_jitSourcePool.m_sourcePool = nullptr;
 }
 }  // namespace JitExec

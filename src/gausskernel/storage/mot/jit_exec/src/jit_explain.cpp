@@ -32,10 +32,14 @@ namespace JitExec {
 DECLARE_LOGGER(JitExplain, JitExec)
 
 // Forward declarations
-static void ExplainExpr(Query* query, Expr* expr);
+static void ExplainExpr(Query* query, JitPlan* plan, JitExpr* jitExpr);
+static void ExplainPointQueryPlan(Query* query, JitPointQueryPlan* plan, bool isSubQuery = false);
+static void ExplainRangeSelectPlan(Query* query, JitRangeSelectPlan* plan, bool isSubQuery = false);
 
-static void ExplainConstExpr(Const* constExpr)
+static void ExplainConstExpr(JitConstExpr* expr)
 {
+    MOT_ASSERT(expr->_source_expr->type == T_Const);
+    Const* constExpr = (Const*)expr->_source_expr;
     switch (constExpr->consttype) {
         case BOOLOID:
             MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[bool] %u", (unsigned)DatumGetBool(constExpr->constvalue));
@@ -131,54 +135,72 @@ static void ExplainRealColumnName(const Query* query, int tableRefId, int column
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "UnknownColumn");
 }
 
-static void ExplainVarExpr(Query* query, const Var* varExpr)
+static void ExplainVarExpr(Query* query, JitVarExpr* expr)
 {
-    int columnId = varExpr->varattno;
-    int tableRefId = varExpr->varno;
-    ExplainRealColumnName(query, tableRefId, columnId);
-}
-
-static void ExplainParamExpr(const Param* paramExpr)
-{
-    MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "$%d", paramExpr->paramid);
-}
-
-static void ExplainRelabelExpr(Query* query, RelabelType* relabelType)
-{
-    Expr* expr = (Expr*)relabelType->arg;
-    if (expr->type == T_Param) {
-        ExplainParamExpr((Param*)expr);
-    } else if (expr->type == T_Var) {
-        ExplainVarExpr(query, (Var*)expr);
+    MOT_ASSERT((expr->_source_expr->type == T_Var) || (expr->_source_expr->type == T_RelabelType));
+    Var* varExpr = nullptr;
+    if (expr->_source_expr->type == T_Var) {
+        varExpr = (Var*)expr->_source_expr;
+    } else if (expr->_source_expr->type == T_RelabelType) {
+        RelabelType* relabelType = (RelabelType*)expr->_source_expr;
+        Expr* subExpr = relabelType->arg;
+        if (subExpr->type == T_Var) {
+            varExpr = (Var*)subExpr;
+        }
+    }
+    if (varExpr != nullptr) {
+        int columnId = varExpr->varattno;
+        int tableRefId = varExpr->varno;
+        ExplainRealColumnName(query, tableRefId, columnId);
     } else {
-        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "RelabelExpr");
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[var]");
+    }
+}
+
+static void ExplainParamExpr(JitParamExpr* expr)
+{
+    MOT_ASSERT((expr->_source_expr->type == T_Param) || (expr->_source_expr->type == T_RelabelType));
+    Param* paramExpr = nullptr;
+    if (expr->_source_expr->type == T_Param) {
+        paramExpr = (Param*)expr->_source_expr;
+    } else if (expr->_source_expr->type == T_RelabelType) {
+        RelabelType* relabelType = (RelabelType*)expr->_source_expr;
+        Expr* subExpr = relabelType->arg;
+        if (subExpr->type == T_Param) {
+            paramExpr = (Param*)subExpr;
+        }
+    }
+    if (paramExpr != nullptr) {
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "$%d", paramExpr->paramid);
+    } else {
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[param]");
     }
 }
 
 #define APPLY_UNARY_OPERATOR(funcid, name)                  \
     case funcid:                                            \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, #name "("); \
-        ExplainExpr(query, args[0]);                        \
+        ExplainExpr(query, plan, expr->_args[0]);           \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");       \
         break;
 
 #define APPLY_BINARY_OPERATOR(funcid, name)                 \
     case funcid:                                            \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, #name "("); \
-        ExplainExpr(query, args[0]);                        \
+        ExplainExpr(query, plan, expr->_args[0]);           \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ", ");      \
-        ExplainExpr(query, args[1]);                        \
+        ExplainExpr(query, plan, expr->_args[1]);           \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");       \
         break;
 
 #define APPLY_TERNARY_OPERATOR(funcid, name)                \
     case funcid:                                            \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, #name "("); \
-        ExplainExpr(query, args[0]);                        \
+        ExplainExpr(query, plan, expr->_args[0]);           \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ", ");      \
-        ExplainExpr(query, args[1]);                        \
+        ExplainExpr(query, plan, expr->_args[1]);           \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ", ");      \
-        ExplainExpr(query, args[2]);                        \
+        ExplainExpr(query, plan, expr->_args[2]);           \
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");       \
         break;
 
@@ -186,85 +208,89 @@ static void ExplainRelabelExpr(Query* query, RelabelType* relabelType)
 #define APPLY_BINARY_CAST_OPERATOR(funcid, name) APPLY_BINARY_OPERATOR(funcid, name)
 #define APPLY_TERNARY_CAST_OPERATOR(funcid, name) APPLY_TERNARY_OPERATOR(funcid, name)
 
-static void ExplainOpExpr(Query* query, const OpExpr* opExpr)
+static void ExplainOpExpr(Query* query, JitPlan* plan, JitOpExpr* expr)
 {
-    Expr* args[3] = {nullptr, nullptr, nullptr};
-    int argNum = 0;
-
-    // process operator arguments (each one is an expression by itself)
-    ListCell* lc = nullptr;
-
-    foreach (lc, opExpr->args) {
-        args[argNum] = (Expr*)lfirst(lc);
-        if (++argNum == 3) {
-            break;
-        }
-    }
-
     // explain the operator
-    switch (opExpr->opfuncid) {
+    switch (expr->_op_func_id) {
         APPLY_OPERATORS()
 
         default:
-            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[op_%u]", opExpr->opfuncid);
+            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[op_%u]", expr->_op_func_id);
             break;
     }
 }
 
-static void ExplainFuncExpr(Query* query, const FuncExpr* funcExpr)
+static void ExplainFuncExpr(Query* query, JitPlan* plan, JitFuncExpr* expr)
 {
-    Expr* args[3] = {nullptr, nullptr, nullptr};
-    int argNum = 0;
-
-    // process operator arguments (each one is an expression by itself)
-    ListCell* lc = nullptr;
-
-    foreach (lc, funcExpr->args) {
-        args[argNum] = (Expr*)lfirst(lc);
-        if (++argNum == 3) {
-            break;
-        }
-    }
-
     // explain the function
-    switch (funcExpr->funcid) {
+    switch (expr->_func_id) {
         APPLY_OPERATORS()
 
         default:
-            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[func_%d]", funcExpr->funcid);
+            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[func_%d]", expr->_func_id);
             break;
     }
 }
 
-static void ExplainExpr(Query* query, Expr* expr)
+#undef APPLY_UNARY_OPERATOR
+#undef APPLY_BINARY_OPERATOR
+#undef APPLY_TERNARY_OPERATOR
+#undef APPLY_UNARY_CAST_OPERATOR
+#undef APPLY_BINARY_CAST_OPERATOR
+#undef APPLY_TERNARY_CAST_OPERATOR
+
+static void ExplainSubLinkExpr(Query* query, JitPlan* plan, JitSubLinkExpr* subLinkExpr)
 {
-    switch (expr->type) {
-        case T_Const:
-            ExplainConstExpr((Const*)expr);
+    // currently we support only one sub-query (so we don't use sub-query plan index)
+    if ((plan != nullptr) && (plan->_plan_type == JIT_PLAN_COMPOUND)) {
+        JitCompoundPlan* compoundPlan = (JitCompoundPlan*)plan;
+        SubLink* subLink = (SubLink*)subLinkExpr->_source_expr;
+        Query* subQuery = (Query*)subLink->subselect;
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[");
+        JitPlan* subQueryPlan = compoundPlan->_sub_query_plans[subLinkExpr->_sub_query_index];
+        if (subQueryPlan->_plan_type == JIT_PLAN_POINT_QUERY) {
+            ExplainPointQueryPlan(subQuery, (JitPointQueryPlan*)subQueryPlan, true);
+        } else if (subQueryPlan->_plan_type == JIT_PLAN_RANGE_SCAN) {
+            ExplainRangeSelectPlan(subQuery, (JitRangeSelectPlan*)subQueryPlan, true);
+        } else {
+            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "sub-query");
+        }
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "]");
+    } else {
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[sub-query]");
+    }
+}
+
+static void ExplainExpr(Query* query, JitPlan* plan, JitExpr* expr)
+{
+    switch (expr->_expr_type) {
+        case JIT_EXPR_TYPE_CONST:
+            ExplainConstExpr((JitConstExpr*)expr);
             break;
 
-        case T_Var:
-            ExplainVarExpr(query, (Var*)expr);
+        case JIT_EXPR_TYPE_VAR:
+            ExplainVarExpr(query, (JitVarExpr*)expr);
             break;
 
-        case T_Param:
-            ExplainParamExpr((Param*)expr);
+        case JIT_EXPR_TYPE_PARAM:
+            ExplainParamExpr((JitParamExpr*)expr);
             break;
 
-        case T_OpExpr:
-            ExplainOpExpr(query, (OpExpr*)expr);
+        case JIT_EXPR_TYPE_OP:
+            ExplainOpExpr(query, plan, (JitOpExpr*)expr);
             break;
 
-        case T_FuncExpr:
-            ExplainFuncExpr(query, (FuncExpr*)expr);
+        case JIT_EXPR_TYPE_FUNC:
+            ExplainFuncExpr(query, plan, (JitFuncExpr*)expr);
             break;
 
-        case T_RelabelType:
-            ExplainRelabelExpr(query, (RelabelType*)expr);
+        case JIT_EXPR_TYPE_SUBLINK:
+            ExplainSubLinkExpr(query, plan, (JitSubLinkExpr*)expr);
             break;
 
         default:
             MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "[expr]");
+            break;
     }
 }
 
@@ -286,23 +312,31 @@ static const char* JitWhereOperatorClassToString(JitWhereOperatorClass opClass)
     }
 }
 
-static void ExplainFilterArray(Query* query, int indent, JitFilterArray* filterArray)
+static void ExplainFilterArray(
+    Query* query, JitPlan* plan, int indent, JitFilterArray* filterArray, bool isSubQuery = false)
 {
-    MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sFILTER ON (", indent, "");
+    if (!isSubQuery) {
+        MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sFILTER ON (", indent, "");
+    } else {
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " FILTER ON (");
+    }
     for (int i = 0; i < filterArray->_filter_count; ++i) {
-        ExplainExpr(query, filterArray->_scan_filters[i]._lhs_operand->_source_expr);
+        ExplainExpr(query, plan, filterArray->_scan_filters[i]._lhs_operand);
         JitWhereOperatorClass opClass = ClassifyWhereOperator(filterArray->_scan_filters[i]._filter_op);
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " %s ", JitWhereOperatorClassToString(opClass));
-        ExplainExpr(query, filterArray->_scan_filters[i]._rhs_operand->_source_expr);
+        ExplainExpr(query, plan, filterArray->_scan_filters[i]._rhs_operand);
         if (i < (filterArray->_filter_count - 1)) {
             MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
         }
     }
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");
-    MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    if (!isSubQuery) {
+        MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    }
 }
 
-static void ExplainExprArray(Query* query, JitColumnExprArray* exprArray, const char* sep, bool forSelect = false)
+static void ExplainExprArray(
+    Query* query, JitPlan* plan, JitColumnExprArray* exprArray, const char* sep, bool forSelect = false)
 {
     for (int i = 0; i < exprArray->_count; ++i) {
         if (!forSelect) {
@@ -310,35 +344,35 @@ static void ExplainExprArray(Query* query, JitColumnExprArray* exprArray, const 
                 "%s = ",
                 exprArray->_exprs[i]._table->GetFieldName(exprArray->_exprs[i]._table_column_id));
         }
-        ExplainExpr(query, exprArray->_exprs[i]._expr->_source_expr);
+        ExplainExpr(query, plan, exprArray->_exprs[i]._expr);
         if (i < (exprArray->_count - 1)) {
             MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, sep);
         }
     }
 }
 
-static void ExplainInsertExprArray(Query* query, int indent, JitColumnExprArray* exprArray)
+static void ExplainInsertExprArray(Query* query, JitPlan* plan, int indent, JitColumnExprArray* exprArray)
 {
     MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sVALUES (", indent, "");
-    ExplainExprArray(query, exprArray, ", ");
+    ExplainExprArray(query, plan, exprArray, ", ");
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");
     MOT_LOG_END(MOT::LogLevel::LL_TRACE);
 }
 
-static void ExplainUpdateExprArray(Query* query, int indent, JitColumnExprArray* exprArray)
+static void ExplainUpdateExprArray(Query* query, JitPlan* plan, int indent, JitColumnExprArray* exprArray)
 {
     MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sSET (", indent, "");
-    ExplainExprArray(query, exprArray, ", ");
+    ExplainExprArray(query, plan, exprArray, ", ");
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");
     MOT_LOG_END(MOT::LogLevel::LL_TRACE);
 }
 
-static void ExplainSelectExprArray(Query* query, JitSelectExprArray* exprArray)
+static void ExplainSelectExprArray(Query* query, JitPlan* plan, JitSelectExprArray* exprArray)
 {
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "(");
     for (int i = 0; i < exprArray->_count; ++i) {
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "%%%d = ", exprArray->_exprs[i]._tuple_column_id);
-        ExplainExpr(query, exprArray->_exprs[i]._column_expr->_source_expr);
+        ExplainExpr(query, plan, (JitExpr*)exprArray->_exprs[i]._column_expr);
         if (i < (exprArray->_count - 1)) {
             MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ", ");
         }
@@ -346,58 +380,76 @@ static void ExplainSelectExprArray(Query* query, JitSelectExprArray* exprArray)
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");
 }
 
-static void ExplainSearchExprArray(Query* query, int indent, JitColumnExprArray* exprArray)
+static void ExplainSearchExprArray(
+    Query* query, JitPlan* plan, int indent, JitColumnExprArray* exprArray, bool isSubQuery)
 {
-    MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sWHERE (", indent, "");
-    ExplainExprArray(query, exprArray, " AND ");
+    if (!isSubQuery) {
+        MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sWHERE (", indent, "");
+    } else {
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " WHERE (");
+    }
+    ExplainExprArray(query, plan, exprArray, " AND ", false);
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");
-    MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    if (!isSubQuery) {
+        MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    }
 }
 
 static void ExplainInsertPlan(Query* query, JitInsertPlan* plan)
 {
     MOT_LOG_TRACE("[Plan] INSERT into table %s", plan->_table->GetTableName().c_str());
-    ExplainInsertExprArray(query, 2, &plan->_insert_exprs);
+    ExplainInsertExprArray(query, (JitPlan*)plan, 2, &plan->_insert_exprs);
 }
 
-static void ExplainUpdateQueryPlan(Query* query, int indent, JitUpdatePlan* plan)
+static void ExplainUpdateQueryPlan(Query* query, JitUpdatePlan* plan, int indent)
 {
     MOT_LOG_TRACE("%*sUPDATE table %s:", indent, "", plan->_query._table->GetTableName().c_str());
-    ExplainUpdateExprArray(query, indent + 2, &plan->_update_exprs);
+    ExplainUpdateExprArray(query, (JitPlan*)plan, indent + 2, &plan->_update_exprs);
 }
 
-static void ExplainDeleteQueryPlan(int indent, const JitDeletePlan* plan)
+static void ExplainDeleteQueryPlan(JitDeletePlan* plan, int indent)
 {
     MOT_LOG_TRACE("%*sDELETE from table %s:", indent, "", plan->_query._table->GetTableName().c_str());
 }
 
-static void ExplainSelectQueryPlan(Query* query, int indent, JitSelectPlan* plan)
+static void ExplainSelectQueryPlan(Query* query, JitSelectPlan* plan, int indent, bool isSubQuery)
 {
-    MOT_LOG_BEGIN(
-        MOT::LogLevel::LL_TRACE, "%*sSELECT from table %s:", indent, "", plan->_query._table->GetTableName().c_str());
-    ExplainSelectExprArray(query, &plan->_select_exprs);
-    MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    if (isSubQuery) {
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " SELECT from table %s:", plan->_query._table->GetTableName().c_str());
+    } else {
+        MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE,
+            "%*sSELECT from table %s:",
+            indent,
+            "",
+            plan->_query._table->GetTableName().c_str());
+    }
+    ExplainSelectExprArray(query, (JitPlan*)plan, &plan->_select_exprs);
+    if (!isSubQuery) {
+        MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    }
 }
 
-static void ExplainPointQueryPlan(Query* query, JitPointQueryPlan* plan)
+static void ExplainPointQueryPlan(Query* query, JitPointQueryPlan* plan, bool isSubQuery /* = false */)
 {
-    MOT_LOG_TRACE("[Plan] Point Query", plan->_query._table->GetTableName().c_str());
+    if (!isSubQuery) {
+        MOT_LOG_TRACE("[Plan] Point Query");
+    }
     int indent = 0;
     if (plan->_query._filters._filter_count > 0) {
-        ExplainFilterArray(query, indent, &plan->_query._filters);
+        ExplainFilterArray(query, (JitPlan*)plan, indent, &plan->_query._filters, isSubQuery);
         indent += 2;
     }
     switch (plan->_command_type) {
         case JIT_COMMAND_UPDATE:
-            ExplainUpdateQueryPlan(query, indent + 2, (JitUpdatePlan*)plan);
+            ExplainUpdateQueryPlan(query, (JitUpdatePlan*)plan, indent + 2);
             break;
 
         case JIT_COMMAND_DELETE:
-            ExplainDeleteQueryPlan(indent + 2, (JitDeletePlan*)plan);
+            ExplainDeleteQueryPlan((JitDeletePlan*)plan, indent + 2);
             break;
 
         case JIT_COMMAND_SELECT:
-            ExplainSelectQueryPlan(query, indent + 2, (JitSelectPlan*)plan);
+            ExplainSelectQueryPlan(query, (JitSelectPlan*)plan, indent + 2, isSubQuery);
             break;
 
         default:
@@ -405,10 +457,10 @@ static void ExplainPointQueryPlan(Query* query, JitPointQueryPlan* plan)
             return;
     }
 
-    ExplainSearchExprArray(query, indent + 4, &plan->_query._search_exprs);
+    ExplainSearchExprArray(query, (JitPlan*)plan, indent + 4, &plan->_query._search_exprs, isSubQuery);
 }
 
-static void ExplainIndexExprArray(Query* query, JitIndexScan* indexScan, int count)
+static void ExplainIndexExprArray(Query* query, JitPlan* plan, JitIndexScan* indexScan, int count)
 {
     for (int i = 0; i < count; ++i) {
         if (indexScan->_search_exprs._exprs[i]._join_expr) {
@@ -417,7 +469,7 @@ static void ExplainIndexExprArray(Query* query, JitIndexScan* indexScan, int cou
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE,
             "%s = ",
             indexScan->_table->GetFieldName(indexScan->_search_exprs._exprs[i]._table_column_id));
-        ExplainExpr(query, indexScan->_search_exprs._exprs[i]._expr->_source_expr);
+        ExplainExpr(query, plan, indexScan->_search_exprs._exprs[i]._expr);
         if (indexScan->_search_exprs._exprs[i]._join_expr) {
             MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");
         }
@@ -427,29 +479,30 @@ static void ExplainIndexExprArray(Query* query, JitIndexScan* indexScan, int cou
     }
 }
 
-static void ExplainIndexOpenExpr(Query* query, JitIndexScan* indexScan, int index, JitWhereOperatorClass opClass)
+static void ExplainIndexOpenExpr(
+    Query* query, JitPlan* plan, JitIndexScan* indexScan, int index, JitWhereOperatorClass opClass)
 {
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE,
         "%s",
         indexScan->_table->GetFieldName(indexScan->_search_exprs._exprs[index]._table_column_id));
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " %s ", JitWhereOperatorClassToString(opClass));
-    ExplainExpr(query, indexScan->_search_exprs._exprs[index]._expr->_source_expr);
+    ExplainExpr(query, plan, indexScan->_search_exprs._exprs[index]._expr);
 }
 
-static void ExplainIndexExprArray(Query* query, JitIndexScan* indexScan)
+static void ExplainIndexExprArray(Query* query, JitPlan* plan, JitIndexScan* indexScan)
 {
     if ((indexScan->_scan_type == JIT_INDEX_SCAN_CLOSED) || (indexScan->_scan_type == JIT_INDEX_SCAN_POINT)) {
-        ExplainIndexExprArray(query, indexScan, indexScan->_search_exprs._count);
+        ExplainIndexExprArray(query, plan, indexScan, indexScan->_search_exprs._count);
     } else if (indexScan->_scan_type == JIT_INDEX_SCAN_SEMI_OPEN) {
-        ExplainIndexExprArray(query, indexScan, indexScan->_search_exprs._count - 1);
+        ExplainIndexExprArray(query, plan, indexScan, indexScan->_search_exprs._count - 1);
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
-        ExplainIndexOpenExpr(query, indexScan, indexScan->_search_exprs._count - 1, indexScan->_last_dim_op1);
+        ExplainIndexOpenExpr(query, plan, indexScan, indexScan->_search_exprs._count - 1, indexScan->_last_dim_op1);
     } else if (indexScan->_scan_type == JIT_INDEX_SCAN_OPEN) {
-        ExplainIndexExprArray(query, indexScan, indexScan->_search_exprs._count - 2);
+        ExplainIndexExprArray(query, plan, indexScan, indexScan->_search_exprs._count - 2);
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
-        ExplainIndexOpenExpr(query, indexScan, indexScan->_search_exprs._count - 2, indexScan->_last_dim_op1);
+        ExplainIndexOpenExpr(query, plan, indexScan, indexScan->_search_exprs._count - 2, indexScan->_last_dim_op1);
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
-        ExplainIndexOpenExpr(query, indexScan, indexScan->_search_exprs._count - 1, indexScan->_last_dim_op2);
+        ExplainIndexOpenExpr(query, plan, indexScan, indexScan->_search_exprs._count - 1, indexScan->_last_dim_op2);
     }
 }
 
@@ -494,33 +547,46 @@ static const char* JitIndexScanDirectionToString(JitIndexScanDirection scanDirec
     }
 }
 
-static void ExplainIndexScan(Query* query, int indent, JitIndexScan* indexScan, const char* scanName = "")
+static void ExplainIndexScan(Query* query, JitPlan* plan, int indent, JitIndexScan* indexScan,
+    const char* scanName = "", bool isSubQuery = false)
 {
     if (indexScan->_filters._filter_count > 0) {
-        ExplainFilterArray(query, indent, &indexScan->_filters);
+        ExplainFilterArray(query, plan, indent, &indexScan->_filters, isSubQuery);
         indent += 2;
     }
     MOT::Index* index = indexScan->_table->GetIndex(indexScan->_index_id);
-    MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE,
-        "%*s%sSCAN %s index %s (%s, %s) ON (",
-        indent,
-        "",
-        scanName,
-        index->GetName().c_str(),
-        JitQuerySortOrderToString(indexScan->_sort_order),
-        JitIndexScanTypeToString(indexScan->_scan_type),
-        JitIndexScanDirectionToString(indexScan->_scan_direction));
+    if (isSubQuery) {
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE,
+            "%s SCAN %s index %s (%s, %s) ON (",
+            scanName,
+            index->GetName().c_str(),
+            JitQuerySortOrderToString(indexScan->_sort_order),
+            JitIndexScanTypeToString(indexScan->_scan_type),
+            JitIndexScanDirectionToString(indexScan->_scan_direction));
+    } else {
+        MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE,
+            "%*s%s SCAN %s index %s (%s, %s) ON (",
+            indent,
+            "",
+            scanName,
+            index->GetName().c_str(),
+            JitQuerySortOrderToString(indexScan->_sort_order),
+            JitIndexScanTypeToString(indexScan->_scan_type),
+            JitIndexScanDirectionToString(indexScan->_scan_direction));
+    }
 
-    ExplainIndexExprArray(query, indexScan);
+    ExplainIndexExprArray(query, plan, indexScan);
     MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");
-    MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    if (!isSubQuery) {
+        MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    }
 }
 
 static void ExplainRangeUpdatePlan(Query* query, JitRangeUpdatePlan* plan)
 {
     MOT_LOG_TRACE("[Plan] Range UPDATE table %s:", plan->_index_scan._table->GetTableName().c_str());
-    ExplainUpdateExprArray(query, 2, &plan->_update_exprs);
-    ExplainIndexScan(query, 2, &plan->_index_scan);
+    ExplainUpdateExprArray(query, (JitPlan*)plan, 2, &plan->_update_exprs);
+    ExplainIndexScan(query, (JitPlan*)plan, 2, &plan->_index_scan);
 }
 
 static const char* JitAggregateOperatorToString(JitAggregateOperator aggregateOp)
@@ -541,14 +607,21 @@ static const char* JitAggregateOperatorToString(JitAggregateOperator aggregateOp
     }
 }
 
-static void ExplainAggregateOperator(int indent, const JitAggregate* aggregate)
+static void ExplainAggregateOperator(int indent, const JitAggregate* aggregate, bool isSubQuery = false)
 {
-    MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE,
-        "%*s%s [op %d](",
-        indent,
-        "",
-        JitAggregateOperatorToString(aggregate->_aggreaget_op),
-        aggregate->_func_id);
+    if (isSubQuery) {
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE,
+            "%s [op %d](",
+            JitAggregateOperatorToString(aggregate->_aggreaget_op),
+            aggregate->_func_id);
+    } else {
+        MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE,
+            "%*s%s [op %d](",
+            indent,
+            "",
+            JitAggregateOperatorToString(aggregate->_aggreaget_op),
+            aggregate->_func_id);
+    }
     if (aggregate->_distinct) {
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "DISTINCT(");
     }
@@ -559,29 +632,45 @@ static void ExplainAggregateOperator(int indent, const JitAggregate* aggregate)
     if (aggregate->_distinct) {
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ")");
     }
-    MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    if (!isSubQuery) {
+        MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+    }
 }
 
-static void ExplainRangeSelectPlan(Query* query, JitRangeSelectPlan* plan)
+static void ExplainRangeSelectPlan(Query* query, JitRangeSelectPlan* plan, bool isSubQuery /* = false */)
 {
-    MOT_LOG_TRACE("[Plan] Range SELECT from table %s:", plan->_index_scan._table->GetTableName().c_str());
+    if (isSubQuery) {
+        MOT_LOG_APPEND(
+            MOT::LogLevel::LL_TRACE, "Range SELECT from table %s:", plan->_index_scan._table->GetTableName().c_str());
+    } else {
+        MOT_LOG_TRACE("[Plan] Range SELECT from table %s:", plan->_index_scan._table->GetTableName().c_str());
+    }
     int indent = 0;
     if (plan->_aggregate._aggreaget_op != JIT_AGGREGATE_NONE) {
         indent += 2;
-        ExplainAggregateOperator(indent, &plan->_aggregate);
+        ExplainAggregateOperator(indent, &plan->_aggregate, isSubQuery);
     }
     if (plan->_limit_count > 0) {
-        indent += 2;
-        MOT_LOG_TRACE("%*sLIMIT %d", indent, "", plan->_limit_count);
+        if (isSubQuery) {
+            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " LIMIT %d", plan->_limit_count);
+        } else {
+            indent += 2;
+            MOT_LOG_TRACE("%*sLIMIT %d", indent, "", plan->_limit_count);
+        }
     }
     if (plan->_aggregate._aggreaget_op == JIT_AGGREGATE_NONE) {
-        indent += 2;
-        MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sSELECT", indent, "");
-        ExplainSelectExprArray(query, &plan->_select_exprs);
-        MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+        if (isSubQuery) {
+            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " SELECT");
+            ExplainSelectExprArray(query, (JitPlan*)plan, &plan->_select_exprs);
+        } else {
+            indent += 2;
+            MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sSELECT", indent, "");
+            ExplainSelectExprArray(query, (JitPlan*)plan, &plan->_select_exprs);
+            MOT_LOG_END(MOT::LogLevel::LL_TRACE);
+        }
     }
 
-    ExplainIndexScan(query, indent + 2, &plan->_index_scan);
+    ExplainIndexScan(query, (JitPlan*)plan, indent + 2, &plan->_index_scan, "", isSubQuery);
 }
 
 static void ExplainRangeScanPlan(Query* query, JitRangeScanPlan* plan)
@@ -626,15 +715,30 @@ static void ExplainJoinPlan(Query* query, JitJoinPlan* plan)
     } else {
         indent += 2;
         MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "%*sSELECT", indent, "");
-        ExplainSelectExprArray(query, &plan->_select_exprs);
+        ExplainSelectExprArray(query, (JitPlan*)plan, &plan->_select_exprs);
         MOT_LOG_END(MOT::LogLevel::LL_TRACE);
     }
     if (plan->_limit_count > 0) {
         indent += 2;
         MOT_LOG_TRACE("%*sLIMIT %d", indent, "", plan->_limit_count);
     }
-    ExplainIndexScan(query, indent + 2, &plan->_outer_scan, "OUTER ");
-    ExplainIndexScan(query, indent + 2, &plan->_inner_scan, "INNER ");
+    ExplainIndexScan(query, (JitPlan*)plan, indent + 2, &plan->_outer_scan, "OUTER ");
+    ExplainIndexScan(query, (JitPlan*)plan, indent + 2, &plan->_inner_scan, "INNER ");
+}
+
+static void ExplainCompoundPlan(Query* query, JitCompoundPlan* plan)
+{
+    MOT_LOG_TRACE("[Plan] Compound Query on table %s", plan->_outer_query_plan->_query._table->GetTableName().c_str());
+    int indent = 0;
+    if (plan->_outer_query_plan->_query._filters._filter_count > 0) {
+        ExplainFilterArray(query, (JitPlan*)plan, indent, &plan->_outer_query_plan->_query._filters, false);
+        indent += 2;
+    }
+    if (plan->_command_type == JIT_COMMAND_SELECT) {
+        ExplainSelectQueryPlan(query, (JitSelectPlan*)plan->_outer_query_plan, indent + 2, false);
+    }
+
+    ExplainSearchExprArray(query, (JitPlan*)plan, indent + 4, &plan->_outer_query_plan->_query._search_exprs, false);
 }
 
 extern void JitExplainPlan(Query* query, JitPlan* plan)
@@ -655,6 +759,10 @@ extern void JitExplainPlan(Query* query, JitPlan* plan)
 
             case JIT_PLAN_JOIN:
                 ExplainJoinPlan(query, (JitJoinPlan*)plan);
+                break;
+
+            case JIT_PLAN_COMPOUND:
+                ExplainCompoundPlan(query, (JitCompoundPlan*)plan);
                 break;
 
             case JIT_PLAN_INVALID:

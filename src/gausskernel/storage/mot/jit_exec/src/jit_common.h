@@ -33,6 +33,9 @@
 
 // This file contains definitions used both by LLVM and TVM jitted code
 namespace JitExec {
+// forward declaration
+struct JitCompoundPlan;
+
 // common helpers for code generation
 /** @brief Converts a PG command type to LLVM command type. */
 extern JitCommandType ConvertCommandType(int pgCommandType, bool isPKey);
@@ -111,6 +114,14 @@ extern bool InitTableInfo(TableInfo* table_info, MOT::Table* table, MOT::Index* 
  * @param table_info The table information structure to cleanup.
  */
 extern void DestroyTableInfo(TableInfo* table_info);
+
+/**
+ * @brief Prepares sub-query data items for a JIT context (table, index and tuple descriptor).
+ * @param jitContext The JIT context to prepare.
+ * @param plan The compound plan for the query.
+ * @return True if operations succeeded, otherwise false.
+ */
+extern bool PrepareSubQueryData(JitContext* jitContext, JitCompoundPlan* plan);
 }  // namespace JitExec
 
 #endif

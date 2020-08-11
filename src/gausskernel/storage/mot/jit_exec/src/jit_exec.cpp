@@ -106,7 +106,11 @@ extern JitPlan* IsJittable(Query* query, const char* queryString)
                 // plan generated so query is jittable, but...
                 // we disqualify plan if we see distinct operator, until integrated with PG
                 if (JitPlanHasDistinct(jitPlan)) {
-                    MOT_LOG_TRACE("Disqualifying JOIN DISTINCT plan");
+                    MOT_LOG_TRACE("Disqualifying plan with DISTINCT aggregate");
+                    JitDestroyPlan(jitPlan);
+                    jitPlan = nullptr;
+                } else if (JitPlanHasSort(jitPlan)) {
+                    MOT_LOG_TRACE("Disqualifying plan with ORDER BY specifier");
                     JitDestroyPlan(jitPlan);
                     jitPlan = nullptr;
                 } else {
@@ -141,7 +145,8 @@ static void ProcessJitResult(MOT::RC result, JitContext* jitContext)
     // we ignore "local row not found" in SELECT and DELETE scenarios
     if (result == MOT::RC_LOCAL_ROW_NOT_FOUND) {
         if ((jitContext->m_commandType == JIT_COMMAND_DELETE) || (jitContext->m_commandType == JIT_COMMAND_SELECT) ||
-            (jitContext->m_commandType == JIT_COMMAND_RANGE_SELECT)) {
+            (jitContext->m_commandType == JIT_COMMAND_RANGE_SELECT) ||
+            (jitContext->m_commandType == JIT_COMMAND_COMPOUND_SELECT)) {
             // this is considered as successful execution
             JitStatisticsProvider::GetInstance().AddExecQuery();
             return;
@@ -205,6 +210,7 @@ static JitContext* GenerateJitContext(Query* query, const char* queryString, Jit
                 ++u_sess->mot_cxt.jit_context_count;
                 AddJitSourceContext(jitSource, jitContext);  // register for cleanup due to DDL
                 jitContext->m_jitSource = jitSource;
+                jitContext->m_queryString = jitSource->_query_string;
                 // update statistics
                 MOT_LOG_TRACE("Registered JIT context %p in JIT source %p for cleanup", jitContext, jitSource);
                 JitStatisticsProvider& instance = JitStatisticsProvider::GetInstance();
@@ -331,7 +337,7 @@ extern int JitExecQuery(
 
     // make sure we can execute (guard against crash due to logical error)
 #ifdef MOT_JIT_DEBUG
-    MOT_LOG_DEBUG("Executing JIT context %p with query: %s", jitContext, jitContext->_queryString);
+    MOT_LOG_DEBUG("Executing JIT context %p with query: %s", jitContext, jitContext->m_queryString);
 #endif
     if (!jitContext->m_llvmFunction && !jitContext->m_tvmFunction) {
         MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG,
@@ -371,12 +377,12 @@ extern int JitExecQuery(
 #ifdef MOT_JIT_DEBUG
     // in trace log-level we raise the log level to DEBUG on first few executions only
     bool firstExec = false;
-    if ((++jitContext->_exec_count <= 10) && MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
+    if ((++jitContext->m_execCount <= 2) && MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
         MOT_LOG_TRACE("Executing JIT context %p for the %dth time: %s",
             jitContext,
-            jitContext->_exec_count,
-            jitContext->_queryString);
-        MOT::SetLogComponentLogLevel("LiteExec", MOT::LogLevel::LL_DEBUG);
+            jitContext->m_execCount,
+            jitContext->m_queryString);
+        MOT::SetLogComponentLogLevel("JitExec", MOT::LogLevel::LL_DEBUG);
         firstExec = true;
     }
 #endif
@@ -384,7 +390,7 @@ extern int JitExecQuery(
     // invoke the jitted function
     if (jitContext->m_llvmFunction != nullptr) {
 #ifdef MOT_JIT_DEBUG
-        MOT_LOG_DEBUG("Executing LLVM-jitted function %p: %s", jitContext->m_llvmFunction, jitContext->_queryString);
+        MOT_LOG_DEBUG("Executing LLVM-jitted function %p: %s", jitContext->m_llvmFunction, jitContext->m_queryString);
 #endif
         result = ((JitFunc)jitContext->m_llvmFunction)(jitContext->m_table,
             jitContext->m_index,
@@ -401,14 +407,14 @@ extern int JitExecQuery(
             jitContext->m_innerEndIteratorKey);
     } else {
 #ifdef MOT_JIT_DEBUG
-        MOT_LOG_DEBUG("Executing TVM-jitted function %p: %s", jitContext->m_tvmFunction, jitContext->_queryString);
+        MOT_LOG_DEBUG("Executing TVM-jitted function %p: %s", jitContext->m_tvmFunction, jitContext->m_queryString);
 #endif
         result = JitExecTvmQuery(jitContext, params, slot, tuplesProcessed, scanEnded);
     }
 
 #ifdef MOT_JIT_DEBUG
     if (firstExec) {
-        MOT::SetLogComponentLogLevel("LiteExec", MOT::LogLevel::LL_TRACE);
+        MOT::SetLogComponentLogLevel("JitExec", MOT::LogLevel::LL_TRACE);
     }
 #endif
 

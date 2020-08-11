@@ -150,17 +150,53 @@ struct JitContext {
     /** @var Scan ended flag (stateful execution). */
     uint64_t m_innerScanEnded;  // L1 offset 40
 
+    /*---------------------- Compound Query Execution -------------------*/
+    struct SubQueryData {
+        /** @var The sub-query command type (point-select, aggregate range select or limit 1 range-select). */
+        JitCommandType m_commandType;  // L1 offset 0
+
+        /** @var Align next member to 8-byte offset. */
+        uint8_t m_padding[7];  // L1 offset 1
+
+        /** @var Tuple descriptor for the sub-query result. */
+        TupleDesc m_tupleDesc;  // L1 offset 8
+
+        /** @var Sub-query execution result. */
+        TupleTableSlot* m_slot;  // L1 offset 16
+
+        /** @var The table used by the sub-query. */
+        MOT::Table* m_table;  // L1 offset 24
+
+        /** @var The index used by the sub-query. */
+        MOT::Index* m_index;  // L1 offset 32
+
+        /** @var The search key used by the sub-query. */
+        MOT::Key* m_searchKey;  // L1 offset 40
+
+        /** @var The search key used by a range select sub-query (whether aggregated or limited). */
+        MOT::Key* m_endIteratorKey;  // L1 offset 48
+
+        /** @var Align whole struct size to one cache line. */
+        uint8_t m_padding2[8];  // L1 offset 56
+    };
+
+    /** @var Array of tuple descriptors for each sub-query. */
+    SubQueryData* m_subQueryData;  // L1 offset 48
+
+    /** @var The number of sub-queries used. */
+    uint64_t m_subQueryCount;  // L1 offset 56
+
     /*---------------------- Cleanup -------------------*/
     /** @var Chain all context objects related to the same source, for cleanup during relation modification. */
-    JitContext* m_nextInSource;  // L1 offset 48
+    JitContext* m_nextInSource;  // L1 offset 0
 
     /** @var The JIT source from which this context originated. */
-    JitSource* m_jitSource;  // L1 offset 56
+    JitSource* m_jitSource;  // L1 offset 8
 
     /*---------------------- Debug execution state -------------------*/
     /** @var The number of times this context was invoked for execution. */
 #ifdef MOT_JIT_DEBUG
-    uint64_t m_execCount;  // L1 offset 0
+    uint64_t m_execCount;  // L1 offset 16
 #endif
 };
 
@@ -210,9 +246,16 @@ extern bool PrepareJitContext(JitContext* jitContext);
 extern void DestroyJitContext(JitContext* jitContext);
 
 /**
- * @brief Release all resources related to the primary table.
+ * @brief Release all resources related to any table used by the JIT context object.
+ * @detail When a DDL command is executed (such as DROP table), all resources associated with the table must be
+ * reclaimed immediately. Any attempt to do so at a later phase (i.e. after DDL ends, and other cached plans are
+ * invalidated), will result in a crash (because the key/row pools, into which cached plan objects are to be returned,
+ * are already destroyed during DDL execution). So we provide API to purge a JIT context object from all resources
+ * associated with a relation, which can be invoked during DDL execution (so by the time the cached plan containing the
+ * JIT context is invalidated, the members related to the affected MOT relation had already been reclaimed).
  * @param jitContext The JIT context to be purged.
  * @param relationId The external identifier of the modified relation that triggered purge.
+ * @see SetJitSourceExpired().
  */
 extern void PurgeJitContext(JitContext* jitContext, uint64_t relationId);
 }  // namespace JitExec

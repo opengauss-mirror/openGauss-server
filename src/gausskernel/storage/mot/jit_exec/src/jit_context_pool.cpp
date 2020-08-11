@@ -28,18 +28,18 @@
 
 #include "jit_context_pool.h"
 #include "utilities.h"
+#include "mm_global_api.h"
 
 namespace JitExec {
 DECLARE_LOGGER(JitContextPool, JitExec)
 
 extern bool InitJitContextPool(JitContextPool* contextPool, JitContextUsage usage, uint32_t poolSize)
 {
-    bool result = false;
-
+    MOT_ASSERT(contextPool->m_contextPool == nullptr);
     contextPool->m_usage = usage;
-    contextPool->m_contextPool = NULL;
+    contextPool->m_contextPool = nullptr;
     contextPool->m_poolSize = 0;
-    contextPool->m_freeContextList = NULL;
+    contextPool->m_freeContextList = nullptr;
     contextPool->m_freeContextCount = 0;
 
     if (usage == JIT_CONTEXT_GLOBAL) {
@@ -54,17 +54,9 @@ extern bool InitJitContextPool(JitContextPool* contextPool, JitContextUsage usag
     }
 
     size_t allocSize = sizeof(JitContext) * poolSize;
-    int res = posix_memalign((void**)&contextPool->m_contextPool, 64, allocSize);
-    if (res != 0) {
-        // report OOM first to make sure error is reported correctly to user
+    contextPool->m_contextPool = (JitContext*)MOT::MemGlobalAllocAligned(allocSize, L1_CACHE_LINE);
+    if (contextPool->m_contextPool == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
-            "JIT Context Pool Initialization",
-            "Failed to allocate %u JIT context objects (64-byte aligned %u bytes) for %s JIT context pool",
-            poolSize,
-            allocSize,
-            usage == JIT_CONTEXT_GLOBAL ? "global" : "session-local");
-        MOT_REPORT_SYSTEM_ERROR_CODE(res,
-            posix_memalign,
             "JIT Context Pool Initialization",
             "Failed to allocate %u JIT context objects (64-byte aligned %u bytes) for %s JIT context pool",
             poolSize,
@@ -77,7 +69,6 @@ extern bool InitJitContextPool(JitContextPool* contextPool, JitContextUsage usag
     securec_check(erc, "\0", "\0");
 
     // fill the free list
-    result = true;
     contextPool->m_poolSize = poolSize;
     for (uint32_t i = 0; i < poolSize; ++i) {
         JitContext* jitContext = &contextPool->m_contextPool[i];
@@ -86,12 +77,16 @@ extern bool InitJitContextPool(JitContextPool* contextPool, JitContextUsage usag
     }
     contextPool->m_freeContextCount = contextPool->m_poolSize;
 
-    return result;
+    return true;
 }
 
 extern void DestroyJitContextPool(JitContextPool* contextPool)
 {
-    free(contextPool->m_contextPool);
+    if (contextPool->m_contextPool == nullptr) {
+        return;
+    }
+
+    MOT::MemGlobalFree(contextPool->m_contextPool);
 
     if (contextPool->m_usage == JIT_CONTEXT_GLOBAL) {
         int res = pthread_spin_destroy(&contextPool->m_lock);
@@ -103,9 +98,9 @@ extern void DestroyJitContextPool(JitContextPool* contextPool)
         }
     }
 
-    contextPool->m_contextPool = NULL;
+    contextPool->m_contextPool = nullptr;
     contextPool->m_poolSize = 0;
-    contextPool->m_freeContextList = NULL;
+    contextPool->m_freeContextList = nullptr;
     contextPool->m_freeContextCount = 0;
 }
 
@@ -120,7 +115,7 @@ extern JitContext* AllocPooledJitContext(JitContextPool* contextPool)
         }
     }
 
-    MOT_LOG_DEBUG("%s JIT context pool free-count before alloc context: %u",
+    MOT_LOG_TRACE("%s JIT context pool free-count before alloc context: %u",
         contextPool->m_usage == JIT_CONTEXT_GLOBAL ? "global" : "session-local",
         contextPool->m_freeContextCount);
     JitContext* result = contextPool->m_freeContextList;
@@ -145,7 +140,7 @@ extern JitContext* AllocPooledJitContext(JitContextPool* contextPool)
 
     if (result == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
-            "Global JIT Context Allocation",
+            "JIT Context Allocation",
             "Failed to allocate %s JIT context: pool with %u context objects depleted",
             contextPool->m_usage == JIT_CONTEXT_GLOBAL ? "global" : "session-local",
             contextPool->m_poolSize);
@@ -176,7 +171,7 @@ extern void FreePooledJitContext(JitContextPool* contextPool, JitContext* jitCon
     jitContext->m_next = contextPool->m_freeContextList;
     contextPool->m_freeContextList = jitContext;
     ++contextPool->m_freeContextCount;
-    MOT_LOG_DEBUG("%s JIT context pool free-count after free context: %u",
+    MOT_LOG_TRACE("%s JIT context pool free-count after free context: %u",
         contextPool->m_usage == JIT_CONTEXT_GLOBAL ? "global" : "session-local",
         contextPool->m_freeContextCount);
 

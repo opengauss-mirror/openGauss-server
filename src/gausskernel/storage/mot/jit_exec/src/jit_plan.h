@@ -99,7 +99,10 @@ enum JitPlanType {
     JIT_PLAN_RANGE_SCAN,
 
     /** @var Plan for a nested loop join. */
-    JIT_PLAN_JOIN
+    JIT_PLAN_JOIN,
+
+    /** @var Plan for a query with sub-queries. */
+    JIT_PLAN_COMPOUND
 };
 
 /** @enum Expression types. */
@@ -120,7 +123,10 @@ enum JitExprType {
     JIT_EXPR_TYPE_OP,
 
     /** @var Function expression type. */
-    JIT_EXPR_TYPE_FUNC
+    JIT_EXPR_TYPE_FUNC,
+
+    /** @var Sub-link expression type (for a sub-query). */
+    JIT_EXPR_TYPE_SUBLINK
 };
 
 /** @enum Index scan types. */
@@ -148,7 +154,7 @@ struct JitExpr {
     /** @var The original expression in the parsed query (required for convenient filter collection). */
     Expr* _source_expr;
 
-    /** @var The column type. */
+    /** @var The expression result type. */
     int _result_type;
 
     /** @var The position of the expression in the arg-is-null array. */
@@ -222,7 +228,7 @@ struct JitOpExpr {
     /** @var The original expression in the parsed query (required for convenient filter collection). */
     Expr* _source_expr;
 
-    /** @var The column type. */
+    /** @var The expression result type. */
     int _result_type;
 
     /** @var The position of the expression in the arg-is-null array. */
@@ -248,7 +254,7 @@ struct JitFuncExpr {
     /** @var The original expression in the parsed query (required for convenient filter collection). */
     Expr* _source_expr;
 
-    /** @var The column type. */
+    /** @var The expression result type. */
     int _result_type;
 
     /** @var The position of the expression in the arg-is-null array. */
@@ -262,6 +268,23 @@ struct JitFuncExpr {
 
     /** @var The number of arguments used in the function. */
     int _arg_count;
+};
+
+struct JitSubLinkExpr {
+    /** @var The expression type (always @ref JIT_EXPR_TYPE_SUBLINK). */
+    JitExprType _expr_type;
+
+    /** @var The original expression in the parsed query (required for extracting the sub-query). */
+    Expr* _source_expr;
+
+    /** @var The sub-query result type. */
+    int _result_type;
+
+    /** @var The position of the expression in the arg-is-null array. */
+    int _arg_pos;
+
+    /** @var The position of the sub-query plan in the sub-query plan array of the containing compound plan. */
+    int _sub_query_index;
 };
 
 /** @struct An expression tied to a table column. */
@@ -519,7 +542,7 @@ struct JitRangeUpdatePlan {
     /** @var The type of plan being used (always @ref JIT_PLAN_RANGE_SCAN). */
     JitPlanType _plan_type;
 
-    /** @var The command type being used (always @ref JIT_COMMAND_RANGE_UPDATE). */
+    /** @var The command type being used (always @ref JIT_COMMAND_UPDATE). */
     JitCommandType _command_type;
 
     /** @var Defines how to make the scan. */
@@ -534,7 +557,7 @@ struct JitRangeSelectPlan {
     /** @var The type of plan being used (always @ref JIT_PLAN_RANGE_SCAN). */
     JitPlanType _plan_type;
 
-    /** @var The command type being used (always @ref JIT_COMMAND_RANGE_SELECT). */
+    /** @var The command type being used (always @ref JIT_COMMAND_SELECT). */
     JitCommandType _command_type;
 
     /** @var Defines how to make the scan. */
@@ -577,6 +600,24 @@ struct JitJoinPlan {
     JitAggregate _aggregate;
 };
 
+/** @strut Plan for compound point query with a single sub-query. */
+struct JitCompoundPlan {
+    /** @var The type of plan being used (always @ref JIT_PLAN_COMPOUND). */
+    JitPlanType _plan_type;  // always JIT_PLAN_COMPOUND
+
+    /** @var The command type being used (currently always @ref JIT_COMMAND_SELECT). */
+    JitCommandType _command_type;
+
+    /** @var The outer point query plan (currently only one column refers to a sub-query). */
+    JitPointQueryPlan* _outer_query_plan;
+
+    /** @var The number of sub-queries (currently always limited to 1 by planning phase). */
+    uint32_t _sub_query_count;
+
+    /** @var The sub-query plans (each one must evaluate to a single value, whether by point, aggregate or limit 1). */
+    JitPlan** _sub_query_plans;
+};
+
 /** @define A special constant denoting a plan is not needed since jitted query has already been generated. */
 #define MOT_READY_JIT_PLAN ((JitPlan*)-1)
 
@@ -590,6 +631,9 @@ extern JitPlan* JitPreparePlan(Query* query, const char* queryString);
 
 /** @brief Queries whether a plan has a DISTINCT operator. */
 extern bool JitPlanHasDistinct(JitPlan* plan);
+
+/** @brief Queries whether a plan has an ORDER BY specifier. */
+extern bool JitPlanHasSort(JitPlan* plan);
 
 /**
  * @brief Explains how a plan is to be executed.
