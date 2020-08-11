@@ -10,7 +10,6 @@ export GAUSSHOME=/usr/local/opengauss
 export PATH=$GAUSSHOME/bin:$PATH
 export LD_LIBRARY_PATH=$GAUSSHOME/lib:$LD_LIBRARY_PATH
 
-
 file_env() {
         local var="$1"
         local fileVar="${var}_FILE"
@@ -81,8 +80,11 @@ docker_init_database_dir() {
                 set -- --xlogdir "$POSTGRES_INITDB_XLOGDIR" "$@"
         fi
 
-        eval 'gs_initdb --pwfile=<(echo "$GS_PASSWORD") --nodename=`hostname` '"$POSTGRES_INITDB_ARGS"' "$@"'
-
+        if [ -n "$GS_NODENAME" ]; then
+                eval 'gs_initdb --pwfile=<(echo "$GS_PASSWORD") --nodename=$GS_NODENAME '"$POSTGRES_INITDB_ARGS"' "$@"'
+        else
+                eval 'gs_initdb --pwfile=<(echo "$GS_PASSWORD") --nodename=gaussdb '"$POSTGRES_INITDB_ARGS"' "$@"'
+        fi        
         # unset/cleanup "nss_wrapper" bits
         if [ "${LD_PRELOAD:-}" = '/usr/lib/libnss_wrapper.so' ]; then
                 rm -f "$NSS_WRAPPER_PASSWD" "$NSS_WRAPPER_GROUP"
@@ -99,8 +101,10 @@ docker_verify_minimum_env() {
         # messes it up
         if [ "${#GS_PASSWORD}" -ge 100 ]; then
                 cat >&2 <<-'EOWARN'
+
                         WARNING: The supplied GS_PASSWORD is 100+ characters.
-                EOWARN
+
+EOWARN
         fi
         if [ -z "$GS_PASSWORD" ] && [ 'trust' != "$GS_HOST_AUTH_METHOD" ]; then
                 # The - option suppresses leading tabs but *not* spaces. :)
@@ -108,22 +112,24 @@ docker_verify_minimum_env() {
                         Error: Database is uninitialized and superuser password is not specified.
                                You must specify GS_PASSWORD to a non-empty value for the
                                superuser. For example, "-e GS_PASSWORD=password" on "docker run".
+
                                You may also use "GS_HOST_AUTH_METHOD=trust" to allow all
                                connections without a password. This is *not* recommended.
-                EOE
+
+EOE
                 exit 1
         fi
         if [ 'trust' = "$GS_HOST_AUTH_METHOD" ]; then
                 cat >&2 <<-'EOWARN'
                         ********************************************************************************
                         WARNING: GS_HOST_AUTH_METHOD has been set to "trust". This will allow
-                                 anyone with access to the Postgres port to access your database without
+                                 anyone with access to the opengauss port to access your database without
                                  a password, even if GS_PASSWORD is set.
                                  It is not recommended to use GS_HOST_AUTH_METHOD=trust. Replace
                                  it with "-e GS_PASSWORD=password" instead to set a password in
                                  "docker run".
                         ********************************************************************************
-                EOWARN
+EOWARN
         fi
 }
 
@@ -174,13 +180,25 @@ docker_process_sql() {
 # uses environment variables for input: GS_DB
 docker_setup_db() {
         if [ "$GS_DB" != 'postgres' ]; then
-                GS_DB= docker_process_sql --dbname postgres --set db="$GS_DB" --set passwd="$GS_PASSWORD" <<-'EOSQL'
+                GS_DB= docker_process_sql --dbname postgres --set db="$GS_DB" --set passwd="$GS_PASSWORD" --set passwd="$GS_PASSWORD" <<-'EOSQL'
                         CREATE DATABASE :"db" ;
                         create user gaussdb with login password :"passwd" ;
-                EOSQL
+
+EOSQL
                 echo
         fi
 }
+
+docker_setup_user() {
+        if [ -n "$GS_USERNAME" ]; then
+                GS_DB= docker_process_sql --dbname postgres --set db="$GS_DB" --set passwd="$GS_PASSWORD" --set user="$GS_USERNAME" <<-'EOSQL'
+                        create user :"user" with login password :"passwd" ;
+EOSQL
+        else           
+                echo " default user is gaussdb"
+        fi
+}
+
 
 # Loads various settings that are used elsewhere in the script
 # This should be called before any other functions
@@ -216,15 +234,21 @@ opengauss_setup_hba_conf() {
 opengauss_setup_postgresql_conf() {
         {
                 echo
-                if [ 'trust' = "$GS_HOST_AUTH_METHOD" ]; then
-                        echo '# warning trust is enabled for all connections'
+                if [ -n "$GS_PORT" ]; then
+                    echo "password_encryption_type = 0"
+                    echo "listen_addresses = '*'"
+                    echo "port = $GS_PORT"
+                else
+                    echo '# use default port 5432'
+                    echo "password_encryption_type = 0"
+                    echo "listen_addresses = '*'"
                 fi
-                echo "password_encryption_type = 0"
-                echo "listen_addresses = '*'"
         } >> "$PGDATA/postgresql.conf"
 }
 
-
+opengauss_setup_mot_conf() {
+         echo "enable_numa = false" >> "$PGDATA/mot.conf"
+}
 
 # start socket-only postgresql server for setting up or running scripts
 # all arguments will be passed along as arguments to `postgres` (via pg_ctl)
@@ -291,6 +315,7 @@ _main() {
                         docker_init_database_dir
                         opengauss_setup_hba_conf
                         opengauss_setup_postgresql_conf
+                        opengauss_setup_mot_conf
 
                         # PGPASSWORD is required for gsql when authentication is required for 'local' connections via pg_hba.conf and is otherwise harmless
                         # e.g. when '--auth=md5' or '--auth-local=md5' is used in POSTGRES_INITDB_ARGS
@@ -298,6 +323,7 @@ _main() {
                         docker_temp_server_start "$@"
 
                         docker_setup_db
+                        docker_setup_user
                         docker_process_init_files /docker-entrypoint-initdb.d/*
 
                         docker_temp_server_stop
