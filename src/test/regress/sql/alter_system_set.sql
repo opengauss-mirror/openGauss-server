@@ -30,8 +30,8 @@ SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
 -- for POSTMASTER GUC
 --------------------------------------------------------
 SHOW enable_thread_pool;
-ALTER SYSTEM SET enable_thread_pool to off;
 ALTER SYSTEM SET enable_thread_pool to on;
+ALTER SYSTEM SET enable_thread_pool to off;
 
 ------------------------------------------------------
 -- for SIGHUP GUC

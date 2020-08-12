@@ -74,12 +74,12 @@ SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
 SHOW enable_thread_pool;
  enable_thread_pool 
 --------------------
- on
+ off
 (1 row)
 
-ALTER SYSTEM SET enable_thread_pool to off;
-NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
 ALTER SYSTEM SET enable_thread_pool to on;
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+ALTER SYSTEM SET enable_thread_pool to off;
 NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
 ------------------------------------------------------
 -- for SIGHUP GUC
@@ -386,8 +386,8 @@ SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM 
       type      | result | userid |  database  | client_conninfo |      object_name      |                     detail_info                      
 ----------------+--------+--------+------------+-----------------+-----------------------+------------------------------------------------------
  internal_event | ok     | 10     | regression | gsql@[local]    | null                  | SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
- set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool    | ALTER SYSTEM SET enable_thread_pool to off;
  set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool    | ALTER SYSTEM SET enable_thread_pool to on;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool    | ALTER SYSTEM SET enable_thread_pool to off;
  set_parameter  | ok     | 10     | regression | gsql@[local]    | password_lock_time    | ALTER SYSTEM SET  password_lock_time to 1.1;
  set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum            | ALTER SYSTEM SET autovacuum to off;
  set_parameter  | ok     | 10     | regression | gsql@[local]    | log_destination       | ALTER SYSTEM SET log_destination to 'stderr,csvlog';
