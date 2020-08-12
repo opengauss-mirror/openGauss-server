@@ -2460,8 +2460,14 @@ void RemoveAttributeById(Oid relid, AttrNumber attnum)
 
     heap_close(attr_rel, RowExclusiveLock);
 
-    if (attnum > 0)
-        RemoveStatistics<'c'>(relid, attnum);
+    if (attnum > 0) {
+        if (RELATION_IS_GLOBAL_TEMP(rel)) {
+            remove_gtt_att_statistic(relid, attnum);
+        } else {
+            RemoveStatistics<'c'>(relid, attnum);
+        }
+    }
+
     /* decrease the relation's relnatts in pg_class */
     if (isRedisDropColumn) {
         pgclass = heap_open(RelationRelationId, RowExclusiveLock);

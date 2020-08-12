@@ -11115,7 +11115,11 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
     /*
      * Drop any pg_statistic entry for the column, since it's now wrong type
      */
-    RemoveStatistics<'c'>(RelationGetRelid(rel), attnum);
+    if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        remove_gtt_att_statistic(RelationGetRelid(rel), attnum);
+    } else {
+        RemoveStatistics<'c'>(RelationGetRelid(rel), attnum);
+    }
 
     /*
      * Update the default, if present, by brute force --- remove and re-add
