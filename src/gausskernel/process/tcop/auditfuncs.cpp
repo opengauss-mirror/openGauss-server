@@ -1313,6 +1313,10 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             VariableSetStmt* variablesetstmt = (VariableSetStmt*)(parsetree);
             pgaudit_process_set_parameter(variablesetstmt->name, queryString);
         } break;
+        case T_AlterSystemStmt: {
+            AlterSystemStmt* altersystemstmt = (AlterSystemStmt*)(parsetree);
+            pgaudit_process_set_parameter(altersystemstmt->setstmt->name, queryString);
+        } break;
         case T_CreateDataSourceStmt: {
             CreateDataSourceStmt* createdatasourcestmt = (CreateDataSourceStmt*)(parsetree);
             pgaudit_ddl_datasource(createdatasourcestmt->srcname, queryString);

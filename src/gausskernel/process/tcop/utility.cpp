@@ -4787,6 +4787,11 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             ExecCreateTableAs((CreateTableAsStmt*)parse_tree, query_string, params, completion_tag);
             break;
 
+        case T_AlterSystemStmt:
+            PreventTransactionChain(is_top_level, "ALTER SYSTEM SET");
+            AlterSystemSetConfigFile((AlterSystemStmt*)parse_tree);
+            break;
+
         case T_VariableSetStmt:
             ExecSetVariableStmt((VariableSetStmt*)parse_tree);
 #ifdef PGXC
@@ -7175,6 +7180,10 @@ const char* CreateCommandTag(Node* parse_tree)
                 tag = "CREATE TABLE AS";
             break;
 
+        case T_AlterSystemStmt:
+            tag = "ALTER SYSTEM SET";
+            break;
+
         case T_VariableSetStmt:
             switch (((VariableSetStmt*)parse_tree)->kind) {
                 case VAR_SET_VALUE:
@@ -8017,6 +8026,10 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
         } break;
 
         case T_CreateTableAsStmt:
+            lev = LOGSTMT_DDL;
+            break;
+
+        case T_AlterSystemStmt:
             lev = LOGSTMT_DDL;
             break;
 

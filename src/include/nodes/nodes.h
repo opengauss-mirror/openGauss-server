@@ -452,6 +452,7 @@ typedef enum NodeTag {
     T_DropDirectoryStmt,
     T_CreateRlsPolicyStmt,
     T_AlterRlsPolicyStmt,
+    T_AlterSystemStmt,
 
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h)

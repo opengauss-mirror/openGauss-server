@@ -483,6 +483,8 @@ static const char* show_unix_socket_permissions(void);
 static const char* show_log_file_mode(void);
 static char* config_enum_get_options(
     struct config_enum* record, const char* prefix, const char* suffix, const char* separator);
+static bool validate_conf_option(struct config_generic * record, const char *name, const char *value,
+    GucSource source, int elevel, bool freemem, void *newval, void **newextra);
 
 /* Database Security: Support password complexity */
 static bool check_int_parameter(int* newval, void** extra, GucSource source);
@@ -11885,6 +11887,7 @@ static void show_guc_config_option(const char* name, DestReceiver* dest);
 static void show_all_guc_config(DestReceiver* dest);
 static char* _show_option(struct config_generic* record, bool use_units);
 static bool validate_option_array_item(const char* name, const char* value, bool skip_if_no_permissions);
+static void replace_config_value(char** optlines, char* name, char* value, config_type vartype);
 
 /*
  * Some infrastructure for checking malloc/strdup/realloc calls
@@ -14324,6 +14327,202 @@ static char* config_enum_get_options(
     return retstr.data;
 }
 
+/*
+ * Validates configuration parameter and value, by calling check hook functions
+ * depending on record's vartype. It validates if the parameter
+ * value given is in range of expected predefined value for that parameter.
+ *
+ * freemem - true indicates memory for newval and newextra will be
+ *          freed in this function, false indicates it will be freed
+ *          by caller.
+ * Return value:
+ * true : the value is valid
+ * false: the name or value is invalid
+ */
+bool validate_conf_option(struct config_generic * record, const char *name, const char *value, GucSource source,
+                          int elevel, bool freemem, void *newvalue, void **newextra)
+{
+    Assert(value != NULL);
+
+    /*
+     * Validate the value for the passed record, to ensure it is in expected range.
+     */
+    switch (record->vartype)
+    {
+        case PGC_BOOL:
+            {
+                struct config_bool *conf = (struct config_bool *) record;
+                bool tmpnewval;
+                bool* newval = (newvalue == NULL ? &tmpnewval : (bool*)newvalue);
+
+                if (!parse_bool(value, newval)) {
+                    ereport(elevel,
+                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                             errmsg("parameter \"%s\" requires a Boolean value", name)));
+                    return false;
+                }
+
+                if (!call_bool_check_hook(conf, newval, newextra, source, elevel))
+                    return false;
+
+                if (*newextra && freemem)
+                    pfree(*newextra);
+            }
+            break;
+        case PGC_INT:
+            {
+                struct config_int *conf = (struct config_int *) record;
+                int  tmpnewval;
+                int* newval = (newvalue == NULL ? &tmpnewval : (int*)newvalue);
+                const char *hintmsg = NULL;
+
+                if (!parse_int(value, newval, conf->gen.flags, &hintmsg)) {
+                    ereport(elevel,
+                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                             errmsg("invalid value for parameter \"%s\": \"%s\"",
+                             name, value), hintmsg ? errhint("%s", _(hintmsg)) : 0));
+                    return false;
+                }
+
+                if (*newval < conf->min || *newval > conf->max) {
+                    ereport(elevel,
+                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                             errmsg("%d is outside the valid range for parameter \"%s\" (%d .. %d)",
+                                    *newval, name, conf->min, conf->max)));
+                    return false;
+                }
+
+                if (!call_int_check_hook(conf, newval, newextra, source, elevel))
+                    return false;
+
+                if (*newextra && freemem)
+                    pfree(*newextra);
+            }
+            break;
+        case PGC_INT64:
+            {
+                struct config_int64* conf = (struct config_int64*)record;
+                int64  tmpnewval;
+                int64* newval = (newvalue == NULL ? &tmpnewval : (int64*)newvalue);
+                const char* hintmsg = NULL;
+
+                if (!parse_int64(value, newval, &hintmsg)) {
+                    ereport(elevel,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                         errmsg("parameter \"%s\" requires a numeric value", name)));
+                    return false;
+                }
+
+                if (*newval < conf->min || *newval > conf->max) {
+                    ereport(elevel,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                         errmsg("%ld is outside the valid range for parameter \"%s\" (%ld .. %ld)",
+                                *newval, name, conf->min, conf->max)));
+                    return false;
+                }
+
+                if (!call_int64_check_hook(conf, newval, newextra, source, elevel))
+                    return false;
+
+                if (*newextra && freemem)
+                    pfree(newextra);
+            }
+            break;
+        case PGC_REAL:
+            {
+                struct config_real *conf = (struct config_real *) record;
+                double  tmpnewval;
+                double* newval = (newvalue == NULL ? &tmpnewval : (double*)newvalue);
+
+                if (!parse_real(value, newval)) {
+                    ereport(elevel,
+                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                             errmsg("parameter \"%s\" requires a numeric value", name)));
+                    return false;
+                }
+
+                if (*newval < conf->min || *newval > conf->max) {
+                    ereport(elevel,
+                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                             errmsg("%g is outside the valid range for parameter \"%s\" (%g .. %g)",
+                                    *newval, name, conf->min, conf->max)));
+                    return false;
+                }
+
+                if (!call_real_check_hook(conf, newval, newextra, source, elevel))
+                    return false;
+
+                if (*newextra && freemem)
+                    pfree(*newextra);
+            }
+            break;
+        case PGC_STRING:
+            {
+                struct config_string *conf = (struct config_string *) record;
+                char*  tmpnewval = NULL;
+                char** newval = newvalue == NULL ? &tmpnewval : (char**)newvalue;
+
+                /* The value passed by the caller could be transient, so we always strdup it. */
+                *newval = guc_strdup(elevel, value);
+                if (*newval == NULL)
+                    return false;
+
+                /* The only built-in "parsing" check we have is to apply truncation if GUC_IS_NAME. */
+                if (conf->gen.flags & GUC_IS_NAME)
+                    truncate_identifier(*newval, strlen(*newval), true);
+
+                if (!call_string_check_hook(conf, newval, newextra, source, elevel)) {
+                    pfree(*newval);
+                    return false;
+                }
+
+                /* Free the malloc'd data if any */
+                if (freemem) {
+                    if (*newval != NULL)
+                        pfree(*newval);
+                    if (*newextra != NULL)
+                        pfree(*newextra);
+                }
+            }
+            break;
+        case PGC_ENUM:
+            {
+                struct config_enum *conf = (struct config_enum *) record;
+                int  tmpnewval;
+                int* newval = (newvalue == NULL ? &tmpnewval : (int*)newvalue);
+
+                if (!config_enum_lookup_by_name(conf, value, newval)) {
+                    char* hintmsg;
+
+                    hintmsg = config_enum_get_options(conf, "Available values: ", ".", ", ");
+
+                    ereport(elevel,
+                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                             errmsg("invalid value for parameter \"%s\": \"%s\"", name, value),
+                             hintmsg ? errhint("%s", _(hintmsg)) : 0));
+
+                    if (hintmsg != NULL)
+                        pfree(hintmsg);
+                    return false;
+                }
+                if (!call_enum_check_hook(conf, newval, newextra, source, LOG))
+                    return false;
+
+                if (*newextra && freemem)
+                    pfree(*newextra);
+            }
+            break;
+        default:
+            {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_ATTRIBUTE),
+                         errmsg("unknow guc variable type: %d", record->vartype)));
+            }
+            break;
+    }
+    return true;
+}
+
 void SetThreadLocalGUC(knl_session_context* session)
 {
     default_statistics_target = session->attr.attr_sql.default_statistics_target;
@@ -14590,14 +14789,7 @@ int set_config_option(const char* name, const char* value, GucContext context, G
             void* newextra = NULL;
 
             if (value != NULL) {
-                if (!parse_bool(value, &newval)) {
-                    ereport(elevel,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("parameter \"%s\" requires a Boolean value", name)));
-                    return 0;
-                }
-
-                if (!call_bool_check_hook(conf, &newval, &newextra, source, elevel)) {
+                if (!validate_conf_option(record, name, value, source, elevel, false, &newval, &newextra)) {
                     return 0;
                 }
             } else if (source == PGC_S_DEFAULT) {
@@ -14681,27 +14873,7 @@ int set_config_option(const char* name, const char* value, GucContext context, G
             void* newextra = NULL;
 
             if (value != NULL) {
-                const char* hintmsg = NULL;
-
-                if (!parse_int(value, &newval, conf->gen.flags, &hintmsg)) {
-                    ereport(elevel, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("invalid value for parameter \"%s\": \"%s\"", name, value),
-                        hintmsg ? errhint("%s", _(hintmsg)) : 0));
-                    return 0;
-                }
-
-                if (newval < conf->min || newval > conf->max) {
-                    ereport(elevel,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("%d is outside the valid range for parameter \"%s\" (%d .. %d)",
-                                newval,
-                                name,
-                                conf->min,
-                                conf->max)));
-                    return 0;
-                }
-
-                if (!call_int_check_hook(conf, &newval, &newextra, source, elevel)) {
+                if (!validate_conf_option(record, name, value, source, elevel, false, &newval, &newextra)) {
                     return 0;
                 }
             } else if (source == PGC_S_DEFAULT) {
@@ -14780,26 +14952,7 @@ int set_config_option(const char* name, const char* value, GucContext context, G
             void* newextra = NULL;
 
             if (value != NULL) {
-                const char* hintmsg = NULL;
-                if (!parse_int64(value, &newval, &hintmsg)) {
-                    ereport(elevel,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("parameter \"%s\" requires a numeric value", name)));
-                    return 0;
-                }
-
-                if (newval < conf->min || newval > conf->max) {
-                    ereport(elevel,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("%ld is outside the valid range for parameter \"%s\" (%ld .. %ld)",
-                                newval,
-                                name,
-                                conf->min,
-                                conf->max)));
-                    return 0;
-                }
-
-                if (!call_int64_check_hook(conf, &newval, &newextra, source, elevel)) {
+                if (!validate_conf_option(record, name, value, source, elevel, false, &newval, &newextra)) {
                     return 0;
                 }
             } else if (source == PGC_S_DEFAULT) {
@@ -14872,25 +15025,7 @@ int set_config_option(const char* name, const char* value, GucContext context, G
             void* newextra = NULL;
 
             if (value != NULL) {
-                if (!parse_real(value, &newval)) {
-                    ereport(elevel,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("parameter \"%s\" requires a numeric value", name)));
-                    return 0;
-                }
-
-                if (newval < conf->min || newval > conf->max) {
-                    ereport(elevel,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg("%g is outside the valid range for parameter \"%s\" (%g .. %g)",
-                                newval,
-                                name,
-                                conf->min,
-                                conf->max)));
-                    return 0;
-                }
-
-                if (!call_real_check_hook(conf, &newval, &newextra, source, elevel)) {
+                if (!validate_conf_option(record, name, value, source, elevel, false, &newval, &newextra)) {
                     return 0;
                 }
             } else if (source == PGC_S_DEFAULT) {
@@ -14978,14 +15113,6 @@ int set_config_option(const char* name, const char* value, GucContext context, G
             }
 
             if (value != NULL) {
-                /*
-                 * The value passed by the caller could be transient, so
-                 * we always strdup it.
-                 */
-                newval = guc_strdup(elevel, value);
-                if (newval == NULL) {
-                    return 0;
-                }
 
                 // when \parallel in gsql is on, we use "set search_path to pg_temp_XXX"
                 // to tell new started parallel postgres which temp namespace should use.
@@ -15016,16 +15143,7 @@ int set_config_option(const char* name, const char* value, GucContext context, G
                     return 1;
                 }
 
-                /*
-                 * The only built-in "parsing" check we have is to apply
-                 * truncation if GUC_IS_NAME.
-                 */
-                if (conf->gen.flags & GUC_IS_NAME) {
-                    truncate_identifier(newval, strlen(newval), true);
-                }
-
-                if (!call_string_check_hook(conf, &newval, &newextra, source, elevel)) {
-                    pfree(newval);
+                if (!validate_conf_option(record, name, value, source, elevel, false, &newval, &newextra)) {
                     return 0;
                 }
             } else if (source == PGC_S_DEFAULT) {
@@ -15119,20 +15237,7 @@ int set_config_option(const char* name, const char* value, GucContext context, G
             void* newextra = NULL;
 
             if (value != NULL) {
-                if (!config_enum_lookup_by_name(conf, value, &newval)) {
-                    char* hintmsg = NULL;
-                    hintmsg = config_enum_get_options(conf, "Available values: ", ".", ", ");
-                    ereport(elevel, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("invalid value for parameter \"%s\": \"%s\"", name, value),
-                        hintmsg ? errhint("%s", _(hintmsg)) : 0));
-
-                    if (hintmsg != NULL) {
-                        pfree(hintmsg);
-                    }
-                    return 0;
-                }
-
-                if (!call_enum_check_hook(conf, &newval, &newextra, source, elevel)) {
+                if (!validate_conf_option(record, name, value, source, elevel, false, &newval, &newextra)) {
                     return 0;
                 }
             } else if (source == PGC_S_DEFAULT) {
@@ -15499,6 +15604,228 @@ static char* flatten_set_variable_args(const char* name, List* args)
 
     return buf.data;
 }
+
+/*
+ * This function takes list of all configuration parameters in
+ * postgresql.conf and parameter to be updated as input arguments and
+ * replace the updated configuration parameter value in a list. If the
+ * parameter to be updated is new then it is appended to the list of
+ * parameters.
+ */
+static void replace_config_value(char** optlines, char* name, char* value, config_type vartype)
+{
+    Assert(optlines != NULL);
+
+    int index = 0;
+    int optvalue_off = 0;
+    int optvalue_len = 0;
+    char* newline = (char*)pg_malloc(MAX_PARAM_LEN);
+    int rc = 0;
+
+    switch (vartype) {
+        case PGC_BOOL:
+        case PGC_INT:
+        case PGC_INT64:
+        case PGC_REAL:
+        case PGC_ENUM:
+            rc = snprintf_s(newline, MAX_PARAM_LEN, MAX_PARAM_LEN - 1, "%s = %s\n", name, value);
+            break;
+        case PGC_STRING:
+            rc = snprintf_s(newline, MAX_PARAM_LEN, MAX_PARAM_LEN - 1, "%s = '%s'\n", name, value);
+            break;
+    }
+    securec_check_ss(rc, "\0", "\0");
+
+    index = find_guc_option(optlines, name, NULL, NULL, &optvalue_off, &optvalue_len);
+
+    /* add or replace */
+    if (index == INVALID_LINES_IDX) {
+        /* find the first NULL point reserved. */
+        for (index = 0; optlines[index] != NULL; index++);
+
+    } else {
+        /* copy comment to newline and pfree old line */
+        rc = strncpy_s(newline + rc - 1, MAX_PARAM_LEN - rc,
+                       optlines[index] + optvalue_off + optvalue_len, MAX_PARAM_LEN - rc - 1);
+        securec_check(rc, "\0", "\0");
+        pfree(optlines[index]);
+    }
+
+    optlines[index] = newline;
+}
+
+/*
+ * Persist the configuration parameter value.
+ *
+ * This function takes all previous configuration parameters
+ * set by ALTER SYSTEM command and the currently set ones
+ * and write them all to the automatic configuration file.
+ *
+ * The configuration parameters are written to a temporary
+ * file then renamed to the final name. The template for the
+ * temporary file is postgresql.auto.conf.temp.
+ *
+ * An LWLock is used to serialize writing to the same file.
+ *
+ * In case of an error, we leave the original automatic
+ * configuration file (postgresql.auto.conf) intact.
+ */
+void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
+{
+#define GUCCONF_FILE           "postgresql.conf"
+#define GUCCONF_FILE_BAK       "postgresql.conf.bak"
+#define GUCCONF_FILE_BAK_BAK   "postgresql.conf.bak_bak"
+#define GUCCONF_FILE_LOCK      "postgresql.conf.lock"
+
+    char       *name = NULL;
+    char       *value = NULL;
+    struct config_generic *record = NULL;
+    char        ConfFileName[MAXPGPATH];
+    char        ConfTmpFileName[MAXPGPATH];
+    char        ConfTmpBakFileName[MAXPGPATH];
+    char        ConfLockFileName[MAXPGPATH];
+    struct stat st;
+    void       *newextra = NULL;
+    ConfFileLock filelock = {NULL, 0};
+    errno_t rc;
+    ErrCode ret;
+
+    if (!superuser())
+        ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                 (errmsg("must be superuser to execute ALTER SYSTEM SET command"))));
+
+    /*
+     * Validate the name and arguments [value1, value2 ... ].
+     */
+    name = altersysstmt->setstmt->name;
+    switch (altersysstmt->setstmt->kind) {
+        case VAR_SET_VALUE:
+            value = ExtractSetVariableArgs(altersysstmt->setstmt);
+            break;
+
+        case VAR_SET_DEFAULT:
+            ereport(ERROR,
+                (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                 (errmsg("ALTER SYSTEM SET does not support 'set to default'."))));
+            value = NULL;
+            break;
+        default:
+            elog(ERROR, "unrecognized ALTER SYSTEM SET stmt type: %d",
+                 altersysstmt->setstmt->kind);
+            break;
+    }
+
+    record = find_option(name, false, LOG);
+    if (record == NULL)
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                 errmsg("unrecognized configuration parameter \"%s\"", name)));
+
+    if ((record->context != PGC_POSTMASTER && record->context != PGC_SIGHUP && record->context != PGC_BACKEND) ||
+        record->flags & GUC_DISALLOW_IN_FILE)
+        ereport(ERROR,
+            (errcode(ERRCODE_CANT_CHANGE_RUNTIME_PARAM),
+             errmsg("unsupport parameter: %s\n"
+                    "ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,\n"
+                    "and it must be allowed to set in postgresql.conf.", name)));
+
+    if (!validate_conf_option(record, name, value, PGC_S_FILE, ERROR, true, NULL, &newextra))
+        ereport(ERROR, 
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("invalid value for parameter \"%s\": \"%s\"", name, value)));
+
+
+    rc = snprintf_s(ConfFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, GUCCONF_FILE);
+    securec_check_ss(rc, "\0", "\0");
+    rc = snprintf_s(ConfTmpFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, GUCCONF_FILE_BAK);
+    securec_check_ss(rc, "\0", "\0");
+    rc = snprintf_s(ConfLockFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, GUCCONF_FILE_LOCK);
+    securec_check_ss(rc, "\0", "\0");
+    rc = snprintf_s(ConfTmpBakFileName, MAXPGPATH, MAXPGPATH - 1,
+                    "%s/%s", t_thrd.proc_cxt.DataDir, GUCCONF_FILE_BAK_BAK);
+    securec_check_ss(rc, "\0", "\0");
+
+    /*
+     * one backend is allowed to operate on postgresql.conf.bak file, to
+     * ensure that we need to update the contents of the file with
+     * AutoFileLock. To ensure crash safety, first the contents are written to
+     * temporary file and then rename it to postgresql.auto.conf. In case
+     * there exists a temp file from previous crash, that can be reused.
+     */
+    char** opt_lines = NULL;
+    if (stat(ConfFileName, &st) == 0 && get_file_lock(ConfLockFileName, &filelock) == CODE_OK) {
+        opt_lines = read_guc_file(ConfFileName);
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_FILE_READ_FAILED),
+                 errmsg("File does not exits or it is being used.Can not open file: %s.", ConfFileName)));
+    }
+
+    /*
+     * replace with new value if the configuration parameter already
+     * exists OR add it as a new cofiguration parameter in the file.
+     */
+    replace_config_value(opt_lines, name, value, record->vartype);
+    ret = write_guc_file(ConfTmpFileName, opt_lines);
+    release_opt_lines(opt_lines);
+    if (ret != CODE_OK) {
+        release_file_lock(&filelock);
+        ereport(ERROR,
+                (errcode(ERRCODE_FILE_WRITE_FAILED),
+                 errmsg("write %s failed: %s.", ConfTmpFileName, gs_strerror(ret))));
+    }
+
+    /* we should leave postgresql.conf.bak like gs_guc */
+    opt_lines = read_guc_file(ConfTmpFileName);
+    ret = write_guc_file(ConfTmpBakFileName, opt_lines);
+    release_opt_lines(opt_lines);
+    opt_lines = NULL;
+    if (ret != CODE_OK) {
+        release_file_lock(&filelock);
+        ereport(ERROR,
+                (errcode(ERRCODE_FILE_WRITE_FAILED),
+                 errmsg("write %s failed: %s.", ConfTmpBakFileName, gs_strerror(ret))));
+    }
+
+    /*
+     * As the rename is atomic operation, if any problem occurs after this
+     * at max it can loose the parameters set by last ALTER SYSTEM SET
+     * command.
+     */
+    if (rename(ConfTmpBakFileName, ConfFileName) < 0) {
+        release_file_lock(&filelock);
+        ereport(ERROR,
+                (errcode_for_file_access(),
+                 errmsg("could not rename file \"%s\" to \"%s\"", ConfTmpFileName, ConfFileName)));
+    }
+
+    release_file_lock(&filelock);
+
+    /*
+     * send signal to postmaster to reload postgresql.conf, POSTMASTER-level variable
+     * takes effect only after restarting the database, but we still need to send the
+     * signal so that we can send the postgresql.conf to standby node.
+     */
+    if (gs_signal_send(PostmasterPid, SIGHUP)) {
+        ereport(WARNING, (errmsg("Failed to send signal to postmaster to reload guc config file.")));
+        return;
+    }
+
+    /* print notice message */
+    switch (record->context) {
+        case PGC_POSTMASTER:
+            ereport(NOTICE,
+                    (errmsg("please restart the database for the POSTMASTER level parameter to take effect.")));
+            break;
+        case PGC_BACKEND:
+            ereport(NOTICE,
+                    (errmsg("please reconnect the database for the BACKEND level parameter to take effect.")));
+            break;
+        default:
+            break;
+    }
+ }
 
 /*
  * SET command
@@ -20066,7 +20393,7 @@ char** read_guc_file(const char* path)
     }
 
     /* set up the result and the line buffer */
-    result = (char**)pg_malloc((nlines + 1) * sizeof(char*));
+    result = (char**)pg_malloc((nlines + 2) * sizeof(char*));  // Reserve one extra for alter system set.
     buffer = (char*)pg_malloc(maxlength + 1);
 
     /* now reprocess the file and store the lines */
@@ -20078,7 +20405,7 @@ char** read_guc_file(const char* path)
     }
     (void)fclose(infile);
     pfree(buffer);
-    result[nlines] = NULL;
+    result[nlines] = result[nlines + 1] = NULL;
 
     return result;
 }

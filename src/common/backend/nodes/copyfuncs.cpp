@@ -87,6 +87,7 @@
 
 static void CopyMemInfoFields(const OpMemInfo* from, OpMemInfo* newnode);
 static ReplicaIdentityStmt* _copyReplicaIdentityStmt(const ReplicaIdentityStmt* from);
+static AlterSystemStmt* _copyAlterSystemStmt(const AlterSystemStmt * from);
 
 static void CopyCursorFields(const Cursor_Data* from, Cursor_Data* newnode);
 /* ****************************************************************
@@ -6401,6 +6402,9 @@ void* copyObject(const void* from)
         case T_ReplicaIdentityStmt:
             retval = _copyReplicaIdentityStmt((ReplicaIdentityStmt*)from);
             break;
+        case T_AlterSystemStmt:
+            retval = _copyAlterSystemStmt((AlterSystemStmt*)from);
+            break;
         case T_CreateSeqStmt:
             retval = _copyCreateSeqStmt((CreateSeqStmt*)from);
             break;
@@ -6825,6 +6829,13 @@ static ReplicaIdentityStmt* _copyReplicaIdentityStmt(const ReplicaIdentityStmt* 
     COPY_STRING_FIELD(name);
 
     return newnode;
+}
+
+static AlterSystemStmt* _copyAlterSystemStmt(const AlterSystemStmt * from)
+{
+   AlterSystemStmt* newnode = makeNode(AlterSystemStmt);
+   COPY_NODE_FIELD(setstmt);
+   return newnode;
 }
 
 /*
