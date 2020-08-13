@@ -534,7 +534,13 @@ void TxnManager::RollbackDDLs()
                 MOT_LOG_INFO("Rollback of create index %s for table %s",
                     index->GetName().c_str(),
                     table->GetLongTableName().c_str());
-                table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
+                if (index->IsPrimaryKey()) {
+                    table->SetPrimaryIndex(nullptr);
+                    GcManager::ClearIndexElements(index->GetIndexId());
+                    table->DeletePrimaryIndex(index);
+                } else {
+                    table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
+                }
                 break;
             case DDL_ACCESS_DROP_INDEX:
                 index = (Index*)ddl_access->GetEntry();
@@ -542,6 +548,9 @@ void TxnManager::RollbackDDLs()
                 MOT_LOG_INFO("Rollback of drop index %s for table %s",
                     index->GetName().c_str(),
                     table->GetLongTableName().c_str());
+                if (index->IsPrimaryKey()) {
+                    table->SetPrimaryIndex(index);
+                }
                 break;
             default:
                 break;
@@ -582,15 +591,24 @@ void TxnManager::WriteDDLChanges()
                 delete[] indexes;
                 break;
             case DDL_ACCESS_CREATE_INDEX:
-                ((Index*)ddl_access->GetEntry())->SetIsCommited(true);
+                index = (Index*)ddl_access->GetEntry();
+                table = index->GetTable();
+                index->SetIsCommited(true);
+                if (index->IsPrimaryKey()) {
+                    table->SetPrimaryIndex(index);
+                }
                 break;
             case DDL_ACCESS_DROP_INDEX:
                 index = (Index*)ddl_access->GetEntry();
-                if (index->IsPrimaryKey())
-                    break;
                 table = index->GetTable();
                 table->WrLock();
-                table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
+                if (index->IsPrimaryKey()) {
+                    table->SetPrimaryIndex(nullptr);
+                    GcManager::ClearIndexElements(index->GetIndexId());
+                    table->DeletePrimaryIndex(index);
+                } else {
+                    table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
+                }
                 table->Unlock();
                 break;
             default:
@@ -1225,14 +1243,22 @@ RC TxnManager::CreateIndex(Table* table, Index* index, bool is_primary)
         return RC_MEMORY_ALLOCATION_ERROR;
     }
 
+    table->WrLock();  // for concurrent access
     if (is_primary) {
-        table->UpdatePrimaryIndex((MOT::Index*)index);
+        if (!table->UpdatePrimaryIndex(index, this, m_threadId)) {
+            table->Unlock();
+            if (MOT_IS_OOM()) {  // do not report error in "unique violation" scenario
+                MOT_REPORT_ERROR(
+                    MOT_ERROR_INTERNAL, "Create Index", "Failed to add primary index %s", index->GetName().c_str());
+            }
+            delete ddl_access;
+            return m_err;
+        }
     } else {
         // currently we are still adding the index to the table although
         // is should only be added on successful commit. Assuming that if
         // a client did a create index, all other clients are waiting on a lock
         // until the changes are either commited or aborted
-        table->WrLock();  // for concurrent access
         if (table->GetNumIndexes() == MAX_NUM_INDEXES) {
             table->Unlock();
             MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
@@ -1253,14 +1279,13 @@ RC TxnManager::CreateIndex(Table* table, Index* index, bool is_primary)
             delete ddl_access;
             return m_err;
         }
-        table->Unlock();
     }
-
+    table->Unlock();
     m_txnDdlAccess->Add(ddl_access);
     return RC_OK;
 }
 
-RC TxnManager::DropIndex(Index* index)
+RC TxnManager::DropIndex(MOT::Index* index)
 {
     // allocate DDL before work and fail immediately if required
     TxnDDLAccess::DDLAccess* new_ddl_access = nullptr;
@@ -1277,13 +1302,19 @@ RC TxnManager::DropIndex(Index* index)
     RC res = RC_OK;
     Table* table = index->GetTable();
 
-    RollbackSecondaryIndexInsert(index);
+    if (!index->IsPrimaryKey()) {
+        RollbackSecondaryIndexInsert(index);
+    }
 
     if (ddl_access != nullptr) {
         // this index was created in this transaction, can delete it from the ddl_access
         // table->removeSecondaryIndex also performs releases the object
         m_txnDdlAccess->EraseByOid(index->GetExtId());
-        res = table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
+        if (index->IsPrimaryKey()) {
+            res = table->DeletePrimaryIndex(index);
+        } else {
+            res = table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
+        }
         if (res != RC_OK) {
             // print Error
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Drop Index", "Failed to remove secondary index");

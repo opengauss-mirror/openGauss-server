@@ -1813,11 +1813,8 @@ static void MOTValidateTableDef(Node* obj)
                 cmd = (AlterTableCmd*)lfirst(cell);
                 if (cmd->subtype == AT_ChangeOwner) {
                     allow = true;
-                } else if (cmd->subtype == AT_AddIndex && u_sess->proc_cxt.clientIsGsRestore) {
+                } else if (cmd->subtype == AT_AddIndex) {
                     allow = true;
-                    isMemoryLimitReached();
-                    ((IndexStmt*)cmd->def)->relation->foreignOid = ats->relation->foreignOid;
-                    MOTAdaptor::CreateIndex((IndexStmt*)cmd->def, tid);
                 }
             }
             if (allow == false) {

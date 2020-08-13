@@ -1541,7 +1541,16 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         return MOT::RC_ERROR;
     }
 
-    if (table->GetNumIndexes() == MAX_NUM_INDEXES) {
+    if (index->primary) {
+        if (!table->IsTableEmpty(txn->GetThdId())) {
+            ereport(ERROR,
+                (errmodule(MOD_MM),
+                    errcode(ERRCODE_FDW_ERROR),
+                    errmsg(
+                        "Table %s is not empty, create primary index is not allowed", table->GetTableName().c_str())));
+            return MOT::RC_ERROR;
+        }
+    } else if (table->GetNumIndexes() == MAX_NUM_INDEXES) {
         ereport(ERROR,
             (errmodule(MOD_MM),
                 errcode(ERRCODE_FDW_TOO_MANY_INDEXES),
@@ -1852,6 +1861,15 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
             table->base.relation->foreignOid,
             columnCount,
             tupleSize);
+
+        res = txn->CreateTable(currentTable);
+        if (res != MOT::RC_OK) {
+            delete currentTable;
+            currentTable = nullptr;
+            report_pg_error(res, txn);
+            break;
+        }
+
         // add default PK index
         MOT::RC rc = MOT::RC_OK;
         primaryIdx = MOT::IndexFactory::CreatePrimaryIndexEx(MOT::IndexingMethod::INDEXING_METHOD_TREE,
@@ -1866,20 +1884,19 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
             report_pg_error(rc, txn);
             break;
         }
+        primaryIdx->SetExtId(table->base.relation->foreignOid + 1);
         primaryIdx->SetNumTableFields(columnCount);
         primaryIdx->SetNumIndexFields(1);
         primaryIdx->SetLenghtKeyFields(0, -1, 8);
         primaryIdx->SetFakePrimary(true);
 
-        // The primary index has been created and registered at the table, but not yet initialized
-        currentTable->AddPrimaryIndex(std::move(primaryIdx));
-
-        res = txn->CreateTable(currentTable);
+        // Add default primary index
+        res = txn->CreateIndex(currentTable, primaryIdx, true);
     } while (0);
 
     if (res != MOT::RC_OK) {
         if (currentTable != nullptr) {
-            MOT::GetTableManager()->DropTable(currentTable, txn->GetSessionContext());
+            txn->DropTable(currentTable);
         }
         if (primaryIdx != nullptr) {
             delete primaryIdx;

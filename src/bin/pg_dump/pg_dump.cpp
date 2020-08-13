@@ -17390,12 +17390,14 @@ static void dumpConstraintForForeignTbl(Archive* fout, ConstraintInfo* coninfo)
         appendPQExpBuffer(q, ";\n");
 
         /*
-         * DROP must be fully qualified in case same name appears in
-         * pg_catalog
+         * DROP must be fully qualified in case same name appears in pg_catalog
+         * In case of FDW MOT do not generate drop statements for CONSTRAINT
          */
-        appendPQExpBuffer(delq, "ALTER TABLE %s.", fmtId(tbinfo->dobj.nmspace->dobj.name));
-        appendPQExpBuffer(delq, "%s ", fmtId(tbinfo->dobj.name));
-        appendPQExpBuffer(delq, "DROP CONSTRAINT %s;\n", fmtId(coninfo->dobj.name));
+        if (!tbinfo->isMOT) {
+            appendPQExpBuffer(delq, "ALTER TABLE %s.", fmtId(tbinfo->dobj.nmspace->dobj.name));
+            appendPQExpBuffer(delq, "%s ", fmtId(tbinfo->dobj.name));
+            appendPQExpBuffer(delq, "DROP CONSTRAINT %s;\n", fmtId(coninfo->dobj.name));
+        }
         ArchiveEntry(fout,
             coninfo->dobj.catId,
             coninfo->dobj.dumpId,
@@ -18972,7 +18974,12 @@ static void addBoundaryDependencies(DumpableObject** dobjs, int numObjs, Dumpabl
             case DO_DEFAULT_ACL:
             case DO_RLSPOLICY:
                 /* Post-data objects: must come after the post-data boundary */
-                addObjectDependency(dobj, postDataBound->dumpId);
+                if (dobj->objType == DO_INDEX &&
+                    ((IndxInfo*)dobj)->indextable && ((IndxInfo*)dobj)->indextable->isMOT) {
+                    addObjectDependency(preDataBound, dobj->dumpId);
+                } else {
+                    addObjectDependency(dobj, postDataBound->dumpId);
+                }
                 break;
             case DO_RULE:
                 /* Rules are post-data, but only if dumped separately */
@@ -18983,8 +18990,11 @@ static void addBoundaryDependencies(DumpableObject** dobjs, int numObjs, Dumpabl
             case DO_FK_CONSTRAINT:
             case DO_FTBL_CONSTRAINT:
                 /* Constraints are post-data, but only if dumped separately */
-                if (((ConstraintInfo*)dobj)->separate)
+                if (((ConstraintInfo*)dobj)->contable && ((ConstraintInfo*)dobj)->contable->isMOT) {
+                    addObjectDependency(preDataBound, dobj->dumpId);
+                } else if (((ConstraintInfo*)dobj)->separate) {
                     addObjectDependency(dobj, postDataBound->dumpId);
+                }
                 break;
             case DO_PRE_DATA_BOUNDARY:
                 /* nothing to do */

@@ -182,13 +182,15 @@ public:
      * @brief Sets the primary index for the table.
      * @param index The index to set.
      */
-    void AddPrimaryIndex(Index*&& index);
+    void SetPrimaryIndex(Index* index);
 
     /**
      * @brief Sets the primary index for the table (replaces previously created fake primary.
      * @param index The index to set.
+     * @param txn The current transaction.
+     * @param tid Current thread id
      */
-    void UpdatePrimaryIndex(Index*&& index);
+    bool UpdatePrimaryIndex(Index* index, TxnManager* txn, uint32_t tid);
 
     /**
      * @brief Adds a secondary index to the table.
@@ -215,6 +217,20 @@ public:
      * @return RC value denoting the operation's completion status.
      */
     RC RemoveSecondaryIndex(char* name, TxnManager* txn);
+
+    /**
+     * @brief Deletes a primary index.
+     * @param the index to remove.
+     * @return RC value denoting the operation's completion status.
+     */
+    RC DeletePrimaryIndex(MOT::Index* index);
+
+    /**
+     * @brief Checks if table contains data.
+     * @param thread id.
+     * @return true if table is empty, false otherwise.
+     */
+    bool IsTableEmpty(uint32_t tid);
 
     /**
      * @brief Truncates the table.

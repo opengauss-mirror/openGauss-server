@@ -157,27 +157,60 @@ void Table::DecIndexColumnUsage(Index* index)
     }
 }
 
-void Table::AddPrimaryIndex(Index*&& index)
+bool Table::IsTableEmpty(uint32_t tid)
 {
-    index->SetTable(this);
-    this->m_primaryIndex = std::move(index);
-    IncIndexColumnUsage(index);
+    bool res = false;
+    IndexIterator* it = GetPrimaryIndex()->Begin(tid);
 
-    m_indexes[0] = index;
-    ++m_numIndexes;
+    // report error if failed to allocate
+    if (it == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "IsTableEmpty", "Failed to begin iterating over primary index");
+        return false;
+    }
+
+    if (!it->IsValid()) {
+        res = true;
+    }
+
+    delete it;
+    return res;
 }
 
-void Table::UpdatePrimaryIndex(Index*&& index)
+void Table::SetPrimaryIndex(Index* index)
+{
+    if (index != nullptr) {
+        index->SetTable(this);
+    }
+    this->m_primaryIndex = index;
+    m_indexes[0] = index;
+}
+
+bool Table::UpdatePrimaryIndex(Index* index, TxnManager* txn, uint32_t tid)
 {
     if (this->m_primaryIndex) {
-        DecIndexColumnUsage(this->m_primaryIndex);
-        delete this->m_primaryIndex;
+        if (txn == nullptr) {
+            DeletePrimaryIndex(this->m_primaryIndex);
+        } else {
+            txn->DropIndex(this->m_primaryIndex);
+        }
+    } else {
+        if (m_numIndexes == 0) {
+            ++m_numIndexes;
+        }
     }
-    index->SetTable(this);
-    this->m_primaryIndex = std::move(index);
-    IncIndexColumnUsage(index);
 
-    m_indexes[0] = index;
+    IncIndexColumnUsage(index);
+    SetPrimaryIndex(index);
+
+    return true;
+}
+
+RC Table::DeletePrimaryIndex(MOT::Index* index)
+{
+    DecIndexColumnUsage(index);
+    delete index;
+
+    return RC::RC_OK;
 }
 
 bool Table::AddSecondaryIndex(const string& indexName, Index* index, TxnManager* txn, uint32_t tid)
@@ -913,7 +946,11 @@ RC Table::CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid)
         return RC_ERROR;
     }
     if (primary) {
-        UpdatePrimaryIndex((Index*)ix);
+        if (UpdatePrimaryIndex(ix, nullptr, tid) != true) {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to add primary index");
+            delete ix;
+            return RC_ERROR;
+        }
     } else {
         if (AddSecondaryIndex(ix->GetName(), (Index*)ix, nullptr, tid) != true) {
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to add secondary index");

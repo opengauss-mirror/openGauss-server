@@ -45,9 +45,9 @@ static uint64 totaldone = 0;
  * the contents of it into a directory. Only files, directories and
  * symlinks are supported, no other kinds of special files.
  */
-static void MotReceiveAndUnpackTarFile(
-    const char* basedir, const char* chkptName, PGconn* conn, PGresult* res, int rownum, const char* progname)
+static void MotReceiveAndUnpackTarFile(const char* basedir, const char* chkptName, PGconn* conn, const char* progname)
 {
+    PGresult* res = NULL;
     char current_path[MAXPGPATH];
     char filename[MAXPGPATH];
     int current_len_left;
@@ -66,6 +66,7 @@ static void MotReceiveAndUnpackTarFile(
         fprintf(stderr, "%s: could not get COPY data stream: %s", progname, PQerrorMessage(conn));
         disconnect_and_exit(1);
     }
+    PQclear(res);
 
     while (1) {
         int r;
@@ -302,6 +303,7 @@ void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* prog
             if (verbose) {
                 fprintf(stderr, "%s: no mot checkpoint exists\n", progname);
             }
+            PQclear(res);
             return;
         } else {
             fprintf(stderr, "%s: could not fetch mot checkpoint info: %s", progname, PQerrorMessage(fetchConn));
@@ -341,7 +343,7 @@ void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* prog
             exit(1);
         }
 
-        MotReceiveAndUnpackTarFile(basedir, chkptName, fetchConn, res, 1, progname);
+        MotReceiveAndUnpackTarFile(basedir, chkptName, fetchConn, progname);
         if (verbose) {
             fprintf(stderr, "%s: finished fetching mot checkpoint\n", progname);
         }
@@ -400,6 +402,9 @@ char* GetOptionValueFromFile(const char* fileName, const char* option)
         }
     }
 
+    if (line != NULL) {
+        free(line);
+    }
     fclose(file);
     return ret;
 }

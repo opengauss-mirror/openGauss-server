@@ -5372,7 +5372,6 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
          * wheather support alter owner, support alter colomn type, etc.
          */
         FdwRoutine* fdwroutine = GetFdwRoutineByRelId(relid);
-        stmt->relation->foreignOid = relid;
 
         if (NULL != fdwroutine->ValidateTableDef) {
             fdwroutine->ValidateTableDef((Node*)stmt);
@@ -8844,6 +8843,7 @@ static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt,
         check_rights,
         skip_build,
         quiet);
+    CreateForeignIndex(stmt, new_index);
     (void)pgstat_report_waitstatus(oldStatus);
 
     /*
