@@ -176,6 +176,71 @@ select * from gtt_test_new;
 
 --ok
 ALTER TABLE gtt_test_new DROP address;
+--gtt statistic test
+create global temp table gtt_statistic_test(id int);
+insert into gtt_statistic_test values (generate_series(1,1000));
+analyze gtt_statistic_test;
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+ attname | avg_width 
+---------+-----------
+ id      |         4
+(1 row)
+
+--add column
+alter table gtt_statistic_test add column text varchar(128);
+\d gtt_statistic_test
+   Table "gtt_function.gtt_statistic_test"
+ Column |          Type          | Modifiers 
+--------+------------------------+-----------
+ id     | integer                | 
+ text   | character varying(128) | 
+
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+ attname | avg_width 
+---------+-----------
+ id      |         4
+ text    |          
+(2 rows)
+
+insert into gtt_statistic_test values (generate_series(1,1000),'hello gtt');
+analyze gtt_statistic_test;
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+ attname | avg_width 
+---------+-----------
+ id      |         4
+ text    |        10
+(2 rows)
+
+--modify column
+alter table gtt_statistic_test modify id varchar(128);
+\d gtt_statistic_test
+   Table "gtt_function.gtt_statistic_test"
+ Column |          Type          | Modifiers 
+--------+------------------------+-----------
+ id     | character varying(128) | 
+ text   | character varying(128) | 
+
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+ attname | avg_width 
+---------+-----------
+ id      |          
+ text    |        10
+(2 rows)
+
+--drop column
+alter table gtt_statistic_test drop text;
+\d gtt_statistic_test
+   Table "gtt_function.gtt_statistic_test"
+ Column |          Type          | Modifiers 
+--------+------------------------+-----------
+ id     | character varying(128) | 
+
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+ attname | avg_width 
+---------+-----------
+ id      |          
+(1 row)
+
 CREATE global temp TABLE products (
     product_no integer PRIMARY KEY,
     name text,
@@ -382,7 +447,7 @@ create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='');
 ERROR:  parameter "on_commit_delete_rows" requires a Boolean value
 reset search_path;
 drop schema gtt_function cascade;
-NOTICE:  drop cascades to 34 other objects
+NOTICE:  drop cascades to 35 other objects
 DETAIL:  drop cascades to table gtt_function.gtt1
 drop cascades to table gtt_function.gtt2
 drop cascades to table gtt_function.gtt3
@@ -398,6 +463,7 @@ drop cascades to table gtt_function.gtt7
 drop cascades to table gtt_function.gtt8
 drop cascades to table gtt_function.gtt9
 drop cascades to table gtt_function.gtt_test_new
+drop cascades to table gtt_function.gtt_statistic_test
 drop cascades to table gtt_function.products
 drop cascades to table gtt_function.orders
 drop cascades to table gtt_function.mytable

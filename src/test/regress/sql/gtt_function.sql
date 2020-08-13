@@ -178,6 +178,30 @@ select * from gtt_test_new;
 --ok
 ALTER TABLE gtt_test_new DROP address;
 
+--gtt statistic test
+create global temp table gtt_statistic_test(id int);
+insert into gtt_statistic_test values (generate_series(1,1000));
+analyze gtt_statistic_test;
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+
+--add column
+alter table gtt_statistic_test add column text varchar(128);
+\d gtt_statistic_test
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+insert into gtt_statistic_test values (generate_series(1,1000),'hello gtt');
+analyze gtt_statistic_test;
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+
+--modify column
+alter table gtt_statistic_test modify id varchar(128);
+\d gtt_statistic_test
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+
+--drop column
+alter table gtt_statistic_test drop text;
+\d gtt_statistic_test
+select attname,avg_width from pg_gtt_stats where tablename='gtt_statistic_test';
+
 CREATE global temp TABLE products (
     product_no integer PRIMARY KEY,
     name text,

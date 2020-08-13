@@ -709,6 +709,50 @@ bool get_gtt_relstats(Oid relid, BlockNumber* relpages, double* reltuples, Block
     return true;
 }
 
+void remove_gtt_att_statistic(Oid reloid, int attnum)
+{
+    gtt_local_hash_entry* entry = gtt_search_by_relid(reloid, true);
+    if (entry == NULL) {
+        return;
+    }
+    for (int i = 0; i < entry->natts; i++) {
+        if (entry->attnum[i] != attnum) {
+            continue;
+        }
+        Assert(entry->att_stat_tups[i]);
+        entry->attnum[i] = 0;
+        heap_freetuple(entry->att_stat_tups[i]);
+        entry->att_stat_tups[i] = NULL;
+        break;
+    }
+    return;
+}
+
+void extend_gtt_att_statistic(gtt_local_hash_entry* entry, int natts)
+{
+    Assert(entry != NULL);
+    Assert(entry->natts < natts);
+
+    MemoryContext oldContext = MemoryContextSwitchTo(u_sess->gtt_ctx.gtt_relstats_context);
+    int* attNum = (int*)palloc0(sizeof(int) * natts);
+    HeapTuple* attStatTups = (HeapTuple*)palloc0(sizeof(HeapTuple) * natts);
+    for (int i = 0; i < entry->natts; i++) {
+        if (entry->attnum[i] == 0) {
+            continue;
+        }
+        attNum[i] = entry->attnum[i];
+        attStatTups[i] = entry->att_stat_tups[i];
+    }
+    pfree(entry->attnum);
+    pfree(entry->att_stat_tups);
+
+    entry->natts = natts;
+    entry->attnum = attNum;
+    entry->att_stat_tups = attStatTups;
+    (void)MemoryContextSwitchTo(oldContext);
+    return;
+}
+
 /*
  * Update global temp table statistic info(definition is same as pg_statistic)
  * to local hashtable where ananyze global temp table
@@ -725,10 +769,8 @@ void up_gtt_att_statistic(Oid reloid, int attnum, int natts, TupleDesc tupleDesc
     entry = gtt_search_by_relid(reloid, true);
     if (entry == NULL)
         return;
-
     if (entry->natts < natts) {
-        elog(WARNING, "reloid %u not support update attstat after add colunm", reloid);
-        return;
+        extend_gtt_att_statistic(entry, natts);
     }
 
     oldcontext = MemoryContextSwitchTo(u_sess->gtt_ctx.gtt_relstats_context);
