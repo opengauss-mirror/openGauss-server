@@ -1171,7 +1171,7 @@ inline Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
         upBoundary->constbyval);
 }
 
-inline int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Interval* intervalValue)
+int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Interval* intervalValue)
 {
     Assert(partition->isInterval);
     Assert(partition->len == 1);

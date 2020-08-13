@@ -396,28 +396,28 @@ INTERVAL('1 MONTH')
 ( PARTITION p0 VALUES LESS THAN (TO_DATE('1-1-2008', 'DD-MM-YYYY')),
   PARTITION p1 VALUES LESS THAN (TO_DATE('6-5-2008', 'DD-MM-YYYY'))
 );
-select relname, parentid, reltoastrelid, boundaries from pg_partition;
-    relname     | parentid | reltoastrelid |          boundaries          
-----------------+----------+---------------+------------------------------
- interval_sales |    19348 |             0 | 
- p0             |    19348 |         19354 | {"Tue Jan 01 00:00:00 2008"}
- p1             |    19348 |         19357 | {"Tue May 06 00:00:00 2008"}
+select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition;
+    relname     | has_toastrelid |          boundaries          
+----------------+----------------+------------------------------
+ interval_sales | FALSE          | 
+ p0             | TRUE           | {"Tue Jan 01 00:00:00 2008"}
+ p1             | TRUE           | {"Tue May 06 00:00:00 2008"}
 (3 rows)
 
 insert into interval_sales values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('2020-01-01', 'YYYY-MM-DD'),TO_DATE('2020-07-01', 'YYYY-MM-DD'),'1 day'), 1, 1, 1, 1);
-select relname, parentid, reltoastrelid, boundaries from pg_partition;
-    relname     | parentid | reltoastrelid |          boundaries          
-----------------+----------+---------------+------------------------------
- interval_sales |    19348 |             0 | 
- p0             |    19348 |         19354 | {"Tue Jan 01 00:00:00 2008"}
- p1             |    19348 |         19357 | {"Tue May 06 00:00:00 2008"}
- sys_p1         |    19348 |         19361 | {"Mon Jan 06 00:00:00 2020"}
- sys_p2         |    19348 |         19365 | {"Thu Feb 06 00:00:00 2020"}
- sys_p3         |    19348 |         19369 | {"Fri Mar 06 00:00:00 2020"}
- sys_p4         |    19348 |         19373 | {"Mon Apr 06 00:00:00 2020"}
- sys_p5         |    19348 |         19377 | {"Wed May 06 00:00:00 2020"}
- sys_p6         |    19348 |         19381 | {"Sat Jun 06 00:00:00 2020"}
- sys_p7         |    19348 |         19385 | {"Mon Jul 06 00:00:00 2020"}
+select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition;
+    relname     | has_toastrelid |          boundaries          
+----------------+----------------+------------------------------
+ interval_sales | FALSE          | 
+ p0             | TRUE           | {"Tue Jan 01 00:00:00 2008"}
+ p1             | TRUE           | {"Tue May 06 00:00:00 2008"}
+ sys_p1         | TRUE           | {"Mon Jan 06 00:00:00 2020"}
+ sys_p2         | TRUE           | {"Thu Feb 06 00:00:00 2020"}
+ sys_p3         | TRUE           | {"Fri Mar 06 00:00:00 2020"}
+ sys_p4         | TRUE           | {"Mon Apr 06 00:00:00 2020"}
+ sys_p5         | TRUE           | {"Wed May 06 00:00:00 2020"}
+ sys_p6         | TRUE           | {"Sat Jun 06 00:00:00 2020"}
+ sys_p7         | TRUE           | {"Mon Jul 06 00:00:00 2020"}
 (10 rows)
 
 drop table interval_sales;
