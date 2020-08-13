@@ -564,7 +564,9 @@ static void MotSysNumaSetTaskConstraints()
             g_numProcNode = MotSysNumaReadBitmask(mask, g_allNodesBm);
     }
     fclose(f);
-    free(buffer);
+    if (buffer != nullptr) {
+        free(buffer);
+    }
 
     if (g_numProcCpu <= 0) {
         for (i = 0; i <= g_maxConfCpu; i++) {
