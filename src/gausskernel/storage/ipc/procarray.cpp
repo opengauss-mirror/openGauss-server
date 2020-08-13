@@ -4054,6 +4054,12 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
             volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
             TransactionId xid;
 
+            /* Update globalxmin to be the smallest valid xmin */
+            xid = pgxact->xmin; /* fetch just once */
+
+            if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, globalxmin))
+                globalxmin = xid;
+
             /*
              * Backend is doing logical decoding which manages xmin
              * separately, check below.
@@ -4064,12 +4070,6 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
             /* Ignore procs running LAZY VACUUM */
             if (pgxact->vacuumFlags & PROC_IN_VACUUM)
                 continue;
-
-            /* Update globalxmin to be the smallest valid xmin */
-            xid = pgxact->xmin; /* fetch just once */
-
-            if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, globalxmin))
-                globalxmin = xid;
 
             /* Fetch xid just once - see GetNewTransactionId */
             xid = pgxact->xid;
