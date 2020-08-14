@@ -16,8 +16,6 @@
  */
 #define USE_READLINE 1
 
-#include <editline/readline.h>
-
 #ifdef HAVE_LIBREADLINE
 #define USE_READLINE 1
 
@@ -37,6 +35,8 @@
 #include <history.h>
 #endif
 #endif   /* HAVE_READLINE_READLINE_H, etc */
+#else
+#include <editline/readline.h>
 #endif   /* HAVE_LIBREADLINE */
 
 #include "libpq/pqexpbuffer.h"
