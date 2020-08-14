@@ -15,6 +15,8 @@
 #define CLAUSES_H
 
 #include "nodes/relation.h"
+#include "parser/parse_node.h"
+#include "nodes/nodeFuncs.h"
 
 #define is_opclause(clause) ((clause) != NULL && IsA(clause, OpExpr))
 #define is_funcclause(clause) ((clause) != NULL && IsA(clause, FuncExpr))
@@ -110,6 +112,16 @@ extern bool contain_rownum_walker(Node *node, void *context);
 static inline bool contain_rownum_expr(Node *node) 
 {
     return contain_rownum_walker(node, NULL);
+}
+
+/* Check if it includes Rownum */
+static inline void ExcludeRownumExpr(ParseState* pstate, Node* expr)
+{
+    if (contain_rownum_expr(expr))                                                          
+            ereport(ERROR,                                                                      
+                (errcode(ERRCODE_SYNTAX_ERROR),                                                 
+                errmsg("specified ROWNUM is not allowed here."),                                
+                parser_errposition(pstate, exprLocation(expr))));
 }
 
 extern List* get_quals_lists(Node *jtnode);

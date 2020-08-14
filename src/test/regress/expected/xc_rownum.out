@@ -251,7 +251,29 @@ select rownum rowno2, * from (select rownum rowno1, * from distributors order by
 ERROR:  Alias "rowno2" reference with ROWNUM included is invalid.
 LINE 1: ...wno1, * from distributors order by id desc) where rowno2 < 2...
                                                              ^
-															 
+--test default rownum when creating table
+create table student(id int default rownum, stuname varchar(5));
+ERROR:  specified ROWNUM is not allowed here.
+create table student(id int default rownum+1, stuname varchar(5));
+ERROR:  specified ROWNUM is not allowed here.
+--test insert when values include rownum
+insert into distributors values (rownum, 'qwer');
+ERROR:  specified ROWNUM is not allowed here.
+LINE 1: insert into distributors values (rownum, 'qwer');
+                                         ^
+insert into distributors(id, name) values (2, 'abcd'), (rownum+1, 'qwer');
+ERROR:  specified ROWNUM is not allowed here.
+LINE 1: ... into distributors(id, name) values (2, 'abcd'), (rownum+1, ...
+                                                             ^
+--test VALUES clause that's being used as a standalone SELECT
+select * from (values(rownum, 1)) x(a, b);
+ERROR:  specified ROWNUM is not allowed here.
+LINE 1: select * from (values(rownum, 1)) x(a, b);
+                              ^
+select * from (values(rownum+1, 1)) x(a, b);
+ERROR:  specified ROWNUM is not allowed here.
+LINE 1: select * from (values(rownum+1, 1)) x(a, b);
+                              ^
 --test except and minus
 --create test table
 create table except_table (a int, b int);

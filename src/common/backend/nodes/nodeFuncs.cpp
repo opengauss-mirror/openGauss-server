@@ -1383,6 +1383,9 @@ int exprLocation(const Node* expr)
             /* just use typename's location */
             loc = exprLocation((Node*)((const FunctionParameter*)expr)->argType);
             break;
+        case T_Rownum:
+            loc = ((const Rownum*)expr)->location;
+            break;
         default:
             /* for any other node type it's just unknown... */
             loc = -1;

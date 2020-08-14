@@ -1536,6 +1536,10 @@ List* transformInsertRow(ParseState* pstate, List* exprlist, List* stmtcols, Lis
     foreach (lc, exprlist) {
         Expr* expr = (Expr*)lfirst(lc);
         ResTarget* col = NULL;
+        /*
+         * Rownum is not allowed in exprlist in INSERT statement.
+         */
+        ExcludeRownumExpr(pstate, (Node*)expr);
 
         col = (ResTarget*)lfirst(icols);
         AssertEreport(IsA(col, ResTarget), MOD_OPT, "nodeType inconsistant");
@@ -1802,7 +1806,7 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
 
     /*
      * For each row of VALUES, transform the raw expressions.  This is also a
-     * handy place to reject DEFAULT nodes, which the grammar allows for
+     * handy place to reject DEFAULT nodes and Rownum, which the grammar allows for
      * simplicity.
      *
      * Note that the intermediate representation we build is column-organized
@@ -1832,7 +1836,7 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
                     parser_errposition(pstate, exprLocation((Node*)sublist))));
         }
 
-        /* Check for DEFAULT and build per-column expression lists */
+        /* Check for DEFAULT and Rownum, then build per-column expression lists */
         i = 0;
         foreach (lc2, sublist) {
             Node* col = (Node*)lfirst(lc2);
@@ -1842,9 +1846,13 @@ static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt)
                     (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("DEFAULT can only appear in a VALUES list within INSERT"),
                         parser_errposition(pstate, exprLocation(col))));
-            }
+            } 
+
+            ExcludeRownumExpr(pstate, col);
+
             colexprs[i] = lappend(colexprs[i], col);
             i++;
+            
         }
 
         /* Release sub-list's cells to save memory */
