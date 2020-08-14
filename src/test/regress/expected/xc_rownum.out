@@ -274,6 +274,7 @@ select * from (values(rownum+1, 1)) x(a, b);
 ERROR:  specified ROWNUM is not allowed here.
 LINE 1: select * from (values(rownum+1, 1)) x(a, b);
                               ^
+                              
 --test except and minus
 --create test table
 create table except_table (a int, b int);
