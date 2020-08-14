@@ -196,6 +196,8 @@ static void StartupReleaseAllLocks(int code, Datum arg)
  */
 void StartupProcessMain(void)
 {
+    knl_thread_set_name("StartupProcess");
+
     /*
      * Properly accept or ignore signals the postmaster might send us.
      *

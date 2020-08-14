@@ -74,6 +74,8 @@
 
 #define RESERVE_SIZE 32
 
+#define MAX_THREAD_NAME_LENGTH 16
+
 typedef struct ResourceOwnerData* ResourceOwner;
 
 typedef struct knl_t_codegen_context {
@@ -2812,5 +2814,6 @@ typedef struct knl_thrd_context {
 extern void knl_thread_mot_init();
 extern void knl_thread_init(knl_thread_role role);
 extern THR_LOCAL knl_thrd_context t_thrd;
+extern void knl_thread_set_name(const char* name);
 
 #endif /* SRC_INCLUDE_KNL_KNL_THRD_H_ */

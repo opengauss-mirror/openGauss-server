@@ -199,10 +199,10 @@ NON_EXEC_STATIC void CatchupMain()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    t_thrd.proc_cxt.MyProgName = "Catchup";
+    knl_thread_set_name("Catchup");
 
     /* Identify myself via ps */
-    init_ps_display("catchup process", "", "", "");
+    init_ps_display("Catchup process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 

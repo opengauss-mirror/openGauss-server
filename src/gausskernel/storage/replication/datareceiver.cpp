@@ -204,7 +204,9 @@ void DataReceiverMain(void)
 
     AssertEreport(datarcv != nullptr, MOD_FUNCTION, "datarcv should not be null");
 
-    ereport(LOG, (errmsg("datareceiver thread started")));
+    knl_thread_set_name("DataReceiver");
+
+    ereport(LOG, (errmsg("DataReceiver thread started")));
     /*
      * Mark datareceiver as running in shared memory.
      *

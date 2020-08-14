@@ -702,7 +702,9 @@ void walrcvWriterMain(void)
     sigset_t oldSigMask;
     MemoryContext walrcvWriterContext;
 
-    ereport(LOG, (errmsg("walrcvwriter thread started")));
+    knl_thread_set_name("WalRcvWriter");
+
+    ereport(LOG, (errmsg("WalRcvWriter thread started")));
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -867,7 +869,7 @@ void walrcvWriterMain(void)
             ;
 
         if (t_thrd.walrcvwriter_cxt.shutdownRequested) {
-            ereport(LOG, (errmsg("walrcvwriter thread shut down")));
+            ereport(LOG, (errmsg("WalRcvWriter thread shut down")));
             /*
              * From here on, elog(ERROR) should end with exit(1), not send
              * control back to the sigsetjmp block above
@@ -879,7 +881,7 @@ void walrcvWriterMain(void)
 
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)1000 /* ms */);
         if (rc & WL_POSTMASTER_DEATH) {
-            ereport(LOG, (errmsg("walrcvwriter thread shut down with code 1")));
+            ereport(LOG, (errmsg("WalRcvWriter thread shut down with code 1")));
             gs_thread_exit(1);
         }
     }

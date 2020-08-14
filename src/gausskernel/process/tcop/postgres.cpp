@@ -6429,6 +6429,8 @@ int StreamMain(void* arg)
 
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
+    knl_thread_set_name("Stream");
+
     /*
      * Rebind stream thread to instance bind CPU in thread pool mode.
      * Otherwise the stream thread will follow its parent thread's bind CPU,
@@ -6948,7 +6950,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-        t_thrd.proc_cxt.MyProgName = "gaussdb";
+        knl_thread_set_name("BackendMode");
 
         /*
          * Initialize random() for the first time, like PostmasterMain()
@@ -6958,7 +6960,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
         srandom((unsigned int)(t_thrd.proc_cxt.MyProcPid ^ (unsigned int)t_thrd.proc_cxt.MyStartTime));
     } else {
-        t_thrd.proc_cxt.MyProgName = "postgres";
+        knl_thread_set_name("gaussdb");
     }
 
     /*

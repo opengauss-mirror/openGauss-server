@@ -7495,7 +7495,7 @@ int WLMProcessThreadMain(void)
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    t_thrd.proc_cxt.MyProgName = "WLMCollectWorker";
+    knl_thread_set_name("WlmCollector");
 
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
@@ -7504,7 +7504,7 @@ int WLMProcessThreadMain(void)
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
 
     /* Identify myself via ps */
-    init_ps_display("wlm collect worker process", "", "", "");
+    init_ps_display("WlmCollector worker process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -7665,7 +7665,7 @@ int WLMProcessThreadMain(void)
     /* init transaction to execute query */
     WLMInitTransaction(&backinit);
 
-    ereport(LOG, (errmsg("process wlm thread starting up.")));
+    ereport(LOG, (errmsg("WlmCollector thread starting up.")));
 
     /* build user info and resource pool hash table if does not exist */
     if (!g_instance.wlm_cxt->stat_manager.infoinit) {
@@ -7891,7 +7891,7 @@ int WLMProcessThreadMain(void)
 
     backinit = false;
 
-    ereport(DEBUG1, (errmsg("exit wlm worker thread!")));
+    ereport(DEBUG1, (errmsg("exit WlmCollector thread!")));
 
     return 0;
 }

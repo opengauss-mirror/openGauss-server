@@ -104,7 +104,9 @@ void BackgroundWriterMain(void)
 
     t_thrd.role = BGWRITER;
 
-    ereport(LOG, (errmsg("bgwriter started")));
+    knl_thread_set_name("BgWriter");
+
+    ereport(LOG, (errmsg("BgWriter started")));
 
     /*
      * Properly accept or ignore signals the postmaster might send us.

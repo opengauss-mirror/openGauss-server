@@ -122,14 +122,14 @@ NON_EXEC_STATIC void JobScheduleMain()
     /* reset t_thrd.proc_cxt.MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    t_thrd.proc_cxt.MyProgName = "JobScheduler";
+    knl_thread_set_name("JobScheduler");
     u_sess->attr.attr_common.application_name = pstrdup("JobScheduler");
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("job scheduler process", "", "", "");
+    init_ps_display("JobScheduler process", "", "", "");
 
     elog(LOG, "job scheduler started");
 
@@ -303,7 +303,7 @@ NON_EXEC_STATIC void JobScheduleMain()
 
     if (t_thrd.job_cxt.got_SIGTERM) {
         /* Normal exit */
-        ereport(LOG, (errmsg("job scheduler is shutting down")));
+        ereport(LOG, (errmsg("JobScheduler is shutting down")));
 
         t_thrd.job_cxt.JobScheduleShmem->jsch_pid = 0;
 
@@ -359,7 +359,7 @@ NON_EXEC_STATIC void JobScheduleMain()
          * necessity for manual cleanup of all postmaster children.
          */
         if ((unsigned int)ret & WL_POSTMASTER_DEATH) {
-            elog(LOG, "Job scheduler shutting down with exit code 1");
+            elog(LOG, "JobScheduler shutting down with exit code 1");
             proc_exit(1);
         }
 
@@ -463,7 +463,7 @@ NON_EXEC_STATIC void JobScheduleMain()
     }
 
     /* Normal exit */
-    ereport(LOG, (errmsg("job scheduler is shutting down")));
+    ereport(LOG, (errmsg("JobScheduler is shutting down")));
 
     t_thrd.job_cxt.JobScheduleShmem->jsch_pid = 0;
 

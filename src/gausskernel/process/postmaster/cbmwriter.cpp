@@ -61,7 +61,9 @@ void CBMWriterMain(void)
     sigjmp_buf local_sigjmp_buf;
     ResourceOwner cbmwriter_resourceOwner;
 
-    ereport(LOG, (errmsg("cbm writer started")));
+    knl_thread_set_name("CBMWriter");
+
+    ereport(LOG, (errmsg("CBMWriter started")));
     u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
                                                       ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                       : u_sess->attr.attr_storage.fullCheckPointTimeout;

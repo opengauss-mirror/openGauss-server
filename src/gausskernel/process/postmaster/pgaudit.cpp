@@ -374,7 +374,9 @@ NON_EXEC_STATIC void PgAuditorMain()
 
     t_thrd.role = AUDIT;
 
-    init_ps_display("auditor process", "", "", "");
+    knl_thread_set_name("Auditor");
+
+    init_ps_display("Auditor process", "", "", "");
 
     /*
      * Also close our copy of the write end of the pipe.  This is needed to
@@ -600,7 +602,7 @@ NON_EXEC_STATIC void PgAuditorMain()
      * seeing this message on the real stderr is annoying - so we make
      * it DEBUG1 to suppress in normal use.
      */
-    ereport(DEBUG1, (errmsg("auditor shutting down")));
+    ereport(DEBUG1, (errmsg("Auditor shutting down")));
 
     pgaudit_cleanup();
     pgaudit_update_indexfile(PG_BINARY_W, true);

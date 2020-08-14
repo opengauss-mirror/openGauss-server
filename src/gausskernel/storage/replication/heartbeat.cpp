@@ -269,7 +269,7 @@ void heartbeat_main(void)
     MemoryContext heartbeat_context;
 
     t_thrd.role = HEARTBEAT;
-    t_thrd.proc_cxt.MyProgName = "Heartbeat";
+    knl_thread_set_name("Heartbeater");
 
     heartbeat_init();
 
@@ -333,7 +333,7 @@ void heartbeat_main(void)
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
 
-    ereport(LOG, (errmsg("heartbeat thread started")));
+    ereport(LOG, (errmsg("Heartbeater thread started")));
     proc_exit(server_loop());
 }
 

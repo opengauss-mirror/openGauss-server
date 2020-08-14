@@ -161,13 +161,13 @@ void JobExecuteWorkerMain()
     /* reset t_thrd.proc_cxt.MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    t_thrd.proc_cxt.MyProgName = "JobExecuteWorker";
+    knl_thread_set_name("JobExecutor");
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("Job worker process", "", "", "");
+    init_ps_display("JobExecutor worker process", "", "", "");
 
     /* set processing mode */
     SetProcessingMode(InitProcessing);
@@ -220,7 +220,7 @@ void JobExecuteWorkerMain()
         EmitErrorReport();
 
         if (job_id > 0) {
-            ereport(LOG, (errmsg("job worker with job id %d shutdown abnormaly", job_id)));
+            ereport(LOG, (errmsg("JobExecutor with job id %d shutdown abnormaly", job_id)));
         }
 
         (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
@@ -269,12 +269,12 @@ void JobExecuteWorkerMain()
         /* setup shared memory hook */
         on_shmem_exit(FreeJobWorkerInfo, 0);
         on_shmem_exit(PGXCNodeCleanAndRelease, 0);
-        ereport(LOG, (errmsg("job worker started with job id: %d", job_id)));
+        ereport(LOG, (errmsg("JobExecutor started with job id: %d", job_id)));
     } else {
         LWLockRelease(JobShmemLock);
 
         /* no worker entry for me, go away */
-        ereport(WARNING, (errmsg("job worker started wihtout worker entry")));
+        ereport(WARNING, (errmsg("JobExecutor started wihtout worker entry")));
         proc_exit(0);
     }
 
@@ -326,7 +326,7 @@ void JobExecuteWorkerMain()
     /* execute job procedure */
     elog(LOG, "Job is running, worker: %lu, job id: %d", t_thrd.proc_cxt.MyProcPid, job_id);
     execute_job(job_id);
-    elog(LOG, "Job worker is shutdown normal.");
+    elog(LOG, "JobExecutor is shutdown normal.");
 
     MemoryContextResetAndDeleteChildren(t_thrd.mem_cxt.msg_mem_cxt);
 

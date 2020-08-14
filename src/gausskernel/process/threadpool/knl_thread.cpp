@@ -1502,3 +1502,19 @@ void knl_thread_init(knl_thread_role role)
     knl_t_poolcleaner_init(&t_thrd.poolcleaner_cxt);
     knl_t_mot_init(&t_thrd.mot_cxt);
 }
+
+void knl_thread_set_name(const char* name)
+{
+    t_thrd.proc_cxt.MyProgName = (char*)name;
+    /*
+     * The length of thread name is restricted to 16 characters,
+     * including the terminating null byte ('\0').
+     */
+    Assert(strlen(name) < MAX_THREAD_NAME_LENGTH);
+    pthread_setname_np(pthread_self(), name);
+}
+
+__attribute__ ((__used__)) knl_thrd_context *get_current_thread()
+{
+    return &t_thrd;
+}

@@ -356,12 +356,12 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    t_thrd.proc_cxt.MyProgName = "AutoVacLauncher";
+    knl_thread_set_name("AutoVacLauncher");
 
     /* Identify myself via ps */
-    init_ps_display("autovacuum launcher process", "", "", "");
+    init_ps_display("AutoVacLauncher process", "", "", "");
 
-    ereport(LOG, (errmsg("autovacuum launcher started")));
+    ereport(LOG, (errmsg("AutoVacLauncher started")));
 
     if (u_sess->attr.attr_security.PostAuthDelay)
         pg_usleep(u_sess->attr.attr_security.PostAuthDelay * 1000000L);
@@ -708,7 +708,7 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
 
     /* Normal exit from the autovac launcher is here */
 shutdown:
-    ereport(LOG, (errmsg("autovacuum launcher shutting down")));
+    ereport(LOG, (errmsg("AutoVacLauncher shutting down")));
     t_thrd.autovacuum_cxt.AutoVacuumShmem->av_launcherpid = 0;
 
     proc_exit(0); /* done */
@@ -1299,10 +1299,10 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    t_thrd.proc_cxt.MyProgName = "AutoVacWorker";
+    knl_thread_set_name("AutoVacWorker");
 
     /* Identify myself via ps */
-    init_ps_display("autovacuum worker process", "", "", "");
+    init_ps_display("AutoVacWorker process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -1431,7 +1431,7 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
             gs_signal_send(t_thrd.autovacuum_cxt.AutoVacuumShmem->av_launcherpid, SIGUSR2);
     } else {
         /* no worker entry for me, go away */
-        ereport(WARNING, (errmsg("autovacuum worker started without a worker entry")));
+        ereport(WARNING, (errmsg("AutoVacWorker started without a worker entry")));
         dbid = InvalidOid;
         LWLockRelease(AutovacuumLock);
     }

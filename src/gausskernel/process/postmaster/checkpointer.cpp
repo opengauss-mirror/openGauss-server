@@ -184,8 +184,11 @@ void CheckpointerMain(void)
     u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
                                                       ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                       : u_sess->attr.attr_storage.fullCheckPointTimeout;
+
+    knl_thread_set_name("Checkpointer");
+
     ereport(
-        LOG, (errmsg("checkpointer started, CheckPointTimeout is %d", u_sess->attr.attr_storage.CheckPointTimeout)));
+        LOG, (errmsg("Checkpointer started, CheckPointTimeout is %d", u_sess->attr.attr_storage.CheckPointTimeout)));
 
     /*
      * Properly accept or ignore signals the postmaster might send us

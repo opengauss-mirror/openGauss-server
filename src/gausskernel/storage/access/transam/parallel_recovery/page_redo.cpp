@@ -247,6 +247,8 @@ void HandlePageRedoInterrupts()
 /* Run from the worker thread. */
 void PageRedoWorkerMain()
 {
+    knl_thread_set_name("ParallelRecov");
+
     bool isWorkerStarting = false;
     SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.rwlock));
     isWorkerStarting = ((g_instance.comm_cxt.predo_cxt.state == REDO_STARTING_BEGIN) ? true : false);
@@ -257,11 +259,11 @@ void PageRedoWorkerMain()
     }
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.rwlock));
     if (!isWorkerStarting) {
-        ereport(WARNING, (errmsg("PageRedoWorkerMain Page-redo-worker %u exit.", (uint32)isWorkerStarting)));
+        ereport(WARNING, (errmsg("PageRedoWorkerMain ParallelRecov %u exit.", (uint32)isWorkerStarting)));
         SetPageWorkStateByThreadId(PAGE_REDO_WORKER_EXIT);
         proc_exit(0);
     }
-    ereport(LOG, (errmsg("Page-redo-worker thread %u started.", g_redoWorker->id)));
+    ereport(LOG, (errmsg("ParallelRecov thread %u started.", g_redoWorker->id)));
 
     SetupSignalHandlers();
     InitGlobals();
@@ -274,7 +276,7 @@ void PageRedoWorkerMain()
     (void)MemoryContextSwitchTo(g_redoWorker->oldCtx);
 
     ResourceManagerStop();
-    ereport(LOG, (errmsg("Page-redo-worker thread %u terminated, retcode %d.", g_redoWorker->id, retCode)));
+    ereport(LOG, (errmsg("ParallelRecov thread %u terminated, retcode %d.", g_redoWorker->id, retCode)));
     LastMarkReached();
     pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[g_redoWorker->originId].threadState),
         PAGE_REDO_WORKER_EXIT);

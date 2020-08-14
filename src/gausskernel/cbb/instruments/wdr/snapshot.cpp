@@ -1334,7 +1334,7 @@ static void SetMyproc()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    t_thrd.proc_cxt.MyProgName = "WDRSnapshot";
+    knl_thread_set_name("WDRSnapshot");
     u_sess->attr.attr_common.application_name = pstrdup("WDRSnapshot");
 }
 /*

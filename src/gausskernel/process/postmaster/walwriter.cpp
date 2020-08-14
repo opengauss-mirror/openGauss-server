@@ -99,7 +99,9 @@ void WalWriterMain(void)
     bool hibernating = false;
     sigset_t oldSigMask;
 
-    ereport(LOG, (errmsg("walwriter started")));
+    knl_thread_set_name("WalWriter");
+
+    ereport(LOG, (errmsg("WalWriter started")));
 
     /*
      * Properly accept or ignore signals the postmaster might send us

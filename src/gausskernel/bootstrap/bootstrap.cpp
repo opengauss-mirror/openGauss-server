@@ -199,7 +199,7 @@ void BootStrapProcessMain(int argc, char* argv[])
      */
     srandom((unsigned int)(t_thrd.proc_cxt.MyProcPid ^ (unsigned int)t_thrd.proc_cxt.MyStartTime));
 
-    t_thrd.proc_cxt.MyProgName = "BootStrap";
+    knl_thread_set_name("BootStrap");
     /*
      * Fire up essential subsystems: error and memory management
      *

@@ -224,6 +224,8 @@ void FencedUDFMasterMain(int argc, char* argv[])
     u_sess->attr.attr_common.update_process_title = true;
     set_ps_display("gaussdb fenced UDF master process", true);
 
+    knl_thread_set_name("FencedUDFMaster");
+
     /* Step 1: Initialize envrionment: signal handle, display info */
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
     gs_signal_block_sigusr2();
@@ -272,7 +274,7 @@ void FencedUDFMasterMain(int argc, char* argv[])
         ereport(FATAL, (errmodule(MOD_UDF), errmsg("listen socket failed: %m")));
     }
 
-    ereport(LOG, (errmodule(MOD_UDF), errmsg("Fenced master process start OK.")));
+    ereport(LOG, (errmodule(MOD_UDF), errmsg("FencedUDFMaster process start OK.")));
 
     /* Step 3: ServerLoop for accept connection and start worker process */
     UDFMasterServerLoop();

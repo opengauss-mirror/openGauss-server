@@ -133,13 +133,13 @@ int DataSenderMain(void)
 {
     MemoryContext datasnd_context;
 
-    t_thrd.proc_cxt.MyProgName = "DataSender";
+    knl_thread_set_name("DataSender");
 
     /* Create a per-datasender data structure in shared memory */
     InitDataSnd();
     catchupDone = false;
 
-    ereport(LOG, (errmsg("datasender thread started")));
+    ereport(LOG, (errmsg("DataSender thread started")));
     /*
      * Create a memory context that we will do all our work in.  We do this so
      * that we can reset the context during error recovery and thereby avoid

@@ -306,7 +306,9 @@ void WalReceiverMain(void)
      */
     Assert(walrcv != NULL);
 
-    ereport(LOG, (errmsg("walreceiver thread started")));
+    knl_thread_set_name("WalReceiver");
+
+    ereport(LOG, (errmsg("WalReceiver thread started")));
 
     /* Initialize walrcv buffer for walreceive optimization */
     walRcvCtlBlockInit();

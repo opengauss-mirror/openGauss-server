@@ -220,7 +220,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
     t_thrd.proc_cxt.MyStartTime = time(NULL); /* set our start time in case we call elog */
     now = t_thrd.proc_cxt.MyStartTime;
 
-    t_thrd.proc_cxt.MyProgName = "syslogger";
+    knl_thread_set_name("SysLogger");
 
     t_thrd.myLogicTid = noProcLogicTid + SYSLOGGER_LID;
 
@@ -228,7 +228,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
 
     t_thrd.role = SYSLOGGER;
 
-    init_ps_display("logger process", "", "", "");
+    init_ps_display("SysLogger process", "", "", "");
 
     /*
      * If we restarted, our stderr is already redirected into our own input
@@ -567,7 +567,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
              * seeing this message on the real stderr is annoying - so we make
              * it DEBUG1 to suppress in normal use.
              */
-            ereport(DEBUG1, (errmsg("logger shutting down")));
+            ereport(DEBUG1, (errmsg("SysLogger shutting down")));
 
             /*
              * Normal exit from the syslogger is here.	Note that we
