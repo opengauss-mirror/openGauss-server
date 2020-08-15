@@ -2171,9 +2171,10 @@ static long do_portal_run_fetch(Portal portal, FetchDirection fdirection, long c
  */
 static void do_portal_rewind(Portal portal)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_EXECUTOR), errmsg("Cursor rewind are not supported.")));
-
+#endif
     if (portal->holdStore) {
         MemoryContext old_context;
 

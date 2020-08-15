@@ -1527,7 +1527,7 @@ Datum fmgr_c_validator(PG_FUNCTION_ARGS)
     probin = TextDatumGetCString(tmp);
     if (strcmp(probin, "$libdir/plpgsql") && strcmp(probin, "$libdir/dist_fdw") && strcmp(probin, "$libdir/file_fdw") &&
         strcmp(probin, "$libdir/mot_fdw") && strcmp(probin, "$libdir/log_fdw") &&
-        strcmp(probin, "$libdir/hdfs_fdw") && strcmp(probin, "$libdir/postgres_fdw")) {
+        strcmp(probin, "$libdir/hdfs_fdw")) {
         (void)load_external_function(probin, prosrc, true, true);
     }
 

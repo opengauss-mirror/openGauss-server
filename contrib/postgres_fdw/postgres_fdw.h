@@ -1,0 +1,58 @@
+/* -------------------------------------------------------------------------
+ *
+ * postgres_fdw.h
+ * 		  Foreign-data wrapper for remote PostgreSQL servers
+ *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2012-2014, PostgreSQL Global Development Group
+ *
+ * IDENTIFICATION
+ * 		  contrib/postgres_fdw/postgres_fdw.h
+ *
+ * -------------------------------------------------------------------------
+ */
+#ifndef POSTGRES_FDW_H
+#define POSTGRES_FDW_H
+
+#include "foreign/foreign.h"
+#include "lib/stringinfo.h"
+#include "nodes/relation.h"
+#include "utils/rel.h"
+
+#include "libpq/libpq-fe.h"
+
+/* in postgres_fdw.c */
+extern int set_transmission_modes(void);
+extern void reset_transmission_modes(int nestlevel);
+
+/* in connection.c */
+extern PGconn *GetConnection(ForeignServer *server, UserMapping *user, bool will_prep_stmt);
+extern void ReleaseConnection(PGconn *conn);
+extern unsigned int GetCursorNumber(PGconn *conn);
+extern unsigned int GetPrepStmtNumber(PGconn *conn);
+extern PGresult *pgfdw_get_result(PGconn *conn, const char *query);
+extern PGresult *pgfdw_exec_query(PGconn *conn, const char *query);
+extern void pgfdw_report_error(int elevel, PGresult *res, PGconn *conn, bool clear, const char *sql);
+
+/* in option.c */
+extern int ExtractConnectionOptions(List *defelems, const char **keywords, const char **values);
+
+/* in deparse.c */
+extern void classifyConditions(PlannerInfo *root, RelOptInfo *baserel, List *input_conds, List **remote_conds,
+    List **local_conds);
+extern bool is_foreign_expr(PlannerInfo *root, RelOptInfo *baserel, Expr *expr);
+extern void deparseSelectSql(StringInfo buf, PlannerInfo *root, RelOptInfo *baserel, Bitmapset *attrs_used,
+    List **retrieved_attrs);
+extern void appendWhereClause(StringInfo buf, PlannerInfo *root, RelOptInfo *baserel, List *exprs, bool is_first,
+    List **params);
+extern void deparseInsertSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *targetAttrs,
+    List *returningList, List **retrieved_attrs);
+extern void deparseUpdateSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *targetAttrs,
+    List *returningList, List **retrieved_attrs);
+extern void deparseDeleteSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *returningList,
+    List **retrieved_attrs);
+extern void deparseAnalyzeSizeSql(StringInfo buf, Relation rel);
+extern void deparseAnalyzeSql(StringInfo buf, Relation rel, List **retrieved_attrs);
+
+#endif /* POSTGRES_FDW_H */
+

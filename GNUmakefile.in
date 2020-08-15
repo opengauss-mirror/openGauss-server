@@ -58,6 +58,7 @@ else
 install:
 	$(MAKE) install_mysql_fdw
 	$(MAKE) install_oracle_fdw
+	$(MAKE) -C contrib/postgres_fdw $@
 	$(MAKE) -C contrib/pg_stat_statements $@
 	+@echo "openGauss installation complete."
 endif

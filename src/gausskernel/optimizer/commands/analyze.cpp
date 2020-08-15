@@ -896,7 +896,8 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
             onerel, vacstmt, elevel, rows, target_rows, totalrows, totaldeadrows, vacattrstats, attr_cnt);
     } else if (isForeignTable ||
             (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE &&
-            (isMOTFromTblOid(RelationGetRelid(onerel)) || isOracleFDWFromTblOid(RelationGetRelid(onerel))))) {
+            (isMOTFromTblOid(RelationGetRelid(onerel)) || isOracleFDWFromTblOid(RelationGetRelid(onerel)) ||
+             isPostgresFDWFromTblOid(RelationGetRelid(onerel))))) {
         /*
          * @hdfs processing foreign table sampling operation 
          * get foreign table FDW routine 

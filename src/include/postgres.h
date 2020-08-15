@@ -82,6 +82,10 @@
 #define ORACLE_FDW "oracle_fdw"
 #endif
 
+#ifndef POSTGRES_FDW
+#define POSTGRES_FDW "postgres_fdw"
+#endif
+
 #ifndef MOT_FDW
 #define MOT_FDW "mot_fdw"
 #endif
