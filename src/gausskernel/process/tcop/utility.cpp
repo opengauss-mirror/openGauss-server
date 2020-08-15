@@ -3795,12 +3795,12 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
             switch (stmt->kind) {
                 case OBJECT_AGGREGATE:
-#ifdef PGXC
+#ifdef  ENABLE_MULTIPLE_NODES
                     if (!u_sess->attr.attr_common.IsInplaceUpgrade && !u_sess->exec_cxt.extension_is_valid)
                         ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("user defined aggregate is not yet supported.")));
-#endif /* PGXC */
+#endif /*  ENABLE_MULTIPLE_NODES */
                     DefineAggregate(stmt->defnames, stmt->args, stmt->oldstyle, stmt->definition);
                     break;
                 case OBJECT_OPERATOR:
@@ -8547,9 +8547,11 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
                 return;
             else
                 break;
+#ifdef ENABLE_MULTIPLE_NODES
         case OBJECT_AGGREGATE:
             tag = "AGGREGATE";
             break;
+#endif
         case OBJECT_OPERATOR:
             tag = "OPERATOR";
             break;
