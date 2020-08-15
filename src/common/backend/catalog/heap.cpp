@@ -3449,10 +3449,16 @@ Node* cookDefault(ParseState* pstate, Node* raw_default, Oid atttypid, int32 att
             (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("cannot use column references in default expression")));
 
     /*
+     * Make sure default expr does not refer to rownum.
+     */
+    ExcludeRownumExpr(pstate, expr);
+
+    /*
      * It can't return a set either.
      */
     if (expression_returns_set(expr))
-        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("default expression must not return a set")));
+        ereport(ERROR, 
+            (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("default expression must not return a set")));
 
     /*
      * No subplans or aggregates, either...

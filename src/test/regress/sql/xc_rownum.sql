@@ -88,6 +88,15 @@ select rownum + 1 rn from dual group by rn;
 --test alias name after where
 select rownum rn, name from distributors where rn<3;
 select rownum rowno2, * from (select rownum rowno1, * from distributors order by id desc) where rowno2 < 2;
+--test default rownum when creating table
+create table student(id int default rownum, stuname varchar(5));
+create table student(id int default rownum+1, stuname varchar(5));
+--test insert when values include rownum
+insert into distributors values (rownum, 'qwer');
+insert into distributors(id, name) values (2, 'abcd'), (rownum+1, 'qwer');
+--test VALUES clause that's being used as a standalone SELECT
+select * from (values(rownum, 1)) x(a, b);
+select * from (values(rownum+1, 1)) x(a, b);
 
 --test except and minus
 --create test table
