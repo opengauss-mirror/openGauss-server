@@ -537,8 +537,8 @@ index e75b6ab..113dda5 100644
  	/* rollback to the appropriate savepoint on subtransaction abort */
 -	if (event == SUBXACT_EVENT_ABORT_SUB || event == SUBXACT_EVENT_PRE_COMMIT_SUB)
 -		oracleEndSubtransaction(arg, GetCurrentTransactionNestLevel(), event == SUBXACT_EVENT_PRE_COMMIT_SUB);
-+	if (event == SUBXACT_EVENT_ABORT_SUB)
-+		oracleEndSubtransaction(arg, GetCurrentTransactionNestLevel(), false);
++	if (event == SUBXACT_EVENT_ABORT_SUB || event == SUBXACT_EVENT_COMMIT_SUB)
++		oracleEndSubtransaction(arg, GetCurrentTransactionNestLevel(), event == SUBXACT_EVENT_COMMIT_SUB);
  }
  
  /*

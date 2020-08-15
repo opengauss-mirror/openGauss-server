@@ -253,7 +253,7 @@ bool IsSpecifiedFDWFromRelid(Oid relId, const char* SepcifiedType)
  */
 bool CheckSupportedFDWType(Oid relId)
 {
-    static const char* supportFDWType[] = {MOT_FDW, MYSQL_FDW, ORACLE_FDW};
+    static const char* supportFDWType[] = {MOT_FDW, MYSQL_FDW, ORACLE_FDW, POSTGRES_FDW};
     int size = sizeof(supportFDWType) / sizeof(supportFDWType[0]);
     bool support = false;
 

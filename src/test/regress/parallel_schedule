@@ -581,4 +581,4 @@ test: gtt_clean
 
 
 # procedure, Function Test
-test: create_procedure create_function pg_compatibility
+test: create_procedure create_function pg_compatibility postgres_fdw

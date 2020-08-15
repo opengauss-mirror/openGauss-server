@@ -289,11 +289,17 @@ bool isWriteOnlyFt(Oid relid);
 #define isMOTTableFromSrvName(srvName) \
     (IsSpecifiedFDW(srvName, MOT_FDW))
 
+#define isPostgresFDWFromSrvName(srvName) \
+    (IsSpecifiedFDW(srvName, POSTGRES_FDW))
+
 #define isMysqlFDWFromTblOid(relId) \
     (IsSpecifiedFDWFromRelid(relId, MYSQL_FDW))
 
 #define isOracleFDWFromTblOid(relId) \
     (IsSpecifiedFDWFromRelid(relId, ORACLE_FDW))
+
+#define isPostgresFDWFromTblOid(relId) \
+    (IsSpecifiedFDWFromRelid(relId, POSTGRES_FDW))
 
 #define IS_OBS_CSV_TXT_FOREIGN_TABLE(relId) \
     (IsSpecifiedFDWFromRelid(relId, DIST_FDW) && (is_obs_protocol(HdfsGetOptionValue(relId, optLocation))))

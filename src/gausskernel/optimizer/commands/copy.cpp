@@ -4169,10 +4169,8 @@ static uint64 CopyFrom(CopyState cstate)
     /* Handle queued AFTER triggers */
     AfterTriggerEndQuery(estate);
 
-    /* To free the statement allocated in ExecForeignInsert */
-    if (resultRelInfo->ri_FdwRoutine && resultRelInfo->ri_FdwRoutine->GetFdwType &&
-        (resultRelInfo->ri_FdwRoutine->GetFdwType() == MYSQL_ORC ||
-         resultRelInfo->ri_FdwRoutine->GetFdwType() == ORACLE_ORC)) {
+    /* To free the statement allocated in ExecForeignInsert, MOT doesn't need this */
+    if (isForeignTbl && !isMOTFromTblOid(RelationGetRelid(cstate->rel))) {
         resultRelInfo->ri_FdwRoutine->EndForeignModify(estate, resultRelInfo);
     }
 

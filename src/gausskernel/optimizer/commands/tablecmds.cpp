@@ -1858,7 +1858,8 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
             RawColumnDefault* rawEnt = NULL;
             if (relkind == RELKIND_FOREIGN_TABLE) {
                 if (!(IsA(stmt, CreateForeignTableStmt) &&
-                        isMOTTableFromSrvName(((CreateForeignTableStmt*)stmt)->servername)))
+                        (isMOTTableFromSrvName(((CreateForeignTableStmt*)stmt)->servername) ||
+                         isPostgresFDWFromSrvName(((CreateForeignTableStmt*)stmt)->servername))))
                     ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                             errmsg("default values on foreign tables are not supported")));
             }
@@ -7735,7 +7736,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
         RawColumnDefault* rawEnt = NULL;
 
         if (relkind == RELKIND_FOREIGN_TABLE) {
-            if (!isMOTFromTblOid(RelationGetRelid(rel)))
+            if (!isMOTFromTblOid(RelationGetRelid(rel)) && !isPostgresFDWFromTblOid(RelationGetRelid(rel)))
                 ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("default values on foreign tables are not supported")));
         }
@@ -14478,6 +14479,12 @@ static void ATExecGenericOptions(Relation rel, List* options)
 
     simple_heap_update(ftrel, &tuple->t_self, tuple);
     CatalogUpdateIndexes(ftrel, tuple);
+
+    /*
+     * Invalidate relcache so that all sessions will refresh any cached plans
+     * that might depend on the old options.
+     */
+    CacheInvalidateRelcache(rel);
 
     heap_close(ftrel, RowExclusiveLock);
 

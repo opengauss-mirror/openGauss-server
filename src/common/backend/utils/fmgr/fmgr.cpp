@@ -511,8 +511,7 @@ static void fmgr_info_C_lang(Oid functionId, FmgrInfo* finfo, HeapTuple procedur
         /* Look up the function itself */
         if (strcmp(pro_bin_string, "$libdir/plpgsql") && strcmp(pro_bin_string, "$libdir/dist_fdw") &&
             strcmp(pro_bin_string, "$libdir/file_fdw") && strcmp(pro_bin_string, "$libdir/mot_fdw") &&
-            strcmp(pro_bin_string, "$libdir/log_fdw") && strcmp(pro_bin_string, "$libdir/hdfs_fdw") &&
-            strcmp(pro_bin_string, "$libdir/postgres_fdw")) {
+            strcmp(pro_bin_string, "$libdir/log_fdw") && strcmp(pro_bin_string, "$libdir/hdfs_fdw")) {
             funInfo = load_external_function(pro_bin_string, pro_src_string, true, false);
             user_fn = funInfo.user_fn;
             inforec = funInfo.inforec;

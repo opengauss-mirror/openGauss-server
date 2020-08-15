@@ -91,5 +91,5 @@ test: pmk
 
 test: hw_datatype hw_datatype_2 hw_datatype_3
 test: test_regex llt_atc
-test: llt_coverage_atc
+test: llt_coverage_atc postgres_fdw
 
