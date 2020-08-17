@@ -106,6 +106,8 @@ static void 	plpgsql_parser_funcname(const char *s, char **output,
                                         int numidents);
 static PLpgSQL_stmt 	*make_callfunc_stmt(const char *sqlstart,
                                 int location, bool is_assign);
+
+static PLpgSQL_stmt 	*make_callfunc_stmt_no_arg(const char *sqlstart, int location);
                                 
 static PLpgSQL_expr 	*read_sql_construct5(int until,
                                              int until2,
@@ -2343,23 +2345,36 @@ stmt_execsql			: K_ALTER
                     {	
                         int tok = -1;
                         bool isCallFunc = false;
+                        bool funcNoarg = false;
+
                         tok = yylex();
                         if ('(' == tok)
                             isCallFunc = is_function($1.ident, false);
                         else if ('=' ==tok || COLON_EQUALS == tok || '[' == tok)
                             word_is_not_variable(&($1), @1);
+                        else if (';' == tok)
+                            funcNoarg = true;
 
-                        plpgsql_push_back_token(tok);
-                        if (isCallFunc)
-                            $$ = make_callfunc_stmt($1.ident, @1, false);
-                        else
-                            $$ = make_execsql_stmt(T_WORD, @1);
+                        if (funcNoarg) {
+                            isCallFunc = is_function($1.ident, false);
+                            if (isCallFunc)
+                                $$ = make_callfunc_stmt_no_arg($1.ident, @1);
+                            else
+                                $$ = make_execsql_stmt(T_WORD, @1);
+                        } else {
+                            plpgsql_push_back_token(tok);
+                            if (isCallFunc)
+                                $$ = make_callfunc_stmt($1.ident, @1, false);
+                            else
+                                $$ = make_execsql_stmt(T_WORD, @1);
+                        }
                     }
                 | T_CWORD
                     {
                         int tok = yylex();
                         char *name = NULL;
                         bool isCallFunc = false;
+                        bool funcNoarg = false;
 
                         if ('(' == tok)
                         {
@@ -2370,12 +2385,26 @@ stmt_execsql			: K_ALTER
                         }
                         else if ('=' == tok || COLON_EQUALS == tok || '[' == tok) 
                             cword_is_not_variable(&($1), @1);
+                        else if (';' == tok) {
+                            MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+                            name = NameListToString($1.idents);
+                            (void)MemoryContextSwitchTo(colCxt);
+                            isCallFunc = is_function(name, false);
+                            funcNoarg = true;
+                        }
 
-                        plpgsql_push_back_token(tok);
-                        if (isCallFunc)
-                            $$ = make_callfunc_stmt(name, @1, false);
-                        else
-                            $$ = make_execsql_stmt(T_CWORD, @1);
+                        if (funcNoarg) {
+                            if (isCallFunc)
+                                $$ = make_callfunc_stmt_no_arg(name, @1);
+                            else
+                                $$ = make_execsql_stmt(T_CWORD, @1);
+                        } else {
+                            plpgsql_push_back_token(tok);
+                            if (isCallFunc)
+                                $$ = make_callfunc_stmt(name, @1, false);
+                            else
+                                $$ = make_execsql_stmt(T_CWORD, @1);
+                        }
                     }
                 | T_ARRAY_EXTEND
                     {
@@ -5923,4 +5952,73 @@ make_case(int location, PLpgSQL_expr *t_expr,
     }
 
     return (PLpgSQL_stmt *) newp;
+}
+
+static PLpgSQL_stmt *
+make_callfunc_stmt_no_arg(const char *sqlstart, int location)
+{
+    char *cp[3];
+
+    List *funcname = NIL;
+    PLpgSQL_expr* expr = NULL;
+    FuncCandidateList clist = NULL;
+    StringInfoData func_inparas;
+    char *quoted_sqlstart = NULL;
+
+    MemoryContext oldCxt = NULL;
+    /*get the function's name*/
+    cp[0] = NULL;
+    cp[1] = NULL;
+    cp[2] = NULL;
+    /* the function make_callfunc_stmt is only to assemble a sql statement, so the context is set to tmp context */
+    oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+    plpgsql_parser_funcname(sqlstart, cp, 3);
+
+    if (cp[2] && cp[2][0] != '\0')
+        funcname = list_make3(makeString(cp[0]), makeString(cp[1]), makeString(cp[2]));
+    else if (cp[1] && cp[1][0] != '\0')
+        funcname = list_make2(makeString(cp[0]), makeString(cp[1]));
+    else
+        funcname = list_make1(makeString(cp[0]));
+
+
+    /* search the function */
+    clist = FuncnameGetCandidates(funcname, -1, NIL, false, false, false);
+    if (!clist)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                 errmsg("function \"%s\" doesn't exist ", sqlstart)));
+        return NULL;
+    }
+
+    initStringInfo(&func_inparas);
+
+    appendStringInfoString(&func_inparas, "CALL ");
+
+    quoted_sqlstart = NameListToQuotedString(funcname);
+    appendStringInfoString(&func_inparas, quoted_sqlstart);
+    pfree_ext(quoted_sqlstart);
+
+    appendStringInfoString(&func_inparas, "(");
+
+    appendStringInfoString(&func_inparas, ")");
+
+    (void)MemoryContextSwitchTo(oldCxt);
+
+    /* generate the expression */
+    expr 				= (PLpgSQL_expr*)palloc0(sizeof(PLpgSQL_expr));
+    expr->dtype			= PLPGSQL_DTYPE_EXPR;
+    expr->query			= pstrdup(func_inparas.data);
+    expr->plan			= NULL;
+    expr->paramnos 		= NULL;
+    expr->ns			= plpgsql_ns_top();
+
+    PLpgSQL_stmt_perform *perform = NULL;
+    perform = (PLpgSQL_stmt_perform*)palloc0(sizeof(PLpgSQL_stmt_perform));
+    perform->cmd_type = PLPGSQL_STMT_PERFORM;
+    perform->lineno   = plpgsql_location_to_lineno(location);
+    perform->expr	  = expr;
+
+    return (PLpgSQL_stmt *)perform;
 }
