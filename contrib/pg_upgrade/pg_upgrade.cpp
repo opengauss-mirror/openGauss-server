@@ -788,7 +788,7 @@ static void set_frozenxids(void)
             "UPDATE	pg_catalog.pg_class "
             "SET	relfrozenxid64 = '%lu' "
             /* only heap and TOAST are vacuumed */
-            "WHERE	relkind IN ('r', 't')",
+            "WHERE	relkind IN ('r', 'm','t')",
             old_cluster.controldata.chkpnt_nxtxid));
         PQfinish(conn);
 

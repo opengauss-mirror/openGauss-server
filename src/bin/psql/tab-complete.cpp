@@ -370,11 +370,11 @@ static const SchemaQuery Query_for_list_of_relations = {
     /* qualresult */
     NULL};
 
-static const SchemaQuery Query_for_list_of_tsvf = {
+static const SchemaQuery Query_for_list_of_tsvmf = {
     /* catname */
     "pg_catalog.pg_class c",
     /* selcondition */
-    "c.relkind IN ('r', 'S', 'v', 'f')",
+    "c.relkind IN ('r', 'S', 'v', 'm', 'f')",
     /* viscondition */
     "pg_catalog.pg_table_is_visible(c.oid)",
     /* namespace */
@@ -384,11 +384,25 @@ static const SchemaQuery Query_for_list_of_tsvf = {
     /* qualresult */
     NULL};
 
-static const SchemaQuery Query_for_list_of_tf = {
+static const SchemaQuery Query_for_list_of_tmf = {
     /* catname */
     "pg_catalog.pg_class c",
     /* selcondition */
-    "c.relkind IN ('r', 'f')",
+    "c.relkind IN ('r', 'm', 'f')",
+    /* viscondition */
+    "pg_catalog.pg_table_is_visible(c.oid)",
+    /* namespace */
+    "c.relnamespace",
+    /* result */
+    "pg_catalog.quote_ident(c.relname)",
+    /* qualresult */
+    NULL};
+
+static const SchemaQuery Query_for_list_of_tm = {
+    /* catname */
+    "pg_catalog.pg_class c",
+    /* selcondition */
+    "c.relkind IN ('r', 'm')",
     /* viscondition */
     "pg_catalog.pg_table_is_visible(c.oid)",
     /* namespace */
@@ -411,6 +425,21 @@ static const SchemaQuery Query_for_list_of_views = {
     "pg_catalog.quote_ident(c.relname)",
     /* qualresult */
     NULL};
+
+static const SchemaQuery Query_for_list_of_matviews = {
+    /* catname */
+    "pg_catalog.pg_class c",
+    /* selcondition */
+    "c.relkind IN ('m')",
+    /* viscondition */
+    "pg_catalog.pg_table_is_visible(c.oid)",
+    /* namespace */
+    "c.relnamespace",
+    /* result */
+    "pg_catalog.quote_ident(c.relname)",
+    /* qualresult */
+    NULL
+};
 
 /*
  * Queries to get lists of names of various kinds of things, possibly
@@ -657,6 +686,7 @@ static const pgsql_thing_t words_after_create[] = {
     {"GROUP", Query_for_list_of_roles, NULL, 0},
     {"LANGUAGE", Query_for_list_of_languages, NULL, 0},
     {"INDEX", NULL, &Query_for_list_of_indexes, 0},
+    {"MATERIALIZED VIEW", NULL, NULL},
 #ifdef PGXC
     {"NODE", Query_for_list_of_available_nodenames, NULL, 0},
     {"NODE GROUP", Query_for_list_of_available_nodegroup_names, NULL, 0},

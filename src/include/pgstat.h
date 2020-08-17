@@ -1683,7 +1683,7 @@ static inline void pgstat_reset_waitStatePhase(WaitState waitstatus, WaitStatePh
             (rel)->pgstat_info->t_counts.t_cu_hdd_asyn += (n); \
     } while (0)
 
-extern void pgstat_count_heap_insert(Relation rel, int n);
+extern void pgstat_count_heap_insert(Relation rel, PgStat_Counter n);
 extern void pgstat_count_heap_update(Relation rel, bool hot);
 extern void pgstat_count_heap_delete(Relation rel);
 extern void pgstat_update_heap_dead_tuples(Relation rel, int delta);

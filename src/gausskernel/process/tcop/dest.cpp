@@ -33,6 +33,7 @@
 #include "access/xact.h"
 #include "commands/copy.h"
 #include "commands/createas.h"
+#include "commands/matview.h"
 #include "executor/functions.h"
 #include "executor/spi.h"
 #include "executor/tstoreReceiver.h"
@@ -133,6 +134,8 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
         case DestSQLFunction:
             return CreateSQLFunctionDestReceiver();
 
+        case DestTransientRel:
+            return CreateTransientRelDestReceiver(InvalidOid);
         case DestTupleBroadCast:
         case DestTupleLocalBroadCast:
         case DestTupleRedistribute:
@@ -183,6 +186,7 @@ void EndCommand(const char* commandTag, CommandDest dest)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
+        case DestTransientRel:
         default:
             break;
     }
@@ -259,6 +263,7 @@ void NullCommand(CommandDest dest)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
+        case DestTransientRel:
         default:
             break;
     }

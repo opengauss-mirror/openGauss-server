@@ -42,47 +42,6 @@
 #endif
 
 static void checkViewTupleDesc(TupleDesc newdesc, TupleDesc olddesc);
-static bool isViewOnTempTable_walker(Node* node, void* context);
-
-/* ---------------------------------------------------------------------
- * isViewOnTempTable
- *
- * Returns true iff any of the relations underlying this view are
- * temporary tables.
- * ---------------------------------------------------------------------
- */
-static bool isViewOnTempTable(Query* viewParse)
-{
-    return isViewOnTempTable_walker((Node*)viewParse, NULL);
-}
-
-static bool isViewOnTempTable_walker(Node* node, void* context)
-{
-    if (node == NULL)
-        return false;
-
-    if (IsA(node, Query)) {
-        Query* query = (Query*)node;
-        ListCell* rtable = NULL;
-
-        foreach (rtable, query->rtable) {
-            RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtable);
-
-            if (rte->rtekind == RTE_RELATION) {
-                Relation rel = heap_open(rte->relid, AccessShareLock);
-                char relpersistence = rel->rd_rel->relpersistence;
-
-                heap_close(rel, AccessShareLock);
-                if (relpersistence == RELPERSISTENCE_TEMP)
-                    return true;
-            }
-        }
-
-        return query_tree_walker(query, (bool (*)())isViewOnTempTable_walker, context, QTW_IGNORE_JOINALIASES);
-    }
-
-    return expression_tree_walker(node, (bool (*)())isViewOnTempTable_walker, context);
-}
 
 /* ---------------------------------------------------------------------
  * DefineVirtualRelation
@@ -109,20 +68,8 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
         TargetEntry* tle = (TargetEntry*)lfirst(t);
 
         if (!tle->resjunk) {
-            ColumnDef* def = makeNode(ColumnDef);
-
-            def->colname = pstrdup(tle->resname);
-            def->typname = makeTypeNameFromOid(exprType((Node*)tle->expr), exprTypmod((Node*)tle->expr));
-            def->inhcount = 0;
-            def->is_local = true;
-            def->is_not_null = false;
-            def->is_from_type = false;
-            def->storage = 0;
-            def->cmprs_mode = ATT_CMPR_NOCOMPRESS; /* dont compress */
-            def->raw_default = NULL;
-            def->cooked_default = NULL;
-            def->collClause = NULL;
-            def->collOid = exprCollation((Node*)tle->expr);
+            ColumnDef *def = makeColumnDef(tle->resname, exprType((Node *)tle->expr), exprTypmod((Node *)tle->expr),
+                exprCollation((Node *)tle->expr));
 
             /*
              * It's possible that the column is of a collatable type but the
@@ -136,8 +83,7 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
                             errhint("Use the COLLATE clause to set the collation explicitly.")));
             } else
                 Assert(!OidIsValid(def->collOid));
-            def->constraints = NIL;
-
+                
             attrList = lappend(attrList, def);
         }
     }
@@ -262,7 +208,6 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
         createStmt->inhRelations = NIL;
         createStmt->constraints = NIL;
         createStmt->options = options;
-        createStmt->options = lappend(options, defWithOids(false));
         createStmt->oncommit = ONCOMMIT_NOOP;
         createStmt->tablespacename = NULL;
         createStmt->if_not_exists = false;
@@ -488,7 +433,7 @@ void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode)
      * schema name.
      */
     view = (RangeVar*)copyObject(stmt->view); /* don't corrupt original command */
-    if (view->relpersistence == RELPERSISTENCE_PERMANENT && isViewOnTempTable(viewParse)) {
+    if (view->relpersistence == RELPERSISTENCE_PERMANENT && isQueryUsingTempRelation(viewParse)) {
         view->relpersistence = RELPERSISTENCE_TEMP;
         ereport(NOTICE, (errmsg("view \"%s\" will be a temporary view", view->relname)));
     }
@@ -513,6 +458,15 @@ void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode)
      * command id counter (but do NOT pfree any memory!!!!)
      */
     CommandCounterIncrement();
+    StoreViewQuery(viewOid, viewParse, stmt->replace);
+
+}
+
+/*
+ * Use the rules system to store the query for the view.
+ */
+void StoreViewQuery(Oid viewOid, Query* viewParse, bool replace)
+{
 
     /*
      * The range table of 'viewParse' does not contain entries for the "OLD"
@@ -523,7 +477,7 @@ void DefineView(ViewStmt* stmt, const char* queryString, bool isFirstNode)
     /*
      * Now create the rules associated with the view.
      */
-    DefineViewRules(viewOid, viewParse, stmt->replace);
+    DefineViewRules(viewOid, viewParse, replace);
 }
 
 bool IsViewTemp(ViewStmt* stmt, const char* queryString)
@@ -539,7 +493,7 @@ bool IsViewTemp(ViewStmt* stmt, const char* queryString)
      * long as the CREATE command is consistent with that --- no explicit
      * schema name.
      */
-    if (view->relpersistence == RELPERSISTENCE_PERMANENT && isViewOnTempTable(viewParse)) {
+    if (view->relpersistence == RELPERSISTENCE_PERMANENT && isQueryUsingTempRelation(viewParse)) {
         view->relpersistence = RELPERSISTENCE_TEMP;
     }
 

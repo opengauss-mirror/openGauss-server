@@ -93,7 +93,11 @@ typedef struct RangeVar {
 } RangeVar;
 
 /*
- * IntoClause - target information for SELECT INTO and CREATE TABLE AS
+ * IntoClause - target information for SELECT INTO, CREATE MATERIALIZED VIEW and CREATE TABLE AS
+ * 
+ * For CREATE MATERIALIZED VIEW, viewQuery is the parsed-but-not-rewritten
+ * SELECT Query for the view; otherwise it's NULL.  (Although it's actually
+ * Query*, we declare it as Node* to avoid a forward reference.)
  */
 typedef struct IntoClause {
     NodeTag type;
@@ -104,6 +108,7 @@ typedef struct IntoClause {
     OnCommitAction onCommit; /* what do we do at COMMIT? */
     int8 row_compress;       /* row compression flag */
     char* tableSpaceName;    /* table space to use, or NULL */
+    Node* viewQuery;          /* materialized view's SELECT query */
     bool skipData;           /* true for WITH NO DATA */
 #ifdef PGXC
     struct DistributeBy* distributeby; /* distribution to use, or NULL */

@@ -2824,6 +2824,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             /* colNames, options are deemed uninteresting */
+            /* viewQuery should be null in raw parsetree, but check it */
+            if (p2walker(into->viewQuery, context))
+                return true;
         } break;
         case T_List:
             foreach (temp, (List*)node) {

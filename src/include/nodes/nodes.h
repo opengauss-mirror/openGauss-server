@@ -452,6 +452,7 @@ typedef enum NodeTag {
     T_DropDirectoryStmt,
     T_CreateRlsPolicyStmt,
     T_AlterRlsPolicyStmt,
+    T_RefreshMatViewStmt,
     T_AlterSystemStmt,
 
     /*

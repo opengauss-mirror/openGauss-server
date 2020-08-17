@@ -169,6 +169,18 @@ CREATE VIEW pg_tables AS
          LEFT JOIN pg_object po ON (po.object_oid = C.oid and po.object_type = 'r')
     WHERE C.relkind = 'r';
 
+CREATE VIEW pg_matviews AS
+    SELECT
+        N.nspname AS schemaname,
+        C.relname AS matviewname,
+        pg_get_userbyid(C.relowner) AS matviewowner,
+        T.spcname AS tablespace,
+        C.relhasindex AS hasindexes,
+        pg_get_viewdef(C.oid) AS definition
+    FROM pg_class C LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
+         LEFT JOIN pg_tablespace T ON (T.oid = C.reltablespace)
+    WHERE C.relkind = 'm';
+
 CREATE VIEW pg_indexes AS
     SELECT
         N.nspname AS schemaname,
@@ -180,7 +192,7 @@ CREATE VIEW pg_indexes AS
          JOIN pg_class I ON (I.oid = X.indexrelid)
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
          LEFT JOIN pg_tablespace T ON (T.oid = I.reltablespace)
-    WHERE C.relkind = 'r' AND I.relkind = 'i';
+    WHERE C.relkind IN ('r', 'm') AND I.relkind = 'i';
 
 -- For global temporary table
 CREATE VIEW pg_gtt_relstats WITH (security_barrier) AS
@@ -442,6 +454,7 @@ SELECT
 	l.objoid, l.classoid, l.objsubid,
 	CASE WHEN rel.relkind = 'r' THEN 'table'::text
 		 WHEN rel.relkind = 'v' THEN 'view'::text
+         WHEN rel.relkind = 'm' THEN 'materialized view'::text
 		 WHEN rel.relkind = 'S' THEN 'sequence'::text
 		 WHEN rel.relkind = 'f' THEN 'foreign table'::text END AS objtype,
 	rel.relnamespace AS objnamespace,
@@ -629,7 +642,7 @@ CREATE VIEW pg_stat_all_tables AS
     FROM pg_class C LEFT JOIN
          pg_index I ON C.oid = I.indrelid
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind IN ('r', 't')
+    WHERE C.relkind IN ('r', 't', 'm')
     GROUP BY C.oid, N.nspname, C.relname;
 	
 CREATE VIEW pg_stat_xact_all_tables AS
@@ -649,7 +662,7 @@ CREATE VIEW pg_stat_xact_all_tables AS
     FROM pg_class C LEFT JOIN
          pg_index I ON C.oid = I.indrelid
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind IN ('r', 't')
+    WHERE C.relkind IN ('r', 't', 'm')
     GROUP BY C.oid, N.nspname, C.relname;
 
 CREATE VIEW pg_stat_sys_tables AS
@@ -694,7 +707,7 @@ CREATE VIEW pg_statio_all_tables AS
             pg_class T ON C.reltoastrelid = T.oid LEFT JOIN
             pg_class X ON T.reltoastidxid = X.oid
             LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind IN ('r', 't')
+    WHERE C.relkind IN ('r', 't', 'm')
     GROUP BY C.oid, N.nspname, C.relname, T.oid, X.oid;
 
 CREATE VIEW pg_statio_sys_tables AS
@@ -721,7 +734,7 @@ CREATE VIEW pg_stat_all_indexes AS
             pg_index X ON C.oid = X.indrelid JOIN
             pg_class I ON I.oid = X.indexrelid
             LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind IN ('r', 't');
+    WHERE C.relkind IN ('r', 't', 'm');
 
 CREATE VIEW pg_stat_sys_indexes AS
     SELECT * FROM pg_stat_all_indexes
@@ -747,7 +760,7 @@ CREATE VIEW pg_statio_all_indexes AS
             pg_index X ON C.oid = X.indrelid JOIN
             pg_class I ON I.oid = X.indexrelid
             LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind IN ('r', 't');
+    WHERE C.relkind IN ('r', 't', 'm');
 
 CREATE VIEW pg_statio_sys_indexes AS
     SELECT * FROM pg_statio_all_indexes

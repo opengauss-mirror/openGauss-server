@@ -1055,6 +1055,7 @@ static void relation_parse_rel_options(Relation relation, HeapTuple tuple)
         case RELKIND_TOASTVALUE:
         case RELKIND_INDEX:
         case RELKIND_VIEW:
+        case RELKIND_MATVIEW:
             break;
         default:
             return;
@@ -1641,8 +1642,9 @@ static Relation relation_build_desc(Oid targetRelId, bool insertIt, bool buildke
     /*
      * if no such tuple exists, return NULL
      */
-    if (!HeapTupleIsValid(pg_class_tuple))
+    if (!HeapTupleIsValid(pg_class_tuple)) {
         return NULL;
+    }
 
     /*
      * get information from the pg_class_tuple
@@ -2423,6 +2425,9 @@ static void formr_desc(const char* relationName, Oid relationReltype, bool issha
 
     /* formr_desc is used only for permanent relations */
     relation->rd_rel->relpersistence = RELPERSISTENCE_PERMANENT;
+
+    /* ... and they're always populated, too */
+    relation->relispopulated = true;
 
     relation->rd_rel->relpages = 0;
     relation->rd_rel->reltuples = 0;
@@ -3723,6 +3728,9 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid relpersistence: %c", relpersistence)));
             break;
     }
+
+    /* we keep this flag and set it true for all relations here, which may be useful for future */
+    rel->relispopulated = true;
 
     /*
      * Insert relation physical and logical identifiers (OIDs) into the right

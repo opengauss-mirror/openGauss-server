@@ -101,6 +101,7 @@ typedef struct RelationData {
     int rd_refcnt;                    /* reference count */
     BackendId rd_backend;             /* owning backend id, if temporary relation */
     bool rd_isnailed;                 /* rel is nailed in cache */
+    bool        relispopulated; /* matview has query results */
     bool rd_isvalid;                  /* relcache entry is valid */
     char rd_indexvalid;               /* state of rd_indexlist: 0 = not valid, 1 =
                                        * valid, 2 = temporarily forced */
@@ -318,7 +319,9 @@ typedef struct StdRdOptions {
  *      from the pov of logical decoding.
  */
 #define RelationIsUsedAsCatalogTable(relation) \
-    ((relation)->rd_options ? ((StdRdOptions*)(relation)->rd_options)->user_catalog_table : false)
+    ((relation)->rd_options && \
+     ((relation)->rd_rel->relkind == RELKIND_RELATION || (relation)->rd_rel->relkind == RELKIND_MATVIEW) ? \
+        ((StdRdOptions*)(relation)->rd_options)->user_catalog_table : false)
 
 #define RelationIsInternal(relation) (RelationGetInternalMask(relation) != INTERNAL_MASK_DISABLE)
 
@@ -473,6 +476,23 @@ typedef struct StdRdOptions {
 #define RelationNeedsWAL(relation)                                     \
     ((relation)->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT || \
         (((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP) && STMT_RETRY_ENABLED))
+
+
+/*
+ * RelationIsScannable
+ *             Currently can only be false for a materialized view which has not been
+ *             populated by its query.  This is likely to get more complicated later,
+ *             so use a macro which looks like a function.
+ */
+#define RelationIsScannable(relation) ((relation)->relispopulated)
+
+/*
+ * RelationIsPopulated
+ *             Currently, we don't physically distinguish the "populated" and
+ *             "scannable" properties of matviews, but that may change later.
+ *             Hence, use the appropriate one of these macros in code tests.
+ */
+#define RelationIsPopulated(relation) ((relation)->relispopulated)
 
 /*
  * RelationUsesLocalBuffers

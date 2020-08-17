@@ -152,7 +152,7 @@ typedef struct {
  */
 #define TRANSFORM_RELATION_LIKE_CLAUSE(rel_relkind)                                                                    \
     (((rel_relkind) != RELKIND_RELATION && (rel_relkind) != RELKIND_VIEW && (rel_relkind) != RELKIND_COMPOSITE_TYPE && \
-         (rel_relkind) != RELKIND_FOREIGN_TABLE)                                                                       \
+         relation->rd_rel->relkind != RELKIND_MATVIEW && (rel_relkind) != RELKIND_FOREIGN_TABLE)                       \
             ? false                                                                                                    \
             : true)
 
@@ -525,7 +525,7 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
     if (cxt.hasoids) {
         stmt->options = lappend(stmt->options, makeDefElem("oids", (Node*)makeInteger(cxt.hasoids)));
     }
-    cxt.hasoids = interpretOidsOption(stmt->options);
+    cxt.hasoids = interpretOidsOption(stmt->options, true);
 
 #ifdef PGXC
     if (cxt.distributeby != NULL) {
@@ -1159,7 +1159,7 @@ static void transformTableLikeClause(
     if (!TRANSFORM_RELATION_LIKE_CLAUSE(relation->rd_rel->relkind))
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("\"%s\" is not a table, view, composite type, or foreign table",
+                errmsg("\"%s\" is not a table, view, materialized view, composite type, or foreign table",
                     RelationGetRelationName(relation))));
 
     cancel_parser_errposition_callback(&pcbstate);
@@ -3203,7 +3203,10 @@ void transformRuleStmt(RuleStmt* stmt, const char* queryString, List** actions, 
      * beforehand.
      */
     rel = heap_openrv(stmt->relation, AccessExclusiveLock);
-
+    if (rel->rd_rel->relkind == RELKIND_MATVIEW)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+            errmsg("rules on materialized views are not supported")));
+            
     /* Set up pstate */
     pstate = make_parsestate(NULL);
     pstate->p_sourcetext = queryString;

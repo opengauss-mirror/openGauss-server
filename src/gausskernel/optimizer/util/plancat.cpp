@@ -526,6 +526,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
 #endif
         /* fall through */
         case RELKIND_INDEX:
+        case RELKIND_MATVIEW:
         /* fall through */
         case RELKIND_TOASTVALUE:
             /*

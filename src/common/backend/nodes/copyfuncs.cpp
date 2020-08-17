@@ -2181,6 +2181,7 @@ static IntoClause* _copyIntoClause(const IntoClause* from)
     COPY_SCALAR_FIELD(onCommit);
     COPY_SCALAR_FIELD(row_compress);
     COPY_STRING_FIELD(tableSpaceName);
+    COPY_NODE_FIELD(viewQuery);
     COPY_SCALAR_FIELD(skipData);
 #ifdef PGXC
     COPY_NODE_FIELD(distributeby);
@@ -4800,7 +4801,18 @@ static CreateTableAsStmt* _copyCreateTableAsStmt(const CreateTableAsStmt* from)
 
     COPY_NODE_FIELD(query);
     COPY_NODE_FIELD(into);
+    COPY_SCALAR_FIELD(relkind);
     COPY_SCALAR_FIELD(is_select_into);
+
+    return newnode;
+}
+
+static RefreshMatViewStmt* _copyRefreshMatViewStmt(const RefreshMatViewStmt* from)
+{
+    RefreshMatViewStmt* newnode = makeNode(RefreshMatViewStmt);
+
+    COPY_SCALAR_FIELD(skipData);
+    COPY_NODE_FIELD(relation);
 
     return newnode;
 }
@@ -6398,6 +6410,9 @@ void* copyObject(const void* from)
             break;
         case T_CreateTableAsStmt:
             retval = _copyCreateTableAsStmt((CreateTableAsStmt*)from);
+            break;
+        case T_RefreshMatViewStmt:
+            retval = _copyRefreshMatViewStmt((RefreshMatViewStmt*)from);
             break;
         case T_ReplicaIdentityStmt:
             retval = _copyReplicaIdentityStmt((ReplicaIdentityStmt*)from);

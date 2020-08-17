@@ -127,12 +127,12 @@ create aggregate newavg2 (sfunc = int4pl,
 			  stype = int4,
 			  finalfunc = int2um,
 			  initcond = '0');
-ERROR:  user defined aggregate is not yet supported.
+ERROR:  function int2um(smallint) requires run-time type coercion
 -- left out basetype
 create aggregate newcnt1 (sfunc = int4inc,
 			  stype = int4,
 			  initcond = '0');
-ERROR:  user defined aggregate is not yet supported.
+ERROR:  aggregate input type must be specified
 --
 -- DROP INDEX
 -- missing index name

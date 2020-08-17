@@ -378,11 +378,11 @@ static void OnConflict_CheckForSerializationFailure(const SERIALIZABLEXACT *read
 /* ------------------------------------------------------------------------ */
 /*
  * Does this relation participate in predicate locking? Temporary and system
- * relations are exempt.
+ * relations are exempt, as are materialized views.
  */
 static inline bool PredicateLockingNeededForRelation(Relation relation)
 {
-    return !(relation->rd_id < FirstBootstrapObjectId);
+    return !(relation->rd_id < FirstBootstrapObjectId || relation->rd_rel->relkind == RELKIND_MATVIEW);
 }
 
 /*

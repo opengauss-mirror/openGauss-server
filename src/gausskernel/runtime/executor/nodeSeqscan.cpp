@@ -322,8 +322,7 @@ static AbsTblScanDesc InitBeginScan(SeqScanState* node, Relation current_relatio
 /* ----------------------------------------------------------------
  *		InitScanRelation
  *
- *		This does the initialization for scan relations and
- *		subplans of scans.
+ *		Set up to access the scan relation.
  * ----------------------------------------------------------------
  */
 void InitScanRelation(SeqScanState* node, EState* estate)
@@ -410,6 +409,7 @@ void InitScanRelation(SeqScanState* node, EState* estate)
     node->ss_currentRelation = current_relation;
     node->ss_currentScanDesc = current_scan_desc;
 
+    /* and report the scan tuple slot's rowtype */
     ExecAssignScanType(node, RelationGetDescr(current_relation));
 }
 static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)

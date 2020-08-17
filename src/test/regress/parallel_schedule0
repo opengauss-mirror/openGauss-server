@@ -125,6 +125,8 @@ test: single_node_privileges2
 #test: single_node_misc
 # rules cannot run concurrently with any test that creates a view
 #test: single_node_rules
+#test for materialized view
+test: matview
 
 # ----------
 # Another group of parallel tests

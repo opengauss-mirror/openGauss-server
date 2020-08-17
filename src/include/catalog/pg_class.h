@@ -168,6 +168,7 @@ DESCR("");
 #define RELKIND_VIEW 'v'                        /* view */
 #define RELKIND_COMPOSITE_TYPE 'c'              /* composite type */
 #define RELKIND_FOREIGN_TABLE 'f'               /* foreign table */
+#define RELKIND_MATVIEW 'm'                     /* materialized view */
 #define PARTTYPE_PARTITIONED_RELATION 'p'       /* partitioned relation */
 #define PARTTYPE_VALUE_PARTITIONED_RELATION 'v' /* value partitioned relation */
 #define PARTTYPE_NON_PARTITIONED_RELATION 'n'   /* non-partitioned relation */

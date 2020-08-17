@@ -61,6 +61,7 @@ static int32* getValuesTypmods(RangeTblEntry* rte);
 #ifndef PGXC
 static int specialAttNum(const char* attname);
 #endif
+static bool isQueryUsingTempRelation_walker(Node* node, void* context);
 
 static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* pstate, Relation rel);
 
@@ -550,11 +551,48 @@ Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, in
 }
 
 /*
+ * Examine a fully-parsed query, and return TRUE iff any relation underlying
+ * the query is a temporary relation (table, view, or materialized view).
+ */
+bool isQueryUsingTempRelation(Query* query)
+{
+    return isQueryUsingTempRelation_walker((Node*)query, NULL);
+}
+
+static bool isQueryUsingTempRelation_walker(Node* node, void* context)
+{
+    if (node == NULL)
+        return false;
+
+    if (IsA(node, Query)) {
+        Query* query = (Query*)node;
+        ListCell* rtable;
+
+        foreach (rtable, query->rtable) {
+            RangeTblEntry* rte = (RangeTblEntry*)lfirst(rtable);
+
+            if (rte->rtekind == RTE_RELATION) {
+                Relation rel = heap_open(rte->relid, AccessShareLock);
+                char relpersistence = rel->rd_rel->relpersistence;
+
+                heap_close(rel, AccessShareLock);
+                if (relpersistence == RELPERSISTENCE_TEMP || relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
+                    return true;
+            }
+        }
+
+        return query_tree_walker(query, (bool (*)())isQueryUsingTempRelation_walker, context, QTW_IGNORE_JOINALIASES);
+    }
+
+    return expression_tree_walker(node, (bool (*)())isQueryUsingTempRelation_walker, context);
+}
+
+/*
  * colNameToVar
- *	  Search for an unqualified column name.
- *	  If found, return the appropriate Var node (or expression).
- *	  If not found, return NULL.  If the name proves ambiguous, raise error.
- *	  If localonly is true, only names in the innermost query are considered.
+ * 	  Search for an unqualified column name.
+ * 	  If found, return the appropriate Var node (or expression).
+ * 	  If not found, return NULL.  If the name proves ambiguous, raise error.
+ * 	  If localonly is true, only names in the innermost query are considered.
  */
 Node* colNameToVar(ParseState* pstate, char* colname, bool localonly, int location, RangeTblEntry** final_rte)
 {

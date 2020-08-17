@@ -2139,7 +2139,7 @@ static void setup_privileges(void)
 
     privileges_setup[0] = xstrdup("UPDATE pg_class "
                                  "  SET relacl = E'{\"=r/\\\\\"$POSTGRES_SUPERUSERNAME\\\\\"\"}' "
-                                 "  WHERE relkind IN ('r', 'v', 'S') AND relacl IS NULL;\n");
+                                 "  WHERE relkind IN ('r', 'v', 'm', 'S') AND relacl IS NULL;\n");
     privileges_setup[1] = xstrdup("GRANT USAGE ON SCHEMA pg_catalog TO PUBLIC;\n");
     privileges_setup[2] = xstrdup("GRANT CREATE, USAGE ON SCHEMA public TO PUBLIC;\n");
     privileges_setup[3] = xstrdup("REVOKE ALL ON pg_largeobject FROM PUBLIC;\n");

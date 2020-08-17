@@ -611,23 +611,32 @@ static void ExplainOneQuery(
             CreateTableAsStmt* ctas = (CreateTableAsStmt*)query->utilityStmt;
             List* rewritten = NIL;
 
-            // INSERT INTO statement needs target table to be created first,
-            // so we just support EXPLAIN ANALYZE.
-            //
-            if (!es->analyze) {
-                const char* stmt = ctas->is_select_into ? "SELECT INTO" : "CREATE TABLE AS SELECT";
-
-                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("EXPLAIN %s requires ANALYZE", stmt)));
-            }
-
             // CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
             // target table is created first. The SELECT query is then transformed
             // into an INSERT INTO statement.
             //
-            rewritten = QueryRewriteCTAS(query);
-            AssertEreport(list_length(rewritten) == 1, MOD_EXECUTOR, "unexpect list length");
-            ExplainOneQuery((Query*)linitial(rewritten), ctas->into, es, queryString, params);
+            if (ctas->relkind == OBJECT_MATVIEW) {
+                query = (Query*)ctas->query;
+                rewritten = QueryRewrite((Query*) copyObject(query));
+            } else {
+                rewritten = QueryRewriteCTAS(query); 
+            }
+            Assert(list_length(rewritten) == 1);
 
+            // INSERT INTO statement needs target table to be created first,
+            // so we just support EXPLAIN ANALYZE.
+            //
+            if (!es->analyze) {
+                if (ctas->relkind == OBJECT_MATVIEW) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                        errmsg("EXPLAIN CREATE MATERIALIZED VIEW requires ANALYZE")));
+                }
+                const char* stmt = ctas->is_select_into ? "SELECT INTO" : "CREATE TABLE AS SELECT";
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("EXPLAIN %s requires ANALYZE", stmt)));
+            }
+    
+            ExplainOneQuery((Query*) linitial(rewritten), ctas->into, es, queryString, params);
+            
             return;
         }
 
@@ -885,9 +894,13 @@ void ExplainOnePlan(
     UpdateActiveSnapshotCommandId();
 
     /*
-     * Normally we discard the query's output.
+     * Normally we discard the query's output, but if explaining CREATE TABLE
+     * AS, we'd better use the appropriate tuple receiver.
      */
-    dest = None_Receiver;
+    if (into != NULL && into->viewQuery != NULL)
+            dest = CreateIntoRelDestReceiver(into);
+    else
+            dest = None_Receiver;
 
     /* Create a QueryDesc for the query */
     queryDesc = CreateQueryDesc(

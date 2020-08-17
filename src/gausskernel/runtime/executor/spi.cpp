@@ -2069,9 +2069,19 @@ static int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
                  * SELECT INTO.
                  */
                 if (IsA(stmt, CreateTableAsStmt)) {
-                    Assert(strncmp(completionTag, "SELECT ", 7) == 0);
-                    u_sess->SPI_cxt._current->processed = strtoul(completionTag + 7, NULL, 10);
-                    if (((CreateTableAsStmt *)stmt)->is_select_into) {
+                    CreateTableAsStmt *ctastmt = (CreateTableAsStmt *) stmt;
+                    if (strncmp(completionTag, "SELECT ", 7) == 0) {
+                        u_sess->SPI_cxt._current->processed = strtoul(completionTag + 7, NULL, 10);
+                    } else {
+                        /*
+                         * Must be an IF NOT EXISTS that did nothing, or a
+                         * CREATE ... WITH NO DATA.
+                         */
+                        Assert(ctastmt->into->skipData);
+                        u_sess->SPI_cxt._current->processed = 0;
+                    }
+                    
+                    if (ctastmt->is_select_into) {
                         res = SPI_OK_SELINTO;
                     } else {
                         res = SPI_OK_UTILITY;
