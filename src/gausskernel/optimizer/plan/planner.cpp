@@ -6950,7 +6950,7 @@ bool plan_cluster_use_sort(Oid tableOid, Oid indexOid)
     rte = makeNode(RangeTblEntry);
     rte->rtekind = RTE_RELATION;
     rte->relid = tableOid;
-    rte->relkind = RELKIND_RELATION;
+    rte->relkind = RELKIND_RELATION;  /* Don't be too picky. */
     rte->inh = false;
     rte->inFromCl = true;
     query->rtable = list_make1(rte);

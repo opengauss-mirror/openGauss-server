@@ -2476,14 +2476,14 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
     /*
      * Scan pg_class to build a list of the relations we need to reindex.
      *
-     * We only consider plain relations here (toast rels will be processed
-     * indirectly by reindex_relation).
+     * We only consider plain relations and materialized views here (toast
+     * rels will be processed indirectly by reindex_relation).
      */
     relationRelation = heap_open(RelationRelationId, AccessShareLock);
     scan = heap_beginscan(relationRelation, SnapshotNow, 0, NULL);
     while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
         Form_pg_class classtuple = (Form_pg_class)GETSTRUCT(tuple);
-        if (classtuple->relkind != RELKIND_RELATION)
+        if (classtuple->relkind != RELKIND_RELATION && classtuple->relkind != RELKIND_MATVIEW)
             continue;
 
         /* Skip temp tables of other backends; we can't reindex them at all */
@@ -2777,7 +2777,7 @@ static bool relationHasInformationalPrimaryKey(const Relation rel)
  */
 static void handleErrMsgForInfoCnstrnt(const IndexStmt* stmt, const Relation rel)
 {
-    if (rel->rd_rel->relkind != RELKIND_RELATION) {
+    if (rel->rd_rel->relkind != RELKIND_RELATION && rel->rd_rel->relkind != RELKIND_MATVIEW) {
         Oid relationId = RelationGetRelid(rel);
         /*
          * @hdfs
@@ -2810,7 +2810,8 @@ static void handleErrMsgForInfoCnstrnt(const IndexStmt* stmt, const Relation rel
             }
         } else {
             ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a table", RelationGetRelationName(rel))));
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE), 
+                    errmsg("\"%s\" is not a table or materialized view", RelationGetRelationName(rel))));
         }
     }
 }

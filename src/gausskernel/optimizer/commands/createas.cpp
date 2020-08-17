@@ -1,14 +1,17 @@
 /* -------------------------------------------------------------------------
  *
  * createas.cpp
- *	  Execution of CREATE TABLE ... AS, a/k/a SELECT INTO
+ *	  Execution of CREATE TABLE ... AS, a/k/a SELECT INTO.
+ *    Since CREATE MATERIALIZED VIEW shares syntax and most behaviors,
+ *    we implement that here, too.
  *
  * We implement this by diverting the query's normal output to a
  * specialized DestReceiver type.
  *
- * Formerly, this command was implemented as a variant of SELECT, which led
+ * Formerly, CTAS was implemented as a variant of SELECT, which led
  * to assorted legacy behaviors that we still try to preserve, notably that
- * we must return a tuples-processed count in the completionTag.
+ * we must return a tuples-processed count in the completionTag.  (We no
+ * longer do that for CTAS ... WITH NO DATA, however.)
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -29,8 +32,13 @@
 #include "access/xlog.h"
 #include "catalog/toasting.h"
 #include "commands/createas.h"
+#include "commands/matview.h"
 #include "commands/prepare.h"
 #include "commands/tablecmds.h"
+#include "commands/view.h"
+#include "miscadmin.h"
+#include "nodes/makefuncs.h"
+#include "nodes/nodeFuncs.h"
 #include "parser/parse_clause.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/smgr.h"
@@ -39,6 +47,7 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/sec_rls_utils.h"
 #include "utils/snapmgr.h"
 
 typedef struct {
@@ -46,15 +55,144 @@ typedef struct {
     IntoClause* into; /* target relation specification */
     /* These fields are filled by intorel_startup: */
     Relation rel;            /* relation to write to */
+    ObjectAddress reladdr;          /* address of rel, for ExecCreateTableAs */
     CommandId output_cid;    /* cmin to insert in output tuples */
     int hi_options;          /* heap_insert performance options */
     BulkInsertState bistate; /* bulk insert state */
 } DR_intorel;
+/* utility functions for CTAS definition creation */
+static ObjectAddress create_ctas_internal(List* attrList, IntoClause* into);
+static ObjectAddress create_ctas_nodata(const List* tlist, IntoClause* into);
 
+/* the OID of the created table, for ExecCreateTableAs consumption */
 static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinfo);
 static void intorel_receive(TupleTableSlot* slot, DestReceiver* self);
 static void intorel_shutdown(DestReceiver* self);
 static void intorel_destroy(DestReceiver* self);
+
+/*
+ * create_ctas_internal
+ *
+ * Internal utility used for the creation of the definition of a relation
+ * created via CREATE TABLE AS or a materialized view.  Caller needs to
+ * provide a list of attributes (ColumnDef nodes).
+ */
+static ObjectAddress create_ctas_internal(List* attrList, IntoClause* into)
+{
+    CreateStmt *create = makeNode(CreateStmt);
+    bool is_matview;
+    char relkind;
+    Datum toast_options;
+    static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+    ObjectAddress intoRelationAddr;
+    Oid relOid;
+
+    /* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
+    is_matview = (into->viewQuery != NULL);
+    relkind = is_matview ? RELKIND_MATVIEW : RELKIND_RELATION;
+
+    /*
+     * Create the target relation by faking up a CREATE TABLE parsetree and
+     * passing it to DefineRelation.
+     */
+    create->relation = into->rel;
+    create->tableElts = attrList;
+    create->inhRelations = NIL;
+    create->ofTypename = NULL;
+    create->constraints = NIL;
+    create->options = into->options;
+    create->oncommit = into->onCommit;
+    create->tablespacename = into->tableSpaceName;
+    create->if_not_exists = false;
+
+    /*
+     * Create the relation.  (This will error out if there's an existing view,
+     * so we don't need more code to complain if "replace" is false.)
+     */
+    relOid = DefineRelation(create, relkind, InvalidOid);
+    intoRelationAddr.classId = RelationRelationId;
+    intoRelationAddr.objectId = relOid;
+    intoRelationAddr.objectSubId = 0;
+
+    /*
+     * If necessary, create a TOAST table for the target table.  Note that
+     * NewRelationCreateToastTable ends with CommandCounterIncrement(), so
+     * that the TOAST table will be visible for insertion.
+     */
+    CommandCounterIncrement();
+
+    /* parse and validate reloptions for the toast table */
+    toast_options = transformRelOptions((Datum)0, create->options, "toast", validnsps, true, false);
+
+    (void)heap_reloptions(RELKIND_TOASTVALUE, toast_options, true);
+
+    NewRelationCreateToastTable(intoRelationAddr.objectId, toast_options);
+
+    /* Create the "view" part of a materialized view. */
+    if (is_matview) {
+        /* StoreViewQuery scribbles on tree, so make a copy */
+        Query *query = (Query*)copyObject(into->viewQuery);
+
+        StoreViewQuery(intoRelationAddr.objectId, query, false);
+        CommandCounterIncrement();
+    }
+
+    return intoRelationAddr;
+}
+
+static ObjectAddress create_ctas_nodata(const List* tlist, IntoClause* into)
+{
+    List *attrList;
+    ListCell *t, *lc;
+
+    /*
+     * Build list of ColumnDefs from non-junk elements of the tlist.  If a
+     * column name list was specified in CREATE TABLE AS, override the column
+     * names in the query.  (Too few column names are OK, too many are not.)
+     */
+    attrList = NIL;
+    lc = list_head(into->colNames);
+    foreach (t, tlist) {
+        TargetEntry* tle = (TargetEntry*)lfirst(t);
+
+        if (!tle->resjunk) {
+            ColumnDef *col;
+            char *colname;
+
+            if (lc) {
+                colname = strVal(lfirst(lc));
+                lc = lnext(lc);
+            } else
+                colname = tle->resname;
+
+            col = makeColumnDef(colname, exprType((Node*)tle->expr), exprTypmod((Node*)tle->expr),
+                                exprCollation((Node*)tle->expr));
+
+            /*
+             * It's possible that the column is of a collatable type but the
+             * collation could not be resolved, so double-check.  (We must
+             * check this here because DefineRelation would adopt the type's
+             * default collation rather than complaining.)
+             */
+            if (!OidIsValid(col->collOid) && type_is_collatable(col->typname->typeOid))
+                ereport(ERROR, 
+                    (errcode(ERRCODE_INDETERMINATE_COLLATION),
+                        errmsg("no collation was derived for column \"%s\" with collatable type %s", 
+                            col->colname,
+                            format_type_be(col->typname->typeOid)),
+                            errhint("Use the COLLATE clause to set the collation explicitly.")));
+
+            attrList = lappend(attrList, col);
+        }
+    }
+
+    if (lc != NULL)
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("too many column names were specified")));
+
+    /* Create the relation definition using the ColumnDef list */
+    return create_ctas_internal(attrList, into);
+}
+
 
 /*
  * ExecCreateTableAs -- execute a CREATE TABLE AS command
@@ -63,11 +201,14 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
 {
     Query* query = (Query*)stmt->query;
     IntoClause* into = stmt->into;
+    bool is_matview = (into->viewQuery != NULL);
     DestReceiver* dest = NULL;
-    List* rewritten = NIL;
+    Oid save_userid = InvalidOid;
+    int save_sec_context = 0;
+    int save_nestlevel = 0;
+    List *rewritten = NULL;
     PlannedStmt* plan = NULL;
     QueryDesc* queryDesc = NULL;
-    ScanDirection dir;
 
     /*
      * Create the tuple receiver object and insert info it will need
@@ -82,92 +223,110 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
     if (query->commandType == CMD_UTILITY && IsA(query->utilityStmt, ExecuteStmt)) {
         ExecuteStmt* estmt = (ExecuteStmt*)query->utilityStmt;
 
+        Assert(!is_matview);    /* excluded by syntax */
         ExecuteQuery(estmt, into, queryString, params, dest, completionTag);
-
         return;
     }
     Assert(query->commandType == CMD_SELECT);
 
     /*
-     * Parse analysis was done already, but we still have to run the rule
-     * rewriter.  We do not do AcquireRewriteLocks: we assume the query either
-     * came straight from the parser, or suitable locks were acquired by
-     * plancache.c.
-     *
-     * Because the rewriter and planner tend to scribble on the input, we make
-     * a preliminary copy of the source querytree.	This prevents problems in
-     * the case that CTAS is in a portal or plpgsql function and is executed
-     * repeatedly.	(See also the same hack in EXPLAIN and PREPARE.)
+     * For materialized views, lock down security-restricted operations and
+     * arrange to make GUC variable changes local to this command.  This is
+     * not necessary for security, but this keeps the behavior similar to
+     * REFRESH MATERIALIZED VIEW.  Otherwise, one could create a materialized
+     * view not possible to refresh.
      */
-    rewritten = QueryRewrite((Query*)copyObject(stmt->query));
+    if (is_matview) {
+        GetUserIdAndSecContext(&save_userid, &save_sec_context);
+        SetUserIdAndSecContext(save_userid, save_sec_context | SECURITY_RESTRICTED_OPERATION);
+        save_nestlevel = NewGUCNestLevel();
+    }
+    if (into->skipData) {
+        /*
+         * If WITH NO DATA was specified, do not go through the rewriter,
+         * planner and executor.  Just define the relation using a code path
+         * similar to CREATE VIEW.  This avoids dump/restore problems stemming
+         * from running the planner before all dependencies are set up.
+         */
+        (void)create_ctas_nodata(query->targetList, into);
+    } else {
+        /*
+         * Parse analysis was done already, but we still have to run the rule
+         * rewriter.  We do not do AcquireRewriteLocks: we assume the query either
+         * came straight from the parser, or suitable locks were acquired by
+         * plancache.c.
+         *
+         * Because the rewriter and planner tend to scribble on the input, we make
+         * a preliminary copy of the source querytree.  This prevents problems in
+         * the case that CTAS is in a portal or plpgsql function and is executed
+         * repeatedly.  (See also the same hack in EXPLAIN and PREPARE.)
+         */
+        rewritten = QueryRewrite((Query*)copyObject(query));
 
-    /* SELECT should never rewrite to more or less than one SELECT query */
-    if (list_length(rewritten) != 1)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unexpected rewrite result for CREATE TABLE AS SELECT")));
-    query = (Query*)linitial(rewritten);
-    Assert(query->commandType == CMD_SELECT);
+        /* SELECT should never rewrite to more or less than one SELECT query */
+        if (list_length(rewritten) != 1)
+            elog(ERROR, "unexpected rewrite result for %s",
+                is_matview ? "CREATE MATERIALIZED VIEW" : "CREATE TABLE AS SELECT");
+        query = (Query*)linitial(rewritten);
+        Assert(query->commandType == CMD_SELECT);
 
-    /* plan the query */
-    plan = pg_plan_query(query, 0, params);
+        /* plan the query */
+        plan = pg_plan_query(query, 0, params);
 
-    /*
-     * Use a snapshot with an updated command ID to ensure this query sees
-     * results of any previously executed queries.	(This could only matter if
-     * the planner executed an allegedly-stable function that changed the
-     * database contents, but let's do it anyway to be parallel to the EXPLAIN
-     * code path.)
-     */
-    PushCopiedSnapshot(GetActiveSnapshot());
-    UpdateActiveSnapshotCommandId();
+        /*
+         * Use a snapshot with an updated command ID to ensure this query sees
+         * results of any previously executed queries.	(This could only matter if
+         * the planner executed an allegedly-stable function that changed the
+         * database contents, but let's do it anyway to be parallel to the EXPLAIN
+         * code path.)
+         */
+        PushCopiedSnapshot(GetActiveSnapshot());
+        UpdateActiveSnapshotCommandId();
 
-    /* Create a QueryDesc, redirecting output to our tuple receiver */
-    queryDesc = CreateQueryDesc(plan, queryString, GetActiveSnapshot(), InvalidSnapshot, dest, params, 0);
+        /* Create a QueryDesc, redirecting output to our tuple receiver */
+        queryDesc = CreateQueryDesc(plan, queryString, GetActiveSnapshot(), InvalidSnapshot, dest, params, 0);
 
-    if (ENABLE_WORKLOAD_CONTROL && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
-        /* Check if need track resource */
-        u_sess->exec_cxt.need_track_resource = WLMNeedTrackResource(queryDesc);
+        if (ENABLE_WORKLOAD_CONTROL && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
+            /* Check if need track resource */
+            u_sess->exec_cxt.need_track_resource = WLMNeedTrackResource(queryDesc);
+        }
+
+        /* call ExecutorStart to prepare the plan for execution */
+        ExecutorStart(queryDesc, GetIntoRelEFlags(into));
+
+        /* workload client manager */
+        if (ENABLE_WORKLOAD_CONTROL) {
+            WLMInitQueryPlan(queryDesc);
+            dywlm_client_manager(queryDesc);
+        }
+
+        /* run the plan to completion */
+        ExecutorRun(queryDesc, ForwardScanDirection, 0L);
+
+        /* save the rowcount if we're given a completionTag to fill */
+        if (completionTag != NULL) {
+            errno_t rc;
+            rc = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "SELECT %lu",
+                queryDesc->estate->es_processed);
+            securec_check_ss(rc, "\0", "\0");
+        }
+
+        /* and clean up */
+        ExecutorFinish(queryDesc);
+        ExecutorEnd(queryDesc);
+
+        FreeQueryDesc(queryDesc);
+
+        PopActiveSnapshot();
     }
 
-    /* call ExecutorStart to prepare the plan for execution */
-    ExecutorStart(queryDesc, GetIntoRelEFlags(into));
+    if (is_matview) {
+        /* Roll back any GUC changes */
+        AtEOXact_GUC(false, save_nestlevel);
 
-    /* workload client manager */
-    if (ENABLE_WORKLOAD_CONTROL) {
-        WLMInitQueryPlan(queryDesc);
-        dywlm_client_manager(queryDesc);
+        /* Restore userid and security context */
+        SetUserIdAndSecContext(save_userid, save_sec_context);
     }
-
-    /*
-     * Normally, we run the plan to completion; but if skipData is specified,
-     * just do tuple receiver startup and shutdown.
-     */
-    if (into->skipData)
-        dir = NoMovementScanDirection;
-    else
-        dir = ForwardScanDirection;
-
-    /* run the plan */
-    ExecutorRun(queryDesc, dir, 0L);
-
-    /* save the rowcount if we're given a completionTag to fill */
-    if (completionTag != NULL) {
-        errno_t rc;
-        rc = snprintf_s(completionTag,
-            COMPLETION_TAG_BUFSIZE,
-            COMPLETION_TAG_BUFSIZE - 1,
-            "SELECT %lu",
-            queryDesc->estate->es_processed);
-        securec_check_ss(rc, "\0", "\0");
-    }
-
-    /* and clean up */
-    ExecutorFinish(queryDesc);
-    ExecutorEnd(queryDesc);
-
-    FreeQueryDesc(queryDesc);
-
-    PopActiveSnapshot();
 }
 
 /*
@@ -180,15 +339,23 @@ void ExecCreateTableAs(CreateTableAsStmt* stmt, const char* queryString, ParamLi
  */
 int GetIntoRelEFlags(IntoClause* intoClause)
 {
+    int flags;
     /*
      * We need to tell the executor whether it has to produce OIDs or not,
      * because it doesn't have enough information to do so itself (since we
      * can't build the target relation until after ExecutorStart).
+     * 
+     * Disallow the OIDS option for materialized views.
      */
-    if (interpretOidsOption(intoClause->options))
-        return EXEC_FLAG_WITH_OIDS;
+    if (interpretOidsOption(intoClause->options, (intoClause->viewQuery == NULL)))
+        flags = EXEC_FLAG_WITH_OIDS;
     else
-        return EXEC_FLAG_WITHOUT_OIDS;
+        flags = EXEC_FLAG_WITHOUT_OIDS;
+
+    if (intoClause->skipData)
+        flags |= EXEC_FLAG_WITH_NO_DATA;
+
+    return flags;
 }
 
 /*
@@ -219,32 +386,20 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
 {
     DR_intorel* myState = (DR_intorel*)self;
     IntoClause* into = myState->into;
-    CreateStmt* create = NULL;
-    Oid intoRelationId;
+    bool is_matview;
+    char relkind;
+    List* attrList;
+    ObjectAddress intoRelationAddr;
     Relation intoRelationDesc;
-    RangeTblEntry* rte = NULL;
-    Datum toast_options;
-    ListCell* lc = NULL;
+    RangeTblEntry* rte;
+    ListCell* lc;
     int attnum;
-    static const char* const validnsps[] = HEAP_RELOPT_NAMESPACES;
 
     Assert(into != NULL); /* else somebody forgot to set it */
 
-    /*
-     * Create the target relation by faking up a CREATE TABLE parsetree and
-     * passing it to DefineRelation.
-     */
-    create = makeNode(CreateStmt);
-    create->relation = into->rel;
-    create->tableElts = NIL; /* will fill below */
-    create->inhRelations = NIL;
-    create->ofTypename = NULL;
-    create->constraints = NIL;
-    create->options = into->options;
-    create->oncommit = into->onCommit;
-    create->row_compress = into->row_compress;
-    create->tablespacename = into->tableSpaceName;
-    create->if_not_exists = false;
+    /* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
+    is_matview = (into->viewQuery != NULL);
+    relkind = is_matview ? RELKIND_MATVIEW : RELKIND_RELATION;
 
     /*
      * Build column definitions using "pre-cooked" type and collation info. If
@@ -252,40 +407,20 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
      * column names derived from the query.  (Too few column names are OK, too
      * many are not.)
      */
+    attrList = NIL;
     lc = list_head(into->colNames);
     for (attnum = 0; attnum < typeinfo->natts; attnum++) {
         Form_pg_attribute attribute = typeinfo->attrs[attnum];
-        ColumnDef* col = makeNode(ColumnDef);
-        TypeName* coltype = makeNode(TypeName);
+        ColumnDef *col;
+        char *colname;
 
-        if (lc != NULL) {
-            col->colname = strVal(lfirst(lc));
+        if (lc) {
+            colname = strVal(lfirst(lc));
             lc = lnext(lc);
         } else
-            col->colname = NameStr(attribute->attname);
-        col->typname = coltype;
-        col->inhcount = 0;
-        col->is_local = true;
-        col->is_not_null = false;
-        col->is_from_type = false;
-        col->storage = 0;
-        col->kvtype = attribute->attkvtype;
-        col->cmprs_mode = attribute->attcmprmode;
-        col->raw_default = NULL;
-        col->cooked_default = NULL;
-        col->collClause = NULL;
-        col->collOid = attribute->attcollation;
-        col->constraints = NIL;
-        col->fdwoptions = NIL;
+            colname = NameStr(attribute->attname);
 
-        coltype->names = NIL;
-        coltype->typeOid = attribute->atttypid;
-        coltype->setof = false;
-        coltype->pct_type = false;
-        coltype->typmods = NIL;
-        coltype->typemod = attribute->atttypmod;
-        coltype->arrayBounds = NIL;
-        coltype->location = -1;
+        col = makeColumnDef(colname, attribute->atttypid, attribute->atttypmod, attribute->attcollation);
 
         /*
          * It's possible that the column is of a collatable type but the
@@ -293,43 +428,29 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
          * this here because DefineRelation would adopt the type's default
          * collation rather than complaining.)
          */
-        if (!OidIsValid(col->collOid) && type_is_collatable(coltype->typeOid))
-            ereport(ERROR,
+        if (!OidIsValid(col->collOid) && type_is_collatable(col->typname->typeOid))
+            ereport(ERROR, 
                 (errcode(ERRCODE_INDETERMINATE_COLLATION),
-                    errmsg("no collation was derived for column \"%s\" with collatable type %s",
+                    errmsg("no collation was derived for column \"%s\" with collatable type %s", 
                         col->colname,
-                        format_type_be(coltype->typeOid)),
-                    errhint("Use the COLLATE clause to set the collation explicitly.")));
+                        format_type_be(col->typname->typeOid)),
+                        errhint("Use the COLLATE clause to set the collation explicitly.")));
 
-        create->tableElts = lappend(create->tableElts, col);
+        attrList = lappend(attrList, col);
     }
 
     if (lc != NULL)
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("CREATE TABLE AS specifies too many column names")));
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("too many column names were specified")));
 
     /*
      * Actually create the target table
      */
-    intoRelationId = DefineRelation(create, RELKIND_RELATION, InvalidOid);
-
-    /*
-     * If necessary, create a TOAST table for the target table.  Note that
-     * AlterTableCreateToastTable ends with CommandCounterIncrement(), so that
-     * the TOAST table will be visible for insertion.
-     */
-    CommandCounterIncrement();
-
-    /* parse and validate reloptions for the toast table */
-    toast_options = transformRelOptions((Datum)0, create->options, "toast", validnsps, true, false);
-
-    (void)heap_reloptions(RELKIND_TOASTVALUE, toast_options, true);
-
-    AlterTableCreateToastTable(intoRelationId, toast_options);
+    intoRelationAddr = create_ctas_internal(attrList, into);
 
     /*
      * Finally we can open the target table
      */
-    intoRelationDesc = heap_open(intoRelationId, AccessExclusiveLock);
+    intoRelationDesc = heap_open(intoRelationAddr.objectId, AccessExclusiveLock);
 
     /*
      * Check INSERT permission on the constructed table.
@@ -339,19 +460,33 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
      */
     rte = makeNode(RangeTblEntry);
     rte->rtekind = RTE_RELATION;
-    rte->relid = intoRelationId;
-    rte->relkind = RELKIND_RELATION;
+    rte->relid = intoRelationAddr.objectId;
+    rte->relkind = relkind;
     rte->requiredPerms = ACL_INSERT;
 
     for (attnum = 1; attnum <= intoRelationDesc->rd_att->natts; attnum++)
-        rte->insertedCols = bms_add_member(rte->insertedCols, attnum - FirstLowInvalidHeapAttributeNumber);
+        rte->insertedCols = bms_add_member(rte->insertedCols,
 
-    (void)ExecCheckRTPerms(list_make1(rte), true);
+            attnum - FirstLowInvalidHeapAttributeNumber);
+    ExecCheckRTPerms(list_make1(rte), true);
+
+    /*
+     * Make sure the constructed table does not have RLS enabled.
+     *
+     * check_enable_rls() will ereport(ERROR) itself if the user has requested
+     * something invalid, and otherwise will return RLS_ENABLED if RLS should
+     * be enabled here.  We don't actually support that currently, so throw
+     * our own ereport(ERROR) if that happens.
+     */
+    if (CheckEnableRlsPolicies(intoRelationDesc, GetUserId()) == RLS_ENABLED)
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), (errmsg("policies not yet implemented for this command"))));
 
     /*
      * Fill private fields of myState for use by later routines
      */
     myState->rel = intoRelationDesc;
+    myState->reladdr = intoRelationAddr;
     myState->output_cid = GetCurrentCommandId(true);
 
     /*

@@ -863,6 +863,7 @@ bytea* extractRelOptions(HeapTuple tuple, TupleDesc tupdesc, Oid amoptions)
         case RELKIND_RELATION:
         case RELKIND_TOASTVALUE:
         case RELKIND_VIEW:
+        case RELKIND_MATVIEW:
             options = heap_reloptions(classForm->relkind, datum, false);
             break;
         case RELKIND_INDEX:
@@ -1531,6 +1532,7 @@ bytea* heap_reloptions(char relkind, Datum reloptions, bool validate)
             }
             return (bytea*)rdopts;
         case RELKIND_RELATION:
+        case RELKIND_MATVIEW:
             return default_reloptions(reloptions, validate, RELOPT_KIND_HEAP);
         case RELKIND_VIEW:
             return default_reloptions(reloptions, validate, RELOPT_KIND_VIEW);

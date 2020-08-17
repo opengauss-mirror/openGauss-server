@@ -48,6 +48,7 @@
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_statistic_ext.h"
 #include "catalog/namespace.h"
+#include "commands/matview.h"
 #include "commands/trigger.h"
 #include "executor/execdebug.h"
 #include "executor/nodeRecursiveunion.h"
@@ -1318,7 +1319,7 @@ static void InitPlan(QueryDesc *queryDesc, int eflags)
          * it is a parameterless subplan (not initplan), we suggest that it be
          * prepared to handle REWIND efficiently; otherwise there is no need.
          */
-        sp_eflags = eflags & EXEC_FLAG_EXPLAIN_ONLY;
+        sp_eflags = eflags & (EXEC_FLAG_EXPLAIN_ONLY | EXEC_FLAG_WITH_NO_DATA);
         if (bms_is_member(i, plannedstmt->rewindPlanIDs)) {
             sp_eflags |= EXEC_FLAG_REWIND;
         }
@@ -1463,6 +1464,11 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
                     break;
             }
             break;
+        case RELKIND_MATVIEW:
+            if (!MatViewIncrementalMaintenanceIsEnabled())
+                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), 
+                        errmsg("cannot change materialized view \"%s\"", RelationGetRelationName(resultRel))));
+            break;
         case RELKIND_FOREIGN_TABLE:
             /* Okay only if the FDW supports it */
             fdwroutine = GetFdwRoutineForRelation(resultRel, false);
@@ -1536,9 +1542,17 @@ static void CheckValidRowMarkRel(Relation rel, RowMarkType markType)
                 errmsg("cannot lock rows in TOAST relation \"%s\"", RelationGetRelationName(rel))));
             break;
         case RELKIND_VIEW:
-            /* Should not get here */
+            /* Allow referencing a matview, but not actual locking clauses */
+            if (markType != ROW_MARK_REFERENCE)
+                ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                       errmsg("cannot lock rows in materialized view \"%s\"",
+                              RelationGetRelationName(rel))));
+            break;
+        case RELKIND_MATVIEW:
+            /* Should not get here; planner should have used ROW_MARK_COPY */
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("cannot lock rows in view \"%s\"", RelationGetRelationName(rel))));
+                errmsg("cannot lock rows in materialized view \"%s\"", RelationGetRelationName(rel))));
             break;
         case RELKIND_FOREIGN_TABLE:
             /* Should not get here; planner should have used ROW_MARK_COPY */

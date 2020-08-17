@@ -617,7 +617,34 @@ Param* makeParam(ParamKind paramkind, int paramid, Oid paramtype, int32 paramtyp
 }
 
 /*
- * makeIndexInfo
+ * makeColumnDef -
+ * build a ColumnDef node to represent a simple column definition.
+ *
+ * Type and collation are specified by OID.
+ * Other properties are all basic to start with.
+ */
+ColumnDef* makeColumnDef(const char* colname, Oid typeOid, int32 typmod, Oid collOid)
+{
+    ColumnDef* n = makeNode(ColumnDef);
+
+    n->colname = pstrdup(colname);
+    n->typname = makeTypeNameFromOid(typeOid, typmod);
+    n->inhcount = 0;
+    n->is_local = true;
+    n->is_not_null = false;
+    n->is_from_type = false;
+    n->storage = 0;
+    n->raw_default = NULL;
+    n->cooked_default = NULL;
+    n->collClause = NULL;
+    n->collOid = collOid;
+    n->constraints = NIL;
+    n->fdwoptions = NIL;
+
+    return n;
+}
+
+/* makeIndexInfo
  *	  create an IndexInfo node
  */
 IndexInfo* makeIndexInfo(int numattrs, List* expressions, List* predicates, bool unique, bool isready, bool concurrent)

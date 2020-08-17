@@ -383,7 +383,7 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
                     success = describeTableDetails(pattern, show_verbose, show_system);
                 else
                     /* standard listing of interesting things */
-                    success = listTables("tvsE", NULL, show_verbose, show_system);
+                    success = listTables("tvmsE", NULL, show_verbose, show_system);
                 break;
             case 'a':
                 success = describeAggregates(pattern, show_verbose, show_system);
@@ -449,6 +449,7 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
                 break;
             case 't':
             case 'v':
+            case 'm':
             case 'i':
             case 's':
             case 'E':

@@ -2235,6 +2235,11 @@ static CopyState BeginCopyTo(
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("cannot copy from view \"%s\"", RelationGetRelationName(rel)),
                     errhint("Try the COPY (SELECT ...) TO variant.")));
+        else if (rel->rd_rel->relkind == RELKIND_MATVIEW)
+            ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("cannot copy from materialized view \"%s\"", RelationGetRelationName(rel)),
+                    errhint("Try the COPY (SELECT ...) TO variant.")));
         else if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -3404,7 +3409,11 @@ static uint64 CopyFrom(CopyState cstate)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("cannot copy to view \"%s\"", RelationGetRelationName(cstate->rel))));
-        else if (cstate->rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+        else if (cstate->rel->rd_rel->relkind == RELKIND_MATVIEW)
+            ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("cannot copy to materialized view \"%s\"", RelationGetRelationName(cstate->rel))));	
+	else if (cstate->rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
             if (!CheckSupportedFDWType(RelationGetRelid(cstate->rel)))
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),

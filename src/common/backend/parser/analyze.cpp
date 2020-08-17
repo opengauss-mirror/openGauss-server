@@ -227,6 +227,7 @@ Query* transformTopLevelStmt(ParseState* pstate, Node* parseTree, bool isFirstNo
 
             ctas->query = parseTree;
             ctas->into = stmt->intoClause;
+            ctas->relkind = OBJECT_TABLE;
             ctas->is_select_into = true;
 
             /*
@@ -2993,7 +2994,7 @@ static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt)
 {
     Query* result = NULL;
 
-    /* transform contained query, allowing SELECT INTO */
+    /* transform a CREATE TABLE AS, SELECT ... INTO, or CREATE MATERIALIZED VIEW Statement */
     stmt->query = (Node*)transformTopLevelStmt(pstate, stmt->query);
 
     /* represent the command as a utility Query */
@@ -3014,9 +3015,56 @@ static Query* transformCreateTableAsStmt(ParseState* pstate, CreateTableAsStmt* 
 {
     Query* result = NULL;
     ListCell* lc = NULL;
+    Query* query;
 
     /* transform contained query */
-    stmt->query = (Node*)transformStmt(pstate, stmt->query);
+    query = transformStmt(pstate, stmt->query);
+    stmt->query = (Node*)query;
+    /* additional work needed for CREATE MATERIALIZED VIEW */
+    if (stmt->relkind == OBJECT_MATVIEW) {
+        /*
+         * Prohibit a data-modifying CTE in the query used to create a
+         * materialized view. It's not sufficiently clear what the user would
+         * want to happen if the MV is refreshed or incrementally maintained.
+         */
+        if (query->hasModifyingCTE)
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg(
+                "materialized views must not use data-modifying statements in WITH"))); 
+
+        /*
+         * Check whether any temporary database objects are used in the creation query. 
+         * It would be hard to refresh data or incrementally maintain it if a source 
+         * disappeared.
+         */
+        if (isQueryUsingTempRelation(query))
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("materialized views must not use temporary tables or views")));
+        /*
+         * A materialized view would either need to save parameters for use in
+         * maintaining/loading the data or prohibit them entirely.  The latter
+         * seems safer and more sane.
+         */
+        if (query_contains_extern_params(query))
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("materialized views may not be defined using bound parameters")));
+        /*
+         * For now, we disallow unlogged materialized views, because it
+         * seems like a bad idea for them to just go to empty after a crash.
+         * (If we could mark them as unpopulated, that would be better, but
+         * that requires catalog changes which crash recovery can't presently
+         * handle.)
+         */
+        if (stmt->into->rel->relpersistence == RELPERSISTENCE_UNLOGGED)
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("materialized views cannot be UNLOGGED")));
+
+        /*
+         * At runtime, we'll need a copy of the parsed-but-not-rewritten Query
+         * for purposes of creating the view's ON SELECT rule.  We stash that
+         * in the IntoClause because that's where intorel_startup() can
+         * conveniently get it from.
+         */
+        stmt->into->viewQuery = (Node*)copyObject(query);
+    }
 
     /* if result type of new relation is unknown-type, then resolve as type TEXT */
     foreach (lc, ((Query*)stmt->query)->targetList) {

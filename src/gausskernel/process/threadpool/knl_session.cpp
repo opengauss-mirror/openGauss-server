@@ -465,6 +465,7 @@ void knl_u_commands_init(knl_u_commands_context* cmd_cxt)
 {
     cmd_cxt->TableSpaceUsageArray = NULL;
     cmd_cxt->isUnderCreateForeignTable = false;
+    cmd_cxt->isUnderRefreshMatview = false;
     cmd_cxt->CurrentExtensionObject = InvalidOid;
     cmd_cxt->PendingLibraryDeletes = NIL;
 

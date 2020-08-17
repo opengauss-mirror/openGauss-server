@@ -339,7 +339,7 @@ static void get_rel_infos(ClusterInfo* cluster, DbInfo* dbinfo)
         " FROM pg_catalog.pg_class p INNER JOIN pg_catalog.pg_namespace n ON (p.relnamespace = n.oid)"
         " LEFT OUTER JOIN pg_catalog.pg_tablespace t ON (p.reltablespace = t.oid)"
         " WHERE p.oid < 16384 AND"
-        "       p.relkind IN ('r', 'i', 't') AND"
+        "       p.relkind IN ('r', 'm', 'i', 't') AND"
         "       p.relisshared= false "
         " ORDER BY 1",
         is_exists ? ", t.relative " : "");

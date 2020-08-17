@@ -174,7 +174,6 @@ static void quoteOneName(char* buffer, const char* name);
 static void quoteRelationName(char* buffer, Relation rel);
 static void ri_GenerateQual(StringInfo buf, const char* sep, const char* leftop, Oid leftoptype, Oid opoid,
     const char* rightop, Oid rightoptype);
-static void ri_add_cast_to(StringInfo buf, Oid typid);
 static void ri_GenerateQualCollation(StringInfo buf, Oid collation);
 static int ri_NullCheck(Relation rel, HeapTuple tup, RI_QueryKey* key, int pairidx);
 static void ri_BuildQueryKeyFull(RI_QueryKey* key, const RI_ConstraintInfo* riinfo, int32 constr_queryno);
@@ -2319,61 +2318,8 @@ static void quoteRelationName(char* buffer, Relation rel)
 static void ri_GenerateQual(StringInfo buf, const char* sep, const char* leftop, Oid leftoptype, Oid opoid,
     const char* rightop, Oid rightoptype)
 {
-    HeapTuple opertup;
-    Form_pg_operator operform;
-    char* oprname = NULL;
-    char* nspname = NULL;
-
-    opertup = SearchSysCache1(OPEROID, ObjectIdGetDatum(opoid));
-    if (!HeapTupleIsValid(opertup)) {
-        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for operator %u", opoid)));
-    }
-    operform = (Form_pg_operator)GETSTRUCT(opertup);
-    Assert(operform->oprkind == 'b');
-    oprname = NameStr(operform->oprname);
-
-    nspname = get_namespace_name(operform->oprnamespace, true);
-
-    appendStringInfo(buf, " %s %s", sep, leftop);
-    if (leftoptype != operform->oprleft) {
-        ri_add_cast_to(buf, operform->oprleft);
-    }
-    appendStringInfo(buf, " OPERATOR(%s.", quote_identifier(nspname));
-    appendStringInfoString(buf, oprname);
-    appendStringInfo(buf, ") %s", rightop);
-    if (rightoptype != operform->oprright) {
-        ri_add_cast_to(buf, operform->oprright);
-    }
-    ReleaseSysCache(opertup);
-}
-
-/*
- * Add a cast specification to buf.  We spell out the type name the hard way,
- * intentionally not using format_type_be().  This is to avoid corner cases
- * for CHARACTER, BIT, and perhaps other types, where specifying the type
- * using SQL-standard syntax results in undesirable data truncation.  By
- * doing it this way we can be certain that the cast will have default (-1)
- * target typmod.
- */
-static void ri_add_cast_to(StringInfo buf, Oid typid)
-{
-    HeapTuple typetup;
-    Form_pg_type typform;
-    char* typname = NULL;
-    char* nspname = NULL;
-
-    typetup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-    if (!HeapTupleIsValid(typetup)) {
-        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
-    }
-    typform = (Form_pg_type)GETSTRUCT(typetup);
-
-    typname = NameStr(typform->typname);
-    nspname = get_namespace_name(typform->typnamespace, true);
-
-    appendStringInfo(buf, "::%s.%s", quote_identifier(nspname), quote_identifier(typname));
-
-    ReleaseSysCache(typetup);
+    appendStringInfo(buf, " %s ", sep);
+    generate_operator_clause(buf, leftop, leftoptype, opoid, rightop, rightoptype);
 }
 
 /*

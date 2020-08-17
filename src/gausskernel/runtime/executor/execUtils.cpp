@@ -1031,7 +1031,7 @@ Relation ExecOpenScanRelation(EState* estate, Index scanrelid)
         }
     }
 
-    /* OK, open the relation and acquire lock as needed */
+    /* Open the relation and acquire lock as needed */
     reloid = getrelid(scanrelid, estate->es_range_table);
     rel = heap_open(reloid, lockmode);
 

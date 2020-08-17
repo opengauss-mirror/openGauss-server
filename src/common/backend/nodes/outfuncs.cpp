@@ -1854,6 +1854,7 @@ static void _outIntoClause(StringInfo str, IntoClause* node)
     WRITE_ENUM_FIELD(onCommit, OnCommitAction);
     WRITE_ENUM_FIELD(row_compress, RelCompressType);
     WRITE_STRING_FIELD(tableSpaceName);
+    WRITE_NODE_FIELD(viewQuery);
     WRITE_BOOL_FIELD(skipData);
 }
 

@@ -120,6 +120,7 @@ static bool _equalIntoClause(const IntoClause* a, const IntoClause* b)
     COMPARE_SCALAR_FIELD(onCommit);
     COMPARE_SCALAR_FIELD(row_compress);
     COMPARE_STRING_FIELD(tableSpaceName);
+    COMPARE_NODE_FIELD(viewQuery);
     COMPARE_SCALAR_FIELD(skipData);
 
     return true;
@@ -1554,10 +1555,20 @@ static bool _equalCreateTableAsStmt(const CreateTableAsStmt* a, const CreateTabl
 {
     COMPARE_NODE_FIELD(query);
     COMPARE_NODE_FIELD(into);
+    COMPARE_SCALAR_FIELD(relkind);
     COMPARE_SCALAR_FIELD(is_select_into);
 
     return true;
 }
+
+static bool _equalRefreshMatViewStmt(const RefreshMatViewStmt* a, const RefreshMatViewStmt* b)
+{
+    COMPARE_SCALAR_FIELD(skipData);
+    COMPARE_NODE_FIELD(relation);
+
+    return true;
+}
+
 
 static bool _equalReplicaIdentityStmt(const ReplicaIdentityStmt* a, const ReplicaIdentityStmt* b)
 {
@@ -3129,6 +3140,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_CreateTableAsStmt:
             retval = _equalCreateTableAsStmt((CreateTableAsStmt*)a, (CreateTableAsStmt*)b);
+            break;
+        case T_RefreshMatViewStmt:
+            retval = _equalRefreshMatViewStmt((RefreshMatViewStmt*)a, (RefreshMatViewStmt*)b);
             break;
         case T_CreateSeqStmt:
             retval = _equalCreateSeqStmt((CreateSeqStmt*)a, (CreateSeqStmt*)b);

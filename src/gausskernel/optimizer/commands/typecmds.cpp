@@ -1928,7 +1928,7 @@ Oid DefineCompositeType(RangeVar* typevar, List* coldeflist)
     createStmt->tableElts = coldeflist;
     createStmt->inhRelations = NIL;
     createStmt->constraints = NIL;
-    createStmt->options = list_make1(defWithOids(false));
+    createStmt->options = NIL;
     createStmt->oncommit = ONCOMMIT_NOOP;
     createStmt->tablespacename = NULL;
     createStmt->if_not_exists = false;
@@ -2603,9 +2603,16 @@ static List* get_rels_with_domain(Oid domainOid, LOCKMODE lockmode)
              */
             if (OidIsValid(rel->rd_rel->reltype))
                 find_composite_type_dependencies(rel->rd_rel->reltype, NULL, format_type_be(domainOid));
-
-            /* Otherwise we can ignore views, composite types, etc */
-            if (rel->rd_rel->relkind != RELKIND_RELATION) {
+                
+            /*
+             * Otherwise, we can ignore relations except those with both
+             * storage and user-chosen column types.
+             *
+             * XXX If an index-only scan could satisfy "col::some_domain" from
+             * a suitable expression index, this should also check expression
+             * index columns.
+             */
+            if (rel->rd_rel->relkind != RELKIND_RELATION && rel->rd_rel->relkind != RELKIND_MATVIEW) {
                 relation_close(rel, lockmode);
                 continue;
             }

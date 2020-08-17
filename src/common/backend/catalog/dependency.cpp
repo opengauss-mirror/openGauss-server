@@ -3034,6 +3034,9 @@ static void getRelationDescription(StringInfo buffer, Oid relid)
         case RELKIND_VIEW:
             appendStringInfo(buffer, _("view %s"), relname);
             break;
+        case RELKIND_MATVIEW:
+            appendStringInfo(buffer, _("materialized view %s"), relname);
+            break;
         case RELKIND_COMPOSITE_TYPE:
             appendStringInfo(buffer, _("composite type %s"), relname);
             break;

@@ -93,15 +93,16 @@ void ExecSecLabelStmt(SecLabelStmt* stmt)
 
             /*
              * Allow security labels only on columns of tables, views,
-             * composite types, and foreign tables (which are the only
-             * relkinds for which pg_dump will dump labels).
+             * materialized views, composite types, and foreign tables (which
+             * are the only relkinds for which pg_dump will dump labels).
              */
             if (relation->rd_rel->relkind != RELKIND_RELATION && relation->rd_rel->relkind != RELKIND_VIEW &&
+                relation->rd_rel->relkind != RELKIND_MATVIEW &&
                 relation->rd_rel->relkind != RELKIND_COMPOSITE_TYPE &&
                 relation->rd_rel->relkind != RELKIND_FOREIGN_TABLE)
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("\"%s\" is not a table, view, composite type, or foreign table",
+                        errmsg("\"%s\" is not a table, view, materialized view, composite type, or foreign table",
                             RelationGetRelationName(relation))));
             break;
         default:

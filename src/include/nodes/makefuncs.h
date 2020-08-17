@@ -71,6 +71,7 @@ extern Node* makeTidConst(ItemPointer item);
 extern FuncCall* makeFuncCall(List* funcname, List* args, int location);
 extern Param* makeParam(
     ParamKind paramkind, int paramid, Oid paramtype, int32 paramtypmod, Oid paramcollid, int location);
+extern ColumnDef* makeColumnDef(const char* colname, Oid typeOid, int32 typmod, Oid collOid);
 extern IndexInfo* makeIndexInfo(int numattrs, List *expressions, List *predicates,
     bool unique, bool isready, bool concurrent);
 #endif /* MAKEFUNC_H */

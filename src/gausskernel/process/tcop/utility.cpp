@@ -46,6 +46,7 @@
 #include "commands/discard.h"
 #include "commands/explain.h"
 #include "commands/extension.h"
+#include "commands/matview.h"
 #include "commands/lockcmds.h"
 #include "commands/portalcmds.h"
 #include "commands/prepare.h"
@@ -362,6 +363,7 @@ static void check_xact_readonly(Node* parse_tree)
         case T_CreateSeqStmt:
         case T_CreateStmt:
         case T_CreateTableAsStmt:
+        case T_RefreshMatViewStmt:
         case T_CreateTableSpaceStmt:
         case T_CreateTrigStmt:
         case T_CompositeTypeStmt:
@@ -2076,6 +2078,7 @@ void ReindexCommand(ReindexStmt* stmt, bool is_top_level)
             ReindexIndex(stmt->relation, (const char*)stmt->name, &stmt->memUsage);
             break;
         case OBJECT_TABLE:
+        case OBJECT_MATVIEW:
         case OBJECT_TABLE_PARTITION:
             ReindexTable(stmt->relation, (const char*)stmt->name, &stmt->memUsage);
             break;
@@ -2661,8 +2664,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #else
             AlterTableSpaceOptions((AlterTableSpaceOptionsStmt*)parse_tree);
 #endif
-            break;
 
+            break;
         case T_CreateExtensionStmt:
             CreateExtension((CreateExtensionStmt*)parse_tree);
 #ifdef PGXC
@@ -2823,6 +2826,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 }
                     /* fall through */
                 case OBJECT_SEQUENCE:
+                case OBJECT_MATVIEW:
                 case OBJECT_VIEW:
 #ifdef PGXC
                 {
@@ -4786,6 +4790,9 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         case T_CreateTableAsStmt:
             ExecCreateTableAs((CreateTableAsStmt*)parse_tree, query_string, params, completion_tag);
             break;
+        case T_RefreshMatViewStmt:
+            ExecRefreshMatView((RefreshMatViewStmt*)parse_tree, query_string, params, completion_tag);
+            break;
 
         case T_AlterSystemStmt:
             PreventTransactionChain(is_top_level, "ALTER SYSTEM SET");
@@ -6531,9 +6538,10 @@ bool QueryReturnsTuples(Query* parse_tree)
  * We assume it is invoked only on already-parse-analyzed statements
  * (else the contained parse_tree isn't a Query yet).
  *
- * In some cases (currently, only EXPLAIN of CREATE TABLE AS/SELECT INTO),
- * potentially Query-containing utility statements can be nested.  This
- * function will drill down to a non-utility Query, or return NULL if none.
+ * In some cases (currently, only EXPLAIN of CREATE TABLE AS/SELECT INTO and
+ * CREATE MATERIALIZED VIEW), potentially Query-containing utility statements
+ * can be nested.  This function will drill down to a non-utility Query, or
+ * return NULL if none.
  */
 Query* UtilityContainsQuery(Node* parse_tree)
 {
@@ -6680,6 +6688,9 @@ static const char* AlterObjectTypeCommandTag(ObjectType obj_type)
             break;
         case OBJECT_VIEW:
             tag = "ALTER VIEW";
+            break;
+        case OBJECT_MATVIEW:
+            tag = "ALTER MATERIALIZED VIEW";
             break;
         case OBJECT_DATA_SOURCE:
             tag = "ALTER DATA SOURCE";
@@ -6905,6 +6916,9 @@ const char* CreateCommandTag(Node* parse_tree)
                 case OBJECT_VIEW:
                     tag = "DROP VIEW";
                     break;
+                case OBJECT_MATVIEW:
+                    tag = "DROP MATERIALIZED VIEW";
+                    break;
                 case OBJECT_INDEX:
                     tag = "DROP INDEX";
                     break;
@@ -7005,7 +7019,10 @@ const char* CreateCommandTag(Node* parse_tree)
             break;
 
         case T_RenameStmt:
-            tag = AlterObjectTypeCommandTag(((RenameStmt*)parse_tree)->renameType);
+            tag = AlterObjectTypeCommandTag(
+                ((RenameStmt*)parse_tree)->renameType == OBJECT_COLUMN ?
+                ((RenameStmt*)parse_tree)->relationType :
+                ((RenameStmt*)parse_tree)->renameType);
             break;
 
         case T_AlterObjectSchemaStmt:
@@ -7174,10 +7191,23 @@ const char* CreateCommandTag(Node* parse_tree)
             break;
 
         case T_CreateTableAsStmt:
-            if (((CreateTableAsStmt*)parse_tree)->is_select_into)
-                tag = "SELECT INTO";
-            else
-                tag = "CREATE TABLE AS";
+            switch (((CreateTableAsStmt*)parse_tree)->relkind)
+            {
+                case OBJECT_TABLE:
+                    if (((CreateTableAsStmt*)parse_tree)->is_select_into)
+                            tag = "SELECT INTO";
+                    else
+                            tag = "CREATE TABLE AS";
+                    break;
+                case OBJECT_MATVIEW:
+                    tag = "CREATE MATERIALIZED VIEW";
+                    break;
+                default:
+                    tag = "?\?\?";
+            }
+            break;
+        case T_RefreshMatViewStmt:
+            tag = "REFRESH MATERIALIZED VIEW";
             break;
 
         case T_AlterSystemStmt:
@@ -8029,6 +8059,7 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             lev = LOGSTMT_DDL;
             break;
 
+        case T_RefreshMatViewStmt:
         case T_AlterSystemStmt:
             lev = LOGSTMT_DDL;
             break;

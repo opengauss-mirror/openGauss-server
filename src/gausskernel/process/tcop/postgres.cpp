@@ -909,7 +909,9 @@ static List* pg_rewrite_query(Query* query)
     PGSTAT_START_TIME_RECORD();
 
 #ifdef PGXC
-    if (query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt)) {
+    if (query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt) && 
+        ((CreateTableAsStmt*)query->utilityStmt)->relkind != OBJECT_MATVIEW &&
+        u_sess->cmd_cxt.isUnderRefreshMatview == false) {
         /*
          * CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
          * target table is created first. The SELECT query is then transformed
@@ -7637,6 +7639,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         t_thrd.postgres_cxt.debug_query_string = NULL;
         t_thrd.postgres_cxt.g_NoAnalyzeRelNameList = NIL;
         u_sess->analyze_cxt.is_under_analyze = false;
+        u_sess->cmd_cxt.isUnderRefreshMatview = false;
         t_thrd.postgres_cxt.mark_explain_analyze = false;
         t_thrd.postgres_cxt.mark_explain_only = false;
         if (unlikely(t_thrd.log_cxt.msgbuf->data != NULL)) {
