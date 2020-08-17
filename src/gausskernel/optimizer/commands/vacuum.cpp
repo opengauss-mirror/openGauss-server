@@ -677,14 +677,11 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
         Relation pgclass;
         HeapScanDesc scan;
         HeapTuple tuple;
-        ScanKeyData key;
 
         /* Process all plain relations listed in pg_class */
-        ScanKeyInit(&key, Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_RELATION));
-
         pgclass = heap_open(RelationRelationId, AccessShareLock);
 
-        scan = heap_beginscan(pgclass, SnapshotNow, 1, &key);
+        scan = heap_beginscan(pgclass, SnapshotNow, 0, NULL);
 
         while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
             /* for dfs special vacuum, just skip for non-dfs table. */
@@ -695,6 +692,11 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                 continue;
 
             Form_pg_class classForm = (Form_pg_class)GETSTRUCT(tuple);
+
+            /* Only vacuum table and materialized view */
+            if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_MATVIEW) {
+                continue;
+            }
 
             /* Plain relation and valued partition relation */
             if (classForm->parttype == PARTTYPE_NON_PARTITIONED_RELATION ||
@@ -1155,10 +1157,11 @@ void vac_update_datfrozenxid(void)
         Form_pg_class classForm = (Form_pg_class)GETSTRUCT(classTup);
 
         /*
-         * Only consider heap and TOAST tables (anything else should have
-         * InvalidTransactionId in relfrozenxid anyway.)
+         * Only consider relations able to hold unfrozen XIDs (anything else
+         * should have InvalidTransactionId in relfrozenxid anyway.)
          */
-        if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_TOASTVALUE)
+        if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_MATVIEW && 
+                classForm->relkind != RELKIND_TOASTVALUE)
             continue;
 
         /* global temp table relstats not in pg_class */
@@ -1811,13 +1814,14 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     }
 
     /*
-     * Check that it's a vacuumable table; we used to do this in
+     * Check that it's a vacuumable relation; we used to do this in
      * get_rel_oids() but seems safer to check after we've locked the
      * relation.
      */
     if (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(onerel->rd_id)) {
         ;
-    } else if (onerel->rd_rel->relkind != RELKIND_RELATION && onerel->rd_rel->relkind != RELKIND_TOASTVALUE) {
+    } else if (onerel->rd_rel->relkind != RELKIND_RELATION && onerel->rd_rel->relkind != RELKIND_MATVIEW && 
+        onerel->rd_rel->relkind != RELKIND_TOASTVALUE) {
 
         if (vacstmt->options & VACOPT_VERBOSE)
             messageLevel = VERBOSEMESSAGE;

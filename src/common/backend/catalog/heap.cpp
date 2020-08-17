@@ -970,7 +970,7 @@ void InsertPgClassTuple(
     else
         nulls[Anum_pg_class_reloptions - 1] = true;
 
-    if (relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE)
+    if (relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_TOASTVALUE)
         values[Anum_pg_class_relfrozenxid64 - 1] = u_sess->utils_cxt.RecentXmin;
     else
         values[Anum_pg_class_relfrozenxid64 - 1] = InvalidTransactionId;
@@ -1027,6 +1027,7 @@ static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, O
 
     switch (relkind) {
         case RELKIND_RELATION:
+        case RELKIND_MATVIEW:
         case RELKIND_INDEX:
         case RELKIND_TOASTVALUE:
             /* The relation is real, but as yet empty */
@@ -1049,7 +1050,7 @@ static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, O
     }
     
     /* Initialize relfrozenxid */
-    if (relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE) {
+    if (relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_TOASTVALUE) {
         /*
          * Initialize to the minimum XID that could put tuples in the table.
          * We know that no xacts older than RecentXmin are still running, so
@@ -1828,8 +1829,8 @@ Oid heap_create_with_catalog(const char* relname, Oid relnamespace, Oid reltable
          * supplied.
          */
         if (u_sess->proc_cxt.IsBinaryUpgrade && OidIsValid(u_sess->upg_cxt.binary_upgrade_next_heap_pg_class_oid) &&
-            (relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE || relkind == RELKIND_VIEW ||
-                relkind == RELKIND_COMPOSITE_TYPE || relkind == RELKIND_FOREIGN_TABLE)) {
+            (relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE || relkind == RELKIND_VIEW || 
+                relkind == RELKIND_MATVIEW || relkind == RELKIND_COMPOSITE_TYPE || relkind == RELKIND_FOREIGN_TABLE)) {
             relid = u_sess->upg_cxt.binary_upgrade_next_heap_pg_class_oid;
             u_sess->upg_cxt.binary_upgrade_next_heap_pg_class_oid = InvalidOid;
 
@@ -1879,6 +1880,7 @@ Oid heap_create_with_catalog(const char* relname, Oid relnamespace, Oid reltable
         switch (relkind) {
             case RELKIND_RELATION:
             case RELKIND_VIEW:
+            case RELKIND_MATVIEW:
             case RELKIND_FOREIGN_TABLE:
                 relacl = get_user_default_acl(ACL_OBJECT_RELATION, ownerid, relnamespace);
                 break;
@@ -1957,13 +1959,12 @@ Oid heap_create_with_catalog(const char* relname, Oid relnamespace, Oid reltable
     /*
      * Decide whether to create an array type over the relation's rowtype. We
      * do not create any array types for system catalogs (ie, those made
-     * during initdb).	We create array types for regular relations, views,
-     * composite types and foreign tables ... but not, eg, for toast tables or
-     * sequences.
+     * during initdb). We do not create them where the use of a relation as
+     * such is an implementation detail: toast tables, sequences and indexes.
      */
     if (IsUnderPostmaster && !u_sess->attr.attr_common.IsInplaceUpgrade &&
-        (relkind == RELKIND_RELATION || relkind == RELKIND_VIEW || relkind == RELKIND_FOREIGN_TABLE ||
-            relkind == RELKIND_COMPOSITE_TYPE))
+        (relkind == RELKIND_RELATION || relkind == RELKIND_VIEW || relkind == RELKIND_MATVIEW ||
+            relkind == RELKIND_FOREIGN_TABLE || relkind == RELKIND_COMPOSITE_TYPE))
         new_array_oid = AssignTypeArrayOid();
 
     /*
@@ -2203,7 +2204,7 @@ Oid heap_create_with_catalog(const char* relname, Oid relnamespace, Oid reltable
         register_on_commit_action(relid, oncommit);
 
     if (relpersistence == RELPERSISTENCE_UNLOGGED) {
-        Assert(relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE);
+        Assert(relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_TOASTVALUE);
         heap_create_init_fork(new_rel_desc);
     }
 

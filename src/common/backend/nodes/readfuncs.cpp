@@ -1511,6 +1511,7 @@ static IntoClause* _readIntoClause(void)
     READ_ENUM_FIELD(onCommit, OnCommitAction);
     READ_ENUM_FIELD(row_compress, RelCompressType);
     READ_STRING_FIELD(tableSpaceName);
+    READ_NODE_FIELD(viewQuery);
     READ_BOOL_FIELD(skipData);
 
     READ_DONE();

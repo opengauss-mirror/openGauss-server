@@ -133,6 +133,7 @@ void ExecRenameStmt(RenameStmt* stmt)
         case OBJECT_TABLE:
         case OBJECT_SEQUENCE:
         case OBJECT_VIEW:
+        case OBJECT_MATVIEW:
         case OBJECT_INDEX:
         case OBJECT_FOREIGN_TABLE:
             RenameRelation(stmt);
@@ -221,6 +222,7 @@ void ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt* stmt)
         case OBJECT_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
+        case OBJECT_MATVIEW:
         case OBJECT_FOREIGN_TABLE:
             if (stmt->objectType == OBJECT_FOREIGN_TABLE)
                 ereport(ERROR,

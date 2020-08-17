@@ -186,6 +186,7 @@ ObjectAddress get_object_address(
             case OBJECT_SEQUENCE:
             case OBJECT_TABLE:
             case OBJECT_VIEW:
+            case OBJECT_MATVIEW:
             case OBJECT_FOREIGN_TABLE:
                 address = get_relation_by_qualified_name(objtype, objname, &relation, lockmode, missing_ok);
                 break;
@@ -530,6 +531,12 @@ static ObjectAddress get_relation_by_qualified_name(
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("\"%s\" is not a view", RelationGetRelationName(relation))));
             break;
+        case OBJECT_MATVIEW:
+            if (relation->rd_rel->relkind != RELKIND_MATVIEW)
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("\"%s\" is not a materialized view", RelationGetRelationName(relation))));
+            break;
         case OBJECT_FOREIGN_TABLE:
             if (relation->rd_rel->relkind != RELKIND_FOREIGN_TABLE)
                 ereport(ERROR,
@@ -763,6 +770,7 @@ void check_object_ownership(
         case OBJECT_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
+        case OBJECT_MATVIEW:
         case OBJECT_FOREIGN_TABLE:
         case OBJECT_COLUMN:
         case OBJECT_RULE:

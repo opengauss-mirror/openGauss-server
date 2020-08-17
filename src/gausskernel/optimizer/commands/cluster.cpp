@@ -476,6 +476,18 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
         check_index_is_clusterable(OldHeap, indexOid, recheck, lockMode, &amid);
 
     /*
+     * Quietly ignore the request if this is a materialized view which has not
+     * been populated from its query. No harm is done because there is no data
+     * to deal with, and we don't want to throw an error if this is part of a
+     * multi-relation request -- for example, CLUSTER was run on the entire
+     * database.
+     */
+    if (OldHeap->rd_rel->relkind == RELKIND_MATVIEW && !RelationIsPopulated(OldHeap)) {
+        relation_close(OldHeap, AccessExclusiveLock);
+        return;
+    }
+
+    /*
      * There is no data on Coordinator except system tables, it is no sense to rewrite a relation
      * on Coordinator.so we can skip to vacuum full user-define tables
      */
@@ -1278,6 +1290,8 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
     bool isNull = false;
     int ss_c = 0;
     HashBucketInfo bucketinfo;
+    Oid namespaceid;
+    char relpersistence;
 
     OldHeap = heap_open(OIDOldHeap, lockMode);
     OldHeapDesc = RelationGetDescr(OldHeap);
@@ -1298,6 +1312,9 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
     if (isNull)
         reloptions = (Datum)0;
 
+    namespaceid = RelationGetNamespace(OldHeap);
+    relpersistence = OldHeap->rd_rel->relpersistence;
+
     /*
      * Create the new heap, using a temporary name in the same namespace as
      * the existing table.	NOTE: there is some risk of collision with user
@@ -1315,7 +1332,7 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
 
     bucketinfo.bucketOid = RelationGetBucketOid(OldHeap);
     OIDNewHeap = heap_create_with_catalog(NewHeapName,
-        RelationGetNamespace(OldHeap),
+        namespaceid,
         NewTableSpace,
         InvalidOid,
         InvalidOid,
@@ -1323,8 +1340,8 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
         OldHeap->rd_rel->relowner,
         OldHeapDesc,
         NIL,
-        OldHeap->rd_rel->relkind,
-        OldHeap->rd_rel->relpersistence,
+        RELKIND_RELATION,
+        relpersistence,
         false,
         RelationIsMapped(OldHeap),
         true,

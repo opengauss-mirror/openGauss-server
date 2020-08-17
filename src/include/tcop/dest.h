@@ -91,6 +91,7 @@ typedef enum {
     DestIntoRel,         /* results sent to relation (SELECT INTO) */
     DestCopyOut,         /* results sent to COPY TO code */
     DestSQLFunction,     /* results sent to SQL-language func mgr */
+    DestTransientRel,    /* results sent to transient relation */
     DestSPITupleAnalyze, /* results sent to SPI manager when analyze for table sample */
 
     DestTupleBroadCast,         /* results send to consumer thread in a broadcast way */

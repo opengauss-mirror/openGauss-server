@@ -1229,7 +1229,7 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
     }
 #endif
 
-    if (target_relation->rd_rel->relkind == RELKIND_RELATION) {
+    if (target_relation->rd_rel->relkind == RELKIND_RELATION || target_relation->rd_rel->relkind == RELKIND_MATVIEW) {
         /*
          * Emit CTID so that executor can find the row to update or delete.
          */
@@ -1704,6 +1704,19 @@ static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePus
         if (rte->rtekind != RTE_RELATION) {
             continue;
         }
+
+        /*
+         * Always ignore RIR rules for materialized views referenced in
+         * queries.  (This does not prevent refreshing MVs, since they aren't
+         * referenced in their own query definitions.)
+         *
+         * Note: in the future we might want to allow MVs to be conditionally
+         * expanded as if they were regular views, if they are not scannable.
+         * In that case this test would need to be postponed till after we've
+         * opened the rel, so that we could check its state.
+         */
+        if (rte->relkind == RELKIND_MATVIEW)
+                continue;
 
         /*
          * If the table is not referenced in the query, then we ignore it.

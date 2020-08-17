@@ -85,7 +85,6 @@ MemoryContext WaitCountGlobalContext = NULL;
 /* Hook to check passwords in CreateRole() and AlterRole() */
 THR_LOCAL check_password_hook_type check_password_hook = NULL;
 
-static List* roleNamesToIds(const List* memberNames);
 static void AddRoleMems(
     const char* rolename, Oid roleid, const List* memberNames, List* memberIds, Oid grantorId, bool admin_opt);
 static void DelRoleMems(const char* rolename, Oid roleid, const List* memberNames, List* memberIds, bool admin_opt);
@@ -3237,7 +3236,7 @@ void ReassignOwnedObjects(ReassignOwnedStmt* stmt)
  * Given a list of role names (as String nodes), generate a list of role OIDs
  * in the same order.
  */
-static List* roleNamesToIds(const List* memberNames)
+List* roleNamesToIds(const List* memberNames)
 {
     List* result = NIL;
     ListCell* l = NULL;

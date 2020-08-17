@@ -2257,6 +2257,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3986 | pg_shared_memory_detail
  3987 | pg_shared_memctx_detail
  3989 | gin_clean_pending_list
+ 3997 | btrecordimagecmp
  3998 | update_pgjob
  3999 | pg_tde_info
  4000 | gs_fault_inject
@@ -2636,7 +2637,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
  9999 | pg_test_err_contain_err
-(2274 rows)
+(2275 rows)
 
 -- **************** pg_cast ****************
 -- Catch bogus values in pg_cast columns (other than cases detected by

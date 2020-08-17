@@ -737,6 +737,13 @@ extern Datum record_gt(PG_FUNCTION_ARGS);
 extern Datum record_le(PG_FUNCTION_ARGS);
 extern Datum record_ge(PG_FUNCTION_ARGS);
 extern Datum btrecordcmp(PG_FUNCTION_ARGS);
+extern Datum record_image_eq(PG_FUNCTION_ARGS);
+extern Datum record_image_ne(PG_FUNCTION_ARGS);
+extern Datum record_image_lt(PG_FUNCTION_ARGS);
+extern Datum record_image_gt(PG_FUNCTION_ARGS);
+extern Datum record_image_le(PG_FUNCTION_ARGS);
+extern Datum record_image_ge(PG_FUNCTION_ARGS);
+extern Datum btrecordimagecmp(PG_FUNCTION_ARGS);
 
 /* ruleutils.c */
 extern Datum pg_get_ruledef(PG_FUNCTION_ARGS);
@@ -779,6 +786,8 @@ extern List* deparse_context_for_plan(Node* plan, List* ancestors, List* rtable)
 #endif
 extern const char* quote_identifier(const char* ident);
 extern char* quote_qualified_identifier(const char* qualifier, const char* ident);
+extern void generate_operator_clause(fmStringInfo buf, const char* leftop, Oid leftoptype, Oid opoid,
+    const char* rightop, Oid rightoptype);
 extern char* generate_collation_name(Oid collid);
 
 /* tid.c */

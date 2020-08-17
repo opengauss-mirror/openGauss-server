@@ -1866,7 +1866,7 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
                 bool isNull = false;
 
                 relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
-                if (relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE) {
+                if (relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE || relkind == RELKIND_MATVIEW) {
                     datum = ExecGetJunkAttribute(slot, junk_filter->jf_junkAttNo, &isNull);
                     /* shouldn't ever get a null result... */
                     if (isNull) {
@@ -2404,7 +2404,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
                     char relkind;
 
                     relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
-                    if (relkind == RELKIND_RELATION) {
+                    if (relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW) {
                         j->jf_junkAttNo = ExecFindJunkAttribute(j, "ctid");
                         if (!AttributeNumberIsValid(j->jf_junkAttNo)) {
                             ereport(ERROR,

@@ -539,6 +539,7 @@ typedef struct knl_u_commands_context {
     /* Tablespace usage  information management struct */
     struct TableSpaceUsageStruct* TableSpaceUsageArray;
     bool isUnderCreateForeignTable;
+    bool isUnderRefreshMatview;
 
     Oid CurrentExtensionObject;
 

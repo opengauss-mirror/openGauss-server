@@ -1768,7 +1768,9 @@ static void set_subquery_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti,
     /*
      * It's possible that constraint exclusion proved the subquery empty. If
      * so, it's convenient to turn it back into a dummy path so that we will
-     * recognize appropriate optimizations at this level.
+     * recognize appropriate optimizations at this query level.  (But see
+     * create_append_plan in createplan.c, which has to reverse this
+     * substitution.)
      */
     if (is_dummy_plan(rel->subplan)) {
         set_dummy_rel_pathlist(rel);

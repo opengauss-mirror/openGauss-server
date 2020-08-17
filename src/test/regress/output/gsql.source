@@ -109,6 +109,7 @@ Informational
   \di[S+] [PATTERN]      list indexes
   \dl                    list large objects, same as \lo_list
   \dL[S+] [PATTERN]      list procedural languages
+  \dm[S+] [PATTERN]      list materialized views
   \dn[S+] [PATTERN]      list schemas
   \do[S]  [PATTERN]      list operators
   \dO[S+] [PATTERN]      list collations

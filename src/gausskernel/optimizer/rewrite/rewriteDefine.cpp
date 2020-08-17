@@ -51,7 +51,7 @@
 #include "utils/syscache.h"
 #include "utils/tqual.h"
 
-static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect);
+static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect, bool requireColumnNameMatch);
 static bool setRuleCheckAsUser_walker(Node* node, Oid* context);
 static void setRuleCheckAsUser_Query(Query* qry, Oid userid);
 
@@ -236,8 +236,11 @@ void DefineQueryRewrite(
 
     /*
      * Verify relation is of a type that rules can sensibly be applied to.
+     * Internal callers can target materialized views, but transformRuleStmt()
+     * blocks them for users.  Don't mention them in the error message.
      */
-    if (event_relation->rd_rel->relkind != RELKIND_RELATION && event_relation->rd_rel->relkind != RELKIND_VIEW)
+    if (event_relation->rd_rel->relkind != RELKIND_RELATION && event_relation->rd_rel->relkind != RELKIND_MATVIEW &&
+        event_relation->rd_rel->relkind != RELKIND_VIEW)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is not a table or view", RelationGetRelationName(event_relation))));
@@ -324,7 +327,8 @@ void DefineQueryRewrite(
          * ... the targetlist of the SELECT action must exactly match the
          * event relation, ...
          */
-        checkRuleResultList(query->targetList, RelationGetDescr(event_relation), true);
+        checkRuleResultList(query->targetList, RelationGetDescr(event_relation), 
+            true, event_relation->rd_rel->relkind != RELKIND_MATVIEW);
 
         /*
          * ... there must not be another ON SELECT rule already ...
@@ -377,7 +381,7 @@ void DefineQueryRewrite(
          * business of converting relations to views is just a kluge to allow
          * loading ancient pg_dump files.)
          */
-        if (event_relation->rd_rel->relkind != RELKIND_VIEW) {
+        if (event_relation->rd_rel->relkind != RELKIND_VIEW && event_relation->rd_rel->relkind != RELKIND_MATVIEW) {
             HeapScanDesc scanDesc;
             if (RELATION_IS_PARTITIONED(event_relation)) {
                 ereport(ERROR,
@@ -455,7 +459,7 @@ void DefineQueryRewrite(
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("RETURNING lists are not supported in non-INSTEAD rules")));
-            checkRuleResultList(query->returningList, RelationGetDescr(event_relation), false);
+            checkRuleResultList(query->returningList, RelationGetDescr(event_relation), false, false);
         }
     }
 
@@ -611,10 +615,11 @@ void DefineQueryRewrite(
  *		Verify that targetList produces output compatible with a tupledesc
  *
  * The targetList might be either a SELECT targetlist, or a RETURNING list;
- * isSelect tells which.  (This is mostly used for choosing error messages,
- * but also we don't enforce column name matching for RETURNING.)
+ * isSelect tells which.  This is used for choosing error messages.
+ * 
+ * A SELECT targetlist may optionally require that column names match.
  */
-static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect)
+static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect, bool requireColumnNameMatch)
 {
     ListCell* tllist = NULL;
     int i;
@@ -652,7 +657,7 @@ static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isS
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("cannot convert relation containing dropped columns to view")));
 
-        if (isSelect && strcmp(tle->resname, attname) != 0)
+        if (requireColumnNameMatch && strcmp(tle->resname, attname) != 0)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("SELECT rule's target entry %d has different column name from \"%s\"", i, attname)));

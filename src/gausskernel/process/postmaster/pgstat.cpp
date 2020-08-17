@@ -1824,8 +1824,8 @@ void pgstat_initstats(Relation rel)
     char relkind = rel->rd_rel->relkind;
 
     /* We only count stats for things that have storage */
-    if (!(relkind == RELKIND_RELATION || relkind == RELKIND_INDEX || relkind == RELKIND_TOASTVALUE ||
-            relkind == RELKIND_SEQUENCE)) {
+    if (!(relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_INDEX || 
+            relkind == RELKIND_TOASTVALUE || relkind == RELKIND_SEQUENCE)) {
         rel->pgstat_info = NULL;
         return;
     }
@@ -2001,7 +2001,7 @@ static void add_tabstat_xact_level(PgStat_TableStatus* pgstat_info, int nest_lev
 /*
  * pgstat_count_heap_insert - count a tuple insertion of n tuples
  */
-void pgstat_count_heap_insert(Relation rel, int n)
+void pgstat_count_heap_insert(Relation rel, PgStat_Counter n)
 {
     PgStat_TableStatus* pgstat_info = rel->pgstat_info;
 

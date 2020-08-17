@@ -302,7 +302,7 @@ test: bypass_preparedexecute_support
 test: string_digit_to_numeric
 # Another group of parallel tests
 # ----------
-test: collate tablesample tablesample_1 tablesample_2
+test: collate tablesample tablesample_1 tablesample_2 matview
 
 # ----------
 # Another group of parallel tests

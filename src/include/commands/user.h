@@ -66,7 +66,7 @@ int64 SearchAllAccounts();
 void InitAccountLockHashTable();
 extern USER_STATUS GetAccountLockedStatusFromHashTable(Oid roleid);
 extern void UpdateAccountInfoFromHashTable();
-
+extern List* roleNamesToIds(const List* memberNames);
 
 extern inline void str_reset(char* str)
 {

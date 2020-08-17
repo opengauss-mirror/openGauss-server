@@ -1902,11 +1902,11 @@ PLpgSQL_type* plpgsql_parse_cwordtype(List* idents)
     class_struct = (Form_pg_class)GETSTRUCT(classtup);
 
     /*
-     * It must be a relation, sequence, view, composite type, or foreign table
+     * It must be a relation, sequence, view, materialized view, composite type, or foreign table
      */
     if (class_struct->relkind != RELKIND_RELATION && class_struct->relkind != RELKIND_SEQUENCE &&
         class_struct->relkind != RELKIND_VIEW && class_struct->relkind != RELKIND_COMPOSITE_TYPE &&
-        class_struct->relkind != RELKIND_FOREIGN_TABLE) {
+        class_struct->relkind != RELKIND_FOREIGN_TABLE && class_struct->relkind != RELKIND_MATVIEW) {
         goto done;
     }
     /*
@@ -2259,10 +2259,10 @@ static PLpgSQL_row* build_row_from_class(Oid class_oid)
     class_struct = RelationGetForm(rel);
     relname = RelationGetRelationName(rel);
 
-    /* accept relation, sequence, view, composite type, or foreign table */
+    /* accept relation, sequence, view, composite type, materialized view or foreign table */
     if (class_struct->relkind != RELKIND_RELATION && class_struct->relkind != RELKIND_SEQUENCE &&
         class_struct->relkind != RELKIND_VIEW && class_struct->relkind != RELKIND_COMPOSITE_TYPE &&
-        class_struct->relkind != RELKIND_FOREIGN_TABLE) {
+        class_struct->relkind != RELKIND_FOREIGN_TABLE && class_struct->relkind != RELKIND_MATVIEW) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_WRONG_OBJECT_TYPE),

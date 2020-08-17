@@ -94,6 +94,7 @@ test: prepared_xacts
 test: privileges
 test: security_label
 test: collate
+test: matview
 test: replica_identity
 test: misc
 test: rules

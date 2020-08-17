@@ -26,6 +26,7 @@ extern bool createToastTableForPartition(Oid relOid,
                                          Datum reloptions,
                                          List *relfilenode);
 
+extern void NewRelationCreateToastTable(Oid relOid, Datum reloptions);
 /*
  * This macro is just to keep the C compiler from spitting up on the
  * upcoming commands for genbki.pl.
