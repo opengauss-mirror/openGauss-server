@@ -37,6 +37,10 @@ elif [ -f "/etc/centos-release" ]
 then
         kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
         version=$(cat /etc/centos-release | awk -F '(' '{print $2}'| awk -F ')' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/os-release" ]
+then
+        kernel=$(source /etc/os-release; echo $ID)
+        version=$(source /etc/os-release; echo $VERSION_ID)
 else
         kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
         version=$(lsb_release -r | awk -F ' ' '{print $2}')
@@ -52,8 +56,10 @@ if [ X"$kernel" == X"centos" ]; then
     dist_version="CentOS"
 elif [ X"$kernel" == X"openeuler" ]; then
     dist_version="openEuler"
+elif [ X"$kernel" == X"neokylin" ]; then
+    dist_version="neokylin"
 else
-    echo "We only support openEuler(aarch64), CentOS platform."
+    echo "We only support openEuler(aarch64), neokylin(aarch64), CentOS platform."
     echo "Kernel is $kernel"
     exit 1
 fi
@@ -62,8 +68,8 @@ gcc_version="8.2"
 ##add platform architecture information
 PLATFORM_ARCH=$(uname -p)
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
-    if [ "$dist_version" != "openEuler" ]; then
-        echo "We only support NUMA on openEuler(aarch64) platform."
+    if [ "$dist_version" != "openEuler" ] && [ "$dist_version" != "neokylin" ] ; then
+        echo "We only support NUMA on openEuler(aarch64), neokylin(aarch64) platform."
         exit 1
     fi
 fi
