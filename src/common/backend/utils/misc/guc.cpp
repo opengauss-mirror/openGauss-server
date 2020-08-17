@@ -4374,7 +4374,7 @@ static void init_configure_names_bool()
                 NULL
             },
             &u_sess->attr.attr_sql.enable_opfusion,
-            true,
+            false,
             NULL,
             NULL,
             NULL
