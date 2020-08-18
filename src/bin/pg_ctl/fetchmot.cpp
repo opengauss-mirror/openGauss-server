@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "postgres_fe.h"
+#include "gs_tar_const.h"
+#include "streamutil.h"
 #include "libpq/libpq-fe.h"
 #include "utils/builtins.h"
 #include "common/fe_memutils.h"
@@ -39,6 +41,290 @@
     }
 
 static uint64 totaldone = 0;
+
+static void CheckConnResult(PGconn* conn, const char* progname)
+{
+    PGresult* res = PQgetResult(conn);
+    if (PQresultStatus(res) != PGRES_COPY_OUT) {
+        fprintf(stderr, "%s: could not get COPY data stream: %s", progname, PQerrorMessage(conn));
+        disconnect_and_exit(1);
+    }
+    PQclear(res);
+}
+
+static void MotReceiveAndAppendTarFile(
+    const char* basedir, const char* chkptName, PGconn* conn, const char* progname, int compresslevel)
+{
+    CheckConnResult(conn, progname);
+
+    FILE* tarfile = NULL;
+    char filename[MAXPGPATH];
+    errno_t errorno = EOK;
+    char* copybuf = NULL;
+    FILE* file = NULL;
+    char current_path[MAXPGPATH];
+    int current_len_left = 0;
+    int current_padding = 0;
+
+    errorno = strncpy_s(current_path, sizeof(current_path), basedir, sizeof(current_path) - 1);
+    securec_check_c(errorno, "", "");
+
+#ifdef HAVE_LIBZ
+    gzFile ztarfile = NULL;
+    int duplicatedfd = -1;
+#endif
+    if (strcmp(basedir, "-") == 0) {
+#ifdef HAVE_LIBZ
+        if (compresslevel != 0) {
+            duplicatedfd = dup(fileno(stdout));
+            if (duplicatedfd == -1) {
+                fprintf(stderr, _("%s: could not allocate dup fd by fileno(stdout): %s\n"), progname, strerror(errno));
+                disconnect_and_exit(1);
+            }
+
+            ztarfile = gzdopen(duplicatedfd, "ab");
+            if (gzsetparams(ztarfile, compresslevel, Z_DEFAULT_STRATEGY) != Z_OK) {
+                fprintf(stderr,
+                    _("%s: could not set compression level %d: %s\n"),
+                    progname,
+                    compresslevel,
+                    get_gz_error(ztarfile));
+                close(duplicatedfd);
+                duplicatedfd = -1;
+                disconnect_and_exit(1);
+            }
+            close(duplicatedfd);
+            duplicatedfd = -1;
+        } else
+#endif
+            tarfile = stdout;
+        strcpy_s(filename, 1, "-");
+    } else {
+#ifdef HAVE_LIBZ
+        if (compresslevel != 0) {
+            errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/base.tar.gz", basedir);
+            securec_check_ss_c(errorno, "", "");
+            ztarfile = openGzFile(filename, compresslevel, "ab");
+        } else
+#endif
+        {
+            errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/base.tar", basedir);
+            // basdir has been realpath before
+            securec_check_ss_c(errorno, "", "");
+            tarfile = fopen(filename, "ab");
+        }
+    }
+
+    /* chkptName header */
+    copybuf = (char*)xmalloc0(TAR_BLOCK_SIZE);
+
+    int chkptDirLen = strlen(chkptName);
+    errorno = strcpy_s(copybuf + 2, chkptDirLen + 1, chkptName);
+    securec_check_ss_c(errorno, "", "");
+
+    copybuf[0] = '.';
+    copybuf[1] = '/';
+    copybuf[chkptDirLen + 2] = '/';
+    copybuf[TAR_FILE_TYPE] = TAR_TYPE_DICTORY;
+
+    for (int i = 0; i < 11; i++) {
+        copybuf[TAR_LEN_LEFT + i] = '0';
+    }
+    errorno = sprintf_s(&copybuf[TAR_FILE_MODE], TAR_BLOCK_SIZE - TAR_FILE_MODE, "%07o ", FILE_PERMISSION);
+    securec_check_ss_c(errorno, "", "");
+
+#ifdef HAVE_LIBZ
+    if (ztarfile != NULL) {
+        if (!writeGzFile(ztarfile, copybuf, TAR_BLOCK_SIZE)) {
+            fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+            disconnect_and_exit(1);
+        }
+    } else
+#endif
+    {
+        if (fwrite(copybuf, TAR_BLOCK_SIZE, 1, tarfile) != 1) {
+            fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+            disconnect_and_exit(1);
+        }
+    }
+
+    while (1) {
+        int r;
+
+        if (copybuf != NULL) {
+            PQfreemem(copybuf);
+            copybuf = NULL;
+        }
+
+        r = PQgetCopyData(conn, &copybuf, 0);
+        if (r == -1) {
+#ifdef HAVE_LIBZ
+            if (ztarfile != NULL) {
+                if (gzclose(ztarfile) != 0) {
+                    fprintf(stderr,
+                        _("%s: could not close compressed file \"%s\": %s\n"),
+                        progname,
+                        filename,
+                        get_gz_error(ztarfile));
+                    disconnect_and_exit(1);
+                }
+            } else
+#endif
+            {
+                if (strcmp(basedir, "-") != 0) {
+                    if (fclose(tarfile) != 0) {
+                        fprintf(
+                            stderr, _("%s: could not close file \"%s\": %s\n"), progname, filename, strerror(errno));
+                        tarfile = NULL;
+                        disconnect_and_exit(1);
+                    }
+                    tarfile = NULL;
+                }
+            }
+            break;
+        } else if (r == TAR_READ_ERROR) {
+            fprintf(stderr, "%s: could not read COPY data: %s", progname, PQerrorMessage(conn));
+            disconnect_and_exit(1);
+        }
+        if (current_len_left == 0 && current_padding == 0) {
+            /* No current file, so this must be the header for a new file */
+            if (r != TAR_BLOCK_SIZE) {
+                fprintf(stderr, _("%s: invalid tar block header size: %d\n"), progname, r);
+                disconnect_and_exit(1);
+            }
+
+            /* new file */
+            int filemode;
+            totaldone += TAR_BLOCK_SIZE;
+            if (sscanf_s(copybuf + TAR_LEN_LEFT, "%201o", &current_len_left) != 1) {
+                fprintf(stderr, "%s: could not parse file size\n", progname);
+                disconnect_and_exit(1);
+            }
+
+            /* Set permissions on the file */
+            if (sscanf_s(&copybuf[TAR_FILE_MODE], "%07o ", (unsigned int*)&filemode) != 1) {
+                fprintf(stderr, "%s: could not parse file mode\n", progname);
+                disconnect_and_exit(1);
+            }
+
+            /*
+             * All files are padded up to 512 bytes
+             */
+            current_padding = ((current_len_left + TAR_FILE_PADDING) & ~TAR_FILE_PADDING) - current_len_left;
+            /*
+             * First part of header is zero terminated filename.
+             * when getting a checkpoint, file name can be either
+             * the control file (written to base_dir), or a checkpoint
+             * file (written to base_dir/chkpt_)
+             */
+            if (strstr(copybuf, "mot.ctrl")) {
+                errorno =
+                    snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, "mot.ctrl");
+                securec_check_ss_c(errorno, "", "");
+            } else {
+                char* chkptOffset = strstr(copybuf, chkptName);
+                if (chkptOffset) {
+                    errorno = snprintf_s(
+                        filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, chkptOffset);
+                    securec_check_ss_c(errorno, "", "");
+                } else {
+                    errorno =
+                        snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, copybuf);
+                    securec_check_ss_c(errorno, "", "");
+                }
+            }
+
+            if (filename[strlen(filename) - 1] == '/') {
+                filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
+                strcpy_s(copybuf, strlen(filename), filename);
+                continue; /* directory or link handled */
+            }
+#ifdef HAVE_LIBZ
+            if (ztarfile != NULL) {
+                if (!writeGzFile(ztarfile, copybuf, r)) {
+                    fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                    disconnect_and_exit(1);
+                }
+            } else
+#endif
+            {
+                if (fwrite(copybuf, r, 1, tarfile) != 1) {
+                    fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                    disconnect_and_exit(1);
+                }
+            }
+            if (current_len_left == 0) {
+                continue;
+            }
+        } else {
+            /*
+             * Continuing blocks in existing file
+             */
+            if (current_len_left == 0 && r == current_padding) {
+#ifdef HAVE_LIBZ
+                if (ztarfile != NULL) {
+                    if (!writeGzFile(ztarfile, copybuf, current_padding)) {
+                        fprintf(
+                            stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                        disconnect_and_exit(1);
+                    }
+                } else
+#endif
+                {
+                    if (fwrite(copybuf, current_padding, 1, tarfile) != 1) {
+                        fprintf(
+                            stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                        disconnect_and_exit(1);
+                    }
+                }
+                totaldone += r;
+                current_padding -= r;
+                continue;
+            }
+
+            totaldone += r;
+#ifdef HAVE_LIBZ
+            if (ztarfile != NULL) {
+                if (!writeGzFile(ztarfile, copybuf, r)) {
+                    fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                    disconnect_and_exit(1);
+                }
+            } else
+#endif
+            {
+                if (fwrite(copybuf, r, 1, tarfile) != 1) {
+                    fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                    disconnect_and_exit(1);
+                }
+            }
+            if (current_len_left == 0) {
+                continue;
+            }
+            current_len_left -= r;
+            if (current_len_left == 0 && current_padding == 0) {
+                /*
+                 * Received the last block, and there is no padding to be
+                 * expected. Close the file and move on to the next tar
+                 * header.
+                 */
+                fclose(file);
+                file = NULL;
+                continue;
+            }
+        } /* continuing data in existing file */
+    }     /* loop over all data blocks */
+    if (tarfile != NULL) {
+        fclose(tarfile);
+        tarfile = NULL;
+    }
+
+    if (copybuf != NULL) {
+        PQfreemem(copybuf);
+        copybuf = NULL;
+    }
+
+    return;
+}
 
 /*
  * Receive a tar format stream from the connection to the server, and unpack
@@ -154,11 +440,8 @@ static void MotReceiveAndUnpackTarFile(const char* basedir, const char* chkptNam
                      */
                     filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
                     if (mkdir(filename, S_IRWXU) != 0) {
-                        fprintf(stderr,
-                            "%s: could not create directory \"%s\": %s\n",
-                            progname,
-                            filename,
-                            strerror(errno));
+                        fprintf(
+                            stderr, "%s: could not create directory \"%s\": %s\n", progname, filename, strerror(errno));
                         disconnect_and_exit(1);
                     }
 #ifndef WIN32
@@ -272,7 +555,8 @@ static void MotReceiveAndUnpackTarFile(const char* basedir, const char* chkptNam
  * @param controls verbose output
  * @return Boolean value denoting success or failure.
  */
-void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose)
+void FetchMotCheckpoint(
+    const char* basedir, PGconn* fetchConn, const char* progname, bool verbose, const char format, int compresslevel)
 {
     PGresult* res = NULL;
     const char* fetchQuery = "FETCH_MOT_CHECKPOINT";
@@ -333,17 +617,24 @@ void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* prog
             fprintf(stderr, "%s: mot checkpoint directory: %s\n", progname, dirName);
         }
 
-        if (stat(dirName, &fileStat) < 0) {
-            if (pg_mkdir_p(dirName, S_IRWXU) == -1) {
-                fprintf(stderr, "%s: could not create directory \"%s\": %s\n", progname, dirName, strerror(errno));
+        if (format == 'p') {
+            if (stat(dirName, &fileStat) < 0) {
+                if (pg_mkdir_p(dirName, S_IRWXU) == -1) {
+                    fprintf(stderr, "%s: could not create directory \"%s\": %s\n", progname, dirName, strerror(errno));
+                    exit(1);
+                }
+            } else {
+                fprintf(stderr, "%s: directory \"%s\" already exists, please remove it and try again\n", progname,
+                    dirName);
                 exit(1);
             }
+            MotReceiveAndUnpackTarFile(basedir, chkptName, fetchConn, progname);
+        } else if (format == 't') {
+            MotReceiveAndAppendTarFile(basedir, chkptName, fetchConn, progname, compresslevel);
         } else {
-            fprintf(stderr, "%s: directory \"%s\" already exists, please remove it and try again\n", progname, dirName);
+            fprintf(stderr, "%s: unsupport format type: \"%c\".\n", progname, format);
             exit(1);
         }
-
-        MotReceiveAndUnpackTarFile(basedir, chkptName, fetchConn, progname);
         if (verbose) {
             fprintf(stderr, "%s: finished fetching mot checkpoint\n", progname);
         }

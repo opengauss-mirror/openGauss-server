@@ -127,7 +127,8 @@ static int replace_node_name(char* sSrc, const char* sMatchStr, const char* sRep
 static void show_full_build_process(const char* errmg);
 static void backup_dw_file(const char* target_dir);
 static void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
-extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose);
+extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose,
+    const char format = 'p', const int compresslevel = 0);
 extern char* GetOptionValueFromFile(const char* fileName, const char* option);
 
 /*
