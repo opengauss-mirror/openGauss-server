@@ -34,7 +34,7 @@
 #include "postgres_fe.h"
 
 #include "getopt_long.h"
-#include "libpq-fe.h"
+#include "libpq/libpq-fe.h"
 #include "libpq/pqsignal.h"
 #include "portability/instr_time.h"
 
