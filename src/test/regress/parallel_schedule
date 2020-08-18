@@ -248,7 +248,7 @@ test: subplan_new
 test: select
 test: col_subplan_base_1 col_subplan_new
 test: join
-test: select_into select_distinct subselect_part1 subselect_part2 transactions random btree_index select_distinct_on union  gs_aggregate arrays hash_index
+test: select_into select_distinct subselect_part1 subselect_part2 transactions transactions_control random btree_index select_distinct_on union  gs_aggregate arrays hash_index
 test: aggregates
 test: portals_p2 window tsearch temp__6 holdable_cursor col_subplan_base_2
 

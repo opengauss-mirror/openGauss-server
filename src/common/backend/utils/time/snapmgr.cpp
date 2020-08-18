@@ -534,6 +534,14 @@ void UpdateActiveSnapshotCommandId(void)
  */
 void PopActiveSnapshot(void)
 {
+    /*
+     * In multi commit/rollback within stored procedure, the ActiveSnapshot already poped.
+     * Therefore, no need to pop the active snapshot. Otherwise it will cause seg fault.
+     */
+    if (!u_sess->utils_cxt.ActiveSnapshot) {
+        return;
+    }
+
     ActiveSnapshotElt* newstack = NULL;
 
     newstack = u_sess->utils_cxt.ActiveSnapshot->as_next;

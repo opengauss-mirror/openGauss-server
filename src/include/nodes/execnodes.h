@@ -1734,6 +1734,7 @@ typedef struct FunctionScanState {
     TupleDesc tupdesc;
     Tuplestorestate* tuplestorestate;
     ExprState* funcexpr;
+    bool atomic;
 } FunctionScanState;
 
 /* ----------------

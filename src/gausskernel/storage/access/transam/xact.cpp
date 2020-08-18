@@ -277,7 +277,7 @@ typedef struct GTMCallbackItem {
 
 /* local function prototypes */
 static void AssignTransactionId(TransactionState s);
-static void AbortTransaction(bool PerfectRollback);
+static void AbortTransaction(bool PerfectRollback = false, bool stpRollback = false);
 static void AtAbort_Memory(void);
 static void AtCleanup_Memory(void);
 static void AtAbort_ResourceOwner(void);
@@ -294,13 +294,13 @@ static void CleanSequenceCallbacks(void);
 static void CallSequenceCallbacks(GTMEvent event);
 #endif
 static void CleanupTransaction(void);
-static void CommitTransaction(void);
+static void CommitTransaction(bool stpCommit = false);
 static TransactionId RecordTransactionAbort(bool isSubXact);
 static void StartTransaction(bool begin_on_gtm);
 
 static void StartSubTransaction(void);
-static void CommitSubTransaction(void);
-static void AbortSubTransaction(void);
+static void CommitSubTransaction(bool stpCommit = false);
+static void AbortSubTransaction(bool stpRollback = false);
 static void CleanupSubTransaction(void);
 static void PushTransaction(void);
 static void PopTransaction(void);
@@ -316,7 +316,7 @@ static void ShowTransactionState(const char* str);
 static void ShowTransactionStateRec(TransactionState state);
 static const char* BlockStateAsString(TBlockState blockState);
 static const char* TransStateAsString(TransState state);
-static void PrepareTransaction(void);
+static void PrepareTransaction(bool stpCommit = false);
 
 extern void print_leak_warning_at_commit();
 #ifndef ENABLE_LLT
@@ -2365,7 +2365,7 @@ void ThreadLocalFlagCleanUp()
  *
  * NB: if you change this routine, better look at PrepareTransaction too!
  */
-static void CommitTransaction(void)
+static void CommitTransaction(bool stpCommit)
 {
     u_sess->need_report_top_xid = false;
     TransactionState s = CurrentTransactionState;
@@ -2409,6 +2409,14 @@ static void CommitTransaction(void)
     u_sess->inval_cxt.deepthInAcceptInvalidationMessage = 0;
     t_thrd.xact_cxt.handlesDestroyedInCancelQuery = false;
     ThreadLocalFlagCleanUp();
+
+    /*
+     * When commit within nested store procedure, it will create a plan cache.
+     * During commit time, need to clean up those plan cache.
+     */
+    if (stpCommit) {
+        ResourceOwnerDecrementNPlanRefs(t_thrd.utils_cxt.CurrentResourceOwner, true);
+    }
 
 #ifdef PGXC
     /*
@@ -2486,7 +2494,7 @@ static void CommitTransaction(void)
                  */
                 Assert(GlobalTransactionIdIsValid(s->transactionId));
 
-                PrepareTransaction();
+                PrepareTransaction(stpCommit);
                 s->blockState = TBLOCK_DEFAULT;
 
                 /*
@@ -2519,7 +2527,7 @@ static void CommitTransaction(void)
          * If there weren't any, we are done ... otherwise loop back to check
          * if they queued deferred triggers.  Lather, rinse, repeat.
          */
-        if (!PreCommit_Portals(false))
+        if (!PreCommit_Portals(false, stpCommit))
             break;
     }
 
@@ -2848,9 +2856,11 @@ static void CommitTransaction(void)
 
     AtCommit_Notify();
     AtEOXact_GUC(true, 1);
-    AtEOXact_SPI(true);
+    AtEOXact_SPI(true, false, stpCommit);
     AtEOXact_on_commit_actions(true);
-    AtEOXact_Namespace(true);
+    if (!stpCommit){
+        AtEOXact_Namespace(true);
+    }
     AtEOXact_SMgr();
     AtEOXact_Files();
     AtEOXact_ComboCid();
@@ -3093,7 +3103,7 @@ bool AtEOXact_GlobalTxn(bool commit, bool is_write)
  * If PrepareTransaction is called during an implicit 2PC, do not release ressources,
  * this is made by CommitTransaction when transaction has been committed on Nodes.
  */
-static void PrepareTransaction(void)
+static void PrepareTransaction(bool stpCommit)
 {
     u_sess->need_report_top_xid = false;
     TransactionState s = CurrentTransactionState;
@@ -3198,7 +3208,7 @@ static void PrepareTransaction(void)
          * If there weren't any, we are done ... otherwise loop back to check
          * if they queued deferred triggers.  Lather, rinse, repeat.
          */
-        if (!PreCommit_Portals(true))
+        if (!PreCommit_Portals(true, stpCommit))
             break;
     }
 
@@ -3392,9 +3402,16 @@ static void PrepareTransaction(void)
 
     /* PREPARE acts the same as COMMIT as far as GUC is concerned */
     AtEOXact_GUC(true, 1);
-    AtEOXact_SPI(true);
+    AtEOXact_SPI(true, false, stpCommit);
     AtEOXact_on_commit_actions(true);
-    AtEOXact_Namespace(true);
+    /*
+     * For commit within stored procedure don't clean up namespace.
+     * Otherwise it will throw warning leaked override search path,
+     * since we push the search path hasn't pop yet.
+     */
+    if (!stpCommit) {
+        AtEOXact_Namespace(true);
+    }
     AtEOXact_SMgr();
     AtEOXact_Files();
     AtEOXact_ComboCid();
@@ -3468,7 +3485,7 @@ static void PrepareTransaction(void)
 #endif
 }
 
-static void AbortTransaction(bool PerfectRollback = false)
+static void AbortTransaction(bool PerfectRollback, bool stpRollback)
 {
     u_sess->need_report_top_xid = false;
     TransactionState s = CurrentTransactionState;
@@ -3723,7 +3740,7 @@ static void AbortTransaction(bool PerfectRollback = false)
      */
     AfterTriggerEndXact(false); /* 'false' means it's abort */
     CallXactCallbacks(XACT_EVENT_PREROLLBACK_CLEANUP);
-    AtAbort_Portals();
+    AtAbort_Portals(stpRollback);
     AtEOXact_LargeObject(false);
     AtAbort_Notify();
     AtEOXact_RelationMap(false);
@@ -3787,9 +3804,11 @@ static void AbortTransaction(bool PerfectRollback = false)
         if (change_user_name)
             u_sess->misc_cxt.CurrentUserName = NULL;
 
-        AtEOXact_SPI(false);
+        AtEOXact_SPI(false, stpRollback, false);
         AtEOXact_on_commit_actions(false);
-        AtEOXact_Namespace(false);
+        if (!stpRollback) {
+            AtEOXact_Namespace(false);
+        }
         AtEOXact_SMgr();
         AtEOXact_Files();
         AtEOXact_ComboCid();
@@ -3876,7 +3895,7 @@ static void CleanupTransaction(void)
 #endif
 }
 
-void StartTransactionCommand(void)
+void StartTransactionCommand(bool stpRollback)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -3918,6 +3937,9 @@ void StartTransactionCommand(void)
              */
         case TBLOCK_ABORT:
         case TBLOCK_SUBABORT:
+            if (stpRollback) {
+                s->blockState = TBLOCK_DEFAULT;
+            }
             break;
 
             /* These cases are invalid. */
@@ -3949,10 +3971,11 @@ void StartTransactionCommand(void)
     (void)MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
 }
 
-void CommitTransactionCommand(void)
+void CommitTransactionCommand(bool stpCommit)
 {
     TransactionState s = CurrentTransactionState;
     TBlockState oldstate = s->blockState;
+    const int stpownerlevel = 2;
 
     switch (s->blockState) {
             /*
@@ -3971,7 +3994,7 @@ void CommitTransactionCommand(void)
              * transaction commit, and return to the idle state.
              */
         case TBLOCK_STARTED:
-            CommitTransaction();
+            CommitTransaction(stpCommit);
             s->blockState = TBLOCK_DEFAULT;
             break;
 
@@ -3993,6 +4016,29 @@ void CommitTransactionCommand(void)
         case TBLOCK_INPROGRESS:
         case TBLOCK_SUBINPROGRESS:
             CommandCounterIncrement();
+
+            if (stpCommit && u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
+                int subTransactionCounter = 0;
+                Assert(!StreamThreadAmI());
+
+                do {
+                    MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
+                    CommitSubTransaction(stpCommit);
+                    s = CurrentTransactionState;
+                    subTransactionCounter++;
+
+                    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+                        /* CN should send release savepoint command to remote nodes for savepoint name reuse */
+                        pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, true, false);
+                    }
+                } while (s->blockState == TBLOCK_SUBINPROGRESS);
+
+                /* If we had a commit command, finish off the main xact too */
+                Assert(subTransactionCounter == u_sess->SPI_cxt.portal_stp_exception_counter);
+                t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.StpSavedResourceOwner;
+                CommitTransaction(stpCommit);
+                s->blockState = TBLOCK_DEFAULT;
+            }
             break;
 
             /*
@@ -4000,7 +4046,7 @@ void CommitTransactionCommand(void)
              * idle state.
              */
         case TBLOCK_END:
-            CommitTransaction();
+            CommitTransaction(stpCommit);
             s->blockState = TBLOCK_DEFAULT;
             break;
 
@@ -4029,7 +4075,7 @@ void CommitTransactionCommand(void)
              * and then clean up.
              */
         case TBLOCK_ABORT_PENDING:
-            AbortTransaction(true);
+            AbortTransaction(true, false);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4050,6 +4096,9 @@ void CommitTransactionCommand(void)
              * state.)
              */
         case TBLOCK_SUBBEGIN:
+            if (CurrentTransactionState->nestingLevel == stpownerlevel) {
+                t_thrd.utils_cxt.StpSavedResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+            }
             StartSubTransaction();
             s->blockState = TBLOCK_SUBINPROGRESS;
             break;
@@ -4112,7 +4161,7 @@ void CommitTransactionCommand(void)
 
             /* As above, but it's not dead yet, so abort first. */
         case TBLOCK_SUBABORT_PENDING:
-            AbortSubTransaction();
+            AbortSubTransaction(stpCommit);
             CleanupSubTransaction();
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(WARNING,
@@ -4137,7 +4186,7 @@ void CommitTransactionCommand(void)
             s->name = NULL;
             savepointLevel = s->savepointLevel;
 
-            AbortSubTransaction();
+            AbortSubTransaction(stpCommit);
             CleanupSubTransaction();
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(WARNING,
@@ -4198,7 +4247,7 @@ void CommitTransactionCommand(void)
     }
 }
 
-void AbortCurrentTransaction(void)
+void AbortCurrentTransaction(bool stpRollback)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -4216,7 +4265,7 @@ void AbortCurrentTransaction(void)
                  */
                 if (s->state == TRANS_START)
                     s->state = TRANS_INPROGRESS;
-                AbortTransaction();
+                AbortTransaction(false, stpRollback);
                 CleanupTransaction();
             }
             break;
@@ -4226,7 +4275,7 @@ void AbortCurrentTransaction(void)
              * & cleanup transaction.
              */
         case TBLOCK_STARTED:
-            AbortTransaction();
+            AbortTransaction(false, stpRollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4239,7 +4288,7 @@ void AbortCurrentTransaction(void)
              * state.
              */
         case TBLOCK_BEGIN:
-            AbortTransaction();
+            AbortTransaction(false, stpRollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4250,7 +4299,7 @@ void AbortCurrentTransaction(void)
              * ABORT state.  We will stay in ABORT until we get a ROLLBACK.
              */
         case TBLOCK_INPROGRESS:
-            AbortTransaction();
+            AbortTransaction(false, stpRollback);
             s->blockState = TBLOCK_ABORT;
             /* CleanupTransaction happens when we exit TBLOCK_ABORT_END */
             break;
@@ -4261,7 +4310,7 @@ void AbortCurrentTransaction(void)
              * the transaction).
              */
         case TBLOCK_END:
-            AbortTransaction();
+            AbortTransaction(false, stpRollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4290,7 +4339,7 @@ void AbortCurrentTransaction(void)
              * Abort, cleanup, go to idle state.
              */
         case TBLOCK_ABORT_PENDING:
-            AbortTransaction();
+            AbortTransaction(false, stpRollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4301,7 +4350,7 @@ void AbortCurrentTransaction(void)
              * the transaction).
              */
         case TBLOCK_PREPARE:
-            AbortTransaction();
+            AbortTransaction(false, stpRollback);
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
             break;
@@ -4312,8 +4361,29 @@ void AbortCurrentTransaction(void)
              * we get ROLLBACK.
              */
         case TBLOCK_SUBINPROGRESS:
-            AbortSubTransaction();
-            s->blockState = TBLOCK_SUBABORT;
+            if (stpRollback && u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
+                int subTransactionCounter = 0;
+                do {
+                    AbortSubTransaction(stpRollback);
+                    s->blockState = TBLOCK_SUBABORT;
+                    CleanupSubTransaction();
+                    s = CurrentTransactionState;
+                    subTransactionCounter++;
+                } while (s->blockState == TBLOCK_SUBINPROGRESS);
+
+                Assert(subTransactionCounter == u_sess->SPI_cxt.portal_stp_exception_counter);
+                if (s->state == TRANS_START) {
+                    s->state = TRANS_INPROGRESS;
+                }
+
+                AbortTransaction(false, stpRollback);
+                CleanupTransaction();
+                s->blockState = TBLOCK_DEFAULT;
+            } else {
+                AbortSubTransaction();
+                s->blockState = TBLOCK_SUBABORT;
+            }
+            
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(WARNING,
                     (errmsg(
@@ -4332,7 +4402,7 @@ void AbortCurrentTransaction(void)
         case TBLOCK_SUBCOMMIT:
         case TBLOCK_SUBABORT_PENDING:
         case TBLOCK_SUBRESTART:
-            AbortSubTransaction();
+            AbortSubTransaction(stpRollback);
             CleanupSubTransaction();
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(WARNING,
@@ -4347,7 +4417,7 @@ void AbortCurrentTransaction(void)
         case TBLOCK_SUBABORT_END:
         case TBLOCK_SUBABORT_RESTART:
             CleanupSubTransaction();
-            AbortCurrentTransaction();
+            AbortCurrentTransaction(stpRollback);
             break;
         default:
             ereport(FATAL,
@@ -5473,7 +5543,7 @@ void RollbackAndReleaseCurrentSubTransaction(void)
 
     /* Abort the current subtransaction, if needed. */
     if (s->blockState == TBLOCK_SUBINPROGRESS) {
-        AbortSubTransaction();
+        AbortSubTransaction(false);
     }
 
     /* And clean it up, too */
@@ -5586,7 +5656,7 @@ void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
             case TBLOCK_SUBCOMMIT:
             case TBLOCK_SUBABORT_PENDING:
             case TBLOCK_SUBRESTART:
-                AbortSubTransaction();
+                AbortSubTransaction(false);
                 CleanupSubTransaction();
                 s = CurrentTransactionState; /* changed by pop */
                 break;
@@ -5626,6 +5696,10 @@ void AbortOutOfAnyTransaction(bool reserve_topxact_abort)
 bool IsTransactionBlock(void)
 {
     TransactionState s = CurrentTransactionState;
+
+    if (u_sess->SPI_cxt.portal_stp_exception_counter > 0 && s->blockState == TBLOCK_SUBINPROGRESS) {
+        return false;
+    }
 
     if (s->blockState == TBLOCK_DEFAULT || s->blockState == TBLOCK_STARTED) {
         return false;
@@ -5770,7 +5844,7 @@ static void StartSubTransaction(void)
  *	The caller has to make sure to always reassign CurrentTransactionState
  *	if it has a local pointer to it after calling this function.
  */
-static void CommitSubTransaction(void)
+static void CommitSubTransaction(bool stpCommit)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -5862,14 +5936,27 @@ static void CommitSubTransaction(void)
         XactLockTableDelete(s->transactionId);
     }
 
+    /*
+     * When commit within nedted store procedure, it will create a plan cache.
+     * During commit time, need to clean up those plan cache.
+     */
+    if (stpCommit) {
+        ResourceOwnerDecrementNPlanRefs(t_thrd.utils_cxt.CurrentResourceOwner, true);
+        ResourceOwnerDecrementNsnapshots(t_thrd.utils_cxt.CurrentResourceOwner, NULL);
+    }
+
     /* Other locks should get transferred to their parent resource owner. */
     ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_LOCKS, true, false);
     ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_AFTER_LOCKS, true, false);
 
     AtEOXact_GUC(true, s->gucNestLevel);
-    AtEOSubXact_SPI(true, s->subTransactionId);
+    if (!stpCommit) {
+        AtEOSubXact_SPI(true, s->subTransactionId, false, stpCommit);
+    }
     AtEOSubXact_on_commit_actions(true, s->subTransactionId, s->parent->subTransactionId);
-    AtEOSubXact_Namespace(true, s->subTransactionId, s->parent->subTransactionId);
+    if (!stpCommit) {
+        AtEOSubXact_Namespace(true, s->subTransactionId, s->parent->subTransactionId);
+    }
     AtEOSubXact_Files(true, s->subTransactionId, s->parent->subTransactionId);
     AtEOSubXact_HashTables(true, s->nestingLevel);
     AtEOSubXact_PgStat(true, s->nestingLevel);
@@ -5895,7 +5982,7 @@ static void CommitSubTransaction(void)
     PopTransaction();
 }
 
-static void AbortSubTransaction(void)
+static void AbortSubTransaction(bool stpRollback)
 {
     TransactionState s = CurrentTransactionState;
     t_thrd.xact_cxt.bInAbortTransaction = true;
@@ -6045,9 +6132,11 @@ static void AbortSubTransaction(void)
         ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
 
         AtEOXact_GUC(false, s->gucNestLevel);
-        AtEOSubXact_SPI(false, s->subTransactionId);
+        AtEOSubXact_SPI(false, s->subTransactionId, stpRollback, false);
         AtEOSubXact_on_commit_actions(false, s->subTransactionId, s->parent->subTransactionId);
-        AtEOSubXact_Namespace(false, s->subTransactionId, s->parent->subTransactionId);
+        if (!stpRollback) {
+            AtEOSubXact_Namespace(false, s->subTransactionId, s->parent->subTransactionId);
+        }
         AtEOSubXact_Files(false, s->subTransactionId, s->parent->subTransactionId);
         AtEOSubXact_HashTables(false, s->nestingLevel);
         AtEOSubXact_PgStat(false, s->nestingLevel);
@@ -6217,6 +6306,7 @@ static void PopTransaction(void)
     /* Ditto for ResourceOwner links */
     t_thrd.utils_cxt.CurTransactionResourceOwner = s->parent->curTransactionOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = s->parent->curTransactionOwner;
+    t_thrd.xact_cxt.currentSubTransactionId = s->parent->subTransactionId;
 
     /* Free the old child structure */
     if (s->name) {

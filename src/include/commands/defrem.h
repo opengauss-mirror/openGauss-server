@@ -52,7 +52,7 @@ extern void CreateCast(CreateCastStmt* stmt);
 extern void DropCastById(Oid castOid);
 extern void AlterFunctionNamespace(List* name, List* argtypes, bool isagg, const char* newschema);
 extern Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid);
-extern void ExecuteDoStmt(const DoStmt* stmt);
+extern void ExecuteDoStmt(const DoStmt* stmt, bool atomic);
 extern Oid get_cast_oid(Oid sourcetypeid, Oid targettypeid, bool missing_ok);
 
 /* commands/operatorcmds.c */

@@ -179,6 +179,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     // PGSTAT_INIT_PLSQL_TIME_RECORD
     int64 startTime = 0;
     bool needRecord = false;
+    bool nonatomic = false;
 #ifdef STREAMPLAN
     bool outer_is_stream = false;
     bool outer_is_stream_support = false;
@@ -193,11 +194,20 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     }
 #endif
 
+    /*
+     * If the atomic stored in fcinfo is false means allow
+     * commit/rollback within stord procedure.
+     * set the noatomic and will be reused within function.
+     */
+    nonatomic = fcinfo->context &&
+                IsA(fcinfo->context, FunctionScanState) &&
+                !castNode(FunctionScanState, fcinfo->context)->atomic;
+
     _PG_init();
     /*
      * Connect to SPI manager
      */
-    if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
+    if ((rc = SPI_connect_ext(DestSPI, NULL, NULL, nonatomic ? SPI_OPT_NOATOMIC : 0)) != SPI_OK_CONNECT) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -338,7 +348,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     /*
      * Connect to SPI manager
      */
-    if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
+    if ((rc = SPI_connect_ext(DestSPI, NULL, NULL, codeblock->atomic ? 0 : SPI_OPT_NOATOMIC)) != SPI_OK_CONNECT) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_SPI_CONNECTION_FAILURE),

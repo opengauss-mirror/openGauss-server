@@ -78,6 +78,11 @@ static void CopySPI_Plan(SPIPlanPtr newplan, SPIPlanPtr plan, MemoryContext plan
 /* =================== interface functions =================== */
 int SPI_connect(CommandDest dest, void (*spiCallbackfn)(void *), void *clientData)
 {
+    return SPI_connect_ext(dest, spiCallbackfn, clientData, 0);
+}
+
+int SPI_connect_ext(CommandDest dest, void (*spiCallbackfn)(void *), void *clientData, int options)
+{
     int new_depth;
     /*
      * When procedure called by Executor u_sess->SPI_cxt._curid expected to be equal to
@@ -93,8 +98,12 @@ int SPI_connect(CommandDest dest, void (*spiCallbackfn)(void *), void *clientDat
                 u_sess->SPI_cxt._connected != -1 ? "init level is not -1." : "stack depth is not zero.")));
         }
         new_depth = 16;
+        /*
+         * Need TopMemoryContext because commit is allowed in stored procedure and it will clear all memory
+         * context from TopTransaction. Therefor,need to use TopMemoryContext.
+         */
         u_sess->SPI_cxt._stack =
-            (_SPI_connection *)MemoryContextAlloc(u_sess->top_transaction_mem_cxt, new_depth * sizeof(_SPI_connection));
+            (_SPI_connection *)MemoryContextAlloc(u_sess->top_mem_cxt, new_depth * sizeof(_SPI_connection));
         u_sess->SPI_cxt._stack_depth = new_depth;
     } else {
         if (u_sess->SPI_cxt._stack_depth <= 0 || u_sess->SPI_cxt._stack_depth <= u_sess->SPI_cxt._connected) {
@@ -125,18 +134,28 @@ int SPI_connect(CommandDest dest, void (*spiCallbackfn)(void *), void *clientDat
     u_sess->SPI_cxt._current->dest = dest;
     u_sess->SPI_cxt._current->spiCallback = (void (*)(void *))spiCallbackfn;
     u_sess->SPI_cxt._current->clientData = clientData;
+    u_sess->SPI_cxt._current->atomic = (options & SPI_OPT_NOATOMIC) ? false : true;
+    u_sess->SPI_cxt._current->internal_xact = false;
 
     /*
      * Create memory contexts for this procedure
+     * 
+     * In atomic contexts (the normal case), we use TopTransactionContext,
+     * otherwise PortalContext, so that it lives across transaction
+     * boundaries.
      *
-     * XXX it would be better to use t_thrd.mem_cxt.portal_mem_cxt as the parent context, but
-     * we may not be inside a portal (consider deferred-trigger execution).
-     * Perhaps t_thrd.mem_cxt.cur_transaction_mem_cxt would do?	For now it doesn't matter
-     * because we clean up explicitly in AtEOSubXact_SPI().
+     * XXX it would be better to use PortalContext as the parent context in
+     * all cases, but we may not be inside a portal (consider deferred-trigger
+     * execution). Perhaps CurTransactionContext could be an option? For now
+     * it doesn't matter because we clean up explicitly in ATEOSubXact_SPI().
      */
-    u_sess->SPI_cxt._current->procCxt = AllocSetContextCreate(u_sess->top_transaction_mem_cxt, "SPI Proc",
+    u_sess->SPI_cxt._current->procCxt =
+        AllocSetContextCreate(u_sess->SPI_cxt._current->atomic ? u_sess->top_transaction_mem_cxt :
+        t_thrd.mem_cxt.portal_mem_cxt, "SPI Proc",
         ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-    u_sess->SPI_cxt._current->execCxt = AllocSetContextCreate(u_sess->top_transaction_mem_cxt, "SPI Exec",
+    u_sess->SPI_cxt._current->execCxt =
+        AllocSetContextCreate(u_sess->SPI_cxt._current->atomic ? u_sess->top_transaction_mem_cxt :
+        u_sess->SPI_cxt._current->procCxt, "SPI Exec",
         ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     /* ... and switch to procedure's context */
     u_sess->SPI_cxt._current->savedcxt = MemoryContextSwitchTo(u_sess->SPI_cxt._current->procCxt);
@@ -185,11 +204,138 @@ int SPI_finish(void)
     return SPI_OK_FINISH;
 }
 
+void SPI_start_transaction(void)
+{
+    MemoryContext oldContext = CurrentMemoryContext;
+
+    StartTransactionCommand(true);
+    MemoryContextSwitchTo(oldContext);
+}
+
+void SPI_commit(void)
+{
+    MemoryContext oldContext = CurrentMemoryContext;
+
+#ifdef ENABLE_MULTIPLE_NODES
+    /* Can not commit at non-CN nodes */
+    if (!IS_PGXC_COORDINATOR || IsConnFromCoord()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TRANSACTION_TERMINATION),
+                errmsg("cannot commit at non-CN node")));
+    }
+#endif
+
+    /* If commit is not within stored procedure report error */
+    if (!u_sess->SPI_cxt.is_stp) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TRANSACTION_TERMINATION),
+                errmsg("cannot commit within function")));
+    }
+
+    /* Cannot commit if it's atomic is true */
+    if (u_sess->SPI_cxt._current->atomic) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TRANSACTION_TERMINATION),
+                errmsg("invalid transaction termination")));
+    }
+
+    /*
+     * Hold any pinned portals that any PLs might be using.  We have to do
+     * this before changing trasnaction state, since this will run
+     * user-defined code that might throw an error.
+     */
+    HoldPinnedPortals();
+
+    /*
+     * This restriction is required by PLs implemented on top of SPI.  They
+     * use subtransactions to establish exception blocks that are supposed to
+     * be rolled back together if there is an error.  Terminating the
+     * top-level transaction in such a block violates that idea. A future PL
+     * implementation might have different ideas about this, in which case
+     * this restriction would have to be refined or the check possibly be
+     * moved out of SPI into the PLs.
+     */
+    u_sess->SPI_cxt._current->internal_xact = true;
+
+    while (ActiveSnapshotSet()) {
+        PopActiveSnapshot();
+    }
+
+    CommitTransactionCommand(true);
+    MemoryContextSwitchTo(oldContext);
+
+    u_sess->SPI_cxt._current->internal_xact = false;
+}
+
+void SPI_rollback(void)
+{
+    MemoryContext oldContext = CurrentMemoryContext;
+
+#ifdef ENABLE_MULTIPLE_NODES
+    /* Can not commit at non-CN nodes */
+    if (!IS_PGXC_COORDINATOR || IsConnFromCoord()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TRANSACTION_TERMINATION),
+                errmsg("cannot rollback at non-CN node")));
+    }
+#endif
+
+    /* If commit is not within stored procedure report error */
+    if (!u_sess->SPI_cxt.is_stp) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TRANSACTION_TERMINATION),
+                errmsg("cannot rollback within function")));
+    }
+
+    /* Cannot commit if it's atomic is true */
+    if (u_sess->SPI_cxt._current->atomic) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TRANSACTION_TERMINATION),
+                errmsg("invalid transaction termination")));
+    }
+
+    /*
+     * Hold any pinned portals that any PLs might be using.  We have to do
+     * this before changing trasnaction state, since this will run
+     * user-defined code that might throw an error.
+     */
+    HoldPinnedPortals();
+
+    /* see under SPI_commit() */
+    u_sess->SPI_cxt._current->internal_xact = true;
+
+    AbortCurrentTransaction(true);
+    MemoryContextSwitchTo(oldContext);
+
+    u_sess->SPI_cxt._current->internal_xact = false;
+}
+
+/*
+ * Clean up SPI state.  Called on trasnaction end (of non-SPI-internal
+ * trasnactions) and when retruning to the main loop on error.
+ */
+void SPICleanup(void)
+{
+    u_sess->SPI_cxt._current = u_sess->SPI_cxt._stack = NULL;
+    u_sess->SPI_cxt._stack_depth = 0;
+    u_sess->SPI_cxt._connected = u_sess->SPI_cxt._curid = -1;
+    SPI_processed = 0;
+    u_sess->SPI_cxt.lastoid = InvalidOid;
+    SPI_tuptable = NULL;
+}
+
 /*
  * Clean up SPI state at transaction commit or abort.
  */
-void AtEOXact_SPI(bool isCommit)
+void AtEOXact_SPI(bool isCommit, bool stpRollback, bool stpCommit)
 {
+    /*
+     * Do nothing if the trasnaction end was initiated by SPI.
+     */
+    if (stpRollback || stpCommit) {
+        return;
+    }
+
     /*
      * Note that memory contexts belonging to SPI stack entries will be freed
      * automatically, so we can ignore them here.  We just need to restore our
@@ -200,12 +346,7 @@ void AtEOXact_SPI(bool isCommit)
             errhint("Check for missing \"SPI_finish\" calls.")));
     }
 
-    u_sess->SPI_cxt._current = u_sess->SPI_cxt._stack = NULL;
-    u_sess->SPI_cxt._stack_depth = 0;
-    u_sess->SPI_cxt._connected = u_sess->SPI_cxt._curid = -1;
-    SPI_processed = 0;
-    u_sess->SPI_cxt.lastoid = InvalidOid;
-    SPI_tuptable = NULL;
+    SPICleanup();
 }
 
 /*
@@ -214,8 +355,12 @@ void AtEOXact_SPI(bool isCommit)
  * During commit, there shouldn't be any unclosed entries remaining from
  * the current subtransaction; we emit a warning if any are found.
  */
-void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid)
+void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool stpRollback, bool stpCommit)
 {
+    if (stpRollback || stpCommit) {
+        return;
+    }
+
     bool found = false;
 
     while (u_sess->SPI_cxt._connected >= 0) {
@@ -223,6 +368,10 @@ void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid)
 
         if (connection->connectSubid != mySubid) {
             break; /* couldn't be any underneath it either */
+        }
+
+        if (connection->internal_xact) {
+            break;
         }
 
         found = true;
@@ -1873,6 +2022,11 @@ static int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
     CachedPlan *cplan = NULL;
     ListCell *lc1 = NULL;
     bool tmp_enable_light_proxy = u_sess->attr.attr_sql.enable_light_proxy;
+    TransactionId oldTransactionId = InvalidTransactionId;
+
+    if (!RecoveryInProgress()) {
+        oldTransactionId = GetTopTransactionId();
+    }
 
     /* not allow Light CN */
     u_sess->attr.attr_sql.enable_light_proxy = false;
@@ -2118,7 +2272,9 @@ static int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
         }
 
         /* Done with this plan, so release refcount */
-        ReleaseCachedPlan(cplan, plan->saved);
+        if ((!RecoveryInProgress()) && (oldTransactionId == GetTopTransactionId())) {
+            ReleaseCachedPlan(cplan, plan->saved);
+        }
         cplan = NULL;
 
         /*
@@ -2228,6 +2384,7 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
     int operation = queryDesc->operation;
     int eflags;
     int res;
+    TransactionId oldTransactionId = InvalidTransactionId;
 
     switch (operation) {
         case CMD_SELECT:
@@ -2275,6 +2432,9 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
         eflags = EXEC_FLAG_SKIP_TRIGGERS;
     }
 
+    if (!RecoveryInProgress()) {
+        oldTransactionId = GetTopTransactionId();
+    }
     ExecutorStart(queryDesc, eflags);
 
     bool forced_control = !from_lock && IS_PGXC_COORDINATOR &&
@@ -2349,6 +2509,17 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
                 u_sess->SPI_cxt._current->tuptable == NULL ? "tupletable is NULL." :
                                                              "processed tuples is not matched.")));
         }
+    }
+
+    /*
+     * If there are commit/rollback within stored proedure. Snapshot has already free during commit/rollback process.
+     * Therefor, need to set queryDesc snapshots to NULL. Otherwise the reference will be stale pointers.
+     */
+    if ((!RecoveryInProgress()) && (oldTransactionId != GetTopTransactionId())) {
+        queryDesc->snapshot = NULL;
+        queryDesc->crosscheck_snapshot = NULL;
+        queryDesc->estate->es_snapshot = NULL;
+        queryDesc->estate->es_crosscheck_snapshot = NULL;
     }
 
     ExecutorFinish(queryDesc);

@@ -2133,7 +2133,7 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
  * ExecuteDoStmt
  *		Execute inline procedural-language code
  */
-void ExecuteDoStmt(const DoStmt* stmt)
+void ExecuteDoStmt(const DoStmt* stmt, bool atomic)
 {
     InlineCodeBlock* codeblock = makeNode(InlineCodeBlock);
     ListCell* arg = NULL;
@@ -2200,6 +2200,7 @@ void ExecuteDoStmt(const DoStmt* stmt)
 
     /* get the handler function's OID */
     laninline = languageStruct->laninline;
+    codeblock->atomic = atomic;
     if (!OidIsValid(laninline))
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

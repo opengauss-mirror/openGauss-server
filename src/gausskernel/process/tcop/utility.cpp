@@ -4425,7 +4425,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_DoStmt:
-            ExecuteDoStmt((DoStmt*)parse_tree);
+            ExecuteDoStmt((DoStmt*)parse_tree, (!u_sess->SPI_cxt.is_toplevel_stp || IsTransactionBlock()));
             break;
 
         case T_CreatedbStmt:

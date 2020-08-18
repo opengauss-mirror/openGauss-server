@@ -63,6 +63,9 @@ extern ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name)
 extern void ResourceOwnerRelease(ResourceOwner owner, ResourceReleasePhase phase, bool isCommit, bool isTopLevel);
 extern void ResourceOwnerDelete(ResourceOwner owner);
 extern ResourceOwner ResourceOwnerGetParent(ResourceOwner owner);
+extern ResourceOwner ResourceOwnerGetNextChild(ResourceOwner owner);
+extern ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner);
+extern const char* ResourceOwnerGetName(ResourceOwner owner);
 extern void ResourceOwnerNewParent(ResourceOwner owner, ResourceOwner newparent);
 extern void RegisterResourceReleaseCallback(ResourceReleaseCallback callback, void* arg);
 extern void UnregisterResourceReleaseCallback(ResourceReleaseCallback callback, void* arg);
@@ -116,6 +119,8 @@ extern void ResourceOwnerForgetTupleDesc(ResourceOwner owner, const TupleDesc tu
 extern void ResourceOwnerEnlargeSnapshots(ResourceOwner owner);
 extern void ResourceOwnerRememberSnapshot(ResourceOwner owner, Snapshot snapshot);
 extern void ResourceOwnerForgetSnapshot(ResourceOwner owner, const Snapshot snapshot);
+extern void ResourceOwnerDecrementNsnapshots(ResourceOwner owner, void* queryDesc);
+extern void ResourceOwnerDecrementNPlanRefs(ResourceOwner owner, bool useResOwner);
 
 /* support for temporary file management */
 extern void ResourceOwnerEnlargeFiles(ResourceOwner owner);

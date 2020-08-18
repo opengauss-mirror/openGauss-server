@@ -130,6 +130,8 @@ static bool is_anonymous_block(const char* query);
 static int exec_stmt_dynfors(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynfors* stmt);
 
 static void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, ReturnSetInfo* rsi);
+static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt);
+static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* stmt);
 static void exec_eval_cleanup(PLpgSQL_execstate* estate);
 
 static void exec_prepare_plan(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, int cursorOptions);
@@ -291,6 +293,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
 {
     PLpgSQL_execstate estate;
     ErrorContextCallback plerrcontext;
+    bool savedIsStp;
     int i;
     int rc;
 
@@ -412,7 +415,9 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
      */
     estate.err_text = NULL;
     estate.err_stmt = (PLpgSQL_stmt*)(func->action);
+    savedIsStp = u_sess->SPI_cxt.is_stp;
     rc = exec_stmt_block(&estate, func->action);
+    u_sess->SPI_cxt.is_stp = savedIsStp;
     if (rc != PLPGSQL_RC_RETURN) {
         estate.err_stmt = NULL;
         estate.err_text = NULL;
@@ -633,6 +638,7 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
     PLpgSQL_rec *rec_new = NULL;
     PLpgSQL_rec *rec_old = NULL;
     HeapTuple rettup;
+    bool saveIsStp;
 
     /*
      * Setup the execution state
@@ -842,7 +848,10 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
      */
     estate.err_text = NULL;
     estate.err_stmt = (PLpgSQL_stmt*)(func->action);
+    saveIsStp = u_sess->SPI_cxt.is_stp;
+    u_sess->SPI_cxt.is_stp = false;
     rc = exec_stmt_block(&estate, func->action);
+    u_sess->SPI_cxt.is_stp = saveIsStp;
     if (rc != PLPGSQL_RC_RETURN) {
         estate.err_stmt = NULL;
         estate.err_text = NULL;
@@ -1399,6 +1408,10 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     int i;
     int n;
     SubTransactionId subXid = InvalidSubTransactionId;
+    bool savedIsTopLevelForStp = u_sess->SPI_cxt.is_toplevel_stp;
+    bool savedIsStp = u_sess->SPI_cxt.is_stp;
+    TransactionId oldTransactionId = InvalidTransactionId;
+
     /*
      * First initialize all variables declared in this block
      */
@@ -1477,13 +1490,17 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     }
 
     if (block->exceptions != NULL) {
+        u_sess->SPI_cxt.portal_stp_exception_counter++;
+
         /*
          * Execute the statements in the block's body inside a sub-transaction
          */
         MemoryContext oldcontext = CurrentMemoryContext;
         ResourceOwner oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
-        ExprContext* old_eval_econtext = estate->eval_econtext;
         ErrorData* save_cur_error = estate->cur_error;
+        if (!RecoveryInProgress()) {
+            oldTransactionId = GetTopTransactionId();
+        }
 
         estate->err_text = gettext_noop("during statement block entry");
 
@@ -1539,13 +1556,25 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
             }
 
             MemoryContextSwitchTo(oldcontext);
+            if ((!RecoveryInProgress()) && (oldTransactionId != GetTopTransactionId())) {
+                if (ResourceOwnerGetNextChild(t_thrd.utils_cxt.CurrentResourceOwner)) {
+                    oldowner = ResourceOwnerGetNextChild(t_thrd.utils_cxt.CurrentResourceOwner);
+                } else {
+                    if (ResourceOwnerGetParent(t_thrd.utils_cxt.CurrentResourceOwner)) {
+                        oldowner = ResourceOwnerGetParent(t_thrd.utils_cxt.CurrentResourceOwner);
+                    } else {
+                        oldowner = ResourceOwnerGetFirstChild(t_thrd.utils_cxt.CurrentResourceOwner);
+                    }
+                }
+            }
             t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+            u_sess->SPI_cxt.portal_stp_exception_counter--;
 
             /*
              * Revert to outer eval_econtext.  (The inner one was
              * automatically cleaned up during subxact exit.)
              */
-            estate->eval_econtext = old_eval_econtext;
+            estate->eval_econtext = u_sess->plsql_cxt.simple_econtext_stack->stack_econtext;
 
             /*
              * AtEOSubXact_SPI() should not have popped any SPI context, but
@@ -1557,6 +1586,10 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
         {
             ErrorData* edata = NULL;
             ListCell* e = NULL;
+
+            u_sess->SPI_cxt.is_toplevel_stp = savedIsTopLevelForStp;
+            u_sess->SPI_cxt.is_stp = savedIsStp;
+
             estate->cursor_return_data = saved_cursor_data;
 
             /* gs_signal_handle maybe block sigusr2 when accept SIGINT */
@@ -1601,10 +1634,22 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
             }
 
             MemoryContextSwitchTo(oldcontext);
+            if ((!RecoveryInProgress()) && (oldTransactionId != GetTopTransactionId())) {
+                if (ResourceOwnerGetNextChild(t_thrd.utils_cxt.CurrentResourceOwner)) {
+                    oldowner = ResourceOwnerGetNextChild(t_thrd.utils_cxt.CurrentResourceOwner);
+                } else {
+                    if (ResourceOwnerGetParent(t_thrd.utils_cxt.CurrentResourceOwner)) {
+                        oldowner = ResourceOwnerGetParent(t_thrd.utils_cxt.CurrentResourceOwner);
+                    } else {
+                        oldowner = ResourceOwnerGetFirstChild(t_thrd.utils_cxt.CurrentResourceOwner);
+                    }
+                }
+            }
             t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
 
             /* Revert to outer eval_econtext */
-            estate->eval_econtext = old_eval_econtext;
+            estate->eval_econtext = u_sess->plsql_cxt.simple_econtext_stack->stack_econtext;
+            u_sess->SPI_cxt.portal_stp_exception_counter--;
 
             /*
              * If AtEOSubXact_SPI() popped any SPI context of the subxact, it
@@ -2061,12 +2106,26 @@ static int exec_stmt_assign(PLpgSQL_execstate* estate, PLpgSQL_stmt_assign* stmt
 static int exec_stmt_perform(PLpgSQL_execstate* estate, PLpgSQL_stmt_perform* stmt)
 {
     PLpgSQL_expr* expr = stmt->expr;
+    TransactionId oldTransactionId = InvalidTransactionId;
     int rc;
+
+    if (!RecoveryInProgress()) {
+        oldTransactionId = GetTopTransactionId();
+    }
 
     rc = exec_run_select(estate, expr, 0, NULL);
     if (rc != SPI_OK_SELECT) {
         ereport(DEBUG1,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmodule(MOD_PLSQL), errmsg("exec_run_select returns %d", rc)));
+    }
+
+    /*
+     * This is used for nested STP. If the transaction Id changed,
+     * then need to create new econtext for the TopTransaction.
+     */
+    if ((!RecoveryInProgress()) && (oldTransactionId != GetTopTransactionId())) {
+        u_sess->plsql_cxt.simple_eval_estate = NULL;
+        plpgsql_create_econtext(estate);
     }
 
     exec_set_found(estate, (estate->eval_processed != 0));
@@ -3695,7 +3754,7 @@ static void exec_eval_cleanup(PLpgSQL_execstate* estate)
     estate->eval_tuptable = NULL;
 
     /* Clear result of exec_eval_simple_expr (but keep the econtext) */
-    if (estate->eval_econtext != NULL) {
+    if (estate->eval_econtext != NULL && estate->eval_econtext->ecxt_per_tuple_memory != NULL) {
         ResetExprContext(estate->eval_econtext);
     }
 }
@@ -3762,6 +3821,11 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     int rc;
     PLpgSQL_expr* expr = stmt->sqlstmt;
     Cursor_Data* saved_cursor_data = NULL;
+    TransactionId oldTransactionId = InvalidTransactionId;
+
+    if (!RecoveryInProgress()) {
+        oldTransactionId = GetTopTransactionId();
+    }
 
     /*
      * On the first call for this statement generate the plan, and detect
@@ -3836,6 +3900,16 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
      * Execute the plan
      */
     rc = SPI_execute_plan_with_paramlist(expr->plan, paramLI, estate->readonly_func, tcount);
+
+    /*
+     * This is used for nested STP. If the transaction Id changed,
+     * then need to create new econtext for the TopTransaction.
+     */
+    if ((!RecoveryInProgress()) && (oldTransactionId != GetTopTransactionId())) {
+        u_sess->plsql_cxt.simple_eval_estate = NULL;
+        plpgsql_create_econtext(estate);
+    }
+
     plpgsql_estate = NULL;
 
     /*
@@ -4179,6 +4253,11 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
         FmgrInfo flinfo;
         int ppdindex = 0;
         int datumindex = 0;
+        TransactionId oldTransactionId = InvalidTransactionId;
+
+        if (!RecoveryInProgress()) {
+            oldTransactionId = GetTopTransactionId();
+        }
 
         /* Compile the anonymous code block */
         /* support pass external parameter in anonymous block */
@@ -4207,6 +4286,16 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
         flinfo.fn_mcxt = CurrentMemoryContext;
 
         (void)plpgsql_exec_function(func, &fake_fcinfo, true);
+
+        /*
+         * This is used for nested STP. If the transaction Id changed,
+         * then need to create new econtext for the TopTransaction.
+         */
+        if ((!RecoveryInProgress()) && (oldTransactionId != GetTopTransactionId())) {
+            u_sess->plsql_cxt.simple_eval_estate = NULL;
+            plpgsql_create_econtext(estate);
+        }
+
         exec_set_sql_isopen(estate, false);
         exec_set_sql_cursor_found(estate, PLPGSQL_TRUE);
         exec_set_sql_notfound(estate, PLPGSQL_FALSE);
@@ -4895,6 +4984,58 @@ static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
  */
 static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt)
 {
+    const char* PORTAL = "Portal";
+    int subTransactionCount = u_sess->SPI_cxt.portal_stp_exception_counter;
+
+    if (u_sess->SPI_cxt.portal_stp_exception_counter == 0) {
+        t_thrd.utils_cxt.StpSavedResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    }
+
+    if (strcmp(PORTAL, ResourceOwnerGetName(t_thrd.utils_cxt.CurrentResourceOwner)) == 0) {
+        if (ResourceOwnerGetNextChild(t_thrd.utils_cxt.CurrentResourceOwner)
+            && (strcmp(PORTAL, ResourceOwnerGetName(ResourceOwnerGetNextChild(t_thrd.utils_cxt.CurrentResourceOwner))) == 0))
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("commit with PE is not supported")));
+    }
+
+    SPI_commit();
+    SPI_start_transaction();
+
+    u_sess->plsql_cxt.simple_eval_estate = NULL;
+    plpgsql_create_econtext(estate);
+
+    /* link portal to new TopTransaction */
+    ResourceOwnerNewParent(t_thrd.utils_cxt.StpSavedResourceOwner, t_thrd.utils_cxt.CurrentResourceOwner);
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.StpSavedResourceOwner;
+
+    while (subTransactionCount > 0) {
+        if (u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
+            MemoryContext oldcontext = CurrentMemoryContext;
+
+            estate->err_text = gettext_noop("during statement block entry");
+
+            /* CN should send savesopint command to remote nodes to begin sub transaction remotely */
+            if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+                pgxc_node_remote_savepoint("Savepoint s1", EXEC_ON_ALL_NODES, true, true);
+            }
+
+            BeginInternalSubTransaction(NULL);
+
+            /* Want to run statements inside function's memory context */
+            MemoryContextSwitchTo(oldcontext);
+
+            plpgsql_create_econtext(estate);
+            estate->err_text = NULL;
+        }
+
+        subTransactionCount--;
+    }
+
+    if (u_sess->SPI_cxt.portal_stp_exception_counter == 0) {
+        t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.StpSavedResourceOwner;
+    }
+
     return PLPGSQL_RC_OK;
 }
 
@@ -4905,6 +5046,58 @@ static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt
  */
 static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* stmt)
 {
+    const char* PORTAL = "Portal";
+    int subTransactionCount = u_sess->SPI_cxt.portal_stp_exception_counter;
+
+    if (u_sess->SPI_cxt.portal_stp_exception_counter == 0) {
+        t_thrd.utils_cxt.StpSavedResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    }
+
+    if (strcmp(PORTAL, ResourceOwnerGetName(t_thrd.utils_cxt.CurrentResourceOwner)) == 0) {
+        if (ResourceOwnerGetNextChild(t_thrd.utils_cxt.CurrentResourceOwner)
+            && (strcmp(PORTAL, ResourceOwnerGetName(ResourceOwnerGetNextChild(t_thrd.utils_cxt.CurrentResourceOwner))) == 0))
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("commit with PE is not supported")));
+    }
+
+    SPI_rollback();
+    SPI_start_transaction();
+
+    u_sess->plsql_cxt.simple_eval_estate = NULL;
+    plpgsql_create_econtext(estate);
+
+    /* link portal to new TopTransaction */
+    ResourceOwnerNewParent(t_thrd.utils_cxt.StpSavedResourceOwner, t_thrd.utils_cxt.CurrentResourceOwner);
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.StpSavedResourceOwner;
+
+    while (subTransactionCount > 0) {
+        if (u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
+            MemoryContext oldcontext = CurrentMemoryContext;
+
+            estate->err_text = gettext_noop("during statement block entry");
+
+            /* CN should send savesopint command to remote nodes to begin sub transaction remotely */
+            if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+                pgxc_node_remote_savepoint("Savepoint s1", EXEC_ON_ALL_NODES, true, true);
+            }
+
+            BeginInternalSubTransaction(NULL);
+
+            /* Want to run statements inside function's memory context */
+            MemoryContextSwitchTo(oldcontext);
+
+            plpgsql_create_econtext(estate);
+            estate->err_text = NULL;
+        }
+
+        subTransactionCount--;
+    }
+
+    if (u_sess->SPI_cxt.portal_stp_exception_counter == 0) {
+        t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.StpSavedResourceOwner;
+    }
+
     return PLPGSQL_RC_OK;
 }
 
@@ -7555,26 +7748,21 @@ static void plpgsql_destroy_econtext(PLpgSQL_execstate* estate)
  */
 void plpgsql_xact_cb(XactEvent event, void* arg)
 {
+    u_sess->plsql_cxt.simple_eval_estate = NULL;
+
     /*
      * If we are doing a clean transaction shutdown, free the EState (so that
      * any remaining resources will be released correctly). In an abort, we
      * expect the regular abort recovery procedures to release everything of
      * interest.
      */
-    if (event == XACT_EVENT_PREROLLBACK_CLEANUP) {
-        return;
-    } else if (event != XACT_EVENT_ABORT) {
-        /* Shouldn't be any econtext stack entries left at commit */
-        AssertEreport(u_sess->plsql_cxt.simple_econtext_stack == NULL,
-            MOD_PLSQL,
-            "Shouldn't be any econtext stack entries left at commit");
-
+    u_sess->plsql_cxt.simple_econtext_stack = NULL;
+    if (event != XACT_EVENT_ABORT) {
         if (u_sess->plsql_cxt.simple_eval_estate) {
             FreeExecutorState(u_sess->plsql_cxt.simple_eval_estate);
         }
         u_sess->plsql_cxt.simple_eval_estate = NULL;
     } else {
-        u_sess->plsql_cxt.simple_econtext_stack = NULL;
         u_sess->plsql_cxt.simple_eval_estate = NULL;
     }
 }

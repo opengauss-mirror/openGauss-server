@@ -431,6 +431,10 @@ void ResourceOwnerDelete(ResourceOwner owner)
      */
     ResourceOwnerNewParent(owner, NULL);
 
+    if (owner == t_thrd.utils_cxt.StpSavedResourceOwner) {
+        return;
+    }
+
     /* And free the object. */
     if (owner->buffers)
         pfree(owner->buffers);
@@ -467,6 +471,30 @@ void ResourceOwnerDelete(ResourceOwner owner)
 ResourceOwner ResourceOwnerGetParent(ResourceOwner owner)
 {
     return owner->parent;
+}
+
+/*
+ * Fetch nextchild of a ResourceOwner (returns)
+ */
+ResourceOwner ResourceOwnerGetNextChild(ResourceOwner owner)
+{
+    return owner->nextchild;
+}
+
+/*
+ * Fetch name of a ResourceOwner (should always has value)
+ */
+const char* ResourceOwnerGetName(ResourceOwner owner)
+{
+    return owner->name;
+}
+
+/*
+ * Fetch firstchild of a ResourceOwner.
+ */
+ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner)
+{
+    return owner->firstchild;
 }
 
 /*
@@ -1320,6 +1348,55 @@ void ResourceOwnerForgetSnapshot(ResourceOwner owner, const Snapshot snapshot)
             errmsg("snapshot is not owned by resource owner %s", owner->name)));
 }
 
+/*
+ * This function is used to clean up the snapshots.
+ * It will be called by PreCommit_Portals and Abort_Portals.
+ */
+void ResourceOwnerDecrementNsnapshots(ResourceOwner owner, void* queryDesc)
+{
+    QueryDesc* queryDescTemp = (QueryDesc*)queryDesc;
+
+    while (owner->nsnapshots > 0) {
+        if (queryDescTemp) {
+            /*
+             * check if owner's snapshot is same as queryDesc's snapshot, need to set queryDesc
+             * snapshot to null, because this function will clean up those snapshots.
+             */
+            if (owner->snapshots[owner->nsnapshots - 1] == queryDescTemp->estate->es_snapshot) {
+                queryDescTemp->estate->es_snapshot = NULL;
+            }
+
+            if (owner->snapshots[owner->nsnapshots - 1] == queryDescTemp->estate->es_crosscheck_snapshot) {
+                queryDescTemp->estate->es_crosscheck_snapshot = NULL;
+            }
+
+            if (owner->snapshots[owner->nsnapshots - 1] == queryDescTemp->snapshot) {
+                queryDescTemp->snapshot = NULL;
+            }
+
+            if (owner->snapshots[owner->nsnapshots - 1] == queryDescTemp->crosscheck_snapshot) {
+                queryDescTemp->crosscheck_snapshot = NULL;
+            }
+        }
+
+        UnregisterSnapshotFromOwner(owner->snapshots[owner->nsnapshots - 1], owner);
+    }
+}
+
+/*
+ * This function is used to clean up the cached plan.
+ * It will ba called by CommitTransaction.
+ */
+void ResourceOwnerDecrementNPlanRefs(ResourceOwner owner, bool useResOwner)
+{
+    if (!owner) {
+        return;
+    }
+
+    while (owner->nplanrefs > 0) {
+        ReleaseCachedPlan(owner->planrefs[owner->nplanrefs - 1], useResOwner);
+    }
+}
 /*
  * Debugging subroutine
  */

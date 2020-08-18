@@ -311,12 +311,12 @@ extern void CopyTransactionIdLoggedIfAny(TransactionState state);
 extern bool TransactionIdIsCurrentTransactionId(TransactionId xid);
 extern void CommandCounterIncrement(void);
 extern void ForceSyncCommit(void);
-extern void StartTransactionCommand(void);
-extern void CommitTransactionCommand(void);
+extern void StartTransactionCommand(bool stpRollback = false);
+extern void CommitTransactionCommand(bool stpCommit = false);
 #ifdef PGXC
 extern void AbortCurrentTransactionOnce(void);
 #endif
-extern void AbortCurrentTransaction(void);
+extern void AbortCurrentTransaction(bool stpRollback = false);
 extern void BeginTransactionBlock(void);
 extern bool EndTransactionBlock(void);
 extern bool PrepareTransactionBlock(const char* gid);
