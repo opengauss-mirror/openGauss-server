@@ -1618,6 +1618,58 @@ bool cmdStringCheck(const char* cmd_string)
 }
 
 /*
+ * Check cmdString length.
+ */
+static bool cmdStringLengthCheck(const char* cmd_string)
+{
+    const size_t cmd_length_limit = 200;
+    const size_t slotname_limit = 64;
+    char comd[cmd_length_limit] = {'\0'};
+    char* sub_cmd = NULL;
+    char* rm_cmd = NULL;
+    char* slot_name = NULL;
+
+    size_t cmd_length = strlen(cmd_string);
+    if (cmd_length == 0) {
+        return true;
+    }
+    if (cmd_length >= cmd_length_limit) {
+        return false;
+    }
+    errno_t ret = memset_s(comd, cmd_length_limit, 0, cmd_length_limit);
+    securec_check_c(ret, "\0", "\0");
+    ret = strncpy_s(comd, cmd_length_limit, cmd_string, cmd_length);
+    securec_check_c(ret, "\0", "\0");
+
+    if (cmd_length > strlen("START_REPLICATION") &&
+        strncmp(cmd_string, "START_REPLICATION", strlen("START_REPLICATION")) == 0) {
+        sub_cmd = strtok_r(comd, " ", &rm_cmd);
+        sub_cmd = strtok_r(NULL, " ", &rm_cmd);
+        if (strlen(sub_cmd) != strlen("SLOT") ||
+            strncmp(sub_cmd, "SLOT", strlen("SLOT")) != 0) {
+            return true;
+        } else {
+            slot_name = strtok_r(NULL, " ", &rm_cmd);
+        }
+    } else if (cmd_length > strlen("CREATE_REPLICATION_SLOT") &&
+        strncmp(cmd_string, "CREATE_REPLICATION_SLOT", strlen("CREATE_REPLICATION_SLOT")) == 0) {
+        sub_cmd = strtok_r(comd, " ", &rm_cmd);
+        slot_name = strtok_r(NULL, " ", &rm_cmd);
+    } else if (cmd_length > strlen("DROP_REPLICATION_SLOT") &&
+        strncmp(cmd_string, "DROP_REPLICATION_SLOT", strlen("DROP_REPLICATION_SLOT")) == 0) {
+        sub_cmd = strtok_r(comd, " ", &rm_cmd);
+        slot_name = strtok_r(NULL, " ", &rm_cmd);
+    } else {
+        return true;
+    }
+
+    if (strlen(slot_name) >= slotname_limit) {
+        return false;
+    }
+    return true;
+}
+
+/*
  * Execute an incoming replication command.
  */
 static bool HandleWalReplicationCommand(const char* cmd_string)
@@ -1640,6 +1692,11 @@ static bool HandleWalReplicationCommand(const char* cmd_string)
     if (cmdStringCheck(cmd_string) == false) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), 
             (errmsg_internal("replication command, syntax error."))));
+    }
+
+    if (cmdStringLengthCheck(cmd_string) == false) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+            (errmsg_internal("replication slot name should be shorter than %d.", NAMEDATALEN))));
     }
 
     cmd_context = AllocSetContextCreate(CurrentMemoryContext,
