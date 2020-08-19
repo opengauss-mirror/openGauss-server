@@ -10365,7 +10365,7 @@ void CreateCheckPoint(int flags)
         LogStandbySnapshot();
     }
 #else
-    if (XLogStandbyInfoActive()) {
+    if (XLogStandbyInfoActive() && !RecoveryInProgress()) {
         LogStandbySnapshot();
     }
 #endif
