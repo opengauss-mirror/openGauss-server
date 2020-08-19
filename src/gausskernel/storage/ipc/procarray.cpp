@@ -2038,11 +2038,17 @@ Datum pg_get_running_xacts(PG_FUNCTION_ARGS)
  * simple as possible and leave GetSnapshotData() as the primary code for
  * that bookkeeping.
  */
-TransactionId GetOldestActiveTransactionId()
+TransactionId GetOldestActiveTransactionId(TransactionId *globalXmin)
 {
     ProcArrayStruct* arrayP = g_instance.proc_array_idx;
     TransactionId oldestRunningXid;
     int index;
+
+    /* xmax is always latestCompletedXid + 1 */
+    TransactionId xmax = t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid;
+    Assert(TransactionIdIsNormal(xmax));
+    TransactionIdAdvance(xmax);
+    TransactionId xmin = xmax;
 
     Assert(!RecoveryInProgress());
 
@@ -2065,6 +2071,12 @@ TransactionId GetOldestActiveTransactionId()
         volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
         TransactionId xid;
 
+        /* Update globalxmin to be the smallest valid xmin */
+        xid = pgxact->xmin; /* fetch just once */
+
+        if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, xmin))
+            xmin = xid;
+
         /* Fetch xid just once - see GetNewTransactionId */
         xid = pgxact->xid;
 
@@ -2083,6 +2095,15 @@ TransactionId GetOldestActiveTransactionId()
 
     LWLockRelease(ProcArrayLock);
 
+    /*
+     * Update globalxmin to include actual process xids.  This is a slightly
+     * different way of computing it than GetOldestXmin uses, but should give
+     * the same result.
+     */
+    if (TransactionIdPrecedes(oldestRunningXid, xmin)) {
+        xmin = oldestRunningXid;
+    }
+    *globalXmin = xmin;
     return oldestRunningXid;
 }
 
@@ -4054,12 +4075,6 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
             volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
             TransactionId xid;
 
-            /* Update globalxmin to be the smallest valid xmin */
-            xid = pgxact->xmin; /* fetch just once */
-
-            if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, globalxmin))
-                globalxmin = xid;
-
             /*
              * Backend is doing logical decoding which manages xmin
              * separately, check below.
@@ -4070,6 +4085,12 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
             /* Ignore procs running LAZY VACUUM */
             if (pgxact->vacuumFlags & PROC_IN_VACUUM)
                 continue;
+
+            /* Update globalxmin to be the smallest valid xmin */
+            xid = pgxact->xmin; /* fetch just once */
+
+            if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, globalxmin))
+                globalxmin = xid;
 
             /* Fetch xid just once - see GetNewTransactionId */
             xid = pgxact->xid;
