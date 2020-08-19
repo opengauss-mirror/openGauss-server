@@ -241,6 +241,7 @@ static void print_literal(StringInfo s, Oid typid, char* outputstr)
     const char* valptr = NULL;
 
     switch (typid) {
+        case INT1OID:
         case INT2OID:
         case INT4OID:
         case INT8OID:
@@ -366,6 +367,7 @@ static void pg_decode_change(
     MemoryContext old;
     char* res = NULL;
     data = (TestDecodingData*)ctx->output_plugin_private;
+    u_sess->attr.attr_common.extra_float_digits = 0;
 
     /* output BEGIN if we haven't yet */
     if (data->skip_empty_xacts && !data->xact_wrote_changes) {
