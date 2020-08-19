@@ -24,6 +24,7 @@
 
 #include <malloc.h>
 #include <string.h>
+#include <algorithm>
 #include "table.h"
 #include "mot_engine.h"
 #include "utilities.h"
@@ -127,7 +128,9 @@ bool Table::InitRowPool(bool local)
 void Table::ClearThreadMemoryCache()
 {
     for (int i = 0; i < m_numIndexes; i++) {
-        m_indexes[i]->ClearThreadMemoryCache();
+        if (m_indexes[i] != nullptr) {
+            m_indexes[i]->ClearThreadMemoryCache();
+        }
     }
 
     if (m_rowPool != nullptr) {
@@ -189,9 +192,13 @@ bool Table::UpdatePrimaryIndex(Index* index, TxnManager* txn, uint32_t tid)
 {
     if (this->m_primaryIndex) {
         if (txn == nullptr) {
-            DeletePrimaryIndex(this->m_primaryIndex);
+            if (DeletePrimaryIndex(this->m_primaryIndex) != RC_OK) {
+                return false;
+            }
         } else {
-            txn->DropIndex(this->m_primaryIndex);
+            if (txn->DropIndex(this->m_primaryIndex) != RC_OK) {
+                return false;
+            }
         }
     } else {
         if (m_numIndexes == 0) {
@@ -449,7 +456,13 @@ RC Table::InsertRow(Row* row, TxnManager* txn)
     // set primary key
     row->SetRowId(txn->GetSurrogateKey());
 
+    mot_vector<Key*> cleanupKeys;
     key = txn->GetTxnKey(ix);
+    if (key == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Insert Row", "Failed to create primary key");
+        return RC_MEMORY_ALLOCATION_ERROR;
+    }
+    cleanupKeys.push_back(key);
     if (ix->IsFakePrimary()) {
         surrogateprimaryKey = htobe64(row->GetRowId());
         row->SetSurrogateKey(surrogateprimaryKey);
@@ -464,10 +477,19 @@ RC Table::InsertRow(Row* row, TxnManager* txn)
     for (uint16_t i = 1; i < numIndexes; i++) {
         ix = GetSecondaryIndex(i);
         key = txn->GetTxnKey(ix);
+        if (key == nullptr) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_OOM, "Insert Row", "Failed to create key for secondary index %s", ix->GetName().c_str());
+            std::for_each(cleanupKeys.begin(), cleanupKeys.end(), [](Key*& key) { MOTCurrTxn->DestroyTxnKey(key); });
+            MOTCurrTxn->Rollback();
+            return RC_MEMORY_ALLOCATION_ERROR;
+        }
+        cleanupKeys.push_back(key);
         ix->BuildKey(this, row, key);
         txn->GetNextInsertItem()->SetItem(row, ix, key);
     }
 
+    cleanupKeys.clear();  // subsequent call to insert row takes care of key cleanup
     return txn->InsertRow(row);
 }
 
@@ -675,21 +697,23 @@ bool Table::ModifyColumnSize(const uint32_t& id, const uint64_t& size)
     }
 
     // column size is uint64_t but tuple size is uint32_t, so we must check for overflow
-    if (size >= (uint64_t)std::numeric_limits<decltype(this->m_tupleSize)>::max())
+    if (size >= (uint64_t)std::numeric_limits<decltype(this->m_tupleSize)>::max()) {
         return false;
+    }
 
     uint64_t oldColSize = m_columns[id]->m_size;
-
     uint64_t newTupleSize = ((uint64_t)m_tupleSize) - oldColSize + size;
-    if (newTupleSize >= (uint64_t)std::numeric_limits<decltype(this->m_tupleSize)>::max())
+    if (newTupleSize >= (uint64_t)std::numeric_limits<decltype(this->m_tupleSize)>::max()) {
         return false;
+    }
 
     m_tupleSize = newTupleSize;
     m_columns[id]->m_size = size;
 
     // now we need to fix the offset of all subsequent fields
-    for (uint32_t i = id + 1; i < m_fieldCnt; ++i)
+    for (uint32_t i = id + 1; i < m_fieldCnt; ++i) {
         m_columns[id]->m_offset = m_columns[id]->m_offset - oldColSize + size;
+    }
 
     return true;
 }
@@ -909,13 +933,17 @@ char* Table::DesrializeMeta(char* dataIn, CommonIndexMeta& meta)
     return dataIn;
 }
 
-RC Table::CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid)
+RC Table::CreateIndexFromMeta(
+    CommonIndexMeta& meta, bool primary, uint32_t tid, bool addToTable /* = true */, Index** outIndex /* = nullptr */)
 {
     IndexTreeFlavor flavor = DEFAULT_TREE_FLAVOR;
     Index* ix = nullptr;
+
     MOT_LOG_DEBUG("%s: %s (%s)", __func__, meta.m_name.c_str(), primary ? "primary" : "secondary");
-    if (meta.m_indexingMethod == IndexingMethod::INDEXING_METHOD_TREE)
+    if (meta.m_indexingMethod == IndexingMethod::INDEXING_METHOD_TREE) {
         flavor = GetGlobalConfiguration().m_indexTreeFlavor;
+    }
+
     ix = IndexFactory::CreateIndex(meta.m_indexOrder, meta.m_indexingMethod, flavor);
     if (ix == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
@@ -924,6 +952,7 @@ RC Table::CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid)
             m_longTableName.c_str());
         return RC_ERROR;
     }
+
     ix->SetUnique(meta.m_unique);
     if (!ix->SetNumTableFields(meta.m_numTableFields)) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
@@ -934,29 +963,39 @@ RC Table::CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid)
         delete ix;
         return RC_ERROR;
     }
-    for (int i = 0; i < meta.m_numKeyFields; i++)
+
+    for (int i = 0; i < meta.m_numKeyFields; i++) {
         ix->SetLenghtKeyFields(i, meta.m_columnKeyFields[i], meta.m_lengthKeyFields[i]);
+    }
     ix->SetFakePrimary(meta.m_fake);
     ix->SetNumIndexFields(meta.m_numKeyFields);
     ix->SetTable(this);
-    ix->SetIsCommited(true);
     if (ix->IndexInit(meta.m_keyLength, meta.m_unique, meta.m_name, nullptr) != RC_OK) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to initialize index");
         delete ix;
         return RC_ERROR;
     }
-    if (primary) {
-        if (UpdatePrimaryIndex(ix, nullptr, tid) != true) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to add primary index");
-            delete ix;
-            return RC_ERROR;
+
+    if (addToTable) {
+        // In transactional recovery we set index as committed only during commit.
+        ix->SetIsCommited(true);
+        if (primary) {
+            if (UpdatePrimaryIndex(ix, nullptr, tid) != true) {
+                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to add primary index");
+                delete ix;
+                return RC_ERROR;
+            }
+        } else {
+            if (AddSecondaryIndex(ix->GetName(), (Index*)ix, nullptr, tid) != true) {
+                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to add secondary index");
+                delete ix;
+                return RC_ERROR;
+            }
         }
-    } else {
-        if (AddSecondaryIndex(ix->GetName(), (Index*)ix, nullptr, tid) != true) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to add secondary index");
-            delete ix;
-            return RC_ERROR;
-        }
+    }
+
+    if (outIndex != nullptr) {
+        *outIndex = ix;
     }
     return RC_OK;
 }

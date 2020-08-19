@@ -315,6 +315,35 @@ function failover_to_standby4() {
   fi
 }
 
+function print_time() {
+  cur_time=`date +"%F %T.%N" | cut -c1-23`
+  echo -n "[${cur_time}] "
+}
+
+function wait_recovery_done() {
+  # wait for recovery to complete on primary node
+  # this function is incomplete as it does not find the correct log line (still need to support minimum timstamp for search)
+  recovery_done=0
+  node_data_dir=$1
+  wait_time_seconds=$2
+  last_log=`ls -ltr ${node_data_dir}/pg_log/postgresql-* | tail -1 | awk '{print $9}'`
+  for i in `seq 1 $wait_time_seconds`;
+  do
+    recovery_done=`grep "database system is ready to accept read only connections" $last_log | wc -l`
+    if [ $recovery_done -eq 1 ]; then
+      print_time
+      echo "Recovery done on node detected after $i seconds at: $node_data_dir"
+      break
+    fi
+    sleep 1
+  done
+
+  if [ $recovery_done -eq 0 ]; then
+    print_time
+    echo "Failed to find recovery done message after $wait_time_seconds seconds in node log at: $node_data_dir"
+  fi
+}
+
 #check_synchronous_commit "datanode1" 1
 #check_detailed_instance
 #check_primary "datanode1" 2

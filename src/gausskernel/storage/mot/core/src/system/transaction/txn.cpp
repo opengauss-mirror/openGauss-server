@@ -227,9 +227,13 @@ RC TxnManager::LitePrepare(TransactionId transactionId)
     return RC_OK;
 }
 
-RC TxnManager::CommitInternal()
+RC TxnManager::CommitInternal(uint64_t csn)
 {
-    SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
+    if (csn == MOT_INVALID_CSN) {
+        SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
+    } else {
+        SetCommitSequenceNumber(csn);  // for recovery
+    }
     // Record the start write phase for this transaction
     if (GetGlobalConfiguration().m_enableCheckpoint) {
         GetCheckpointManager()->BeginTransaction(this);
@@ -255,14 +259,14 @@ RC TxnManager::Commit()
     return Commit(INVALID_TRANSACTIOIN_ID);
 }
 
-RC TxnManager::Commit(uint64_t transcationId)
+RC TxnManager::Commit(uint64_t transcationId, uint64_t csn /* = MOT_INVALID_CSN */)
 {
     // Validate concurrency control
     if (transcationId != INVALID_TRANSACTIOIN_ID)
         m_transactionId = transcationId;
     RC rc = m_occManager.ValidateOcc(this);
     if (rc == RC_OK) {
-        rc = CommitInternal();
+        rc = CommitInternal(csn);
         MOT::DbSessionStatisticsProvider::GetInstance().AddCommitTxn();
     }
     return rc;
@@ -515,6 +519,7 @@ void TxnManager::RollbackDDLs()
                 indexes = (Index**)ddl_access->GetEntry();
                 table = indexes[0]->GetTable();
                 MOT_LOG_INFO("Rollback of truncate table %s", table->GetLongTableName().c_str());
+                table->WrLock();
                 for (int idx = 0; idx < table->GetNumIndexes(); idx++) {
                     index = table->m_indexes[idx];
                     table->m_indexes[idx] = indexes[idx];
@@ -526,6 +531,7 @@ void TxnManager::RollbackDDLs()
                     index->Truncate(true);
                     delete index;
                 }
+                table->Unlock();
                 delete[] indexes;
                 break;
             case DDL_ACCESS_CREATE_INDEX:
@@ -534,6 +540,7 @@ void TxnManager::RollbackDDLs()
                 MOT_LOG_INFO("Rollback of create index %s for table %s",
                     index->GetName().c_str(),
                     table->GetLongTableName().c_str());
+                table->WrLock();
                 if (index->IsPrimaryKey()) {
                     table->SetPrimaryIndex(nullptr);
                     GcManager::ClearIndexElements(index->GetIndexId());
@@ -541,6 +548,7 @@ void TxnManager::RollbackDDLs()
                 } else {
                     table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
                 }
+                table->Unlock();
                 break;
             case DDL_ACCESS_DROP_INDEX:
                 index = (Index*)ddl_access->GetEntry();
@@ -549,7 +557,9 @@ void TxnManager::RollbackDDLs()
                     index->GetName().c_str(),
                     table->GetLongTableName().c_str());
                 if (index->IsPrimaryKey()) {
+                    table->WrLock();
                     table->SetPrimaryIndex(index);
+                    table->Unlock();
                 }
                 break;
             default:
@@ -595,7 +605,9 @@ void TxnManager::WriteDDLChanges()
                 table = index->GetTable();
                 index->SetIsCommited(true);
                 if (index->IsPrimaryKey()) {
+                    table->WrLock();
                     table->SetPrimaryIndex(index);
+                    table->Unlock();
                 }
                 break;
             case DDL_ACCESS_DROP_INDEX:
@@ -679,6 +691,7 @@ TxnManager::TxnManager(SessionContext* session_context)
       m_checkpointNABit(false),
       m_csn(0),
       m_transactionId(INVALID_TRANSACTIOIN_ID),
+      m_replayLsn(0),
       m_surrogateGen(0),
       m_flushDone(false),
       m_internalTransactionId(((uint64_t)m_sessionContext->GetSessionId()) << SESSION_ID_BITS),

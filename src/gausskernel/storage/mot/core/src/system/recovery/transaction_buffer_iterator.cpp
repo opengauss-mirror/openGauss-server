@@ -51,7 +51,7 @@ void* RedoLogTransactionIterator::GetTransactionEntry()
     return reinterpret_cast<void*>(m_buffer + m_position);
 }
 
-LogSegment* RedoLogTransactionIterator::AllocRedoSegment()
+LogSegment* RedoLogTransactionIterator::AllocRedoSegment(uint64_t replayLsn)
 {
     LogSegment* segment = new (std::nothrow) LogSegment();
     if (segment == nullptr) {
@@ -69,6 +69,7 @@ LogSegment* RedoLogTransactionIterator::AllocRedoSegment()
         reinterpret_cast<void*>(m_buffer + m_position + sizeof(uint32_t)),
         segment->m_len);
     securec_check(erc, "\0", "\0");
+    segment->m_replayLsn = replayLsn;
     return segment;
 }
 

@@ -28,6 +28,10 @@
 #include <atomic>
 #include "global.h"
 
+#define MOT_INVALID_CSN ((uint64_t)-1)
+#define MOT_RECOVERED_TABLE_CSN ((uint64_t)0)
+#define MOT_INITIAL_CSN ((uint64_t)1)
+
 namespace MOT {
 /**
  * @class CSNManager

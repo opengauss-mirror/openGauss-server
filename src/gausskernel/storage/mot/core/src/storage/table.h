@@ -944,7 +944,8 @@ public:
      * @param tid the thread identifier
      * @return RC error code.
      */
-    RC CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid);
+    RC CreateIndexFromMeta(
+        CommonIndexMeta& meta, bool primary, uint32_t tid, bool addToTable = true, Index** outIndex = nullptr);
 
     /**
      * @brief returns the serialized size of a table

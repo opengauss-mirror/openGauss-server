@@ -238,7 +238,7 @@ bool RedoLogWriter::AppendPartial(RedoLogBuffer& redoLogBuffer, TxnManager* txn)
 bool RedoLogWriter::AppendIndex(RedoLogBuffer& buffer, Table* table, Index* index)
 {
     size_t bufSize = table->SerializeItemSize(index);
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(size_t) + sizeof(uint32_t) + bufSize + sizeof(EndSegmentBlock);
+    uint16_t entrySize = sizeof(OperationCode) + sizeof(size_t) + sizeof(uint64_t) + bufSize + sizeof(EndSegmentBlock);
     if (buffer.FreeSize() < entrySize)
         return false;
 
@@ -248,7 +248,7 @@ bool RedoLogWriter::AppendIndex(RedoLogBuffer& buffer, Table* table, Index* inde
         return false;
     }
 
-    uint32_t tableId = table->GetTableId();
+    uint64_t tableId = table->GetTableExId();
     table->SerializeItem(buf, index);
     buffer.Append(OperationCode::CREATE_INDEX);
     buffer.Append(bufSize);
@@ -262,10 +262,10 @@ bool RedoLogWriter::AppendIndex(RedoLogBuffer& buffer, Table* table, Index* inde
 bool RedoLogWriter::AppendDropIndex(RedoLogBuffer& buffer, Table* table, Index* index)
 {
     uint16_t entrySize =
-        sizeof(OperationCode) + sizeof(uint32_t) + sizeof(size_t) + index->GetName().length() + sizeof(EndSegmentBlock);
+        sizeof(OperationCode) + sizeof(uint64_t) + sizeof(size_t) + index->GetName().length() + sizeof(EndSegmentBlock);
     if (buffer.FreeSize() < entrySize)
         return false;
-    uint32_t tableId = table->GetTableId();
+    uint64_t tableId = table->GetTableExId();
     buffer.Append(OperationCode::DROP_INDEX);
     buffer.Append(tableId);
     buffer.Append(index->GetName().length());
@@ -297,11 +297,11 @@ bool RedoLogWriter::AppendTable(RedoLogBuffer& buffer, Table* table)
 
 bool RedoLogWriter::AppendDropTable(RedoLogBuffer& buffer, Table* table)
 {
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(uint32_t) + sizeof(EndSegmentBlock);
+    uint16_t entrySize = sizeof(OperationCode) + sizeof(uint64_t) + sizeof(EndSegmentBlock);
     if (buffer.FreeSize() < entrySize)
         return false;
 
-    uint32_t tableId = table->GetTableId();
+    uint64_t tableId = table->GetTableExId();
     buffer.Append(OperationCode::DROP_TABLE);
     buffer.Append(tableId);
     return true;
@@ -309,11 +309,11 @@ bool RedoLogWriter::AppendDropTable(RedoLogBuffer& buffer, Table* table)
 
 bool RedoLogWriter::AppendTruncateTable(RedoLogBuffer& buffer, Table* table)
 {
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(uint32_t) + sizeof(EndSegmentBlock);
+    uint16_t entrySize = sizeof(OperationCode) + sizeof(uint64_t) + sizeof(EndSegmentBlock);
     if (buffer.FreeSize() < entrySize)
         return false;
 
-    uint32_t tableId = table->GetTableId();
+    uint64_t tableId = table->GetTableExId();
     buffer.Append(OperationCode::TRUNCATE_TABLE);
     buffer.Append(tableId);
     return true;

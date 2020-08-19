@@ -281,6 +281,11 @@ void CheckpointManager::TransactionCompleted(TxnManager* txn)
     } else {  // previous phase
         m_counters[!m_cntBit].fetch_sub(1);
     }
+    if (txn->m_replayLsn != 0 && MOTEngine::GetInstance()->IsRecovering()) {
+        // Update the last replay LSN in recovery manager in case of redo replay.
+        // This is needed for getting the last replay LSN during checkpoint in standby.
+        GetRecoveryManager()->SetLastReplayLsn(txn->GetReplayLsn());
+    }
     m_lock.RdUnlock();
 
     if (m_counters[!m_cntBit] == 0 && IsAutoCompletePhase()) {
@@ -338,6 +343,15 @@ void CheckpointManager::MoveToNextPhase()
             // write all buffer entries before taking the LSN position
             // relevant for asynchronous logging or group commit
             m_redoLogHandler->Flush();
+        }
+        if (MOTEngine::GetInstance()->IsRecovering()) {
+            // We are moving from RESOLVE to CAPTURE phase. No transaction is allowed to commit
+            // as this point. This is the point where we take snapshot and any rows committed
+            // after this point will not be included in this checkpoint.
+            // Get the current last replay LSN from recovery manager and use it as m_lastReplayLsn
+            // for the current checkpoint. If the system recovers from disk after this checkpoint,
+            // it is safe to ignore any redo replay before this LSN.
+            SetLastReplayLsn(GetRecoveryManager()->GetLastReplayLsn());
         }
     }
 
@@ -760,7 +774,8 @@ bool CheckpointManager::CreateCheckpointId(uint64_t& checkpointId)
 
 bool CheckpointManager::GetCheckpointDirName(std::string& dirName)
 {
-    if (!CheckpointUtils::SetDirName(dirName, m_id)) {
+    uint64_t checkpointId = GetRecoveryManager()->GetCheckpointId();
+    if (!CheckpointUtils::SetDirName(dirName, checkpointId)) {
         MOT_LOG_ERROR("SetDirName failed");
         return false;
     }

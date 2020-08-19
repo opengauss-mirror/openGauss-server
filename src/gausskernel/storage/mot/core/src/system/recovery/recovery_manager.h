@@ -53,7 +53,10 @@ public:
         CP_RECOVERY = 3,
         XLOG_SETUP = 4,
         XLOG_RECOVERY = 5,
-        SURROGATE = 6
+        SURROGATE = 6,
+        CP_TABLE_COMMIT = 7,
+        CP_ROW_COMMIT = 8,
+        XLOG_TXN_COMMIT = 9
     };
 
     enum RecoveryOpState { COMMIT = 1, ABORT = 2, TPC_APPLY = 3, TPC_COMMIT = 4, TPC_ABORT = 5 };
@@ -174,6 +177,7 @@ public:
           m_recoverFromCkptDone(false),
           m_checkpointId(0),
           m_lsn(0),
+          m_lastReplayLsn(0),
           m_numWorkers(GetGlobalConfiguration().m_checkpointRecoveryWorkers),
           m_tid(0),
           m_maxRecoveredCsn(0),
@@ -488,7 +492,7 @@ public:
      * transactions map and operate on it
      * @return Boolean value denoting success or failure.
      */
-    bool ApplyLogSegmentFromData(char* data, size_t len);
+    bool ApplyLogSegmentFromData(char* data, size_t len, uint64_t replayLsn = 0);
 
     /**
      * @brief attempts to insert a data chunk into the in-process
@@ -497,7 +501,7 @@ public:
      * ignored.
      * @return Boolean value denoting success or failure.
      */
-    bool ApplyLogSegmentFromData(uint64_t redoLsn, char* data, size_t len);
+    bool ApplyRedoLog(uint64_t redoLsn, char* data, size_t len);
     /**
      * @brief performs a commit on an in-process transaction,
      * @return Boolean value denoting success or failure to commit.
@@ -575,6 +579,11 @@ public:
         m_checkpointId = id;
     }
 
+    inline uint64_t GetCheckpointId() const
+    {
+        return m_checkpointId;
+    }
+
     /**
      * @brief applies a failed 2pc transaction according to its type.
      * a detailed info is described in the function's implementation.
@@ -606,6 +615,18 @@ public:
     inline void IncreaseTableDeletesStat(Table* t)
     {
         m_tableDeletesStat[t]++;
+    }
+
+    inline void SetLastReplayLsn(uint64_t lastReplayLsn)
+    {
+        if (m_lastReplayLsn < lastReplayLsn) {
+            m_lastReplayLsn = lastReplayLsn;
+        }
+    }
+
+    inline uint64_t GetLastReplayLsn() const
+    {
+        return m_lastReplayLsn;
     }
 
     void ClearTableCache();
@@ -670,11 +691,12 @@ private:
      * @param transactionId the transaction id
      * @param tid the thread id of the recovering thread
      * @param sState the returned surrogate state of this operation
-     * @param status the returned status of the operation
+     * @param[out] status the returned status of the operation
+     * @param[out] Was this a commit operation (required for managing transactional state).
      * @return Int value denoting the number of bytes recovered
      */
-    static uint32_t RecoverLogOperation(
-        uint8_t* data, uint64_t csn, uint64_t transactionId, uint32_t tid, SurrogateState& sState, RC& status);
+    static uint32_t RecoverLogOperation(uint8_t* data, uint64_t csn, uint64_t transactionId, uint32_t tid,
+        SurrogateState& sState, RC& status, bool& wasCommit);
 
     /**
      * @brief performs an insert operation of a data buffer
@@ -727,7 +749,16 @@ private:
      * @param tid the thread id of the recovering thread
      * @return Int value denoting the number of bytes recovered
      */
-    static uint32_t RecoverLogOperationCommit(uint8_t* data, uint64_t csn, uint32_t tid);
+    static uint32_t RecoverLogOperationCommit(uint8_t* data, uint64_t csn, uint32_t tid, RC& status);
+
+    /**
+     * @brief performs a rollback operation of a data buffer
+     * @param data the buffer to recover.
+     * @param csn The CSN of the operation.
+     * @param tid the thread id of the recovering thread
+     * @return Int value denoting the number of bytes recovered
+     */
+    static uint32_t RecoverLogOperationRollback(uint8_t* data, uint64_t csn, uint32_t tid, RC& status);
 
     /**
      * @brief performs a create table operation from a data buffer
@@ -984,6 +1015,18 @@ private:
     bool IsRecoveryMemoryLimitReached(uint32_t numThreads);
 
     /**
+     * @brief Starts a new transaction for recovery operations.
+     * @param replayLsn the redo LSN for this transaction during replay.
+     */
+    bool BeginTransaction(uint64_t replayLsn = 0);
+
+    /** @brief Commits the current recovery transaction. */
+    RC CommitTransaction(uint64_t csn);
+
+    /** @brief Rolls back the current recovery transaction. */
+    RC RollbackTransaction();
+
+    /**
      * @brief a helper to extract a type from a buffer
      * @param data the data buffer to extract from.
      * @param out the output value.
@@ -1016,6 +1059,8 @@ private:
     uint64_t m_checkpointId;
 
     uint64_t m_lsn;
+
+    uint64_t m_lastReplayLsn;
 
     std::string m_workingDir;
 

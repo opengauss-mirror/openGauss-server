@@ -38,8 +38,9 @@ function test_1()
   fi
 
   start_primary_as_standby
-  sleep 5
+  sleep 30
   switchover_to_primary
+  sleep 30
 
   #test the copy results on dn1_primary
   if [ $(gsql -d $db -p $dn1_primary_port -c "select pgxc_pool_reload();select count(1) from cstore_copy_t1;" | grep `expr 1 \* $cstore_rawdata_lines` |wc -l) -eq 1 ]; then

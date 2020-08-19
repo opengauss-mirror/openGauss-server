@@ -71,8 +71,7 @@ void MOTRedo(XLogReaderState* record)
     if (!IsValidEntry(recordType)) {
         elog(ERROR, "MOTRedo: invalid op code %u", recordType);
     }
-    if (MOT::GetRecoveryManager()->IsErrorSet() ||
-        !MOT::GetRecoveryManager()->ApplyLogSegmentFromData(lsn, data, len)) {
+    if (MOT::GetRecoveryManager()->IsErrorSet() || !MOT::GetRecoveryManager()->ApplyRedoLog(lsn, data, len)) {
         // we treat errors fatally.
         ereport(FATAL,
             (MOTXlateRecoveryErr(MOT::GetRecoveryManager()->GetErrorCode()),
