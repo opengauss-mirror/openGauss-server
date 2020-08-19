@@ -9975,6 +9975,7 @@ void CreateCheckPoint(int flags)
     XLogRecPtr curMinRecLSN = InvalidXLogRecPtr;
     bool doFullCheckpoint = !g_instance.attr.attr_storage.enableIncrementalCheckpoint;
     TransactionId oldest_active_xid = InvalidTransactionId;
+    TransactionId globalXmin = InvalidTransactionId;
 
     /*
      * An end-of-recovery checkpoint is really a shutdown checkpoint, just
@@ -10045,8 +10046,11 @@ void CreateCheckPoint(int flags)
      * pointer. This allows us to begin accumulating changes to assemble our
      * starting snapshot of locks and transactions.
      */
+    if (!shutdown) {
+        oldest_active_xid = GetOldestActiveTransactionId(&globalXmin);
+    }
     if (!shutdown && XLogStandbyInfoActive()) {
-        checkPoint.oldestActiveXid = oldest_active_xid = GetOldestActiveTransactionId();
+        checkPoint.oldestActiveXid = oldest_active_xid;
     } else {
         checkPoint.oldestActiveXid = InvalidTransactionId;
     }
@@ -10334,8 +10338,8 @@ void CreateCheckPoint(int flags)
              * local oldest active xid may lower than oldestxmin,
              * don't truncate it for safe.
              */
-            if (TransactionIdIsNormal(oldest_active_xid) && TransactionIdPrecedes(oldest_active_xid, cutoff_xid)) {
-                cutoff_xid = oldest_active_xid;
+            if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoff_xid)) {
+                cutoff_xid = globalXmin;
             }
             TruncateCSNLOG(cutoff_xid);
             t_thrd.checkpoint_cxt.last_truncate_log_time = now;

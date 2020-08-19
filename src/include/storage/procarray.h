@@ -62,7 +62,7 @@ extern bool TransactionIdIsActive(TransactionId xid);
 extern TransactionId GetRecentGlobalXmin(void);
 extern TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin = false);
 extern void CheckCurrentTimeline(GTM_Timeline timeline);
-extern TransactionId GetOldestActiveTransactionId(void);
+extern TransactionId GetOldestActiveTransactionId(TransactionId *globalXmin);
 extern void FixCurrentSnapshotByGxid(TransactionId gxid);
 extern void CheckSnapshotIsValidException(Snapshot snapshot, const char* location);
 extern TransactionId GetOldestSafeDecodingTransactionId(bool catalogOnly);
