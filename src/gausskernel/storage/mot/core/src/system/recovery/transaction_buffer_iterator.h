@@ -41,6 +41,8 @@ struct LogSegment : public Serializable {
 
     EndSegmentBlock m_controlBlock;
 
+    uint64_t m_replayLsn;
+
     /**
      * @brief fetches the size of the log segment
      * @return Size_t value denoting the size of the segment.
@@ -106,7 +108,7 @@ public:
 
     void* GetTransactionEntry();
 
-    LogSegment* AllocRedoSegment();
+    LogSegment* AllocRedoSegment(uint64_t replayLsn);
 
 private:
     char* m_buffer;

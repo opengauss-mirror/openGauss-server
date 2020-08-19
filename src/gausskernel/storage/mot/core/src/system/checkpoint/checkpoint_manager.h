@@ -164,11 +164,6 @@ public:
         return m_id;
     }
 
-    void SetLastReplayLsn(uint64_t lsn)
-    {
-        m_lastReplayLsn = lsn;
-    }
-
     uint64_t GetLastReplayLsn()
     {
         return m_lastReplayLsn;
@@ -294,6 +289,11 @@ private:
     uint64_t GetLsn()
     {
         return m_lsn;
+    }
+
+    void SetLastReplayLsn(uint64_t lsn)
+    {
+        m_lastReplayLsn = lsn;
     }
 
     static const char* PhaseToString(CheckpointPhase phase);

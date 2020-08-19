@@ -41,6 +41,7 @@
 #include "bitmapset.h"
 #include "txn_ddl_access.h"
 #include "mm_session_api.h"
+#include "commit_sequence_number.h"
 
 namespace MOT {
 class MOTContext;
@@ -55,6 +56,8 @@ class InsItem;
 class LoggerTask;
 class Key;
 class Index;
+
+#define MOTCurrTxn MOT_GET_CURRENT_SESSION_CONTEXT()->GetTxnManager()
 
 /**
  * @class TxnManager
@@ -138,6 +141,16 @@ public:
         m_internalTransactionId = transactionId;
     }
 
+    inline void SetReplayLsn(uint64_t replayLsn)
+    {
+        m_replayLsn = replayLsn;
+    }
+
+    inline uint64_t GetReplayLsn() const
+    {
+        return m_replayLsn;
+    }
+
     void RemoveTableFromStat(Table* t);
 
     /**
@@ -151,7 +164,7 @@ public:
      * @return Result code denoting success or failure.
      */
     RC Commit();
-    RC Commit(uint64_t transcationId);
+    RC Commit(uint64_t transcationId, uint64_t csn = MOT_INVALID_CSN);
     RC LiteCommit(uint64_t transcationId);
 
     /**
@@ -472,7 +485,7 @@ private:
     /**
      * @brief Internal commit (used by commit and commitPrepared)
      */
-    RC CommitInternal();
+    RC CommitInternal(uint64_t csn);
     RC RollbackInternal(bool isPrepared);
 
     // Disable class level new operator
@@ -543,8 +556,10 @@ private:
     /** @var transaction_id Provided by envelop on start transaction. */
     uint64_t m_transactionId;
 
-    /** @var serogate_counter Promotes every insert
-     transaction. */
+    /** @var Replay LSN for this transaction, used only during replay in standby. */
+    uint64_t m_replayLsn;
+
+    /** @var surrogate_counter Promotes every insert transaction. */
     SurrogateKeyGenerator m_surrogateGen;
 
     bool m_flushDone;

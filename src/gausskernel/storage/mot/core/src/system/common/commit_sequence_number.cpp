@@ -31,7 +31,7 @@
 namespace MOT {
 DECLARE_LOGGER(CSNManager, System);
 
-CSNManager::CSNManager() : m_csn(0)
+CSNManager::CSNManager() : m_csn(MOT_INITIAL_CSN)
 {}
 
 CSNManager::~CSNManager()

@@ -28,14 +28,16 @@
 #include "checkpoint_utils.h"
 #include "bitmapset.h"
 #include "column.h"
+#include "txn_insert_action.h"
 
 #include <string>
+#include <algorithm>
 
 namespace MOT {
 DECLARE_LOGGER(RecoveryOps, Recovery);
 
-uint32_t RecoveryManager::RecoverLogOperation(
-    uint8_t* data, uint64_t csn, uint64_t transactionId, uint32_t tid, SurrogateState& sState, RC& status)
+uint32_t RecoveryManager::RecoverLogOperation(uint8_t* data, uint64_t csn, uint64_t transactionId, uint32_t tid,
+    SurrogateState& sState, RC& status, bool& wasCommit)
 {
     OperationCode opCode = *static_cast<OperationCode*>((void*)data);
     switch (opCode) {
@@ -59,11 +61,17 @@ uint32_t RecoveryManager::RecoverLogOperation(
             return RecoverLogOperationTruncateTable(data, status, COMMIT);
         case COMMIT_TX:
         case COMMIT_PREPARED_TX:
-            return RecoverLogOperationCommit(data, csn, tid);
+            wasCommit = true;
+            return RecoverLogOperationCommit(data, csn, tid, status);
         case PARTIAL_REDO_TX:
         case PREPARE_TX:
             return sizeof(EndSegmentBlock);
+        case ROLLBACK_TX:
+        case ROLLBACK_PREPARED_TX:
+            return RecoverLogOperationRollback(data, csn, tid, status);
         default:
+            MOT_LOG_ERROR("Unknown recovery redo record op-code: %u", (unsigned)opCode);
+            status = RC_ERROR;
             return 0;
     }
 }
@@ -173,7 +181,7 @@ uint32_t RecoveryManager::RecoverLogOperationDropTable(uint8_t* data, RC& status
             status = RC_ERROR;
             break;
     }
-    return sizeof(OperationCode) + sizeof(uint32_t);
+    return sizeof(OperationCode) + sizeof(uint64_t);
 }
 
 uint32_t RecoveryManager::RecoverLogOperationCreateIndex(uint8_t* data, uint32_t tid, RC& status, RecoveryOpState state)
@@ -197,7 +205,7 @@ uint32_t RecoveryManager::RecoverLogOperationCreateIndex(uint8_t* data, uint32_t
             status = RC_ERROR;
             break;
     }
-    return sizeof(OperationCode) + sizeof(bufSize) + sizeof(uint32_t) + bufSize;  // sizeof(uint32_t) is for tableId
+    return sizeof(OperationCode) + sizeof(bufSize) + sizeof(uint64_t) + bufSize;  // sizeof(uint64_t) is for tableId
 }
 
 uint32_t RecoveryManager::RecoverLogOperationDropIndex(uint8_t* data, RC& status, RecoveryOpState state)
@@ -220,11 +228,11 @@ uint32_t RecoveryManager::RecoverLogOperationDropIndex(uint8_t* data, RC& status
             status = RC_ERROR;
             break;
     }
-    uint32_t tableId = 0;
+    uint64_t tableId = 0;
     size_t nameLen = 0;
     Extract(data, tableId);
     Extract(data, nameLen);
-    return sizeof(OperationCode) + sizeof(uint32_t) + sizeof(size_t) + nameLen;
+    return sizeof(OperationCode) + sizeof(uint64_t) + sizeof(size_t) + nameLen;
 }
 
 uint32_t RecoveryManager::RecoverLogOperationTruncateTable(uint8_t* data, RC& status, RecoveryOpState state)
@@ -246,7 +254,7 @@ uint32_t RecoveryManager::RecoverLogOperationTruncateTable(uint8_t* data, RC& st
             status = RC_ERROR;
             break;
     }
-    return sizeof(OperationCode) + sizeof(uint32_t);
+    return sizeof(OperationCode) + sizeof(uint64_t);
 }
 
 uint32_t RecoveryManager::RecoverLogOperationInsert(
@@ -319,7 +327,7 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
         return 0;
     }
     key->CpKey((const uint8_t*)keyData, keyLength);
-    Row* row = index->IndexRead(key, tid);
+    Row* row = MOTCurrTxn->RowLookupByKey(table, RD_FOR_UPDATE, key);
 
     if (row == nullptr) {
         /// row not found...
@@ -433,140 +441,144 @@ uint32_t RecoveryManager::RecoverLogOperationDelete(uint8_t* data, uint64_t csn,
     return sizeof(OperationCode) + sizeof(tableId) + sizeof(exId) + sizeof(keyLength) + keyLength;
 }
 
-uint32_t RecoveryManager::RecoverLogOperationCommit(uint8_t* data, uint64_t csn, uint32_t tid)
+uint32_t RecoveryManager::RecoverLogOperationCommit(uint8_t* data, uint64_t csn, uint32_t tid, RC& status)
 {
     // OperationCode + CSN + transaction_type + commit_counter + transaction_id
     if (MOT::GetRecoveryManager()->m_logStats != nullptr)
         MOT::GetRecoveryManager()->m_logStats->m_tcls++;
+    status = MOT::GetRecoveryManager()->CommitTransaction(csn);
+    if (status != RC_OK) {
+        MOT_LOG_ERROR("Failed to commit row recovery from log: %s (error code: %d)", RcToString(status), (int)status);
+    }
+    return sizeof(EndSegmentBlock);
+}
+
+uint32_t RecoveryManager::RecoverLogOperationRollback(uint8_t* data, uint64_t csn, uint32_t tid, RC& status)
+{
+    // OperationCode + CSN + transaction_type + commit_counter + transaction_id
+    status = MOT::GetRecoveryManager()->RollbackTransaction();
+    if (status != RC_OK) {
+        MOT_LOG_ERROR("Failed to rollback row recovery from log: %s (error code: %d)", RcToString(status), (int)status);
+    }
     return sizeof(EndSegmentBlock);
 }
 
 void RecoveryManager::InsertRow(uint64_t tableId, uint64_t exId, char* keyData, uint16_t keyLen, char* rowData,
     uint64_t rowLen, uint64_t csn, uint32_t tid, SurrogateState& sState, RC& status, uint64_t rowId, bool insertLocked)
 {
-    Table* table = nullptr;
-    if (!GetRecoveryManager()->FetchTable(tableId, table)) {
+    Table* table = MOTCurrTxn->GetTableByExternalId(exId);
+    if (table == nullptr) {
         status = RC_ERROR;
-        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "RecoveryManager::insertRow", "Table %llu does not exist", tableId);
-        return;
-    }
-
-    uint64_t tableExId = table->GetTableExId();
-    if (tableExId != exId) {
-        status = RC_ERROR;
-        MOT_REPORT_ERROR(
-            MOT_ERROR_INTERNAL, "Recovery Manager Insert Row", "exId mismatch: my %llu - pkt %llu", tableExId, exId);
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Recover Insert Row", "Table %" PRIu64 " does not exist", exId);
         return;
     }
 
     Row* row = table->CreateNewRow();
-    if (row == nullptr) {  // OA: check result before using pointer
+    if (row == nullptr) {
         status = RC_ERROR;
-        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Insert Row", "failed to create row");
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recover Insert Row", "Failed to create row");
         return;
     }
     row->CopyData((const uint8_t*)rowData, rowLen);
     row->SetCommitSequenceNumber(csn);
+    row->SetRowId(rowId);
 
     if (insertLocked == true) {
         row->SetTwoPhaseMode(true);
         row->m_rowHeader.Lock();
     }
 
-    uint64_t surrogateprimaryKey = 0;
-    uint8_t* keyBytes = nullptr;
     Key* key = nullptr;
     MOT::Index* ix = nullptr;
-    uint32_t numIndexes = table->GetNumIndexes();
 
+    mot_vector<Key*> cleanupKeys;
     ix = table->GetPrimaryIndex();
-    key = ix->CreateNewKey();
+    key = MOTCurrTxn->GetTxnKey(ix);
     if (key == nullptr) {
         table->DestroyRow(row);
         status = RC_ERROR;
-        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Insert Row", "failed to create key");
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recover Insert Row", "Failed to create primary key");
         return;
     }
+    cleanupKeys.push_back(key);
     if (ix->IsFakePrimary()) {
         row->SetSurrogateKey(*(uint64_t*)keyData);
         sState.UpdateMaxKey(rowId);
     }
     key->CpKey((const uint8_t*)keyData, keyLen);
-    status = table->InsertRowNonTransactional(row, tid, key);
+    MOTCurrTxn->GetNextInsertItem()->SetItem(row, ix, key);
+    for (uint16_t i = 1; i < table->GetNumIndexes(); i++) {
+        ix = table->GetSecondaryIndex(i);
+        key = MOTCurrTxn->GetTxnKey(ix);
+        if (key == nullptr) {
+            status = RC_MEMORY_ALLOCATION_ERROR;
+            MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                "Recover Insert Row",
+                "Failed to create key for secondary index %s",
+                ix->GetName().c_str());
+            std::for_each(cleanupKeys.begin(), cleanupKeys.end(), [](Key*& key) { MOTCurrTxn->DestroyTxnKey(key); });
+            MOTCurrTxn->Rollback();
+            return;
+        }
+        cleanupKeys.push_back(key);
+        ix->BuildKey(table, row, key);
+        MOTCurrTxn->GetNextInsertItem()->SetItem(row, ix, key);
+    }
+    cleanupKeys.clear();  // subsequent call to insert row takes care of key cleanup
+    status = MOTCurrTxn->InsertRow(row);
 
     if (insertLocked == true) {
         row->GetPrimarySentinel()->Lock(0);
     }
 
     if (status == RC_UNIQUE_VIOLATION && DuplicateRow(table, keyData, keyLen, rowData, rowLen, tid)) {
-        /* Same row already exists. ok. */
-        table->DestroyRow(row);
+        // Same row already exists. ok.
+        // no need to destroy row (already destroyed by TxnManager::InsertRow() in case of unique violation)
         status = RC_OK;
     } else if (status == RC_MEMORY_ALLOCATION_ERROR) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Insert Row", "failed to insert row");
         table->DestroyRow(row);
-    } else if (status != RC_OK) {
-        table->DestroyRow(row);
     }
-
-    ix->DestroyKey(key);
 }
 
 void RecoveryManager::DeleteRow(
     uint64_t tableId, uint64_t exId, char* keyData, uint16_t keyLen, uint64_t csn, uint32_t tid, RC& status)
 {
-    Sentinel* pSentinel = nullptr;
-    RC rc;
     Row* row = nullptr;
     Key* key = nullptr;
     Index* index = nullptr;
-    uint64_t tableExId;
 
-    Table* table = nullptr;
-    if (!GetRecoveryManager()->FetchTable(tableId, table)) {
-        MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG, "Recovery Manager Delete Row", "table %u does not exist", tableId);
+    Table* table = MOTCurrTxn->GetTableByExternalId(exId);
+    if (table == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_INVALID_ARG, "Recovery Manager Delete Row", "table %" PRIu64 " does not exist", exId);
         status = RC_ERROR;
-        MOT_LOG_ERROR("RecoveryManager::deleteRow - table %u does not exist", tableId);
         return;
     }
 
     index = table->GetPrimaryIndex();
-    key = index->CreateNewKey();
-    if (key == nullptr) {  // OA: check result before using pointer
+    key = MOTCurrTxn->GetTxnKey(index);
+    if (key == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Delete Row", "failed to create key");
         status = RC_ERROR;
         return;
     }
     key->CpKey((const uint8_t*)keyData, keyLen);
-
-    tableExId = table->GetTableExId();
-    if (tableExId != exId) {
-        MOT_REPORT_ERROR(
-            MOT_ERROR_INTERNAL, "Recovery Manager Delete Row", "exId mismatch: my %lu - pkt %lu", tableExId, exId);
-        status = RC_ERROR;
-        index->DestroyKey(key);
-        return;
-    }
-    rc = table->FindRow(key, pSentinel, tid);
-    if ((rc != RC_OK) || (pSentinel == 0)) {
-        MOT_LOG_ERROR("RecoveryManager::deleteRow - findRow rc %u, sentinel %p", rc, pSentinel);
-        status = RC_OK;
-        index->DestroyKey(key);
-        return;
-    }
-
-    row = pSentinel->GetData();
-    if (row != 0) {
-        if (!table->RemoveRow(row, tid)) {
+    row = MOTCurrTxn->RowLookupByKey(table, WR, key);
+    if (row != nullptr) {
+        status = MOTCurrTxn->DeleteLastRow();
+        if (status != RC_OK) {
             if (MOT_IS_OOM()) {
-                // OA: report error if remove row failed due to OOM (what about other errors?)
                 MOT_REPORT_ERROR(
                     MOT_ERROR_OOM, "Recovery Manager Delete Row", "failed to remove row due to lack of memory");
                 status = RC_MEMORY_ALLOCATION_ERROR;
             } else {
-                status = RC_ERROR;
+                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                    "Recovery Manager Delete Row",
+                    "failed to remove row: %s (error code: %d)",
+                    RcToString(status),
+                    status);
             }
-            MOT_LOG_ERROR("RecoveryManager::deleteRow2 - findRow rc %u, sentinel %p", rc, pSentinel);
         } else {
             GetRecoveryManager()->IncreaseTableDeletesStat(table);
         }
@@ -574,17 +586,18 @@ void RecoveryManager::DeleteRow(
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Recovery Manager Delete Row", "getData failed");
         status = RC_ERROR;
     }
-    index->DestroyKey(key);
+    MOTCurrTxn->DestroyTxnKey(key);
     status = RC_OK;
 }
 
 void RecoveryManager::UpdateRow(uint64_t tableId, uint64_t exId, char* keyData, uint16_t keyLen, char* rowData,
     uint64_t rowLen, uint64_t csn, uint32_t tid, SurrogateState& sState, RC& status)
 {
-    Table* table = nullptr;
-    if (!GetRecoveryManager()->FetchTable(tableId, table)) {
+    Table* table = MOTCurrTxn->GetTableByExternalId(exId);
+    if (table == nullptr) {
         status = RC_ERROR;
-        MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG, "Recovery Manager Update Row", "table %u does not exist", tableId);
+        MOT_REPORT_ERROR(
+            MOT_ERROR_INVALID_ARG, "Recovery Manager Update Row", "table %" PRIu64 " does not exist", exId);
         return;
     }
 
@@ -597,14 +610,14 @@ void RecoveryManager::UpdateRow(uint64_t tableId, uint64_t exId, char* keyData, 
     }
 
     Index* index = table->GetPrimaryIndex();
-    Key* key = index->CreateNewKey();
-    if (key == nullptr) {  // OA: check result before using pointer
+    Key* key = MOTCurrTxn->GetTxnKey(index);
+    if (key == nullptr) {
         status = RC_ERROR;
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Update Row", "failed to create key");
         return;
     }
     key->CpKey((const uint8_t*)keyData, keyLen);
-    Row* row = index->IndexRead(key, tid);
+    Row* row = MOTCurrTxn->RowLookupByKey(table, RD_FOR_UPDATE, key);
     if (row == nullptr) {
         /// row not found... need to check row version
         // if row version is less than the updated row version it means that we
@@ -628,7 +641,7 @@ void RecoveryManager::UpdateRow(uint64_t tableId, uint64_t exId, char* keyData, 
                 csn);
         }
     }
-    index->DestroyKey(key);
+    MOTCurrTxn->DestroyTxnKey(key);
 }
 
 void RecoveryManager::CreateTable(char* data, RC& status, Table*& table, bool addToEngine)
@@ -647,7 +660,7 @@ void RecoveryManager::CreateTable(char* data, RC& status, Table*& table, bool ad
 
     table = new (std::nothrow) Table();
     if (table == nullptr) {
-        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Create Table", "failed to allocate table's memory");
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Create Table", "failed to allocate table object");
         status = RC_ERROR;
         return;
     }
@@ -655,16 +668,16 @@ void RecoveryManager::CreateTable(char* data, RC& status, Table*& table, bool ad
     table->Deserialize((const char*)data);
     do {
         if (!table->IsDeserialized()) {
-            MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to deserialize table");
+            MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to de-serialize table");
             break;
         }
 
-        if (addToEngine && !GetTableManager()->AddTable(table)) {
+        if (addToEngine && ((status = MOTCurrTxn->CreateTable(table)) != RC_OK)) {
             MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to add table to engine");
             break;
         }
 
-        MOT_LOG_DEBUG("RecoveryManager::CreateTable: table %s [%lu] created (%s to engine)",
+        MOT_LOG_DEBUG("RecoveryManager::CreateTable: table %s [internal id %u] created (%s to engine)",
             table->GetLongTableName().c_str(),
             table->GetTableId(),
             addToEngine ? "added" : "not added");
@@ -675,60 +688,79 @@ void RecoveryManager::CreateTable(char* data, RC& status, Table*& table, bool ad
 
     MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to recover table");
     delete table;
-    status = RC_ERROR;
+    if (status == RC_OK) {
+        status = RC_ERROR;
+    }
     return;
 }
 
 void RecoveryManager::DropTable(char* data, RC& status)
 {
     char* in = (char*)data;
-    uint32_t tableId;
+    uint64_t externalTableId;
     Table* table;
     string tableName;
 
-    in = SerializablePOD<uint32_t>::Deserialize(in, tableId);
-    table = GetTableManager()->GetTable(tableId);
+    in = SerializablePOD<uint64_t>::Deserialize(in, externalTableId);
+    table = MOTCurrTxn->GetTableByExternalId(externalTableId);
     if (table == nullptr) {
-        MOT_LOG_DEBUG("DropTable: could not find table %u", tableId);
+        MOT_LOG_DEBUG("DropTable: could not find table %" PRIu64, externalTableId);
         /* this might happen if we try to replay an outdated xlog entry - currently we do not error out */
         return;
     }
     tableName.assign(table->GetLongTableName());
-    if (GetTableManager()->DropTable(table, MOT_GET_CURRENT_SESSION_CONTEXT()) != RC_OK) {
+    status = MOTCurrTxn->DropTable(table);
+    if (status != RC_OK) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
             "Recovery Manager Drop Table",
-            "Failed to drop table %s [%lu])",
+            "Failed to drop table %s [%" PRIu64 "])",
             tableName.c_str(),
-            tableId);
-        status = RC_ERROR;
+            externalTableId);
     } else {
         MOT::GetRecoveryManager()->m_tableDeletesStat.erase(table);
     }
-    MOT_LOG_DEBUG("RecoveryManager::DropTable: table %s [%lu] dropped", tableName.c_str(), tableId);
+    MOT_LOG_DEBUG("RecoveryManager::DropTable: table %s [%" PRIu64 "] dropped", tableName.c_str(), externalTableId);
 }
 
 void RecoveryManager::CreateIndex(char* data, uint32_t tid, RC& status)
 {
     char* in = (char*)data;
-    uint32_t tableId;
+    uint64_t externalTableId;
     Table* table;
     Table::CommonIndexMeta idx;
 
-    in = SerializablePOD<uint32_t>::Deserialize(in, tableId);
-    table = GetTableManager()->GetTable(tableId);
+    in = SerializablePOD<uint64_t>::Deserialize(in, externalTableId);
+    table = MOTCurrTxn->GetTableByExternalId(externalTableId);
     if (table == nullptr) {
-        MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG, "Recovery Manager Create Index", "Could not find table %u", tableId);
+        MOT_REPORT_ERROR(
+            MOT_ERROR_INVALID_ARG, "Recover Create Index", "Could not find table %" PRIu64, externalTableId);
         status = RC_ERROR;
         return;
     }
 
     in = table->DesrializeMeta(in, idx);
-    if (idx.m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY) {
-        MOT_LOG_DEBUG("createIndex: creating Primary Index");
-        table->CreateIndexFromMeta(idx, true, tid);
-    } else {
-        MOT_LOG_DEBUG("createIndex: creating Secondary Index");
-        table->CreateIndexFromMeta(idx, false, tid);
+    bool primary = idx.m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY;
+    MOT_LOG_DEBUG("createIndex: creating %s Index", primary ? "Primary" : "Secondary");
+    Index* index = nullptr;
+    status = table->CreateIndexFromMeta(idx, primary, tid, false, &index);
+    if (status != RC_OK) {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+            "Recover Create Index",
+            "Failed to create index for table %" PRIu64 " from meta-data: %s (error code: %d)",
+            externalTableId,
+            RcToString(status),
+            status);
+    }
+    if (status == RC_OK) {
+        status = MOTCurrTxn->CreateIndex(table, index, primary);
+        if (status != RC_OK) {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                "Recover Create Index",
+                "Failed to create index for table %" PRIu64 ": %s (error code: %d)",
+                externalTableId,
+                RcToString(status),
+                status);
+        }
     }
 }
 
@@ -736,21 +768,26 @@ void RecoveryManager::DropIndex(char* data, RC& status)
 {
     RC res;
     char* in = (char*)data;
-    uint32_t tableId;
+    uint64_t externalTableId;
     Table* table;
     uint32_t indexNameLength;
     string indexName;
 
-    in = SerializablePOD<uint32_t>::Deserialize(in, tableId);
-    table = GetTableManager()->GetTable(tableId);
+    in = SerializablePOD<uint64_t>::Deserialize(in, externalTableId);
+    table = MOTCurrTxn->GetTableByExternalId(externalTableId);
     if (table == nullptr) {
         /* this might happen if we try to replay an outdated xlog entry - currently we do not error out */
-        MOT_LOG_DEBUG("dropIndex: could not find table %u", tableId);
+        MOT_LOG_DEBUG("dropIndex: could not find table %" PRIu64, externalTableId);
         return;
     }
 
     in = SerializableSTR::Deserialize(in, indexName);
-    res = table->RemoveSecondaryIndex((char*)(indexName.c_str()), MOT_GET_CURRENT_SESSION_CONTEXT()->GetTxnManager());
+    Index* index = table->GetSecondaryIndex(indexName);
+    if (index == nullptr) {
+        res = RC_INDEX_NOT_FOUND;
+    } else {
+        res = MOTCurrTxn->DropIndex(index);
+    }
     if (res != RC_OK) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
             "Recovery Manager Drop Index",
@@ -764,18 +801,20 @@ void RecoveryManager::TruncateTable(char* data, RC& status)
 {
     RC res = RC_OK;
     char* in = (char*)data;
-    uint32_t tableId;
+    uint64_t externalTableId;
     Table* table;
 
-    in = SerializablePOD<uint32_t>::Deserialize(in, tableId);
-    table = GetTableManager()->GetTable(tableId);
+    in = SerializablePOD<uint64_t>::Deserialize(in, externalTableId);
+    table = MOTCurrTxn->GetTableByExternalId(externalTableId);
     if (table == nullptr) {
         /* this might happen if we try to replay an outdated xlog entry - currently we do not error out */
-        MOT_LOG_DEBUG("truncateTable: could not find table %u", tableId);
+        MOT_LOG_DEBUG("truncateTable: could not find table %" PRIu64, externalTableId);
         return;
     }
 
-    table->Truncate(MOT_GET_CURRENT_SESSION_CONTEXT()->GetTxnManager());
+    table->WrLock();
+    status = MOTCurrTxn->TruncateTable(table);
+    table->Unlock();
 }
 
 // in-process (2pc) transactions recovery
@@ -839,8 +878,8 @@ uint32_t RecoveryManager::TwoPhaseRecoverOp(RecoveryOpState state, uint8_t* data
     if (opCode == CREATE_ROW)
         ret += sizeof(uint64_t);  // rowId
 
-    Table* table = nullptr;
-    if (!GetRecoveryManager()->FetchTable(tableId, table)) {
+    Table* table = MOTCurrTxn->GetTableByExternalId(exId);
+    if (table == nullptr) {
         status = RC_ERROR;
         MOT_LOG_ERROR("RecoveryManager::applyInProcessInsert: fetch table failed (id %lu)", tableId);
         return ret;
@@ -1079,5 +1118,66 @@ bool RecoveryManager::DuplicateRow(
     if (key != nullptr && index != nullptr)
         index->DestroyKey(key);
     return res;
+}
+
+bool RecoveryManager::BeginTransaction(uint64_t replayLsn /* = 0 */)
+{
+    bool result = false;
+    SessionContext* sessionContext = MOT_GET_CURRENT_SESSION_CONTEXT();
+    if (sessionContext == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_INVALID_STATE, "Recover DB", "Cannot start recovery transaction: no session context");
+    } else {
+        TxnManager* txn = sessionContext->GetTxnManager();
+        txn->StartTransaction(INVALID_TRANSACTIOIN_ID, READ_COMMITED);
+        txn->SetReplayLsn(replayLsn);
+        result = true;
+    }
+    return result;
+}
+
+RC RecoveryManager::CommitTransaction(uint64_t csn)
+{
+    RC result = RC_ERROR;
+    SessionContext* sessionContext = MOT_GET_CURRENT_SESSION_CONTEXT();
+    if (sessionContext == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_INVALID_STATE, "Recover DB", "Cannot commit recovery transaction: no session context");
+    } else {
+        TxnManager* txn = sessionContext->GetTxnManager();
+        result = txn->Commit(INVALID_TRANSACTIOIN_ID, csn);
+        if (result != RC_OK) {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                "Recover DB",
+                "Failed to commit recovery transaction: %s (error code: %d)",
+                RcToString(result),
+                (int)result);
+            txn->Rollback();
+        } else {
+            txn->EndTransaction();
+        }
+    }
+    return result;
+}
+
+RC RecoveryManager::RollbackTransaction()
+{
+    RC result = RC_ERROR;
+    SessionContext* sessionContext = MOT_GET_CURRENT_SESSION_CONTEXT();
+    if (sessionContext == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_INVALID_STATE, "Recover DB", "Cannot rollback recovery transaction: no session context");
+    } else {
+        TxnManager* txn = sessionContext->GetTxnManager();
+        result = txn->Rollback();
+        if (result != RC_OK) {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                "Recover DB",
+                "Failed to rollback recovery transaction: %s (error code: %d)",
+                RcToString(result),
+                (int)result);
+        }
+    }
+    return result;
 }
 }  // namespace MOT

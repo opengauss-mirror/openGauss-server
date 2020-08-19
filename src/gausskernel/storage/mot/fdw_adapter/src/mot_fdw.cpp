@@ -1329,13 +1329,16 @@ List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultR
     RangeTblEntry* rte = planner_rt_fetch(resultRelation, root);
     Relation rel = heap_open(rte->relid, NoLock);
     TupleDesc desc = RelationGetDescr(rel);
-    bool isFromScan = false;
     uint8_t attrsModify[BITMAP_GETLEN(desc->natts)];
+    uint8_t* ptrAttrsModify = attrsModify;
     MOT::TxnManager* currTxn = GetSafeTxn(/*GetCurrentTransactionId()*/);
     MOT::Table* table = currTxn->GetTableByExternalId(RelationGetRelid(rel));
 
     if ((int)resultRelation < root->simple_rel_array_size && root->simple_rel_array[resultRelation] != nullptr) {
-        isFromScan = true;
+        if (root->simple_rel_array[resultRelation]->fdw_private != nullptr) {
+            fdwState = (MOTFdwStateSt*)root->simple_rel_array[resultRelation]->fdw_private;
+            ptrAttrsModify = fdwState->m_attrsUsed;
+        }
     } else {
         fdwState = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
         fdwState->m_cmdOper = plan->operation;
@@ -1367,7 +1370,7 @@ List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultR
             securec_check(erc, "\0", "\0");
             for (int i = 0; i < desc->natts; i++) {
                 if (bms_is_member(desc->attrs[i]->attnum - FirstLowInvalidHeapAttributeNumber, rte->updatedCols)) {
-                    BITMAP_SET(attrsModify, (desc->attrs[i]->attnum - 1));
+                    BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
                 }
             }
             break;
@@ -1378,7 +1381,7 @@ List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultR
                 securec_check(erc, "\0", "\0");
                 for (int i = 0; i < desc->natts; i++) {
                     if (!desc->attrs[i]->attisdropped) {
-                        BITMAP_SET(attrsModify, (desc->attrs[i]->attnum - 1));
+                        BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
                     }
                 }
             }
@@ -1390,8 +1393,8 @@ List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultR
 
     heap_close(rel, NoLock);
 
-    return (isFromScan ? (List*)BitmapSerialize(nullptr, attrsModify, BITMAP_GETLEN(desc->natts))
-                       : (List*)SerializeFdwState(fdwState));
+    return ((fdwState == nullptr) ? (List*)BitmapSerialize(nullptr, attrsModify, BITMAP_GETLEN(desc->natts))
+                                  : (List*)SerializeFdwState(fdwState));
 }
 
 static TupleTableSlot* MOTExecForeignInsert(
@@ -2121,7 +2124,7 @@ uint64_t MOTCheckpointGetId()
 {
     MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
     if (engine != nullptr) {
-        return engine->GetCheckpointManager()->GetId();
+        return engine->GetRecoveryManager()->GetCheckpointId();
     }
     return 0;
 }

@@ -327,6 +327,7 @@ bool RecoveryManager::RecoverTableRows(
             break;
         }
 
+        BeginTransaction();
         InsertRow(tableId,
             fileHeader.m_exId,
             keyData,
@@ -338,8 +339,13 @@ bool RecoveryManager::RecoverTableRows(
             m_sState,
             status,
             entry.m_rowId);
-        if (status != RC_OK)
+        status = CommitTransaction(entry.m_csn);
+        if (status != RC_OK) {
+            MOT_LOG_ERROR(
+                "Failed to commit row recovery from checkpoint: %s (error code: %d)", RcToString(status), (int)status);
             break;
+        }
+        MOT_LOG_DEBUG("Inserted into table %u row with CSN %" PRIu64, tableId, entry.m_csn);
         if (entry.m_csn > maxCsn)
             maxCsn = entry.m_csn;
     }
@@ -412,7 +418,6 @@ void RecoveryManager::CpWorkerFunc()
 
 bool RecoveryManager::RecoverFromCheckpoint()
 {
-    uint64_t lastReplayLsn = 0;
     m_checkpointWorkerStop = false;
     if (!m_tasksList.empty()) {
         MOT_LOG_ERROR("RecoveryManager:: tasksQueue is not empty!");
@@ -426,7 +431,7 @@ bool RecoveryManager::RecoverFromCheckpoint()
         if (IsCheckpointValid(CheckpointControlFile::GetCtrlFile()->GetId())) {
             m_checkpointId = CheckpointControlFile::GetCtrlFile()->GetId();
             m_lsn = CheckpointControlFile::GetCtrlFile()->GetLsn();
-            lastReplayLsn = CheckpointControlFile::GetCtrlFile()->GetLastReplayLsn();
+            m_lastReplayLsn = CheckpointControlFile::GetCtrlFile()->GetLastReplayLsn();
         } else {
             MOT_LOG_ERROR("RecoveryManager:: no valid checkpoint exist");
             OnError(RecoveryManager::ErrCodes::CP_SETUP, "RecoveryManager:: no valid checkpoint exist");
@@ -440,11 +445,15 @@ bool RecoveryManager::RecoverFromCheckpoint()
         return false;
     }
 
-    if (m_lsn >= lastReplayLsn) {
-        MOT_LOG_DEBUG("Recovery LSN Check: will use lsn: %lu (last replay lsn: %lu)", m_lsn, lastReplayLsn);
-    } else {
-        m_lsn = lastReplayLsn;
-        MOT_LOG_WARN("Recovery LSN Check: modifying lsn to %lu (last replay lsn)", m_lsn);
+    if (m_checkpointId != CheckpointControlFile::invalidId) {
+        if (m_lsn >= m_lastReplayLsn) {
+            MOT_LOG_INFO(
+                "Recovery LSN Check will use the LSN (%lu), ignoring the lastReplayLSN (%lu)", m_lsn, m_lastReplayLsn);
+        } else {
+            MOT_LOG_WARN(
+                "Recovery LSN Check will use the lastReplayLSN (%lu), ignoring the LSN (%lu)", m_lastReplayLsn, m_lsn);
+            m_lsn = m_lastReplayLsn;
+        }
     }
 
     int taskFillStat = FillTasksFromMapFile();
@@ -467,6 +476,7 @@ bool RecoveryManager::RecoverFromCheckpoint()
         m_tableIds.size(),
         m_checkpointId);
 
+    BeginTransaction();
     for (auto it = m_tableIds.begin(); it != m_tableIds.end(); ++it) {
         if (IsRecoveryMemoryLimitReached(NUM_REDO_RECOVERY_THREADS)) {
             MOT_LOG_ERROR("Memory hard limit reached. Cannot recover datanode");
@@ -480,6 +490,12 @@ bool RecoveryManager::RecoverFromCheckpoint()
                 std::to_string(*it).c_str());
             return false;
         }
+    }
+    RC status = CommitTransaction(MOT_RECOVERED_TABLE_CSN);
+    if (status != RC_OK) {
+        MOT_LOG_ERROR("Failed to commit table recovery: %s (error code: %d)", RcToString(status), (int)status);
+        OnError(RecoveryManager::ErrCodes::CP_TABLE_COMMIT, "Failed to commit table recovery from checkpoint");
+        return false;
     }
 
     std::vector<std::thread> recoveryThreadPool;
@@ -593,20 +609,18 @@ void RecoveryManager::FreeRedoSegment(LogSegment* segment)
     delete segment;
 }
 
-bool RecoveryManager::ApplyLogSegmentFromData(uint64_t redoLsn, char* data, size_t len)
+bool RecoveryManager::ApplyRedoLog(uint64_t redoLsn, char* data, size_t len)
 {
     if (redoLsn < m_lsn) {
         // ignore old redo records which are prior to our checkpoint LSN
-        MOT_LOG_DEBUG(
-            "ApplyLogSegmentFromData - ignoring old redo record. Checkpoint LSN: %lu, redo LSN: %lu", m_lsn, redoLsn);
+        MOT_LOG_DEBUG("ApplyRedoLog - ignoring old redo record. Checkpoint LSN: %lu, redo LSN: %lu", m_lsn, redoLsn);
         return true;
     }
 
-    MOTEngine::GetInstance()->GetCheckpointManager()->SetLastReplayLsn(redoLsn);
-    return ApplyLogSegmentFromData(data, len);
+    return ApplyLogSegmentFromData(data, len, redoLsn);
 }
 
-bool RecoveryManager::ApplyLogSegmentFromData(char* data, size_t len)
+bool RecoveryManager::ApplyLogSegmentFromData(char* data, size_t len, uint64_t replayLsn /* = 0 */)
 {
     bool result = false;
     char* curData = data;
@@ -614,7 +628,7 @@ bool RecoveryManager::ApplyLogSegmentFromData(char* data, size_t len)
     while (data + len > curData) {
         // obtain LogSegment from buffer
         RedoLogTransactionIterator iterator(curData, len);
-        LogSegment* segment = iterator.AllocRedoSegment();
+        LogSegment* segment = iterator.AllocRedoSegment(replayLsn);
         if (segment == nullptr) {
             MOT_LOG_ERROR("ApplyLogSegmentFromData - failed to allocate segment");
             return false;
@@ -741,18 +755,41 @@ RC RecoveryManager::RedoSegment(LogSegment* segment, uint64_t csn, uint64_t tran
     bool is2pcRecovery = !MOTEngine::GetInstance()->IsRecovering();
     uint8_t* endPosition = (uint8_t*)(segment->m_data + segment->m_len);
     uint8_t* operationData = (uint8_t*)(segment->m_data);
+    bool txnStarted = false;
+    bool wasCommit = false;
 
     while (operationData < endPosition) {
-        // redolog recovery - single threaded
+        // redo log recovery - single threaded
         if (IsRecoveryMemoryLimitReached(NUM_REDO_RECOVERY_THREADS)) {
             status = RC_ERROR;
             MOT_LOG_ERROR("Memory hard limit reached. Cannot recover datanode");
             break;
         }
 
+        // begin transaction on-demand
+        if (!txnStarted) {
+            if (!BeginTransaction(segment->m_replayLsn)) {
+                MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT, "Recover Redo Segment", "Cannot start a new transaction");
+                return RC_ERROR;
+            } else {
+                txnStarted = true;
+            }
+        }
+
         if (!is2pcRecovery) {
-            operationData += RecoverLogOperation(operationData, csn, transactionId, MOTCurrThreadId, m_sState, status);
-            GcManager* gc = MOT_GET_CURRENT_SESSION_CONTEXT()->GetTxnManager()->GetGcSession();
+            operationData +=
+                RecoverLogOperation(operationData, csn, transactionId, MOTCurrThreadId, m_sState, status, wasCommit);
+            // check operation result status
+            if (status != RC_OK) {
+                MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT, "Recover Redo Segment", "Failed to recover redo segment");
+                break;
+            }
+            // update transactional state
+            if (wasCommit) {
+                txnStarted = false;
+            }
+
+            GcManager* gc = MOTCurrTxn->GetGcSession();
             if (m_numRedoOps == 0 && gc != nullptr) {
                 gc->GcStartTxn();
             }
@@ -1221,6 +1258,7 @@ bool RecoveryManager::DeserializeInProcessTxns(int fd, uint64_t numEntries)
             break;
         }
 
+        segment->m_replayLsn = 0;
         erc = memcpy_s(&segment->m_len, sizeof(size_t), buf, sizeof(size_t));
         securec_check(erc, "\0", "\0");
         segment->m_data = new (std::nothrow) char[segment->m_len];
