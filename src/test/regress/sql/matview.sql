@@ -14,6 +14,8 @@ SELECT * FROM mvtest_tv ORDER BY type;
 -- create a materialized view with no data, and confirm correct behavior
 EXPLAIN (analyze on, costs off)
   CREATE MATERIALIZED VIEW mvtest_tm AS SELECT type, sum(amt) AS totamt FROM mvtest_t GROUP BY type WITH NO DATA;
+EXPLAIN (analyze on, costs off)
+  REFRESH MATERIALIZED VIEW mvtest_tm;
 SELECT * FROM mvtest_tm ORDER BY type;
 REFRESH MATERIALIZED VIEW mvtest_tm;
 ALTER MATERIALIZED VIEW mvtest_tm set (orientation=column); --error

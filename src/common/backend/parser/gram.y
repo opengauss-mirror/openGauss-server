@@ -12817,7 +12817,6 @@ ExplainableStmt:
 			| DeclareCursorStmt
 			| CreateAsStmt
 			| CreateMatViewStmt
-			| RefreshMatViewStmt
 			| ExecuteStmt					/* by default all are $$=$1 */
 		;
 
