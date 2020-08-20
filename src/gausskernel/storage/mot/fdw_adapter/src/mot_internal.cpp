@@ -1925,10 +1925,15 @@ MOT::RC MOTAdaptor::DropIndex(DropForeignStmt* stmt, ::TransactionId tid)
                 stmt->indexoid,
                 stmt->reloid);
             res = MOT::RC_INDEX_NOT_FOUND;
+        } else if (index->IsPrimaryKey()) {
+            elog(LOG, "Drop primary index is not supported, failed to drop index: %s", stmt->name);
         } else {
-            uint64_t table_relid = index->GetTable()->GetTableExId();
+            MOT::Table* table = index->GetTable();
+            uint64_t table_relid = table->GetTableExId();
             JitExec::PurgeJitSourceCache(table_relid);
+            table->WrLock();
             res = txn->DropIndex(index);
+            table->Unlock();
         }
     } while (0);
 

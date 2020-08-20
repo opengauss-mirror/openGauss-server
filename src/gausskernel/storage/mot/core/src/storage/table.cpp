@@ -451,18 +451,18 @@ RC Table::InsertRow(Row* row, TxnManager* txn)
     uint64_t surrogateprimaryKey = 0;
     MOT::Index* ix = GetPrimaryIndex();
     uint32_t numIndexes = GetNumIndexes();
+    MOT::Key* cleanupKeys[numIndexes] = {nullptr};
 
     // add row
     // set primary key
     row->SetRowId(txn->GetSurrogateKey());
 
-    mot_vector<Key*> cleanupKeys;
     key = txn->GetTxnKey(ix);
     if (key == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Insert Row", "Failed to create primary key");
         return RC_MEMORY_ALLOCATION_ERROR;
     }
-    cleanupKeys.push_back(key);
+    cleanupKeys[0] = key;
     if (ix->IsFakePrimary()) {
         surrogateprimaryKey = htobe64(row->GetRowId());
         row->SetSurrogateKey(surrogateprimaryKey);
@@ -480,16 +480,19 @@ RC Table::InsertRow(Row* row, TxnManager* txn)
         if (key == nullptr) {
             MOT_REPORT_ERROR(
                 MOT_ERROR_OOM, "Insert Row", "Failed to create key for secondary index %s", ix->GetName().c_str());
-            std::for_each(cleanupKeys.begin(), cleanupKeys.end(), [](Key*& key) { MOTCurrTxn->DestroyTxnKey(key); });
+            for (uint16_t j = 0; j < numIndexes; j++) {
+                if (cleanupKeys[j] != nullptr) {
+                    MOTCurrTxn->DestroyTxnKey(cleanupKeys[j]);
+                }
+            }
             MOTCurrTxn->Rollback();
             return RC_MEMORY_ALLOCATION_ERROR;
         }
-        cleanupKeys.push_back(key);
+        cleanupKeys[i] = key;
         ix->BuildKey(this, row, key);
         txn->GetNextInsertItem()->SetItem(row, ix, key);
     }
 
-    cleanupKeys.clear();  // subsequent call to insert row takes care of key cleanup
     return txn->InsertRow(row);
 }
 
@@ -979,19 +982,23 @@ RC Table::CreateIndexFromMeta(
     if (addToTable) {
         // In transactional recovery we set index as committed only during commit.
         ix->SetIsCommited(true);
+        WrLock();
         if (primary) {
             if (UpdatePrimaryIndex(ix, nullptr, tid) != true) {
+                Unlock();
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to add primary index");
                 delete ix;
                 return RC_ERROR;
             }
         } else {
             if (AddSecondaryIndex(ix->GetName(), (Index*)ix, nullptr, tid) != true) {
+                Unlock();
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to add secondary index");
                 delete ix;
                 return RC_ERROR;
             }
         }
+        Unlock();
     }
 
     if (outIndex != nullptr) {
