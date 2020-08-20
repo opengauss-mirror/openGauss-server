@@ -58,8 +58,10 @@ elif [ X"$kernel" == X"openeuler" ]; then
     dist_version="openEuler"
 elif [ X"$kernel" == X"neokylin" ]; then
     dist_version="neokylin"
+elif [ X"$kernel" == X"kylin" ]; then
+    dist_version="kylin"
 else
-    echo "We only support openEuler(aarch64), neokylin(aarch64), CentOS platform."
+    echo "We only support openEuler(aarch64), neokylin(aarch64), kylin(aarch64), CentOS platform."
     echo "Kernel is $kernel"
     exit 1
 fi
