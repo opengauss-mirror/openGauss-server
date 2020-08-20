@@ -16,6 +16,7 @@ EXPLAIN (analyze on, costs off)
   CREATE MATERIALIZED VIEW mvtest_tm AS SELECT type, sum(amt) AS totamt FROM mvtest_t GROUP BY type WITH NO DATA;
 SELECT * FROM mvtest_tm ORDER BY type;
 REFRESH MATERIALIZED VIEW mvtest_tm;
+ALTER MATERIALIZED VIEW mvtest_tm set (orientation=column); --error
 CREATE UNIQUE INDEX mvtest_tm_type ON mvtest_tm (type);
 SELECT * FROM mvtest_tm ORDER BY type;
 

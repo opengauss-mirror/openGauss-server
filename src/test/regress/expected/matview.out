@@ -34,6 +34,9 @@ SELECT * FROM mvtest_tm ORDER BY type;
 (0 rows)
 
 REFRESH MATERIALIZED VIEW mvtest_tm;
+ALTER MATERIALIZED VIEW mvtest_tm set (orientation=column); --error
+ERROR:  Un-support feature
+DETAIL:  Option "orientation" doesn't allow ALTER
 CREATE UNIQUE INDEX mvtest_tm_type ON mvtest_tm (type);
 SELECT * FROM mvtest_tm ORDER BY type;
  type | totamt 

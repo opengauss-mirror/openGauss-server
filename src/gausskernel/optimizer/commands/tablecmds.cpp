@@ -12456,7 +12456,8 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
 
     /* Validate */
     switch (rel->rd_rel->relkind) {
-        case RELKIND_RELATION: {
+        case RELKIND_RELATION:
+        case RELKIND_MATVIEW: {
             /* this options only can be used when define a new relation.
              * forbid to change or reset these options.
              */
@@ -12485,8 +12486,7 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
             break;
         }
         case RELKIND_TOASTVALUE:
-        case RELKIND_VIEW: 
-        case RELKIND_MATVIEW:{
+        case RELKIND_VIEW: {
             (void)heap_reloptions(rel->rd_rel->relkind, newOptions, true);
             break;
         }

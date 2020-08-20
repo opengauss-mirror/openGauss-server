@@ -195,7 +195,7 @@ typedef struct RelationMetaData {
     StdRdOptionsGetStringData((relation)->rd_options, filesystem, FILESYSTEM_GENERAL)
 
 #define RelationIsCUFormat(relation)                    \
-    ((RELKIND_RELATION == relation->rd_rel->relkind) && \
+    ((RELKIND_RELATION == relation->rd_rel->relkind || RELKIND_MATVIEW == relation->rd_rel->relkind) && \
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_COLUMN) == 0)
 
 #define RelationIsRowFormat(relation)                   \
@@ -259,14 +259,15 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
  * Return the relations' orientation. Pax format includes ORC format.
  */
 #define RelationIsPAXFormat(relation)                   \
-    ((RELKIND_RELATION == relation->rd_rel->relkind) && \
+    ((RELKIND_RELATION == relation->rd_rel->relkind || RELKIND_MATVIEW == relation->rd_rel->relkind) && \
         pg_strcasecmp(RelationGetOrientation(relation), ORIENTATION_ORC) == 0)
 
 /* RelationIsColStore
  * 	  Return relation whether is column store, which includes CU format and PAX format.
  */
 #define RelationIsColStore(relation) \
-    ((RELKIND_RELATION == relation->rd_rel->relkind) && (RelationIsCUFormat(relation) || RelationIsPAXFormat(relation)))
+    ((RELKIND_RELATION == relation->rd_rel->relkind || RELKIND_MATVIEW == relation->rd_rel->relkind) && \
+        (RelationIsCUFormat(relation) || RelationIsPAXFormat(relation)))
 
 #define RelationOptionIsDfsStore(optionValue) (optionValue && 0 == pg_strncasecmp(optionValue, HDFS, strlen(HDFS)))
 
