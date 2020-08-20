@@ -17502,6 +17502,30 @@ target_el:	a_expr AS ColLabel
 					$$->val = (Node *)n;
 					$$->location = @1;
 				}
+			| c_expr VALUE_P            
+				{
+					$$ = makeNode(ResTarget);
+					$$->name = pstrdup($2);
+					$$->indirection = NIL;
+					$$->val = (Node *)$1;
+					$$->location = @1;
+				}
+			| c_expr NAME_P            
+				{
+					$$ = makeNode(ResTarget);
+					$$->name = pstrdup($2);
+					$$->indirection = NIL;
+					$$->val = (Node *)$1;
+					$$->location = @1;
+				}
+			| c_expr TYPE_P            
+				{
+					$$ = makeNode(ResTarget);
+					$$->name = pstrdup($2);
+					$$->indirection = NIL;
+					$$->val = (Node *)$1;
+					$$->location = @1;
+				}
 		;
 
 

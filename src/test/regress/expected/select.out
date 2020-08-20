@@ -726,6 +726,29 @@ SELECT * FROM foo ORDER BY f1 DESC NULLS LAST;
 (7 rows)
 
 --
+-- Test alias : VALUE, NAME, TYPE
+--
+CREATE TEMP TABLE fooAlias (f1 int);
+INSERT INTO fooAlias VALUES (42);
+SELECT f1 VALUE FROM fooAlias;
+ value 
+-------
+    42
+(1 row)
+
+SELECT f1 NAME FROM fooAlias;
+ name 
+------
+   42
+(1 row)
+
+SELECT f1 TYPE FROM fooAlias;
+ type 
+------
+   42
+(1 row)
+
+--
 -- Test some corner cases that have been known to confuse the planner
 --
 -- ORDER BY on a constant doesn't really need any sorting

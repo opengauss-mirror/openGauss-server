@@ -191,6 +191,14 @@ SELECT * FROM foo ORDER BY f1 DESC;
 SELECT * FROM foo ORDER BY f1 DESC NULLS LAST;
 
 --
+-- Test alias : VALUE, NAME, TYPE
+--
+CREATE TEMP TABLE fooAlias (f1 int);
+INSERT INTO fooAlias VALUES (42);
+SELECT f1 VALUE FROM fooAlias;
+SELECT f1 NAME FROM fooAlias;
+SELECT f1 TYPE FROM fooAlias;
+--
 -- Test some corner cases that have been known to confuse the planner
 --
 
