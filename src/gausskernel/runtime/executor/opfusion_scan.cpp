@@ -566,9 +566,6 @@ void IndexOnlyScanFusion::Init(long max_rows)
     m_scandesc = (AbsIdxScanDesc)abs_idx_beginscan(m_rel, m_index, GetActiveSnapshot(), m_keyNum, 0, scanstate); // add scanstate pointer ?
 
     if (PointerIsValid(m_scandesc)) {
-        if (m_VMBuffer != InvalidBuffer) {
-            ReleaseBuffer(m_VMBuffer);
-        }
         m_VMBuffer = InvalidBuffer;
         IndexScanDesc indexdesc = GetIndexScanDesc(m_scandesc);
         indexdesc->xs_want_itup = true;
