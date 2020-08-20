@@ -68,8 +68,8 @@ gcc_version="8.2"
 ##add platform architecture information
 PLATFORM_ARCH=$(uname -p)
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
-    if [ "$dist_version" != "openEuler" ] && [ "$dist_version" != "neokylin" ] ; then
-        echo "We only support NUMA on openEuler(aarch64), neokylin(aarch64) platform."
+    if [ "$dist_version" != "openEuler" ] && [ "$dist_version" != "neokylin" ] && [ "$dist_version" != "kylin" ] ; then
+        echo "We only support NUMA on openEuler(aarch64), neokylin(aarch64), kylin(aarch64) platform."
         exit 1
     fi
 fi
