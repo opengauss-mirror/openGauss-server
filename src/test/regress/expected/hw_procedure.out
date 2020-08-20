@@ -578,9 +578,6 @@ BEGIN
 	return q;
 END;
 $$ LANGUAGE plpgsql;
-ERROR:  syntax error at or near "hw_insertion5"
-LINE 5:  hw_insertion5;       --IN, INOUT
-         ^
 CREATE FUNCTION test_func_call_less_arg6() RETURNS integer AS $$
 DECLARE
 	q int := 1;
@@ -1884,3 +1881,59 @@ END;
 /
 		
 drop table test_table;
+-----------------------------------------------------function without arguments
+DROP FUNCTION IF EXISTS func_add_sql_arg2;
+NOTICE:  function func_add_sql_arg2() does not exist, skipping
+DROP function IF EXISTS f_add_no_arg;
+NOTICE:  function f_add_no_arg() does not exist, skipping
+DROP FUNCTION IF EXISTS f_add;
+NOTICE:  function f_add() does not exist, skipping
+CREATE FUNCTION func_add_sql_arg2(num1 integer, num2 integer) RETURN integer
+AS
+BEGIN
+RETURN num1 + num2;
+END;
+/
+CREATE FUNCTION func_add_sql_no_arg() RETURN integer
+AS
+BEGIN
+RETURN 1;
+END;
+/
+create or replace procedure f_add_no_arg
+as
+begin
+	func_add_sql_arg2;
+end;
+/
+create or replace procedure f_add
+as
+begin
+	func_add_sql_arg2(3,4);
+end;
+/
+call f_add();
+ f_add 
+-------
+ 
+(1 row)
+
+call f_add_no_arg();
+ERROR:  function "func_add_sql_arg2" with 0 parameters doesn't exist 
+CONTEXT:  SQL statement "CALL func_add_sql_arg2()"
+PL/pgSQL function f_add_no_arg() line 3 at PERFORM
+DROP FUNCTION IF EXISTS func_add_sql_arg2;
+DROP function IF EXISTS f_add_no_arg;
+DROP FUNCTION IF EXISTS f_add;
+create or replace procedure func_proc_no_arg
+as
+begin
+	func_add_sql_no_arg;
+end;
+/
+call func_proc_no_arg();
+ func_proc_no_arg 
+------------------
+ 
+(1 row)
+

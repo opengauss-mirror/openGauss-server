@@ -1586,3 +1586,54 @@ END;
 /
 		
 drop table test_table;
+
+
+
+-----------------------------------------------------function without arguments
+DROP FUNCTION IF EXISTS func_add_sql_arg2;
+DROP function IF EXISTS f_add_no_arg;
+DROP FUNCTION IF EXISTS f_add;
+
+CREATE FUNCTION func_add_sql_arg2(num1 integer, num2 integer) RETURN integer
+AS
+BEGIN
+RETURN num1 + num2;
+END;
+/
+
+CREATE FUNCTION func_add_sql_no_arg() RETURN integer
+AS
+BEGIN
+RETURN 1;
+END;
+/
+
+create or replace procedure f_add_no_arg
+as
+begin
+	func_add_sql_arg2;
+end;
+/
+
+create or replace procedure f_add
+as
+begin
+	func_add_sql_arg2(3,4);
+end;
+/
+
+call f_add();
+call f_add_no_arg();
+
+DROP FUNCTION IF EXISTS func_add_sql_arg2;
+DROP function IF EXISTS f_add_no_arg;
+DROP FUNCTION IF EXISTS f_add;
+
+create or replace procedure func_proc_no_arg
+as
+begin
+	func_add_sql_no_arg;
+end;
+/
+
+call func_proc_no_arg();
