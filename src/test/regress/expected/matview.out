@@ -28,6 +28,11 @@ EXPLAIN (analyze on, costs off)
 --? Total runtime: .* ms
 (4 rows)
 
+EXPLAIN (analyze on, costs off)
+  REFRESH MATERIALIZED VIEW mvtest_tm;
+ERROR:  syntax error at or near "REFRESH"
+LINE 2:   REFRESH MATERIALIZED VIEW mvtest_tm;
+          ^
 SELECT * FROM mvtest_tm ORDER BY type;
  type | totamt 
 ------+--------
