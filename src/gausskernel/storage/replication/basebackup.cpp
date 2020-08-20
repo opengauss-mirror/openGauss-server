@@ -53,6 +53,7 @@ typedef struct {
     bool fastcheckpoint;
     bool nowait;
     bool includewal;
+    bool sendtblspcmapfile;
 } basebackup_options;
 
 #define BUILD_PATH_LEN 2560 /* (MAXPGPATH*2 + 512) */
@@ -70,14 +71,15 @@ const int MATCH_SIX = 6;
 
 XLogRecPtr XlogCopyStartPtr = InvalidXLogRecPtr;
 
-static int64 sendDir(const char* path, int basepathlen, bool sizeonly, List* tablespaces, bool skipmot = true);
-static int64 sendTablespace(const char* path, bool sizeonly);
+static int64 sendDir(
+    const char* path, int basepathlen, bool sizeonly, List* tablespaces, bool sendtblspclinks, bool skipmot = true);
 static bool sendFile(char* readfilename, char* tarfilename, struct stat* statbuf, bool missing_ok);
 static void sendFileWithContent(const char* filename, const char* content);
 static void _tarWriteHeader(const char* filename, const char* linktarget, struct stat* statbuf);
 static void send_int8_string(StringInfoData* buf, int64 intval);
 static void SendBackupHeader(List* tablespaces);
 static void SendMotCheckpointHeader(const char* path);
+static int CompareWalFileNames(const void* a, const void* b);
 static void base_backup_cleanup(int code, Datum arg);
 static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir);
 static void parse_basebackup_options(List* options, basebackup_options* opt);
@@ -218,11 +220,20 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
     XLogRecPtr endptr;
     XLogRecPtr minlsn;
     char* labelfile = NULL;
+    char* tblspc_map_file = NULL;
     int datadirpathlen;
+    List* tablespaces = NIL;
 
     datadirpathlen = strlen(t_thrd.proc_cxt.DataDir);
 
-    startptr = do_pg_start_backup(opt->label, opt->fastcheckpoint, &labelfile);
+    startptr = do_pg_start_backup(opt->label,
+        opt->fastcheckpoint,
+        &labelfile,
+        tblspcdir,
+        &tblspc_map_file,
+        &tablespaces,
+        opt->progress,
+        opt->sendtblspcmapfile);
     /* Get the slot minimum LSN */
     ReplicationSlotsComputeRequiredXmin(false);
     ReplicationSlotsComputeRequiredLSN(NULL);
@@ -247,74 +258,12 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
 
     PG_ENSURE_ERROR_CLEANUP(base_backup_cleanup, (Datum)0);
     {
-        List* tablespaces = NIL;
         ListCell* lc = NULL;
-        struct dirent* de;
         tablespaceinfo* ti = NULL;
-
-        /* Collect information about all tablespaces */
-        while ((de = ReadDir(tblspcdir, "pg_tblspc")) != NULL) {
-            char fullpath[MAXPGPATH];
-            char linkpath[MAXPGPATH];
-            char* relpath = NULL;
-            int rllen;
-            errno_t errorno = EOK;
-            int nRet = 0;
-
-            errorno = memset_s(fullpath, MAXPGPATH, '\0', MAXPGPATH);
-            securec_check(errorno, "", "");
-
-            errorno = memset_s(linkpath, MAXPGPATH, '\0', MAXPGPATH);
-            securec_check(errorno, "", "");
-
-            /* Skip special stuff */
-            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
-                continue;
-
-            nRet = snprintf_s(fullpath, MAXPGPATH, MAXPGPATH - 1, "pg_tblspc/%s", de->d_name);
-            securec_check_ss(nRet, "", "");
-
-#if defined(HAVE_READLINK) || defined(WIN32)
-            rllen = readlink(fullpath, linkpath, sizeof(linkpath));
-            if (rllen < 0) {
-                ereport(WARNING, (errmsg("could not read symbolic link \"%s\": %m", fullpath)));
-                continue;
-            } else if (rllen >= (int)sizeof(linkpath)) {
-                ereport(WARNING, (errmsg("symbolic link \"%s\" target is too long", fullpath)));
-                continue;
-            }
-            linkpath[rllen] = '\0';
-
-            /*
-             * Relpath holds the relative path of the tablespace directory
-             * when it's located within PGDATA, or NULL if it's located
-             * elsewhere.
-             */
-            if (rllen > datadirpathlen && strncmp(linkpath, t_thrd.proc_cxt.DataDir, datadirpathlen) == 0 &&
-                IS_DIR_SEP(linkpath[datadirpathlen]))
-                relpath = linkpath + datadirpathlen + 1;
-
-            ti = (tablespaceinfo*)palloc(sizeof(tablespaceinfo));
-            ti->oid = pstrdup(de->d_name);
-            ti->path = pstrdup(linkpath);
-            ti->relativePath = relpath ? pstrdup(relpath) : NULL;
-            ti->size = opt->progress ? sendTablespace(fullpath, true) : -1;
-            tablespaces = lappend(tablespaces, ti);
-#else
-
-            /*
-             * If the platform does not have symbolic links, it should not be
-             * possible to have tablespaces - clearly somebody else created
-             * them. Warn about it and ignore.
-             */
-            ereport(WARNING,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
-#endif
-        }
 
         /* Add a node for the base directory at the end */
         ti = (tablespaceinfo*)palloc0(sizeof(tablespaceinfo));
-        ti->size = opt->progress ? sendDir(".", 1, true, tablespaces) : -1;
+        ti->size = opt->progress ? sendDir(".", 1, true, tablespaces, true) : -1;
         tablespaces = (List*)lappend(tablespaces, ti);
 
         /* Send tablespace header */
@@ -344,8 +293,12 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
                 /* Skip the tablespace if it's created in GAUSSDATA */
                 sendTablespace(iterti->path, false);
             } else {
-                /* data dir */
-                sendDir(".", 1, false, tablespaces);
+                /* Then the tablespace_map file, if required... */
+                if (tblspc_map_file && opt->sendtblspcmapfile) {
+                    sendFileWithContent(TABLESPACE_MAP, tblspc_map_file);
+                    sendDir(".", 1, false, tablespaces, false);
+                } else
+                    sendDir(".", 1, false, tablespaces, true);
             }
 
             /* In the main tar, include pg_control last. */
@@ -391,11 +344,226 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
 
     endptr = do_pg_stop_backup(labelfile, !opt->nowait);
 
-    SendXlogRecPtrResult(endptr);
+    if (opt->includewal) {
+        /*
+         * We've left the last tar file "open", so we can now append the
+         * required WAL files to it.
+         */
+        char pathbuf[MAXPGPATH];
+        XLogSegNo segno;
+        XLogSegNo startsegno;
+        XLogSegNo endsegno;
+        struct stat statbuf;
+        List* historyFileList = NIL;
+        List* walFileList = NIL;
+        char** walFiles;
+        int nWalFiles;
+        char firstoff[MAXFNAMELEN];
+        char lastoff[MAXFNAMELEN];
+        DIR* dir;
+        struct dirent* de;
+        int i;
+        ListCell* lc;
+        TimeLineID tli;
 
+        /*
+         * I'd rather not worry about timelines here, so scan pg_xlog and
+         * include all WAL files in the range between 'startptr' and 'endptr',
+         * regardless of the timeline the file is stamped with. If there are
+         * some spurious WAL files belonging to timelines that don't belong in
+         * this server's history, they will be included too. Normally there
+         * shouldn't be such files, but if there are, there's little harm in
+         * including them.
+         */
+        XLByteToSeg(startptr, startsegno);
+        XLogFileName(firstoff, t_thrd.xlog_cxt.ThisTimeLineID, startsegno);
+        XLByteToPrevSeg(endptr, endsegno);
+        XLogFileName(lastoff, t_thrd.xlog_cxt.ThisTimeLineID, endsegno);
+
+        dir = AllocateDir("pg_xlog");
+        if (!dir) {
+            ereport(ERROR, (errmsg("could not open directory \"%s\": %m", "pg_xlog")));
+        }
+        while ((de = ReadDir(dir, "pg_xlog")) != NULL) {
+            /* Does it look like a WAL segment, and is it in the range? */
+            if (strlen(de->d_name) == 24 && strspn(de->d_name, "0123456789ABCDEF") == 24 &&
+                strcmp(de->d_name + 8, firstoff + 8) >= 0 && strcmp(de->d_name + 8, lastoff + 8) <= 0) {
+                walFileList = lappend(walFileList, pstrdup(de->d_name));
+            } else if (strlen(de->d_name) == 8 + strlen(".history") && strspn(de->d_name, "0123456789ABCDEF") == 8 &&
+                       strcmp(de->d_name + 8, ".history") == 0) {
+                /* Does it look like a timeline history file? */
+                historyFileList = lappend(historyFileList, pstrdup(de->d_name));
+            }
+        }
+        FreeDir(dir);
+
+        /*
+         * Before we go any further, check that none of the WAL segments we
+         * need were removed.
+         */
+        CheckXLogRemoved(startsegno, t_thrd.xlog_cxt.ThisTimeLineID);
+
+        /*
+         * Put the WAL filenames into an array, and sort. We send the files in
+         * order from oldest to newest, to reduce the chance that a file is
+         * recycled before we get a chance to send it over.
+         */
+        nWalFiles = list_length(walFileList);
+        walFiles = (char**)palloc0(nWalFiles * sizeof(char*));
+        i = 0;
+        foreach (lc, walFileList) {
+            walFiles[i++] = (char*)lfirst(lc);
+        }
+        qsort(walFiles, nWalFiles, sizeof(char*), CompareWalFileNames);
+
+        /*
+         * There must be at least one xlog file in the pg_xlog directory,
+         * since we are doing backup-including-xlog.
+         */
+        if (nWalFiles < 1) {
+            ereport(ERROR, (errmsg("could not find any WAL files")));
+        }
+
+        /*
+         * Sanity check: the first and last segment should cover startptr and
+         * endptr, with no gaps in between.
+         */
+        XLogFromFileName(walFiles[0], &tli, &segno);
+        if (segno != startsegno) {
+            char startfname[MAXFNAMELEN];
+
+            XLogFileName(startfname, t_thrd.xlog_cxt.ThisTimeLineID, startsegno);
+            ereport(ERROR, (errmsg("could not find WAL file \"%s\"", startfname)));
+        }
+        for (i = 0; i < nWalFiles; i++) {
+            XLogSegNo currsegno = segno;
+            XLogSegNo nextsegno = segno + 1;
+
+            XLogFromFileName(walFiles[i], &tli, &segno);
+            if (!(nextsegno == segno || currsegno == segno)) {
+                char nextfname[MAXFNAMELEN];
+
+                XLogFileName(nextfname, t_thrd.xlog_cxt.ThisTimeLineID, nextsegno);
+                ereport(ERROR, (errmsg("could not find WAL file \"%s\"", nextfname)));
+            }
+        }
+        if (segno != endsegno) {
+            char endfname[MAXFNAMELEN];
+
+            XLogFileName(endfname, t_thrd.xlog_cxt.ThisTimeLineID, endsegno);
+            ereport(ERROR, (errmsg("could not find WAL file \"%s\"", endfname)));
+        }
+
+        /* Ok, we have everything we need. Send the WAL files. */
+        for (i = 0; i < nWalFiles; i++) {
+            FILE* fp;
+            char buf[TAR_SEND_SIZE];
+            size_t cnt;
+            pgoff_t len = 0;
+
+            snprintf(pathbuf, MAXPGPATH, XLOGDIR "/%s", walFiles[i]);
+            XLogFromFileName(walFiles[i], &tli, &segno);
+
+            fp = AllocateFile(pathbuf, "rb");
+            if (fp == NULL) {
+                int save_errno = errno;
+
+                /*
+                 * Most likely reason for this is that the file was already
+                 * removed by a checkpoint, so check for that to get a better
+                 * error message.
+                 */
+                CheckXLogRemoved(segno, tli);
+
+                errno = save_errno;
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", pathbuf)));
+            }
+
+            if (fstat(fileno(fp), &statbuf) != 0) {
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathbuf)));
+            }
+            if (statbuf.st_size != XLogSegSize) {
+                CheckXLogRemoved(segno, tli);
+                ereport(ERROR, (errcode_for_file_access(), errmsg("unexpected WAL file size \"%s\"", walFiles[i])));
+            }
+
+            /* send the WAL file itself */
+            _tarWriteHeader(pathbuf, NULL, &statbuf);
+
+            while ((cnt = fread(buf, 1, Min((uint32)sizeof(buf), XLogSegSize - len), fp)) > 0) {
+                CheckXLogRemoved(segno, tli);
+                /* Send the chunk as a CopyData message */
+                if (pq_putmessage('d', buf, cnt)) {
+                    ereport(ERROR, (errmsg("base backup could not send data, aborting backup")));
+                }
+
+                len += cnt;
+
+                if (len == XLogSegSize)
+                    break;
+            }
+
+            if (len != XLogSegSize) {
+                CheckXLogRemoved(segno, tli);
+                ereport(ERROR, (errcode_for_file_access(), errmsg("unexpected WAL file size \"%s\"", walFiles[i])));
+            }
+
+            /* XLogSegSize is a multiple of 512, so no need for padding */
+            FreeFile(fp);
+
+            /*
+             * Mark file as archived, otherwise files can get archived again
+             * after promotion of a new node. This is in line with
+             * walreceiver.c always doing a XLogArchiveForceDone() after a
+             * complete segment.
+             */
+            StatusFilePath(pathbuf, walFiles[i], ".done");
+            sendFileWithContent(pathbuf, "");
+        }
+
+        /*
+         * Send timeline history files too. Only the latest timeline history
+         * file is required for recovery, and even that only if there happens
+         * to be a timeline switch in the first WAL segment that contains the
+         * checkpoint record, or if we're taking a base backup from a standby
+         * server and the target timeline changes while the backup is taken.
+         * But they are small and highly useful for debugging purposes, so
+         * better include them all, always.
+         */
+        foreach (lc, historyFileList) {
+            char* fname = (char*)lfirst(lc);
+
+            snprintf(pathbuf, MAXPGPATH, XLOGDIR "/%s", fname);
+
+            if (lstat(pathbuf, &statbuf) != 0)
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathbuf)));
+
+            sendFile(pathbuf, pathbuf, &statbuf, false);
+
+            /* unconditionally mark file as archived */
+            StatusFilePath(pathbuf, fname, ".done");
+            sendFileWithContent(pathbuf, "");
+        }
+
+        /* Send CopyDone message for the last tar file */
+        pq_putemptymessage('c');
+    }
+    SendXlogRecPtrResult(endptr);
     LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
     XlogCopyStartPtr = InvalidXLogRecPtr;
     LWLockRelease(FullBuildXlogCopyStartPtrLock);
+}
+
+/*
+ * list_sort comparison function, to compare log/seg portion of WAL segment
+ * filenames, ignoring the timeline portion.
+ */
+static int CompareWalFileNames(const void* a, const void* b)
+{
+    char* fna = *((char**)a);
+    char* fnb = *((char**)b);
+
+    return strcmp(fna + 8, fnb + 8);
 }
 
 /*
@@ -430,23 +598,17 @@ void PerformMotCheckpointFetch()
         }
 
         if (getcwd(cwd, sizeof(cwd)) == NULL) {
-            ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("could not get current work dir : %m")));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not get current work dir : %m")));
         }
 
         chkptDir = MOTCheckpointFetchDirName();
         if (chkptDir == NULL) {
-            ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("could not get mot checkpoint dir : %m")));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not get mot checkpoint dir : %m")));
         }
 
         workingDir = MOTCheckpointFetchWorkingDir();
         if (workingDir == NULL) {
-            ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("could not get mot checkpoint working dir : %m")));
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not get mot checkpoint working dir : %m")));
         }
 
         if (strncmp(cwd, workingDir, strlen(workingDir) - 1) == 0) {
@@ -482,14 +644,13 @@ void PerformMotCheckpointFetch()
             struct stat statbuf;
             if (lstat(ctrlFilePath, &statbuf) != 0) {
                 ereport(ERROR,
-                    (errcode_for_file_access(),
-                        errmsg("could not stat mot control file \"%s\": %m", ctrlFilePath)));
+                    (errcode_for_file_access(), errmsg("could not stat mot control file \"%s\": %m", ctrlFilePath)));
             }
 
             sendFile((char*)ctrlFilePath, (char*)ctrlFilePath, &statbuf, false);
 
             /* send the checkpoint dir */
-            sendDir(fullChkptDir, 1, false, NIL, false);
+            sendDir(fullChkptDir, 1, false, NIL, false, false);
 
             /* CopyDone */
             pq_putemptymessage_noblock('c');
@@ -510,6 +671,7 @@ static void parse_basebackup_options(List* options, basebackup_options* opt)
     bool o_fast = false;
     bool o_nowait = false;
     bool o_wal = false;
+    bool o_tablespace_map = false;
     errno_t rc = 0;
 
     rc = memset_s(opt, sizeof(*opt), 0, sizeof(*opt));
@@ -542,6 +704,11 @@ static void parse_basebackup_options(List* options, basebackup_options* opt)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("duplicate option \"%s\"", defel->defname)));
             opt->includewal = true;
             o_wal = true;
+        } else if (strcmp(defel->defname, "tablespace_map") == 0) {
+            if (o_tablespace_map)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("duplicate option \"%s\"", defel->defname)));
+            opt->sendtblspcmapfile = true;
+            o_tablespace_map = true;
         } else
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
     }
@@ -722,7 +889,7 @@ static void SendMotCheckpointHeader(const char* path)
     if (path != NULL) {
         /* Send one datarow message */
         pq_beginmessage(&buf, 'D');
-        pq_sendint16(&buf, 1); /* number of columns */
+        pq_sendint16(&buf, 1);            /* number of columns */
         pq_sendint32(&buf, strlen(path)); /* length */
         pq_sendbytes(&buf, path, strlen(path));
         pq_endmessage_noblock(&buf);
@@ -818,7 +985,7 @@ static void sendFileWithContent(const char* filename, const char* content)
  *
  * Only used to send auxiliary tablespaces, not GAUSSDATA.
  */
-static int64 sendTablespace(const char* path, bool sizeonly)
+int64 sendTablespace(const char* path, bool sizeonly)
 {
     int64 size = 0;
     char pathbuf[MAXPGPATH] = {0};
@@ -857,7 +1024,7 @@ static int64 sendTablespace(const char* path, bool sizeonly)
     size = 512; /* Size of the header just added */
 
     /* Send all the files in the tablespace version directory */
-    size += sendDir(pathbuf, strlen(path), sizeonly, NIL);
+    size += sendDir(pathbuf, strlen(path), sizeonly, NIL, true);
 
     return size;
 }
@@ -870,7 +1037,8 @@ static int64 sendTablespace(const char* path, bool sizeonly)
  * Omit any directory in the tablespaces list, to avoid backing up
  * tablespaces twice when they were created inside PGDATA.
  */
-static int64 sendDir(const char* path, int basepathlen, bool sizeonly, List* tablespaces, bool skipmot)
+static int64 sendDir(
+    const char* path, int basepathlen, bool sizeonly, List* tablespaces, bool sendtblspclinks, bool skipmot)
 {
     DIR* dir = NULL;
     struct dirent* de = NULL;
@@ -1070,9 +1238,50 @@ static int64 sendDir(const char* path, int basepathlen, bool sizeonly, List* tab
                 }
             }
             size += 512; /* Size of the header just added */
+            if (!sizeonly) {
+#ifndef WIN32
+                if (S_ISLNK(statbuf.st_mode)) {
+#else
+                if (pgwin32_is_junction(pathbuf)) {
+#endif
+#if defined(HAVE_READLINK) || defined(WIN32)
+                    char linkpath[MAXPGPATH] = {0};
+                    int rllen;
+
+                    rllen = readlink(pathbuf, linkpath, sizeof(linkpath));
+                    if (rllen < 0)
+                        ereport(ERROR,
+                            (errcode_for_file_access(), errmsg("could not read symbolic link \"%s\": %m", pathbuf)));
+                    if (rllen >= (int)sizeof(linkpath))
+                        ereport(ERROR,
+                            (errcode(ERRCODE_NAME_TOO_LONG),
+                                errmsg("symbolic link \"%s\" target is too long", pathbuf)));
+                    linkpath[MAXPGPATH - 1] = '\0';
+                    _tarWriteHeader(pathbuf + basepathlen + 1, linkpath, &statbuf);
+#else
+                    /*
+                     * If the platform does not have symbolic links, it should not be
+                     * possible to have tablespaces - clearly somebody else created
+                     * them. Warn about it and ignore.
+                     */
+                    ereport(WARNING,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("tablespaces are not supported on this platform")));
+                    continue;
+#endif /* HAVE_READLINK */
+
+                } else if (S_ISDIR(statbuf.st_mode)) {
+                    /*
+                     * Also send archive_status directory (by hackishly reusing
+                     * statbuf from above ...).
+                     */
+                    statbuf.st_mode = S_IFDIR | S_IRWXU;
+                    _tarWriteHeader("pg_xlog/archive_status", NULL, &statbuf);
+                }
+            }
+            size += 512; /* Size of the header just added */
             continue;    /* don't recurse into pg_xlog */
         }
-
         /* Allow symbolic links in pg_tblspc only */
         if (strcmp(path, "./pg_tblspc") == 0 &&
 #ifndef WIN32
@@ -1137,8 +1346,13 @@ static int64 sendDir(const char* path, int basepathlen, bool sizeonly, List* tab
                     break;
                 }
             }
+            /*
+             * skip sending directories inside pg_tblspc, if not required.
+             */
+            if (strcmp(pathbuf, "./pg_tblspc") == 0 && !sendtblspclinks)
+                skip_this_dir = true;
             if (!skip_this_dir)
-                size += sendDir(pathbuf, basepathlen, sizeonly, tablespaces);
+                size += sendDir(pathbuf, basepathlen, sizeonly, tablespaces, sendtblspclinks);
         } else if (S_ISREG(statbuf.st_mode)) {
             bool sent = false;
 
@@ -1191,19 +1405,16 @@ bool check_base_path(const char* fname, int* segNo)
     if (nmatch == MATCH_FOUR) {
         return false;
     }
-    nmatch = sscanf_s(fname, "base/%u/%u_b%d.%u",
-                    &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+    nmatch = sscanf_s(fname, "base/%u/%u_b%d.%u", &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
     if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
         return true;
     }
 
-    nmatch = sscanf_s(fname, "base/%u/%u_b%d_vm.%u",
-                    &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+    nmatch = sscanf_s(fname, "base/%u/%u_b%d_vm.%u", &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
     if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
         return true;
     }
-    nmatch = sscanf_s(fname, "base/%u/%u_b%d_fsm.%u",
-                    &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+    nmatch = sscanf_s(fname, "base/%u/%u_b%d_fsm.%u", &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
     if (nmatch == MATCH_THREE || nmatch == MATCH_FOUR) {
         return true;
     }
@@ -1248,20 +1459,41 @@ bool check_rel_tblspac_path(const char* fname, int* segNo)
         return false;
     }
 
-    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u_b%d.%u",
-                 &rnode.spcNode, buf, sizeof(buf), &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+    nmatch = sscanf_s(fname,
+        "pg_tblspc/%u/%[^/]/%u/%u_b%d.%u",
+        &rnode.spcNode,
+        buf,
+        sizeof(buf),
+        &rnode.dbNode,
+        &rnode.relNode,
+        &rnode.bucketNode,
+        segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
-    
-    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u_b%d_fsm.%u",
-                &rnode.spcNode, buf, sizeof(buf), &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+
+    nmatch = sscanf_s(fname,
+        "pg_tblspc/%u/%[^/]/%u/%u_b%d_fsm.%u",
+        &rnode.spcNode,
+        buf,
+        sizeof(buf),
+        &rnode.dbNode,
+        &rnode.relNode,
+        &rnode.bucketNode,
+        segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
-    
-    nmatch = sscanf_s(fname, "pg_tblspc/%u/%[^/]/%u/%u_b%d_vm.%u",
-                &rnode.spcNode, buf, sizeof(buf), &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+
+    nmatch = sscanf_s(fname,
+        "pg_tblspc/%u/%[^/]/%u/%u_b%d_vm.%u",
+        &rnode.spcNode,
+        buf,
+        sizeof(buf),
+        &rnode.dbNode,
+        &rnode.relNode,
+        &rnode.bucketNode,
+        segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
@@ -1320,20 +1552,38 @@ bool check_abs_tblspac_path(const char* fname, int* segNo)
     if (nmatch == MATCH_SIX) {
         return false;
     }
-    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_b%d.%u",
-                buf, sizeof(buf), &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+    nmatch = sscanf_s(fname,
+        "PG_9.2_201611171_%[^/]/%u/%u_b%d.%u",
+        buf,
+        sizeof(buf),
+        &rnode.dbNode,
+        &rnode.relNode,
+        &rnode.bucketNode,
+        segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
 
-    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_b%d_fsm.%u",
-                buf, sizeof(buf), &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+    nmatch = sscanf_s(fname,
+        "PG_9.2_201611171_%[^/]/%u/%u_b%d_fsm.%u",
+        buf,
+        sizeof(buf),
+        &rnode.dbNode,
+        &rnode.relNode,
+        &rnode.bucketNode,
+        segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
 
-    nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_b%d_vm.%u",
-                buf, sizeof(buf), &rnode.dbNode, &rnode.relNode, &rnode.bucketNode, segNo);
+    nmatch = sscanf_s(fname,
+        "PG_9.2_201611171_%[^/]/%u/%u_b%d_vm.%u",
+        buf,
+        sizeof(buf),
+        &rnode.dbNode,
+        &rnode.relNode,
+        &rnode.bucketNode,
+        segNo);
     if (nmatch == MATCH_FIVE || nmatch == MATCH_SIX) {
         return true;
     }
@@ -1450,7 +1700,7 @@ static bool sendFile(char* readfilename, char* tarfilename, struct stat* statbuf
     ereport(DEBUG1, (errmsg("sendFile, filename is %s, isNeedCheck is %d", readfilename, isNeedCheck)));
 
     /* make sure data file size is integer multiple of BLCKSZ and change statbuf if needed */
-    if(isNeedCheck) {
+    if (isNeedCheck) {
         statbuf->st_size = statbuf->st_size - (statbuf->st_size % BLCKSZ);
     }
 
@@ -1461,20 +1711,21 @@ static bool sendFile(char* readfilename, char* tarfilename, struct stat* statbuf
         if (t_thrd.walsender_cxt.walsender_ready_to_stop)
             ereport(ERROR, (errcode_for_file_access(), errmsg("base backup receive stop message, aborting backup")));
     recheck:
-        if (cnt != (size_t) Min(TAR_SEND_SIZE, statbuf->st_size - len)) {
+        if (cnt != (size_t)Min(TAR_SEND_SIZE, statbuf->st_size - len)) {
             if (ferror(fp)) {
-                ereport(ERROR,
-                   (errcode_for_file_access(),
-                   errmsg("could not read file \"%s\": %m", readfilename)));
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", readfilename)));
             }
         }
         if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && isNeedCheck) {
             /* len and cnt must be integer multiple of BLCKSZ. */
             if (len % BLCKSZ != 0 || cnt % BLCKSZ != 0) {
                 ereport(ERROR,
-                   (errcode_for_file_access(),
-                   errmsg("base backup file length cannot be divisibed by 8k: file %s, len %ld, cnt %ld, aborting backup",
-                   readfilename, len, cnt)));
+                    (errcode_for_file_access(),
+                        errmsg("base backup file length cannot be divisibed by 8k: file %s, len %ld, cnt %ld, aborting "
+                               "backup",
+                            readfilename,
+                            len,
+                            cnt)));
             }
             for (check_loc = 0; (unsigned int)(check_loc) < cnt; check_loc += BLCKSZ) {
                 blkno = len / BLCKSZ + check_loc / BLCKSZ + (segNo * ((BlockNumber)RELSEG_SIZE));
@@ -1496,9 +1747,12 @@ static bool sendFile(char* readfilename, char* tarfilename, struct stat* statbuf
                         goto recheck;
                     } else if (cnt > 0 && retryCnt == MAX_RETRY_LIMIT) {
                         ereport(ERROR,
-                           (errcode_for_file_access(),
-                           errmsg("base backup cheksum failed in file \"%s\"(computed: %d, recorded: %d), aborting backup",
-                           readfilename, checksum, phdr->pd_checksum)));
+                            (errcode_for_file_access(),
+                                errmsg("base backup cheksum failed in file \"%s\"(computed: %d, recorded: %d), "
+                                       "aborting backup",
+                                    readfilename,
+                                    checksum,
+                                    phdr->pd_checksum)));
                     } else {
                         retryCnt = 0;
                         break;

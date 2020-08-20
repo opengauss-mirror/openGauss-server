@@ -126,6 +126,7 @@ extern Oid get_tablespace_oid(const char* tablespacename, bool missing_ok);
 extern char* get_tablespace_name(Oid spc_oid);
 
 extern bool directory_is_empty(const char* path);
+extern void remove_tablespace_symlink(const char *linkloc);
 extern void check_create_dir(char* location);
 
 extern void tblspc_redo(XLogReaderState* rptr);

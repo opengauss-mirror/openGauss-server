@@ -19,6 +19,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = binaryheap.o ilist.o dllist.o stringinfo.o bipartite_match.o hyperloglog.o
+OBJS = binaryheap.o ilist.o dllist.o stringinfo.o bipartite_match.o hyperloglog.o string.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

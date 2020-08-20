@@ -110,12 +110,12 @@ static void CheckTablespaceOptions(const Oid tablespaceOid, Datum options);
 
 Datum CanonicalizeTablespaceOptions(Datum datum);
 
-#define CANONICALIZE_PATH(path)         \
-    do {                                \
-        if (NULL != (path)) {           \
-            path = pstrdup(path);       \
-            canonicalize_path(path);    \
-        }                               \
+#define CANONICALIZE_PATH(path)      \
+    do {                             \
+        if (NULL != (path)) {        \
+            path = pstrdup(path);    \
+            canonicalize_path(path); \
+        }                            \
     } while (0)
 
 /*
@@ -344,7 +344,7 @@ static bool parse_maxsize(const char* value, int64* result, const char** hintmsg
 
             endptr += 1;
             val *= KB_PER_TB;
-        } else if (*endptr == 'P'|| *endptr == 'p') {
+        } else if (*endptr == 'P' || *endptr == 'p') {
             if (val > MAX_PB_VALUE) {
                 appendStringInfo(&buf, "Value exceeds max size %ld with unit PB", MAX_PB_VALUE);
                 *hintmsg = buf.data;
@@ -1141,7 +1141,8 @@ static void create_tablespace_directories(const char* location, const Oid tables
                 (errcode(ERRCODE_UNDEFINED_FILE),
                     errmsg("directory \"%s\" does not exist", location),
                     t_thrd.xlog_cxt.InRecovery ? errhint("Create this directory for the tablespace before "
-                    "restarting the server.") : 0));
+                                                         "restarting the server.")
+                                               : 0));
         else
             ereport(ERROR,
                 (errcode_for_file_access(), errmsg("could not set permissions on directory \"%s\": %m", location)));
@@ -1326,7 +1327,7 @@ void CreateExternalDirectories(const Oid tablespaceOid, Datum options)
     srvOptions = (DfsSrvOptions*)palloc0(sizeof(DfsSrvOptions));
     srvOptions->filesystem = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_FILESYSTEM);
 
-    if (srvOptions->filesystem == NULL||
+    if (srvOptions->filesystem == NULL ||
         0 != pg_strncasecmp(srvOptions->filesystem, FILESYSTEM_HDFS, strlen(srvOptions->filesystem))) {
         pfree_ext(srvOptions);
         return;
@@ -1710,6 +1711,47 @@ bool directory_is_empty(const char* path)
 
     FreeDir(dirdesc);
     return true;
+}
+
+/*
+ *  remove_tablespace_symlink
+ *
+ * This function removes symlinks in pg_tblspc.  On Windows, junction points
+ * act like directories so we must be able to apply rmdir.  This function
+ * works like the symlink removal code in destroy_tablespace_directories,
+ * except that failure to remove is always an ERROR.  But if the file doesn't
+ * exist at all, that's OK.
+ */
+void remove_tablespace_symlink(const char* linkloc)
+{
+    struct stat st;
+
+    if (lstat(linkloc, &st) < 0) {
+        if (errno == ENOENT)
+            return;
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", linkloc)));
+    }
+
+    if (S_ISDIR(st.st_mode)) {
+        /*
+         * This will fail if the directory isn't empty, but not if it's a
+         * junction point.
+         */
+        if (rmdir(linkloc) < 0 && errno != ENOENT)
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", linkloc)));
+    }
+#ifdef S_ISLNK
+    else if (S_ISLNK(st.st_mode)) {
+        if (unlink(linkloc) < 0 && errno != ENOENT)
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove symbolic link \"%s\": %m", linkloc)));
+    }
+#endif
+    else {
+        /* Refuse to remove anything that's not a directory or symlink */
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("\"%s\" is not a directory or symbolic link", linkloc)));
+    }
 }
 
 /*
@@ -2551,12 +2593,10 @@ void xlog_create_tblspc(Oid ts_id, char* ts_path, bool isRelativePath)
         errno_t rc = EOK;
 
         if (t_thrd.proc_cxt.DataDir[strlen(t_thrd.proc_cxt.DataDir)] == '/') {
-            rc = snprintf_s(
-                location, len, len - 1, "%s%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, ts_path);
+            rc = snprintf_s(location, len, len - 1, "%s%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, ts_path);
             securec_check_ss(rc, "\0", "\0");
         } else {
-            rc = snprintf_s(
-                location, len, len - 1, "%s/%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, ts_path);
+            rc = snprintf_s(location, len, len - 1, "%s/%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, ts_path);
             securec_check_ss(rc, "\0", "\0");
         }
     }
@@ -2621,8 +2661,8 @@ void tblspc_redo(XLogReaderState* record)
                         errhint("You can remove the directories manually if necessary.")));
         }
     } else {
-        ereport(PANIC, 
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("tblspc_redo: unknown op code %u", (uint)info)));
+        ereport(
+            PANIC, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("tblspc_redo: unknown op code %u", (uint)info)));
     }
 
     t_thrd.xlog_cxt.needImmediateCkp = true;
@@ -2718,7 +2758,7 @@ inline void TableSpaceUsageManager::ResetUsageSlot(TableSpaceUsageSlot* info)
  * 2. the bucket must have been locked
  */
 inline void TableSpaceUsageManager::ResetBucket(TableSpaceUsageBucket* bucket)
-{ 
+{
     for (int counter = 0; counter < TABLESPACE_BUCKET_CONFLICT_LISTLEN; counter++) {
         TableSpaceUsageManager::ResetUsageSlot(&bucket->spcUsage[counter]);
     }
