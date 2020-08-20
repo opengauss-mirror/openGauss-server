@@ -490,8 +490,7 @@ void RecoveryManager::InsertRow(uint64_t tableId, uint64_t exId, char* keyData, 
 
     Key* key = nullptr;
     MOT::Index* ix = nullptr;
-
-    mot_vector<Key*> cleanupKeys;
+    MOT::Key* cleanupKeys[table->GetNumIndexes()] = {nullptr};
     ix = table->GetPrimaryIndex();
     key = MOTCurrTxn->GetTxnKey(ix);
     if (key == nullptr) {
@@ -500,7 +499,7 @@ void RecoveryManager::InsertRow(uint64_t tableId, uint64_t exId, char* keyData, 
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recover Insert Row", "Failed to create primary key");
         return;
     }
-    cleanupKeys.push_back(key);
+    cleanupKeys[0] = key;
     if (ix->IsFakePrimary()) {
         row->SetSurrogateKey(*(uint64_t*)keyData);
         sState.UpdateMaxKey(rowId);
@@ -516,15 +515,18 @@ void RecoveryManager::InsertRow(uint64_t tableId, uint64_t exId, char* keyData, 
                 "Recover Insert Row",
                 "Failed to create key for secondary index %s",
                 ix->GetName().c_str());
-            std::for_each(cleanupKeys.begin(), cleanupKeys.end(), [](Key*& key) { MOTCurrTxn->DestroyTxnKey(key); });
+            for (uint16_t j = 0; j < table->GetNumIndexes(); j++) {
+                if (cleanupKeys[j] != nullptr) {
+                    MOTCurrTxn->DestroyTxnKey(cleanupKeys[j]);
+                }
+            }
             MOTCurrTxn->Rollback();
             return;
         }
-        cleanupKeys.push_back(key);
+        cleanupKeys[i] = key;
         ix->BuildKey(table, row, key);
         MOTCurrTxn->GetNextInsertItem()->SetItem(row, ix, key);
     }
-    cleanupKeys.clear();  // subsequent call to insert row takes care of key cleanup
     status = MOTCurrTxn->InsertRow(row);
 
     if (insertLocked == true) {
@@ -786,7 +788,9 @@ void RecoveryManager::DropIndex(char* data, RC& status)
     if (index == nullptr) {
         res = RC_INDEX_NOT_FOUND;
     } else {
+        table->WrLock();
         res = MOTCurrTxn->DropIndex(index);
+        table->Unlock();
     }
     if (res != RC_OK) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,

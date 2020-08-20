@@ -1136,11 +1136,23 @@ RC TxnManager::DropTable(Table* table)
         if (ddl_access->GetDDLAccessType() == DDL_ACCESS_CREATE_TABLE) {
             // this table was created in this transaction, can delete it from the ddl_access
             m_txnDdlAccess->EraseByOid(table->GetTableExId());
+            // check for create and drop index ddls
+            for (uint16_t i = 0; i < table->GetNumIndexes(); i++) {
+                m_txnDdlAccess->EraseByOid(table->GetIndex(i)->GetExtId());
+            }
+            // erase drop fake primary index if exists
+            TxnDDLAccess::DDLAccess* iddl = m_txnDdlAccess->GetByOid(table->GetTableExId() + 1);
+            if (iddl != nullptr) {
+                MOT::Index* ix = (MOT::Index*)iddl->GetEntry();
+                GcManager::ClearIndexElements(ix->GetIndexId());
+                table->DeletePrimaryIndex(ix);
+            }
             table->DropImpl();
             RemoveTableFromStat(table);
             delete table;
         } else if (ddl_access->GetDDLAccessType() == DDL_ACCESS_TRUNCATE_TABLE) {
             Index** indexes = (Index**)ddl_access->GetEntry();
+            table->WrLock();
             for (int i = 0; i < table->GetNumIndexes(); i++) {
                 Index* newIndex = table->m_indexes[i];
                 Index* oldIndex = indexes[i];
@@ -1153,6 +1165,7 @@ RC TxnManager::DropTable(Table* table)
                 // assumption is the we deleted all rows
                 delete newIndex;
             }
+            table->Unlock();
             delete[] indexes;
             m_txnDdlAccess->EraseByOid(table->GetTableExId());
             m_txnDdlAccess->Add(new_ddl_access);
