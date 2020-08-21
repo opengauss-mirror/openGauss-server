@@ -1365,6 +1365,7 @@ static void knl_t_perf_snap_init(knl_t_perf_snap_context* perf_snap_cxt)
     perf_snap_cxt->cancel_request = 0;
     perf_snap_cxt->request_snapshot = false;
     perf_snap_cxt->res = NULL;
+    perf_snap_cxt->is_mem_protect = false;
 }
 
 static void knl_t_stat_init(knl_t_stat_context* stat_cxt)

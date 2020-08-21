@@ -2643,6 +2643,7 @@ typedef struct knl_t_perf_snap_context {
     uint64 curr_snapid;      // snapid is Increasing
     MemoryContext PerfSnapMemCxt;
     volatile bool request_snapshot;
+    volatile bool is_mem_protect;
 } knl_t_perf_snap_context;
 
 /* Default send interval is 1s */

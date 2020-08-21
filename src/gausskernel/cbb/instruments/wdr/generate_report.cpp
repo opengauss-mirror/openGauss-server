@@ -3979,6 +3979,7 @@ static bool IsSnapIdValid(report_params* params)
  */
 static void check_report_parameter(report_params* params)
 {
+    const char *currentNodeName = NULL;
     if (params == NULL) {
         return;
     }
@@ -4008,9 +4009,17 @@ static void check_report_parameter(report_params* params)
             (errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("invalid report scope, should be %s or %s", g_clusterScope, g_nodeScope)));
     }
+    /* Checking PGXCNodeName just for supporting openGauss
+     * It should be changed to check the node name's oid isValid in distributed version.
+     */
+    if (!g_instance.attr.attr_common.PGXCNodeName || g_instance.attr.attr_common.PGXCNodeName[0] == '\0') {
+        currentNodeName = "unknown name";
+    }
+    currentNodeName = g_instance.attr.attr_common.PGXCNodeName;
 
     if ((strncmp(params->report_scope, g_nodeScope, strlen(g_nodeScope)) == 0) &&
-        ((params->report_node == NULL) || !OidIsValid(get_pgxc_nodeoid(params->report_node)))) {
+        ((params->report_node == NULL) || 
+        strncmp(params->report_node, currentNodeName, strlen(currentNodeName)) != 0)) {
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("invalid report node name.")));
     }
 }
