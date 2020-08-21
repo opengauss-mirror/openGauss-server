@@ -36,6 +36,9 @@ then
 elif [ -f "/etc/openEuler-release" ]
 then
 	kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/os-release" ]
+then
+	kernel=$(source /etc/os-release; echo $ID)
 else
 	kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
 fi
@@ -132,6 +135,14 @@ then
     plat_form_str=openeuler_"$cpu_bit"
 fi
 
+##################################################################################
+# neokylin platform
+# the result form like this: neokylin_aarch64
+##################################################################################
+if [ "$kernel"x = "neokylin"x ]
+then
+    plat_form_str=neokylin_"$cpu_bit"
+fi
 
 ##################################################################################
 #
