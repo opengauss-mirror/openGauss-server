@@ -2042,6 +2042,52 @@ static Datum ExecMakeFunctionResultNoSets(
     PgStat_FunctionCallUsage fcusage;
     int i;
     int* var_dno = NULL;
+    FunctionScanState* node = NULL;
+    HeapTuple tup;
+    FuncExpr* fexpr = NULL;
+    bool savedIsStp = u_sess->SPI_cxt.is_stp;
+    bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
+    bool proIsProcedure = false;
+    bool supportTransaction = false;
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR) {
+        supportTransaction = true;
+    }
+#else
+    supportTransaction = true;
+#endif
+
+    if (supportTransaction && IsA(fcache->xprstate.expr, FuncExpr)) {
+        fexpr = (FuncExpr*)(fcache->xprstate.expr);
+        node = makeNode(FunctionScanState);
+        node->atomic = (!u_sess->SPI_cxt.is_toplevel_stp || IsTransactionBlock());
+
+        /*
+         * If proconfig is set we can't allow transaction commands because of the
+         * way the GUC stacking works. The transaction boundary would have to pop
+         * the proconfig setting off the stack. That restriction could be lefted
+         * by redesigning the GUC nesting mechanism a bit.
+         */
+        Relation relation = heap_open(ProcedureRelationId, AccessShareLock);
+        tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+        if (!HeapTupleIsValid(tup)) {
+            elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
+        }
+
+        if (!heap_attisnull(tup, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
+            u_sess->SPI_cxt.is_proconfig_set = true;
+            node->atomic = true;
+        }
+
+        proIsProcedure = PROC_IS_PRO(((Form_pg_proc)GETSTRUCT(tup))->prokind);
+
+        heap_close(relation, AccessShareLock);
+
+        /* If proisprocedure is true means it was a stored procedure. */
+        u_sess->SPI_cxt.is_stp = savedIsStp && proIsProcedure;
+        ReleaseSysCache(tup);
+    }
 
     /* Guard against stack overflow due to overly complex expressions */
     check_stack_depth();
@@ -2057,6 +2103,10 @@ static Datum ExecMakeFunctionResultNoSets(
 
     /* init the number of arguments to a function*/
     InitFunctionCallInfoArgs(*fcinfo, list_length(fcache->args), 1);
+
+    if (supportTransaction) {
+        fcinfo->context = (Node*)node;
+    }
 
     if (has_cursor_return) {
         /* init returnCursor to store out-args cursor info on ExprContext*/
@@ -2152,6 +2202,9 @@ static Datum ExecMakeFunctionResultNoSets(
             pfree_ext(var_dno);
     }
 
+    u_sess->SPI_cxt.is_stp = savedIsStp;
+    u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+
     return result;
 }
 
@@ -2234,8 +2287,52 @@ Tuplestorestate* ExecMakeTableFunctionResult(
     bool first_time = true;
     int* var_dno = NULL;
     bool has_refcursor = false;
+    HeapTuple tup;
+    FuncExpr* fexpr = NULL;
+    bool savedIsStp = u_sess->SPI_cxt.is_stp;
+    bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
+    bool proIsProcedure = false;
+    bool supportTransaction = false;
 
     callerContext = CurrentMemoryContext;
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR) {
+        supportTransaction = true;
+    }
+#else
+    supportTransaction = true;
+#endif
+
+    if (supportTransaction && IsA(funcexpr->expr, FuncExpr)) {
+        fexpr = (FuncExpr*)(funcexpr->expr);
+        node->atomic = (!u_sess->SPI_cxt.is_toplevel_stp || IsTransactionBlock());
+
+        /*
+         * If proconfig is set we can't allow transaction commands because of the
+         * way the GUC stacking works. The transaction boundary would have to pop
+         * the proconfig setting off the stack. That restriction could be lefted
+         * by redesigning the GUC nesting mechanism a bit.
+         */
+        Relation relation = heap_open(ProcedureRelationId, AccessShareLock);
+        tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+        if (!HeapTupleIsValid(tup)) {
+            elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
+        }
+
+        if (!heap_attisnull(tup, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
+            u_sess->SPI_cxt.is_proconfig_set = true;
+            node->atomic = true;
+        }
+
+        proIsProcedure = PROC_IS_PRO(((Form_pg_proc)GETSTRUCT(tup))->prokind);
+
+        heap_close(relation, AccessShareLock);
+
+        /* If proisprocedure is true means it was a stored procedure. */
+        u_sess->SPI_cxt.is_stp = savedIsStp && proIsProcedure;
+        ReleaseSysCache(tup);
+    } 
 
     if (unlikely(funcexpr == NULL)) {
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The input function expression is NULL.")));
@@ -2351,7 +2448,11 @@ Tuplestorestate* ExecMakeTableFunctionResult(
     } else {
         /* Treat funcexpr as a generic expression */
         direct_function_call = false;
-        InitFunctionCallInfoData(fcinfo, NULL, 0, InvalidOid, NULL, NULL);
+        if (supportTransaction) {
+            InitFunctionCallInfoData(fcinfo, NULL, 0, InvalidOid, (Node*)node, NULL);
+        } else {
+            InitFunctionCallInfoData(fcinfo, NULL, 0, InvalidOid, NULL, NULL);
+        }
     }
 
     /*
@@ -2591,6 +2692,9 @@ no_function_result:
         if (var_dno != NULL)
             pfree_ext(var_dno);
     }
+
+    u_sess->SPI_cxt.is_stp = savedIsStp;
+    u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
 
     /* All done, pass back the tuplestore */
     return rsinfo.setResult;

@@ -183,6 +183,14 @@ typedef struct knl_u_SPI_context {
     struct _SPI_connection* _stack;
 
     struct _SPI_connection* _current;
+
+    bool is_toplevel_stp;
+
+    bool is_stp;
+
+    bool is_proconfig_set;
+
+    int portal_stp_exception_counter;
 } knl_u_SPI_context;
 
 typedef struct knl_u_index_context {

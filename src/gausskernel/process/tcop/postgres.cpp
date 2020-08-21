@@ -44,6 +44,7 @@
 #include "catalog/pg_authid.h"
 #include "commands/async.h"
 #include "commands/prepare.h"
+#include "executor/spi.h"
 #include "commands/user.h"
 #include "commands/vacuum.h"
 #ifdef PGXC
@@ -93,6 +94,7 @@
 #include "mb/pg_wchar.h"
 #include "pgaudit.h"
 #include "auditfuncs.h"
+#include "funcapi.h"
 #ifdef PGXC
 #include "storage/procarray.h"
 #include "pgxc/pgxc.h"
@@ -2039,6 +2041,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
      * significant to PreventTransactionChain.)
      */
     isTopLevel = (list_length(parsetree_list) == 1);
+    u_sess->SPI_cxt.is_toplevel_stp = isTopLevel;
 
     if (isTopLevel != 1)
         t_thrd.explain_cxt.explain_perf_mode = EXPLAIN_NORMAL;
@@ -2477,6 +2480,12 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
     u_sess->attr.attr_sql.single_shard_stmt = false;
 
     MemoryContextDelete(OptimizerContext);
+
+    /* Reset store procedure's session variables. */
+    u_sess->SPI_cxt.is_toplevel_stp = false;
+    u_sess->SPI_cxt.is_stp = true;
+    u_sess->SPI_cxt.is_proconfig_set = false;
+    u_sess->SPI_cxt.portal_stp_exception_counter = 0;
 
     /*
      * Close down transaction statement, if one is open.
@@ -4331,6 +4340,7 @@ static void exec_execute_message(const char* portal_name, long max_rows)
     bool execute_is_fetch = false;
     bool was_logged = false;
     char msec_str[32];
+    bool savedIsTopLevelForSTP = false;
 
     gstrace_entry(GS_TRC_ID_exec_execute_message);
     /* Adjust destination to tell printtup.c what to do */
@@ -4469,6 +4479,9 @@ static void exec_execute_message(const char* portal_name, long max_rows)
     /* Check for cancel signal before we start execution */
     CHECK_FOR_INTERRUPTS();
 
+    savedIsTopLevelForSTP = u_sess->SPI_cxt.is_toplevel_stp;
+    u_sess->SPI_cxt.is_toplevel_stp = true;
+
     /*
      * Okay to run the portal.
      */
@@ -4482,6 +4495,7 @@ static void exec_execute_message(const char* portal_name, long max_rows)
         receiver,
         completionTag);
 
+    u_sess->SPI_cxt.is_toplevel_stp = savedIsTopLevelForSTP;
     (*receiver->rDestroy)(receiver);
 
     if (completed) {
@@ -7371,6 +7385,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
         gstrace_tryblock_exit(true, oldTryCounter);
 
+        u_sess->SPI_cxt.is_stp = true;
+        u_sess->SPI_cxt.is_proconfig_set = false;
+        u_sess->SPI_cxt.portal_stp_exception_counter = 0;
+
         (void)pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
         t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
         /* output the memory tracking information when error happened */
@@ -7493,6 +7511,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          * Abort the current transaction in order to recover.
          */
         AbortCurrentTransaction();
+
+        PortalErrorCleanup();
+        SPICleanup();
 
         /* Notice: at the most time it isn't necessary to call because
          *   all the LWLocks are released in AbortCurrentTransaction().

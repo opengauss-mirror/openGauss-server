@@ -1105,6 +1105,10 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
     volatile int save_nestlevel;
     PgStat_FunctionCallUsage fcusage;
 
+    /* Does not allow commit in pre setting scenary */
+    bool savedisTopLevelForSTP = u_sess->SPI_cxt.is_toplevel_stp;
+    u_sess->SPI_cxt.is_toplevel_stp = false;
+
     if (!fcinfo->flinfo->fn_extra) {
         HeapTuple tuple;
         Form_pg_proc procedureStruct;
@@ -1215,6 +1219,9 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
     if (fmgr_hook) {
         (*fmgr_hook)(FHET_END, &(fcache->flinfo), &(fcache->arg));
     }
+
+    /* restore is_toplevel_stp */
+    u_sess->SPI_cxt.is_toplevel_stp = savedisTopLevelForSTP;
 
     return result;
 }

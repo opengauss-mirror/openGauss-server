@@ -1578,6 +1578,7 @@ typedef struct knl_t_utils_context {
     struct ResourceOwnerData* CurrentResourceOwner;
     struct ResourceOwnerData* CurTransactionResourceOwner;
     struct ResourceOwnerData* TopTransactionResourceOwner;
+    struct ResourceOwnerData* StpSavedResourceOwner;
     struct ResourceReleaseCallbackItem* ResourceRelease_callbacks;
     bool SortColumnOptimize;
     struct RelationData* pRelatedRel;

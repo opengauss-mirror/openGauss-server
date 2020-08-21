@@ -239,6 +239,10 @@ static void knl_u_SPI_init(knl_u_SPI_context* spi)
     spi->_curid = -1;
     spi->_stack = NULL;
     spi->_current = NULL;
+    spi->is_toplevel_stp = false;
+    spi->is_stp = true;
+    spi->is_proconfig_set = false;
+    spi->portal_stp_exception_counter = 0;
 }
 
 static void knl_u_trigger_init(knl_u_trigger_context* tri_cxt)

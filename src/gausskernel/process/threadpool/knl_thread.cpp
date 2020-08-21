@@ -845,6 +845,7 @@ static void knl_t_utils_init(knl_t_utils_context* utils_cxt)
     utils_cxt->CurrentResourceOwner = NULL;
     utils_cxt->CurTransactionResourceOwner = NULL;
     utils_cxt->TopTransactionResourceOwner = NULL;
+    utils_cxt->StpSavedResourceOwner = NULL;
     utils_cxt->ResourceRelease_callbacks = NULL;
     utils_cxt->SortColumnOptimize = false;
     utils_cxt->pRelatedRel = NULL;

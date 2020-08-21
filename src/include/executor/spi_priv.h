@@ -28,6 +28,11 @@ typedef struct _SPI_connection {
     MemoryContext savedcxt;        /* context of SPI_connect's caller */
     SubTransactionId connectSubid; /* ID of connecting subtransaction */
     CommandDest dest;              /* identify which is the orientated caller of spi interface, analyze or normal */
+
+    /* transaction management suppoort */
+    bool atomic;                   /* atomic execution context, does not allow transactions */
+    bool internal_xact;            /* SPI-managed transaction boundary, skip cleanup */
+
     void* clientData;              /* argument to call back function */
     void (*spiCallback)(void*);    /* callback for process received data. */
 } _SPI_connection;
