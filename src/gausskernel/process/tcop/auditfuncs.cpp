@@ -732,7 +732,7 @@ static void pgaudit_ddl_synonym(const char* objectName, const char* cmdText)
     AuditResult auditResult = AUDIT_OK;
 
     Assert(cmdText);
-    if (!CHECK_AUDIT_DDL(DDL_TABLE)) {
+    if (!CHECK_AUDIT_DDL(DDL_SYNONYM)) {
         return;
     }
 
