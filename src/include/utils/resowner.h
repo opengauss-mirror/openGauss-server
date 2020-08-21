@@ -68,7 +68,7 @@ extern ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner);
 extern const char* ResourceOwnerGetName(ResourceOwner owner);
 extern void ResourceOwnerNewParent(ResourceOwner owner, ResourceOwner newparent);
 extern void RegisterResourceReleaseCallback(ResourceReleaseCallback callback, void* arg);
-extern void UnregisterResourceReleaseCallback(ResourceReleaseCallback callback, void* arg);
+extern void UnregisterResourceReleaseCallback(ResourceReleaseCallback callback, const void* arg);
 
 /* support for buffer refcount management */
 extern void ResourceOwnerEnlargeBuffers(ResourceOwner owner);
