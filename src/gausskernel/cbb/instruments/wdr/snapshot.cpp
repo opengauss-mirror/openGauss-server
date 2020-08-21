@@ -64,6 +64,7 @@
 
 const int PGSTAT_RESTART_INTERVAL = 60;
 #define MAX_INT ((unsigned)(-1) >> 1)
+#define COUNT_ARRAY_SIZE(array) (sizeof((array)) / sizeof(*(array)))
 
 using namespace std;
 
@@ -109,6 +110,49 @@ void SetThrdCxt(void);
 void AnalyzeTable(List* analyzeList);
 void GetAnalyzeList(List** analyzeList);
 char* GetTableColAttr(const char* viewname, bool onlyViewCol, bool addType);
+void InsertViewsIntoList(List* &tableList, const char** views, int viewsNum);
+/*
+ * select these views in a different database gives the same result,
+ * We just need to snapshot these views under postgres database
+ */
+const char* g_sharedViews[] = {"global_os_runtime", "global_os_threads", "global_instance_time",
+    "summary_workload_sql_count", "summary_workload_sql_elapse_time", "global_workload_transaction",
+    "summary_workload_transaction", "global_thread_wait_status",
+    "global_operator_history_table",
+    "global_operator_history", "global_operator_runtime", "global_statement_complex_history",
+    "global_statement_complex_history_table", "global_statement_complex_runtime", "global_memory_node_detail",
+    "global_shared_memory_detail",
+    "global_stat_db_cu", "global_stat_database", "summary_stat_database",
+    "global_stat_database_conflicts", "summary_stat_database_conflicts",
+    "global_stat_bad_block", "summary_stat_bad_block", "global_file_redo_iostat", "summary_file_redo_iostat",
+    "global_rel_iostat", "summary_rel_iostat", "global_file_iostat", "summary_file_iostat",
+    "global_replication_slots", "global_bgwriter_stat", "global_replication_stat",
+    "global_transactions_running_xacts", "summary_transactions_running_xacts",
+    "global_transactions_prepared_xacts", "summary_transactions_prepared_xacts", "summary_statement",
+    "global_statement_count", "summary_statement_count", "global_config_settings", "global_wait_events",
+    "summary_user_login", "global_ckpt_status", "global_double_write_status",
+    "global_pagewriter_status", "global_redo_status",
+    "global_rto_status", "global_recovery_status", "global_threadpool_status",
+    "statement_responsetime_percentile"};
+/*
+ * These views represent the state of the database in which they are located
+ * select these views in a different database gives the different result,
+ * We just need to snapshot these views under different database
+ */
+const char* g_dbRelatedViews[] = {"global_statio_all_indexes", "summary_statio_all_indexes",
+    "global_statio_all_sequences", "summary_statio_all_sequences", "global_statio_all_tables",
+    "summary_statio_all_tables", "global_statio_sys_indexes", "summary_statio_sys_indexes",
+    "global_statio_sys_sequences", "summary_statio_sys_sequences", "global_statio_sys_tables",
+    "summary_statio_sys_tables", "global_statio_user_indexes", "summary_statio_user_indexes",
+    "global_statio_user_sequences", "summary_statio_user_sequences", "global_statio_user_tables",
+    "summary_statio_user_tables", "global_stat_all_indexes", "summary_stat_all_indexes",
+    "global_stat_sys_indexes", "summary_stat_sys_indexes", "global_stat_user_tables",
+    "summary_stat_user_tables", "global_stat_user_indexes", "summary_stat_user_indexes",
+    "summary_stat_user_functions", "global_stat_user_functions"};
+
+/* At each snapshot, these views must be placed behind them for the snapshot */
+const char* g_lastDbRelatedViews[] = {"class_vital_info"};
+const char* g_lastStatViews[] = {"global_record_reset_time"};
 }  // namespace SnapshotNameSpace
 
 void instrSnapshotClean(void)
@@ -170,6 +214,46 @@ static void check_snapshot_thd_exit()
         gs_thread_exit(0);
     }
 }
+
+/*
+ * If enable_memory_limit is off,
+ * select session memory related views will report an error.
+ * The snapshot thread successfully collects global session memory information.
+ * Ensure that t_thrd.utils_cxt.gs_mp_inited of each node is true.
+ * Before each snapshot thread collects information,
+ * it will first determine whether the view related to session memory can be selected
+ */
+static bool CheckMemProtectInit()
+{
+    bool res = false;
+    MemoryContext currentCtx = CurrentMemoryContext;
+    PG_TRY();
+    {
+        errno_t rc;
+        StartTransactionCommand();
+        if ((rc = SPI_connect()) != SPI_OK_CONNECT)
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("SPI_connect failed: %s", SPI_result_code_string(rc))));
+        const char *query = "select * from DBE_PERF.global_memory_node_detail";
+        (void)SnapshotNameSpace::ExecuteQuery(query, SPI_OK_SELECT);
+        SPI_finish();
+        CommitTransactionCommand();
+        res = true;
+    }
+    PG_CATCH();
+    {
+        SPI_finish();
+        (void)MemoryContextSwitchTo(currentCtx);
+        ErrorData *edata = CopyErrorData();
+        ereport(LOG, (errmsg("Failed to snapshot global_memory_node_detail, cause: %s", edata->message)));
+        FlushErrorState();
+        FreeErrorData(edata);
+        AbortCurrentTransaction();
+    }
+    PG_END_TRY();
+    return res;
+}
+
 
 #ifdef ENABLE_MULTIPLE_NODES
 /* kill snapshot thread on all CN node */
@@ -541,7 +625,7 @@ void SnapshotNameSpace::take_snapshot(const TablesList& tablesList)
         }
         SnapshotNameSpace::UpdateSnapEndTime(t_thrd.perf_snap_cxt.curr_snapid);
         pfree_ext(query.data);
-        SPI_finish();
+        (void)SPI_finish();
     }
     PG_CATCH();
     {
@@ -627,38 +711,6 @@ void SnapshotNameSpace::AnalyzeTable(List* analyzeList)
 }
 
 /*
- * is_skipped_view - check which view is needed to skip during snapshot
- */
-static bool is_skipped_view(const char* view_name)
-{
-    if (view_name == NULL) {
-        return true;
-    }
-
-    /* skip session/workload manager related views */
-    if (strstr(view_name, "session_") != NULL || strstr(view_name, "wlm_") != NULL ||
-        strstr(view_name, "wlmstat_") != NULL || strstr(view_name, "stat_sys_tables") ||
-        strstr(view_name, "stat_all_tables")) {
-        return true;
-    }
-
-    if (!IsCgroupInit(view_name)) {
-        return true;
-    }
-
-    if ((!g_instance.attr.attr_memory.enable_memory_limit || maxChunksPerProcess) &&
-        (strcmp(view_name, "session_memory") == 0 || strcmp(view_name, "memory_node_detail") == 0 ||
-            strcmp(view_name, "memory_node_ng_detail") == 0 || strcmp(view_name, "global_session_memory") == 0 ||
-            strcmp(view_name, "global_memory_node_detail") == 0 ||
-            strcmp(view_name, "global_memory_node_ng_detail") == 0 ||
-            strcmp(view_name, "summary_session_memory") == 0 || strcmp(view_name, "summary_memory_node_detail") == 0 ||
-            strcmp(view_name, "summary_memory_node_ng_detail") == 0))
-        return true;
-
-    return false;
-}
-
-/*
  * InsertOneTableData -- insert snapshot into snapshot.snap_xxx_xxx table
  *
  * insert into a table of snapshot schema from a view data from dbe_perf schema
@@ -680,10 +732,9 @@ void SnapshotNameSpace::InsertOneTableData(List* ViewNameList, uint64 snapid)
     foreach_cell(cellViewName, ViewNameList)
     {
         char* viewName = (char*)lfirst(cellViewName);
-        if (is_skipped_view(viewName)) {
+        if (!t_thrd.perf_snap_cxt.is_mem_protect &&
+            (strcmp(viewName, "global_memory_node_detail") == 0))
             continue;
-        }
-
         resetStringInfo(&query);
         CHECK_FOR_INTERRUPTS();
         /* Record snapshot start time of a single table */
@@ -1038,45 +1089,29 @@ void SnapshotNameSpace::SplitString(const char* str, const char* delim, List** r
     pfree(strs);
 }
 
+void SnapshotNameSpace::InsertViewsIntoList(List* &tableList, const char** views, int viewsNum)
+{
+    for (int i = 0; i < viewsNum; i++) {
+        tableList = lappend(tableList, (char*)views[i]);
+    }
+}
+
 void SnapshotNameSpace::InitTableList(TablesList& tablesList)
 {
-    const int NAME_SIZE = 3;
-    List* viewNames = NIL;
-    const char* delim = "_";  // spliter
-    const char* sql = "select viewname from pg_views where schemaname = 'dbe_perf'";
-
-    SnapshotNameSpace::GetQueryData(sql, false, &viewNames);
     /* table such as global_stat_xxx ,global_statio_xxx, summary_stat_xxx or summary_statio_xxx
      * come from pg_class, only describe statistics in a database
      */
     MemoryContext old_context = MemoryContextSwitchTo(t_thrd.perf_snap_cxt.PerfSnapMemCxt);
-    foreach_cell(cell, viewNames)
-    {
-        List* row = (List*)lfirst(cell);
-        foreach_cell(rowCell, row)
-        {
-            List* splitName = NIL;
-            SnapshotNameSpace::SplitString((char*)lfirst(rowCell), delim, &splitName);
-            char* tmpStr = pstrdup((char*)lfirst(rowCell));
-            if (splitName->length >= NAME_SIZE &&
-                (strcmp((char*)lfirst(splitName->head), "summary") == 0 ||
-                    strcmp((char*)lfirst(splitName->head), "global") == 0) &&
-                (strcmp((char*)lsecond(splitName), "stat") == 0 || strcmp((char*)lsecond(splitName), "statio") == 0) &&
-                (strcmp((char*)lthird(splitName), "user") == 0 || strcmp((char*)lthird(splitName), "all") == 0 ||
-                    strcmp((char*)lthird(splitName), "sys") == 0)) {
-                tablesList.oneDbTableList = lappend(tablesList.oneDbTableList, tmpStr);
-            } else if (strcmp(tmpStr, "class_vital_info") == 0) {
-                tablesList.lastOneDbTableList = lappend(tablesList.lastOneDbTableList, tmpStr);
-            } else if (strcmp(tmpStr, "global_record_reset_time") == 0) {
-                tablesList.lastStatTableList = lappend(tablesList.lastStatTableList, tmpStr);
-            } else {
-                tablesList.multiDbTableList = lappend(tablesList.multiDbTableList, tmpStr);
-            }
-            list_free_deep(splitName);
-        }
-    }
+    SnapshotNameSpace::InsertViewsIntoList(tablesList.oneDbTableList, SnapshotNameSpace::g_dbRelatedViews,
+        COUNT_ARRAY_SIZE(SnapshotNameSpace::g_dbRelatedViews));
+    SnapshotNameSpace::InsertViewsIntoList(tablesList.lastOneDbTableList, SnapshotNameSpace::g_lastDbRelatedViews,
+        COUNT_ARRAY_SIZE(SnapshotNameSpace::g_lastDbRelatedViews));
+    SnapshotNameSpace::InsertViewsIntoList(tablesList.lastStatTableList, SnapshotNameSpace::g_lastStatViews,
+        COUNT_ARRAY_SIZE(SnapshotNameSpace::g_lastStatViews));
+    SnapshotNameSpace::InsertViewsIntoList(tablesList.multiDbTableList, SnapshotNameSpace::g_sharedViews,
+        COUNT_ARRAY_SIZE(SnapshotNameSpace::g_sharedViews));
+    
     (void)MemoryContextSwitchTo(old_context);
-    DeepListFree(viewNames, false);
 }
 /*
  * GetDatabaseData
@@ -1092,10 +1127,6 @@ void SnapshotNameSpace::InsertDatabaseData(const char* dbname, uint64 curr_snapi
     foreach_cell(cellViewName, tableList)
     {
         char* viewName = (char*)lfirst(cellViewName);
-        if (is_skipped_view(viewName)) {
-            continue;
-        }
-
         SnapshotNameSpace::GetQueryStr(query, viewName, curr_snapid, dbname);
         resetStringInfo(&sql);
         CHECK_FOR_INTERRUPTS();
@@ -1191,18 +1222,6 @@ void SnapshotNameSpace::CreateIndexes(void)
         appendStringInfo(&query,
             "create index snap_summary_stat_indexes_name on"
             " snapshot.snap_summary_stat_all_indexes(db_name, snap_schemaname, snap_relname, snap_indexrelname);");
-
-        if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("create index failed")));
-        }
-    }
-
-    /* snap_summary_stat_all_tables */
-    if (IsNeedCreateIndex("snap_summary_stat_tables_name")) {
-        resetStringInfo(&query);
-        appendStringInfo(&query,
-            "create index snap_summary_stat_tables_name on"
-            " snapshot.snap_summary_stat_all_tables(db_name, snap_schemaname, snap_relname);");
 
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("create index failed")));
@@ -1419,12 +1438,15 @@ static void analyze_snap_table(TablesList& tablesList)
     SnapshotNameSpace::GetAnalyzeList(&(tablesList.analyzeTableList));
     set_lock_timeout();
     SnapshotNameSpace::AnalyzeTable(tablesList.analyzeTableList);
-    SPI_finish();
+    (void)SPI_finish();
     CommitTransactionCommand();
 }
 
+
 void InitSnapshot(TablesList& tablesList)
 {
+    /* Check if global_memory_node_detail view can do snapshot */
+    t_thrd.perf_snap_cxt.is_mem_protect = CheckMemProtectInit();
     /* All the tables list will be initialized once. when database is restarted or powered on */
     StartTransactionCommand();
     int rc = 0;
