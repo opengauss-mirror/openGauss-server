@@ -300,12 +300,12 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
     Extract(data, keyLength);
     keyData = ExtractPtr(data, keyLength);
 
-    Table* table = GetTableManager()->GetTable(tableId);
+    Table* table = MOTCurrTxn->GetTableByExternalId(exId);
     if (table == nullptr) {
         status = RC_ERROR;
         MOT_REPORT_ERROR(MOT_ERROR_INVALID_ARG,
             "Recovery Manager Update Row",
-            "table %u with exId %lu does not exist",
+            "table %lu with exId %lu does not exist",
             tableId,
             exId);
         return 0;
@@ -320,7 +320,7 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
     }
 
     Index* index = table->GetPrimaryIndex();
-    Key* key = index->CreateNewKey();
+    Key* key = MOTCurrTxn->GetTxnKey(index);
     if (key == nullptr) {
         status = RC_ERROR;
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Update Row", "failed to allocate key");
@@ -330,9 +330,8 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
     Row* row = MOTCurrTxn->RowLookupByKey(table, RD_FOR_UPDATE, key);
 
     if (row == nullptr) {
-        /// row not found...
-        /// error, got an update for non existing row
-        index->DestroyKey(key);
+        // Row not found. Error!!! Got an update for non existing row.
+        MOTCurrTxn->DestroyTxnKey(key);
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
             "Recovery Manager Update Row",
             "row not found, key: %s, tableId: %lu",
@@ -349,7 +348,7 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
     // in order to skip for the next one
     // CSNs can be equal if updated during the same transaction
     if (row->GetCommitSequenceNumber() > csn) {
-        MOT_LOG_WARN("RecoveryManager::updateRow, tableId: %llu -  row csn is newer! %llu > %llu {%s}",
+        MOT_LOG_WARN("Recovery Manager Update Row, tableId: %lu - row csn is newer! %lu > %lu {%s}",
             tableId,
             row->GetCommitSequenceNumber(),
             csn,
@@ -387,7 +386,10 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
         updated_columns_it.Next();
     }
 
-    index->DestroyKey(key);
+    if (doUpdate) {
+        MOTCurrTxn->UpdateLastRowState(MOT::AccessType::WR);
+    }
+    MOTCurrTxn->DestroyTxnKey(key);
     if (MOT::GetRecoveryManager()->m_logStats != nullptr && doUpdate)
         MOT::GetRecoveryManager()->m_logStats->IncUpdate(tableId);
     return sizeof(OperationCode) + sizeof(tableId) + sizeof(exId) + sizeof(keyLength) + keyLength +
@@ -621,13 +623,15 @@ void RecoveryManager::UpdateRow(uint64_t tableId, uint64_t exId, char* keyData, 
     key->CpKey((const uint8_t*)keyData, keyLen);
     Row* row = MOTCurrTxn->RowLookupByKey(table, RD_FOR_UPDATE, key);
     if (row == nullptr) {
-        /// row not found... need to check row version
-        // if row version is less than the updated row version it means that we
-        // missed an insert. Treat this update as an insert
-        // in order to avoid code copy, I just create a new insert operation
-        // and replay it
-        MOT_LOG_DEBUG("RecoveryManager::updateRow - row not found - inserting");
-        InsertRow(tableId, exId, keyData, keyLen, rowData, rowLen, csn, tid, sState, status, 0 /* row id hack */);
+        // Row not found. Error!!! Got an update for non existing row.
+        MOTCurrTxn->DestroyTxnKey(key);
+        status = RC_ERROR;
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+            "RecoveryManager::updateRow",
+            "row not found, key: %s, tableId: %lu",
+            key->GetKeyStr().c_str(),
+            tableId);
+        return;
     } else {
         // CSNs can be equal if updated during the same transaction
         if (row->GetCommitSequenceNumber() <= csn) {
@@ -636,8 +640,9 @@ void RecoveryManager::UpdateRow(uint64_t tableId, uint64_t exId, char* keyData, 
             if (row->IsAbsentRow()) {
                 row->UnsetAbsentRow();
             }
+            MOTCurrTxn->UpdateLastRowState(MOT::AccessType::WR);
         } else {
-            MOT_LOG_DEBUG("RecoveryManager::updateRow [%d] -  row csn is newer! %d > %d ",
+            MOT_LOG_WARN("RecoveryManager::updateRow, tableId: %lu - row csn is newer! %lu > %lu",
                 tableId,
                 row->GetCommitSequenceNumber(),
                 csn);
