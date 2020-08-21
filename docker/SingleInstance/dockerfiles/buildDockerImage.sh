@@ -20,9 +20,14 @@ EOF
 
 # Validate packages
 checksumPackages() {
+if [ $arch = "amd64" ]; then
+    md5_file="md5_file_amd64"
+    else
+    md5_file="md5_file_arm64"
+fi
   if hash md5sum 2>/dev/null; then
     echo "Checking if required packages are present and valid..."   
-    if ! md5sum -c "Checksum"; then
+    if ! md5sum -c "$md5_file"; then
       echo "MD5 for required packages to build this image did not match!"
       echo "Make sure to download missing files in folder $VERSION."
       exit 1;
@@ -60,7 +65,12 @@ VERSION="1.0.0"
 SKIPMD5=0
 DOCKEROPS=""
 MIN_DOCKER_VERSION="17.09"
-DOCKERFILE="Dockerfile"
+arch=`case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac`
+if [ $arch = "amd64" ]; then
+    DOCKERFILE="dockerfile_amd"
+    else
+    DOCKERFILE="dockerfile_arm"
+fi
 
 if [ "$#" -eq 0 ]; then
   usage;
@@ -102,7 +112,7 @@ if [ "$VERSION" == "12.1.0.2" ] || [ "$VERSION" == "11.2.0.2" ] || [ "$VERSION" 
   DOCKERFILE="$DOCKERFILE"
 fi;
 
-# Oracle Database Image Name
+# openGauss Database Image Name
 IMAGE_NAME="opengauss:$VERSION"
 
 # Go into version folder
@@ -154,7 +164,7 @@ docker build --force-rm=true --no-cache=true \
        $DOCKEROPS $PROXY_SETTINGS  \
        -t $IMAGE_NAME -f $DOCKERFILE . || {
   echo ""
-  echo "ERROR: Oracle Database Docker Image was NOT successfully created."
+  echo "ERROR: openGauss Database Docker Image was NOT successfully created."
   echo "ERROR: Check the output and correct any reported problems with the docker build operation."
   exit 1
 }

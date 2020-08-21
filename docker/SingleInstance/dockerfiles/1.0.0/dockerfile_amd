@@ -1,6 +1,7 @@
 FROM centos:7.6.1810
 
 COPY openGauss-1.0.0-CentOS-64bit.tar.bz2 .
+COPY gosu-amd64 /usr/local/bin/gosu
 ENV LANG en_US.utf8
 
 #RUN yum install -y epel-release
@@ -12,7 +13,7 @@ RUN set -eux; \
     mkdir -p /var/lib/opengauss && \
     mkdir -p /usr/local/opengauss && \
     tar -jxvf openGauss-1.0.0-CentOS-64bit.tar.bz2 -C /usr/local/opengauss && \
-    mkdir -p /var/run/opengauss && chown -R omm:omm /var/run/opengauss && chmod 2777 /var/run/opengauss && \
+    mkdir -p /var/run/opengauss && chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chmod 2777 /var/run/opengauss && \
     rm -rf openGauss-1.0.0-CentOS-64bit.tar.bz2 && yum clean all
 
 RUN set -eux; \
@@ -22,14 +23,14 @@ RUN set -eux; \
 
 ENV GOSU_VERSION 1.12
 RUN set -eux; \
-    dpkgArch=`case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac`; \
-    gpg --keyserver pool.sks-keyservers.net --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 \
-    && curl -o /usr/local/bin/gosu -SL "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch" \
-    && curl -o /usr/local/bin/gosu.asc -SL "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch.asc" \
-    && gpg --verify /usr/local/bin/gosu.asc \
-    && rm /usr/local/bin/gosu.asc \
-    && rm -r /root/.gnupg/ \
-    && chmod +x /usr/local/bin/gosu
+#    dpkgArch=`case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac`; \
+#    gpg --keyserver pool.sks-keyservers.net --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 \
+#    && curl -o /usr/local/bin/gosu -SL "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch" \
+#    && curl -o /usr/local/bin/gosu.asc -SL "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch.asc" \
+#    && gpg --verify /usr/local/bin/gosu.asc \
+#    && rm /usr/local/bin/gosu.asc \
+#    && rm -r /root/.gnupg/ \
+     chmod +x /usr/local/bin/gosu
 
 RUN mkdir /docker-entrypoint-initdb.d
 
@@ -40,5 +41,5 @@ RUN chmod +x /usr/local/bin/entrypoint.sh;ln -s /usr/local/bin/entrypoint.sh / #
 
 ENTRYPOINT ["entrypoint.sh"]
 
-EXPOSE 5432
+EXPOSE 5432 
 CMD ["gaussdb"]
