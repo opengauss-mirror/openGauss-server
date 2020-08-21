@@ -119,12 +119,12 @@ NON_EXEC_STATIC void AlarmCheckerMain()
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* reord my name */
-    t_thrd.proc_cxt.MyProgName = "AlarmChecker";
+    knl_thread_set_name("AlarmChecker");
 
     /* Identify myself via ps */
     init_ps_display("AlarmChecker", "", "", "");
 
-    AlarmLog(ALM_LOG, "alarm checker started.");
+    AlarmLog(ALM_LOG, "AlarmChecker started.");
 
     InitializeLatchSupport(); /* needed for latch waits */
 
@@ -189,7 +189,7 @@ NON_EXEC_STATIC void AlarmCheckerMain()
         (void)WaitLatch(&t_thrd.alarm_cxt.AlarmCheckerLatch, WL_LATCH_SET | WL_TIMEOUT, AlarmCheckInterval * 1000);
     }
 
-    AlarmLog(ALM_LOG, "alarm checker shutting down...");
+    AlarmLog(ALM_LOG, "AlarmChecker shutting down...");
 
     proc_exit(0);
 }

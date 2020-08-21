@@ -154,14 +154,14 @@ NON_EXEC_STATIC void PercentileMain()
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
-    t_thrd.proc_cxt.MyProgName = "getpercentile";
+    knl_thread_set_name("PercentileJob");
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
     }
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
     u_sess->attr.attr_common.application_name = pstrdup("PercentileJob");
     /* Identify myself via ps */
-    init_ps_display("instrumention percentile process", "", "", "");
+    init_ps_display("PercentileJob process", "", "", "");
     SetProcessingMode(InitProcessing);
     PercentileSpace::init_gspqsignal();
     /* Early initialization */

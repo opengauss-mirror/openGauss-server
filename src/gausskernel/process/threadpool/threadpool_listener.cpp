@@ -59,7 +59,7 @@ static void listener_sigusrl_handler(SIGNAL_ARGS)
 
 void TpoolListenerMain(ThreadPoolListener* listener)
 {
-    t_thrd.proc_cxt.MyProgName = "ThreadPoolListener";
+    knl_thread_set_name("ThdPoolListener");
     pgstat_report_appname("ThreadPoolListener");
 
     (void)gspqsignal(SIGHUP, SIG_IGN);

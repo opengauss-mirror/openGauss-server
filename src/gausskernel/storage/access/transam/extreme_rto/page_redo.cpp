@@ -492,6 +492,9 @@ void BatchRedoMain()
 {
     void** eleArry;
     uint32 eleNum;
+
+    knl_thread_set_name("RedoBatch");
+
     XLogParseBufferInitFunc(MAX_PARSE_BUFF_NUM, &recordRefOperate);
     while (SPSCBlockingQueueGetAll(g_redoWorker->queue, &eleArry, &eleNum)) {
         bool isEnd = BatchRedoDistributeItems(eleArry, eleNum);
@@ -762,6 +765,9 @@ void RedoPageManagerMain()
 {
     void** eleArry;
     uint32 eleNum;
+
+    knl_thread_set_name("RedoPageMgr");
+
     XLogParseBufferInitFunc(MAX_PARSE_BUFF_NUM, &recordRefOperate);
     while (SPSCBlockingQueueGetAll(g_redoWorker->queue, &eleArry, &eleNum)) {
         bool isEnd = PageManagerRedoDistributeItems(eleArry, eleNum);
@@ -857,6 +863,8 @@ void WaitLsnUpdate(bool force)
 
 void TrxnManagerMain()
 {
+    knl_thread_set_name("RedoTxnMgr");
+
     XLogParseBufferInitFunc(MAX_PARSE_BUFF_NUM, &recordRefOperate);
     while (true) {
         HandlePageRedoInterrupts();
@@ -892,6 +900,8 @@ void TrxnWorkerProcLsnForwarder(RedoItem* lsnForwarder)
 
 void TrxnWorkMain()
 {
+    knl_thread_set_name("RedoTxnWorker");
+
     RedoItem* item = nullptr;
     MOTBeginRedoRecovery();
     if (ParseStateWithoutCache())
@@ -997,6 +1007,8 @@ void RedoPageWorkerRedoBcmBlock(XLogRecParseState* procState)
 
 void RedoPageWorkerMain()
 {
+    knl_thread_set_name("RedoPageWorker");
+
     XLogRecParseState* redoblockstateHead = nullptr;
     if (ParseStateWithoutCache())
         XLogRedoBufferInitFunc(MAX_LOCAL_BUFF_NUM, &recordRefOperate);
@@ -1306,6 +1318,8 @@ void XLogReadManagerMain()
     XLogReaderState* xlogreader = nullptr;
     XLogReaderState* newxlogreader = nullptr;
 
+    knl_thread_set_name("RedoReadMgr");
+
     g_recordbuffer = &g_dispatcher->recordstate;
     GetRecoveryLatch();
     /* init readstate */
@@ -1361,6 +1375,8 @@ void XLogReadWorkerMain()
     uint32 readindex;
     uint32 waitcount = 0;
     const uint32 sleepTime = 50; /* 50 us */
+
+    knl_thread_set_name("RedoReadWorker");
 
     g_recordbuffer = &g_dispatcher->recordstate;
     startreadworker = pg_atomic_read_u32(&(g_recordbuffer->startreadworker));
@@ -1538,9 +1554,11 @@ void WaitStateNormal()
 /* Run from the worker thread. */
 void ParallelRedoThreadMain()
 {
+    knl_thread_set_name("ExtremeRTO");
+
     ParallelRedoThreadRegister();
     ereport(LOG,
-        (errmsg("Page-redo-worker thread %u started, role:%u, slotId:%u.",
+        (errmsg("ExtremeRTO thread %u started, role:%u, slotId:%u.",
             g_redoWorker->id,
             g_redoWorker->role,
             g_redoWorker->slotId)));
@@ -1554,7 +1572,7 @@ void ParallelRedoThreadMain()
     int retCode = RedoMainLoop();
     ResourceManagerStop();
     ereport(LOG,
-        (errmsg("Page-redo-worker thread %u terminated, role:%u, slotId:%u, retcode %u.",
+        (errmsg("ExtremeRTO thread %u terminated, role:%u, slotId:%u, retcode %u.",
             g_redoWorker->id,
             g_redoWorker->role,
             g_redoWorker->slotId,

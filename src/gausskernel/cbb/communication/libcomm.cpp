@@ -9529,13 +9529,13 @@ void commSenderFlowMain()
     /* reset MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    t_thrd.proc_cxt.MyProgName = "CommSenderFlowerWorker";
+    knl_thread_set_name("CommSendStream");
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("comm sender flower worker process", "", "", "");
+    init_ps_display("CommSendStream worker process", "", "", "");
 
     /* setup signal process hook */
     SetupCommSignalHook();
@@ -9548,7 +9548,7 @@ void commSenderFlowMain()
 
     t_thrd.comm_cxt.g_libcomm_poller_list =
         g_instance.comm_cxt.pollers_cxt.g_s_poller_list->get_poller();  // get poller for monitoring network events
-    LIBCOMM_ELOG(LOG, "Sender flow control thread is initialized.");
+    LIBCOMM_ELOG(LOG, "CommSendStream thread is initialized.");
 
     sigjmp_buf local_sigjmp_buf;
     int curTryCounter;
@@ -9613,13 +9613,13 @@ void commReceiverFlowMain()
     /* reset MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    t_thrd.proc_cxt.MyProgName = "CommReceiverFlowerWorker";
+    knl_thread_set_name("CommRcvStream");
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("comm receiver flower worker process", "", "", "");
+    init_ps_display("CommRcvStream worker process", "", "", "");
 
     /* setup signal process hook */
     SetupCommSignalHook();
@@ -9651,7 +9651,7 @@ void commReceiverFlowMain()
     }
     LIBCOMM_PTHREAD_MUTEX_UNLOCK(g_instance.comm_cxt.pollers_cxt.g_r_poller_list_lock);
 
-    LIBCOMM_ELOG(LOG, "Receiver flow control thread is initialized, ready to accept on socket[%d].", ltk);
+    LIBCOMM_ELOG(LOG, "CommRcvStream thread is initialized, ready to accept on socket[%d].", ltk);
 
     sigjmp_buf local_sigjmp_buf;
     int curTryCounter;
@@ -9712,13 +9712,13 @@ void commAuxiliaryMain()
     /* reset MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    t_thrd.proc_cxt.MyProgName = "CommAuxiliaryFlowerWorker";
+    knl_thread_set_name("CommAuxStream");
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("comm auxiliary worker process", "", "", "");
+    init_ps_display("CommAuxStream worker process", "", "", "");
 
     /* setup signal process hook */
     SetupCommSignalHook();
@@ -9732,7 +9732,7 @@ void commAuxiliaryMain()
     uint64 last_print_time;
     last_print_time = mc_timers_ms();
 
-    LIBCOMM_ELOG(LOG, "Receiver flow control auxiliary thread is initialized.");
+    LIBCOMM_ELOG(LOG, "CommAuxStream thread is initialized.");
 
     sigjmp_buf local_sigjmp_buf;
     int curTryCounter;
@@ -9792,13 +9792,13 @@ void init_clean_pooler_idle_connections()
     /* reset t_thrd.proc_cxt.MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    t_thrd.proc_cxt.MyProgName = "commPoolerCleaner";
+    knl_thread_set_name("CommPoolCleaner");
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("pooler cleaner process", "", "", "");
+    init_ps_display("CommPoolCleaner process", "", "", "");
 
     /* set processing mode */
     SetProcessingMode(InitProcessing);
@@ -9933,13 +9933,13 @@ void commReceiverMain(void* tid_callback)
     /* reset MyProcPid */
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
-    t_thrd.proc_cxt.MyProgName = "CommReceiverWorker";
+    knl_thread_set_name("CommRcvWorker");
 
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* Identify myself via ps */
-    init_ps_display("comm receiver worker process", "", "", "");
+    init_ps_display("CommRcvWorker process", "", "", "");
 
     /* setup signal process hook */
     SetupCommSignalHook();
@@ -9960,7 +9960,7 @@ void commReceiverMain(void* tid_callback)
         &g_instance.comm_cxt.pollers_cxt.g_libcomm_receiver_poller_list[selfid];
     LIBCOMM_PTHREAD_MUTEX_UNLOCK(g_instance.comm_cxt.pollers_cxt.g_r_libcomm_poller_list_lock);
 
-    LIBCOMM_ELOG(LOG, "Receiver data receiving thread[%d] is initialized.", selfid + 1);
+    LIBCOMM_ELOG(LOG, "CommRcvWorker thread[%d] is initialized.", selfid + 1);
 
     sigjmp_buf local_sigjmp_buf;
     int curTryCounter;

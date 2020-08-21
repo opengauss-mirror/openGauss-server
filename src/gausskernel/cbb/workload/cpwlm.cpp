@@ -1795,7 +1795,7 @@ static void NormalBackendInit()
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    t_thrd.proc_cxt.MyProgName = "CPmonitor";
+    knl_thread_set_name("CpMonitor");
 
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
@@ -1804,7 +1804,7 @@ static void NormalBackendInit()
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
 
     /* Identify myself via ps */
-    init_ps_display("compute pool monitor process", "", "", "");
+    init_ps_display("CpMonitor process", "", "", "");
 
     /* release all connections on exit. */
     if (IS_PGXC_COORDINATOR && IsPostmasterEnvironment) {

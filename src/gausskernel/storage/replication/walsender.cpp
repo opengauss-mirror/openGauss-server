@@ -212,7 +212,7 @@ int WalSenderMain(void)
     MemoryContext walsnd_context;
     int nRet = 0;
 
-    t_thrd.proc_cxt.MyProgName = "WalSender";
+    knl_thread_set_name("WalSender");
     if (RecoveryInProgress()) {
         t_thrd.role = WAL_STANDBY_SENDER;
     }
@@ -225,7 +225,7 @@ int WalSenderMain(void)
     /* Create a per-walsender data structure in shared memory */
     InitWalSnd();
 
-    ereport(LOG, (errmsg("walsender thread started")));
+    ereport(LOG, (errmsg("WalSender thread started")));
     /*
      * Create a memory context that we will do all our work in.  We do this so
      * that we can reset the context during error recovery and thereby avoid

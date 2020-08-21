@@ -96,7 +96,9 @@ void DataRcvWriterMain(void)
     MemoryContext datarcvWriterContext;
     t_thrd.xlog_cxt.InRecovery = true;
 
-    ereport(LOG, (errmsg("datarcvwriter thread started")));
+    knl_thread_set_name("DataRcvWriter");
+
+    ereport(LOG, (errmsg("DataRcvWriter thread started")));
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -268,7 +270,7 @@ void DataRcvWriterMain(void)
             ;
 
         if (t_thrd.datarcvwriter_cxt.shutdownRequested) {
-            ereport(LOG, (errmsg("datarcvwriter thread shut down")));
+            ereport(LOG, (errmsg("DataRcvWriter thread shut down")));
             /*
              * From here on, elog(ERROR) should end with exit(1), not send
              * control back to the sigsetjmp block above
@@ -280,7 +282,7 @@ void DataRcvWriterMain(void)
 
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)1000 /* ms */);
         if (rc & WL_POSTMASTER_DEATH) {
-            ereport(LOG, (errmsg("datarcvwriter thread shut down with exit code 1")));
+            ereport(LOG, (errmsg("DataRcvWriter thread shut down with exit code 1")));
             gs_thread_exit(1);
         }
     }

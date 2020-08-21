@@ -1104,7 +1104,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    t_thrd.proc_cxt.MyProgName = "WLMmonitor";
+    knl_thread_set_name("WlmMonitor");
 
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
@@ -1113,7 +1113,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
 
     /* Identify myself via ps */
-    init_ps_display("wlm monitor worker process", "", "", "");
+    init_ps_display("WlmMonitor worker process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -1278,7 +1278,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
     /* wait until g_statManager is available */
     while (!WLMIsInfoInit()) {
         if (t_thrd.wlm_cxt.wlm_got_sigterm) {
-            ereport(LOG, (errmsg("WLMmonitor thread exit!")));
+            ereport(LOG, (errmsg("WlmMonitor thread exit!")));
             t_thrd.wlm_cxt.wlm_got_sigterm = false;
             proc_exit(0);
         }
@@ -1288,7 +1288,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
     /*
      * Identify myself via ps
      */
-    ereport(LOG, (errmsg("WLMmonitor thread is starting up.")));
+    ereport(LOG, (errmsg("WlmMonitor thread is starting up.")));
 
     // initialize thread
     WLMmonitor_init();
@@ -1411,7 +1411,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     /* record Start Time for logging */
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
-    t_thrd.proc_cxt.MyProgName = "WLMarbiter";
+    knl_thread_set_name("WlmArbiter");
 
     if (u_sess->proc_cxt.MyProcPort->remote_host != NULL) {
         pfree(u_sess->proc_cxt.MyProcPort->remote_host);
@@ -1420,7 +1420,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     u_sess->proc_cxt.MyProcPort->remote_host = pstrdup("localhost");
 
     /* Identify myself via ps */
-    init_ps_display("wlm arbiter worker process", "", "", "");
+    init_ps_display("WlmArbiter worker process", "", "", "");
 
     SetProcessingMode(InitProcessing);
 
@@ -1586,7 +1586,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     /* wait until g_statManager is available */
     while (!WLMIsInfoInit()) {
         if (t_thrd.wlm_cxt.wlm_got_sigterm) {
-            ereport(LOG, (errmsg("WLMarbiter thread exit!")));
+            ereport(LOG, (errmsg("WlmArbiter thread exit!")));
             t_thrd.wlm_cxt.wlm_got_sigterm = false;
             proc_exit(0);
         }
@@ -1596,7 +1596,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     /*
      * Identify myself via ps
      */
-    ereport(LOG, (errmsg("WLMarbiter thread is starting up.")));
+    ereport(LOG, (errmsg("WlmArbiter thread is starting up.")));
 
     // main loop of the thread
     WLMarbiter_MainLoop();

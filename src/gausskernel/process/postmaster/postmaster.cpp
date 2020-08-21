@@ -1092,7 +1092,7 @@ int PostmasterMain(int argc, char* argv[])
 
     IsPostmasterEnvironment = true;
 
-    t_thrd.proc_cxt.MyProgName = "gaussmaster";
+    knl_thread_set_name("GaussMaster");
 
     /*
      * for security, no dir or file created can be group or other accessible
@@ -7346,12 +7346,12 @@ void ReaperBackendMain()
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     /* reord my name */
-    t_thrd.proc_cxt.MyProgName = "ReaperBackend";
+    knl_thread_set_name("Reaper");
 
     /* Identify myself via ps */
-    init_ps_display("ReaperBackend", "", "", "");
+    init_ps_display("Reaper", "", "", "");
 
-    ereport(LOG, (errmsg("reaper backend started.")));
+    ereport(LOG, (errmsg("Reaper backend started.")));
 
     InitializeLatchSupport(); /* needed for latch waits */
 
@@ -9400,10 +9400,10 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
      * can occur here.
      */
     srandom((unsigned int)(t_thrd.proc_cxt.MyProcPid ^ (unsigned int)t_thrd.proc_cxt.MyStartTime));
-    t_thrd.proc_cxt.MyProgName = "Auxiliary";
+    knl_thread_set_name("AuxMain");
 
     /* register thread information to PGPROC structure */
-    init_ps_display("Auxiliary", "", "", "");
+    init_ps_display("AuxMain", "", "", "");
 
     /* Validate we have been given a reasonable-looking t_thrd.proc_cxt.DataDir */
     Assert(t_thrd.proc_cxt.DataDir);

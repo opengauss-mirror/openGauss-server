@@ -71,9 +71,11 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
+    knl_thread_set_name("TwoPhaseCleaner");
+
     twoPhaseCleanerProc = t_thrd.proc;
 
-    ereport(DEBUG5, (errmsg("twophasecleaner process is started: %lu", t_thrd.proc_cxt.MyProcPid)));
+    ereport(DEBUG5, (errmsg("TwoPhaseCleaner process is started: %lu", t_thrd.proc_cxt.MyProcPid)));
 
     (void)gspqsignal(SIGHUP, TwoPCSigHupHandler);    /* set flag to read config file */
     (void)gspqsignal(SIGINT, TwoPCShutdownHandler);  /* request shutdown */

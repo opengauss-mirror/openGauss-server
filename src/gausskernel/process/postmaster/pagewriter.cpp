@@ -885,9 +885,11 @@ void ckpt_pagewriter_main(void)
     /* We allow SIGQUIT (quickdie) at all times */
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 
+    knl_thread_set_name("PageWriter");
+
     ereport(LOG,
         (errmodule(MOD_INCRE_CKPT),
-            errmsg("pagewriter started, thread id is %d", t_thrd.pagewriter_cxt.pagewriter_id)));
+            errmsg("PageWriter started, thread id is %d", t_thrd.pagewriter_cxt.pagewriter_id)));
 
     /*
      * Create a resource owner to keep track of our resources (currently only

@@ -168,11 +168,11 @@ NON_EXEC_STATIC void PgArchiverMain()
 
     t_thrd.proc_cxt.MyStartTime = time(NULL); /* record Start Time for logging */
 
-    t_thrd.proc_cxt.MyProgName = "PgArchiver";
+    knl_thread_set_name("Archiver");
 
     t_thrd.myLogicTid = noProcLogicTid + PGARCH_LID;
 
-    ereport(LOG, (errmsg("PgArchiver started")));
+    ereport(LOG, (errmsg("Archiver started")));
 
     InitializeLatchSupport(); /* needed for latch waits */
 
@@ -202,7 +202,7 @@ NON_EXEC_STATIC void PgArchiverMain()
     /*
      * Identify myself via ps
      */
-    init_ps_display("archiver process", "", "", "");
+    init_ps_display("Archiver process", "", "", "");
 
     pgarch_MainLoop();
 

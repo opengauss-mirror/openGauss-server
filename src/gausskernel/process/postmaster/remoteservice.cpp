@@ -93,7 +93,9 @@ void RemoteServiceMain(void)
     MemoryContext remote_service_context;
     long cur_timeout_ms = 0;
 
-    ereport(LOG, (errmsg("remote service is starting...")));
+    knl_thread_set_name("RemoteSrv");
+
+    ereport(LOG, (errmsg("RemoteSrv is starting...")));
 
     /*
      * Properly accept or ignore signals the postmaster might send us.
@@ -221,7 +223,7 @@ void RemoteServiceMain(void)
 
         /* Exit before call RunServer() */
         if (t_thrd.rs_cxt.shutdown_requested) {
-            ereport(LOG, (errmodule(MOD_REMOTE), errmsg("remote service is closing...")));
+            ereport(LOG, (errmodule(MOD_REMOTE), errmsg("RemoteSrv is closing...")));
             GRPC_TRY() {
                 ShutdownAndReleaseServer(t_thrd.rs_cxt.server_context);
                 t_thrd.rs_cxt.server_context = NULL;

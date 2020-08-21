@@ -1140,3 +1140,8 @@ knl_session_context* create_session_context(MemoryContext parent, uint64 id)
     MemoryContextSwitchTo(old_cxt);
     return sess;
 }
+
+__attribute__ ((__used__)) knl_session_context *get_current_session()
+{
+    return u_sess;
+}

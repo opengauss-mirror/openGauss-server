@@ -4928,7 +4928,7 @@ void PgstatCollectorMain()
 
     t_thrd.proc_cxt.MyStartTime = time(NULL); /* record Start Time for logging */
 
-    t_thrd.proc_cxt.MyProgName = "PgstatCollector";
+    knl_thread_set_name("StatCollector");
 
     t_thrd.myLogicTid = noProcLogicTid + PGSTAT_LID;
 
@@ -4960,7 +4960,7 @@ void PgstatCollectorMain()
     /*
      * Identify myself via ps
      */
-    init_ps_display("stats collector process", "", "", "");
+    init_ps_display("StatCollector process", "", "", "");
 
     /*
      * Arrange to write the initial status file right away

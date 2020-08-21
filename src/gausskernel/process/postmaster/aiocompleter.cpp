@@ -467,6 +467,8 @@ void AioCompltrMain(int ac, char** av)
     /* compltrIdx identifies this thread. */
     int compltrIdx = atoi(av[3]);
 
+    knl_thread_set_name("AioWorker");
+
     /*
      * Global thread local shortcuts to the completer descriptor
      * in the compltrArray, these are assigned on entry.
@@ -528,7 +530,7 @@ void AioCompltrMain(int ac, char** av)
     (void)gs_signal_unblock_sigusr2();
 
     /* Announce that the Completer has been started */
-    ereport(LOG, (errmsg("AIO Completer %d STARTED.", compltrIdx)));
+    ereport(LOG, (errmsg("AioWorker %d STARTED.", compltrIdx)));
 
     for (;;) {
         int eventsReceived;
@@ -551,7 +553,7 @@ void AioCompltrMain(int ac, char** av)
         if (t_thrd.aio_cxt.shutdown_requested) {
             timeout = shutdown_timeout;
 
-            ereport(LOG, (errmsg("AIO Completer %d EXITED.", compltrIdx)));
+            ereport(LOG, (errmsg("AioWorker %d EXITED.", compltrIdx)));
             proc_exit(0);
         }
 
@@ -575,7 +577,7 @@ void AioCompltrMain(int ac, char** av)
          */
         if (eventsReceived < 0) {
             /* Report error */
-            ereport(PANIC, (errmsg("AIO Completer io_getevents() failed: error %d .", eventsReceived)));
+            ereport(PANIC, (errmsg("AioWorker io_getevents() failed: error %d .", eventsReceived)));
         }
 
         Assert(eventsReceived <= max_nr);
@@ -590,7 +592,7 @@ void AioCompltrMain(int ac, char** av)
         }
     }
 
-    ereport(LOG, (errmsg("AIO Completer %d EXITED.", compltrIdx)));
+    ereport(LOG, (errmsg("AioWorker %d EXITED.", compltrIdx)));
     exit(0);
 }
 
