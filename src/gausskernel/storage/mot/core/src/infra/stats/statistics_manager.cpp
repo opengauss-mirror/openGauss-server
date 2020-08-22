@@ -346,7 +346,7 @@ void StatisticsManager::PrintStatistics(LogLevel logLevel, uint32_t statOpts /* 
 
         if (hasEnabled) {
             if (statOpts & STAT_OPT_PERIOD_DIFF) {
-                MOT_LOG_INFO("--> Periodic Report (last %llu seconds) <--", m_statsPrintPeriodSeconds);
+                MOT_LOG_INFO("--> Periodic Report (last %lu seconds) <--", m_statsPrintPeriodSeconds);
             } else if (statOpts & STAT_OPT_LEVEL_SUMMARY) {
                 MOT_LOG_INFO("--> Summary Report <--");
             } else if (statOpts & STAT_OPT_LEVEL_DETAIL) {
