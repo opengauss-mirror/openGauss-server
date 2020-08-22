@@ -2,9 +2,8 @@ DROP SCHEMA test_insert_update_003 CASCADE;
 CREATE SCHEMA test_insert_update_003;
 SET CURRENT_SCHEMA TO test_insert_update_003;
 
--- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
--- real upsert will be tested in specialized case.
-SET enable_upsert_to_merge TO ON;
+-- enable_upsert_to_merge must is off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
 
 -- test t4 with one primary key with three columns
 CREATE TABLE t4 (
@@ -106,7 +105,7 @@ CREATE UNIQUE INDEX u_t6_index1 ON t6(col1, col5, col6);
 INSERT INTO t6 (col1) VALUES (1), (2), (3), (4), (5);
 SELECT col1, col2, col3, col6, col7 FROM t6 ORDER BY col3;
 
---- should insert
+--- should not insert
 INSERT INTO t6 (col1) VALUES (1), (2), (3), (4), (5) ON DUPLICATE KEY UPDATE col6 = power(col1, col2);
 SELECT col1, col2, col3, col6, col7 FROM t6 ORDER BY col3;
 

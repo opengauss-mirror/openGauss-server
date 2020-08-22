@@ -6,9 +6,8 @@
 CREATE SCHEMA test_insert_update_008;
 SET current_schema = test_insert_update_008;
 
--- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
--- real upsert will be tested in specialized case.
-SET enable_upsert_to_merge TO ON;
+-- enable_upsert_to_merge must is off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
 
 CREATE TABLE products_base
 (

@@ -1,10 +1,9 @@
-DROP SCHEMA test_insert_update_001 CASCADE;
-CREATE SCHEMA test_insert_update_001;
-SET CURRENT_SCHEMA TO test_insert_update_001;
+DROP SCHEMA test_upsert_001 CASCADE;
+CREATE SCHEMA test_upsert_001;
+SET CURRENT_SCHEMA TO test_upsert_001;
 
--- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
--- real upsert will be tested in specialized case.
-SET enable_upsert_to_merge TO ON;
+-- enable_upsert_to_merge must is off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
 
 -- test description
 \h INSERT
@@ -12,45 +11,46 @@ SET enable_upsert_to_merge TO ON;
 -- test permission
 --- test with no sequence column
 CREATE TABLE t00 (col1 INT DEFAULT 1 PRIMARY KEY, col2 INT);
-CREATE USER insert_update_tester PASSWORD '123456@cc';
-GRANT ALL PRIVILEGES ON SCHEMA test_insert_update_001 TO insert_update_tester;
-SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
-INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
+CREATE USER upsert_tester PASSWORD '123456@cc';
+GRANT ALL PRIVILEGES ON SCHEMA test_upsert_001 TO upsert_tester;
+
+SET SESSION SESSION AUTHORIZATION upsert_tester PASSWORD '123456@cc';
+INSERT INTO test_upsert_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
 RESET SESSION AUTHORIZATION;
 
 ---- error: only have INSERT permission
-GRANT INSERT ON test_insert_update_001.t00 TO insert_update_tester;
-SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
-INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
+GRANT INSERT ON test_upsert_001.t00 TO upsert_tester;
+SET SESSION SESSION AUTHORIZATION upsert_tester PASSWORD '123456@cc';
+INSERT INTO test_upsert_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
 RESET SESSION AUTHORIZATION;
 
----- error: have INSERT UPDATE permission
-GRANT INSERT, UPDATE ON test_insert_update_001.t00 TO insert_update_tester;
-SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
-INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
+---- success: have INSERT UPDATE permission
+GRANT INSERT, UPDATE ON test_upsert_001.t00 TO upsert_tester;
+SET SESSION SESSION AUTHORIZATION upsert_tester PASSWORD '123456@cc';
+INSERT INTO test_upsert_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
 RESET SESSION AUTHORIZATION;
 
 --- have SELECT INSERT UPDATE permission
-GRANT SELECT, INSERT, UPDATE ON test_insert_update_001.t00 TO insert_update_tester;
-SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
-INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
-INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+GRANT SELECT, INSERT, UPDATE ON test_upsert_001.t00 TO upsert_tester;
+SET SESSION SESSION AUTHORIZATION upsert_tester PASSWORD '123456@cc';
+INSERT INTO test_upsert_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
+INSERT INTO test_upsert_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
 RESET SESSION AUTHORIZATION;
 
 --- test with sequnce column
 CREATE TABLE t01 (col1 INT , col2 BIGSERIAL PRIMARY KEY, col3 INT)  ;
 
 ---- error: don't have UPDATE permission on sequence table.
-GRANT SELECT, INSERT, UPDATE ON test_insert_update_001.t01 TO insert_update_tester;
-SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
-INSERT INTO test_insert_update_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+GRANT SELECT, INSERT, UPDATE ON test_upsert_001.t01 TO upsert_tester;
+SET SESSION SESSION AUTHORIZATION upsert_tester PASSWORD '123456@cc';
+INSERT INTO test_upsert_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
 RESET SESSION AUTHORIZATION;
 
 ---- have SELECT INSERT UPDATE permission on target relation, and UPDATE permission on sequence table.
-GRANT UPDATE ON test_insert_update_001.t01_col2_seq TO insert_update_tester;
-SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
-INSERT INTO test_insert_update_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
-INSERT INTO test_insert_update_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+GRANT UPDATE ON test_upsert_001.t01_col2_seq TO upsert_tester;
+SET SESSION SESSION AUTHORIZATION upsert_tester PASSWORD '123456@cc';
+INSERT INTO test_upsert_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+INSERT INTO test_upsert_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
 RESET SESSION AUTHORIZATION;
 
 -- test ommit INSERT target column
@@ -80,7 +80,7 @@ ALTER TABLE t03 DROP COLUMN col3;
 INSERT INTO t03 VALUES(1) ON DUPLICATE KEY UPDATE col1 = 1;
 --- error: clause other than VALUSES are not allowed to use
 INSERT INTO t03 SELECT * FROM t03 ON DUPLICATE KEY UPDATE col2 = 1;
---- error: expression index are not supported
+--- success: expression index are supported
 CREATE UNIQUE INDEX u_expr_index ON t03 USING btree (abs(col1));
 INSERT INTO t03 VALUES(-10, 10) ON DUPLICATE KEY UPDATE col2 = 20;
 DROP INDEX u_expr_index;
@@ -255,30 +255,30 @@ ROLLBACK;
 
 -- test schema
 SET current_schema = public;
-TRUNCATE test_insert_update_001.t05;
+TRUNCATE test_upsert_001.t05;
 --- should insert
-INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+INSERT INTO test_upsert_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
 ON DUPLICATE KEY UPDATE col3 = DEFAULT, col1 = col3;
-SELECT * FROM test_insert_update_001.t05 ORDER BY 1, 2, 3;
+SELECT * FROM test_upsert_001.t05 ORDER BY 1, 2, 3;
 
 --- should update
-INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+INSERT INTO test_upsert_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
 ON DUPLICATE KEY UPDATE col3 = DEFAULT, col1 = col3;
-SELECT * FROM test_insert_update_001.t05 ORDER BY 1, 2, 3;
+SELECT * FROM test_upsert_001.t05 ORDER BY 1, 2, 3;
 
 --- test using schema on update
-INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+INSERT INTO test_upsert_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
 ON DUPLICATE KEY UPDATE t05.col3 = DEFAULT, t05.col1 = t05.col3 + 1;
-SELECT * FROM test_insert_update_001.t05 ORDER BY 1, 2, 3;
+SELECT * FROM test_upsert_001.t05 ORDER BY 1, 2, 3;
 
 --- error: should not append schema
-INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
-ON DUPLICATE KEY UPDATE test_insert_update_001.t05.col3 = DEFAULT, t05.col1 = t05.col3 + 1;
+INSERT INTO test_upsert_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE test_upsert_001.t05.col3 = DEFAULT, t05.col1 = t05.col3 + 1;
 
-INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
-ON DUPLICATE KEY UPDATE t05.col3 = DEFAULT, t05.col1 = test_insert_update_001.t05.col3 + 1;
+INSERT INTO test_upsert_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE t05.col3 = DEFAULT, t05.col1 = test_upsert_001.t05.col3 + 1;
 
-SET CURRENT_SCHEMA TO test_insert_update_001;
+SET CURRENT_SCHEMA TO test_upsert_001;
 
-DROP USER insert_update_tester CASCADE;
-DROP SCHEMA test_insert_update_001 CASCADE;
+DROP USER upsert_tester CASCADE;
+DROP SCHEMA test_upsert_001 CASCADE;

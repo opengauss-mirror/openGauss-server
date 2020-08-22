@@ -1,10 +1,9 @@
-DROP SCHEMA test_insert_update_003 CASCADE;
-CREATE SCHEMA test_insert_update_003;
-SET CURRENT_SCHEMA TO test_insert_update_003;
+DROP SCHEMA test_insert_update_010 CASCADE;
+CREATE SCHEMA test_insert_update_010;
+SET CURRENT_SCHEMA TO test_insert_update_010;
 
--- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
--- real upsert will be tested in specialized case.
-SET enable_upsert_to_merge TO ON;
+-- enable_upsert_to_merge must is off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
 
 -- test t4 with one primary key with three columns
 CREATE TABLE t4 (
@@ -121,7 +120,7 @@ SELECT col1, col2, col3, col6, col7 FROM t6 WHERE col1 = 6 ORDER BY col3;
 --- also primary key will not match
 --- be ware the sequence column of the inserted row will jump n step, where n is the count of the not null rows,
 --- because those sequence have to be generated during the unique index join stage.
-INSERT INTO t6 (col1, col5, col6) 
+INSERT INTO t6 (col1, col5, col6)
     (SELECT col1, col5, col6 FROM t6 WHERE col1 = 6)
     ON DUPLICATE KEY UPDATE
         col7 = col2 + 1;
@@ -142,4 +141,4 @@ INSERT INTO t6 (col1, col5, col6) VALUES (7, 10, 10), (7, 100, 100) ON DUPLICATE
     col7 = col3 * 100;
 SELECT * FROM t6 WHERE col1 = 7 ORDER BY col1, col3, col6, col7;
 
-DROP SCHEMA test_insert_update_003 CASCADE;
+DROP SCHEMA test_insert_update_010 CASCADE;

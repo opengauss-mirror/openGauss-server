@@ -3,9 +3,8 @@ CREATE SCHEMA test_insert_update_009;
 SET CURRENT_SCHEMA TO test_insert_update_009;
 SET enable_light_proxy=off;
 
--- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
--- real upsert will be tested in specialized case.
-SET enable_upsert_to_merge TO ON;
+-- enable_upsert_to_merge must is off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
 
 -- test t1 with no index
 CREATE TABLE t1 (
@@ -37,7 +36,7 @@ INSERT INTO t1 (col1, col2)
         (SELECT col1, col2 FROM t1
         UNION
         SELECT col1, col3 FROM t1) AS union_table
-    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 10;
+    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3);
 SELECT col1, col2, col3 FROM t1 WHERE col5 > 6 ORDER BY col1, col2;
 
 --- test subquery, should insert
@@ -146,22 +145,14 @@ INSERT INTO t2 (col1, col2)
         (SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
         UNION
         SELECT col1, col3 FROM t1) AS union_table
-    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 10;
-
-set behavior_compat_options='merge_update_multi';
-INSERT INTO t2 (col1, col2)
-    SELECT * FROM
-        (SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
-        UNION
-        SELECT col1, col3 FROM t1) AS union_table
-    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 10;
+    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3);
 SELECT col1, col2, col3, col5 FROM t2 ORDER BY col5, col2;
 
 INSERT INTO t2 (col1, col2)
     SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
     UNION
     SELECT col1, col3 FROM t1
-    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 100;
+    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3);
 SELECT col1, col2, col3, col5 FROM t2 ORDER BY col5, col2;
 reset behavior_compat_options;
 
@@ -178,7 +169,7 @@ INSERT INTO t2 (col1, col2)
         SELECT 1, 2)
     INTERSECT
     SELECT col1, col3 FROM t1
-    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 100;
+    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3);
 SELECT col1, col2, col3, col5 FROM t2 WHERE col2 = 3 ORDER BY col5, col2;
 
 -- test EXCEPT, should update
@@ -194,7 +185,7 @@ INSERT INTO t2 (col1, col2)
     (SELECT col1, col3 FROM t1
         UNION
         SELECT NULL, NULL)
-    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 100;
+    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3);
 SELECT col1, col2, col3, col5 FROM t2 WHERE col2 = 2 ORDER BY col5, col2;
 
 -- test unique index with not default value
@@ -211,7 +202,7 @@ INSERT INTO t2
     (SELECT col1, col3 FROM t1
         UNION
         SELECT NULL, NULL)
-    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 100;
+    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3);
 SELECT col1, col2, col3, col5 FROM t2 WHERE col2 = 2 ORDER BY col5, col2;
 
 -- test t3 with one primary index with two columns

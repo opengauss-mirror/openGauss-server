@@ -4,9 +4,8 @@
 -- initial
 CREATE SCHEMA test_insert_update_008;
 SET current_schema = test_insert_update_008;
--- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
--- real upsert will be tested in specialized case.
-SET enable_upsert_to_merge TO ON;
+-- enable_upsert_to_merge must is off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
 CREATE TABLE products_base
 (
 product_id INTEGER DEFAULT 0,
@@ -64,19 +63,14 @@ INSERT INTO products_row
     product_name = excluded.product_name,
     category = excluded.category,
     total = excluded.total;
-                                                                                                                            QUERY PLAN                                                                                                                             
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.products_row
-   ->  Hash Right Join
-         Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid, newproducts_row.ctid
-         Hash Cond: (products_row.product_id = newproducts_row.product_id)
-         ->  Seq Scan on test_insert_update_008.products_row
-               Output: products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-         ->  Hash
-               Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid
-               ->  Seq Scan on test_insert_update_008.newproducts_row
-                     Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid
-(10 rows)
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.products_row
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Seq Scan on test_insert_update_008.newproducts_row
+         Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total
+(5 rows)
 
 EXPLAIN (VERBOSE on, COSTS off)
 INSERT INTO products_row
@@ -90,26 +84,21 @@ INSERT INTO products_row
         product_name = excluded.product_name,
         category = excluded.category,
         total = excluded.total;
-                                                                                                                                                 QUERY PLAN                                                                                                                                                  
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.products_row
+                                                                                                   QUERY PLAN                                                                                                    
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.products_row
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
    ->  Nested Loop
-         Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid, newproducts_row.ctid, test_insert_update_008.products_row.ctid
+         Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total
          Join Filter: ((test_insert_update_008.products_row.total + newproducts_row.total) < 1000)
          ->  Seq Scan on test_insert_update_008.products_row
-               Output: test_insert_update_008.products_row.ctid, test_insert_update_008.products_row.total
+               Output: test_insert_update_008.products_row.product_id, test_insert_update_008.products_row.product_name, test_insert_update_008.products_row.category, test_insert_update_008.products_row.total
          ->  Materialize
-               Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-               ->  Hash Right Join
-                     Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-                     Hash Cond: (products_row.product_id = newproducts_row.product_id)
-                     ->  Seq Scan on test_insert_update_008.products_row
-                           Output: products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-                     ->  Hash
-                           Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid
-                           ->  Seq Scan on test_insert_update_008.newproducts_row
-                                 Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid
-(17 rows)
+               Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total
+               ->  Seq Scan on test_insert_update_008.newproducts_row
+                     Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total
+(12 rows)
 
 EXPLAIN (VERBOSE on, COSTS off)
 INSERT INTO products_row
@@ -119,20 +108,15 @@ INSERT INTO products_row
         product_name = excluded.product_name,
         category = excluded.category,
         total = excluded.total;
-                                                                                                                            QUERY PLAN                                                                                                                             
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.products_row
-   ->  Hash Right Join
-         Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid, newproducts_row.ctid
-         Hash Cond: (products_row.product_id = newproducts_row.product_id)
-         ->  Seq Scan on test_insert_update_008.products_row
-               Output: products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-         ->  Hash
-               Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid
-               ->  Seq Scan on test_insert_update_008.newproducts_row
-                     Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid
-                     Filter: ((newproducts_row.product_id IS NOT NULL) AND (newproducts_row.product_name IS NOT NULL))
-(11 rows)
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.products_row
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Seq Scan on test_insert_update_008.newproducts_row
+         Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total
+         Filter: ((newproducts_row.product_id IS NOT NULL) AND (newproducts_row.product_name IS NOT NULL))
+(6 rows)
 
 -- explain analyze
 BEGIN;
@@ -143,19 +127,14 @@ INSERT INTO products_row
     product_name = excluded.product_name,
     category = excluded.category,
     total = excluded.total;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Merge on products_row (actual rows=4 loops=1)
-   Merge Inserted: 1
-   Merge Updated: 3
-   ->  Hash Right Join (actual rows=4 loops=1)
-         Hash Cond: (products_row.product_id = newproducts_row.product_id)
-         ->  Seq Scan on products_row (actual rows=5 loops=1)
-         ->  Hash (actual rows=4 loops=1)
-                Buckets: 32768  Batches: 1  Memory Usage: 1kB
-               ->  Seq Scan on newproducts_row (actual rows=4 loops=1)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Insert on products_row (actual rows=4 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Seq Scan on newproducts_row (actual rows=4 loops=1)
 --? Total runtime: .* ms
-(10 rows)
+(5 rows)
 
 ROLLBACK;
 -- explain performance
@@ -179,19 +158,14 @@ INSERT INTO products_row
     product_name = excluded.product_name,
     category = excluded.category,
     total = excluded.total;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Merge on products_row (actual rows=4 loops=1)
-   Merge Inserted: 1
-   Merge Updated: 3
-   ->  Hash Right Join (actual rows=4 loops=1)
-         Hash Cond: (products_row.product_id = newproducts_row.product_id)
-         ->  Seq Scan on products_row (actual rows=5 loops=1)
-         ->  Hash (actual rows=4 loops=1)
-                Buckets: 32768  Batches: 1  Memory Usage: 1kB
-               ->  Seq Scan on newproducts_row (actual rows=4 loops=1)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Insert on products_row (actual rows=4 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Seq Scan on newproducts_row (actual rows=4 loops=1)
 --? Total runtime: .* ms
-(10 rows)
+(5 rows)
 
 ROLLBACK;
 -- pretty mode performance
@@ -204,19 +178,14 @@ INSERT INTO products_row
     product_name = excluded.product_name,
     category = excluded.category,
     total = excluded.total;
-                                                                                                                            QUERY PLAN                                                                                                                             
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.products_row
-   ->  Hash Right Join
-         Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid, newproducts_row.ctid
-         Hash Cond: (products_row.product_id = newproducts_row.product_id)
-         ->  Seq Scan on test_insert_update_008.products_row
-               Output: products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-         ->  Hash
-               Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid
-               ->  Seq Scan on test_insert_update_008.newproducts_row
-                     Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total, newproducts_row.ctid
-(10 rows)
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.products_row
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Seq Scan on test_insert_update_008.newproducts_row
+         Output: newproducts_row.product_id, newproducts_row.product_name, newproducts_row.category, newproducts_row.total
+(5 rows)
 
 -- explain analyze
 BEGIN;
@@ -227,19 +196,14 @@ INSERT INTO products_row
     product_name = excluded.product_name,
     category = excluded.category,
     total = excluded.total;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Merge on products_row (actual rows=4 loops=1)
-   Merge Inserted: 1
-   Merge Updated: 3
-   ->  Hash Right Join (actual rows=4 loops=1)
-         Hash Cond: (products_row.product_id = newproducts_row.product_id)
-         ->  Seq Scan on products_row (actual rows=5 loops=1)
-         ->  Hash (actual rows=4 loops=1)
-                Buckets: 32768  Batches: 1  Memory Usage: 1kB
-               ->  Seq Scan on newproducts_row (actual rows=4 loops=1)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Insert on products_row (actual rows=4 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Seq Scan on newproducts_row (actual rows=4 loops=1)
 --? Total runtime: .* ms
-(10 rows)
+(5 rows)
 
 ROLLBACK;
 -- explain analyze
@@ -251,19 +215,14 @@ INSERT INTO products_row
     product_name = excluded.product_name,
     category = excluded.category,
     total = excluded.total;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Merge on products_row (actual rows=4 loops=1)
-   Merge Inserted: 1
-   Merge Updated: 3
-   ->  Hash Right Join (actual rows=4 loops=1)
-         Hash Cond: (products_row.product_id = newproducts_row.product_id)
-         ->  Seq Scan on products_row (actual rows=5 loops=1)
-         ->  Hash (actual rows=4 loops=1)
-                Buckets: 32768  Batches: 1  Memory Usage: 1kB
-               ->  Seq Scan on newproducts_row (actual rows=4 loops=1)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Insert on products_row (actual rows=4 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Seq Scan on newproducts_row (actual rows=4 loops=1)
 --? Total runtime: .* ms
-(10 rows)
+(5 rows)
 
 ROLLBACK;
 -- explain performance
@@ -427,103 +386,73 @@ INSERT INTO item (item_level, item_subclass_cd, item_desc, vendor_party_id)
 --        pg_client_encoding() Column_009
     FROM region Table_001, associate_benefit_expense Table_002
 ON DUPLICATE KEY UPDATE item_level = -1000;
-                                                                                                                                                                                                   QUERY PLAN                                                                                                                                                                                                    
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.item
+                                                                                                                                              QUERY PLAN                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.item
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: u_item_index
    ->  Nested Loop
-         Output: table_001.region_mgr_associate_id, table_002.associate_expns_type_cd, table_001.region_name, 10, item.a, item.item_id, item.item_name, item.item_level, item.item_desc, item.item_subclass_cd, item.item_type_cd, item.inventory_ind, item.vendor_party_id, item.commodity_cd, item.brand_cd, item.item_available, item.ctid, item.tableoid, table_001.ctid, table_002.ctid, table_002.tableoid
-         ->  Hash Left Join
-               Output: table_002.associate_expns_type_cd, table_002.ctid, table_002.tableoid, item.a, item.item_id, item.item_name, item.item_level, item.item_desc, item.item_subclass_cd, item.item_type_cd, item.inventory_ind, item.vendor_party_id, item.commodity_cd, item.brand_cd, item.item_available, item.ctid, item.tableoid
-               Hash Cond: ((table_002.associate_expns_type_cd)::text = (item.item_subclass_cd)::text)
-               ->  Partition Iterator
-                     Output: table_002.associate_expns_type_cd, table_002.ctid, table_002.tableoid
-                     Iterations: 13
-                     ->  Partitioned Seq Scan on test_insert_update_008.associate_benefit_expense table_002
-                           Output: table_002.associate_expns_type_cd, table_002.ctid, table_002.tableoid
-                           Selected Partitions:  1..13
-               ->  Hash
-                     Output: item.a, item.item_id, item.item_name, item.item_level, item.item_desc, item.item_subclass_cd, item.item_type_cd, item.inventory_ind, item.vendor_party_id, item.commodity_cd, item.brand_cd, item.item_available, item.ctid, item.tableoid
-                     ->  Partition Iterator
-                           Output: item.a, item.item_id, item.item_name, item.item_level, item.item_desc, item.item_subclass_cd, item.item_type_cd, item.inventory_ind, item.vendor_party_id, item.commodity_cd, item.brand_cd, item.item_available, item.ctid, item.tableoid
-                           Iterations: 1
-                           ->  Partitioned Seq Scan on test_insert_update_008.item
-                                 Output: item.a, item.item_id, item.item_name, item.item_level, item.item_desc, item.item_subclass_cd, item.item_type_cd, item.inventory_ind, item.vendor_party_id, item.commodity_cd, item.brand_cd, item.item_available, item.ctid, item.tableoid
-                                 Filter: (item.vendor_party_id = 10)
-                                 Selected Partitions:  8
+         Output: 3, NULL::numeric, NULL::character varying, table_001.region_mgr_associate_id, (table_001.region_name)::character varying(250), table_002.associate_expns_type_cd, NULL::character varying, NULL::bpchar, 10::smallint, NULL::character varying, NULL::character varying, NULL::bpchar
+         ->  Partition Iterator
+               Output: table_002.a, table_002.period_end_dt, table_002.associate_expns_type_cd, table_002.associate_party_id, table_002.benefit_hours_qty, table_002.benefit_cost_amt
+               Iterations: 13
+               ->  Partitioned Seq Scan on test_insert_update_008.associate_benefit_expense table_002
+                     Output: table_002.a, table_002.period_end_dt, table_002.associate_expns_type_cd, table_002.associate_party_id, table_002.benefit_hours_qty, table_002.benefit_cost_amt
+                     Selected Partitions:  1..13
          ->  Materialize
-               Output: table_001.region_mgr_associate_id, table_001.region_name, table_001.ctid
+               Output: table_001.region_mgr_associate_id, table_001.region_name
                ->  Seq Scan on test_insert_update_008.region table_001
-                     Output: table_001.region_mgr_associate_id, table_001.region_name, table_001.ctid
-(25 rows)
+                     Output: table_001.region_mgr_associate_id, table_001.region_name
+(15 rows)
 
 EXPLAIN (VERBOSE ON, COSTS OFF)
 INSERT INTO products_row VALUES(100)
     ON DUPLICATE KEY UPDATE total=100;
-                                                                             QUERY PLAN                                                                             
---------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.products_row
-   ->  Hash Right Join
-         Output: "*VALUES*".column1, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid, "*VALUES*".*
-         Hash Cond: (products_row.product_id = "*VALUES*".column1)
-         ->  Seq Scan on test_insert_update_008.products_row
-               Output: products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-         ->  Hash
-               Output: "*VALUES*".column1, "*VALUES*".*
-               ->  Values Scan on "*VALUES*"
-                     Output: "*VALUES*".column1, "*VALUES*".*
-(10 rows)
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.products_row
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Result
+         Output: 100, 'null'::character varying(60), 'unknown'::character varying(60), 0
+(5 rows)
 
 SET enable_light_proxy=off;
 EXPLAIN (VERBOSE ON, COSTS OFF)
 INSERT INTO products_row VALUES(100)
     ON DUPLICATE KEY UPDATE total=100;
-                                                                             QUERY PLAN                                                                             
---------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.products_row
-   ->  Hash Right Join
-         Output: "*VALUES*".column1, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid, "*VALUES*".*
-         Hash Cond: (products_row.product_id = "*VALUES*".column1)
-         ->  Seq Scan on test_insert_update_008.products_row
-               Output: products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-         ->  Hash
-               Output: "*VALUES*".column1, "*VALUES*".*
-               ->  Values Scan on "*VALUES*"
-                     Output: "*VALUES*".column1, "*VALUES*".*
-(10 rows)
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.products_row
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Result
+         Output: 100, 'null'::character varying(60), 'unknown'::character varying(60), 0
+(5 rows)
 
 EXPLAIN (VERBOSE ON, COSTS OFF)
 INSERT INTO products_row VALUES(100)
     ON DUPLICATE KEY UPDATE total=100;
-                                                                             QUERY PLAN                                                                             
---------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.products_row
-   ->  Hash Right Join
-         Output: "*VALUES*".column1, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid, "*VALUES*".*
-         Hash Cond: (products_row.product_id = "*VALUES*".column1)
-         ->  Seq Scan on test_insert_update_008.products_row
-               Output: products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-         ->  Hash
-               Output: "*VALUES*".column1, "*VALUES*".*
-               ->  Values Scan on "*VALUES*"
-                     Output: "*VALUES*".column1, "*VALUES*".*
-(10 rows)
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.products_row
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Result
+         Output: 100, 'null'::character varying(60), 'unknown'::character varying(60), 0
+(5 rows)
 
 EXPLAIN (VERBOSE ON, COSTS OFF)
 INSERT INTO products_row VALUES(100)
     ON DUPLICATE KEY UPDATE total=100;
-                                                                             QUERY PLAN                                                                             
---------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Merge on test_insert_update_008.products_row
-   ->  Hash Right Join
-         Output: "*VALUES*".column1, products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid, "*VALUES*".*
-         Hash Cond: (products_row.product_id = "*VALUES*".column1)
-         ->  Seq Scan on test_insert_update_008.products_row
-               Output: products_row.product_id, products_row.product_name, products_row.category, products_row.total, products_row.ctid
-         ->  Hash
-               Output: "*VALUES*".column1, "*VALUES*".*
-               ->  Values Scan on "*VALUES*"
-                     Output: "*VALUES*".column1, "*VALUES*".*
-(10 rows)
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Insert on test_insert_update_008.products_row
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: products_row_pkey
+   ->  Result
+         Output: 100, 'null'::character varying(60), 'unknown'::character varying(60), 0
+(5 rows)
 
 RESET enable_light_proxy;
 DROP SCHEMA test_insert_update_008 CASCADE;
