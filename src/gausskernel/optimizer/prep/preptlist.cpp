@@ -555,5 +555,10 @@ static List* add_distribute_column(List* tlist, Index result_relation, List* ran
 
     return tlist;
 }
+
+List* preprocess_upsert_targetlist(List* tlist, int result_relation, List* range_table)
+{
+    return expand_targetlist(tlist, CMD_UPDATE, result_relation, range_table);
+}
 #endif
 

@@ -48,11 +48,15 @@ typedef enum
 #define REINDEX_CGIN_INDEX (1<<5)
 #define	REINDEX_ALL_INDEX   (REINDEX_BTREE_INDEX|REINDEX_HASH_INDEX|REINDEX_GIN_INDEX|REINDEX_GIST_INDEX|REINDEX_CGIN_INDEX)
 
+typedef enum CheckWaitMode
+{
+    CHECK_WAIT,
+    CHECK_NOWAIT,
+} CheckWaitMode;
 
 extern void index_check_primary_key(Relation heapRel, IndexInfo *indexInfo, bool is_alter_table);
 
-typedef struct
-{
+typedef struct {
     Oid  existingPSortOid;
     bool isPartitionedIndex;
 } IndexCreateExtraArgs;
@@ -73,6 +77,8 @@ extern void index_drop(Oid indexId, bool concurrent);
 
 extern IndexInfo *BuildIndexInfo(Relation index);
 extern IndexInfo *BuildDummyIndexInfo(Relation index);
+
+extern void BuildSpeculativeIndexInfo(Relation index, IndexInfo* ii);
 
 extern void FormIndexDatum(IndexInfo *indexInfo, TupleTableSlot *slot, EState *estate, Datum *values, bool *isnull);
 extern void index_build(Relation heapRelation, Partition heapPartition, Relation indexRelation,

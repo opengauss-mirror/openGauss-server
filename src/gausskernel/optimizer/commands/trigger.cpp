@@ -2616,6 +2616,11 @@ static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
             LockTupleExclusive,
             false);
         switch (test) {
+            case HeapTupleSelfCreated:
+                ReleaseBuffer(buffer);
+                ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                    errmsg("attempted to lock invisible tuple")));
+                break;
             case HeapTupleSelfUpdated:
                 /* treat it as deleted; do not process */
                 ReleaseBuffer(buffer);

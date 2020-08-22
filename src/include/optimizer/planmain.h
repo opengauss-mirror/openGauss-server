@@ -109,21 +109,21 @@ extern int get_plan_actual_total_width(Plan* plan, bool vectorized, OpType type,
 #ifdef STREAMPLAN
 extern Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList, bool isDfsStore = false);
+    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause, bool isDfsStore = false);
 extern Plan* make_modifytables(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, bool isDfsStore,
-    Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList);
+    Index mergeTargetRelation, List* mergeSourceTargetList, List *mergeActionList, UpsertExpr *upsertClause);
 extern Plan* make_redistribute_for_agg(PlannerInfo* root, Plan* lefttree, List* redistribute_keys, double multiple,
     Distribution* distribution = NULL, bool is_local_redistribute = false);
 extern Plan* make_stream_plan(PlannerInfo* root, Plan* lefttree, List* redistribute_keys, double multiple,
     Distribution* target_distribution = NULL);
 #else
-extern ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
-    List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList, bool isDfsStore = false);
-extern ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
-    List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, bool isDfsStore, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList);
+extern ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRelations,
+    List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
+    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause, bool isDfsStore = false);
+extern ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRelations,
+    List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, bool isDfsStore,
+    Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause);
 #endif
 
 extern bool is_projection_capable_plan(Plan* plan);

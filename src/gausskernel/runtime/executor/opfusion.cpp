@@ -1075,7 +1075,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     m_estate->es_result_relation_info = result_rel_info;
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        ExecOpenIndices(result_rel_info);
+        ExecOpenIndices(result_rel_info, false);
     }
 
     CommandId mycid = GetCurrentCommandId(true);
@@ -1109,7 +1109,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     /* insert index entries for tuple */
     List* recheck_indexes = NIL;
     if (result_rel_info->ri_NumIndices > 0) {
-        recheck_indexes = ExecInsertIndexTuples(m_reslot, &(tuple->t_self), m_estate, NULL, NULL, bucketid);
+        recheck_indexes = ExecInsertIndexTuples(m_reslot, &(tuple->t_self), m_estate, NULL, NULL, bucketid, NULL);
     }
     list_free_ext(recheck_indexes);
 
@@ -1388,7 +1388,7 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
     m_estate->es_output_cid = GetCurrentCommandId(true);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        ExecOpenIndices(result_rel_info);
+        ExecOpenIndices(result_rel_info, false);
     }
 
     /*********************************
@@ -1443,7 +1443,8 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
                 /* done successfully */
                 nprocessed++;
                 if (result_rel_info->ri_NumIndices > 0 && !HeapTupleIsHeapOnly(tup)) {
-                    recheck_indexes = ExecInsertIndexTuples(m_reslot, &(tup->t_self), m_estate, NULL, NULL, bucketid);
+                    recheck_indexes = ExecInsertIndexTuples(m_reslot, &(tup->t_self), m_estate,
+                        NULL, NULL, bucketid, NULL);
                     list_free_ext(recheck_indexes);
                 }
                 break;
@@ -1574,7 +1575,7 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
     m_estate->es_output_cid = GetCurrentCommandId(true);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        ExecOpenIndices(result_rel_info);
+        ExecOpenIndices(result_rel_info, false);
     }
 
     /********************************
@@ -1781,7 +1782,7 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
     m_estate->es_output_cid = GetCurrentCommandId(true);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        ExecOpenIndices(result_rel_info);
+        ExecOpenIndices(result_rel_info, false);
     }
 
     /**************************************
@@ -1850,6 +1851,10 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
             }
 
             switch (result) {
+                case HeapTupleSelfCreated:
+                    ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                        errmsg("attempted to lock invisible tuple")));
+                    break;
                 case HeapTupleSelfUpdated:
                     /* already deleted by self; nothing to do */
                     break;

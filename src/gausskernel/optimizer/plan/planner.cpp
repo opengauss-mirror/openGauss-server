@@ -1332,6 +1332,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     parse->mergeSourceTargetList =
         (List*)preprocess_expression(root, (Node*)parse->mergeSourceTargetList, EXPRKIND_TARGET);
 
+    if (parse->upsertClause) {
+        parse->upsertClause->updateTlist = (List*)
+            preprocess_expression(root, (Node*)parse->upsertClause->updateTlist, EXPRKIND_TARGET);
+    }
     root->append_rel_list = (List*)preprocess_expression(root, (Node*)root->append_rel_list, EXPRKIND_APPINFO);
 
     /* Also need to preprocess expressions for function and values RTEs */
@@ -1521,6 +1525,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->mergeTarget_relation,
                 parse->mergeSourceTargetList,
                 parse->mergeActionList,
+                parse->upsertClause,
                 isDfsStore);
 #else
             plan = (Plan*)make_modifytable(parse->commandType,
@@ -1534,6 +1539,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->mergeTarget_relation,
                 parse->mergeSourceTargetList,
                 parse->mergeActionList,
+                parse->upsertClause,
                 isDfsStore);
 #endif
 #ifdef PGXC
@@ -2014,6 +2020,7 @@ static Plan* inheritance_planner(PlannerInfo* root)
         isDfsStore,
         0,
         NULL,
+        NULL,
         NULL);
 #else
     return make_modifytables(parse->commandType,
@@ -2026,6 +2033,7 @@ static Plan* inheritance_planner(PlannerInfo* root)
         partKeyUpdated,
         isDfsStore,
         0,
+        NULL,
         NULL,
         NULL);
 #endif
@@ -2445,6 +2453,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         /* Preprocess targetlist */
         tlist = preprocess_targetlist(root, tlist);
 
+        if (parse->upsertClause) {
+            UpsertExpr* upsertClause = parse->upsertClause;
+            upsertClause->updateTlist =
+                preprocess_upsert_targetlist(upsertClause->updateTlist, parse->resultRelation, parse->rtable);
+        }
         /*
          * Locate any window functions in the tlist.  (We don't need to look
          * anywhere else, since expressions used in ORDER BY will be in there

@@ -1814,7 +1814,13 @@ IndexInfo* BuildIndexInfo(Relation index)
     /* fetch exclusion constraint info if any */
     if (indexStruct->indisexclusion) {
         RelationGetExclusionInfo(index, &ii->ii_ExclusionOps, &ii->ii_ExclusionProcs, &ii->ii_ExclusionStrats);
-    } 
+    }
+
+    /* not doing speculative insertion here */
+    ii->ii_UniqueOps = NULL;
+    ii->ii_UniqueProcs = NULL;
+    ii->ii_UniqueStrats = NULL;
+
     return ii;
 }
 
@@ -1863,6 +1869,42 @@ IndexInfo* BuildDummyIndexInfo(Relation index)
 
     /* We ignore the exclusion constraint if any */
     return ii;
+}
+
+void BuildSpeculativeIndexInfo(Relation index, IndexInfo* ii)
+{
+    int ncols = index->rd_rel->relnatts;
+    int i;
+
+    /*
+     * fetch info for checking unique indexes
+     */
+    Assert(ii->ii_Unique);
+
+    if (index->rd_rel->relam != BTREE_AM_OID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("unexpected non-btree speculative unique index")));
+    }
+
+    ii->ii_UniqueOps = (Oid*) palloc(sizeof(Oid) * ncols);
+    ii->ii_UniqueProcs = (Oid*) palloc(sizeof(Oid) * ncols);
+    ii->ii_UniqueStrats = (uint16*) palloc(sizeof(uint16) * ncols);
+
+    /*
+     * We have to look up the operator's strategy number.  This
+     * provides a cross-check that the operator does match the index.
+     *
+     * We need the func OIDs and strategy numbers too
+     */
+    for (i = 0; i < ncols; i++) {
+        ii->ii_UniqueStrats[i] = BTEqualStrategyNumber;
+        ii->ii_UniqueOps[i] = get_opfamily_member(index->rd_opfamily[i],
+            index->rd_opcintype[i],
+            index->rd_opcintype[i],
+            ii->ii_UniqueStrats[i]);
+        ii->ii_UniqueProcs[i] = get_opcode(ii->ii_UniqueOps[i]);
+    }
 }
 
 /* ----------------

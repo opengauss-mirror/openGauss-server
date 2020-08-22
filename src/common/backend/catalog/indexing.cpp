@@ -45,7 +45,7 @@ CatalogIndexState CatalogOpenIndexes(Relation heapRel)
     resultRelInfo->ri_RelationDesc = heapRel;
     resultRelInfo->ri_TrigDesc = NULL; /* we don't fire triggers */
 
-    ExecOpenIndices(resultRelInfo);
+    ExecOpenIndices(resultRelInfo, false);
 
     return resultRelInfo;
 }

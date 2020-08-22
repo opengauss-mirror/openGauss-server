@@ -1372,6 +1372,9 @@ int exprLocation(const Node* expr)
         case T_WithClause:
             loc = ((const WithClause*)expr)->location;
             break;
+        case T_UpsertClause:
+            loc = ((const UpsertClause*)expr)->location;
+            break;
         case T_CommonTableExpr:
             loc = ((const CommonTableExpr*)expr)->location;
             break;
@@ -1781,6 +1784,11 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
         } break;
+        case T_UpsertExpr: {
+            UpsertExpr* upsertClause = (UpsertExpr*)node;
+            if (p2walker(upsertClause->updateTlist, context))
+                return true;
+        } break;
         case T_JoinExpr: {
             JoinExpr* join = (JoinExpr*)node;
 
@@ -1878,6 +1886,9 @@ bool query_tree_walker(Query* query, bool (*walker)(), void* context, int flags)
         return true;
     }
     if (p2walker((Node*)query->mergeActionList, context)) {
+        return true;
+    }
+    if (p2walker((Node*)query->upsertClause, context)) {
         return true;
     }
     if (p2walker((Node*)query->returningList, context)) {
@@ -2468,6 +2479,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             }
             return (Node*)resultlist;
         } break;
+        case T_UpsertExpr: {
+            UpsertExpr* upsertClause = (UpsertExpr*)node;
+            UpsertExpr* newnode = NULL;
+
+            FLATCOPY(newnode, upsertClause, UpsertExpr, isCopy);
+            MUTATE(newnode->updateTlist, upsertClause->updateTlist, List*);
+            return (Node*)newnode;
+        } break;
         case T_FromExpr: {
             FromExpr* from = (FromExpr*)node;
             FromExpr* newnode = NULL;
@@ -2586,6 +2605,7 @@ Query* query_tree_mutator(Query* query, Node* (*mutator)(Node*, void*), void* co
     MUTATE(query->targetList, query->targetList, List*);
     MUTATE(query->mergeSourceTargetList, query->mergeSourceTargetList, List*);
     MUTATE(query->mergeActionList, query->mergeActionList, List*);
+    MUTATE(query->upsertClause, query->upsertClause, UpsertExpr*);
     MUTATE(query->returningList, query->returningList, List*);
     MUTATE(query->jointree, query->jointree, FromExpr*);
     MUTATE(query->setOperations, query->setOperations, Node*);
@@ -2851,6 +2871,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             if (p2walker(stmt->withClause, context)) {
+                return true;
+            }
+            if (p2walker(stmt->upsertClause, context)) {
                 return true;
             }
         } break;
@@ -3144,6 +3167,8 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
         } break;
         case T_WithClause:
             return p2walker(((WithClause*)node)->ctes, context);
+        case T_UpsertClause:
+            return p2walker(((UpsertClause*)node)->targetList, context);
         case T_CommonTableExpr:
             return p2walker(((CommonTableExpr*)node)->ctequery, context);
         default:

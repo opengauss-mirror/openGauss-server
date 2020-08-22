@@ -208,6 +208,11 @@ const char *getBypassReason(FusionType result)
             break;
         }
 
+        case NOBYPASS_UPSERT_NOT_SUPPORT: {
+            return "Bypass not support INSERT INTO ... ON DUPLICATE KEY UPDATE statement";
+            break;
+        }
+
         default: {
             Assert(0);
             ereport(ERROR,
@@ -756,6 +761,9 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
     BaseResult *base = (BaseResult *)linitial(node->plans);
     if (base->plan.lefttree != NULL || base->plan.initPlan != NIL || base->resconstantqual != NULL) {
         return NOBYPASS_NO_SIMPLE_INSERT;
+    }
+    if (node->upsertAction != UPSERT_NONE) {
+        return NOBYPASS_UPSERT_NOT_SUPPORT;
     }
 
     /* check relation */

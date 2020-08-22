@@ -187,6 +187,7 @@ static void ExplainProperty(const char* qlabel, const char* value, bool numeric,
 static void ExplainOpenGroup(const char* objtype, const char* labelname, bool labeled, ExplainState* es);
 static void ExplainCloseGroup(const char* objtype, const char* labelname, bool labeled, ExplainState* es);
 static void ExplainDummyGroup(const char* objtype, const char* labelname, ExplainState* es);
+static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es);
 #ifdef PGXC
 static void ExplainExecNodes(const ExecNodes* en, ExplainState* es);
 static void ExplainRemoteQuery(RemoteQuery* plan, PlanState* planstate, List* ancestors, ExplainState* es);
@@ -2326,6 +2327,12 @@ static void ExplainNode(
                     }
                 }
             } else {
+                /* upsert cases */
+                ModifyTableState* mtstate = (ModifyTableState*)planstate;
+                if (mtstate->mt_upsert != NULL &&
+                    mtstate->mt_upsert->us_action != UPSERT_NONE && mtstate->resultRelInfo->ri_NumIndices > 0) {
+                    show_on_duplicate_info(mtstate, es);
+                }
                 /* non-merge cases */
                 foreach (elt, mt->remote_plans) {
                     if (lfirst(elt)) {
@@ -7909,6 +7916,39 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es)
         /* CTE\SUBQUERY\VALUES\JOIN\REMOTEQUERY do not have object owner. */
         if (objectname != NULL)
             es->planinfo->m_planTableData->set_plan_table_objs(plan->plan_node_id, objectname, object_type, namespc);
+    }
+}
+
+/*
+ * Show extra information for upsert info
+ */
+static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es)
+{
+    ResultRelInfo* resultRelInfo = mtstate->resultRelInfo;
+    IndexInfo* indexInfo = NULL;
+    List* idxNames = NIL;
+
+    /* Gather names of ON CONFLICT Arbiter indexes */
+    for (int i = 0; i < resultRelInfo->ri_NumIndices; ++i) {
+        indexInfo = resultRelInfo->ri_IndexRelationInfo[i];
+        if (!indexInfo->ii_Unique && !indexInfo->ii_ExclusionOps) {
+            continue;
+        }
+
+        Relation indexRelation = resultRelInfo->ri_IndexRelationDescs[i];
+        char* indexName = RelationGetRelationName(indexRelation);
+        idxNames = lappend(idxNames, indexName);
+    }
+
+    ExplainPropertyText("Conflict Resolution",
+                        mtstate->mt_upsert->us_action == UPSERT_NOTHING ? "NOTHING" : "UPDATE",
+                        es);
+    /*
+     * Don't display arbiter indexes at all when DO NOTHING variant
+     * implicitly ignores all conflicts
+     */
+    if (idxNames != NIL) {
+        ExplainPropertyList("Conflict Arbiter Indexes", idxNames, es);
     }
 }
 

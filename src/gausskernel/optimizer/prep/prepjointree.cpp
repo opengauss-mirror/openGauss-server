@@ -1056,6 +1056,10 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
      */
     parse->targetList = (List*)pullup_replace_vars((Node*)parse->targetList, &rvcontext);
     parse->returningList = (List*)pullup_replace_vars((Node*)parse->returningList, &rvcontext);
+    if (parse->upsertClause != NULL) {
+        parse->upsertClause->updateTlist = (List*)
+            pullup_replace_vars((Node*)parse->upsertClause->updateTlist, &rvcontext);
+    }
 
     replace_vars_in_jointree((Node*)parse->jointree, &rvcontext, lowest_outer_join);
 

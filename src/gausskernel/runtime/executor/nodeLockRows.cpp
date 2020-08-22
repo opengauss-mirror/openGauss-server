@@ -184,6 +184,10 @@ lnext:
             bucket_rel, &tuple, &buffer, &update_ctid, &update_xmax, estate->es_output_cid, lock_mode, erm->noWait);
         ReleaseBuffer(buffer);
         switch (test) {
+            case HeapTupleSelfCreated:
+                ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                    errmsg("attempted to lock invisible tuple")));
+                break;
             case HeapTupleSelfUpdated:
                 /* treat it as deleted; do not process */
                 goto lnext;

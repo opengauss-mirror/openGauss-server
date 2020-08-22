@@ -23,7 +23,7 @@ extern void checkNameSpaceConflicts(ParseState* pstate, List* namespace1, List* 
 extern int RTERangeTablePosn(ParseState* pstate, RangeTblEntry* rte, int* sublevels_up);
 extern RangeTblEntry* GetRTEByRangeTablePosn(ParseState* pstate, int varno, int sublevels_up);
 extern CommonTableExpr* GetCTEForRTE(ParseState* pstate, RangeTblEntry* rte, int rtelevelsup);
-extern Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, int location);
+extern Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, int location, bool omit = false);
 extern Node* colNameToVar(
     ParseState* pstate, char* colname, bool localonly, int location, RangeTblEntry** final_rte = NULL);
 extern void markVarForSelectPriv(ParseState* pstate, Var* var, RangeTblEntry* rte);

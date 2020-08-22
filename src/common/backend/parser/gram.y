@@ -239,6 +239,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 /* PGXC_END */
     ForeignPartState    *foreignpartby;
 	MergeWhenClause		*mergewhen;
+	UpsertClause *upsert;
 }
 
 %type <node>	stmt schema_stmt
@@ -447,7 +448,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 
 /* INSERT */
 %type <istmt>	insert_rest
-%type <node>	duplicate_update_clause
+%type <node>   upsert_clause
 
 %type <mergewhen>	merge_insert merge_update
 
@@ -13067,80 +13068,79 @@ InsertStmt: opt_with_clause INSERT INTO qualified_name insert_rest returning_cla
 				$5->withClause = $1;
 				$$ = (Node *) $5;
 			}
-			| opt_with_clause INSERT INTO qualified_name insert_rest duplicate_update_clause returning_clause
+			| opt_with_clause INSERT INTO qualified_name insert_rest upsert_clause returning_clause
 				{
-					/* It is a INSERT ON DUPLICATE KEY UPDATE statement */
-					if ($7 != NIL)
-					{
+					if ($7 != NIL) {
 						ereport(ERROR,
 							(errmodule(MOD_PARSER),
 							 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("RETURNING clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
 					}
-					if ($1 != NULL)
-					{
+					if ($1 != NULL) {
 						ereport(ERROR,
 								(errmodule(MOD_PARSER),
 								 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
 					}
 
-					if ($5 != NULL && $5->cols != NIL)
-					{
-						ListCell *c = NULL;
-						List *cols = $5->cols;
-						foreach (c, cols)
-						{
-							ResTarget *rt = (ResTarget *)lfirst(c);
-							if (rt->indirection != NIL)
-							{
-								ereport(ERROR,
-									(errmodule(MOD_PARSER),
-									 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									 errmsg("Subfield name or array subscript of column \"%s\" "
-										"is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.",
-										rt->name),
-									 errhint("Try assign a composite or an array expression to column \"%s\".", rt->name)));
+					if (unlikely(u_sess->attr.attr_sql.enable_upsert_to_merge)) {
+
+						if ($5 != NULL && $5->cols != NIL) {
+							ListCell *c = NULL;
+							List *cols = $5->cols;
+							foreach (c, cols) {
+								ResTarget *rt = (ResTarget *)lfirst(c);
+								if (rt->indirection != NIL) {
+									ereport(ERROR,
+										(errmodule(MOD_PARSER),
+										 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+										 errmsg("Subfield name or array subscript of column \"%s\" "
+											"is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.",
+											rt->name),
+										 errhint("Try assign a composite or an array expression to column \"%s\".", rt->name)));
+								}
 							}
 						}
+
+						MergeStmt *m = makeNode(MergeStmt);
+						m->is_insert_update = true;
+
+						/* for UPSERT, keep the INSERT statement as well */
+						$5->relation = $4;
+						$5->returningList = $7;
+						$5->withClause = $1;
+						m->insert_stmt = (Node *) copyObject($5);
+
+						/* fill a MERGE statement*/
+						m->relation = $4;
+
+						Alias *a1 = makeAlias(($4->relname), NIL);
+						$4->alias = a1;
+
+						Alias *a2 = makeAlias("excluded", NIL);
+						RangeSubselect *r = makeNode(RangeSubselect);
+						r->alias = a2;
+						r->subquery = (Node *) ($5->selectStmt);
+						m->source_relation = (Node *) r;
+
+						MergeWhenClause *n = makeNode(MergeWhenClause);
+						n->matched = false;
+						n->commandType = CMD_INSERT;
+						n->cols = $5->cols;
+						n->values = NULL;
+
+						m->mergeWhenClauses = list_make1((Node *) n);
+						if ($6 != NULL)
+							m->mergeWhenClauses = list_concat(list_make1($6), m->mergeWhenClauses);
+
+						$$ = (Node *)m;
+					} else {
+						$5->relation = $4;
+						$5->returningList = $7;
+						$5->withClause = $1;
+						$5->upsertClause = (UpsertClause *)$6;
+						$$ = (Node *) $5;
 					}
-
-					MergeStmt *m = makeNode(MergeStmt);
-					m->is_insert_update = true;
-
-					/* for UPSERT, keep the INSERT statement as well */
-					$5->relation = $4;
-					$5->returningList = $7;
-					$5->withClause = $1;
-					m->insert_stmt = (Node *) copyObject($5);
-
-					/* fill a MERGE statement*/
-					m->relation = $4;
-
-					Alias *a1 = makeAlias(($4->relname), NIL);
-					$4->alias = a1;
-
-					Alias *a2 = makeAlias("__unnamed_subquery_source__", NIL);
-					RangeSubselect *r = makeNode(RangeSubselect);
-					r->alias = a2;
-					r->subquery = (Node *) ($5->selectStmt);
-					m->source_relation = (Node *) r;
-
-					MergeWhenClause *n = makeNode(MergeWhenClause);
-					n->matched = false;
-					n->commandType = CMD_INSERT;
-					n->cols = $5->cols;
-					n->values = NULL;
-
-					m->mergeWhenClauses = list_make2(($6), (Node *) n);
-
-					/* for UPSERT, keep the INSERT statement as well */
-					$5->relation = $4;
-					$5->returningList = $7;
-					$5->withClause = $1;
-					m->insert_stmt = (Node *) copyObject($5);
-
-					$$ = (Node *)m;
 				}
 		;
 
@@ -13188,16 +13188,47 @@ returning_clause:
 			| /* EMPTY */				{ $$ = NIL; }
 		;
 
-duplicate_update_clause:
-            ON DUPLICATE KEY UPDATE set_clause_list
-                {
-                    MergeWhenClause *n = makeNode(MergeWhenClause);
-                    n->matched = true;
-                    n->commandType = CMD_UPDATE;
-                    n->targetList = $5;
-                    $$ = (Node *) n;
-                }
-        ;
+upsert_clause:
+			ON DUPLICATE KEY UPDATE set_clause_list
+				{
+					if (unlikely(u_sess->attr.attr_sql.enable_upsert_to_merge)) {
+						MergeWhenClause *n = makeNode(MergeWhenClause);
+						n->matched = true;
+						n->commandType = CMD_UPDATE;
+						n->targetList = $5;
+						$$ = (Node *) n;
+					} else {
+						/* check subquery in set clause*/
+						ListCell* cell = NULL;
+						ResTarget* res = NULL;
+						foreach (cell, $5) {
+							res = (ResTarget*)lfirst(cell);
+							if (IsA(res->val,SubLink)) {
+								ereport(ERROR,
+									(errmodule(MOD_PARSER),
+									 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("Update with subquery is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
+							}
+						}
+
+						UpsertClause *uc = makeNode(UpsertClause);
+						uc->targetList = $5;
+						uc->location = @1;
+						$$ = (Node *) uc;
+					}
+				}
+			| ON DUPLICATE KEY UPDATE NOTHING
+				{
+					if (unlikely(u_sess->attr.attr_sql.enable_upsert_to_merge)) {
+						$$ = NULL;
+					} else {
+						UpsertClause *uc = makeNode(UpsertClause);
+						uc->targetList = NIL;
+						uc->location = @1;
+						$$ = (Node *) uc;
+					}
+				}
+			;
 
 /*****************************************************************************
  *
@@ -13288,7 +13319,7 @@ UpdateStmt: opt_with_clause UPDATE relation_expr_opt_alias
 				{
 					UpdateStmt *n = makeNode(UpdateStmt);
 					n->relation = $3;
-                    n->targetList = $5;
+					n->targetList = $5;
 					n->fromClause = $6;
 					n->whereClause = $7;
 					n->returningList = $8;
@@ -13312,6 +13343,30 @@ single_set_clause:
 				{
 					$$ = $1;
 					$$->val = (Node *) $3;
+				}
+			/* this is only used in ON DUPLICATE KEY UPDATE col = VALUES(col) case
+			 * for mysql compatibility
+			 */
+			| set_target '=' VALUES '(' columnref ')'
+				{
+					ColumnRef *c = NULL;
+					int nfields = 0;
+					if (IsA($5, ColumnRef)) {
+						c = (ColumnRef *) $5;
+					} else if (IsA($5, A_Indirection)) {
+						c = (ColumnRef *)(((A_Indirection *)$5)->arg);
+					}
+					nfields = list_length(c->fields);
+					/* only allow col.*, col[...], col */
+					if (nfields > 1) {
+						ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							 errmsg("only allow column name within VALUES"), parser_errposition(@5)));
+					}
+
+					c->fields = lcons((Node *)makeString("excluded"), c->fields);
+					$$ = $1;
+					$$->val = (Node *) $5;
 				}
 		;
 

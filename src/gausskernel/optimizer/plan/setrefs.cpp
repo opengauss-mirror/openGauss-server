@@ -830,6 +830,15 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                 }
             }
 
+            if (splan->updateTlist != NIL) {
+                indexed_tlist* itlist;
+                itlist = build_tlist_index(splan->exclRelTlist);
+                splan->updateTlist = fix_join_expr(root, splan->updateTlist, NULL,
+                    itlist, linitial_int(splan->resultRelations), rtoffset);
+            }
+
+            splan->exclRelRTIndex += rtoffset;
+
             foreach (l, splan->resultRelations) {
                 lfirst_int(l) += rtoffset;
             }

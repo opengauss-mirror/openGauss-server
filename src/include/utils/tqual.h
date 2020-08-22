@@ -70,7 +70,7 @@ extern bool HeapTupleSatisfiesToast(HeapTuple htup, Snapshot snapshot, Buffer bu
 extern bool HeapTupleSatisfiesDirty(HeapTuple htup, Snapshot snapshot, Buffer buffer);
 extern bool HeapTupleSatisfiesHistoricMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer);
 /* Special "satisfies" routines with different APIs */
-extern HTSU_Result HeapTupleSatisfiesUpdate(HeapTuple htup, CommandId curcid, Buffer buffer);
+extern HTSU_Result HeapTupleSatisfiesUpdate(HeapTuple htup, CommandId curcid, Buffer buffer, bool self_visible = false);
 extern HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, Buffer buffer);
 extern bool HeapTupleIsSurelyDead(HeapTuple htup, TransactionId OldestXmin);
 

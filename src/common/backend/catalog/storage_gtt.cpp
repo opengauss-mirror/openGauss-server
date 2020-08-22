@@ -1427,7 +1427,7 @@ void gtt_create_storage_files(Oid relid)
     InitResultRelInfo(resultRelInfo, rel, 1, 0);
     if (resultRelInfo->ri_RelationDesc->rd_rel->relhasindex &&
         resultRelInfo->ri_IndexRelationDescs == NULL) {
-        ExecOpenIndices(resultRelInfo);
+        ExecOpenIndices(resultRelInfo, false);
     }
     init_gtt_storage(CMD_UTILITY, resultRelInfo);
     relation_close(rel, NoLock);

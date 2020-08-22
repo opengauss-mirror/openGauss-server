@@ -8298,11 +8298,11 @@ static void deparallelize_modifytable(List* subplans)
 #ifdef STREAMPLAN
 Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
     List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList, bool isDfsStore)
+    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause, bool isDfsStore)
 #else
 ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
     List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList, bool isDfsStore)
+    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause, bool isDfsStore)
 #endif
 {
     ModifyTable* node = makeNode(ModifyTable);
@@ -8377,6 +8377,16 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
     node->mergeTargetRelation = mergeTargetRelation;
     node->mergeSourceTargetList = mergeSourceTargetList;
     node->mergeActionList = mergeActionList;
+    if (upsertClause != NULL) {
+        node->upsertAction = upsertClause->upsertAction;
+        node->updateTlist = upsertClause->updateTlist;
+        node->exclRelTlist = upsertClause->exclRelTlist;
+        node->exclRelRTIndex = upsertClause->exclRelIndex;
+    } else {
+        node->upsertAction = UPSERT_NONE;
+        node->updateTlist = NIL;
+        node->exclRelTlist = NIL;
+    }
 
 #ifdef STREAMPLAN
     node->plan.exec_nodes = exec_nodes;
@@ -8507,11 +8517,11 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
  */
 Plan* make_modifytables(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
     List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, bool isDfsStore, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList)
+    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause)
 #else
 ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRelations, List* subplans,
     List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, bool isDfsStore, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList)
+    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause)
 #endif
 {
     if (isDfsStore) {
@@ -8542,6 +8552,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
                 0,
                 NULL,
                 NULL,
+                upsertClause,
                 isDfsStore);
             /*
              * We must adjust the plan tree. Because the make_modifytable function would make a
@@ -8593,6 +8604,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
                 0,
                 NULL,
                 NULL,
+                upsertClause,
                 isDfsStore);
             appendSubPlans = lappend(appendSubPlans, (void*)mtplan);
 #endif
@@ -8627,6 +8639,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
             mergeTargetRelation,
             mergeSourceTargetList,
             mergeActionList,
+            upsertClause,
             isDfsStore);
         if (IS_STREAM_PLAN)
             return mt_stream_plan;
@@ -8644,6 +8657,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
             mergeTargetRelation,
             mergeSourceTargetList,
             mergeActionList,
+            upsertClause
             isDfsStore);
         return pgxc_make_modifytable(root, (Plan*)mtplan);
 #endif
@@ -8659,6 +8673,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
             mergeTargetRelation,
             mergeSourceTargetList,
             mergeActionList,
+            upsertClause,
             isDfsStore);
 #endif
     }
@@ -8952,7 +8967,7 @@ List* process_agg_targetlist(PlannerInfo* root, List** local_tlist)
          * We are about to change the local_tlist, check if we have already
          * copied original local_tlist, if not take a copy
          */
-        if ((orig_local_tlist == NULL) && (IsA(expr, Aggref) || context.aggs))
+        if ((orig_local_tlist == NIL) && (IsA(expr, Aggref) || context.aggs))
             orig_local_tlist = (List*)copyObject(*local_tlist);
 
         /*

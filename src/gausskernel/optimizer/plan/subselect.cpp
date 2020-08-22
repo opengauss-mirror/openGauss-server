@@ -2578,6 +2578,7 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             valid_params = bms_add_member(bms_copy(valid_params), locally_added_param);
             scan_params = bms_add_member(bms_copy(scan_params), locally_added_param);
             (void)finalize_primnode((Node*)mtplan->returningLists, &context);
+            (void)finalize_primnode((Node*)mtplan->updateTlist, &context);
             finalize_plans(root, &context, mtplan->plans, valid_params, scan_params);
         } break;
 #ifdef PGXC

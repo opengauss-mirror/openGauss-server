@@ -1359,4 +1359,14 @@ typedef struct {
     bool indexpath;
 } IndexVar;
 
+typedef struct UpsertExpr {
+    NodeTag type;
+    UpsertAction upsertAction;    /* DO NOTHING or UPDATE? */
+
+    /* DUPLICATE KEY UPDATE */
+    List* updateTlist;        /* List of UPDATE TargetEntrys */
+    List* exclRelTlist;       /* tlist of the 'EXCLUDED' pseudo relation */
+    int exclRelIndex;        /* RT index of 'EXCLUDED' relation */
+} UpsertExpr;
+
 #endif /* PRIMNODES_H */

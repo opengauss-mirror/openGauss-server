@@ -3490,7 +3490,7 @@ static uint64 CopyFrom(CopyState cstate)
         1, /* dummy rangetable index */
         0);
 
-    ExecOpenIndices(resultRelInfo);
+    ExecOpenIndices(resultRelInfo, false);
     init_gtt_storage(CMD_INSERT, resultRelInfo);
 
     resultRelationDesc = resultRelInfo->ri_RelationDesc;
@@ -4066,7 +4066,7 @@ static uint64 CopyFrom(CopyState cstate)
                             estate,
                             isPartitionRel ? heaprel : NULL,
                             isPartitionRel ? partition : NULL,
-                            bucketid);
+                            bucketid, NULL);
 
                     /* AFTER ROW INSERT Triggers */
                     ExecARInsertTriggers(estate, resultRelInfo, partitionid, bucketid, tuple, recheckIndexes);
@@ -4413,7 +4413,7 @@ static void CopyFromUpdateIndexAndRunAfterRowTrigger(EState* estate, ResultRelIn
                 estate,
                 ispartitionedtable ? actualHeap : NULL,
                 ispartitionedtable ? partition : NULL,
-                bucketid);
+                bucketid, NULL);
             ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketid, bufferedTuples[i], recheckIndexes);
             list_free(recheckIndexes);
         }
@@ -4484,7 +4484,7 @@ static void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, i
                 estate,
                 ispartitionedtable ? actualHeap : NULL,
                 ispartitionedtable ? partition : NULL,
-                bucketId);
+                bucketId, NULL);
             ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketId, bufferedTuples[i], recheckIndexes);
             list_free(recheckIndexes);
         }

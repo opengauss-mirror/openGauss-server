@@ -119,6 +119,7 @@ extern BulkInsertState GetBulkInsertState(void);
 extern void FreeBulkInsertState(BulkInsertState);
 
 extern Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, BulkInsertState bistate);
+extern void heap_abort_speculative(Relation relation, HeapTuple tuple);
 extern bool heap_page_prepare_for_xid(
     Relation relation, Buffer buffer, TransactionId xid, bool multi, bool pageReplication = false);
 extern bool heap_change_xidbase_after_freeze(Relation relation, Buffer buffer);
@@ -127,18 +128,19 @@ extern bool rewrite_page_prepare_for_xid(Page page, TransactionId xid, bool mult
 extern int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int ntuples, CommandId cid, int options,
     BulkInsertState bistate, HeapMultiInsertExtraArgs* args);
 extern HTSU_Result heap_delete(Relation relation, ItemPointer tid, ItemPointer ctid, TransactionId* update_xmax,
-    CommandId cid, Snapshot crosscheck, bool wait);
+    CommandId cid, Snapshot crosscheck, bool wait, bool allow_delete_self = false);
 extern HTSU_Result heap_update(Relation relation, Relation parentRelation, ItemPointer otid, HeapTuple newtup,
-    ItemPointer ctid, TransactionId* update_xmax, CommandId cid, Snapshot crosscheck, bool wait);
+    ItemPointer ctid, TransactionId* update_xmax, CommandId cid, Snapshot crosscheck,
+    bool wait, bool allow_update_self = false);
 extern HTSU_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, ItemPointer ctid,
-    TransactionId* update_xmax, CommandId cid, LockTupleMode mode, bool nowait);
+    TransactionId* update_xmax, CommandId cid, LockTupleMode mode, bool nowait, bool allow_lock_self = false);
 
 extern void heap_inplace_update(Relation relation, HeapTuple tuple);
 extern bool heap_freeze_tuple(HeapTuple tuple, TransactionId cutoff_xid);
 extern bool heap_tuple_needs_freeze(HeapTuple tuple, TransactionId cutoff_xid, Buffer buf);
 
 extern Oid simple_heap_insert(Relation relation, HeapTuple tup);
-extern void simple_heap_delete(Relation relation, ItemPointer tid);
+extern void simple_heap_delete(Relation relation, ItemPointer tid, int options = 0);
 extern void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup);
 
 extern void heap_markpos(HeapScanDesc scan);

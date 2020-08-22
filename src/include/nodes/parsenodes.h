@@ -234,6 +234,7 @@ typedef struct Query {
     List* mergeSourceTargetList;
     List* mergeActionList; /* list of actions for MERGE (only) */
     Query* upsertQuery;    /* insert query for INSERT ON DUPLICATE KEY UPDATE (only) */
+    UpsertExpr* upsertClause; /* DUPLICATE KEY UPDATE [NOTHING | ...] */
 
     bool isRowTriggerShippable; /* true if all row triggers are shippable. */
     bool use_star_targets;      /* true if use * for targetlist. */
@@ -942,6 +943,8 @@ typedef struct RangeTblEntry {
     bool relhasbucket; /* the rel has underlying buckets, get from pg_class */
     bool isbucket;	  /* the sql only want some buckets from the rel */
     List* buckets;	  /* the bucket id wanted */
+
+    bool isexcluded; /* the rel is the EXCLUDED relation for UPSERT */
 } RangeTblEntry;
 
 /*
@@ -1139,6 +1142,13 @@ typedef struct WithClause {
     int location;   /* token location, or -1 if unknown */
 } WithClause;
 
+typedef struct UpsertClause
+{
+    NodeTag type;
+    List* targetList;
+    int location;
+} UpsertClause;
+
 /*
  * CommonTableExpr -
  *	   representation of WITH list element
@@ -1194,6 +1204,7 @@ typedef struct InsertStmt {
     Node* selectStmt;       /* the source SELECT/VALUES, or NULL */
     List* returningList;    /* list of expressions to return */
     WithClause* withClause; /* WITH clause */
+    UpsertClause* upsertClause;  /* DUPLICATE KEY UPDATE clause */
 } InsertStmt;
 
 /* ----------------------

@@ -61,6 +61,9 @@ typedef struct UtilityDesc {
  *		ExclusionOps		Per-column exclusion operators, or NULL if none
  *		ExclusionProcs		Underlying function OIDs for ExclusionOps
  *		ExclusionStrats		Opclass strategy numbers for ExclusionOps
+ *		UniqueOps           Theses are like Exclusion*, but for unique indexes
+ *		UniqueProcs
+ *		UniqueStrats
  *		Unique				is it a unique index?
  *		ReadyForInserts		is it valid for inserts?
  *		Concurrent			are we doing a concurrent index build?
@@ -81,6 +84,9 @@ typedef struct IndexInfo {
     Oid* ii_ExclusionOps;       /* array with one entry per column */
     Oid* ii_ExclusionProcs;     /* array with one entry per column */
     uint16* ii_ExclusionStrats; /* array with one entry per column */
+    Oid *ii_UniqueOps;          /* array with one entry per column */
+    Oid *ii_UniqueProcs;        /* array with one entry per column */
+    uint16 *ii_UniqueStrats;    /* array with one entry per column */
     bool ii_Unique;
     bool ii_ReadyForInserts;
     bool ii_Concurrent;
@@ -396,6 +402,7 @@ typedef struct MergeState {
  *		ConstraintExprs			array of constraint-checking expr states
  *		junkFilter				for removing junk attributes from tuples
  *		projectReturning		for computing a RETURNING list
+ *		updateProj				for computing a UPSERT update list
  * ----------------
  */
 typedef struct ResultRelInfo {
@@ -434,6 +441,7 @@ typedef struct ResultRelInfo {
      * ri_RangeTableIndex elsewhere.
      */
     Index ri_mergeTargetRTI;
+    ProjectionInfo* ri_updateProj;
 } ResultRelInfo;
 
 /* bloom filter controller */
@@ -1293,6 +1301,18 @@ typedef struct MergeActionState {
 } MergeActionState;
 
 /* ----------------
+ *	 UpsertState information
+ * ----------------
+ */
+typedef struct UpsertState {
+	NodeTag			type;
+	UpsertAction	us_action;                  /* Flags showing DUPLICATE UPDATE NOTHING or SOMETHING */
+	TupleTableSlot* us_existing;                /* slot to store existing target tuple in */
+	List*           us_excludedtlist;           /* the excluded pseudo relation's tlist */
+	TupleTableSlot* us_updateproj;              /* slot to update */
+} UpsertState;
+
+/* ----------------
  *	 ModifyTableState information
  * ----------------
  */
@@ -1326,7 +1346,7 @@ typedef struct ModifyTableState {
     TupleTableSlot* mt_insert_constr_slot; /* slot to store target tuple in for checking constraints */
     TupleTableSlot* mt_mergeproj;          /* MERGE action projection target */
     uint32 mt_merge_subcommands;           /* Flags showing which subcommands are present INS/UPD/DEL/DO NOTHING */
-
+    UpsertState* mt_upsert;                /*  DUPLICATE KEY UPDATE evaluation state */
     instr_time first_tuple_modified; /* record the end time for the first tuple inserted, deleted, or updated */
 } ModifyTableState;
 

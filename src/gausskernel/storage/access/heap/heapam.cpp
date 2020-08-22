@@ -2547,7 +2547,7 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
         }
 
         xlrec.offnum = ItemPointerGetOffsetNumber(&heaptup->t_self);
-        xlrec.flags = all_visible_cleared ? XLOG_HEAP_ALL_VISIBLE_CLEARED : 0;
+        xlrec.flags = all_visible_cleared ? XLH_INSERT_ALL_VISIBLE_CLEARED : 0;
         Assert(ItemPointerGetBlockNumber(&heaptup->t_self) == BufferGetBlockNumber(buffer));
 
         /*
@@ -2556,7 +2556,7 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
          * image. (XXX We could alternatively store a pointer into the FPW).
          */
         if (RelationIsLogicallyLogged(relation)) {
-            xlrec.flags |= XLOG_HEAP_CONTAINS_NEW_TUPLE;
+            xlrec.flags |= XLH_INSERT_CONTAINS_NEW_TUPLE;
             bufflags |= REGBUF_KEEP_DATA;
         }
 
@@ -2605,6 +2605,7 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
      */
     CacheInvalidateHeapTuple(relation, heaptup, NULL);
 
+    /* Note: speculative insertions are counted too, even if aborted later */
     pgstat_count_heap_insert(relation, 1);
 
     /*
@@ -2619,7 +2620,145 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
     return HeapTupleGetOid(tup);
 }
 
-/**
+/*
+ * heap_abort_speculative - kill a speculatively inserted tuple
+ *
+ * Marks a tuple that was speculatively inserted in the same command as dead,
+ * by setting its xmin as invalid.  That makes it immediately appear as dead
+ * to all transactions, including our own.  In particular, it makes
+ * HeapTupleSatisfiesDirty() regard the tuple as dead, so that another backend
+ * inserting a duplicate key value won't unnecessarily wait for our whole
+ * transaction to finish (it'll just wait for our speculative insertion to
+ * finish).
+ *
+ * Killing the tuple prevents "unprincipled deadlocks", which are deadlocks
+ * that arise due to a mutual dependency that is not user visible.  By
+ * definition, unprincipled deadlocks cannot be prevented by the user
+ * reordering lock acquisition in client code, because the implementation level
+ * lock acquisitions are not under the user's direct control.  If speculative
+ * inserters did not take this precaution, then under high concurrency they
+ * could deadlock with each other, which would not be acceptable.
+ *
+ * This is somewhat redundant with heap_delete, but we prefer to have a
+ * dedicated routine with stripped down requirements.
+ *
+ * This routine does not affect logical decoding as it only looks at
+ * confirmation records.
+ */
+void heap_abort_speculative(Relation relation, HeapTuple tuple)
+{
+    TransactionId xid = GetCurrentTransactionId();
+    ItemPointer tid = &(tuple->t_self);
+    ItemId      lp;
+    HeapTupleData tp;
+    Page        page;
+    BlockNumber block;
+    Buffer      buffer;
+
+    Assert(ItemPointerIsValid(tid));
+
+    block = ItemPointerGetBlockNumber(tid);
+    buffer = ReadBuffer(relation, block);
+    page = BufferGetPage(buffer);
+
+    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+
+    /*
+     * Page can't be all visible, we just inserted into it, and are still
+     * running.
+     */
+    Assert(!PageIsAllVisible(page));
+
+    lp = PageGetItemId(page, ItemPointerGetOffsetNumber(tid));
+    Assert(ItemIdIsNormal(lp));
+
+    tp.t_tableOid = RelationGetRelid(relation);
+    tp.t_data = (HeapTupleHeader) PageGetItem(page, lp);
+    tp.t_len = ItemIdGetLength(lp);
+    tp.t_self = *tid;
+
+    /*
+     * Sanity check that the tuple really is a speculatively inserted tuple,
+     * inserted by us.
+     */
+    if (HeapTupleHeaderGetXmin(page, tp.t_data) != xid) {
+        ereport(ERROR,
+            (errmsg("attempted to kill a tuple inserted by another transaction: %lu, %lu",
+             HeapTupleGetRawXmin(&tp), xid)));
+    }
+    Assert(!HeapTupleHeaderIsHeapOnly(tp.t_data));
+
+    /*
+     * No need to check for serializable conflicts here.  There is never a
+     * need for a combocid, either.  No need to extract replica identity, or
+     * do anything special with infomask bits.
+     */
+    START_CRIT_SECTION();
+
+    /*
+     * The tuple will become DEAD immediately.  Flag that this page
+     * immediately is a candidate for pruning by setting xmin to
+     * RecentGlobalXmin.  That's not pretty, but it doesn't seem worth
+     * inventing a nicer API for this.
+     */
+    PageSetPrunable(page, xid);
+
+    /* store transaction information of xact deleting the tuple */
+    tp.t_data->t_infomask &= ~(HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | HEAP_XMAX_IS_MULTI |
+                               HEAP_IS_LOCKED | HEAP_MOVED);
+
+    /*
+     * Set the tuple header xmin to InvalidTransactionId.  This makes the
+     * tuple immediately invisible everyone.  (In particular, to any
+     * transactions waiting on the speculative token, woken up later.)
+     */
+    HeapTupleHeaderSetXmin(page, tp.t_data, InvalidTransactionId);
+
+    MarkBufferDirty(buffer);
+
+    /*
+     * XLOG stuff
+     *
+     * The WAL records generated here match heap_delete().  The same recovery
+     * routines are used.
+     */
+    if (RelationNeedsWAL(relation)) {
+        xl_heap_delete xlrec;
+        XLogRecPtr  recptr;
+
+        xlrec.flags = XLH_DELETE_IS_SUPER;
+        xlrec.offnum = ItemPointerGetOffsetNumber(&tp.t_self);
+
+        XLogBeginInsert();
+        XLogRegisterData((char *) &xlrec, SizeOfHeapDelete);
+        XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
+
+        /* No replica identity & replication origin logged */
+        recptr = XLogInsert(RM_HEAP_ID, XLOG_HEAP_DELETE);
+
+        PageSetLSN(page, recptr);
+    }
+
+    END_CRIT_SECTION();
+
+    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+
+    if (HeapTupleHasExternal(&tp))
+        toast_delete(relation, &tp, HEAP_INSERT_SPECULATIVE);
+
+    /*
+     * Never need to mark tuple for invalidation, since catalogs don't support
+     * speculative insertion
+     */
+
+    /* Now we can release the buffer */
+    ReleaseBuffer(buffer);
+
+    /* count deletion, as we counted the insertion too */
+    pgstat_count_heap_delete(relation);
+}
+
+/*
  * @Description: Find minimum and maximum short transaction ids which occurs in the page.
  * @in: page, heap page
  * @in: multi, Whether multixact
@@ -3422,7 +3561,7 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
             /* the rest of the scratch space is used for tuple data */
             tuple_data = scratchptr;
 
-            xlrec->flags = all_visible_cleared ? XLOG_HEAP_ALL_VISIBLE_CLEARED : 0;
+            xlrec->flags = all_visible_cleared ? XLH_INSERT_ALL_VISIBLE_CLEARED : 0;
             xlrec->ntuples = nthispage;
 
             /* xlog: write the dictionary between header and tuples */
@@ -3472,7 +3611,7 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
             Assert((scratchptr - scratch) < BLCKSZ);
 
             if (need_tuple_data) {
-                xlrec->flags |= XLOG_HEAP_CONTAINS_NEW_TUPLE;
+                xlrec->flags |= XLH_INSERT_CONTAINS_NEW_TUPLE;
             }
 
             /*
@@ -3481,7 +3620,7 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
              * decoding so it knows when to cleanup temporary data.
              */
             if (ndone + nthispage == ntuples) {
-                xlrec->flags |= XLOG_HEAP_LAST_MULTI_INSERT;
+                xlrec->flags |= XLH_INSERT_LAST_IN_MULTI;
             }
 
             /*
@@ -3620,7 +3759,7 @@ Oid simple_heap_insert(Relation relation, HeapTuple tup)
  * (t_xmax is needed to verify that the replacement tuple matches.)
  */
 HTSU_Result heap_delete(Relation relation, ItemPointer tid, ItemPointer ctid, TransactionId* update_xmax, CommandId cid,
-    Snapshot crosscheck, bool wait)
+    Snapshot crosscheck, bool wait, bool allow_delete_self)
 {
     HTSU_Result result;
     TransactionId xid = GetCurrentTransactionId();
@@ -3694,11 +3833,16 @@ HTSU_Result heap_delete(Relation relation, ItemPointer tid, ItemPointer ctid, Tr
     HeapTupleCopyBaseFromPage(&tp, page);
 
 l1:
-    result = HeapTupleSatisfiesUpdate(&tp, cid, buffer);
+    result = HeapTupleSatisfiesUpdate(&tp, cid, buffer, allow_delete_self);
 
     if (result == HeapTupleInvisible) {
         UnlockReleaseBuffer(buffer);
         ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("attempted to delete invisible tuple")));
+    } else if (result == HeapTupleSelfCreated) {
+        UnlockReleaseBuffer(buffer);
+        /* if allow self delete, HeapTupleSelfCreated status will never be reached */
+        Assert(!allow_delete_self);
+        ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("attempted to delete self created tuple")));
     } else if (result == HeapTupleBeingUpdated && wait) {
         TransactionId xwait;
         uint16 infomask;
@@ -3866,7 +4010,7 @@ l1:
             (void)log_heap_new_cid(relation, &tp);
         }
 
-        xlrec.flags = all_visible_cleared ? XLOG_HEAP_ALL_VISIBLE_CLEARED : 0;
+        xlrec.flags = all_visible_cleared ? XLH_DELETE_ALL_VISIBLE_CLEARED : 0;
         xlrec.offnum = ItemPointerGetOffsetNumber(&tp.t_self);
 
         if (old_key_tuple != NULL) {
@@ -3890,9 +4034,9 @@ l1:
             }
 
             if (relreplident == REPLICA_IDENTITY_FULL) {
-                xlrec.flags |= XLOG_HEAP_CONTAINS_OLD_TUPLE;
+                xlrec.flags |= XLH_DELETE_CONTAINS_OLD_TUPLE;
             } else {
-                xlrec.flags |= XLOG_HEAP_CONTAINS_OLD_KEY;
+                xlrec.flags |= XLH_DELETE_CONTAINS_OLD_KEY;
             }
         }
 
@@ -3940,7 +4084,7 @@ l1:
         /* toast table entries should never be recursively toasted */
         Assert(!HeapTupleHasExternal(&tp));
     } else if (HeapTupleHasExternal(&tp))
-        toast_delete(relation, &tp);
+        toast_delete(relation, &tp, allow_delete_self ? HEAP_INSERT_SPECULATIVE : 0);
 
     /*
      * Mark tuple for invalidation from system caches at next command
@@ -3976,11 +4120,12 @@ l1:
  * on the relation associated with the tuple).	Any failure is reported
  * via ereport().
  */
-void simple_heap_delete(Relation relation, ItemPointer tid)
+void simple_heap_delete(Relation relation, ItemPointer tid, int options)
 {
     HTSU_Result result;
     ItemPointerData update_ctid;
     TransactionId update_xmax;
+    bool allow_delete_self = (options & HEAP_INSERT_SPECULATIVE) ? true : false;
 
     result = heap_delete(relation,
         tid,
@@ -3988,7 +4133,8 @@ void simple_heap_delete(Relation relation, ItemPointer tid)
         &update_xmax,
         GetCurrentCommandId(true),
         InvalidSnapshot,
-        true /* wait for commit */);
+        true /* wait for commit */,
+        allow_delete_self);
     switch (result) {
         case HeapTupleSelfUpdated:
             /* Tuple was already updated in current command? */
@@ -4042,8 +4188,9 @@ void simple_heap_delete(Relation relation, ItemPointer tid)
  * tuple was updated, and t_ctid is the location of the replacement tuple.
  * (t_xmax is needed to verify that the replacement tuple matches.)
  */
-HTSU_Result heap_update(Relation relation, Relation parentRelation, ItemPointer otid, HeapTuple newtup,
-    ItemPointer ctid, TransactionId* update_xmax, CommandId cid, Snapshot crosscheck, bool wait)
+HTSU_Result heap_update(Relation relation, Relation parentRelation, ItemPointer otid,
+    HeapTuple newtup, ItemPointer ctid, TransactionId* update_xmax, CommandId cid,
+    Snapshot crosscheck, bool wait, bool allow_update_self)
 {
     HTSU_Result result;
     TransactionId xid = GetCurrentTransactionId();
@@ -4144,10 +4291,15 @@ HTSU_Result heap_update(Relation relation, Relation parentRelation, ItemPointer 
 
 l2:
     HeapTupleCopyBaseFromPage(&oldtup, BufferGetPage(buffer));
-    result = HeapTupleSatisfiesUpdate(&oldtup, cid, buffer);
+    result = HeapTupleSatisfiesUpdate(&oldtup, cid, buffer, allow_update_self);
     if (result == HeapTupleInvisible) {
         UnlockReleaseBuffer(buffer);
         ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("attempted to update invisible tuple")));
+    } else if (result == HeapTupleSelfCreated) {
+        UnlockReleaseBuffer(buffer);
+        /* if allow self update, HeapTupleSelfCreated status will never be reached */
+        Assert(!allow_update_self);
+        ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("attempted to update self created tuple")));
     } else if (result == HeapTupleBeingUpdated && wait) {
         TransactionId xwait;
         uint16 infomask;
@@ -4386,7 +4538,8 @@ l2:
          */
         if (need_toast) {
             /* Note we always use WAL and FSM during updates */
-            heaptup = toast_insert_or_update(relation, newtup, &oldtup, 0, page);
+            heaptup = toast_insert_or_update(relation, newtup, &oldtup,
+                allow_update_self ? HEAP_INSERT_SPECULATIVE : 0, page);
             new_tup_size = MAXALIGN(heaptup->t_len);
         } else {
             heaptup = newtup;
@@ -5064,7 +5217,7 @@ void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
  * conflict for a tuple, we don't incur any extra overhead.
  */
 HTSU_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, ItemPointer ctid,
-    TransactionId* update_xmax, CommandId cid, LockTupleMode mode, bool nowait)
+    TransactionId* update_xmax, CommandId cid, LockTupleMode mode, bool nowait, bool allow_lock_self)
 {
     HTSU_Result result;
     ItemPointer tid = &(tuple->t_self);
@@ -5122,7 +5275,7 @@ HTSU_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, 
 
 l3:
     HeapTupleCopyBaseFromPage(tuple, page);
-    result = HeapTupleSatisfiesUpdate(tuple, cid, *buffer);
+    result = HeapTupleSatisfiesUpdate(tuple, cid, *buffer, allow_lock_self);
     ereport(DEBUG1,
         (errmsg("heap lock tuple ctid (%u,%d) cur_xid %lu xmin "
                 "%lu xmax %lu infomask %hu result %d",
@@ -5137,6 +5290,25 @@ l3:
     if (result == HeapTupleInvisible) {
         UnlockReleaseBuffer(*buffer);
         ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("attempted to lock invisible tuple")));
+    } else if (result == HeapTupleSelfCreated) {
+        /*
+         * This is possible when the tuple is going to be updated twice in one command,
+         * which should be considered as invisible (same with HeapTupleInvisible) and
+         * throw an error.
+         *
+         * However, there is a special case: UPSERT multiple VALUES using a STREAM plan
+         * e.g INSERT values(1,x),(1,x) ON DUPLICATE KEY UPDATE..
+         * As we have to allow this case to be done in MYSQL compatibility,
+         * we return HeapTupleSelfCreated here rather than throwing an error in
+         * order to give UPSERT case the opportunity to throw a more specific error or
+         * allow to UPSERT
+         *
+         * NOTE: multiple VALUES UPSERT using a PGXC plan is not a problem because
+         * the optimizer will spilt the query into multiple commands, each of which only
+         * UPSERT one VALUES().
+         */
+        LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
+        return HeapTupleSelfCreated;
     } else if (result == HeapTupleBeingUpdated) {
         TransactionId xwait;
         uint16 infomask;
@@ -6040,18 +6212,18 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, const ItemPointe
     xlrec.new_offnum = ItemPointerGetOffsetNumber(&newtup->t_self);
     xlrec.flags = 0;
     if (all_visible_cleared) {
-        xlrec.flags |= XLOG_HEAP_ALL_VISIBLE_CLEARED;
+        xlrec.flags |= XLH_UPDATE_OLD_ALL_VISIBLE_CLEARED;
     }
     if (new_all_visible_cleared) {
-        xlrec.flags |= XLOG_HEAP_NEW_ALL_VISIBLE_CLEARED;
+        xlrec.flags |= XLH_UPDATE_NEW_ALL_VISIBLE_CLEARED;
     }
     if (need_tuple_data) {
-        xlrec.flags |= XLOG_HEAP_CONTAINS_NEW_TUPLE;
+        xlrec.flags |= XLH_UPDATE_CONTAINS_NEW_TUPLE;
         if (old_key_tuple) {
             if (reln->rd_rel->relreplident == REPLICA_IDENTITY_FULL)
-                xlrec.flags |= XLOG_HEAP_CONTAINS_OLD_TUPLE;
+                xlrec.flags |= XLH_UPDATE_CONTAINS_OLD_TUPLE;
             else
-                xlrec.flags |= XLOG_HEAP_CONTAINS_OLD_KEY;
+                xlrec.flags |= XLH_UPDATE_CONTAINS_OLD_KEY;
         }
     }
     if (need_tuple_data) {
@@ -6717,7 +6889,7 @@ static void heap_xlog_delete(XLogReaderState* record)
      * The visibility map may need to be fixed even if the heap page is
      * already up-to-date.
      */
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED) {
+    if (xlrec->flags & XLH_DELETE_ALL_VISIBLE_CLEARED) {
         RelFileNode target_node;
         BlockNumber blkno;
 
@@ -6759,7 +6931,7 @@ static void heap_xlog_insert(XLogReaderState* record)
      * The visibility map may need to be fixed even if the heap page is
      * already up-to-date.
      */
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED) {
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED) {
         heap_xlog_allvisiblecleared(target_node, blkno);
     }
 
@@ -6832,7 +7004,7 @@ static void heap_xlog_multi_insert(XLogReaderState* record)
      * The visibility map may need to be fixed even if the heap page is
      * already up-to-date.
      */
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED) {
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED) {
         heap_xlog_allvisiblecleared(rnode, blkno);
     }
 
@@ -6902,12 +7074,11 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
         oldblk = newblk;
     }
 
-
     /*
      * The visibility map may need to be fixed even if the heap page is
      * already up-to-date.
      */
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED) {
+    if (xlrec->flags & XLH_UPDATE_OLD_ALL_VISIBLE_CLEARED) {
         heap_xlog_allvisiblecleared(rnode, oldblk);
     }
 
@@ -6949,7 +7120,7 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
      * The visibility map may need to be fixed even if the heap page is
      * already up-to-date.
      */
-    if (xlrec->flags & XLOG_HEAP_NEW_ALL_VISIBLE_CLEARED) {
+    if (xlrec->flags & XLH_UPDATE_NEW_ALL_VISIBLE_CLEARED) {
         heap_xlog_allvisiblecleared(rnode, newblk);
     }
 
