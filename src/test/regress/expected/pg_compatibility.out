@@ -29,3 +29,17 @@ ERROR:  invalid input syntax for integer: ""
 LINE 1: select ''::int;
                ^
 CONTEXT:  referenced column: int4
+
+select concat_ws('','ABCDE', 2, null, 22);
+ concat_ws
+-----------
+ ABCDE222
+(1 row)
+
+
+select concat_ws(null,'ABCDE', 2, null, 22);
+ concat_ws
+-----------
+ 
+(1 row)
+
