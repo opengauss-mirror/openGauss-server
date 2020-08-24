@@ -9224,13 +9224,13 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog", RelationGetRelationName(pkrel))));
-
+#ifdef ENABLE_MULTIPLE_NODES
     if (RELATION_IS_PARTITIONED(pkrel))
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("Invalid FOREIGN KEY constraints"),
                 errdetail("Partitioned table cannot be referenced table")));
-
+#endif
     /*
      * References from permanent or unlogged tables to temp tables, and from
      * permanent tables to unlogged tables, are disallowed because the
