@@ -157,10 +157,14 @@ create global temp table gtt7 (like gtt2 including reloptions) on commit delete 
 create global temp table gtt8 on commit delete rows as select * from gtt3;
 -- ok
 select * into global temp table gtt9 from gtt2;
-create global temp table gtt_test_rename(a int primary key, b text);
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtt_test_rename_pkey" for table "gtt_test_rename"
+create global temp table gtt_test_rename(a int, b text);
 --ok
 alter table gtt_test_rename rename to gtt_test_new;
+--ok
+alter table gtt_test_new add constraint pk1 primary key(a);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "pk1" for table "gtt_test_new"
+--ok
+alter table gtt_test_new drop constraint pk1;
 --ok
 ALTER TABLE gtt_test_new ADD COLUMN address integer;
 --ok

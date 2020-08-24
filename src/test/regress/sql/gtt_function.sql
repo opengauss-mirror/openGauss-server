@@ -158,10 +158,16 @@ create global temp table gtt8 on commit delete rows as select * from gtt3;
 -- ok
 select * into global temp table gtt9 from gtt2;
 
-create global temp table gtt_test_rename(a int primary key, b text);
+create global temp table gtt_test_rename(a int, b text);
 
 --ok
 alter table gtt_test_rename rename to gtt_test_new;
+
+--ok
+alter table gtt_test_new add constraint pk1 primary key(a);
+
+--ok
+alter table gtt_test_new drop constraint pk1;
 
 --ok
 ALTER TABLE gtt_test_new ADD COLUMN address integer;

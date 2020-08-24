@@ -1699,12 +1699,9 @@ static Relation relation_build_desc(Oid targetRelId, bool insertIt, bool buildke
         switch (relation->rd_rel->relpersistence) {
             case RELPERSISTENCE_UNLOGGED:
             case RELPERSISTENCE_PERMANENT:
-                relation->rd_backend = InvalidBackendId;
-                relation->rd_islocaltemp = false;
-                break;
             case RELPERSISTENCE_TEMP:  // @Temp Table. Temp table here is just like unlogged table.
                 relation->rd_backend = InvalidBackendId;
-                relation->rd_islocaltemp = true;
+                relation->rd_islocaltemp = false;
                 break;
             case RELPERSISTENCE_GLOBAL_TEMP:  // global temp table
                 {
@@ -3712,12 +3709,9 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     switch (relpersistence) {
         case RELPERSISTENCE_UNLOGGED:
         case RELPERSISTENCE_PERMANENT:
-            rel->rd_backend = InvalidBackendId;
-            rel->rd_islocaltemp = false;
-            break;
         case RELPERSISTENCE_TEMP:  // @Temp Table. Temp table here is just like unlogged table.
             rel->rd_backend = InvalidBackendId;
-            rel->rd_islocaltemp = true;
+            rel->rd_islocaltemp = false;
             break;
         case RELPERSISTENCE_GLOBAL_TEMP:  // global temp table
             rel->rd_backend = BackendIdForTempRelations;
