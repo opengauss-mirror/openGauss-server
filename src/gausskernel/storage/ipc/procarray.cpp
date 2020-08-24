@@ -2050,8 +2050,6 @@ TransactionId GetOldestActiveTransactionId(TransactionId *globalXmin)
     TransactionIdAdvance(xmax);
     TransactionId xmin = xmax;
 
-    Assert(!RecoveryInProgress());
-
     LWLockAcquire(ProcArrayLock, LW_SHARED);
 
     /*

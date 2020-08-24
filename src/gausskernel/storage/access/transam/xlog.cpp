@@ -10891,7 +10891,13 @@ bool CreateRestartPoint(int flags)
          */
         if (!g_instance.attr.attr_storage.enableIncrementalCheckpoint ||
             elapsed_secs >= u_sess->attr.attr_storage.fullCheckPointTimeout) {
-            TruncateCSNLOG(GetOldestXmin(NULL));
+            TransactionId globalXmin = InvalidTransactionId;
+            (void)GetOldestActiveTransactionId(&globalXmin);
+            TransactionId cutoff_xid = GetOldestXmin(NULL);
+            if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoff_xid)) {
+                cutoff_xid = globalXmin;
+            }
+            TruncateCSNLOG(cutoff_xid);
             t_thrd.checkpoint_cxt.last_truncate_log_time = now;
         }
     }
