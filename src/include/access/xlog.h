@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
  * src/include/access/xlog.h
  */
@@ -20,7 +21,6 @@
 #include "lib/stringinfo.h"
 #include "access/parallel_recovery/redo_item.h"
 #include "access/htup.h"
-
 
 /* Sync methods */
 #define SYNC_METHOD_FSYNC 0
@@ -94,12 +94,7 @@ typedef enum {
 } RecoveryTargetType;
 
 /* WAL levels */
-typedef enum WalLevel {
-    WAL_LEVEL_MINIMAL = 0,
-    WAL_LEVEL_ARCHIVE,
-    WAL_LEVEL_HOT_STANDBY,
-    WAL_LEVEL_LOGICAL
-} WalLevel;
+typedef enum WalLevel { WAL_LEVEL_MINIMAL = 0, WAL_LEVEL_ARCHIVE, WAL_LEVEL_HOT_STANDBY, WAL_LEVEL_LOGICAL } WalLevel;
 
 #define XLogArchivingActive() \
     (u_sess->attr.attr_common.XLogArchiveMode && g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_ARCHIVE)
@@ -148,7 +143,7 @@ extern const int DemoteModeNum;
     0x0002                          /* Like shutdown checkpoint, \
                                      * but issued at end of WAL  \
                                      * recovery */
-#define CHECKPOINT_FILE_SYNC 0x0004  /* File sync */
+#define CHECKPOINT_FILE_SYNC 0x0004 /* File sync */
 #define CHECKPOINT_IMMEDIATE 0x0008 /* Do it without delays */
 #define CHECKPOINT_FORCE 0x0010     /* Force even if no activity */
 /* These are important to RequestCheckpoint */
@@ -162,7 +157,6 @@ extern const int DemoteModeNum;
 #define STRATEGY_BACKWRITE 0x0200   /* strategy backwrite */
 #define LAZY_BACKWRITE 0x0400       /* lazy backwrite */
 #define PAGERANGE_BACKWRITE 0x0800  /* PageRangeBackWrite */
-
 
 /* Checkpoint statistics */
 typedef struct CheckpointStatsData {
@@ -199,7 +193,7 @@ typedef struct XLogFPWInfo {
 
 struct XLogRecData;
 
-/* 
+/*
  * Shared-memory data structures for XLOG control
  *
  * LogwrtRqst indicates a byte position that we need to write and/or fsync
@@ -350,7 +344,8 @@ extern XLogRecPtr GetDDLDelayStartPtr(void);
 /*
  * Starting/stopping a base backup
  */
-extern XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfile);
+extern XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfile, DIR* tblspcdir,
+    char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfile);
 extern void startupInitRoachBackup(void);
 extern void set_start_backup_flag(bool startFlag);
 extern bool get_startBackup_flag(void);
@@ -381,7 +376,6 @@ extern void WaitCheckpointSync(void);
 void GetRecoveryLatch();
 void ReLeaseRecoveryLatch();
 
-
 extern XLogRecPtr XlogRemoveSegPrimary;
 
 /* File path names (all relative to $PGDATA) */
@@ -408,5 +402,7 @@ typedef struct delayddlrange {
 #define ENABLE_DDL_DELAY_TIMEOUT 60000
 #define ROACH_BARRIER_PREFIX "roach_barrier_"
 
-#endif /* XLOG_H */
+#define TABLESPACE_MAP "tablespace_map"
+#define TABLESPACE_MAP_OLD "tablespace_map.old"
 
+#endif /* XLOG_H */

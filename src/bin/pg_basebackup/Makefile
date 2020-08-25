@@ -34,7 +34,8 @@ endif
 OBJS=receivelog.o streamutil.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a $(top_builddir)/src/bin/pg_ctl/fetchmot.o \
      xlogreader.o xlogreader_common.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a $(top_builddir)/src/lib/build_query/libbuildquery.a \
      $(top_builddir)/src/lib/pgcommon/libpgcommon.a \
-     $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a
+     $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a \
+	 $(top_builddir)/src/common/backend/lib/string.o
 
 
 all: gs_basebackup pg_receivexlog pg_recvlogical
@@ -60,15 +61,19 @@ install: all installdirs
 	$(INSTALL_PROGRAM) gs_basebackup$(X) '$(DESTDIR)$(bindir)/gs_basebackup$(X)'
 	$(INSTALL_PROGRAM) pg_receivexlog$(X) '$(DESTDIR)$(bindir)/pg_receivexlog$(X)'
 	$(INSTALL_PROGRAM) pg_recvlogical$(X) '$(DESTDIR)$(bindir)/pg_recvlogical$(X)'
-
+	rm -f '$(DESTDIR)$(bindir)/gs_tar$(X)'
+	ln -s gs_basebackup$(X) '$(DESTDIR)$(bindir)/gs_tar$(X)'
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
 
 uninstall:
+	rm -f '$(DESTDIR)$(bindir)/gs_tar$(X)'
+	rm -f '$(DESTDIR)$(bindir)/gs_basebackup$(X)'
+	rm -f '$(DESTDIR)$(bindir)/pg_receivexlog$(X)'
 	rm -f '$(DESTDIR)$(bindir)/pg_recvlogical$(X)'
 
 clean distclean maintainer-clean:
-	rm -f gs_basebackup$(X) pg_receivexlog$(X) pg_recvlogical$(X) $(OBJS) \
+	rm -f gs_basebackup$(X) pg_receivexlog$(X) pg_recvlogical$(X) gs_tar$(X) $(OBJS) \
 		pg_basebackup.o pg_receivexlog.o pg_recvlogical.o *.depend
 
 # Be sure that the necessary archives are compiled

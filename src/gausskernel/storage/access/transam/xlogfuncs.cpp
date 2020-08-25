@@ -70,12 +70,13 @@ Datum pg_start_backup(PG_FUNCTION_ARGS)
     bool fast = PG_GETARG_BOOL(1);
     char* backupidstr = NULL;
     XLogRecPtr startpoint;
+    DIR *dir;
     char startxlogstr[MAXFNAMELEN];
     errno_t errorno = EOK;
 
     backupidstr = text_to_cstring(backupid);
-
-    startpoint = do_pg_start_backup(backupidstr, fast, NULL);
+    dir = AllocateDir("pg_tblspc");
+    startpoint = do_pg_start_backup(backupidstr, fast, NULL, dir, NULL, NULL, false, true);
 
     errorno = snprintf_s(startxlogstr,
         sizeof(startxlogstr),

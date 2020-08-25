@@ -86,6 +86,7 @@
 %token K_FAST
 %token K_NOWAIT
 %token K_WAL
+%token K_TABLESPACE_MAP
 %token K_DATA
 %token K_START_REPLICATION
 %token K_FETCH_MOT_CHECKPOINT
@@ -202,7 +203,7 @@ identify_channel:
 			;
 
 /*
- * BASE_BACKUP [LABEL '<label>'] [PROGRESS] [FAST] [WAL] [NOWAIT]
+ * BASE_BACKUP [LABEL '<label>'] [PROGRESS] [FAST] [WAL] [NOWAIT] [TABLESPACE_MAP]
  */
 base_backup:
 			K_BASE_BACKUP base_backup_opt_list
@@ -241,6 +242,11 @@ base_backup_opt:
 				{
 				  $$ = makeDefElem("nowait",
 						   (Node *)makeInteger(TRUE));
+				}
+			| K_TABLESPACE_MAP
+				{
+					$$ = makeDefElem("tablespace_map",
+							(Node *)makeInteger(TRUE));
 				}
 			;
 
