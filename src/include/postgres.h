@@ -241,6 +241,8 @@ typedef enum { SKEW_OPT_OFF, SKEW_OPT_NORMAL, SKEW_OPT_LAZY } SkewStrategy;
 
 typedef enum { RESOURCE_TRACK_NONE, RESOURCE_TRACK_QUERY, RESOURCE_TRACK_OPERATOR } ResourceTrackOption;
 
+typedef enum { QUERY_MESSAGE = 0, HYBRID_MESSAGE } MessageType;
+
 typedef enum {
     CODEGEN_PARTIAL, /* allow to call c-function in codegen */
     CODEGEN_PURE     /* do not allow to call c-function in codegen */

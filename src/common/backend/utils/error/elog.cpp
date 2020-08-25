@@ -1639,6 +1639,63 @@ void FlushErrorStateWithoutDeleteChildrenContext(void)
 }
 
 /*
+ * ThrowErrorData --- report an error described by an ErrorData structure
+ *
+ * This is somewhat like ReThrowError, but it allows elevels besides ERROR,
+ * and the boolean flags such as output_to_server are computed via the
+ * default rules rather than being copied from the given ErrorData.
+ * This is primarily used to re-report errors originally reported by
+ * background worker processes and then propagated (with or without
+ * modification) to the backend responsible for them.
+ */
+void
+ThrowErrorData(ErrorData *edata)
+{
+	ErrorData  *newedata;
+	MemoryContext oldcontext;
+
+	if (!errstart(edata->elevel, edata->filename, edata->lineno,
+				  edata->funcname, NULL))
+		return;					/* error is not to be reported at all */
+
+	newedata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+	t_thrd.log_cxt.recursion_depth++;
+	oldcontext =  MemoryContextSwitchTo(ErrorContext);
+
+	/* Copy the supplied fields to the error stack entry. */
+	if (edata->sqlerrcode != 0)
+		newedata->sqlerrcode = edata->sqlerrcode;
+	if (edata->message)
+		newedata->message = pstrdup(edata->message);
+	if (edata->detail)
+		newedata->detail = pstrdup(edata->detail);
+	if (edata->detail_log)
+		newedata->detail_log = pstrdup(edata->detail_log);
+	if (edata->hint)
+		newedata->hint = pstrdup(edata->hint);
+	if (edata->context)
+		newedata->context = pstrdup(edata->context);
+	/* assume message_id is not available */
+    if (newedata->filename)
+        newedata->filename = pstrdup(edata->filename);
+    if (newedata->funcname)
+        newedata->funcname = pstrdup(edata->funcname);
+    if (newedata->backtrace_log)
+        newedata->backtrace_log = pstrdup(edata->backtrace_log);
+
+	newedata->cursorpos = edata->cursorpos;
+	newedata->internalpos = edata->internalpos;
+	if (edata->internalquery)
+		newedata->internalquery = pstrdup(edata->internalquery);
+
+	MemoryContextSwitchTo(oldcontext);
+	t_thrd.log_cxt.recursion_depth--;
+
+	/* Process the error. */
+	errfinish(0);
+}
+
+/*
  * ReThrowError --- re-throw a previously copied error
  *
  * A handler can do CopyErrorData/FlushErrorState to get out of the error

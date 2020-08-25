@@ -728,6 +728,7 @@ void InitializeSessionUserId(const char* role_name, Oid role_id)
 {
     HeapTuple role_tup;
     Form_pg_authid rform;
+    //Oid role_id;
     char* rname = NULL;
     /* Audit user login */
     char details[PGAUDIT_MAXLENGTH];
@@ -763,14 +764,16 @@ void InitializeSessionUserId(const char* role_name, Oid role_id)
         role_tup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(role_id));
         if (!HeapTupleIsValid(role_tup)) {
             ereport(FATAL,
-                (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                    errmsg("role with OID %u does not exist", role_id)));
+                    (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                     errmsg("role with OID %u does not exist", role_id)));
         }
     }
 
     rform = (Form_pg_authid)GETSTRUCT(role_tup);
     role_id = HeapTupleGetOid(role_tup);
     rname = NameStr(rform->rolname);
+    ereport(LOG,
+            (errmsg("InitializeSessionUserId role name: %s with OID %u", rname, role_id)));
 
     u_sess->misc_cxt.AuthenticatedUserId = role_id;
     u_sess->misc_cxt.AuthenticatedUserIsSuperuser = rform->rolsuper;

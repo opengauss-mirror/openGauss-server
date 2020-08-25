@@ -154,7 +154,7 @@ Query* parse_analyze(
  * symbol datatypes from context.  The passed-in paramTypes[] array can
  * be modified or enlarged (via repalloc).
  */
-Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams)
+Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams, char** paramTypeNames)
 {
     ParseState* pstate = make_parsestate(NULL);
     Query* query = NULL;
@@ -164,7 +164,7 @@ Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** pa
 
     pstate->p_sourcetext = sourceText;
 
-    parse_variable_parameters(pstate, paramTypes, numParams);
+    parse_variable_parameters(pstate, paramTypes, numParams, paramTypeNames);
 
     query = transformTopLevelStmt(pstate, parseTree);
 

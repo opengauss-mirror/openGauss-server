@@ -21,6 +21,7 @@
 #include "catalog/namespace.h"
 #include "commands/trigger.h"
 #include "executor/spi.h"
+#include "tcop/autonomous.h"
 
 /**********************************************************************
  * Definitions
@@ -380,6 +381,7 @@ typedef struct PLpgSQL_stmt_block { /* Block of statements			*/
     int cmd_type;
     int lineno;
     char* label;
+    bool autonomous;
     List* body; /* List of statements */
     int n_initvars;
     int* initvarnos;
@@ -776,7 +778,7 @@ typedef struct PLpgSQL_execstate { /* Runtime execution data	*/
     MemoryContext tuple_store_cxt;
     ResourceOwner tuple_store_owner;
     ReturnSetInfo* rsi;
-
+    AutonomousSession *autonomous_session;
     int found_varno;
 
     /*

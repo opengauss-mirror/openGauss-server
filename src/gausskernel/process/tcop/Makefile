@@ -29,7 +29,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS= stmt_retry.o dest.o fastpath.o postgres.o pquery.o utility.o auditfuncs.o
+OBJS= autonomous.o stmt_retry.o dest.o fastpath.o postgres.o pquery.o utility.o auditfuncs.o
 
 ifneq (,$(filter $(PORTNAME),cygwin win32))
 override CPPFLAGS += -fPIC -DWIN32_STACK_RLIMIT=$(WIN32_STACK_RLIMIT)

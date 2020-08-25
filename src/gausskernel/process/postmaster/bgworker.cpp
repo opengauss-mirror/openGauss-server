@@ -28,6 +28,7 @@
 #include "storage/procsignal.h"
 #include "storage/shmem.h"
 #include "tcop/tcopprot.h"
+#include "tcop/autonomous.h"
 #include "utils/ascii.h"
 #include "utils/ps_status.h"
 #include "utils/postinit.h"
@@ -110,6 +111,10 @@ static const struct {
 } InternalBGWorkers[] =
 
 {
+    {
+        "autonomous_worker_main",
+        autonomous_worker_main
+    }
 };
 
 /* Private functions. */

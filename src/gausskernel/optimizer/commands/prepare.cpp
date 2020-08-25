@@ -114,7 +114,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
      * Because parse analysis scribbles on the raw querytree, we must make a
      * copy to ensure we don't modify the passed-in tree.
      */
-    query = parse_analyze_varparams((Node*)copyObject(stmt->query), queryString, &argtypes, &nargs);
+    query = parse_analyze_varparams((Node*)copyObject(stmt->query), queryString, &argtypes, &nargs, NULL);
 
     /*
      * Check that all parameter types were determined.

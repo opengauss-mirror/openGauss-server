@@ -24,7 +24,7 @@ extern THR_LOCAL PGDLLIMPORT post_parse_analyze_hook_type post_parse_analyze_hoo
 
 extern Query* parse_analyze(Node* parseTree, const char* sourceText, Oid* paramTypes, int numParams,
     bool isFirstNode = true, bool isCreateView = false);
-extern Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams);
+extern Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams, char** paramTypeNames);
 
 extern Query* parse_sub_analyze(Node* parseTree, ParseState* parentParseState, CommonTableExpr* parentCTE,
     bool locked_from_parent, bool resolve_unknowns);

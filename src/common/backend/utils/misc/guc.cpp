@@ -17876,7 +17876,7 @@ static Size EstimateVariableSize(const struct config_generic* gconf)
         }
 
         case PGC_STRING: {
-            const struct config_string* conf = (const struct config_string*)gconf;
+            const struct config_string *conf = (const struct config_string*)gconf;
             /*
              * If the value is NULL, we transmit it as an empty string.
              * Although this is not physically the same value, GUC
@@ -17927,7 +17927,7 @@ static Size EstimateVariableSize(const struct config_generic* gconf)
 Size EstimateGUCStateSpace(void)
 {
     Size size;
-    int i;
+    int	i;
 
     /* Add space reqd for saving the data size of the guc state */
     size = sizeof(Size);
@@ -18008,25 +18008,25 @@ static void SerializeVariable(char** destptr, Size& maxbytes, const struct confi
 
     switch (gconf->vartype) {
         case PGC_BOOL: {
-            const struct config_bool* conf = (const struct config_bool*)gconf;
+            const struct config_bool *conf = (const struct config_bool*)gconf;
             DoSerialize(destptr, maxbytes, (*conf->variable ? "true" : "false"));
             break;
         }
 
         case PGC_INT: {
-            const struct config_int* conf = (const struct config_int*)gconf;
+            const struct config_int *conf = (const struct config_int*)gconf;
             DoSerialize(destptr, maxbytes, "%d", *conf->variable);
             break;
         }
 
         case PGC_INT64: {
-            const struct config_int64* conf = (const struct config_int64*)gconf;
+            const struct config_int64 *conf = (const struct config_int64*)gconf;
             DoSerialize(destptr, maxbytes, "%ld", *conf->variable);
             break;
         }
 
         case PGC_REAL: {
-            const struct config_real* conf = (const struct config_real*)gconf;
+            const struct config_real *conf = (const struct config_real*)gconf;
             DoSerialize(destptr, maxbytes, "%.*e", REALTYPE_PRECISION, *conf->variable);
             break;
         }
@@ -18293,14 +18293,14 @@ void RestoreGUCState(char* gucstate)
 
         if (varsourcefile[0]) {
             ReadGucstateBinary(&srcptr, srcend,
-                               reinterpret_cast<char* >(&varsourceline), sizeof(varsourceline));
+                               reinterpret_cast<char*>(&varsourceline), sizeof(varsourceline));
         } else {
             varsourceline = 0;
         }
         ReadGucstateBinary(&srcptr, srcend,
-                           reinterpret_cast<char* >(&varsource), sizeof(varsource));
+                           reinterpret_cast<char*>(&varsource), sizeof(varsource));
         ReadGucstateBinary(&srcptr, srcend,
-                           reinterpret_cast<char* >(&varscontext), sizeof(varscontext));
+                           reinterpret_cast<char*>(&varscontext), sizeof(varscontext));
 
         result = set_config_option(varname, varvalue, varscontext, varsource,
                                    GUC_ACTION_SET, true, ERROR, true);

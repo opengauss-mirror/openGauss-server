@@ -23,6 +23,7 @@
 #include "nodes/parsenodes.h"
 #include "storage/procsignal.h"
 #include "utils/guc.h"
+#include "postgres.h"
 
 /* Required daylight between max_stack_depth and the kernel limit, in bytes */
 #define STACK_DEPTH_SLOP (640 * 1024L)
@@ -67,5 +68,10 @@ extern int check_log_duration(char* msec_str, bool was_logged);
 extern void set_debug_options(int debug_flag, GucContext context, GucSource source);
 extern bool set_plan_disabling_options(const char* arg, GucContext context, GucSource source);
 extern const char* get_stats_option_name(const char* arg);
+extern void exec_simple_query(const char* query_string, MessageType messageType, StringInfo msg = NULL);
+extern void exec_parse_message(const char* query_string, const char* stmt_name, Oid* paramTypes, char** paramTypeNames, int numParams);
+extern void exec_bind_message(StringInfo input_message);
+extern void exec_execute_message(const char *portal_name, long max_rows);
+extern void exec_describe_statement_message(const char *stmt_name);
 
 #endif /* TCOPPROT_H */
