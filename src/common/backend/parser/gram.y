@@ -641,7 +641,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 	DROP DUPLICATE DISCONNECT
 
 	EACH ELASTIC ELSE ENABLE_P ENCODING ENCRYPTED END_P ENFORCED ENUM_P ERRORS ESCAPE EOL ESCAPING EVERY EXCEPT EXCHANGE
-	EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN
+	EXCLUDE EXCLUDED EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN
 	EXTENSION EXTERNAL EXTRACT
 
 	FALSE_P FAMILY FAST FENCED FETCH FILEHEADER_P FILL_MISSING_FIELDS FIRST_P FIXED_P FLOAT_P FOLLOWING FOR FORCE FOREIGN FORMATTER FORWARD
@@ -17810,6 +17810,7 @@ SignedIconst: Iconst								{ $$ = $1; }
 ColId:		IDENT									{ $$ = $1; }
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
+			| EXCLUDED						{ $$ = pstrdup($1); }
 		;
 
 /* Type/function identifier --- names that can be type or function names.
@@ -18367,6 +18368,7 @@ reserved_keyword:
 			| ELSE
 			| END_P
 			| EXCEPT
+			| EXCLUDED
 			| FALSE_P
 			| FETCH
 			| FOR

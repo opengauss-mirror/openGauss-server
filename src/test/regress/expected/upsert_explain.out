@@ -117,8 +117,8 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_part values(1,1
 (5 rows)
 
 EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_temp values(1,1,1) on duplicate key update c1 = 2;
-                   QUERY PLAN                    
---?.*
+--?.*QUERY PLAN.*
+--?----.*
 --? Insert on pg_temp_datanod.*.up_expl_temp
    Conflict Resolution: UPDATE
    Conflict Arbiter Indexes: up_expl_temp_c3_key
@@ -237,8 +237,8 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_part values(1,1
 (5 rows)
 
 EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_temp values(1,1,1) on duplicate key update nothing;
-                   QUERY PLAN                    
---?.*
+--?.*QUERY PLAN.*
+--?----.*
 --? Insert on pg_temp_datanod.*.up_expl_temp
    Conflict Resolution: NOTHING
    Conflict Arbiter Indexes: up_expl_temp_c3_key
