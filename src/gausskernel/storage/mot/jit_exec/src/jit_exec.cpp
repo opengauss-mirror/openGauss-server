@@ -109,10 +109,6 @@ extern JitPlan* IsJittable(Query* query, const char* queryString)
                     MOT_LOG_TRACE("Disqualifying plan with DISTINCT aggregate");
                     JitDestroyPlan(jitPlan);
                     jitPlan = nullptr;
-                } else if (JitPlanHasSort(jitPlan)) {
-                    MOT_LOG_TRACE("Disqualifying plan with ORDER BY specifier");
-                    JitDestroyPlan(jitPlan);
-                    jitPlan = nullptr;
                 } else {
                     MOT_LOG_TRACE("Query %s jittable by plan", jitPlan ? "is" : "is not");
                     if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
@@ -330,6 +326,12 @@ extern JitContext* JitCodegenQuery(Query* query, const char* queryString, JitPla
     return jitContext;
 }
 
+extern void JitResetScan(JitContext* jitContext)
+{
+    MOT_LOG_DEBUG("JitResetScan(): Resetting iteration count for context %p", jitContext);
+    jitContext->m_iterCount = 0;
+}
+
 extern int JitExecQuery(
     JitContext* jitContext, ParamListInfo params, TupleTableSlot* slot, uint64_t* tuplesProcessed, int* scanEnded)
 {
@@ -378,14 +380,31 @@ extern int JitExecQuery(
     // in trace log-level we raise the log level to DEBUG on first few executions only
     bool firstExec = false;
     if ((++jitContext->m_execCount <= 2) && MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
-        MOT_LOG_TRACE("Executing JIT context %p for the %dth time: %s",
+        MOT_LOG_TRACE("Executing JIT context %p (exec: %" PRIu64 ", query: %" PRIu64 " iteration: %" PRIu64 "): %s",
             jitContext,
             jitContext->m_execCount,
+            jitContext->m_queryCount,
+            jitContext->m_iterCount,
             jitContext->m_queryString);
         MOT::SetLogComponentLogLevel("JitExec", MOT::LogLevel::LL_DEBUG);
         firstExec = true;
     }
 #endif
+
+    // update iteration count and identify a new scan
+    int newScan = 0;
+    if (jitContext->m_iterCount == 0) {
+        ++jitContext->m_queryCount;
+        newScan = 1;
+#ifdef MOT_JIT_DEBUG
+        MOT_LOG_TRACE("Starting a new scan (exec: %" PRIu64 ", query: %" PRIu64 ",iteration: %" PRIu64 ") for query %s",
+            jitContext->m_execCount,
+            jitContext->m_queryCount,
+            jitContext->m_iterCount,
+            jitContext->m_queryString);
+#endif
+    }
+    ++jitContext->m_iterCount;
 
     // invoke the jitted function
     if (jitContext->m_llvmFunction != nullptr) {
@@ -400,6 +419,7 @@ extern int JitExecQuery(
             slot,
             tuplesProcessed,
             scanEnded,
+            newScan,
             jitContext->m_endIteratorKey,
             jitContext->m_innerTable,
             jitContext->m_innerIndex,
@@ -409,7 +429,7 @@ extern int JitExecQuery(
 #ifdef MOT_JIT_DEBUG
         MOT_LOG_DEBUG("Executing TVM-jitted function %p: %s", jitContext->m_tvmFunction, jitContext->m_queryString);
 #endif
-        result = JitExecTvmQuery(jitContext, params, slot, tuplesProcessed, scanEnded);
+        result = JitExecTvmQuery(jitContext, params, slot, tuplesProcessed, scanEnded, newScan);
     }
 
 #ifdef MOT_JIT_DEBUG

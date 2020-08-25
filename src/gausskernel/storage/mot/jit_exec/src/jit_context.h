@@ -193,10 +193,20 @@ struct JitContext {
     /** @var The JIT source from which this context originated. */
     JitSource* m_jitSource;  // L1 offset 8
 
+    /*---------------------- Batch Execution -------------------*/
+    /**
+     * @var The number of times (iterations) a single stateful query was invoked. Used for distinguishing query
+     * boundaries in a stateful query execution when client uses batches.
+     */
+    uint64_t m_iterCount;  // L1 offset 16
+
+    /** @var The number of full query executions. */
+    uint64_t m_queryCount;  // L1 offset 24
+
     /*---------------------- Debug execution state -------------------*/
     /** @var The number of times this context was invoked for execution. */
 #ifdef MOT_JIT_DEBUG
-    uint64_t m_execCount;  // L1 offset 16
+    uint64_t m_execCount;  // L1 offset 32
 #endif
 };
 

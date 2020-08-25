@@ -3867,6 +3867,17 @@ static void exec_bind_message(StringInfo input_message)
         ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MM),
                 errmsg("SubTransaction is not supported for memory table.")));
 
+    /*
+     * MOT JIT Execution:
+     * Assist in distinguishing query boundaries in case of range query when client uses batches. This allows us to
+     * know a new query started, and in case a previous execution did not fetch all records (since user is working in
+     * batch-mode, and can decide to quit fetching in the middle), using this information we can infer this is a new
+     * scan, and old scan state should be discarded.
+     */
+    if (psrc->mot_jit_context != NULL) {
+        JitResetScan(psrc->mot_jit_context);
+    }
+
     if (psrc->opFusionObj != NULL) {
         (void)RevalidateCachedQuery(psrc);
 
@@ -9692,6 +9703,17 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
          * With this, we can determine if we should use global snapshot or local snapshot after.
          */
         cplan->single_shard_stmt = psrc->single_shard_stmt;
+    }
+
+    /*
+     * MOT JIT Execution:
+     * Assist in distinguishing query boundaries in case of range query when client uses batches. This allows us to
+     * know a new query started, and in case a previous execution did not fetch all records (since user is working in
+     * batch-mode, and can decide to quit fetching in the middle), using this information we can infer this is a new
+     * scan, and old scan state should be discarded.
+     */
+    if (psrc->mot_jit_context != NULL) {
+        JitResetScan(psrc->mot_jit_context);
     }
 
     if (IS_PGXC_DATANODE && psrc->is_checked_opfusion == false) {

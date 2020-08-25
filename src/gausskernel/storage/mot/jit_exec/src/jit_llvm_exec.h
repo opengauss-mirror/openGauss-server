@@ -52,6 +52,7 @@ struct JitPlan;
  * @param[out] slot The slot used for reporting select result.
  * @param[out] tuplesProcessed The variable used to report the number of processed rows.
  * @param[out] scanEnded Signifies in range scans whether scan ended.
+ * @param newScan Specifies whether this is a new scan or a continued previous scan.
  * @param endIteratorKey The key used for the end iterator in range scans.
  * @param innerTable The inner scan table used during JOIN queries.
  * @param innerKey The search key used for the inner scan table during JOIN queries.
@@ -60,11 +61,12 @@ struct JitPlan;
  * @note This function may cause transaction abort.
  */
 typedef int (*JitFunc)(MOT::Table* table, MOT::Index* index, MOT::Key* key, MOT::BitmapSet* bitmapSet,
-    ParamListInfo params, TupleTableSlot* slot, uint64_t* tuplesProcessed, int* scanEnded, MOT::Key* endIteratorKey,
-    MOT::Table* innerTable, MOT::Index* innerIndex, MOT::Key* innerKey, MOT::Key* innerEndIteratorKey);
+    ParamListInfo params, TupleTableSlot* slot, uint64_t* tuplesProcessed, int* scanEnded, int newScan,
+    MOT::Key* endIteratorKey, MOT::Table* innerTable, MOT::Index* innerIndex, MOT::Key* innerKey,
+    MOT::Key* innerEndIteratorKey);
 
 // the number of arguments in the jitted function
-#define MOT_JIT_FUNC_ARG_COUNT 13
+#define MOT_JIT_FUNC_ARG_COUNT 14
 
 #ifdef __aarch64__
 /**

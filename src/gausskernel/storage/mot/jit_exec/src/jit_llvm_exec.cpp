@@ -237,6 +237,7 @@ struct JitLlvmCodeGenContext {
     llvm::Value* slot_value;
     llvm::Value* tp_processed_value;
     llvm::Value* scan_ended_value;
+    llvm::Value* isNewScanValue;
     llvm::Value* bitmap_value;
     llvm::Value* inner_table_value;
     llvm::Value* inner_index_value;
@@ -2042,6 +2043,7 @@ static void CreateJittedFunction(JitLlvmCodeGenContext* ctx, const char* functio
     fn_prototype.addArgument(GsCodeGen::NamedVariable("slot", ctx->TupleTableSlotType->getPointerTo()));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("tp_processed", ctx->INT64_T->getPointerTo()));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("scan_ended", ctx->INT32_T->getPointerTo()));
+    fn_prototype.addArgument(GsCodeGen::NamedVariable("isNewScan", ctx->INT32_T));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("end_iterator_key", ctx->KeyType->getPointerTo()));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("inner_table", ctx->TableType->getPointerTo()));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("inner_index", ctx->IndexType->getPointerTo()));
@@ -2060,6 +2062,7 @@ static void CreateJittedFunction(JitLlvmCodeGenContext* ctx, const char* functio
     ctx->slot_value = llvmargs[arg_index++];
     ctx->tp_processed_value = llvmargs[arg_index++];
     ctx->scan_ended_value = llvmargs[arg_index++];
+    ctx->isNewScanValue = llvmargs[arg_index++];
     ctx->end_iterator_key_value = llvmargs[arg_index++];
     ctx->inner_table_value = llvmargs[arg_index++];
     ctx->inner_index_value = llvmargs[arg_index++];
@@ -4511,6 +4514,17 @@ static JitContext* JitSelectCodegen(const Query* query, const char* query_string
     return jit_context;
 }
 
+static void AddCleanupOldScan(JitLlvmCodeGenContext* ctx)
+{
+    JIT_IF_BEGIN(cleanup_old_scan)
+    JIT_IF_EVAL(ctx->isNewScanValue)
+    IssueDebugLog("Destroying state iterators due to new scan");
+    AddDestroyStateIterators(ctx, JIT_RANGE_SCAN_MAIN);
+    AddDestroyStateIterators(ctx, JIT_RANGE_SCAN_INNER);
+    // sub-query does not have a stateful execution, so no need to cleanup
+    JIT_IF_END()
+}
+
 /** @brief Generates code for range SELECT query with a possible LIMIT clause. */
 static JitContext* JitRangeSelectCodegen(const Query* query, const char* query_string, JitRangeSelectPlan* plan)
 {
@@ -4539,6 +4553,9 @@ static JitContext* JitRangeSelectCodegen(const Query* query, const char* query_s
 
     // clear tuple even if row is not found later
     AddExecClearTuple(ctx);
+
+    // emit code to cleanup previous scan in case this is a new scan
+    AddCleanupOldScan(ctx);
 
     // prepare stateful scan if not done so already, if no row exists then emit code to return from function
     int max_arg = 0;
@@ -5028,6 +5045,9 @@ static JitContext* JitRangeJoinCodegen(const Query* query, const char* query_str
 
     // clear tuple even if row is not found later
     AddExecClearTuple(ctx);
+
+    // emit code to cleanup previous scan in case this is a new scan
+    AddCleanupOldScan(ctx);
 
     // prepare stateful scan if not done so already
     int max_arg = 0;
