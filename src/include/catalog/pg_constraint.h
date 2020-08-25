@@ -105,6 +105,13 @@ CATALOG(pg_constraint,2606) BKI_SCHEMA_MACRO
     int2        conkey[1];
 
     /*
+     * Columns of conrelid that the constraint does not apply to, but included
+     * into the same index with key columns.
+     */
+    int2        conincluding[1];
+
+
+    /*
      * If a foreign key, the referenced columns of confrelid
      */
     int2        confkey[1];
@@ -156,7 +163,7 @@ typedef FormData_pg_constraint *Form_pg_constraint;
  *        compiler constants for pg_constraint
  * ----------------
  */
-#define Natts_pg_constraint                    26
+#define Natts_pg_constraint                    27
 #define Anum_pg_constraint_conname             1
 #define Anum_pg_constraint_connamespace        2
 #define Anum_pg_constraint_contype             3
@@ -176,13 +183,14 @@ typedef FormData_pg_constraint *Form_pg_constraint;
 #define Anum_pg_constraint_consoft             17
 #define Anum_pg_constraint_conopt              18
 #define Anum_pg_constraint_conkey              19
-#define Anum_pg_constraint_confkey             20
-#define Anum_pg_constraint_conpfeqop           21
-#define Anum_pg_constraint_conppeqop           22
-#define Anum_pg_constraint_conffeqop           23
-#define Anum_pg_constraint_conexclop           24
-#define Anum_pg_constraint_conbin              25
-#define Anum_pg_constraint_consrc              26
+#define Anum_pg_constraint_conincluding        20
+#define Anum_pg_constraint_confkey             21
+#define Anum_pg_constraint_conpfeqop           22
+#define Anum_pg_constraint_conppeqop           23
+#define Anum_pg_constraint_conffeqop           24
+#define Anum_pg_constraint_conexclop           25
+#define Anum_pg_constraint_conbin              26
+#define Anum_pg_constraint_consrc              27
 
 
 /* Valid values for contype */
@@ -224,6 +232,7 @@ extern Oid CreateConstraintEntry(const char *constraintName,
                                  Oid relId,
                                  const int16 *constraintKey,
                                  int constraintNKeys,
+                                 int constraintNTotalKeys,
                                  Oid domainId,
                                  Oid indexRelId,
                                  Oid foreignRelId,

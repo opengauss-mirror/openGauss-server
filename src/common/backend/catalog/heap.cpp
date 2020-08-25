@@ -453,6 +453,9 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
              */
             reltablespace = InvalidOid;
             break;
+        case RELKIND_GLOBAL_INDEX:
+            create_storage = true;
+            break;
         default:
             if (!partitioned_relation) {
                 create_storage = true;
@@ -1030,6 +1033,7 @@ static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, O
         case RELKIND_MATVIEW:
         case RELKIND_INDEX:
         case RELKIND_TOASTVALUE:
+        case RELKIND_GLOBAL_INDEX:
             /* The relation is real, but as yet empty */
             new_rel_reltup->relpages = 0;
             new_rel_reltup->reltuples = 0;
@@ -2966,7 +2970,8 @@ static void StoreRelCheck(
         is_validated,
         RelationGetRelid(rel), /* relation */
         attNos,                /* attrs in the constraint */
-        keycount,              /* # attrs in the constraint */
+        keycount, /* # key attrs in the constraint */
+        keycount, /* # total attrs in the constraint */
         InvalidOid,            /* not a domain constraint */
         InvalidOid,            /* no associated index */
         InvalidOid,            /* Foreign key fields */
@@ -3674,7 +3679,7 @@ static void RelationTruncateIndexes(Relation heapRelation, LOCKMODE lockmode)
 
         /* Initialize the index and rebuild */
         /* Note: we do not need to re-establish pkey setting */
-        index_build(heapRelation, NULL, currentIndex, NULL, indexInfo, false, true, false);
+        index_build(heapRelation, NULL, currentIndex, NULL, indexInfo, false, true, INDEX_CREATE_NONE_PARTITION);
 
         /* We're done with this index */
         index_close(currentIndex, NoLock);
@@ -3910,7 +3915,7 @@ void heap_truncate_one_rel(Relation rel)
                 }
 
                 p = partitionOpen(rel, indexPart->pd_part->indextblid, NoLock);
-                index_build(rel, p, currentIndex, indexPart, indexInfo, false, true, true);
+                index_build(rel, p, currentIndex, indexPart, indexInfo, false, true, INDEX_CREATE_LOCAL_PARTITION);
 
                 partitionClose(rel, p, NoLock);
                 partitionClose(currentIndex, indexPart, NoLock);
@@ -5231,7 +5236,6 @@ static void addNewPartitionTupleForValuePartitionedTable(Relation pg_partition_r
     values[Anum_pg_partition_relpages - 1] = Float8GetDatum(0);
     values[Anum_pg_partition_reltuples - 1] = Float8GetDatum(0);
     values[Anum_pg_partition_relallvisible - 1] = UInt32GetDatum(0);
-    ;
     values[Anum_pg_partition_reltoastrelid - 1] = ObjectIdGetDatum(InvalidOid);
     values[Anum_pg_partition_reltoastidxid - 1] = ObjectIdGetDatum(InvalidOid);
     values[Anum_pg_partition_indextblid - 1] = ObjectIdGetDatum(InvalidOid);
@@ -5302,6 +5306,7 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
     RangePartitionDefState* lastPartition = NULL;
     Relation relation = NULL;
     Partition new_partition = NULL;
+    Datum newOptions;
 
     Oid new_partition_rfoid = InvalidOid;
 
@@ -5354,6 +5359,9 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
     new_partition->pd_part->relcudescidx = InvalidOid;
     new_partition->pd_part->indisusable = true;
 
+    /* Update reloptions with wait_clean_gpi=n */
+    newOptions = SetWaitCleanGpiRelOptions(reloptions, false);
+
     /*step 2: insert into pg_partition tuple*/
     addNewPartitionTuple(pg_partition_rel, /* RelationData pointer for pg_partition */
         new_partition,                     /* Local PartitionData pointer for new partition */
@@ -5362,7 +5370,7 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
         interval,         /* interval partitioned table's interval*/
         (Datum)0,         /* partitioned table's boundary value is empty in pg_partition */
         transition_point, /* interval's partitioned table's transition point*/
-        reloptions);
+        newOptions);
     relation = relation_open(reloid, NoLock);
     partitionClose(relation, new_partition, NoLock);
     relation_close(relation, NoLock);
@@ -5505,9 +5513,11 @@ void heap_truncate_one_part(Relation rel, Oid partOid)
             parentIndId = (((Form_pg_partition)GETSTRUCT(partIndexTuple)))->parentid;
             partIndId = HeapTupleGetOid(partIndexTuple);
             parentIndex = index_open(parentIndId, AccessShareLock);
-            indexPart = partitionOpen(parentIndex, partIndId, AccessExclusiveLock);
-            reindex_partIndex(rel, p, parentIndex, indexPart);
-            partitionClose(parentIndex, indexPart, NoLock);
+            if (!RelationIsGlobalIndex(parentIndex)) {
+                indexPart = partitionOpen(parentIndex, partIndId, AccessExclusiveLock);
+                reindex_partIndex(rel, p, parentIndex, indexPart);
+                partitionClose(parentIndex, indexPart, NoLock);
+            }
             index_close(parentIndex, NoLock);
         }
     }
@@ -5873,6 +5883,7 @@ List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
             true,                      /* Is Validated */
             RelationGetRelid(rel),     /* relation */
             attNums,                   /* attrs in the constraint */
+            colNum,                    /* # attrs in the constraint */
             colNum,                    /* # attrs in the constraint */
             InvalidOid,                /* not a domain constraint */
             InvalidOid,                /* no associated index */

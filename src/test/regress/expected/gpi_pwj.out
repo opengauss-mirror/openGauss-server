@@ -1,0 +1,85 @@
+DROP TABLE if exists gpi_pwj_table1;
+NOTICE:  table "gpi_pwj_table1" does not exist, skipping
+DROP TABLE if exists gpi_pwj_table2;
+NOTICE:  table "gpi_pwj_table2" does not exist, skipping
+CREATE TABLE gpi_pwj_table1
+(
+    c1 int,
+    c2 int,
+    c3 int
+)
+partition by range (c1)
+(
+    partition p0_gpi_pwj_table1 VALUES less than (10000),
+    partition p1_gpi_pwj_table1 VALUES less than (20000),
+    partition p2_gpi_pwj_table1 VALUES less than (30000),
+    partition p3_gpi_pwj_table1 VALUES less than (maxvalue)
+);
+CREATE TABLE gpi_pwj_table2
+(
+    c1 int,
+    c2 int,
+    c3 int
+)
+partition by range (c1)
+(
+    partition p0_gpi_pwj_table2 VALUES less than (10000),
+    partition p1_gpi_pwj_table2 VALUES less than (20000),
+    partition p2_gpi_pwj_table2 VALUES less than (30000),
+    partition p3_gpi_pwj_table2 VALUES less than (maxvalue)
+);
+INSERT INTO gpi_pwj_table1 SELECT r, r, r FROM generate_series(0,40000) AS r;
+INSERT INTO gpi_pwj_table2 SELECT r, r, r FROM generate_series(0,40000) AS r;
+CREATE INDEX idx1_gpi_pwj_table1 ON gpi_pwj_table1 (c1) GLOBAL;
+CREATE INDEX idx1_gpi_pwj_table2 ON gpi_pwj_table2 (c2) GLOBAL;
+explain (costs off, nodes off)
+SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gpi_pwj_table2.c1 AND gpi_pwj_table1.c2 < 15000;
+                           QUERY PLAN
+----------------------------------------------------------------
+ Aggregate
+   ->  Hash Join
+         Hash Cond: (gpi_pwj_table2.c1 = gpi_pwj_table1.c1)
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on gpi_pwj_table2
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on gpi_pwj_table1
+                           Filter: (c2 < 15000)
+                           Selected Partitions:  1..4
+(13 rows)
+
+SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gpi_pwj_table2.c1 AND gpi_pwj_table1.c2 < 15000;
+ count
+-------
+ 15000
+(1 row)
+
+VACUUM analyze;
+SET enable_partitionwise=ON;
+explain (costs off, nodes off)
+SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gpi_pwj_table2.c1 AND gpi_pwj_table1.c2 < 15000;
+                            QUERY PLAN
+------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 4
+         ->  Hash Join
+               Hash Cond: (gpi_pwj_table1.c1 = gpi_pwj_table2.c1)
+               ->  Partitioned Seq Scan on gpi_pwj_table1
+                     Filter: (c2 < 15000)
+                     Selected Partitions:  1..4
+               ->  Hash
+                     ->  Partitioned Seq Scan on gpi_pwj_table2
+                           Selected Partitions:  1..4
+(11 rows)
+
+SELECT count(*) FROM gpi_pwj_table1, gpi_pwj_table2 WHERE gpi_pwj_table1.c1 = gpi_pwj_table2.c1 AND gpi_pwj_table1.c2 < 15000;
+ count
+-------
+ 15000
+(1 row)
+
+SET enable_partitionwise=OFF;

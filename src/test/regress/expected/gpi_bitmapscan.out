@@ -1,0 +1,225 @@
+DROP TABLE if exists gpi_bitmap_table1;
+NOTICE:  table "gpi_bitmap_table1" does not exist, skipping
+DROP TABLE if exists gpi_bitmap_table2;
+NOTICE:  table "gpi_bitmap_table2" does not exist, skipping
+SET enable_seqscan=off;
+SET enable_indexscan=off;
+CREATE TABLE gpi_bitmap_table1
+(
+    c1 int,
+    c2 int,
+    c3 int
+)
+partition by range (c1)
+(
+    partition p0_gpi_bitmap_table1 VALUES less than (10000),
+    partition p1_gpi_bitmap_table1 VALUES less than (20000),
+    partition p2_gpi_bitmap_table1 VALUES less than (30000),
+    partition p3_gpi_bitmap_table1 VALUES less than (maxvalue)
+);
+INSERT INTO gpi_bitmap_table1
+  SELECT (r%53), (r%59), (r%56)
+  FROM generate_series(1,70000) r;
+--ok
+CREATE INDEX idx1_gpi_bitmap_table1 ON gpi_bitmap_table1 (c1) GLOBAL;
+--ok
+CREATE INDEX idx2_gpi_bitmap_table1 ON gpi_bitmap_table1 (c2) GLOBAL;
+--ok
+-- test bitmap-and
+SELECT count(*) FROM gpi_bitmap_table1 WHERE c1 = 1 AND c2 = 1;
+ count
+-------
+    23
+(1 row)
+
+SELECT * FROM gpi_bitmap_table1 WHERE c1 = 1 AND c2 = 1;
+ c1 | c2 | c3
+----+----+----
+  1 |  1 |  1
+  1 |  1 | 48
+  1 |  1 | 39
+  1 |  1 | 30
+  1 |  1 | 21
+  1 |  1 | 12
+  1 |  1 |  3
+  1 |  1 | 50
+  1 |  1 | 41
+  1 |  1 | 32
+  1 |  1 | 23
+  1 |  1 | 14
+  1 |  1 |  5
+  1 |  1 | 52
+  1 |  1 | 43
+  1 |  1 | 34
+  1 |  1 | 25
+  1 |  1 | 16
+  1 |  1 |  7
+  1 |  1 | 54
+  1 |  1 | 45
+  1 |  1 | 36
+  1 |  1 | 27
+(23 rows)
+
+SELECT * FROM gpi_bitmap_table1 WHERE c1 = 1 AND c2 = 1 ORDER BY c3;
+ c1 | c2 | c3
+----+----+----
+  1 |  1 |  1
+  1 |  1 |  3
+  1 |  1 |  5
+  1 |  1 |  7
+  1 |  1 | 12
+  1 |  1 | 14
+  1 |  1 | 16
+  1 |  1 | 21
+  1 |  1 | 23
+  1 |  1 | 25
+  1 |  1 | 27
+  1 |  1 | 30
+  1 |  1 | 32
+  1 |  1 | 34
+  1 |  1 | 36
+  1 |  1 | 39
+  1 |  1 | 41
+  1 |  1 | 43
+  1 |  1 | 45
+  1 |  1 | 48
+  1 |  1 | 50
+  1 |  1 | 52
+  1 |  1 | 54
+(23 rows)
+
+-- test bitmap-or
+SELECT count(*) FROM gpi_bitmap_table1 WHERE c1 = 1 OR c2 = 1;
+ count
+-------
+  2485
+(1 row)
+
+CREATE TABLE gpi_bitmap_table2
+(
+    c1 int,
+    c2 int,
+    c3 int
+)
+partition by range (c1)
+(
+    partition p0_gpi_bitmap_table2 VALUES less than (10000),
+    partition p1_gpi_bitmap_table2 VALUES less than (20000),
+    partition p2_gpi_bitmap_table2 VALUES less than (30000),
+    partition p3_gpi_bitmap_table2 VALUES less than (maxvalue)
+);
+--ok
+INSERT INTO gpi_bitmap_table2
+  SELECT r, (r+1), 500
+  FROM generate_series(1,70000) r;
+--ok
+CREATE INDEX idx1_gpi_bitmap_table2 ON gpi_bitmap_table2 (c1) GLOBAL;
+--ok
+CREATE INDEX idx2_gpi_bitmap_table2 ON gpi_bitmap_table2 (c2) GLOBAL;
+--ok
+EXPLAIN (COSTS OFF) SELECT count(*) FROM gpi_bitmap_table2 WHERE c1 > 9990 AND c1 < 10010;
+                        QUERY PLAN
+----------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on gpi_bitmap_table2
+         Recheck Cond: ((c1 > 9990) AND (c1 < 10010))
+         ->  Bitmap Index Scan on idx1_gpi_bitmap_table2
+               Index Cond: ((c1 > 9990) AND (c1 < 10010))
+(5 rows)
+
+SELECT count(*) FROM gpi_bitmap_table2 WHERE c1 > 9990 AND c1 < 10010;
+ count
+-------
+    19
+(1 row)
+
+SELECT * FROM gpi_bitmap_table2 WHERE c1 > 9990 AND c1 < 10010;
+  c1   |  c2   | c3
+-------+-------+-----
+  9991 |  9992 | 500
+  9992 |  9993 | 500
+  9993 |  9994 | 500
+  9994 |  9995 | 500
+  9995 |  9996 | 500
+  9996 |  9997 | 500
+  9997 |  9998 | 500
+  9998 |  9999 | 500
+  9999 | 10000 | 500
+ 10000 | 10001 | 500
+ 10001 | 10002 | 500
+ 10002 | 10003 | 500
+ 10003 | 10004 | 500
+ 10004 | 10005 | 500
+ 10005 | 10006 | 500
+ 10006 | 10007 | 500
+ 10007 | 10008 | 500
+ 10008 | 10009 | 500
+ 10009 | 10010 | 500
+(19 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 AND c2 = 10000;
+                       QUERY PLAN
+---------------------------------------------------------
+ Bitmap Heap Scan on gpi_bitmap_table2
+   Recheck Cond: ((c2 = 10000) AND (c1 = 10000))
+   ->  BitmapAnd
+         ->  Bitmap Index Scan on idx2_gpi_bitmap_table2
+               Index Cond: (c2 = 10000)
+         ->  Bitmap Index Scan on idx1_gpi_bitmap_table2
+               Index Cond: (c1 = 10000)
+(7 rows)
+
+SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 AND c2 = 10000;
+ c1 | c2 | c3
+----+----+----
+(0 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 10000;
+                       QUERY PLAN
+---------------------------------------------------------
+ Bitmap Heap Scan on gpi_bitmap_table2
+   Recheck Cond: ((c1 = 10000) OR (c2 = 10000))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on idx1_gpi_bitmap_table2
+               Index Cond: (c1 = 10000)
+         ->  Bitmap Index Scan on idx2_gpi_bitmap_table2
+               Index Cond: (c2 = 10000)
+(7 rows)
+
+SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 10000;
+  c1   |  c2   | c3
+-------+-------+-----
+  9999 | 10000 | 500
+ 10000 | 10001 | 500
+(2 rows)
+
+SELECT * FROM gpi_bitmap_table2 WHERE c1 = 9999 OR c2 = 10001;
+  c1   |  c2   | c3
+-------+-------+-----
+  9999 | 10000 | 500
+ 10000 | 10001 | 500
+(2 rows)
+
+EXPLAIN (COSTS OFF) SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 30000;
+                       QUERY PLAN
+---------------------------------------------------------
+ Bitmap Heap Scan on gpi_bitmap_table2
+   Recheck Cond: ((c1 = 10000) OR (c2 = 30000))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on idx1_gpi_bitmap_table2
+               Index Cond: (c1 = 10000)
+         ->  Bitmap Index Scan on idx2_gpi_bitmap_table2
+               Index Cond: (c2 = 30000)
+(7 rows)
+
+SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 30000;
+  c1   |  c2   | c3
+-------+-------+-----
+ 10000 | 10001 | 500
+ 29999 | 30000 | 500
+(2 rows)
+
+DROP TABLE idx1_gpi_bitmap_table1;
+DROP TABLE idx1_gpi_bitmap_table2;
+SET enable_seqscan=on;
+SET enable_indexscan=on;

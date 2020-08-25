@@ -154,6 +154,7 @@ typedef struct RelationData {
     bytea* rd_options; /* parsed pg_class.reloptions */
 
     /* These are non-NULL only for an index relation: */
+    Oid rd_partHeapOid;   /* partition index's partition oid */
     Form_pg_index rd_index; /* pg_index tuple describing this index */
     /* use "struct" here to avoid needing to include htup.h: */
     struct HeapTupleData* rd_indextuple; /* all of pg_index tuple */
@@ -302,6 +303,7 @@ typedef struct StdRdOptions {
     char* ttl; /* time to live for tsdb data management */
     char* period; /* partition range for tsdb data management */
     char* version;
+    char* wait_clean_gpi; /* pg_partition system catalog wait gpi-clean or not */
     /* item for online expand */
     char* append_mode;
     char* start_ctid_internal;
@@ -388,9 +390,21 @@ typedef struct StdRdOptions {
 
 /*
  * RelationGetNumberOfAttributes
- *		Returns the number of attributes in a relation.
+ *		Returns the total number of attributes in a relation.
  */
 #define RelationGetNumberOfAttributes(relation) ((relation)->rd_rel->relnatts)
+
+/*
+ * IndexRelationGetNumberOfAttributes
+ *		Returns the number of attributes in an index.
+ */
+#define IndexRelationGetNumberOfAttributes(relation) ((relation)->rd_index->indnatts)
+
+/*
+ * IndexRelationGetNumberOfKeyAttributes
+ *		Returns the number of key attributes in an index.
+ */
+#define IndexRelationGetNumberOfKeyAttributes(relation) ((relation)->rd_index->indnkeyatts)
 
 /*
  * RelationGetDescr

@@ -51,9 +51,11 @@ typedef struct UtilityDesc {
  *		entries for a particular index.  Used for both index_build and
  *		retail creation of index entries.
  *
- *		NumIndexAttrs		number of columns in this index
+ *		NumIndexAttrs		total number of columns in this index
+ *		NumIndexKeyAttrs	number of key columns in index
  *		KeyAttrNumbers		underlying-rel attribute numbers used as keys
- *							(zeroes indicate expressions)
+ *							(zeroes indicate expressions). It also contains
+ * 							info about included columns.
  *		Expressions			expr trees for expression entries, or NIL if none
  *		ExpressionsState	exec state for expressions, or NIL if none
  *		Predicate			partial-index predicate, or NIL if none
@@ -75,7 +77,8 @@ typedef struct UtilityDesc {
  */
 typedef struct IndexInfo {
     NodeTag type;
-    int ii_NumIndexAttrs;
+    int ii_NumIndexAttrs;       /* total number of columns in index */
+    int ii_NumIndexKeyAttrs;    /* number of key columns in index */
     AttrNumber ii_KeyAttrNumbers[INDEX_MAX_KEYS];
     List* ii_Expressions;       /* list of Expr */
     List* ii_ExpressionsState;  /* list of ExprState */
@@ -391,6 +394,7 @@ typedef struct MergeState {
  *		RangeTableIndex			result relation's range table index
  *		RelationDesc			relation descriptor for result relation
  *		NumIndices				# of indices existing on result relation
+ *		ri_ContainGPI			indices whether contain global parition index
  *		IndexRelationDescs		array of relation descriptors for indices
  *		IndexRelationInfo		array of key/attr info for indices
  *		TrigDesc				triggers to be fired, if any
@@ -410,6 +414,7 @@ typedef struct ResultRelInfo {
     Index ri_RangeTableIndex;
     Relation ri_RelationDesc;
     int ri_NumIndices;
+    bool ri_ContainGPI;
     RelationPtr ri_IndexRelationDescs;
     IndexInfo** ri_IndexRelationInfo;
     TriggerDesc* ri_TrigDesc;
@@ -1696,6 +1701,7 @@ typedef struct BitmapHeapScanState {
     TBMIterator* prefetch_iterator;
     int prefetch_pages;
     int prefetch_target;
+    GPIScanDesc gpi_scan;  /* global partition index scan use information */
 } BitmapHeapScanState;
 
 /* ----------------
@@ -2449,6 +2455,16 @@ TupleTableSlot* ExecMakeTupleSlot(HeapTuple tuple, HeapScanDesc heapScan, TupleT
     }
 
     return ExecClearTuple(slot);
+}
+
+/*
+ * When the global partition index is used for bitmap scanning,
+ * checks whether the partition table needs to be
+ * switched each time an tbmres is obtained.
+ */
+inline bool BitmapNodeNeedSwitchPartRel(BitmapHeapScanState* node)
+{
+    return tbm_is_global(node->tbm) && GPIScanCheckPartOid(node->gpi_scan, node->tbmres->partitionOid);
 }
 
 extern bool reset_scan_qual(Relation currHeapRel, ScanState *node);

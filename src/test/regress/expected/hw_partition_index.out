@@ -125,8 +125,7 @@ create unique index CONCURRENTLY on hw_partition_index_rp (c1) local
 	partition srp2_index_local tablespace PG_DEFAULT,
 	partition srp3_index_local tablespace PG_DEFAULT
 );
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
+ERROR:  cannot create concurrent partitioned indexes 
 --fail
 create unique index on hw_partition_index_rp (c1) local
 (
@@ -170,9 +169,9 @@ ERROR:  syntax error at or near "srp1_index_local"
 LINE 3:  srp1_index_local tablespace PG_DEFAULT,
          ^
 --fail wrong syntax
-create unique index on hw_partition_index_rp (c1);
-ERROR:  partitioned table does not support global index
---fail wrong syntax
+create unique index global_index on hw_partition_index_rp (c1);
+ERROR:  Global and local partition index should not be on same column
+--fail
 drop table hw_partition_index_rp;
 --unique index , index para must contain partition key
 create table hw_partition_index_rp

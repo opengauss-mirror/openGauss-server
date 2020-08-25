@@ -112,6 +112,11 @@ bool create_or_index_quals(PlannerInfo* root, RelOptInfo* rel)
 
             orpaths = generate_bitmap_or_paths(root, rel, list_make1(rinfo), rel->baserestrictinfo, true);
 
+            if (rel->isPartitionedTable) {
+                orpaths = list_concat(
+                    orpaths, GenerateBitmapOrPathsUseGPI(root, rel, list_make1(rinfo), rel->baserestrictinfo, true));
+            }
+
             /* Locate the cheapest OR path */
             foreach (k, orpaths) {
                 BitmapOrPath* path = (BitmapOrPath*)lfirst(k);

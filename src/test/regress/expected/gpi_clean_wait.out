@@ -1,0 +1,600 @@
+drop table if exists test_gpi_more_invalid;
+NOTICE:  table "test_gpi_more_invalid" does not exist, skipping
+create table test_gpi_more_invalid(a int, b int, c int) partition by range(a) (partition p1 values less than (1001), partition p2 values  less than (2001), partition p3 values less than (3001));
+insert into test_gpi_more_invalid select r,r,100 from generate_series(1,1000) as r;
+insert into test_gpi_more_invalid select r,r,200 from generate_series(1001,2000) as r;
+insert into test_gpi_more_invalid select r,r,300 from generate_series(2001,3000) as r;
+create index global_index_gpi_more_invalid_b on test_gpi_more_invalid (a) global;
+create index global_index_gpi_more_invalid_c on test_gpi_more_invalid (c) global;
+create unique index global_index_gpi_more_invalid_a on test_gpi_more_invalid (b) global;
+create index local_index_gpi_more_invalid_a_b on test_gpi_more_invalid (a,b) local;
+create index global_index_gpi_more_invalid_a_b_c on test_gpi_more_invalid(a,b,c) global;
+vacuum analyze test_gpi_more_invalid;
+start transaction;
+alter table test_gpi_more_invalid add partition p6 values less than (4001);
+update test_gpi_more_invalid set a = 3000 + a where a <= 100;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+        relname        | parttype |                    reloptions                     
+-----------------------+----------+---------------------------------------------------
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+ p6                    | p        | {orientation=row,compression=no,wait_clean_gpi=y}
+(2 rows)
+
+explain (costs off) select * from test_gpi_more_invalid where a >= 3000;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ [Bypass]
+ Index Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+   Index Cond: (a >= 3000)
+(3 rows)
+
+--100 rows
+select count(*) from test_gpi_more_invalid where a > 3000;
+ count 
+-------
+   100
+(1 row)
+
+abort;
+-- delete 100
+delete test_gpi_more_invalid where b % 10 = 0 and c = 100;
+-- delete 100
+delete test_gpi_more_invalid where b % 10 = 0 and c = 200;
+-- delete 100
+delete test_gpi_more_invalid where b % 10 = 0 and c = 300;
+-- after select's where condition
+insert into test_gpi_more_invalid values(10, 100000, 100);
+insert into test_gpi_more_invalid values(1020, 200000, 200);
+insert into test_gpi_more_invalid values(2030, 300000, 300);
+explain (costs off) select count(*) from test_gpi_more_invalid where a <= 100 and b = 100000;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Scan using global_index_gpi_more_invalid_a on test_gpi_more_invalid
+         Index Cond: (b = 100000)
+         Filter: (a <= 100)
+(4 rows)
+
+explain (costs off) select count(*) from test_gpi_more_invalid where a > 3000;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+         Index Cond: (a > 3000)
+(3 rows)
+
+-- 1 rows
+select count(*) from test_gpi_more_invalid where a <= 100 and b = 100000;
+ count 
+-------
+     1
+(1 row)
+
+-- 0 rows
+select count(*) from test_gpi_more_invalid where a >= 3000;
+ count 
+-------
+     0
+(1 row)
+
+-- test_gpi_more_invalid have wait_clean_gpi=y
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+        relname        | parttype |                    reloptions                     
+-----------------------+----------+---------------------------------------------------
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+(1 row)
+
+vacuum analyze test_gpi_more_invalid;
+-- test_gpi_more_invalid have wait_clean_gpi=n
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+ relname | parttype | reloptions 
+---------+----------+------------
+(0 rows)
+
+explain (costs off) select count(*) from test_gpi_more_invalid where a <= 100;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+         Index Cond: (a <= 100)
+(3 rows)
+
+explain (costs off) select count(*) from test_gpi_more_invalid where a >= 4000;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_a_b_c on test_gpi_more_invalid
+         Index Cond: (a >= 4000)
+(3 rows)
+
+-- 91 rows
+select count(*) from test_gpi_more_invalid where a <= 100;
+ count 
+-------
+    91
+(1 row)
+
+-- 0 rows
+select count(*) from test_gpi_more_invalid where a >= 4000;
+ count 
+-------
+     0
+(1 row)
+
+explain (costs off) select count(*) from test_gpi_more_invalid where c = 100;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_c on test_gpi_more_invalid
+         Index Cond: (c = 100)
+(3 rows)
+
+-- 900 rows
+select count(*) from test_gpi_more_invalid where c = 100;
+ count 
+-------
+   901
+(1 row)
+
+explain (costs off) select count(*) from test_gpi_more_invalid where c = 200;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_c on test_gpi_more_invalid
+         Index Cond: (c = 200)
+(3 rows)
+
+-- 900 rows
+select count(*) from test_gpi_more_invalid where c = 200;
+ count 
+-------
+   901
+(1 row)
+
+explain (costs off) select count(*) from test_gpi_more_invalid where c = 300;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_c on test_gpi_more_invalid
+         Index Cond: (c = 300)
+(3 rows)
+
+-- 900 rows
+select count(*) from test_gpi_more_invalid where c = 300;
+ count 
+-------
+   901
+(1 row)
+
+explain (costs off) delete test_gpi_more_invalid where b%5 != 0 and (c = 100 or c = 200 or c = 300);
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Delete on test_gpi_more_invalid
+   ->  Partition Iterator
+         Iterations: 3
+         ->  Partitioned Seq Scan on test_gpi_more_invalid
+               Filter: (((b % 5) <> 0) AND ((c = 100) OR (c = 200) OR (c = 300)))
+               Selected Partitions:  1..3
+(6 rows)
+
+delete test_gpi_more_invalid where b%5 != 0 and (c = 100 or c = 200 or c = 300);
+start transaction;
+alter table test_gpi_more_invalid add partition p6 values less than (4001);
+insert into test_gpi_more_invalid select r,r,300 from generate_series(3001,4000) as r;
+--failed
+update test_gpi_more_invalid set b = 1001 where c = 200;
+ERROR:  duplicate key value violates unique constraint "global_index_gpi_more_invalid_a"
+DETAIL:  Key (b)=(1001) already exists.
+commit;
+-- test_gpi_more_invalid have wait_clean_gpi=y
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+        relname        | parttype |                    reloptions                     
+-----------------------+----------+---------------------------------------------------
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+(1 row)
+
+set enable_seqscan = off;
+-- rows 100
+explain (costs off) select count(*) from test_gpi_more_invalid where c = 200;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_c on test_gpi_more_invalid
+         Index Cond: (c = 200)
+(3 rows)
+
+select count(*) from test_gpi_more_invalid where c = 200;
+ count 
+-------
+   101
+(1 row)
+
+explain (costs off) select count(*) from test_gpi_more_invalid where c = 300;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_c on test_gpi_more_invalid
+         Index Cond: (c = 300)
+(3 rows)
+
+select count(*) from test_gpi_more_invalid where c = 300;
+ count 
+-------
+   101
+(1 row)
+
+explain (costs off) update test_gpi_more_invalid set a = a - 500 where a < 1500 and a >= 1000;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Update on test_gpi_more_invalid
+   ->  Index Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+         Index Cond: ((a < 1500) AND (a >= 1000))
+(3 rows)
+
+update test_gpi_more_invalid set a = a - 500 where a < 1500 and a >= 1000;
+explain (costs off) update test_gpi_more_invalid set a = a + 500 where a < 1000 and a >= 500;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Update on test_gpi_more_invalid
+   ->  Index Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+         Index Cond: ((a < 1000) AND (a >= 500))
+(3 rows)
+
+update test_gpi_more_invalid set a = a + 500 where a < 1000 and a >= 500;
+explain (costs off) select count(*) from test_gpi_more_invalid where a < 1500 and a >= 1000;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+         Index Cond: ((a < 1500) AND (a >= 1000))
+(3 rows)
+
+select count(*) from test_gpi_more_invalid where a < 1500 and a >= 1000;
+ count 
+-------
+   101
+(1 row)
+
+explain (costs off) select count(*) from test_gpi_more_invalid where a <= 1000;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+         Index Cond: (a <= 1000)
+(3 rows)
+
+select count(*) from test_gpi_more_invalid where a <= 1000;
+ count 
+-------
+    51
+(1 row)
+
+set force_bitmapand = on;
+-- partition 1
+explain (costs off) select * from test_gpi_more_invalid where b = 100000 and c = 100;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Index Scan using global_index_gpi_more_invalid_a on test_gpi_more_invalid
+   Index Cond: (b = 100000)
+   Filter: (c = 100)
+(3 rows)
+
+select * from test_gpi_more_invalid where b = 100000 and c = 100;
+ a  |   b    |  c  
+----+--------+-----
+ 10 | 100000 | 100
+(1 row)
+
+--partition 2
+explain (costs off) select * from test_gpi_more_invalid where b = 200000 and c = 200;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Index Scan using global_index_gpi_more_invalid_a on test_gpi_more_invalid
+   Index Cond: (b = 200000)
+   Filter: (c = 200)
+(3 rows)
+
+select * from test_gpi_more_invalid where b = 200000 and c = 200;
+  a   |   b    |  c  
+------+--------+-----
+ 1020 | 200000 | 200
+(1 row)
+
+reset force_bitmapand;
+alter table test_gpi_more_invalid DISABLE ROW MOVEMENT;
+update test_gpi_more_invalid set a = a - 500 where a < 2000 and a > 1500;
+-- failed
+update test_gpi_more_invalid set a = a - 500 where a <= 1500;
+ERROR:  fail to update partitioned table "test_gpi_more_invalid"
+DETAIL:  disable row movement
+alter table test_gpi_more_invalid ENABLE ROW MOVEMENT;
+set force_bitmapand = on;
+--partition 2
+explain (costs off) select * from test_gpi_more_invalid where b = 200000 and c = 200;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Index Scan using global_index_gpi_more_invalid_a on test_gpi_more_invalid
+   Index Cond: (b = 200000)
+   Filter: (c = 200)
+(3 rows)
+
+select * from test_gpi_more_invalid where b = 200000 and c = 200;
+  a   |   b    |  c  
+------+--------+-----
+ 1020 | 200000 | 200
+(1 row)
+
+reset force_bitmapand;
+start transaction;
+alter table test_gpi_more_invalid add partition p5 values less than (4001);
+select * from test_gpi_more_invalid where b = 300000 and c = 700 for update;
+ a | b | c 
+---+---+---
+(0 rows)
+
+update test_gpi_more_invalid set a = a + 1000 where a > 1000 or a < 500;
+select count(*) from test_gpi_more_invalid where c = 100 and b = 2000;
+ count 
+-------
+     0
+(1 row)
+
+-- test_gpi_more_invalid/p5 have wait_clean_gpi=y
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+        relname        | parttype |                    reloptions                     
+-----------------------+----------+---------------------------------------------------
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+ p5                    | p        | {orientation=row,compression=no,wait_clean_gpi=y}
+(2 rows)
+
+abort;
+--failed
+vacuum full pg_partition;
+WARNING:  system table pg_partition contain relation test_gpi_more_invalid have reloptions wait_clean_gpi=y,must run the vacuum (full) test_gpi_more_invalid first
+WARNING:  skipping "pg_partition" --- only table or database can vacuum it
+-- test_gpi_more_invalid have wait_clean_gpi=y
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+        relname        | parttype |                    reloptions                     
+-----------------------+----------+---------------------------------------------------
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+(1 row)
+
+vacuum analyze test_gpi_more_invalid;
+-- test_gpi_more_invalid have wait_clean_gpi=n
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+ relname | parttype | reloptions 
+---------+----------+------------
+(0 rows)
+
+-- success
+vacuum full pg_partition;
+set force_bitmapand = on;
+-- partition 1
+explain (costs off) select * from test_gpi_more_invalid where b = 100000 and c = 100;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Index Scan using global_index_gpi_more_invalid_a on test_gpi_more_invalid
+   Index Cond: (b = 100000)
+   Filter: (c = 100)
+(3 rows)
+
+select * from test_gpi_more_invalid where b = 100000 and c = 100;
+ a  |   b    |  c  
+----+--------+-----
+ 10 | 100000 | 100
+(1 row)
+
+--partition 2
+explain (costs off) select * from test_gpi_more_invalid where b = 200000 and c = 200;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Index Scan using global_index_gpi_more_invalid_a on test_gpi_more_invalid
+   Index Cond: (b = 200000)
+   Filter: (c = 200)
+(3 rows)
+
+select * from test_gpi_more_invalid where b = 200000 and c = 200;
+  a   |   b    |  c  
+------+--------+-----
+ 1020 | 200000 | 200
+(1 row)
+
+--partition 3
+explain (costs off) select * from test_gpi_more_invalid where b = 300000 and c = 300;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Index Scan using global_index_gpi_more_invalid_a on test_gpi_more_invalid
+   Index Cond: (b = 300000)
+   Filter: (c = 300)
+(3 rows)
+
+select * from test_gpi_more_invalid where b = 300000 and c = 300;
+  a   |   b    |  c  
+------+--------+-----
+ 2030 | 300000 | 300
+(1 row)
+
+reset force_bitmapand;
+start transaction;
+alter table test_gpi_more_invalid add partition p5 values less than (4001);
+update test_gpi_more_invalid set a = a + 1000 where a > 1000 or a < 500;
+alter table test_gpi_more_invalid drop partition p5;
+commit;
+-- all global index unusuable 
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
+               relname               | indisusable 
+-------------------------------------+-------------
+ global_index_gpi_more_invalid_a     | f
+ global_index_gpi_more_invalid_a_b_c | f
+ global_index_gpi_more_invalid_b     | f
+ global_index_gpi_more_invalid_c     | f
+ local_index_gpi_more_invalid_a_b    | t
+(5 rows)
+
+-- test_gpi_more_invalid have wait_clean_gpi=y
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+        relname        | parttype |                    reloptions                     
+-----------------------+----------+---------------------------------------------------
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+(1 row)
+
+vacuum full test_gpi_more_invalid;
+-- all global index unusuable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
+               relname               | indisusable 
+-------------------------------------+-------------
+ global_index_gpi_more_invalid_a     | f
+ global_index_gpi_more_invalid_a_b_c | f
+ global_index_gpi_more_invalid_b     | f
+ global_index_gpi_more_invalid_c     | f
+ local_index_gpi_more_invalid_a_b    | t
+(5 rows)
+
+-- test_gpi_more_invalid have wait_clean_gpi=y
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+        relname        | parttype |                    reloptions                     
+-----------------------+----------+---------------------------------------------------
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+(1 row)
+
+alter index local_index_gpi_more_invalid_a_b unusable;
+reindex table test_gpi_more_invalid;
+-- all global index unusuable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
+               relname               | indisusable 
+-------------------------------------+-------------
+ global_index_gpi_more_invalid_a     | f
+ global_index_gpi_more_invalid_a_b_c | f
+ global_index_gpi_more_invalid_b     | f
+ global_index_gpi_more_invalid_c     | f
+ local_index_gpi_more_invalid_a_b    | t
+(5 rows)
+
+alter index global_index_gpi_more_invalid_a rebuild;
+alter index global_index_gpi_more_invalid_a_b_c rebuild;
+alter index global_index_gpi_more_invalid_b rebuild;
+alter index global_index_gpi_more_invalid_c rebuild;
+-- all global index usuable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
+               relname               | indisusable 
+-------------------------------------+-------------
+ global_index_gpi_more_invalid_a     | t
+ global_index_gpi_more_invalid_a_b_c | t
+ global_index_gpi_more_invalid_b     | t
+ global_index_gpi_more_invalid_c     | t
+ local_index_gpi_more_invalid_a_b    | t
+(5 rows)
+
+reset enable_seqscan；
+drop table test_gpi_more_invalid;
+ERROR:  syntax error at or near "drop table"
+LINE 2: drop table test_gpi_more_invalid;
+        ^
+drop table if exists interval_normal_date;
+NOTICE:  table "interval_normal_date" does not exist, skipping
+CREATE TABLE interval_normal_date (logdate date not null, b int, c int)
+PARTITION BY RANGE (logdate)
+INTERVAL ('1 day')
+(
+        PARTITION interval_normal_date_p1 VALUES LESS THAN ('2020-03-01'),
+        PARTITION interval_normal_date_p2 VALUES LESS THAN ('2020-05-01'),
+        PARTITION interval_normal_date_p3 VALUES LESS THAN ('2020-06-01')
+);
+create index global_interval_index on interval_normal_date(b) global;
+insert into interval_normal_date select '2020-6-01', 1000,r  from generate_series(0, 10000) as r;
+vacuum interval_normal_date;
+start transaction;
+insert into interval_normal_date select '2020-6-02', r,r  from generate_series(0,500) as r;
+explain (costs off) select count(*) from interval_normal_date where b <= 500;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on interval_normal_date
+         Recheck Cond: (b <= 500)
+         ->  Bitmap Index Scan on global_interval_index
+               Index Cond: (b <= 500)
+(5 rows)
+
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+       relname        | parttype |                    reloptions                     
+----------------------+----------+---------------------------------------------------
+ interval_normal_date | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+ sys_p2               | p        | {orientation=row,compression=no,wait_clean_gpi=y}
+(2 rows)
+
+alter table interval_normal_date drop partition sys_p2;
+commit;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+       relname        | parttype |                    reloptions                     
+----------------------+----------+---------------------------------------------------
+ interval_normal_date | r        | {orientation=row,compression=no,wait_clean_gpi=y}
+(1 row)
+
+vacuum  analyze interval_normal_date;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+ relname | parttype | reloptions 
+---------+----------+------------
+(0 rows)
+
+drop table if exists interval_partition_table_vacuum;
+NOTICE:  table "interval_partition_table_vacuum" does not exist, skipping
+create table interval_partition_table_vacuum
+(
+	c1 int,
+	c2 int,
+	logdate date not null,
+	PRIMARY KEY(c2,logdate)
+)
+partition by range (logdate)
+INTERVAL ('1 day')
+(
+	PARTITION interval_partition_table_004_p0 VALUES LESS THAN ('2020-03-01'),
+	PARTITION interval_partition_table_004_p1 VALUES LESS THAN ('2020-04-01'),
+	PARTITION interval_partition_table_004_p2 VALUES LESS THAN ('2020-05-01')
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_partition_table_vacuum_pkey" for table "interval_partition_table_vacuum"
+create index global_index_interval_partition_table_vacuum_a on interval_partition_table_vacuum(c1) global;
+\parallel on
+insert into interval_partition_table_vacuum values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('1990-01-01', 'YYYY-MM-DD'),TO_DATE('2020-12-01', 'YYYY-MM-DD'),'1 day'));
+vacuum 	interval_partition_table_vacuum;
+vacuum interval_partition_table_vacuum;
+vacuum analyze interval_partition_table_vacuum;
+\parallel off
+set enable_bitmascan = off;
+ERROR:  unrecognized configuration parameter "enable_bitmascan"
+explain (costs off) select count(*) from interval_partition_table_vacuum where c1 = 1;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using global_index_interval_partition_table_vacuum_a on interval_partition_table_vacuum
+         Index Cond: (c1 = 1)
+(3 rows)
+
+-- 11293 rows
+select count(*) from interval_partition_table_vacuum where c1 = 1;
+ count 
+-------
+ 11293
+(1 row)
+
+-- all new add partition have wait_clean_gpi=y return true
+select true from (select count(*) as count from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_partition_table_vacuum' and a.reloptions[3] like '%wait_clean_gpi=y%') wait_clean_gpi where wait_clean_gpi.count = 0 or wait_clean_gpi.count = 216;
+ bool 
+------
+ t
+(1 row)
+
+vacuum analyze interval_partition_table_vacuum;
+-- 0 rows
+select count(*) from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_partition_table_vacuum' and a.reloptions[3] like '%wait_clean_gpi=y%';
+ count 
+-------
+     0
+(1 row)
+
+reset enable_bitmascan;
+ERROR:  unrecognized configuration parameter "enable_bitmascan"
+-- clean table
+drop table interval_partition_table_vacuum;
+drop table interval_normal_date;
+drop table test_gpi_more_invalid;

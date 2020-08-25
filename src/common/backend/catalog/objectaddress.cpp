@@ -508,7 +508,8 @@ static ObjectAddress get_relation_by_qualified_name(
 
     switch (objtype) {
         case OBJECT_INDEX:
-            if (relation->rd_rel->relkind != RELKIND_INDEX)
+            if (relation->rd_rel->relkind != RELKIND_INDEX &&
+                relation->rd_rel->relkind != RELKIND_GLOBAL_INDEX)
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("\"%s\" is not an index", RelationGetRelationName(relation))));

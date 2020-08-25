@@ -39,6 +39,7 @@ extern void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_cata
     bool check_constraints, TransactionId frozenXid, AdaptMem* memInfo = NULL);
 
 extern void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int freeze_table_age);
+extern void GpiVacuumFullMainPartiton(Oid parentOid);
 extern void updateRelationName(Oid relOid, bool isPartition, const char* relNewName);
 
 #endif /* CLUSTER_H */

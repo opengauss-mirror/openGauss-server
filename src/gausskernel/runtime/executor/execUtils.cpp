@@ -1112,6 +1112,7 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative)
     IndexInfo** indexInfoArray;
 
     resultRelInfo->ri_NumIndices = 0;
+    resultRelInfo->ri_ContainGPI = false;
 
     /* fast path if no indexes */
     if (!RelationGetForm(resultRelation)->relhasindex)
@@ -1155,6 +1156,12 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative)
             index_close(indexDesc, RowExclusiveLock);
             continue;
         }
+
+        /* Check index whether is global parition index, and save */
+        if (RelationIsGlobalIndex(indexDesc)) {
+            resultRelInfo->ri_ContainGPI = true;
+        }
+
         /* extract index key information from the index's pg_index info */
         ii = BuildIndexInfo(indexDesc);
 
@@ -1397,6 +1404,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     bool isnull[INDEX_MAX_KEYS];
     Relation actualheap;
     bool ispartitionedtable = false;
+    bool containGPI;
     List* partitionIndexOidList = NIL;
 
     /*
@@ -1407,6 +1415,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     relationDescs = resultRelInfo->ri_IndexRelationDescs;
     indexInfoArray = resultRelInfo->ri_IndexRelationInfo;
     heapRelation = resultRelInfo->ri_RelationDesc;
+    containGPI = resultRelInfo->ri_ContainGPI;
 
     /*
      * We will use the EState's per-tuple context for evaluating predicates
@@ -1427,7 +1436,8 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
         if (p == NULL || p->pd_part == NULL) {
             return NIL;
         }
-        if (!p->pd_part->indisusable) {
+        /* If the global partition index is included, the index insertion process needs to continue */
+        if (!p->pd_part->indisusable && !containGPI) {
             numIndices = 0;
         }
     } else {
@@ -1437,6 +1447,15 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
     if (bucketId != InvalidBktId) {
         searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt, actualheap, bucketId, actualheap);
     }
+
+    /* Partition create in current transaction, set partition and rel reloption wait_clean_gpi */
+    if (RelationCreateInCurrXact(actualheap) && containGPI && !PartitionEnableWaitCleanGpi(p)) {
+        /* partition create not set wait_clean_gpi, must use update, and we ensure no concurrency */
+        PartitionSetWaitCleanGpi(RelationGetRelid(actualheap), true, false);
+        /* Partitioned create set wait_clean_gpi=n, and we want save it, so just use inplace */
+        PartitionedSetWaitCleanGpi(RelationGetRelationName(heapRelation), RelationGetRelid(heapRelation), true, true);
+    }
+
     /*
      * for each index, form and insert the index tuple
      */
@@ -1461,28 +1480,36 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
             continue;
         }
 
-        if (ispartitionedtable) {
-            partitionedindexid = RelationGetRelid(indexRelation);
-            if (!PointerIsValid(partitionIndexOidList)) {
-                partitionIndexOidList = PartitionGetPartIndexList(p);
-                // no local indexes available
-                if (!PointerIsValid(partitionIndexOidList)) {
-                    return NIL;
+        if (ispartitionedtable && !RelationIsGlobalIndex(indexRelation)) {
+            /* The GPI index insertion is the same as that of a common table */
+            if (RelationIsGlobalIndex(indexRelation)) {
+                if (indexRelation->rd_index->indisusable == false) {
+                    continue;
                 }
-            }
+                actualindex = indexRelation;
+            } else {
+                partitionedindexid = RelationGetRelid(indexRelation);
+                if (!PointerIsValid(partitionIndexOidList)) {
+                    partitionIndexOidList = PartitionGetPartIndexList(p);
+                    // no local indexes available
+                    if (!PointerIsValid(partitionIndexOidList)) {
+                        return NIL;
+                    }
+                }
 
-            indexpartitionid = searchPartitionIndexOid(partitionedindexid, partitionIndexOidList);
+                indexpartitionid = searchPartitionIndexOid(partitionedindexid, partitionIndexOidList);
 
-            searchFakeReationForPartitionOid(estate->esfRelations,
-                estate->es_query_cxt,
-                indexRelation,
-                indexpartitionid,
-                actualindex,
-                indexpartition,
-                RowExclusiveLock);
-            // skip unusable index
-            if (false == indexpartition->pd_part->indisusable) {
-                continue;
+                searchFakeReationForPartitionOid(estate->esfRelations,
+                    estate->es_query_cxt,
+                    indexRelation,
+                    indexpartitionid,
+                    actualindex,
+                    indexpartition,
+                    RowExclusiveLock);
+                // skip unusable index
+                if (false == indexpartition->pd_part->indisusable) {
+                    continue;
+                }
             }
         } else {
             actualindex = indexRelation;
@@ -1617,7 +1644,7 @@ bool check_violation(Relation heap, Relation index, IndexInfo* indexInfo, ItemPo
     Oid* constr_procs = indexInfo->ii_ExclusionProcs;
     uint16* constr_strats = indexInfo->ii_ExclusionStrats;
     Oid* index_collations = index->rd_indcollation;
-    int index_natts = index->rd_index->indnatts;
+    int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(index);
     IndexScanDesc index_scan;
     HeapTuple tup;
     ScanKeyData scankeys[INDEX_MAX_KEYS];
@@ -1633,7 +1660,7 @@ bool check_violation(Relation heap, Relation index, IndexInfo* indexInfo, ItemPo
      * If any of the input values are NULL, the constraint check is assumed to
      * pass (i.e., we assume the operators are strict).
      */
-    for (i = 0; i < index_natts; i++) {
+    for (i = 0; i < indnkeyatts; i++) {
         if (isnull[i]) {
             return true;
         }
@@ -1652,7 +1679,7 @@ bool check_violation(Relation heap, Relation index, IndexInfo* indexInfo, ItemPo
      */
     InitDirtySnapshot(DirtySnapshot);
 
-    for (i = 0; i < index_natts; i++) {
+    for (i = 0; i < indnkeyatts; i++) {
         ScanKeyEntryInitialize(
             &scankeys[i], 0, i + 1, constr_strats[i], InvalidOid, index_collations[i], constr_procs[i], values[i]);
     }
@@ -1677,8 +1704,8 @@ bool check_violation(Relation heap, Relation index, IndexInfo* indexInfo, ItemPo
 retry:
     conflict = false;
     found_self = false;
-    index_scan = index_beginscan(heap, index, &DirtySnapshot, index_natts, 0);
-    index_rescan(index_scan, scankeys, index_natts, NULL, 0);
+    index_scan = index_beginscan(heap, index, &DirtySnapshot, indnkeyatts, 0);
+    index_rescan(index_scan, scankeys, indnkeyatts, NULL, 0);
 
     while ((tup = index_getnext(index_scan, ForwardScanDirection)) != NULL) {
         TransactionId xwait;
@@ -1795,10 +1822,10 @@ retry:
 static bool index_recheck_constraint(
     Relation index, Oid* constr_procs, Datum* existing_values, const bool* existing_isnull, Datum* new_values)
 {
-    int index_natts = index->rd_index->indnatts;
+    int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(index);
     int i;
 
-    for (i = 0; i < index_natts; i++) {
+    for (i = 0; i < indnkeyatts; i++) {
         /* Assume the exclusion operators are strict */
         if (existing_isnull[i]) {
             return false;

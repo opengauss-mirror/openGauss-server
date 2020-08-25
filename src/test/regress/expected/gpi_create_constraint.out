@@ -1,0 +1,142 @@
+DROP TABLE if exists gpi_table1;
+NOTICE:  table "gpi_table1" does not exist, skipping
+DROP TABLE if exists gpi_table2;
+NOTICE:  table "gpi_table2" does not exist, skipping
+CREATE TABLE gpi_table1
+(
+    c1 int,
+    c2 int,
+    c3 int
+)
+partition by range (c1)
+(
+    partition p0_gpi_table1 VALUES less than (10000),
+    partition p1_gpi_table1 VALUES less than (20000),
+    partition p2_gpi_table1 VALUES less than (30000),
+    partition p3_gpi_table1 VALUES less than (maxvalue)
+);
+--ok
+INSERT INTO gpi_table1 SELECT r, r, r FROM generate_series(0,10000) AS r;
+--ok
+CREATE INDEX ON gpi_table1 (c1) GLOBAL;
+--error
+CREATE INDEX idx1_gpi_table1 ON gpi_table1 (c1) GLOBAL;
+--ok
+CREATE INDEX idx2_gpi_table1 ON gpi_table1 (c1) LOCAL;
+ERROR:  Global and local partition index should not be on same column
+--error
+CREATE INDEX idx3_gpi_table1 ON gpi_table1 (c2) LOCAL;
+--ok
+CREATE INDEX idx4_gpi_table1 ON gpi_table1 ((c1+10)) LOCAL;
+--ok
+CREATE INDEX idx5_gpi_table1 ON gpi_table1 (c1, c2) LOCAL;
+--ok
+CREATE INDEX idx6_gpi_table1 ON gpi_table1 (c1, c2) GLOBAL;
+ERROR:  Global and local partition index should not be on same column
+--error
+CREATE INDEX idx7_gpi_table1 ON gpi_table1 ((c1+10)) GLOBAL;
+ERROR:  Global partition index does not support EXPRESSION index
+--error
+CREATE INDEX idx8_gpi_table1 ON gpi_table1 ((c1+10), c2) GLOBAL;
+ERROR:  Global partition index does not support EXPRESSION index
+--error
+CREATE INDEX idx9_gpi_table1 ON gpi_table1 USING hash (c1, c2) GLOBAL;
+ERROR:  Global partition index only support btree.
+--error
+CREATE INDEX idx10_gpi_table1 ON gpi_table1 (c1);
+--ok
+\d gpi_table1;
+  Table "public.gpi_table1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+ c2     | integer | 
+ c3     | integer | 
+Indexes:
+    "gpi_table1_c1_tableoid_idx" btree (c1) TABLESPACE pg_default
+    "idx10_gpi_table1" btree (c1) TABLESPACE pg_default
+    "idx1_gpi_table1" btree (c1) TABLESPACE pg_default
+    "idx3_gpi_table1" btree (c2) LOCAL(PARTITION p0_gpi_table1_c2_idx, PARTITION p1_gpi_table1_c2_idx, PARTITION p2_gpi_table1_c2_idx, PARTITION p3_gpi_table1_c2_idx)  TABLESPACE pg_default
+    "idx4_gpi_table1" btree ((c1 + 10)) LOCAL(PARTITION p0_gpi_table1_expr_idx, PARTITION p1_gpi_table1_expr_idx, PARTITION p2_gpi_table1_expr_idx, PARTITION p3_gpi_table1_expr_idx)  TABLESPACE pg_default
+    "idx5_gpi_table1" btree (c1, c2) LOCAL(PARTITION p0_gpi_table1_c1_c2_idx, PARTITION p1_gpi_table1_c1_c2_idx, PARTITION p2_gpi_table1_c1_c2_idx, PARTITION p3_gpi_table1_c1_c2_idx)  TABLESPACE pg_default
+Range partition by(c1)
+Number of partition: 4 (View pg_partition to check each partition range.)
+
+CREATE TABLE gpi_table2
+(
+    c1 int,
+    c2 int,
+    c3 int
+) WITH (orientation = column)
+partition by range (c1)
+(
+    partition p0_gpi_table2 VALUES less than (10000),
+    partition p1_gpi_table2 VALUES less than (20000),
+    partition p2_gpi_table2 VALUES less than (30000),
+    partition p3_gpi_table2 VALUES less than (maxvalue)
+);
+--ok
+CREATE INDEX idx1_gpi_table2 ON gpi_table2 USING btree (c1)  GLOBAL;
+ERROR:  Global partition index does not support column store.
+--error
+CREATE INDEX idx1_gpi_table2 ON gpi_table2 (c1) GLOBAL;
+ERROR:  Global partition index does not support column store.
+--error
+CREATE INDEX idx1_gpi_table2 ON gpi_table2 (c2) GLOBAL;
+ERROR:  Global partition index does not support column store.
+drop table gpi_table2;
+CREATE TABLE gpi_table2
+(
+    c1 int,
+    c2 int,
+    c3 int
+)
+partition by range (c1)
+(
+    partition p0_gpi_table2 VALUES less than (10000),
+    partition p1_gpi_table2 VALUES less than (20000),
+    partition p2_gpi_table2 VALUES less than (30000),
+    partition p3_gpi_table2 VALUES less than (maxvalue)
+);
+--ok
+CREATE INDEX idx1_gpi_table2 ON gpi_table2 USING btree (c1)  GLOBAL;
+--error
+CREATE INDEX idx1_gpi_table2 ON gpi_table2 (c1) GLOBAL;
+ERROR:  relation "idx1_gpi_table2" already exists
+--error
+CREATE INDEX idx2_gpi_table2_local_c1 ON gpi_table2 (c1) LOCAL;
+ERROR:  Global and local partition index should not be on same column
+--ok
+CREATE INDEX idx1_gpi_table2_global_c2 ON gpi_table2 (c2) GLOBAL;
+\d gpi_table2
+  Table "public.gpi_table2"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+ c2     | integer | 
+ c3     | integer | 
+Indexes:
+    "idx1_gpi_table2" btree (c1) TABLESPACE pg_default
+    "idx1_gpi_table2_global_c2" btree (c2) TABLESPACE pg_default
+Range partition by(c1)
+Number of partition: 4 (View pg_partition to check each partition range.)
+
+alter table gpi_table2 drop column c2;
+\d gpi_table2
+  Table "public.gpi_table2"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+ c3     | integer | 
+Indexes:
+    "idx1_gpi_table2" btree (c1) TABLESPACE pg_default
+Range partition by(c1)
+Number of partition: 4 (View pg_partition to check each partition range.)
+
+create table gpi_table2_inherits (c4 int) INHERITS (gpi_table2);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+-- error
+alter table gpi_table2 set (wait_clean_gpi=y);
+ERROR:  Un-support feature
+DETAIL:  Forbid to set or change inner option "wait_clean_gpi"
+drop table gpi_table2;

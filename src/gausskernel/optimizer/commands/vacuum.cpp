@@ -96,6 +96,11 @@ const char* sql_templates[] = {
     "COMMIT;", /* with schema */
 };
 
+typedef struct {
+    Bitmapset* invisMap; /* cache invisible tuple's partOid in global partition index */
+    Bitmapset* visMap;   /* cache visible tuple's partOid in global partition index */
+} VacStates;
+
 extern void exec_query_for_merge(const char* query_string);
 
 extern void do_delta_merge(List* infos, VacuumStmt* stmt);
@@ -104,10 +109,14 @@ extern void do_delta_merge(List* infos, VacuumStmt* stmt);
 static void free_merge_info(List* infos);
 static void DropEmptyPartitionDirectories(Oid relid);
 
+/* A few variables that don't seem worth passing around as parameters */
 static THR_LOCAL BufferAccessStrategy vac_strategy;
+static THR_LOCAL int elevel = -1;
 
 static void vac_truncate_clog(TransactionId frozenXID);
 static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast);
+static void GPIVacuumMainPartition(
+    Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy);
 
 #define TryOpenCStoreInternalRelation(r, lmode, r1, r2)                   \
     do {                                                                  \
@@ -312,8 +321,9 @@ void vacuum(
              * do NOT vacuum partitioned table,
              * as vacuum is an operation related with tuple and storage page reorganization
              */
-            if (!vacuumMainPartition(vacstmt->flags) && (vacstmt->options & VACOPT_VACUUM)) {
-                if (vacuumPartition(vacstmt->flags) || vacuumRelation(vacstmt->flags)) {
+            if (vacstmt->options & VACOPT_VACUUM) {
+                if (vacuumPartition(vacstmt->flags) || vacuumRelation(vacstmt->flags) ||
+                    vacuumMainPartition(vacstmt->flags)) {
                     if (!vacuum_rel(relOid, vacstmt, do_toast))
                         continue;
                 } else {
@@ -1481,8 +1491,6 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     gstrace_entry(GS_TRC_ID_vacuum_rel);
     StartTransactionCommand();
 
-    Assert(!vacuumMainPartition(vacstmt->flags));
-
     if (!(vacstmt->options & VACOPT_FULL)) {
         /*
          * In lazy vacuum, we can set the PROC_IN_VACUUM flag, which lets
@@ -1604,6 +1612,21 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
                     proc_snapshot_and_transaction();
                     return false;
                 }
+
+                if (rel != NULL && relid == PartitionRelationId && PartitionMetadataDisabledClean(rel)) {
+                    if (vacstmt->options & VACOPT_VERBOSE) {
+                        messageLevel = VERBOSEMESSAGE;
+                    } else {
+                        messageLevel = WARNING;
+                    }
+                    ereport(messageLevel,
+                        (errcode(ERRCODE_E_R_E_MODIFYING_SQL_DATA_NOT_PERMITTED),
+                            errmsg("skipping \"%s\" --- only table or database can vacuum it",
+                                RelationGetRelationName(rel))));
+                    relation_close(rel, AccessShareLock);
+                    proc_snapshot_and_transaction();
+                    return false;
+                }
             }
             if (rel != NULL)
                 relation_close(rel, AccessShareLock);
@@ -1651,8 +1674,27 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         }
 
         GetLock = true;
-    } else if (vacuumRelation(vacstmt->flags) && ConditionalLockRelationOid(relid, lmode)) {
+    } else if (vacuumMainPartition(vacstmt->flags) && !(vacstmt->options & VACOPT_NOWAIT)) {
+        /*
+         * Coordinator needs guarantee the old select statement must finish when
+         * run vacuum full table
+         */
+        CNGuardOldQueryForVacuumFull(vacstmt, relid);
 
+        onerel = try_relation_open(relid, lmode);
+        GetLock = true;
+        /*
+         * We block vacuum operation while the target table is in redistribution
+         * read only mode. For redistribution IUD mode, we will block vacuum before
+         * coming to this point.
+         */
+        if (!u_sess->attr.attr_sql.enable_cluster_resize && onerel != NULL &&
+            RelationInClusterResizingReadOnly(onerel)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_E_R_E_PROHIBITED_SQL_STATEMENT_ATTEMPTED),
+                    errmsg("%s is redistributing, please retry later.", onerel->rd_rel->relname.data)));
+        }
+    } else if (vacuumRelation(vacstmt->flags) && ConditionalLockRelationOid(relid, lmode)) {
         if (relid > FirstNormalObjectId && !checkGroup(relid, true)) {
             proc_snapshot_and_transaction();
             return false;
@@ -1694,6 +1736,10 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             }
         } else
             GetLock = true;
+    } else if (vacuumMainPartition(vacstmt->flags) && ConditionalLockRelationOid(relationid, lmodePartTable)) {
+        Assert(!(vacstmt->options & VACOPT_FULL));
+        onerel = try_relation_open(relid, NoLock);
+        GetLock = true;
     }
 
     if (!GetLock) {
@@ -1728,7 +1774,6 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         pgxc_lock_for_utility_stmt(NULL, RelationIsLocalTemp(onerel));
 
     // Try to open CUDescRel and DeltaRel if needed
-    //
     if (!(vacstmt->options & VACOPT_NOWAIT))
         TryOpenCStoreInternalRelation(onerel, lmode, cudescrel, deltarel);
     else {
@@ -2045,12 +2090,30 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         /* VACUUM FULL is now a variant of CLUSTER; see cluster.c */
         pgstat_report_waitstatus_relname(STATE_VACUUM_FULL, get_nsp_relname(relid));
         vacuumFullPart(relid, vacstmt, vacstmt->freeze_min_age, vacstmt->freeze_table_age);
+    } else if ((vacstmt->options & VACOPT_FULL) && (vacstmt->flags & VACFLG_MAIN_PARTITION)) {
+        if (cudescrel != NULL) {
+            relation_close(cudescrel, NoLock);
+            cudescrel = NULL;
+        }
+        if (deltarel != NULL) {
+            relation_close(deltarel, NoLock);
+            deltarel = NULL;
+        }
+        relation_close(onerel, NoLock);
+        onerel = NULL;
+
+        pgstat_report_waitstatus_relname(STATE_VACUUM_FULL, get_nsp_relname(relid));
+        GpiVacuumFullMainPartiton(relid);
+        pgstat_report_vacuum(relid, InvalidOid, false, 0);
     } else if (!(vacstmt->options & VACOPT_FULL)) {
         /* clean hdfs empty directories of value partition just on main CN */
         if (vacstmt->options & VACOPT_HDFSDIRECTORY) {
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
                 DropEmptyPartitionDirectories(relid);
             }
+        } else if (vacuumMainPartition(vacstmt->flags)) {
+            pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
+            GPIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
         } else {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
             lazy_vacuum_rel(onerel, vacstmt, vac_strategy);
@@ -2319,53 +2382,61 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
     heap_close(rd, RowExclusiveLock);
 }
 
-void vac_open_part_indexes(
-    VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, Relation** Irel, Relation** indexrel, Partition** indexpart)
+void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, int* nindexes_global, Relation** Irel,
+    Relation** indexrel, Partition** indexpart)
 {
-    List* indexoidlist = NIL;
-    ListCell* indexoidscan = NULL;
-    int i;
-    Relation indrel;
+    List* localIndOidList = NIL;
+    List* globIndOidList = NIL;
+    ListCell* localIndCell = NULL;
+    ListCell* globIndCell = NULL;
+    int localIndNums;
+    int globIndNums;
+    int tolIndNums;
+    Relation indrel = NULL;
 
     Assert(lockmode != NoLock);
     Assert(vacstmt->onepart != NULL);
     Assert(vacstmt->onepartrel != NULL);
 
-    indexoidlist = PartitionGetPartIndexList(vacstmt->onepart);
-    i = list_length(indexoidlist);
-    if (i > 0) {
-        *Irel = (Relation*)palloc((long)(i) * sizeof(Relation));
-        *indexrel = (Relation*)palloc((long)(i) * sizeof(Relation));
-        *indexpart = (Partition*)palloc((long)(i) * sizeof(Partition));
+    // get local partition indexes
+    localIndOidList = PartitionGetPartIndexList(vacstmt->onepart);
+    localIndNums = list_length(localIndOidList);
+    // get global partition indexes
+    globIndOidList = RelationGetSpecificKindIndexList(vacstmt->onepartrel, true);
+    globIndNums = list_length(globIndOidList);
+
+    tolIndNums = localIndNums + globIndNums;
+    if (tolIndNums > 0) {
+        *Irel = (Relation*)palloc((long)(tolIndNums) * sizeof(Relation));
     } else {
         *Irel = NULL;
+    }
+    if (localIndNums > 0) {
+        *indexrel = (Relation*)palloc((long)(localIndNums) * sizeof(Relation));
+        *indexpart = (Partition*)palloc((long)(localIndNums) * sizeof(Partition));
+    } else {
         *indexrel = NULL;
         *indexpart = NULL;
     }
 
-    i = 0;
-    foreach (indexoidscan, indexoidlist) {
-        Oid indexParentid;
-        Oid indexoid = lfirst_oid(indexoidscan);
-        Partition indpart;
-        Relation indexPartRel = NULL;
-
+    // collect ready local partition indexes
+    int i = 0;
+    foreach (localIndCell, localIndOidList) {
+        Oid localIndOid = lfirst_oid(localIndCell);
         /* Get the index partition's parent oid */
-        indexParentid = partid_get_parentid(indexoid);
-
+        Oid indexParentid = partid_get_parentid(localIndOid);
         indrel = relation_open(indexParentid, lockmode);
         Assert(indrel != NULL);
 
         /* Open the partition */
-        indpart = partitionOpen(indrel, indexoid, lockmode);
-        indexPartRel = partitionGetRelation(indrel, indpart);
+        Partition indpart = partitionOpen(indrel, localIndOid, lockmode);
+        Relation indexPartRel = partitionGetRelation(indrel, indpart);
 
         if (IndexIsReady(indrel->rd_index) && IndexIsReady(indexPartRel->rd_index) && IndexIsUsable(indrel->rd_index) &&
             indpart->pd_part->indisusable) {
             (*indexrel)[i] = indrel;
             (*indexpart)[i] = indpart;
             (*Irel)[i] = indexPartRel;
-
             ++i;
         } else {
             releaseDummyRelation(&indexPartRel);
@@ -2373,26 +2444,48 @@ void vac_open_part_indexes(
             relation_close(indrel, lockmode);
         }
     }
-
     *nindexes = i;
 
-    list_free(indexoidlist);
+    // collect ready global partion indexes
+    int j = 0;
+    foreach (globIndCell, globIndOidList) {
+        Oid globIndOid = lfirst_oid(globIndCell);
+        indrel = index_open(globIndOid, lockmode);
+        if (IndexIsReady(indrel->rd_index) && IndexIsUsable(indrel->rd_index)) {
+            (*Irel)[i + j] = indrel;
+            j++;
+        } else {
+            index_close(indrel, lockmode);
+        }
+    }
+    *nindexes_global = j;
+    *nindexes += j;
+
+    list_free(localIndOidList);
+    list_free(globIndOidList);
 }
 
-void vac_close_part_indexes(int nindexes, Relation* Irel, Relation* indexrel, Partition* indexpart, LOCKMODE lockmode)
+void vac_close_part_indexes(
+    int nindexes, int nindexes_global, Relation* Irel, Relation* indexrel, Partition* indexpart, LOCKMODE lockmode)
 {
-    if (Irel == NULL || indexpart == NULL || indexrel == NULL) {
+    if (Irel == NULL) {
         return;
     }
 
+    int nindexes_local = nindexes - nindexes_global;
     while (nindexes--) {
         Relation rel = Irel[nindexes];
-        Relation ind = indexrel[nindexes];
-        Partition part = indexpart[nindexes];
-
-        releaseDummyRelation(&rel);
-        partitionClose(ind, part, lockmode);
-        relation_close(ind, lockmode);
+        if (nindexes < nindexes_local) {
+            // close local partition indexes
+            Relation ind = indexrel[nindexes];
+            Partition part = indexpart[nindexes];
+            releaseDummyRelation(&rel);
+            partitionClose(ind, part, lockmode);
+            relation_close(ind, lockmode);
+        } else {
+            // close global partition indexes
+            index_close(rel, lockmode);
+        }
     }
     pfree_ext(indexrel);
     pfree_ext(indexpart);
@@ -3441,3 +3534,165 @@ void updateTotalRows(Oid relid, double num_tuples)
     heap_inplace_update(classRel, ctup);
     heap_close(classRel, RowExclusiveLock);
 }
+
+// call back func to check current partOid is invisible or visible
+static bool GPIIsInvisibleTuple(ItemPointer itemptr, void* state, Oid partOid)
+{
+    VacStates* pvacStates = (VacStates*)state;
+    Assert(pvacStates != NULL);
+
+    if (partOid == InvalidOid) {
+        ereport(elevel,
+            (errmsg("global index tuple's oid invalid. partOid = %u", partOid)));
+        return false;
+    }
+    // check partition oid of global partition index tuple
+    if (bms_is_member(partOid, pvacStates->invisMap)) {
+        return true;
+    }
+    if (bms_is_member(partOid, pvacStates->visMap)) {
+        return false;
+    }
+    PartStatus partStat = PartitionGetMetadataStatus(partOid, true);
+    if (partStat == PART_METADATA_INVISIBLE) {
+        pvacStates->invisMap = bms_add_member(pvacStates->invisMap, partOid);
+        return true;
+    } else {
+        // visible include EXIST and NOEXIST
+        pvacStates->visMap = bms_add_member(pvacStates->visMap, partOid);
+        return false;
+    }
+}
+
+// clean invisible tuples for global partition index
+static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult** stats, Bitmapset** cleanedParts)
+{
+    IndexVacuumInfo ivinfo;
+    PGRUsage ru0;
+
+    gstrace_entry(GS_TRC_ID_lazy_vacuum_index);
+    pg_rusage_init(&ru0);
+
+    ivinfo.index = indrel;
+    ivinfo.analyze_only = false;
+    ivinfo.estimated_count = true;
+    ivinfo.message_level = elevel;
+    ivinfo.num_heap_tuples = indrel->rd_rel->reltuples;
+    ivinfo.strategy = vac_strategy;
+
+    VacStates* pvacStates = (VacStates*)palloc0(sizeof(VacStates));
+    pvacStates->invisMap = NULL;
+    pvacStates->visMap = NULL;
+
+    /* Do bulk deletion */
+    *stats = index_bulk_delete(&ivinfo, *stats, GPIIsInvisibleTuple, (void*)pvacStates);
+    Bitmapset* pIntersect = bms_intersect(pvacStates->invisMap, pvacStates->visMap);
+    Assert(bms_is_empty(pIntersect));
+    bms_free_ext(pIntersect);
+
+    *cleanedParts = bms_add_members(*cleanedParts, pvacStates->invisMap);
+
+    bms_free(pvacStates->invisMap);
+    bms_free(pvacStates->visMap);
+    pfree_ext(pvacStates);
+    ereport(elevel,
+        (errmsg("scanned index \"%s\" to remove %lf invisible rows",
+             RelationGetRelationName(indrel),
+             (*stats)->tuples_removed),
+            errdetail("%s.", pg_rusage_show(&ru0))));
+    gstrace_exit(GS_TRC_ID_lazy_vacuum_index);
+}
+
+static void GPIOpenGlobalIndexes(Relation onerel, LOCKMODE lockmode, int* nindexes, Relation** iRel)
+{
+    List* globIndOidList = NIL;
+    ListCell* globIndCell = NULL;
+    int globIndNums;
+
+    Assert(lockmode != NoLock);
+    Assert(onerel != NULL);
+
+    // get global partition indexes
+    globIndOidList = RelationGetSpecificKindIndexList(onerel, true);
+    globIndNums = list_length(globIndOidList);
+    if (globIndNums > 0) {
+        *iRel = (Relation*)palloc((long)(globIndNums) * sizeof(Relation));
+    } else {
+        *iRel = NULL;
+    }
+
+    // collect ready global partion indexes
+    int i = 0;
+    foreach (globIndCell, globIndOidList) {
+        Oid globIndOid = lfirst_oid(globIndCell);
+        Relation indrel = index_open(globIndOid, lockmode);
+        if (IndexIsReady(indrel->rd_index) && IndexIsUsable(indrel->rd_index)) {
+            (*iRel)[i] = indrel;
+            i++;
+        } else {
+            index_close(indrel, lockmode);
+        }
+    }
+    *nindexes = i;
+
+    list_free(globIndOidList);
+}
+
+// vacuum main partition table to delete invisible tuple in global partition index
+static void GPIVacuumMainPartition(
+    Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy)
+{
+    Relation* iRel = NULL;
+    int nindexes;
+    Bitmapset* cleanedParts = NULL;
+    Bitmapset* invisibleParts = NULL;
+    Oid parentOid = RelationGetRelid(onerel);
+
+    if (vacstmt->options & VACOPT_VERBOSE) {
+        elevel = VERBOSEMESSAGE;
+    } else {
+        elevel = DEBUG2;
+    }
+
+    /*
+     * Before clearing the global partition index of a partition table,
+     * acquire a AccessShareLock on ADD_PARTITION_ACTION, and make sure that the interval partition
+     * creation process will not be performed concurrently.
+     */
+    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+        PartitionGetAllInvisibleParts(parentOid, &invisibleParts);
+        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    }
+
+    vac_strategy = bstrategy;
+    // Open all global indexes of the main partition
+    GPIOpenGlobalIndexes(onerel, lockmode, &nindexes, &iRel);
+    IndexBulkDeleteResult** indstats = (IndexBulkDeleteResult**)palloc0(nindexes * sizeof(IndexBulkDeleteResult*));
+    Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
+    for (int i = 0; i < nindexes; i++) {
+        GPICleanInvisibleIndex(iRel[i], &indstats[i], &cleanedParts);
+        vac_update_relstats(
+            iRel[i], classRel, indstats[i]->num_pages, indstats[i]->num_index_tuples, 0, false, InvalidTransactionId);
+        index_close(iRel[i], lockmode);
+    }
+    heap_close(classRel, RowExclusiveLock);
+
+    /*
+     * Before clearing the global partition index of a partition table,
+     * acquire a AccessShareLock on ADD_PARTITION_ACTION, and make sure that the interval partition
+     * creation process will not be performed concurrently.
+     */
+    if (ConditionalLockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+        PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, true);
+        UnlockPartition(parentOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else {
+        /* Updates reloptions of cleanedParts in pg_partition after gpi lazy_vacuum is executed */
+        PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, false);
+    }
+
+    bms_free(cleanedParts);
+    bms_free(invisibleParts);
+    pfree_ext(indstats);
+    pfree_ext(iRel);
+}
+

@@ -2755,3 +2755,38 @@ static void slot_deform_cmprs_tuple(TupleTableSlot* slot, uint32 natts)
     slot->tts_meta_off = cmprs_off;
     slot->tts_slow = true;
 }
+
+/*
+ * Checks whether a dead tuple can be retained
+ *
+ * Note: Only the dead tuple of pg_partition needs to be verified in the current code.
+ */
+bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc)
+{
+    static KeepInvisbleOpt keepInvisibleArray[] = {
+        {PartitionRelationId, Anum_pg_partition_reloptions, PartitionInvisibleMetadataKeep}};
+
+    for (int i = 0; i < (int)lengthof(keepInvisibleArray); i++) {
+        bool isNull = false;
+        KeepInvisbleOpt keepOpt = keepInvisibleArray[i];
+
+        if (keepOpt.tableOid != tuple->t_tableOid) {
+            return false;
+        }
+
+        Datum checkDatum = fastgetattr(tuple, keepOpt.checkAttnum, tupleDesc, &isNull);
+        if (isNull) {
+            return false;
+        }
+
+        if (checkKeepFunc != NULL) {
+            return checkKeepFunc(checkDatum);
+        } else if (keepOpt.checkKeepFunc != NULL) {
+            return keepOpt.checkKeepFunc(checkDatum);
+        } else {
+            return false;
+        }
+    }
+
+    return false;
+}

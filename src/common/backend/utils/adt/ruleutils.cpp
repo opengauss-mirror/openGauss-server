@@ -2323,6 +2323,12 @@ static char* pg_get_indexdef_worker(
         Oid keycoltype;
         Oid keycolcollation;
 
+        /*
+         * Ignore non-key attributes if told to.
+         */
+        if (keyno >= idxrec->indnkeyatts)
+            break;
+
         if (!colno) {
             appendStringInfoString(&buf, sep);
         }
@@ -2364,11 +2370,16 @@ static char* pg_get_indexdef_worker(
         if (!attrs_only && (!colno || colno == keyno + 1)) {
             Oid indcoll;
 
+            if (keyno >= idxrec->indnkeyatts) {
+                continue;
+            }
+
             /* Add collation, if not default for column */
             indcoll = indcollation->values[keyno];
             if (OidIsValid(indcoll) && indcoll != keycolcollation) {
                 appendStringInfo(&buf, " COLLATE %s", generate_collation_name((indcoll)));
             }
+
             /* Add the operator class name, if not default */
             get_opclass_name(indclass->values[keyno], keycoltype, &buf);
 
@@ -2398,7 +2409,8 @@ static char* pg_get_indexdef_worker(
     if (!attrs_only) {
         appendStringInfoChar(&buf, ')');
 
-        if (idxrelrec->parttype == PARTTYPE_PARTITIONED_RELATION) {
+        if (idxrelrec->parttype == PARTTYPE_PARTITIONED_RELATION &&
+            idxrelrec->relkind != RELKIND_GLOBAL_INDEX) {
             pg_get_indexdef_partitions(indexrelid, idxrec, show_tbl_spc, &buf);
         }
 
@@ -2652,6 +2664,17 @@ static char* pg_get_constraintdef_worker(Oid constraint_id, bool full_command, i
             decompile_column_index_array(val, con_form->conrelid, &buf);
 
             appendStringInfo(&buf, ")");
+
+            /* Fetch and build including column list */
+            isnull = true;
+            val = SysCacheGetAttr(CONSTROID, tup, Anum_pg_constraint_conincluding, &isnull);
+            if (!isnull) {
+                appendStringInfoString(&buf, " INCLUDE (");
+
+                decompile_column_index_array(val, con_form->conrelid, &buf);
+
+                appendStringInfoChar(&buf, ')');
+            }
 
             indexId = get_constraint_index(constraint_id);
             /* XXX why do we only print these bits if fullCommand? */

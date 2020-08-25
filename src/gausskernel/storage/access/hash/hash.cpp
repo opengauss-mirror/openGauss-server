@@ -543,7 +543,7 @@ loop_top:
 
                 itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offno));
                 htup = &(itup->t_tid);
-                if (callback(htup, callback_state)) {
+                if (callback(htup, callback_state, InvalidOid)) {
                     /* mark the item for deletion */
                     deletable[ndeletable++] = offno;
                     tuples_removed += 1;

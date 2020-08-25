@@ -1,0 +1,48 @@
+--
+-- test vacuum full partition
+--
+
+--i1. create table
+create table hw_partition_vacuum_full_partition_table(id int,name text, city text)
+partition by range(id)
+(
+        partition hw_partition_vacuum_full_partition_table_p1 values less than(1000),
+        partition hw_partition_vacuum_full_partition_table_p2 values less than(2000)
+);
+
+--i2. create btree index
+create index inx_part0_id on hw_partition_vacuum_full_partition_table(id) global;
+
+--i3. insert data
+create or replace function insert_part0_data() returns void as $$
+declare
+        times integer :=1;
+begin
+        loop
+                insert into hw_partition_vacuum_full_partition_table values(times, 'xian', 'beijing');
+                times = times + 1;
+                if times > 1998 then
+                        exit;
+                end if;
+  end loop;
+end;
+$$ language plpgsql;
+
+select insert_part0_data();
+
+--i4. delete data
+
+delete from hw_partition_vacuum_full_partition_table where id%10=1;
+\parallel on
+vacuum full hw_partition_vacuum_full_partition_table;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+select count(*) from hw_partition_vacuum_full_partition_table where id%10=0;
+\parallel off
+drop table hw_partition_vacuum_full_partition_table;

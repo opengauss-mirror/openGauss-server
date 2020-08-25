@@ -171,6 +171,9 @@ typedef struct RelationMetaData {
 
 #define OptIgnoreEnableHadoopEnv "ignore_enable_hadoop_env"
 
+#define OptEnabledWaitCleanGpi "y"
+#define OptDisabledWaitCleanGpi "n"
+
 #define INTERNAL_MASK_DISABLE 0x0
 #define INTERNAL_MASK_ENABLE 0x8000
 #define INTERNAL_MASK_DINSERT 0x01    // disable insert
@@ -329,6 +332,12 @@ static inline RedisHtlAction RelationGetAppendMode(Relation rel)
                             RelationGetMaxBatchRows(relation)))                                          \
             : RelDefaultPartialClusterRows)
 
+/* Relation whether create in current xact */
+static inline bool RelationCreateInCurrXact(Relation rel)
+{
+    return rel->rd_createSubid != InvalidTransactionId;
+}
+
 /* RelationGetPgClassOid
  *    return the pg_class OID of this relation.
  *    if this is a PARTITION, return its parent oid;
@@ -445,7 +454,9 @@ extern void PartitionDecrementReferenceCount(Partition part);
 
 #define RelationIsUnlogged(relation) ((relation)->rd_rel->relnamespace == RELPERSISTENCE_UNLOGGED)
 
-#define RelationIsIndex(relation) (RELKIND_INDEX == (relation)->rd_rel->relkind)
+#define RelationIsGlobalIndex(relation) (RELKIND_GLOBAL_INDEX == (relation)->rd_rel->relkind)
+
+#define RelationIsIndex(relation) (RELKIND_INDEX == (relation)->rd_rel->relkind || RelationIsGlobalIndex(relation))
 
 #define RelationIsSequnce(relation) (RELKIND_SEQUENCE == (relation)->rd_rel->relkind)
 
@@ -568,6 +579,33 @@ static inline bool IsCompressedByCmprsInPgclass(const RelCompressType cmprInPgcl
 
 #define RelationGetRelMergeList(relation) \
         StdRdOptionsGetStringData((relation)->rd_options, merge_list, NULL)
+
+#define ParitionGetWaitCleanGpi(partition) StdRdOptionsGetStringData((partition)->rd_options, wait_clean_gpi, OptDisabledWaitCleanGpi)
+#define RelationGetWaitCleanGpi(relation) StdRdOptionsGetStringData((relation)->rd_options, wait_clean_gpi, OptDisabledWaitCleanGpi)
+
+/* Partition get reloptions whether have wait_clean_gpi for parition */
+static inline bool PartitionEnableWaitCleanGpi(Partition partition)
+{
+    if (PointerIsValid(partition) && partition->rd_options != NULL) {
+        if (pg_strcasecmp(OptEnabledWaitCleanGpi, ParitionGetWaitCleanGpi(partition)) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/* Relation get reloptions whether have wait_clean_gpi for relation */
+static inline bool RelationEnableWaitCleanGpi(Relation relation)
+{
+    if (PointerIsValid(relation) && relation->rd_options != NULL) {
+        if (pg_strcasecmp(OptEnabledWaitCleanGpi, RelationGetWaitCleanGpi(relation)) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 /* routines in utils/cache/relcache.c */
 extern bool RelationIsDfsStore(Relation relatioin);

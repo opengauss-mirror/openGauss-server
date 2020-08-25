@@ -600,6 +600,7 @@ Oid get_constraint_index(Oid constraintId)
     ScanKeyData key[3];
     SysScanDesc scan = NULL;
     HeapTuple tup = NULL;
+    char relkind;
 
     /* Search the dependency table for the dependent index */
     depRel = heap_open(DependRelationId, AccessShareLock);
@@ -619,10 +620,12 @@ Oid get_constraint_index(Oid constraintId)
          * must be what we are looking for.  (The relkind test is just
          * paranoia; there shouldn't be any such dependencies otherwise.)
          */
-        if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->deptype == DEPENDENCY_INTERNAL &&
-            get_rel_relkind(deprec->objid) == RELKIND_INDEX) {
-            indexId = deprec->objid;
-            break;
+        if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->deptype == DEPENDENCY_INTERNAL) {
+            relkind = get_rel_relkind(deprec->objid);
+            if (relkind == RELKIND_INDEX || relkind == RELKIND_GLOBAL_INDEX) {
+                indexId = deprec->objid;
+                break;
+            }
         }
     }
 

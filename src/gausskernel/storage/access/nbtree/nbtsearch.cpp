@@ -30,7 +30,7 @@
 #include "catalog/pg_proc.h"
 
 static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
-static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup);
+static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup, Oid partOid);
 static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir);
 static Buffer _bt_walk_left(Relation rel, Buffer buf);
 static bool _bt_endpoint(IndexScanDesc scan, ScanDirection dir);
@@ -103,7 +103,7 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
         offnum = _bt_binsrch(rel, *bufP, keysz, scankey, nextkey);
         itemid = PageGetItemId(page, offnum);
         itup = (IndexTuple)PageGetItem(page, itemid);
-        blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
+        blkno = BTreeInnerTupleGetDownLink(itup);
         par_blkno = BufferGetBlockNumber(*bufP);
 
         /*
@@ -120,7 +120,7 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
             new_stack = (BTStack)palloc(sizeof(BTStackData));
             new_stack->bts_blkno = par_blkno;
             new_stack->bts_offset = offnum;
-            new_stack->bts_btentry = *itup;
+            new_stack->bts_btentry = blkno;
             new_stack->bts_parent = stack_in;
         }
 
@@ -359,6 +359,15 @@ int32 _bt_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNum
 {
     IndexTuple itup;
     BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+
+    /*
+     * Check tuple has correct number of attributes.
+     */
+    if (unlikely(!_bt_check_natts(rel, page, offnum))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("tuple has wrong number of attributes in index \"%s\"", RelationGetRelationName(rel))));
+    }
 
     /*
      * Force result ">" if target item is first data item on an internal page
@@ -940,8 +949,12 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
     /* OK, itemIndex says what to return */
     currItem = &so->currPos.items[so->currPos.itemIndex];
     scan->xs_ctup.t_self = currItem->heapTid;
-    if (scan->xs_want_itup)
+    if (scan->xs_want_itup) {
         scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
+    }
+    if (scan->xs_want_ext_oid && GPIScanCheckPartOid(scan->xs_gpi_scan, currItem->partitionOid)) {
+        GPISetCurrPartOid(scan->xs_gpi_scan, currItem->partitionOid);
+    }
 
     return true;
 }
@@ -997,6 +1010,10 @@ bool _bt_next(IndexScanDesc scan, ScanDirection dir)
     if (scan->xs_want_itup)
         scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
 
+    if (scan->xs_want_ext_oid && GPIScanCheckPartOid(scan->xs_gpi_scan, currItem->partitionOid)) {
+        GPISetCurrPartOid(scan->xs_gpi_scan, currItem->partitionOid);
+    }
+
     return true;
 }
 
@@ -1025,8 +1042,16 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
     int itemIndex;
     IndexTuple itup;
     bool continuescan = true;
+    TupleDesc tupdesc;
+    AttrNumber PartitionOidAttr;
+    Oid partOid = InvalidOid;
+    Oid heapOid = IndexScanGetPartHeapOid(scan);
+    bool isnull = false;
 
     gstrace_entry(GS_TRC_ID__bt_readpage);
+
+    tupdesc = RelationGetDescr(scan->indexRelation);
+    PartitionOidAttr = IndexRelationGetNumberOfAttributes(scan->indexRelation);
 
     /* we must have the buffer pinned and locked */
     Assert(BufferIsValid(so->currPos.buf));
@@ -1057,8 +1082,14 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
         while (offnum <= maxoff) {
             itup = _bt_checkkeys(scan, page, offnum, dir, &continuescan);
             if (itup != NULL) {
+                /* Get partition oid for global partition index */
+                isnull = false;
+                partOid = scan->xs_want_ext_oid
+                              ? DatumGetUInt32(index_getattr(itup, PartitionOidAttr, tupdesc, &isnull))
+                              : heapOid;
+                Assert(!isnull);
                 /* tuple passes all scan key conditions, so remember it */
-                _bt_saveitem(so, itemIndex, offnum, itup);
+                _bt_saveitem(so, itemIndex, offnum, itup, partOid);
                 itemIndex++;
             }
             if (!continuescan) {
@@ -1083,9 +1114,14 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
         while (offnum >= minoff) {
             itup = _bt_checkkeys(scan, page, offnum, dir, &continuescan);
             if (itup != NULL) {
+                isnull = false;
+                partOid = scan->xs_want_ext_oid
+                              ? DatumGetUInt32(index_getattr(itup, PartitionOidAttr, tupdesc, &isnull))
+                              : heapOid;
+                Assert(!isnull);
                 /* tuple passes all scan key conditions, so remember it */
                 itemIndex--;
-                _bt_saveitem(so, itemIndex, offnum, itup);
+                _bt_saveitem(so, itemIndex, offnum, itup, partOid);
             }
             if (!continuescan) {
                 /* there can't be any more matches, so stop */
@@ -1107,12 +1143,13 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
 }
 
 /* Save an index item into so->currPos.items[itemIndex] */
-static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, const IndexTuple itup)
+static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, const IndexTuple itup, Oid partOid)
 {
     BTScanPosItem* currItem = &so->currPos.items[itemIndex];
 
     currItem->heapTid = itup->t_tid;
     currItem->indexOffset = offnum;
+    currItem->partitionOid = partOid;
     if (so->currTuples) {
         Size itupsz = IndexTupleSize(itup);
 
@@ -1431,7 +1468,7 @@ Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost)
             offnum = P_FIRSTDATAKEY(opaque);
 
         itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
-        blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
+        blkno = BTreeInnerTupleGetDownLink(itup);
 
         buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
         page = BufferGetPage(buf);
@@ -1528,6 +1565,10 @@ static bool _bt_endpoint(IndexScanDesc scan, ScanDirection dir)
     if (scan->xs_want_itup)
         scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
 
+    if (scan->xs_want_ext_oid && GPIScanCheckPartOid(scan->xs_gpi_scan, currItem->partitionOid)) {
+        GPISetCurrPartOid(scan->xs_gpi_scan, currItem->partitionOid);
+    }
+
     return true;
 }
 
@@ -1595,5 +1636,45 @@ bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir)
     } while (so->numArrayKeys && _bt_advance_array_keys(scan, dir));
 
     return res;
+}
+
+/*
+ * Check if index tuple have appropriate number of attributes.
+ */
+bool _bt_check_natts(const Relation index, Page page, OffsetNumber offnum)
+{
+    int16 natts = IndexRelationGetNumberOfAttributes(index);
+    int16 nkeyatts = IndexRelationGetNumberOfKeyAttributes(index);
+    ItemId itemid;
+    IndexTuple itup;
+    BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+
+    /*
+     * Assert that mask allocated for number of keys in index tuple can fit
+     * maximum number of index keys.
+     */
+    StaticAssertStmt(BT_N_KEYS_OFFSET_MASK >= INDEX_MAX_KEYS, "BT_N_KEYS_OFFSET_MASK can't fit INDEX_MAX_KEYS");
+
+    itemid = PageGetItemId(page, offnum);
+    itup = (IndexTuple)PageGetItem(page, itemid);
+
+    if (P_ISLEAF(opaque) && offnum >= P_FIRSTDATAKEY(opaque)) {
+        /*
+         * Regular leaf tuples have as every index attributes
+         */
+        return (BTreeTupleGetNAtts(itup, index) == natts);
+    } else if (!P_ISLEAF(opaque) && offnum == P_FIRSTDATAKEY(opaque)) {
+        /*
+         * Leftmost tuples on non-leaf pages have no attributes, or haven't
+         * INDEX_ALT_TID_MASK set in pg_upgraded indexes.
+         */
+        return (BTreeTupleGetNAtts(itup, index) == 0 || ((itup->t_info & INDEX_ALT_TID_MASK) == 0));
+    } else {
+        /*
+         * Pivot tuples stored in non-leaf pages and hikeys of leaf pages
+         * contain only key attributes
+         */
+        return (BTreeTupleGetNAtts(itup, index) == nkeyatts);
+    }
 }
 

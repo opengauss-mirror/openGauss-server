@@ -356,6 +356,13 @@ static relopt_string string_rel_opts[] = {
         NULL,
         "",
     },
+    {
+        {"wait_clean_gpi", "Whether to wait for gpi cleanup", RELOPT_KIND_HEAP },
+        1,
+        false,
+        CheckWaitCleanGpi,
+        "n",
+    },
     /* list terminator */
     {{NULL}}};
 
@@ -867,6 +874,7 @@ bytea* extractRelOptions(HeapTuple tuple, TupleDesc tupdesc, Oid amoptions)
             options = heap_reloptions(classForm->relkind, datum, false);
             break;
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
             options = index_reloptions(amoptions, datum, false);
             break;
         case RELKIND_FOREIGN_TABLE:
@@ -1493,7 +1501,8 @@ bytea* default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         {"end_ctid_internal", RELOPT_TYPE_STRING, offsetof(StdRdOptions, end_ctid_internal)},
         {"user_catalog_table", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, user_catalog_table)},
         {"hashbucket", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hashbucket)},
-        {"on_commit_delete_rows", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, on_commit_delete_rows)}};
+        {"on_commit_delete_rows", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, on_commit_delete_rows)},
+        {"wait_clean_gpi", RELOPT_TYPE_STRING, offsetof(StdRdOptions, wait_clean_gpi)}};
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
 
@@ -1756,6 +1765,21 @@ void check_append_mode(const char* value)
 }
 
 /*
+ * check parameter of wait_clean_gpi . Allows "y", "n"
+ * and "auto" values.
+ */
+void CheckWaitCleanGpi(const char* value)
+{
+    if (value == NULL || (strcmp(value, "y") != 0 && strcmp(value, "n") != 0)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for \"wait_clean_gpi\" option"),
+                errdetail("Valid values are \"y\", \"n\".")));
+    }
+}
+
+
+/*
  * Brief        : Check the compression mode for tablespace.
  * Input        : val, the compression algorithm value.
  * Output       : None.
@@ -1940,7 +1964,7 @@ void ForbidUserToSetDefinedOptions(List* options)
 void ForbidOutUsersToSetInnerOptions(List* user_options)
 {
     static const char* innnerOpts[] = {
-        "internal_mask", "start_ctid_internal", "end_ctid_internal", "append_mode_internal"};
+        "internal_mask", "start_ctid_internal", "end_ctid_internal", "append_mode_internal", "wait_clean_gpi"};
 
     if (user_options != NULL) {
         int first_invalid_opt = -1;

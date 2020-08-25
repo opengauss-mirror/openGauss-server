@@ -2028,7 +2028,8 @@ typedef struct Constraint {
     char* cooked_expr;  /* expr, as nodeToString representation */
 
     /* Fields used for unique constraints (UNIQUE and PRIMARY KEY) or cluster partial key for colstore: */
-    List* keys; /* String nodes naming referenced column(s) */
+    List* keys; /* String nodes naming referenced key column(s) */
+    List* including; /* String nodes naming referenced nonkey column(s) */
 
     /* Fields used for EXCLUSION constraints: */
     List* exclusions; /* list of (IndexElem, operator name) pairs */
@@ -2598,6 +2599,7 @@ typedef struct IndexStmt {
     char* accessMethod;         /* name of access method (eg. btree) */
     char* tableSpace;           /* tablespace, or NULL for default */
     List* indexParams;          /* columns to index: a list of IndexElem */
+    List* indexIncludingParams; /* additional columns to index: a list of IndexElem */
     List* options;              /* WITH clause options: a list of DefElem */
     Node* whereClause;          /* qualification (partial-index predicate) */
     List* excludeOpNames;       /* exclusion operator names, or NIL if none */
@@ -2614,6 +2616,7 @@ typedef struct IndexStmt {
      * value is false when relation is a foreign table.
      */
     bool isPartitioned;
+    bool isGlobal;                            /* is GLOBAL partition index */
     bool unique;                              /* is index unique? */
     bool primary;                             /* is index a primary key? */
     bool isconstraint;                        /* is it for a pkey/unique constraint? */

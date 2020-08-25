@@ -279,6 +279,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
      */
     indexInfo = makeNode(IndexInfo);
     indexInfo->ii_NumIndexAttrs = 2;
+    indexInfo->ii_NumIndexKeyAttrs = indexInfo->ii_NumIndexAttrs;
     indexInfo->ii_KeyAttrNumbers[0] = 1;
     indexInfo->ii_KeyAttrNumbers[1] = 2;
     indexInfo->ii_Expressions = NIL;
@@ -304,8 +305,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
     coloptions[1] = 0;
 
     IndexCreateExtraArgs extra;
-    extra.existingPSortOid = InvalidOid;
-    extra.isPartitionedIndex = false;
+    SetIndexCreateExtraArgs(&extra, InvalidOid, false, false);
 
     index_create(toast_rel,
         toast_idxname,

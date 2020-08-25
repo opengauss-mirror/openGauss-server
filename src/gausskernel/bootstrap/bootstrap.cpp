@@ -497,7 +497,7 @@ void boot_openrel(char* relname)
     ereport(DEBUG4, (errmsg("open relation %s, attrsize %d", relname, (int)ATTRIBUTE_FIXED_PART_SIZE)));
 
     t_thrd.bootstrap_cxt.boot_reldesc = heap_openrv(makeRangeVar(NULL, relname, -1), NoLock);
-    t_thrd.bootstrap_cxt.numattr = t_thrd.bootstrap_cxt.boot_reldesc->rd_rel->relnatts;
+    t_thrd.bootstrap_cxt.numattr = RelationGetNumberOfAttributes(t_thrd.bootstrap_cxt.boot_reldesc);
     for (i = 0; i < t_thrd.bootstrap_cxt.numattr; i++) {
         if (t_thrd.bootstrap_cxt.attrtypes[i] == NULL)
             t_thrd.bootstrap_cxt.attrtypes[i] = AllocateAttribute();
@@ -977,7 +977,8 @@ void build_indices(void)
         /* need not bother with locks during bootstrap */
         heap = heap_open(t_thrd.bootstrap_cxt.ILHead->il_heap, NoLock);
         ind = index_open(t_thrd.bootstrap_cxt.ILHead->il_ind, NoLock);
-        index_build(heap, NULL, ind, NULL, t_thrd.bootstrap_cxt.ILHead->il_info, false, false, false);
+        index_build(
+            heap, NULL, ind, NULL, t_thrd.bootstrap_cxt.ILHead->il_info, false, false, INDEX_CREATE_NONE_PARTITION);
 
         index_close(ind, NoLock);
         heap_close(heap, NoLock);

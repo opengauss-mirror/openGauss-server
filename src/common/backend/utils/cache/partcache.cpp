@@ -73,6 +73,8 @@
 #include "utils/partitionmap_gs.h"
 #include "catalog/pg_partition.h"
 #include "postmaster/autovacuum.h"
+#include "nodes/makefuncs.h"
+
 /*
  * part 1:macro definitions, global virables, and typedefs
  */
@@ -118,7 +120,7 @@ typedef struct partidcacheent {
  *
  *non-export function prototypes
  */
-static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK);
+static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot);
 static Partition AllocatePartitionDesc(Form_pg_partition relp);
 static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt);
 static void PartitionInitPhysicalAddr(Partition partition);
@@ -129,7 +131,7 @@ static void PartitionReloadIndexInfo(Partition part);
 
 static void PartitionParseRelOptions(Partition partition, HeapTuple tuple);
 
-static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK)
+static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot)
 {
     HeapTuple pg_partition_tuple;
     Relation pg_partition_desc;
@@ -163,7 +165,7 @@ static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK)
     pg_partition_scan = systable_beginscan(pg_partition_desc,
         PartitionOidIndexId,
         indexOK && u_sess->relcache_cxt.criticalRelcachesBuilt,
-        SnapshotNow,
+        snapshot,
         1,
         key);
 
@@ -234,7 +236,7 @@ static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt)
     /*
      * find the tuple in pg_class corresponding to the given relation id
      */
-    pg_partition_tuple = ScanPgPartition(targetPartId, true);
+    pg_partition_tuple = ScanPgPartition(targetPartId, true, SnapshotNow);
     /*
      * if no such tuple exists, return NULL
      */
@@ -370,7 +372,7 @@ Partition PartitionIdGetPartition(Oid partitionId)
 
 char* PartitionOidGetName(Oid partOid)
 {
-    HeapTuple tuple = ScanPgPartition(partOid, true);
+    HeapTuple tuple = ScanPgPartition(partOid, true, SnapshotNow);
     if (!HeapTupleIsValid(tuple)) {
         return NULL;
     }
@@ -386,7 +388,7 @@ char* PartitionOidGetName(Oid partOid)
 
 Oid PartitionOidGetTablespace(Oid partOid)
 {
-    HeapTuple tuple = ScanPgPartition(partOid, true);
+    HeapTuple tuple = ScanPgPartition(partOid, true, SnapshotNow);
     if (!HeapTupleIsValid(tuple)) {
         return InvalidOid;
     }
@@ -1191,8 +1193,9 @@ Relation partitionGetRelation(Relation rel, Partition part)
     if (REALTION_BUCKETKEY_INITED(rel))
         relation->rd_bucketkey = rel->rd_bucketkey;
     else
-        relation->rd_bucketkey = NULL;	
+        relation->rd_bucketkey = NULL;
     relation->rd_att = rel->rd_att;
+    relation->rd_partHeapOid =  part->pd_part->indextblid;
     relation->rd_index = rel->rd_index;
     relation->rd_indextuple = rel->rd_indextuple;
     relation->rd_am = rel->rd_am;
@@ -1318,7 +1321,7 @@ static void PartitionReloadIndexInfo(Partition part)
      */
     Assert(part->pd_smgr == NULL);
 
-    pg_partition_tuple = ScanPgPartition(PartitionGetPartid(part), true);
+    pg_partition_tuple = ScanPgPartition(PartitionGetPartid(part), true, SnapshotNow);
     if (!HeapTupleIsValid(pg_partition_tuple)) {
         ereport(ERROR,
             (errcode(ERRCODE_NO_DATA),
@@ -1393,7 +1396,6 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     partform = (Form_pg_partition)GETSTRUCT(tuple);
 
     // CStore Relation must deal with cudesc relation, delta relation
-    //
     if (RelationIsColStore(parent)) {
         // step 1: CUDesc relation must set new relfilenode
         // step 2: CUDesc index must be set new relfilenode
@@ -1517,4 +1519,505 @@ static void PartitionParseRelOptions(Partition partition, HeapTuple tuple)
     }
 
     return;
+}
+
+/* Check one partition whether it is normal use, and save in Bitmapset liveParts */
+static bool PartitionStatusIsLive(Oid partOid, Bitmapset** liveParts)
+{
+    HeapTuple partTuple = NULL;
+
+    if (bms_is_member(partOid, *liveParts)) {
+        return true;
+    }
+
+    /* Get partition information from syscache */
+    partTuple = SearchSysCache1WithLogLevel(PARTRELID, ObjectIdGetDatum(partOid), LOG);
+    if (HeapTupleIsValid(partTuple)) {
+        ReleaseSysCache(partTuple);
+        *liveParts = bms_add_member(*liveParts, partOid);
+        return true;
+    }
+
+    return false;
+}
+
+/* Check one invisible partition whether enable clean, and save in Bitmapset enableCleanParts */
+static bool InvisblePartEnableClean(HeapTuple partTuple, TupleDesc tupleDesc)
+{
+    Datum partOptions;
+    bool isNull = false;
+
+    partOptions = fastgetattr(partTuple, Anum_pg_partition_reloptions, tupleDesc, &isNull);
+    if (isNull || !PartitionInvisibleMetadataKeep(partOptions)) {
+        return true;
+    }
+
+    return false;
+}
+
+/* Just for lazy vacuum check one partition's status */
+static PartStatus PartTupleStatusForVacuum(HeapTuple partTuple, Buffer buffer, TransactionId oldestXmin)
+{
+    PartStatus partStatus = PART_METADATA_NOEXIST;
+
+    /*
+     * We could possibly get away with not locking the buffer here,
+     * since caller should hold ShareLock on the relation, but let's
+     * be conservative about it.  (This remark is still correct even
+     * with HOT-pruning: our pin on the buffer prevents pruning.)
+     */
+    LockBuffer(buffer, BUFFER_LOCK_SHARE);
+    switch (HeapTupleSatisfiesVacuum(partTuple, oldestXmin, buffer)) {
+        case HEAPTUPLE_INSERT_IN_PROGRESS:
+        case HEAPTUPLE_DELETE_IN_PROGRESS:
+            partStatus = PART_METADATA_CREATING;
+            break;
+        case HEAPTUPLE_LIVE:
+            partStatus = PART_METADATA_LIVE;
+            break;
+        case HEAPTUPLE_DEAD:
+        case HEAPTUPLE_RECENTLY_DEAD:
+            partStatus = PART_METADATA_INVISIBLE;
+            break;
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("unexpected HeapTupleSatisfiesVacuum result")));
+            partStatus = PART_METADATA_NOEXIST; /* keep compiler quiet */
+            break;
+    }
+    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+
+    return partStatus;
+}
+
+/*
+ * Check current partition status use HeapTupleSatisfiesVacuum
+ *
+ * Notes: return PART_METADATA_CEATING scenario occurs only in the process of automatically creating
+ * partitions when the interval partition insert statement is executed, Other partition
+ * change scenarios have AccessExclusiveLock locks, which are not executed concurrently
+ * with the vacuum process
+ */
+static PartStatus PartitionStatusForVacuum(Oid partOid)
+{
+    Relation pgPartition = NULL;
+    SysScanDesc scan = NULL;
+    ScanKeyData key[1];
+    HeapTuple partTuple = NULL;
+    TransactionId oldestXmin;
+    PartStatus partStatus = PART_METADATA_NOEXIST;
+
+    pgPartition = heap_open(PartitionRelationId, RowExclusiveLock);
+    oldestXmin = u_sess->utils_cxt.RecentGlobalXmin;
+    ScanKeyInit(&key[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(partOid));
+
+    scan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 1, key);
+    while (HeapTupleIsValid(partTuple = systable_getnext(scan))) {
+        partStatus = PartTupleStatusForVacuum(partTuple, scan->scan->rs_cbuf, oldestXmin);
+        /* The status of a partition is creating or live, the partition status is the latest */
+        if (partStatus == PART_METADATA_CREATING || partStatus == PART_METADATA_LIVE) {
+            break;
+        }
+    }
+    systable_endscan(scan);
+    heap_close(pgPartition, NoLock);
+
+    return partStatus;
+}
+
+/*
+ * This function is used by global partition index to determine whether
+ * the partition corresponding to the partoid in index tuple should be ignored,
+ * The scenarios are as follows:
+ * a partition is created in a transaction and data is inserted into the partition,
+ * However, the transaction is aborted. Alternatively,
+ * a partition is created in a transaction, data is inserted into the partition,
+ * and the partition is deleted. The transaction is committed.
+ *
+ * Notes: In this case, lazy_vacuum of pg_partition must meet the following requirements:
+ * Before clearing a dead tuple, ensure that global partition index (if any) does not contain
+ * any indextuple containing partoid of the dead tuple.
+ */
+PartStatus PartitionGetMetadataStatus(Oid partOid, bool vacuumFlag)
+{
+    HeapTuple partTuple;
+
+    /* Get partition information from syscache */
+    partTuple = SearchSysCache1WithLogLevel(PARTRELID, ObjectIdGetDatum(partOid), LOG);
+    if (HeapTupleIsValid(partTuple)) {
+        ReleaseSysCache(partTuple);
+        return PART_METADATA_LIVE;
+    }
+
+    /* When vacuum is performed, must checks whether the partition is being created */
+    if (vacuumFlag) {
+        return PartitionStatusForVacuum(partOid);
+    }
+
+    /*
+     * Find the tuple in pg_partition corresponding to the given partition oid
+     *
+     * Notes: use SnapshotAny to ensure that the tuple of pg_partition
+     * in the invisible state is obtained.
+     */
+    partTuple = ScanPgPartition(partOid, false, SnapshotAny);
+    /* If get tuple exists, return status invisible */
+    if (HeapTupleIsValid(partTuple)) {
+        pfree_ext(partTuple);
+        return PART_METADATA_INVISIBLE;
+    }
+
+    return PART_METADATA_NOEXIST;
+}
+
+/* Set reloptions walt_clean_gpi, Just for pg_partition's tuple */
+Datum SetWaitCleanGpiRelOptions(Datum oldOptions, bool enable)
+{
+    Datum newOptions;
+    List* defList = NIL;
+    DefElem* def = NULL;
+    Value* defArg = enable ? makeString(OptEnabledWaitCleanGpi) : makeString(OptDisabledWaitCleanGpi);
+    def = makeDefElem(pstrdup("wait_clean_gpi"), (Node*)defArg);
+    defList = lappend(defList, def);
+    newOptions = transformRelOptions(oldOptions, defList, NULL, NULL, false, false);
+    pfree_ext(def->defname);
+    list_free_ext(defList);
+
+    return newOptions;
+}
+
+/* Update pg_partition's tuple attribute reloptions wait_clean_gpi */
+static void UpdateWaitCleanGpiRelOptions(Relation pgPartition, HeapTuple partTuple, bool enable, bool inplace)
+{
+    HeapTuple newTuple;
+    Datum partOptions;
+    Datum newOptions;
+    Datum replVal[Natts_pg_partition];
+    bool replNull[Natts_pg_partition];
+    bool replRepl[Natts_pg_partition];
+    errno_t rc;
+    bool isNull = false;
+
+    partOptions = fastgetattr(partTuple, Anum_pg_partition_reloptions, RelationGetDescr(pgPartition), &isNull);
+    /* If the caller use replacement to update reloptions, but the effect is the same as not set, just return */
+    if (inplace && enable == PartitionInvisibleMetadataKeep(partOptions)) {
+        return;
+    }
+    newOptions = SetWaitCleanGpiRelOptions(isNull ? (Datum)0 : partOptions, enable);
+
+    rc = memset_s(replVal, sizeof(replVal), 0, sizeof(replVal));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replNull, sizeof(replNull), false, sizeof(replNull));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replRepl, sizeof(replRepl), false, sizeof(replRepl));
+    securec_check(rc, "\0", "\0");
+
+    if (PointerIsValid(newOptions)) {
+        replVal[Anum_pg_partition_reloptions - 1] = newOptions;
+        replNull[Anum_pg_partition_reloptions - 1] = false;
+    } else {
+        replNull[Anum_pg_partition_reloptions - 1] = true;
+    }
+    replRepl[Anum_pg_partition_reloptions - 1] = true;
+
+    newTuple = heap_modify_tuple(partTuple, RelationGetDescr(pgPartition), replVal, replNull, replRepl);
+
+    if (inplace) {
+        heap_inplace_update(pgPartition, newTuple);
+    } else {
+        simple_heap_update(pgPartition, &newTuple->t_self, newTuple);
+        CatalogUpdateIndexes(pgPartition, newTuple);
+    }
+
+    ereport(LOG, (errmsg("partition %u set reloptions wait_clean_gpi=n success", HeapTupleGetOid(partTuple))));
+    heap_freetuple_ext(newTuple);
+}
+
+/* Set one partitioned relation's reloptions wait_clean_gpi */
+void PartitionedSetWaitCleanGpi(const char* parentName, Oid parentPartOid, bool enable, bool inplace)
+{
+    HeapTuple partTuple;
+    Relation pgPartition;
+
+    pgPartition = heap_open(PartitionRelationId, RowExclusiveLock);
+    partTuple = SearchSysCache3(PARTPARTOID,
+        PointerGetDatum(parentName),
+        CharGetDatum(PART_OBJ_TYPE_PARTED_TABLE),
+        ObjectIdGetDatum(parentPartOid));
+    if (!HeapTupleIsValid(partTuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for partition %u", parentPartOid)));
+    }
+    UpdateWaitCleanGpiRelOptions(pgPartition, partTuple, enable, inplace);
+    ReleaseSysCache(partTuple);
+    heap_close(pgPartition, NoLock);
+
+    /* Make changes visible */
+    CommandCounterIncrement();
+
+    ereport(LOG, (errmsg("partition relation %s set reloptions wait_clean_gpi success", parentName)));
+}
+
+/* Set one partition's reloptions wait_clean_gpi */
+void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace)
+{
+    Relation pgPartition;
+    HeapTuple partTuple;
+
+    pgPartition = heap_open(PartitionRelationId, RowExclusiveLock);
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for partition %u", partOid)));
+    }
+    UpdateWaitCleanGpiRelOptions(pgPartition, partTuple, enable, inplace);
+    ReleaseSysCache(partTuple);
+    heap_close(pgPartition, NoLock);
+
+    /* Make changes visible */
+    CommandCounterIncrement();
+
+    ereport(LOG, (errmsg("partition %u set reloptions wait_clean_gpi success", partOid)));
+}
+
+/*
+ * Check one partition's invisible metadata tuple whether still keep
+ *
+ * Notes: if wait_clean_gpi=y is contained in reloptions, determine to keep
+ */
+bool PartitionInvisibleMetadataKeep(Datum datumRelOptions)
+{
+    bool ret = false;
+    bytea* options = NULL;
+    char* waitCleanGpi;
+
+    if (!PointerIsValid(datumRelOptions)) {
+        return false;
+    }
+
+    options = heap_reloptions(RELKIND_RELATION, datumRelOptions, true);
+    if (options != NULL) {
+        waitCleanGpi = (char*)StdRdOptionsGetStringData(options, wait_clean_gpi, OptDisabledWaitCleanGpi);
+        if (pg_strcasecmp(OptEnabledWaitCleanGpi, waitCleanGpi) == 0) {
+            ret = true;
+        }
+
+        pfree_ext(options);
+    }
+
+    return ret;
+}
+
+/*
+ * In pg_partition, search all tuples (visible and invisible) containing wait_clean_gpi=y
+ * in reloptios of one partitioed relation and set wait_clean_gpi=n
+ *
+ * Notes: This function is called only when a partition table is lazy vacuumed,
+ * and cannot be executed in parallel with PartitionSetWaitCleanGpi, Currently,
+ * the AccessShareLock lock of ADD_PARTITION_ACTION is used to ensure that no concurrent
+ * operations are performed.
+ */
+void PartitionedSetEnabledClean(Oid parentOid)
+{
+    Relation pgPartition = NULL;
+    SysScanDesc scan = NULL;
+    ScanKeyData key[2];
+    HeapTuple tuple = NULL;
+
+    pgPartition = heap_open(PartitionRelationId, RowExclusiveLock);
+    ScanKeyInit(
+        &key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(PART_OBJ_TYPE_PARTED_TABLE));
+    ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentOid));
+
+    scan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 2, key);
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        UpdateWaitCleanGpiRelOptions(pgPartition, tuple, false, true);
+    }
+    systable_endscan(scan);
+    heap_close(pgPartition, NoLock);
+
+    ereport(LOG, (errmsg("partitioned %u set reloptions wait_clean_gpi=n success", parentOid)));
+}
+
+/*
+ * In pg_partition, search all tuples (visible and invisible) containing wait_clean_gpi=y
+ * in reloptios of one partition's all partitions and set wait_clean_gpi=n
+ *
+ * input cleanedParts means a collection of partoids that have been cleaned of all remaining invalid partitions
+ * input invisibleParts means the collection of partoids for invalid partitions that have been deleted
+ * input updatePartitioned means need check whether update partitioned's reloptions
+ *
+ * Notes: This function is called only when a partition table is lazy vacuumed,
+ * and cannot be executed in parallel with PartitionSetWaitCleanGpi, if updatePartitioned
+ */
+void PartitionSetEnabledClean(
+    Oid parentOid, const Bitmapset* cleanedParts, const Bitmapset* invisibleParts, bool updatePartitioned)
+{
+    Relation pgPartition = NULL;
+    TupleDesc partTupdesc = NULL;
+    SysScanDesc scan = NULL;
+    ScanKeyData key[2];
+    HeapTuple tuple = NULL;
+    Oid partOid;
+    Bitmapset* liveParts = NULL;
+    bool needSetOpts = false;
+    bool needSetPartitioned = updatePartitioned;
+
+    pgPartition = heap_open(PartitionRelationId, RowExclusiveLock);
+    partTupdesc = RelationGetDescr(pgPartition);
+    ScanKeyInit(&key[0],
+        Anum_pg_partition_parttype,
+        BTEqualStrategyNumber,
+        F_CHAREQ,
+        CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION));
+    ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentOid));
+    scan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 2, key);
+
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        needSetOpts = false;
+        partOid = HeapTupleGetOid(tuple);
+        if (bms_is_member(partOid, cleanedParts)) {
+            needSetOpts = true;
+        } else if (bms_is_member(partOid, invisibleParts)) {
+            needSetOpts = true;
+        } else if (PartitionStatusIsLive(partOid, &liveParts)) {
+            needSetOpts = true;
+        } else if (updatePartitioned && InvisblePartEnableClean(tuple, partTupdesc)) {
+            continue;
+        } else {
+            needSetPartitioned = false;
+        }
+
+        if (needSetOpts) {
+            UpdateWaitCleanGpiRelOptions(pgPartition, tuple, false, true);
+        }
+    }
+    systable_endscan(scan);
+    heap_close(pgPartition, NoLock);
+    bms_free(liveParts);
+
+    if (needSetPartitioned) {
+        PartitionedSetEnabledClean(parentOid);
+    }
+}
+
+/*
+ * In pg_partition, search all tuples containing wait_clean_gpi=y
+ * in reloptios of one relation's all partitions (visible and invisible)
+ * in a partition and set wait_clean_gpi=n
+ *
+ * Notes: This function is called only when a partitioned table is vacuum full,
+ * and cannot be executed in parallel with PartitionSetWaitCleanGpi.
+ */
+void PartitionSetAllEnabledClean(Oid parentOid)
+{
+    Relation pgPartition = NULL;
+    SysScanDesc scan = NULL;
+    ScanKeyData key[1];
+    HeapTuple tuple = NULL;
+
+    pgPartition = heap_open(PartitionRelationId, RowExclusiveLock);
+    ScanKeyInit(&key[0], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentOid));
+
+    scan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 1, key);
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        UpdateWaitCleanGpiRelOptions(pgPartition, tuple, false, true);
+    }
+    systable_endscan(scan);
+    heap_close(pgPartition, NoLock);
+
+    ereport(LOG, (errmsg("relation %u set all partition's reloptions wait_clean_gpi=n success", parentOid)));
+}
+
+/*
+ * Get all invisible partition from pg_partition
+ *
+ * Notes: Before calling the function, you must ensure that a lock with parentOid
+ * is already held (to prevent parallelism with any ALTER table partition process)
+ * and AccessShareLock for ADD_PARTITION_ACTION (to prevent parallelism with the
+ * process of automatically creating partitions in any interval partition)
+ */
+void PartitionGetAllInvisibleParts(Oid parentOid, Bitmapset** invisibleParts)
+{
+    Relation pgPartition = NULL;
+    SysScanDesc scan = NULL;
+    ScanKeyData key[2];
+    HeapTuple tuple = NULL;
+    Bitmapset* liveParts = NULL;
+    Oid partOid;
+
+    pgPartition = heap_open(PartitionRelationId, AccessShareLock);
+    ScanKeyInit(&key[0],
+        Anum_pg_partition_parttype,
+        BTEqualStrategyNumber,
+        F_CHAREQ,
+        CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION));
+    ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentOid));
+
+    scan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 2, key);
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        partOid = HeapTupleGetOid(tuple);
+        if (bms_is_member(partOid, *invisibleParts)) {
+            continue;
+        } else if (PartitionStatusIsLive(partOid, &liveParts)) {
+            continue;
+        } else {
+            *invisibleParts = bms_add_member(*invisibleParts, partOid);
+        }
+    }
+    systable_endscan(scan);
+    heap_close(pgPartition, NoLock);
+    bms_free(liveParts);
+}
+
+/*
+ * Check whether contain a tuple in pg_partition, which includes
+ * wait_clean_gpi=y in the reloPTIONS of the tuple
+ *
+ * Notes: this function is called only when vacuum full pg_partition
+ */
+bool PartitionMetadataDisabledClean(Relation pgPartition)
+{
+    bool result = false;
+    TupleDesc partTupdesc = NULL;
+    SysScanDesc scan = NULL;
+    HeapTuple tuple = NULL;
+    ScanKeyData key[1];
+    Form_pg_partition partform;
+    char* relName = NULL;
+
+    if (RelationGetRelid(pgPartition) != PartitionRelationId) {
+        return result;
+    }
+
+    ScanKeyInit(
+        &key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(PART_OBJ_TYPE_PARTED_TABLE));
+
+    partTupdesc = RelationGetDescr(pgPartition);
+    scan = systable_beginscan(pgPartition, PartitionParentOidIndexId, true, SnapshotNow, 1, key);
+    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        bool isNull = false;
+        Datum partOptions = fastgetattr(tuple, Anum_pg_partition_reloptions, partTupdesc, &isNull);
+        if (isNull) {
+            continue;
+        }
+        if (PartitionInvisibleMetadataKeep(partOptions)) {
+            partform = (Form_pg_partition)GETSTRUCT(tuple);
+            relName = (char*)palloc0(NAMEDATALEN);
+            error_t rc = strncpy_s(relName, NAMEDATALEN, partform->relname.data, NAMEDATALEN - 1);
+            securec_check_ss(rc, "\0", "\0");
+            result = true;
+            break;
+        }
+    }
+    systable_endscan(scan);
+
+    if (result) {
+        ereport(WARNING,
+            (errmsg("system table pg_partition contain relation %s have reloptions wait_clean_gpi=y,"
+                    "must run the vacuum (full) %s first",
+                relName,
+                relName)));
+    }
+    return result;
 }

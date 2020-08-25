@@ -2843,7 +2843,8 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
 
         BitmapIndexScan* btindexscan = (BitmapIndexScan*)plan;
         btindexscan->scan.bucketInfo = bitmapqual->parent->bucketInfo;
-        if (root->isPartIteratorPlanning) {
+        /* Global partition index don't need set part interator infomartition */
+        if (root->isPartIteratorPlanning && !CheckIndexPathUseGPI(ipath)) {
             btindexscan = (BitmapIndexScan*)plan;
             btindexscan->scan.isPartTbl = true;
             btindexscan->scan.itrs = root->curItrs;

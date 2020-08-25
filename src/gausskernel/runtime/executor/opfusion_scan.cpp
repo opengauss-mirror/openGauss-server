@@ -295,6 +295,19 @@ bool IndexFusion::EpqCheck(Datum* values, const bool* isnull)
     return true;
 }
 
+Relation IndexFusion::getCurrentRel()
+{
+    IndexScanDesc indexScan = GetIndexScanDesc(m_scandesc);
+    if (indexScan->xs_gpi_scan) {
+        return indexScan->xs_gpi_scan->fakePartRelation;
+    } else {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("partitioned relation dose not use global partition index")));
+        return NULL;
+    }
+}
+
 void IndexFusion::setAttrNo()
 {
     ListCell* lc = NULL;
@@ -326,7 +339,6 @@ IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamLi
     m_node = node;
     m_keyInit = false;
     m_keyNum = list_length(node->indexqual);
-    ;
     m_scanKeys = (ScanKey)palloc0(m_keyNum * sizeof(ScanKeyData));
 
     /* init params */
@@ -594,6 +606,15 @@ TupleTableSlot* IndexOnlyScanFusion::getTupleSlot()
     while ((tid = abs_idx_getnext_tid(m_scandesc, *m_direction)) != NULL) {
         HeapTuple tuple = NULL;
         IndexScanDesc indexdesc = GetIndexScanDesc(m_scandesc);
+        if (IndexScanNeedSwitchPartRel(indexdesc)) {
+            /*
+             * Change the heapRelation in indexScanDesc to Partition Relation of current index
+             */
+            if (!GPIGetNextPartRelation(indexdesc->xs_gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+                continue;
+            }
+            indexdesc->heapRelation = indexdesc->xs_gpi_scan->fakePartRelation;
+        }
         if (!visibilitymap_test(indexdesc->heapRelation, ItemPointerGetBlockNumber(tid), &m_VMBuffer)) {
             tuple = index_fetch_heap(indexdesc);
             if (tuple == NULL) {

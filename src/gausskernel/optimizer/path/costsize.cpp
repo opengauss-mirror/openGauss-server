@@ -1354,6 +1354,7 @@ void cost_bitmap_heap_scan(
     double T;
     bool ispartitionedindex = path->parent->isPartitionedTable;
     bool partition_index_unusable = false;
+    bool containGlobalOrLocalIndex = false;
 
     /* Should only be applied to base relations */
     AssertEreport(IsA(baserel, RelOptInfo),
@@ -1380,9 +1381,15 @@ void cost_bitmap_heap_scan(
     if (ispartitionedindex) {
         if (!check_bitmap_heap_path_index_unusable(bitmapqual, baserel))
             partition_index_unusable = true;
+
+        /* If the bitmap path contains Global partition index OR local partition index, set enable_bitmapscan to off */
+        if (CheckBitmapHeapPathContainGlobalOrLocal(bitmapqual)) {
+            containGlobalOrLocalIndex = true;
+        }
     }
 
-    if (!u_sess->attr.attr_sql.enable_bitmapscan || partition_index_unusable) {
+    if (!u_sess->attr.attr_sql.enable_bitmapscan || partition_index_unusable ||
+        containGlobalOrLocalIndex) {
         startup_cost += g_instance.cost_cxt.disable_cost;
     }
 

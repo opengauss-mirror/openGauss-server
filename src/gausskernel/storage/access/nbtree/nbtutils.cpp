@@ -52,16 +52,25 @@ ScanKey _bt_mkscankey(Relation rel, IndexTuple itup)
 {
     ScanKey skey;
     TupleDesc itupdesc;
-    int natts;
+    int indnatts PG_USED_FOR_ASSERTS_ONLY;
+    int indnkeyatts;
     int16* indoption = NULL;
     int i;
 
     itupdesc = RelationGetDescr(rel);
-    natts = RelationGetNumberOfAttributes(rel);
+    indnatts = IndexRelationGetNumberOfAttributes(rel);
+    indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
     indoption = rel->rd_indoption;
 
-    skey = (ScanKey)palloc(natts * sizeof(ScanKeyData));
-    for (i = 0; i < natts; i++) {
+    Assert(indnkeyatts != 0);
+    Assert(indnkeyatts <= indnatts);
+    Assert(BTreeTupleGetNAtts(itup, rel) == indnatts || BTreeTupleGetNAtts(itup, rel) == indnkeyatts);
+    /*
+     * We'll execute search using ScanKey constructed on key columns. Non key
+     * (included) columns must be omitted.
+     */
+    skey = (ScanKey)palloc(indnkeyatts * sizeof(ScanKeyData));
+    for (i = 0; i < indnkeyatts; i++) {
         FmgrInfo* procinfo = NULL;
         Datum arg;
         bool null = false;
@@ -95,16 +104,16 @@ ScanKey _bt_mkscankey(Relation rel, IndexTuple itup)
 ScanKey _bt_mkscankey_nodata(Relation rel)
 {
     ScanKey skey;
-    int natts;
+    int indnkeyatts;
     int16* indoption = NULL;
     int i;
 
-    natts = RelationGetNumberOfAttributes(rel);
+    indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
     indoption = rel->rd_indoption;
 
-    skey = (ScanKey)palloc(natts * sizeof(ScanKeyData));
+    skey = (ScanKey) palloc(indnkeyatts * sizeof(ScanKeyData));
 
-    for (i = 0; i < natts; i++) {
+    for (i = 0; i < indnkeyatts; i++) {
         FmgrInfo* procinfo = NULL;
         uint32 flags;
 
@@ -1577,6 +1586,9 @@ void _bt_killitems(IndexScanDesc scan, bool haveLock)
     OffsetNumber maxoff;
     int i;
     bool killedsomething = false;
+    AttrNumber partitionOidAttr;
+    TupleDesc tupdesc;
+    Oid heapOid = IndexScanGetPartHeapOid(scan);
 
     Assert(BufferIsValid(so->currPos.buf));
 
@@ -1588,11 +1600,14 @@ void _bt_killitems(IndexScanDesc scan, bool haveLock)
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     minoff = P_FIRSTDATAKEY(opaque);
     maxoff = PageGetMaxOffsetNumber(page);
+    tupdesc = RelationGetDescr(scan->indexRelation);
+    partitionOidAttr = IndexRelationGetNumberOfAttributes(scan->indexRelation);
 
     for (i = 0; i < so->numKilled; i++) {
         int itemIndex = so->killedItems[i];
         BTScanPosItem* kitem = &so->currPos.items[itemIndex];
         OffsetNumber offnum = kitem->indexOffset;
+        Oid partOid = kitem->partitionOid;
 
         Assert(itemIndex >= so->currPos.firstItem && itemIndex <= so->currPos.lastItem);
         if (offnum < minoff) {
@@ -1601,7 +1616,12 @@ void _bt_killitems(IndexScanDesc scan, bool haveLock)
         while (offnum <= maxoff) {
             ItemId iid = PageGetItemId(page, offnum);
             IndexTuple ituple = (IndexTuple)PageGetItem(page, iid);
-            if (ItemPointerEquals(&ituple->t_tid, &kitem->heapTid)) {
+            bool isNull = false;
+            Oid currPartOid = scan->xs_want_ext_oid
+                                  ? DatumGetUInt32(index_getattr(ituple, partitionOidAttr, tupdesc, &isNull))
+                                  : heapOid;
+            Assert(!isNull);
+            if (ItemPointerEquals(&ituple->t_tid, &kitem->heapTid) && currPartOid == partOid) {
                 /* found the item */
                 ItemIdMarkDead(iid);
                 killedsomething = true;
@@ -1834,5 +1854,29 @@ Datum btoptions(PG_FUNCTION_ARGS)
         PG_RETURN_BYTEA_P(result);
     }
     PG_RETURN_NULL();
+}
+
+/*
+ *	_bt_nonkey_truncate() -- remove non-key (INCLUDE) attributes from index
+ *							tuple.
+ *
+ *	Transforms an ordinal B-tree leaf index tuple into pivot tuple to be used
+ *	as hikey or non-leaf page tuple with downlink.  Note that t_tid offset
+ *	will be overritten in order to represent number of present tuple attributes.
+ */
+IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup)
+{
+    IndexTuple truncated;
+    int nkeyattrs = IndexRelationGetNumberOfKeyAttributes(idxrel);
+
+    /*
+     * We're assuming to truncate only regular leaf index tuples which have
+     * both key and non-key attributes.
+     */
+    Assert(BTreeTupleGetNAtts(olditup, idxrel) == IndexRelationGetNumberOfAttributes(idxrel));
+    truncated = index_truncate_tuple(RelationGetDescr(idxrel), olditup, nkeyattrs);
+    BTreeTupleSetNAtts(truncated, nkeyattrs);
+
+    return truncated;
 }
 

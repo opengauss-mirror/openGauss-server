@@ -1211,7 +1211,7 @@ HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, B
             return HEAPTUPLE_DELETE_IN_PROGRESS;
         } else if (xidstatus == XID_COMMITTED) {
             SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED, HeapTupleGetRawXmin(htup));
-	} else {
+        } else {
             /*
              * Not in Progress, Not Committed, so either Aborted or crashed
              */

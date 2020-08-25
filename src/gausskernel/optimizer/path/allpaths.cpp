@@ -2770,18 +2770,40 @@ static void make_partiterator_pathkey(
     itrpath->direction = (BTLessStrategyNumber == pk_strategy ? ForwardScanDirection : BackwardScanDirection);
 }
 
+/*
+ * Check scan path for partition table whether use global partition index
+ */
+static bool CheckPathUseGlobalPartIndex(Path* path)
+{
+    if (path->pathtype == T_IndexScan || path->pathtype == T_IndexOnlyScan) {
+        IndexPath* indexPath = (IndexPath*)path;
+        if (indexPath->indexinfo->isGlobal) {
+            return true;
+        }
+    } else if (path->pathtype == T_BitmapHeapScan) {
+        BitmapHeapPath* bitmapHeapPath = (BitmapHeapPath*)path;
+        if (CheckBitmapQualIsGlobalIndex(bitmapHeapPath->bitmapqual)) {
+            return true;
+        }
+    } else {
+        return false;
+    }
+
+    return false;
+}
+
 static Path* create_partiterator_path(PlannerInfo* root, RelOptInfo* rel, Path* path, Relation relation)
 {
     Path* result = NULL;
 
     switch (path->pathtype) {
+        case T_IndexScan:
+        case T_IndexOnlyScan:
+        case T_BitmapHeapScan:
         case T_SeqScan:
         case T_CStoreScan:
         case T_TsStoreScan:
-        case T_BitmapHeapScan:
-        case T_TidScan:
-        case T_IndexScan:
-        case T_IndexOnlyScan: {
+        case T_TidScan: {
             PartIteratorPath* itrpath = makeNode(PartIteratorPath);
 
             itrpath->subPath = path;
@@ -2845,6 +2867,11 @@ static void try_add_partiterator(PlannerInfo* root, RelOptInfo* rel, RangeTblEnt
         /* do not handle inlist2join path for Partition Table */
         if (path->parent->base_rel && T_SubqueryScan == path->pathtype) {
             Assert(path->parent->base_rel->alternatives != NIL);
+            continue;
+        }
+
+        /* Use globa partition index */
+        if (CheckPathUseGlobalPartIndex(path)) {
             continue;
         }
 

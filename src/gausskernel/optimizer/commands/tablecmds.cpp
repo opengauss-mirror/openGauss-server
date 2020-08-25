@@ -300,6 +300,12 @@ static const struct dropmsgstrings dropmsgstringarray[] = {
         gettext_noop("index \"%s\" does not exist, skipping"),
         gettext_noop("\"%s\" is not an index"),
         gettext_noop("Use DROP INDEX to remove an index.")},
+    {RELKIND_GLOBAL_INDEX,
+        ERRCODE_UNDEFINED_OBJECT,
+        gettext_noop("global partition index \"%s\" does not exist"),
+        gettext_noop("global partition index \"%s\" does not exist, skipping"),
+        gettext_noop("\"%s\" is not an global partition index"),
+        gettext_noop("Use DROP INDEX to remove an global partition index.")},
     {RELKIND_COMPOSITE_TYPE,
         ERRCODE_UNDEFINED_OBJECT,
         gettext_noop("type \"%s\" does not exist"),
@@ -546,6 +552,7 @@ static void ATExecAddPartition(Relation rel, AddPartitionState* partState);
 static void ATExecDropPartition(Relation rel, AlterTableCmd* cmd);
 static void ATExecUnusableIndexPartition(Relation rel, const char* partition_name);
 static void ATExecUnusableIndex(Relation rel);
+static void ATUnusableGlobalIndex(Relation rel);
 static void ATExecUnusableAllIndexOnPartition(Relation rel, const char* partition_name);
 static void ATExecModifyRowMovement(Relation rel, bool rowMovement);
 static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd);
@@ -2790,9 +2797,16 @@ static void RangeVarCallbackForDropRelation(
         return; /* concurrently dropped, so nothing to do */
     classform = (Form_pg_class)GETSTRUCT(tuple);
 
-    if ((classform->relkind != relkind) && !(u_sess->attr.attr_common.IsInplaceUpgrade && relkind == RELKIND_RELATION &&
-                                               classform->relkind == RELKIND_TOASTVALUE))
+    char expected_relkind = relkind;
+    if (classform->relkind == RELKIND_GLOBAL_INDEX) {
+        expected_relkind = RELKIND_GLOBAL_INDEX;
+    }
+    if ((classform->relkind != expected_relkind) &&
+        !(u_sess->attr.attr_common.IsInplaceUpgrade &&
+        expected_relkind == RELKIND_RELATION &&
+        classform->relkind == RELKIND_TOASTVALUE)) {
         DropErrorMsgWrongType(rel->relname, classform->relkind, relkind);
+    }
 
     /* Allow DROP to either table owner or schema owner */
     if (!pg_class_ownercheck(relOid, GetUserId()) && !pg_namespace_ownercheck(classform->relnamespace, GetUserId()))
@@ -2813,7 +2827,7 @@ static void RangeVarCallbackForDropRelation(
      * we do it the other way around.  No error if we don't find a pg_index
      * entry, though --- the relation may have been dropped.
      */
-    if (relkind == RELKIND_INDEX && relOid != oldRelOid) {
+    if ((relkind == RELKIND_INDEX || relkind == RELKIND_GLOBAL_INDEX) && relOid != oldRelOid) {
         state->heapOid = IndexGetRelation(relOid, true);
         if (OidIsValid(state->heapOid))
             LockRelationOid(state->heapOid, heap_lockmode);
@@ -4194,14 +4208,14 @@ static void renameatt_check(Oid myrelid, Form_pg_class classform, bool recursing
      * change names that are hardcoded into the system, hence the following
      * restriction.
      */
-    if (relkind != RELKIND_RELATION && relkind != RELKIND_VIEW && relkind != RELKIND_MATVIEW && 
-        relkind != RELKIND_COMPOSITE_TYPE &&
-        relkind != RELKIND_INDEX && relkind != RELKIND_FOREIGN_TABLE)
+    if (relkind != RELKIND_RELATION && relkind != RELKIND_VIEW && relkind != RELKIND_MATVIEW &&
+        relkind != RELKIND_COMPOSITE_TYPE && relkind != RELKIND_INDEX &&
+        relkind != RELKIND_FOREIGN_TABLE && relkind != RELKIND_GLOBAL_INDEX) {
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is not a table, view, composite type, index, or foreign table",
                     NameStr(classform->relname))));
-
+    }
     /*
      * permissions checking.  only the owner of a class can change its schema.
      */
@@ -4641,7 +4655,7 @@ void RenameRelationInternal(Oid myrelid, const char* newrelname)
     /*
      * Also rename the associated constraint, if any.
      */
-    if (targetrelation->rd_rel->relkind == RELKIND_INDEX) {
+    if (RelationIsIndex(targetrelation)) {
         Oid constraintId = get_index_constraint(myrelid);
         if (OidIsValid(constraintId))
             RenameConstraintById(constraintId, newrelname);
@@ -4976,7 +4990,7 @@ void CheckTableNotInUse(Relation rel, const char* stmt)
                     stmt,
                     RelationGetRelationName(rel))));
 
-    if (rel->rd_rel->relkind != RELKIND_INDEX && AfterTriggerPendingOnRel(RelationGetRelid(rel)))
+    if (!RelationIsIndex(rel) && AfterTriggerPendingOnRel(RelationGetRelid(rel)))
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_IN_USE),
                 /* translator: first %s is a SQL command, eg ALTER TABLE */
@@ -6663,7 +6677,7 @@ static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
                 RelationIsCUFormat(temprel) ? IDX_COL_TBL : (RelationIsPAXFormat(temprel) ? IDX_DFS_TBL : IDX_ROW_TBL);
             idxPartitionedOrNot = RELATION_IS_PARTITIONED(temprel) ? IDX_PARTITIONED_TBL : IDX_ORDINARY_TBL;
             heap_close(temprel, NoLock);
-        } else if (tab->relkind == RELKIND_INDEX) {
+        } else if (tab->relkind == RELKIND_INDEX || tab->relkind == RELKIND_GLOBAL_INDEX) {
             Relation temprel = index_open(tab->relid, NoLock);
             rel_format_idx = IDX_ROW_TBL; /* row relation */
             idxPartitionedOrNot = RelationIsPartitioned(temprel) ? IDX_PARTITIONED_TBL : IDX_ORDINARY_TBL;
@@ -7180,6 +7194,7 @@ static void ATSimplePermissions(Relation rel, int allowed_targets)
             actual_target = ATT_MATVIEW;
             break;
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
             actual_target = ATT_INDEX;
             break;
         case RELKIND_COMPOSITE_TYPE:
@@ -8149,7 +8164,7 @@ static void ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmo
              * Loop over each attribute in the primary key and see if it
              * matches the to-be-altered attribute
              */
-            for (i = 0; i < indexStruct->indnatts; i++) {
+            for (i = 0; i < indexStruct->indnkeyatts; i++) {
                 if (indexStruct->indkey.values[i] == attnum)
                     ereport(ERROR,
                         (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
@@ -8290,11 +8305,11 @@ static void ATPrepSetStatistics(Relation rel, const char* colName, Node* newValu
      * allowSystemTableMods to be turned on.
      */
     if (rel->rd_rel->relkind != RELKIND_RELATION && rel->rd_rel->relkind != RELKIND_MATVIEW &&
-        rel->rd_rel->relkind != RELKIND_INDEX &&
-        rel->rd_rel->relkind != RELKIND_FOREIGN_TABLE)
+        !RelationIsIndex(rel) && rel->rd_rel->relkind != RELKIND_FOREIGN_TABLE) {
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is not a table, materialized view, index, or foreign table", 
                     RelationGetRelationName(rel))));
+    }
 
     /* Permissions checks */
     if (!pg_class_ownercheck(RelationGetRelid(rel), GetUserId()))
@@ -9545,6 +9560,7 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
         RelationGetRelid(rel),
         fkattnum,
         numfks,
+        numfks,
         InvalidOid, /* not a domain constraint */
         indexOid,
         RelationGetRelid(pkrel),
@@ -9876,7 +9892,7 @@ static int transformFkeyGetPrimaryKey(
      * assume a primary key cannot have expressional elements)
      */
     *attnamelist = NIL;
-    for (i = 0; i < indexStruct->indnatts; i++) {
+    for (i = 0; i < indexStruct->indnkeyatts; i++) {
         int pkattno = indexStruct->indkey.values[i];
 
         attnums[i] = pkattno;
@@ -9931,7 +9947,7 @@ static Oid transformFkeyCheckAttrs(Relation pkrel, int numattrs, int16* attnums,
          * partial index; forget it if there are any expressions, too. Invalid
          * indexes are out as well.
          */
-        if (indexStruct->indnatts == numattrs && indexStruct->indisunique && IndexIsValid(indexStruct) &&
+        if (indexStruct->indnkeyatts == numattrs && indexStruct->indisunique && IndexIsValid(indexStruct) &&
             heap_attisnull(indexTuple, Anum_pg_index_indpred, NULL) &&
             heap_attisnull(indexTuple, Anum_pg_index_indexprs, NULL)) {
             /* Must get indclass the hard way */
@@ -10953,7 +10969,7 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
             case OCLASS_CLASS: {
                 char relKind = get_rel_relkind(foundObject.objectId);
 
-                if (relKind == RELKIND_INDEX) {
+                if (relKind == RELKIND_INDEX || relKind == RELKIND_GLOBAL_INDEX) {
                     Assert(foundObject.objectSubId == 0);
                     if (!list_member_oid(tab->changedIndexOids, foundObject.objectId)) {
                         /*
@@ -11721,6 +11737,7 @@ void ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, LOCKMODE
             }
             break;
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
             if (!recursing) {
                 /*
                  * Because ALTER INDEX OWNER used to be allowed, and in fact
@@ -11903,13 +11920,14 @@ void ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, LOCKMODE
          * don't have their own entries either.
          */
         if (tuple_class->relkind != RELKIND_COMPOSITE_TYPE && tuple_class->relkind != RELKIND_INDEX &&
-            tuple_class->relkind != RELKIND_TOASTVALUE && tuple_class->relnamespace != CSTORE_NAMESPACE)
+            tuple_class->relkind != RELKIND_GLOBAL_INDEX && tuple_class->relkind != RELKIND_TOASTVALUE &&
+            tuple_class->relnamespace != CSTORE_NAMESPACE)
             changeDependencyOnOwner(RelationRelationId, relationOid, newOwnerId);
 
         /*
          * Also change the ownership of the table's row type, if it has one
          */
-        if (tuple_class->relkind != RELKIND_INDEX)
+        if (tuple_class->relkind != RELKIND_INDEX && tuple_class->relkind != RELKIND_GLOBAL_INDEX)
             AlterTypeOwnerInternal(tuple_class->reltype, newOwnerId, tuple_class->relkind == RELKIND_COMPOSITE_TYPE);
 
         /*
@@ -11949,7 +11967,8 @@ void ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, LOCKMODE
             change_owner_recurse_to_sequences(relationOid, newOwnerId, lockmode);
         }
 
-        if (tuple_class->relkind == RELKIND_INDEX && tuple_class->relam == PSORT_AM_OID) {
+        if ((tuple_class->relkind == RELKIND_INDEX || tuple_class->relkind == RELKIND_GLOBAL_INDEX) &&
+            tuple_class->relam == PSORT_AM_OID) {
             /* if it is PSORT index,  recurse to change PSORT releateion's ownership */
             if (tuple_class->relcudescrelid != InvalidOid)
                 ATExecChangeOwner(tuple_class->relcudescrelid, newOwnerId, true, lockmode);
@@ -11976,6 +11995,19 @@ void ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, LOCKMODE
                 partCacheList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relationOid);
             } else if (tuple_class->relkind == RELKIND_INDEX) {
                 partCacheList = searchPgPartitionByParentId(PART_OBJ_TYPE_INDEX_PARTITION, relationOid);
+            } else if (tuple_class->relkind == RELKIND_GLOBAL_INDEX) {
+                /* If it has a toast table, recurse to change its ownership */
+                if (tuple_class->reltoastrelid != InvalidOid)
+                    ATExecChangeOwner(tuple_class->reltoastrelid, newOwnerId, true, lockmode);
+
+                /* If it has a cudesc table, recurse to change its ownership */
+                if (tuple_class->relcudescrelid != InvalidOid)
+                    ATExecChangeOwner(tuple_class->relcudescrelid, newOwnerId, true, lockmode);
+
+                /* If it has a delta table, recurse to change its ownership */
+                if (tuple_class->reldeltarelid != InvalidOid)
+                    ATExecChangeOwner(tuple_class->reldeltarelid, newOwnerId, true, lockmode);
+                partCacheList = NIL;
             } else {
                 partCacheList = NIL;
             }
@@ -12491,6 +12523,7 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
             break;
         }
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
             (void)index_reloptions(rel->rd_am->amoptions, newOptions, true);
             break;
         default:
@@ -14380,7 +14413,7 @@ static void ATExecReplicaIdentity(Relation rel, ReplicaIdentityStmt* stmt, LOCKM
                 errmsg("cannot use invalid index \"%s\" as replica identity", RelationGetRelationName(indexRel))));
 
     /* Check index for nullable columns. */
-    for (key = 0; key < indexRel->rd_index->indnatts; key++) {
+    for (key = 0; key < IndexRelationGetNumberOfKeyAttributes(indexRel); key++) {
         int16 attno = indexRel->rd_index->indkey.values[key];
         Form_pg_attribute attr;
 
@@ -15588,7 +15621,8 @@ static void RangeVarCallbackForAlterRelation(
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a composite type", rv->relname)));
     }
 
-    if (reltype == OBJECT_INDEX && relkind != RELKIND_INDEX && !IsA(stmt, RenameStmt)) {
+    if (reltype == OBJECT_INDEX && relkind != RELKIND_INDEX && relkind != RELKIND_GLOBAL_INDEX &&
+        !IsA(stmt, RenameStmt)) {
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not an index", rv->relname)));
     }
     /*
@@ -16547,6 +16581,8 @@ static void ATExecDropPartition(Relation rel, AlterTableCmd* cmd)
 
     Oid changeToRangePartOid = GetNeedDegradToRangePartOid(rel, partOid);
     fastDropPartition(rel, partOid, "DROP PARTITION", changeToRangePartOid);
+    // Unusable Global Index
+    ATUnusableGlobalIndex(rel);
 }
 
 /*
@@ -16640,6 +16676,42 @@ static void ATExecUnusableIndexPartition(Relation rel, const char* partition_nam
         AccessExclusiveLock);  // lock on heap partition
     // call the internal function
     ATExecSetIndexUsableState(PartitionRelationId, indexPartOid, false);
+}
+
+static void ATUnusableGlobalIndex(Relation rel)
+{
+    ListCell* index = NULL;
+    bool dirty = false;
+    HeapTuple sysTuple = NULL;
+    Relation sysTable = NULL;
+
+    sysTable = relation_open(IndexRelationId, RowExclusiveLock);
+    // update the indisusable field
+    foreach (index, RelationGetSpecificKindIndexList(rel, true)) {
+        Oid currIndexOid = lfirst_oid(index);
+        sysTuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(currIndexOid));
+        if (sysTuple) {
+            if (((Form_pg_index)GETSTRUCT(sysTuple))->indisusable != false) {
+                ((Form_pg_index)GETSTRUCT(sysTuple))->indisusable = false;
+                dirty = true;
+            }
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("could not find tuple for relation %u", currIndexOid)));
+        }
+
+        /* Keep the system catalog indexes current. */
+        if (dirty) {
+            simple_heap_update(sysTable, &(sysTuple->t_self), sysTuple);
+            CatalogUpdateIndexes(sysTable, sysTuple);
+        }
+        heap_freetuple_ext(sysTuple);
+    }
+    relation_close(sysTable, RowExclusiveLock);
+
+    if (dirty) {
+        CommandCounterIncrement();
+    }
 }
 
 /*
@@ -16942,6 +17014,9 @@ static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd)
         heap_close(newTableRel, AccessExclusiveLock);
         pgstat_report_truncate(newPartOid, newTableRel->rd_id, newTableRel->rd_rel->relisshared);
     }
+
+    // set global index unusable
+    ATUnusableGlobalIndex(rel);
 }
 
 /*
@@ -17593,7 +17668,7 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     RelationOpenSmgr(tempTableRel);
 
     /* lock the index relation on partitioned table and check the usability */
-    index_list = RelationGetIndexList(partTableRel);
+    index_list = RelationGetSpecificKindIndexList(partTableRel, false);
     foreach (cell, index_list) {
         Oid dstIndexPartTblspcOid;
         Oid clonedIndexRelationId;
@@ -17746,6 +17821,9 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     if (renameTargetPart) {
         renamePartitionInternal(partTableRel->rd_id, destPartOid, destPartName);
     }
+
+    /* step 7: Unusable Global Index */
+    ATUnusableGlobalIndex(partTableRel);
 }
 
 // When merge toast table, values of the first column may be repeat.
@@ -17961,6 +18039,9 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
     // Swap relfilenode of table and toast table
     finishPartitionHeapSwap(partOid, ordTableRel->rd_id, false, relfrozenxid);
 
+    // Unusable global index of partTableRel
+    ATUnusableGlobalIndex(partTableRel);
+
     // Swap relfilenode of index
     Assert(list_length(partIndexList) == list_length(ordIndexList));
     if (0 != list_length(partIndexList)) {
@@ -17968,7 +18049,7 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
         list_free_ext(partIndexList);
         list_free_ext(ordIndexList);
     }
-
+	
     heap_close(ordTableRel, NoLock);
 }
 
@@ -18198,11 +18279,14 @@ bool checkRelationLocalIndexesUsable(Relation relation)
 
     while (HeapTupleIsValid(htup = systable_getnext(indscan))) {
         Form_pg_index index = (Form_pg_index)GETSTRUCT(htup);
+        Relation index_relation = index_open(index->indexrelid, AccessShareLock);
 
-        if (!IndexIsUsable(index)) {
+        if (!IndexIsUsable(index) && !RelationIsGlobalIndex(index_relation)) {
+            index_close(index_relation, AccessShareLock);
             ret = false;
             break;
         }
+        index_close(index_relation, AccessShareLock);
     }
 
     systable_endscan(indscan);
@@ -18486,7 +18570,7 @@ static void checkIndexForExchange(
     HeapTuple ordTableIndexTuple = NULL;
     List* ordTableIndexTupleList = NIL;
     bool* matchFlag = NULL;
-    partTableIndexOidList = RelationGetIndexList(partTableRel);
+    partTableIndexOidList = RelationGetSpecificKindIndexList(partTableRel, false);
     ordTableIndexOidList = RelationGetIndexList(ordTableRel);
     if (list_length(partTableIndexOidList) == 0 && list_length(ordTableIndexOidList) == 0) {
         return;
@@ -19253,6 +19337,9 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
 #endif
 
     list_free_ext(newPartOidList);
+
+    // set global index unusable
+    ATUnusableGlobalIndex(partTableRel);
 }
 
 // check split point
@@ -20660,7 +20747,7 @@ static void ExecOnlyTestCStorePartitionedTable(AlteredTableInfo* tab)
  */
 static void ForbidToRewriteOrTestCstoreIndex(AlteredTableInfo* tab)
 {
-    if (tab->relkind == RELKIND_INDEX) {
+    if (tab->relkind == RELKIND_INDEX || tab->relkind == RELKIND_GLOBAL_INDEX) {
         Relation rel = index_open(tab->relid, AccessShareLock);
         if (rel->rd_rel->relam == PSORT_AM_OID) {
             index_close(rel, AccessShareLock);
@@ -20724,7 +20811,7 @@ static void ExecChangeTableSpaceForRowTable(AlteredTableInfo* tab, LOCKMODE lock
     ATExecSetTableSpace(tab->relid, tab->newTableSpace, lockmode);
 
     /* handle a special index type: PSORT index */
-    if (tab->relkind == RELKIND_INDEX) {
+    if (tab->relkind == RELKIND_INDEX || tab->relkind == RELKIND_GLOBAL_INDEX) {
         Relation rel = index_open(tab->relid, lockmode);
         if (rel->rd_rel->relam == PSORT_AM_OID) {
             PSortChangeTableSpace(rel->rd_rel->relcudescrelid, /* psort oid */
@@ -20897,7 +20984,7 @@ static void ExecChangeTableSpaceForRowPartition(AlteredTableInfo* tab, LOCKMODE 
     ATExecSetTableSpaceForPartitionP3(tab->relid, tab->partid, tab->newTableSpace, partitionLock);
 
     /* handle a special index type: PSORT index */
-    if (tab->relkind == RELKIND_INDEX) {
+    if (tab->relkind == RELKIND_INDEX || tab->relkind == RELKIND_GLOBAL_INDEX) {
         Relation rel = index_open(tab->relid, NoLock);
         if (rel->rd_rel->relam == PSORT_AM_OID) {
             Partition part = partitionOpen(rel, tab->partid, partitionLock);

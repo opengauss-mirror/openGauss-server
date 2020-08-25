@@ -126,6 +126,10 @@ Node* MultiExecBitmapOr(BitmapOrState* node)
             if (result == NULL) {
                 /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
                 result = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
+                /* If bitmapscan uses global partition index, set tbm to global */
+                if (RelationIsGlobalIndex(((BitmapIndexScanState*)subnode)->biss_RelationDesc)) {
+                    tbm_set_global(result, true);
+                }
             }
 
             ((BitmapIndexScanState*)subnode)->biss_result = result;
@@ -148,6 +152,12 @@ Node* MultiExecBitmapOr(BitmapOrState* node)
             if (result == NULL) {
                 result = subresult; /* first subplan */
             } else {
+                if (tbm_is_global(result) != tbm_is_global(subresult)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                            errmsg(
+                                "do not support bitmap index scan for global index and local index simultaneously.")));
+                }
                 tbm_union(result, subresult);
                 tbm_free(subresult);
             }

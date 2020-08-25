@@ -3284,6 +3284,7 @@ static void _outIndexStmt(StringInfo str, IndexStmt* node)
     WRITE_STRING_FIELD(accessMethod);
     WRITE_STRING_FIELD(tableSpace);
     WRITE_NODE_FIELD(indexParams);
+    WRITE_NODE_FIELD(indexIncludingParams);
     WRITE_NODE_FIELD(options);
     WRITE_NODE_FIELD(whereClause);
     WRITE_NODE_FIELD(excludeOpNames);
@@ -4281,6 +4282,7 @@ static void _outConstraint(StringInfo str, Constraint* node)
         case CONSTR_PRIMARY:
             appendStringInfo(str, "PRIMARY_KEY");
             WRITE_NODE_FIELD(keys);
+            WRITE_NODE_FIELD(including);
             WRITE_NODE_FIELD(options);
             WRITE_STRING_FIELD(indexname);
             WRITE_STRING_FIELD(indexspace);
@@ -4290,6 +4292,7 @@ static void _outConstraint(StringInfo str, Constraint* node)
         case CONSTR_UNIQUE:
             appendStringInfo(str, "UNIQUE");
             WRITE_NODE_FIELD(keys);
+            WRITE_NODE_FIELD(including);
             WRITE_NODE_FIELD(options);
             WRITE_STRING_FIELD(indexname);
             WRITE_STRING_FIELD(indexspace);
@@ -4299,6 +4302,7 @@ static void _outConstraint(StringInfo str, Constraint* node)
         case CONSTR_EXCLUSION:
             appendStringInfo(str, "EXCLUSION");
             WRITE_NODE_FIELD(exclusions);
+            WRITE_NODE_FIELD(including);
             WRITE_NODE_FIELD(options);
             WRITE_STRING_FIELD(indexname);
             WRITE_STRING_FIELD(indexspace);

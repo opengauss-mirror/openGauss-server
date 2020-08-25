@@ -28,6 +28,7 @@
 typedef struct IndexBuildResult {
     double heap_tuples;  /* # of tuples seen in parent table */
     double index_tuples; /* # of tuples inserted into index */
+    double* global_index_tuples;
 } IndexBuildResult;
 
 /*
@@ -75,7 +76,7 @@ typedef struct IndexBulkDeleteResult {
 } IndexBulkDeleteResult;
 
 /* Typedef for callback function to determine if a tuple is bulk-deletable */
-typedef bool (*IndexBulkDeleteCallback)(ItemPointer itemptr, void* state);
+typedef bool (*IndexBulkDeleteCallback)(ItemPointer itemptr, void* state, Oid partOid);
 
 /* struct definitions appear in relscan.h */
 typedef struct IndexScanDescData* IndexScanDesc;
@@ -165,5 +166,34 @@ extern HeapTuple systable_getnext_ordered(SysScanDesc sysscan, ScanDirection dir
 extern void systable_endscan_ordered(SysScanDesc sysscan);
 
 HeapTuple systable_getnext_back(SysScanDesc sysscan);
+
+/*
+ * global partition index access method support routines (in genam.c)
+ */
+typedef struct GPIScanDescData {
+    HTAB* fakeRelationTable;     /* fake partition relation and partition hash table */
+    Bitmapset* invisiblePartMap; /* cache invisible partition oid in GPI */
+    Relation parentRelation;     /* parent relation of partition */
+    Relation fakePartRelation;   /* fake-relation using partition */
+    Partition partition;         /* partition use to fake partition rel */
+    Oid currPartOid;             /* current partition oid in GPI */
+} GPIScanDescData;
+
+typedef GPIScanDescData* GPIScanDesc;
+
+/* Check input partition oid is same as global-partition-index current work partition oid */
+inline bool GPIScanCheckPartOid(GPIScanDesc gpiScan, Oid currScanPartOid)
+{
+    if (!PointerIsValid(gpiScan)) {
+        return false;
+    }
+
+    return gpiScan->currPartOid != currScanPartOid;
+}
+extern void GPIScanInit(GPIScanDesc* gpiScan);
+extern void GPIScanEnd(GPIScanDesc gpiScan);
+extern bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode);
+extern void GPISetCurrPartOid(GPIScanDesc gpiScan, Oid partOid);
+extern Oid GPIGetCurrPartOid(const GPIScanDesc gpiScan);
 
 #endif /* GENAM_H */

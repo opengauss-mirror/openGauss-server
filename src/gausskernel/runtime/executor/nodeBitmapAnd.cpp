@@ -125,6 +125,18 @@ Node* MultiExecBitmapAnd(BitmapAndState* node)
         if (result == NULL) {
             result = subresult; /* first subplan */
         } else {
+            /*
+             * If the global tbm intersect with non-global tbm,
+             * set the final result to non-global tbm.
+             *
+             * Notes: This scenario means that the two filter criteria used in the where
+             * condition of the sql statement, one uses the local partitioned index and
+             * the other uses the global partitioned index
+             */
+            if (tbm_is_global(result) != tbm_is_global(subresult)) {
+                tbm_set_global(result, false);
+            }
+
             tbm_intersect(result, subresult);
             tbm_free(subresult);
         }

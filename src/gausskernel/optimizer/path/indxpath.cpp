@@ -76,6 +76,16 @@ typedef struct {
     Bitmapset* clauseids; /* quals+preds represented as a bitmapset */
 } PathClauseUsage;
 
+/* Per-choose-bitmapand data used within ChooseBitmapAndWithMultiIndex() */
+typedef struct {
+    Cost costsofar;           /* path cost for multi-index-path */
+    List* qualsofar;          /* contain quals for multi-index-path */
+    Bitmapset* clauseidsofar; /* contain clause set  for multi-index-path */
+    ListCell* lastcell;       /* lastcell in paths for quick deletions */
+    List* paths;              /* path list for multi-index-path */
+    int startPath;            /* check value for "AND group leader" */
+} ChooseBitmapAndInfo;
+
 static void consider_index_join_clauses(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo* index,
     IndexClauseSet* rclauseset, IndexClauseSet* jclauseset, IndexClauseSet* eclauseset, List** bitindexpaths);
 static void consider_index_join_outer_rels(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo* index,
@@ -90,9 +100,10 @@ static void get_index_paths(
     PlannerInfo* root, RelOptInfo* rel, IndexOptInfo* index, IndexClauseSet* clauses, List** bitindexpaths);
 static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo* index, IndexClauseSet* clauses,
     bool useful_predicate, SaOpControl saop_control, ScanTypeControl scantype);
-static List* build_paths_for_OR(PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses);
+static List* build_paths_for_OR(
+    PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses, bool justUseGloalPartIndex = false);
 static List* drop_indexable_join_clauses(RelOptInfo* rel, List* clauses);
-static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths);
+static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, List* globalPartIndexPaths = NIL);
 static int path_usage_comparator(const void* a, const void* b);
 static Cost bitmap_scan_cost_est(PlannerInfo* root, RelOptInfo* rel, Path* ipath);
 static Cost bitmap_and_cost_est(PlannerInfo* root, RelOptInfo* rel, List* paths);
@@ -243,6 +254,19 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
     bitjoinpaths = list_concat(bitjoinpaths, indexpaths);
 
     /*
+     * Generate BitmapOrPaths for any suitable OR-clauses present in the
+     * restriction list and joinorclauses just use global partition index.
+     * Add these to bitindexpaths.
+     */
+    if (rel->isPartitionedTable) {
+        indexpaths = GenerateBitmapOrPathsUseGPI(root, rel, rel->baserestrictinfo, NIL, false);
+        bitindexpaths = list_concat(bitindexpaths, indexpaths);
+
+        indexpaths = GenerateBitmapOrPathsUseGPI(root, rel, joinorclauses, rel->baserestrictinfo, false);
+        bitjoinpaths = list_concat(bitjoinpaths, indexpaths);
+    }
+
+    /*
      * If we found anything usable, generate a BitmapHeapPath for the most
      * promising combination of restriction bitmap index paths.  Note there
      * will be only one such path no matter how many indexes exist.  This
@@ -308,7 +332,6 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
             {
                 Path* path = (Path*)lfirst(lcp);
                 Relids p_outers = (Relids)lfirst(lco);
-
                 if (bms_is_subset(p_outers, max_outers))
                     this_path_set = lappend(this_path_set, path);
             }
@@ -374,7 +397,7 @@ static void consider_index_join_clauses(PlannerInfo* root, RelOptInfo* rel, Inde
      * relation itself is also included in the relids set.  considered_relids
      * lists all relids sets we've already tried.
      */
-    for (indexcol = 0; indexcol < index->ncolumns; indexcol++) {
+    for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++) {
         /* Consider each applicable simple join clause */
         considered_clauses += list_length(jclauseset->indexclauses[indexcol]);
         consider_index_join_outer_rels(root,
@@ -521,7 +544,7 @@ static void get_join_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInf
     errorno = memset_s(&clauseset, sizeof(IndexClauseSet), 0, sizeof(clauseset));
     securec_check(errorno, "\0", "\0");
 
-    for (indexcol = 0; indexcol < index->ncolumns; indexcol++) {
+    for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++) {
         ListCell* lc = NULL;
 
         /* First find applicable simple join clauses */
@@ -670,6 +693,7 @@ static inline bool index_relation_has_bucket(IndexOptInfo* index)
     heap_close(rel, NoLock);
     return hasBucket;
 }
+
 /*
  * build_index_paths
  *	  Given an index and a set of index clauses for it, construct zero
@@ -771,7 +795,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
     found_clause = false;
     found_lower_saop_clause = false;
     outer_relids = NULL;
-    for (indexcol = 0; indexcol < index->ncolumns; indexcol++) {
+    for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++) {
         ListCell* lc = NULL;
 
         foreach (lc, clauses->indexclauses[indexcol]) {
@@ -930,7 +954,8 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
  * 'clauses' is the current list of clauses (RestrictInfo nodes)
  * 'other_clauses' is the list of additional upper-level clauses
  */
-static List* build_paths_for_OR(PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses)
+static List* build_paths_for_OR(
+    PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses, bool justUseGloalPartIndex)
 {
     List* result = NIL;
     List* all_clauses = NIL; /* not computed till needed */
@@ -945,6 +970,11 @@ static List* build_paths_for_OR(PlannerInfo* root, RelOptInfo* rel, List* clause
         /* Ignore index if it doesn't support bitmap scans */
         if (!index->amhasgetbitmap)
             continue;
+
+        /* Ignore global partition index if caller don't set use global part index flag */
+        if (index->isGlobal != justUseGloalPartIndex) {
+            continue;
+        }
 
         /*
          * Ignore partial indexes that do not match the query.	If a partial
@@ -1051,6 +1081,7 @@ List* generate_bitmap_or_paths(
         foreach (j, ((BoolExpr*)rinfo->orclause)->args) {
             Node* orarg = (Node*)lfirst(j);
             List* indlist = NIL;
+            List* globalIndexList = NIL;
 
             /* OR arguments should be ANDs or sub-RestrictInfos */
             if (and_clause(orarg)) {
@@ -1059,11 +1090,24 @@ List* generate_bitmap_or_paths(
                 if (restriction_only)
                     andargs = drop_indexable_join_clauses(rel, andargs);
 
-                indlist = build_paths_for_OR(root, rel, andargs, all_clauses);
+                indlist = build_paths_for_OR(root, rel, andargs, all_clauses, false);
 
                 /* Recurse in case there are sub-ORs */
-                indlist =
-                    list_concat(indlist, generate_bitmap_or_paths(root, rel, andargs, all_clauses, restriction_only));
+                indlist = list_concat(
+                    indlist, generate_bitmap_or_paths(root, rel, andargs, all_clauses, restriction_only));
+
+                /* If nothing matched this arm, we can't do anything with this OR clause */
+                if (indlist == NIL) {
+                    pathlist = NIL;
+                    break;
+                }
+
+                if (rel->isPartitionedTable) {
+                    globalIndexList = build_paths_for_OR(root, rel, andargs, all_clauses, true);
+                    /* Recurse in case there are sub-ORs */
+                    globalIndexList = list_concat(globalIndexList,
+                        GenerateBitmapOrPathsUseGPI(root, rel, andargs, all_clauses, restriction_only));
+                }
             } else {
                 List* orargs = NIL;
 
@@ -1077,14 +1121,124 @@ List* generate_bitmap_or_paths(
                 if (restriction_only)
                     orargs = drop_indexable_join_clauses(rel, orargs);
 
-                indlist = build_paths_for_OR(root, rel, orargs, all_clauses);
+                indlist = build_paths_for_OR(root, rel, orargs, all_clauses, false);
+
+                /* If nothing matched this arm, we can't do anything with this OR clause */
+                if (indlist == NIL) {
+                    pathlist = NIL;
+                    break;
+                }
+
+                if (rel->isPartitionedTable) {
+                    globalIndexList = build_paths_for_OR(root, rel, orargs, all_clauses, true);
+                }
+            }
+
+            /*
+             * OK, pick the most promising AND combination, and add it to
+             * pathlist.
+             */
+            bitmapqual = choose_bitmap_and(root, rel, indlist, globalIndexList);
+            pathlist = lappend(pathlist, bitmapqual);
+        }
+
+        /*
+         * If we have a match for every arm, then turn them into a
+         * BitmapOrPath, and add to result list.
+         */
+        if (pathlist != NIL) {
+            bitmapqual = (Path*)create_bitmap_or_path(root, rel, pathlist);
+            result = lappend(result, bitmapqual);
+        }
+    }
+
+    return result;
+}
+
+/*
+ * GenerateBitmapOrPathsUseGlobalPartIndex
+ *		Look through the list of clauses to find OR clauses, and generate
+ *		a BitmapOrPath for each one we can handle that way.  Return a list
+ *		of the generated BitmapOrPaths.
+ *
+ * other_clauses is a list of additional clauses that can be assumed true
+ * for the purpose of generating indexquals, but are not to be searched for
+ * ORs.  (See build_paths_for_OR() for motivation.)
+ *
+ * If restriction_only is true, ignore OR elements that are join clauses.
+ * When using this feature it is caller's responsibility that neither clauses
+ * nor other_clauses contain any join clauses that are not ORs, as we do not
+ * re-filter those lists.
+ *
+ * Notes: Just for partition table and just use global partition index.
+ */
+List* GenerateBitmapOrPathsUseGPI(
+    PlannerInfo* root, RelOptInfo* rel, const List* clauses, List* other_clauses, bool restriction_only)
+{
+    List* result = NIL;
+    List* all_clauses = NIL;
+    ListCell* lc = NULL;
+
+    AssertEreport(rel->isPartitionedTable, MOD_OPT, "rel is incorrect");
+
+    /*
+     * We can use both the current and other clauses as context for
+     * build_paths_for_OR; no need to remove ORs from the lists.
+     */
+    all_clauses = list_concat(list_copy(clauses), other_clauses);
+
+    foreach (lc, clauses) {
+        RestrictInfo* rinfo = (RestrictInfo*)lfirst(lc);
+        List* pathlist = NIL;
+        Path* bitmapqual = NULL;
+        ListCell* j = NULL;
+
+        AssertEreport(IsA(rinfo, RestrictInfo), MOD_OPT, "Restriction clause is incorrect");
+        /* Ignore RestrictInfos that aren't ORs */
+        if (!restriction_is_or_clause(rinfo))
+            continue;
+
+        /*
+         * We must be able to match at least one index to each of the arms of
+         * the OR, else we can't use it.
+         */
+        pathlist = NIL;
+        foreach (j, ((BoolExpr*)rinfo->orclause)->args) {
+            Node* orarg = (Node*)lfirst(j);
+            List* globalIndexList = NIL;
+
+            /* OR arguments should be ANDs or sub-RestrictInfos */
+            if (and_clause(orarg)) {
+                List* andargs = ((BoolExpr*)orarg)->args;
+
+                if (restriction_only)
+                    andargs = drop_indexable_join_clauses(rel, andargs);
+
+                globalIndexList = build_paths_for_OR(root, rel, andargs, all_clauses, true);
+                /* Recurse in case there are sub-ORs */
+                globalIndexList = list_concat(
+                    globalIndexList, GenerateBitmapOrPathsUseGPI(root, rel, andargs, all_clauses, restriction_only));
+            } else {
+                List* orargs = NIL;
+
+                AssertEreport(IsA(orarg, RestrictInfo), MOD_OPT, "Restriction clause is incorrect");
+
+                AssertEreport(restriction_is_or_clause((RestrictInfo*)orarg) == false,
+                    MOD_OPT,
+                    "Restriction clause does not contain OR");
+                orargs = list_make1(orarg);
+
+                if (restriction_only)
+                    orargs = drop_indexable_join_clauses(rel, orargs);
+
+                globalIndexList = build_paths_for_OR(root, rel, orargs, all_clauses, true);
             }
 
             /*
              * If nothing matched this arm, we can't do anything with this OR
              * clause.
              */
-            if (indlist == NIL) {
+            if (globalIndexList == NIL) {
                 pathlist = NIL;
                 break;
             }
@@ -1093,7 +1247,7 @@ List* generate_bitmap_or_paths(
              * OK, pick the most promising AND combination, and add it to
              * pathlist.
              */
-            bitmapqual = choose_bitmap_and(root, rel, indlist);
+            bitmapqual = choose_bitmap_and(root, rel, globalIndexList, NIL);
             pathlist = lappend(pathlist, bitmapqual);
         }
 
@@ -1136,6 +1290,112 @@ static List* drop_indexable_join_clauses(RelOptInfo* rel, List* clauses)
 }
 
 /*
+ * As a heuristic, we first check for paths using exactly the same sets of
+ * WHERE clauses + index predicate conditions, and reject all but the
+ * cheapest-to-scan in any such group.	This primarily gets rid of indexes
+ * that include the interesting columns but also irrelevant columns.  (In
+ * situations where the DBA has gone overboard on creating variant
+ * indexes, this can make for a very large reduction in the number of
+ * paths considered further.)
+ */
+static PathClauseUsage** GetPathClauseUsage(List* paths, List* clauselist, int* npaths)
+{
+    int tmpPaths = list_length(paths);
+    PathClauseUsage** pathinfoarray = NULL;
+    PathClauseUsage* pathinfo = NULL;
+    int i;
+    ListCell* l = NULL;
+
+    /* Input paths is NIL */
+    if (tmpPaths == 0) {
+        *npaths = 0;
+        return NULL;
+    }
+
+    pathinfoarray = (PathClauseUsage**)palloc(tmpPaths * sizeof(PathClauseUsage*));
+    tmpPaths = 0;
+    foreach (l, paths) {
+        Path* ipath = (Path*)lfirst(l);
+
+        pathinfo = classify_index_clause_usage(ipath, &clauselist);
+        for (i = 0; i < tmpPaths; i++) {
+            if (bms_equal(pathinfo->clauseids, pathinfoarray[i]->clauseids))
+                break;
+        }
+        if (i < tmpPaths) {
+            /* duplicate clauseids, keep the cheaper one */
+            Cost ncost;
+            Cost ocost;
+            Selectivity nselec;
+            Selectivity oselec;
+
+            cost_bitmap_tree_node(pathinfo->path, &ncost, &nselec);
+            cost_bitmap_tree_node(pathinfoarray[i]->path, &ocost, &oselec);
+            if (ncost < ocost)
+                pathinfoarray[i] = pathinfo;
+        } else {
+            /* not duplicate clauseids, add to array */
+            pathinfoarray[tmpPaths++] = pathinfo;
+        }
+    }
+
+    *npaths = tmpPaths;
+
+    return pathinfoarray;
+}
+
+/*
+ * For each surviving index, consider it as an "AND group leader", and see
+ * whether adding on any of the later indexes results in an AND path with
+ * cheaper total cost than before. Then take the cheapest AND group.
+ */
+static void ChooseBitmapAndWithMultiIndex(
+    PlannerInfo* root, RelOptInfo* rel, ChooseBitmapAndInfo* chooseInfo, PathClauseUsage** pathInfos, int npaths)
+{
+    PathClauseUsage* pathinfo = NULL;
+    ListCell* l = NULL;
+
+    for (int j = chooseInfo->startPath; j < npaths; j++) {
+        Cost newcost;
+
+        pathinfo = pathInfos[j];
+        /* Check for redundancy */
+        if (bms_overlap(pathinfo->clauseids, chooseInfo->clauseidsofar))
+            continue; /* consider it redundant */
+        if (pathinfo->preds != NIL) {
+            bool redundant = false;
+
+            /* we check each predicate clause separately */
+            foreach (l, pathinfo->preds) {
+                Node* np = (Node*)lfirst(l);
+
+                if (predicate_implied_by(list_make1(np), chooseInfo->qualsofar)) {
+                    redundant = true;
+                    break; /* out of inner foreach loop */
+                }
+            }
+            if (redundant)
+                continue;
+        }
+        /* tentatively add new path to paths, so we can estimate cost */
+        chooseInfo->paths = lappend(chooseInfo->paths, pathinfo->path);
+        newcost = bitmap_and_cost_est(root, rel, chooseInfo->paths);
+        if (newcost < chooseInfo->costsofar || u_sess->attr.attr_sql.force_bitmapand) {
+            /* keep new path in paths, update subsidiary variables */
+            chooseInfo->costsofar = newcost;
+            chooseInfo->qualsofar = list_concat(chooseInfo->qualsofar, list_copy(pathinfo->quals));
+            chooseInfo->qualsofar = list_concat(chooseInfo->qualsofar, list_copy(pathinfo->preds));
+            chooseInfo->clauseidsofar = bms_add_members(chooseInfo->clauseidsofar, pathinfo->clauseids);
+            chooseInfo->lastcell = lnext(chooseInfo->lastcell);
+        } else {
+            /* reject new path, remove it from paths list */
+            chooseInfo->paths = list_delete_cell(chooseInfo->paths, lnext(chooseInfo->lastcell), chooseInfo->lastcell);
+        }
+        AssertEreport(lnext(chooseInfo->lastcell) == NULL, MOD_OPT, "Last cell is NULL");
+    }
+}
+
+/*
  * choose_bitmap_and
  *		Given a nonempty list of bitmap paths, AND them into one path.
  *
@@ -1146,7 +1406,7 @@ static List* drop_indexable_join_clauses(RelOptInfo* rel, List* clauses)
  * The result is either a single one of the inputs, or a BitmapAndPath
  * combining multiple inputs.
  */
-static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths)
+static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, List* globalPartIndexPaths)
 {
     int npaths = list_length(paths);
     PathClauseUsage** pathinfoarray;
@@ -1154,11 +1414,12 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths)
     List* clauselist = NIL;
     List* bestpaths = NIL;
     Cost bestcost = 0;
-    int i, j;
-    ListCell* l = NULL;
+    int i;
+    int globalPartPaths = list_length(globalPartIndexPaths);
+    PathClauseUsage** globalPathinfoarray;
 
     AssertEreport(npaths > 0, MOD_OPT, "Path number is incorrect");
-    if (npaths == 1)
+    if (npaths == 1 && globalPartPaths == 0)
         return (Path*)linitial(paths); /* easy case */
 
     /*
@@ -1214,40 +1475,22 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths)
      * same set of clauses; keep only the cheapest-to-scan of any such groups.
      * The surviving paths are put into an array for qsort'ing.
      */
-    pathinfoarray = (PathClauseUsage**)palloc(npaths * sizeof(PathClauseUsage*));
-    clauselist = NIL;
-    npaths = 0;
-    foreach (l, paths) {
-        Path* ipath = (Path*)lfirst(l);
+    pathinfoarray = GetPathClauseUsage(paths, clauselist, &npaths);
 
-        pathinfo = classify_index_clause_usage(ipath, &clauselist);
-        for (i = 0; i < npaths; i++) {
-            if (bms_equal(pathinfo->clauseids, pathinfoarray[i]->clauseids))
-                break;
-        }
-        if (i < npaths) {
-            /* duplicate clauseids, keep the cheaper one */
-            Cost ncost;
-            Cost ocost;
-            Selectivity nselec;
-            Selectivity oselec;
-
-            cost_bitmap_tree_node(pathinfo->path, &ncost, &nselec);
-            cost_bitmap_tree_node(pathinfoarray[i]->path, &ocost, &oselec);
-            if (ncost < ocost)
-                pathinfoarray[i] = pathinfo;
-        } else {
-            /* not duplicate clauseids, add to array */
-            pathinfoarray[npaths++] = pathinfo;
-        }
-    }
+    /* Global part index path and local part index path use same clauselist */
+    globalPathinfoarray = GetPathClauseUsage(globalPartIndexPaths, clauselist, &globalPartPaths);
 
     /* If only one surviving path, we're done */
-    if (npaths == 1)
+    if (npaths == 1 && globalPartPaths == 0)
         return pathinfoarray[0]->path;
 
     /* Sort the surviving paths by index access cost */
     qsort(pathinfoarray, (size_t)npaths, sizeof(PathClauseUsage*), path_usage_comparator);
+
+    /* Sort the surviving paths by index access cost for global partition index paths */
+    if (globalPartPaths > 1) {
+        qsort(globalPathinfoarray, (size_t)globalPartPaths, sizeof(PathClauseUsage*), path_usage_comparator);
+    }
 
     /*
      * For each surviving index, consider it as an "AND group leader", and see
@@ -1255,65 +1498,37 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths)
      * cheaper total cost than before.	Then take the cheapest AND group.
      */
     for (i = 0; i < npaths; i++) {
-        Cost costsofar;
-        List* qualsofar = NIL;
-        Bitmapset* clauseidsofar = NULL;
-        ListCell* lastcell = NULL;
+        ChooseBitmapAndInfo chooseInfo;
 
         pathinfo = pathinfoarray[i];
-        paths = list_make1(pathinfo->path);
-        costsofar = bitmap_scan_cost_est(root, rel, pathinfo->path);
-        qualsofar = list_concat(list_copy(pathinfo->quals), list_copy(pathinfo->preds));
-        clauseidsofar = bms_copy(pathinfo->clauseids);
-        lastcell = list_head(paths); /* for quick deletions */
+        chooseInfo.paths = list_make1(pathinfo->path);
+        chooseInfo.costsofar = bitmap_scan_cost_est(root, rel, pathinfo->path);
+        chooseInfo.qualsofar = list_concat(list_copy(pathinfo->quals), list_copy(pathinfo->preds));
+        chooseInfo.clauseidsofar = bms_copy(pathinfo->clauseids);
+        chooseInfo.startPath = i + 1;
+        chooseInfo.lastcell = list_head(chooseInfo.paths); /* for quick deletions */
 
-        for (j = i + 1; j < npaths; j++) {
-            Cost newcost;
+        ChooseBitmapAndWithMultiIndex(root, rel, &chooseInfo, pathinfoarray, npaths);
 
-            pathinfo = pathinfoarray[j];
-            /* Check for redundancy */
-            if (bms_overlap(pathinfo->clauseids, clauseidsofar))
-                continue; /* consider it redundant */
-            if (pathinfo->preds != NIL) {
-                bool redundant = false;
-
-                /* we check each predicate clause separately */
-                foreach (l, pathinfo->preds) {
-                    Node* np = (Node*)lfirst(l);
-
-                    if (predicate_implied_by(list_make1(np), qualsofar)) {
-                        redundant = true;
-                        break; /* out of inner foreach loop */
-                    }
-                }
-                if (redundant)
-                    continue;
-            }
-            /* tentatively add new path to paths, so we can estimate cost */
-            paths = lappend(paths, pathinfo->path);
-            newcost = bitmap_and_cost_est(root, rel, paths);
-            if (newcost < costsofar || u_sess->attr.attr_sql.force_bitmapand) {
-                /* keep new path in paths, update subsidiary variables */
-                costsofar = newcost;
-                qualsofar = list_concat(qualsofar, list_copy(pathinfo->quals));
-                qualsofar = list_concat(qualsofar, list_copy(pathinfo->preds));
-                clauseidsofar = bms_add_members(clauseidsofar, pathinfo->clauseids);
-                lastcell = lnext(lastcell);
-            } else {
-                /* reject new path, remove it from paths list */
-                paths = list_delete_cell(paths, lnext(lastcell), lastcell);
-            }
-            AssertEreport(lnext(lastcell) == NULL, MOD_OPT, "Last cell is NULL");
+        /*
+         * The local partition index and global partition index form bitmapAnd,
+         * the final result is the local partition index.
+         *
+         * Notes: For global partition index, the start judgment point is 0.
+         */
+        if (globalPartPaths > 0) {
+            chooseInfo.startPath = 0;
+            ChooseBitmapAndWithMultiIndex(root, rel, &chooseInfo, globalPathinfoarray, globalPartPaths);
         }
 
         /* Keep the cheapest AND-group (or singleton) */
-        if (i == 0 || costsofar < bestcost) {
-            bestpaths = paths;
-            bestcost = costsofar;
+        if (i == 0 || chooseInfo.costsofar < bestcost) {
+            bestpaths = chooseInfo.paths;
+            bestcost = chooseInfo.costsofar;
         }
 
         /* some easy cleanup (we don't try real hard though) */
-        list_free_ext(qualsofar);
+        list_free_ext(chooseInfo.qualsofar);
 
         if (u_sess->attr.attr_sql.force_bitmapand)
             break;
@@ -1750,7 +1965,7 @@ static void match_eclass_clauses_to_index(PlannerInfo* root, IndexOptInfo* index
     if (!index->rel->has_eclass_joins)
         return;
 
-    for (indexcol = 0; indexcol < index->ncolumns; indexcol++) {
+    for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++) {
         List* clauses = NIL;
 
         clauses = generate_implied_equalities_for_indexcol(root, index, indexcol);
@@ -1818,7 +2033,7 @@ static void match_clause_to_index(IndexOptInfo* index, RestrictInfo* rinfo, Inde
         return;
 
     /* OK, check each index column for a match */
-    for (indexcol = 0; indexcol < index->ncolumns; indexcol++) {
+    for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++) {
         if (match_clause_to_indexcol(index, indexcol, rinfo)) {
             clauseset->indexclauses[indexcol] = list_append_unique_ptr(clauseset->indexclauses[indexcol], rinfo);
             clauseset->nonempty = true;
@@ -1894,8 +2109,8 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
 {
     Expr* clause = rinfo->clause;
     Index index_relid = index->rel->relid;
-    Oid opfamily = index->opfamily[indexcol];
-    Oid idxcollation = index->indexcollations[indexcol];
+    Oid opfamily;
+    Oid idxcollation;
     Node* leftop = NULL;
     Node* rightop = NULL;
     Relids left_relids;
@@ -1904,6 +2119,9 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
     Oid expr_coll;
     bool plain_op = false;
 
+    Assert(indexcol < index->nkeycolumns);
+    opfamily = index->opfamily[indexcol];
+    idxcollation = index->indexcollations[indexcol];
     /*
      * Never match pseudoconstants to indexes.	(Normally this could not
      * happen anyway, since a pseudoconstant clause couldn't contain a Var,
@@ -2152,7 +2370,7 @@ static void match_pathkeys_to_index(
              * amcanorderbyop.	We might need different logic in future for
              * other implementations.
              */
-            for (indexcol = 0; indexcol < index->ncolumns; indexcol++) {
+            for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++) {
                 Expr* expr = NULL;
 
                 expr = match_clause_to_ordering_op(index, indexcol, member->em_expr, pathkey->pk_opfamily);
@@ -2203,14 +2421,18 @@ static void match_pathkeys_to_index(
  */
 static Expr* match_clause_to_ordering_op(IndexOptInfo* index, int indexcol, Expr* clause, Oid pk_opfamily)
 {
-    Oid opfamily = index->opfamily[indexcol];
-    Oid idxcollation = index->indexcollations[indexcol];
+    Oid opfamily;
+    Oid idxcollation;
     Node* leftop = NULL;
     Node* rightop = NULL;
     Oid expr_op;
     Oid expr_coll;
     Oid sortfamily;
     bool commuted = false;
+
+    Assert(indexcol < index->nkeycolumns);
+    opfamily = index->opfamily[indexcol];
+    idxcollation = index->indexcollations[indexcol];
 
     /*
      * Clause must be a binary opclause.
@@ -2376,8 +2598,12 @@ void check_partial_indexes(PlannerInfo* root, RelOptInfo* rel)
  */
 bool eclass_member_matches_indexcol(EquivalenceClass* ec, EquivalenceMember* em, IndexOptInfo* index, int indexcol)
 {
-    Oid curFamily = index->opfamily[indexcol];
-    Oid curCollation = index->indexcollations[indexcol];
+    Oid curFamily;
+    Oid curCollation;
+
+    Assert(indexcol < index->nkeycolumns);
+    curFamily = index->opfamily[indexcol];
+    curCollation = index->indexcollations[indexcol];
 
     /*
      * If it's a btree index, we can reject it if its opfamily isn't
@@ -2485,7 +2711,7 @@ bool relation_has_unique_index_for(
          * Try to find each index column in the lists of conditions.  This is
          * O(N^2) or worse, but we expect all the lists to be short.
          */
-        for (c = 0; c < ind->ncolumns; c++) {
+        for (c = 0; c < ind->nkeycolumns; c++) {
             bool matched = false;
             ListCell* lc = NULL;
             ListCell* lc2 = NULL;
@@ -2556,7 +2782,7 @@ bool relation_has_unique_index_for(
         }
 
         /* Matched all columns of this index? */
-        if (c == ind->ncolumns)
+        if (c == ind->nkeycolumns)
             return true;
     }
 
@@ -2916,8 +3142,11 @@ void expand_indexqual_conditions(
         RestrictInfo* rinfo = (RestrictInfo*)lfirst(lcc);
         int indexcol = lfirst_int(lci);
         Expr* clause = rinfo->clause;
-        Oid curFamily = index->opfamily[indexcol];
-        Oid curCollation = index->indexcollations[indexcol];
+        Oid curFamily;
+        Oid curCollation;
+        Assert(indexcol < index->nkeycolumns);
+        curFamily = index->opfamily[indexcol];
+        curCollation = index->indexcollations[indexcol];
 
         /* First check for boolean cases */
         if (IsBooleanOpfamily(curFamily)) {
@@ -3248,13 +3477,13 @@ Expr* adjust_rowcompare_for_index(
         /*
          * The Var side can match any column of the index.
          */
-        for (i = 0; i < index->ncolumns; i++) {
+        for (i = 0; i < index->nkeycolumns; i++) {
             if (match_index_to_operand(varop, i, index) &&
                 get_op_opfamily_strategy(expr_op, index->opfamily[i]) == op_strategy &&
                 IndexCollMatchesExprColl(index->indexcollations[i], lfirst_oid(collids_cell)))
                 break;
         }
-        if (i >= index->ncolumns)
+        if (i >= index->nkeycolumns)
             break; /* no match found */
 
         /* Add column number to returned list */

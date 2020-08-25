@@ -242,6 +242,7 @@ PgObjectType GetPgObjectTypePgClass(char relkind)
             objectType = OBJECT_TYPE_SEQUENCE;
             break;
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
             objectType = OBJECT_TYPE_INDEX;
             break;
         default:

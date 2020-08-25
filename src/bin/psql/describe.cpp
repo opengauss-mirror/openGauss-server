@@ -1408,7 +1408,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     } else {
         appendPQExpBuffer(&buf, "\n  NULL AS attcollation");
     }
-    if (tableinfo.relkind == 'i') {
+    if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I') {
         appendPQExpBuffer(&buf, ",\n  pg_catalog.pg_get_indexdef(a.attrelid, a.attnum, TRUE) AS indexdef");
     } else {
         appendPQExpBuffer(&buf, ",\n  NULL AS indexdef");
@@ -1437,7 +1437,8 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     }
 
     appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_attribute a");
-    appendPQExpBuffer(&buf, "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped", oid);
+    appendPQExpBuffer(&buf,
+        "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped AND a.attname <> 'tableoid'", oid);
     appendPQExpBuffer(&buf, "\nORDER BY a.attnum;");
 
     res = PSQLexec(buf.data, false);
@@ -1467,6 +1468,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             printfPQExpBuffer(&title, _("Sequence \"%s.%s\""), schemaname, relationname);
             break;
         case 'i':
+        case 'I':
             if (tableinfo.relpersistence == 'u')
                 printfPQExpBuffer(&title, _("Unlogged index \"%s.%s\""), schemaname, relationname);
             else
@@ -1506,7 +1508,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     if (tableinfo.relkind == 'S')
         headers[cols++] = gettext_noop("Value");
 
-    if (tableinfo.relkind == 'i')
+    if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I')
         headers[cols++] = gettext_noop("Definition");
 
     if (tableinfo.relkind == 'f' && pset.sversion >= 90200)
@@ -1585,7 +1587,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             printTableAddCell(&cont, seq_values[i], false, false);
 
         /* Expression for index column */
-        if (tableinfo.relkind == 'i')
+        if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I')
             printTableAddCell(&cont, PQgetvalue(res, i, 6), false, false);
 
         /* FDW options for foreign table column, only for 9.2 or later */
@@ -1620,7 +1622,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     }
 
     /* Make footers */
-    if (tableinfo.relkind == 'i') {
+    if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I') {
         /* Footer information about an index */
         PGresult* result = NULL;
 
@@ -3028,6 +3030,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
         " WHEN 'v' THEN '%s'"
         " WHEN 'm' THEN '%s'"
         " WHEN 'i' THEN '%s'"
+        " WHEN 'I' THEN '%s'"
         " WHEN 'S' THEN '%s'"
         " WHEN 's' THEN '%s'"
         " WHEN 'f' THEN '%s'"
@@ -3038,6 +3041,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
         gettext_noop("table"),
         gettext_noop("view"),
         gettext_noop("materialized view"),
+        gettext_noop("index"),
         gettext_noop("index"),
         gettext_noop("sequence"),
         gettext_noop("special"),
@@ -3086,7 +3090,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
     if (showMatViews)
         appendPQExpBuffer(&buf, "'m',");
     if (showIndexes)
-        appendPQExpBuffer(&buf, "'i',");
+        appendPQExpBuffer(&buf, "'i','I',");
     if (showSeq)
         appendPQExpBuffer(&buf, "'S',");
     if (showSystem || NULL != pattern)

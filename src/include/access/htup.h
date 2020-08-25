@@ -1125,6 +1125,16 @@ extern MinimalTuple heapFormMinimalTuple(HeapTuple tuple, TupleDesc tuple_desc);
 
 extern MinimalTuple heapFormMinimalTuple(HeapTuple tuple, TupleDesc tuple_desc, Page page);
 
+/* for GPI clean up metadata */
+typedef bool (*KeepInvisbleTupleFunc)(Datum checkDatum);
+typedef struct KeepInvisbleOpt {
+    Oid tableOid;
+    int checkAttnum;
+    KeepInvisbleTupleFunc checkKeepFunc;
+} KeepInvisbleOpt;
+
+bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc = NULL);
+
 // for ut test
 extern HeapTuple test_HeapUncompressTup2(HeapTuple tuple, TupleDesc tuple_desc, Page dict_page);
 

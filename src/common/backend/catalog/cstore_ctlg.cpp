@@ -487,6 +487,7 @@ bool CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition)
 
     IndexInfo* indexInfo = makeNode(IndexInfo);
     indexInfo->ii_NumIndexAttrs = 2;
+    indexInfo->ii_NumIndexKeyAttrs = 2;
     indexInfo->ii_KeyAttrNumbers[0] = 1;
     indexInfo->ii_KeyAttrNumbers[1] = 2;
     indexInfo->ii_Expressions = NIL;
@@ -512,8 +513,7 @@ bool CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition)
     coloptions[1] = 0;
 
     IndexCreateExtraArgs extra;
-    extra.existingPSortOid = InvalidOid;
-    extra.isPartitionedIndex = false;
+    SetIndexCreateExtraArgs(&extra, InvalidOid, false, false);
 
     if (u_sess->proc_cxt.IsBinaryUpgrade) {
         u_sess->upg_cxt.binary_upgrade_next_index_pg_class_oid = bupgrade_get_next_cudesc_index_oid();

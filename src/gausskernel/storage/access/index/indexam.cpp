@@ -177,8 +177,7 @@ Relation index_open(Oid relation_id, LOCKMODE lockmode, int2 bucket_id)
     Relation r;
 
     r = relation_open(relation_id, lockmode, bucket_id);
-
-    if (r->rd_rel->relkind != RELKIND_INDEX)
+    if (r->rd_rel->relkind != RELKIND_INDEX && r->rd_rel->relkind != RELKIND_GLOBAL_INDEX)
         ereport(
             ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not an index", RelationGetRelationName(r))));
     return r;
@@ -260,6 +259,10 @@ IndexScanDesc index_beginscan(
      */
     scan->heapRelation = heap_relation;
     scan->xs_snapshot = snapshot;
+
+    if (scan->xs_want_ext_oid) {
+        scan->xs_gpi_scan->parentRelation = heap_relation;
+    }
 
     return scan;
 }
@@ -377,6 +380,10 @@ void index_endscan(IndexScanDesc scan)
 
     /* Release index refcount acquired by index_beginscan */
     RelationDecrementReferenceCount(scan->indexRelation);
+
+    if (scan->xs_gpi_scan != NULL) {
+        GPIScanEnd(scan->xs_gpi_scan);
+    }
 
     /* Release the scan data structure itself */
     IndexScanEnd(scan);
@@ -608,8 +615,19 @@ HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction)
             /* Time to fetch the next TID from the index */
             tid = index_getnext_tid(scan, direction);
             /* If we're out of index entries, we're done */
-            if (tid == NULL)
+            if (tid == NULL) {
                 break;
+            }
+            if (IndexScanNeedSwitchPartRel(scan)) {
+                /*
+                 * Change the heapRelation in indexScanDesc to Partition Relation of current index
+                 */
+                if (!GPIGetNextPartRelation(scan->xs_gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+                    continue;
+                } 
+                scan->heapRelation = scan->xs_gpi_scan->fakePartRelation;
+            }
+
         } else {
             /*
              * We are resuming scan of a HOT chain after having returned an

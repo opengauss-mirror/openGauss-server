@@ -1508,15 +1508,14 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
 
     TupleDesc oldTupDesc;
     TupleDesc newTupDesc;
+    Relation heapRelation = NULL;
     int natts;
     Datum* values = NULL;
     bool* isnull = NULL;
     IndexScanDesc indexScan;
     HeapScanDesc heapScan;
     bool use_wal = XLogIsNeeded() && RelationNeedsWAL(NewHeap);
-    ;
     bool is_system_catalog = IsSystemRelation(OldHeap);
-    ;
     RewriteState rwstate;
     Tuplesortstate* tuplesort = NULL;
     double num_tuples = 0;
@@ -1561,10 +1560,18 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
      * Prepare to scan the OldHeap.  To ensure we see recently-dead tuples
      * that still need to be copied, we scan with SnapshotAny and use
      * HeapTupleSatisfiesVacuum for the visibility test.
+     * If index is global index, we will use indexScan to copy tuples.
      */
     if (OldIndex != NULL && !use_sort) {
         heapScan = NULL;
-        indexScan = index_beginscan(OldHeap, OldIndex, SnapshotAny, 0, 0);
+        if (RelationIsGlobalIndex(OldIndex)) {
+            /* Open the parent heap relation. */
+            Oid heapId = IndexGetRelation(RelationGetRelid(OldIndex), false);
+            heapRelation = heap_open(heapId, NoLock);
+            indexScan = index_beginscan(heapRelation, OldIndex, SnapshotAny, 0, 0);
+        } else {
+            indexScan = index_beginscan(OldHeap, OldIndex, SnapshotAny, 0, 0);
+        }
         index_rescan(indexScan, NULL, 0, NULL, 0);
     } else {
         heapScan = heap_beginscan(OldHeap, SnapshotAny, 0, (ScanKey)NULL);
@@ -1624,6 +1631,10 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
             tuple = index_getnext(indexScan, ForwardScanDirection);
             if (tuple == NULL)
                 break;
+
+            if (RelationGetRelid(OldHeap) != tuple->t_tableOid) {
+                continue;
+            }
 
             /* Since we used no scan keys, should never need to recheck */
             if (indexScan->xs_recheck)
@@ -1742,6 +1753,12 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
 
     if (indexScan != NULL)
         index_endscan(indexScan);
+
+    if (RelationIsValid(heapRelation)) {
+        Assert(RelationIsGlobalIndex(OldIndex));
+        heap_close(heapRelation, NoLock);
+    }
+
     if (heapScan != NULL)
         heap_endscan(heapScan);
 
@@ -2006,16 +2023,20 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
     if (OidIsValid(indexOid)) {
         Oid partIndexOid = InvalidOid;
         partTabIndexRel = index_open(indexOid, NoLock);
-        partIndexOid = getPartitionIndexOid(indexOid, RelationGetRelid(oldHeap));
-        partIndexRel = partitionOpen(partTabIndexRel, partIndexOid, ExclusiveLock);
-        if (!partIndexRel->pd_part->indisusable) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("can not cluster partition %s using %s bacause of unusable local index",
-                        getPartitionName(oldHeap->rd_id, false),
-                        get_rel_name(indexOid))));
+        if (RelationIsGlobalIndex(partTabIndexRel)) {
+            oldIndex = partTabIndexRel;
+        } else {
+            partIndexOid = getPartitionIndexOid(indexOid, RelationGetRelid(oldHeap));
+            partIndexRel = partitionOpen(partTabIndexRel, partIndexOid, ExclusiveLock);
+            if (!partIndexRel->pd_part->indisusable) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("can not cluster partition %s using %s bacause of unusable local index",
+                            getPartitionName(oldHeap->rd_id, false),
+                            get_rel_name(indexOid))));
+            }
+            oldIndex = partitionGetRelation(partTabIndexRel, partIndexRel);
         }
-        oldIndex = partitionGetRelation(partTabIndexRel, partIndexRel);
     } else {
         oldIndex = NULL;
     }
@@ -2097,6 +2118,11 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
     /* record vacuumed tuple for reporting stat to PgStatCollector */
     if (ptrDeleteTupleNum != NULL)
         *ptrDeleteTupleNum = tups_vacuumed;
+
+    if (RelationIsValid(partTabIndexRel) && RelationIsGlobalIndex(partTabIndexRel)) {
+        index_close(partTabIndexRel, NoLock);
+        return;
+    }
 
     if (oldIndex != NULL) {
         releaseDummyRelation(&oldIndex);
@@ -2262,7 +2288,7 @@ static void swap_relation_files(
      * set rel1's frozen Xid
      */
     nctup = NULL;
-    if (relform1->relkind != RELKIND_INDEX) {
+    if (relform1->relkind != RELKIND_INDEX && relform1->relkind != RELKIND_GLOBAL_INDEX) {
         Datum values[Natts_pg_class];
         bool nulls[Natts_pg_class];
         bool replaces[Natts_pg_class];
@@ -3093,6 +3119,54 @@ static void reform_and_rewrite_tuple(HeapTuple tuple, TupleDesc oldTupDesc, Tupl
     } else {
         rewrite_heap_tuple(rwstate, tuple, copiedTuple);
         heap_freetuple(copiedTuple);
+    }
+}
+
+/*
+ * GpiVacuumFullMainPartiton
+ *
+ * Clean up global partition index finally for the vacuum full, just reindex all gpi.
+ */
+void GpiVacuumFullMainPartiton(Oid parentOid)
+{
+    Relation parentHeap = NULL;
+    bool result = false;
+
+    /* Check for user-requested abort. */
+    CHECK_FOR_INTERRUPTS();
+
+    // to promote the concurrency of vacuum full on partitions in mppdb version,
+    // degrade lockmode from AccessExclusiveLock to AccessShareLock.
+    t_thrd.storage_cxt.EnlargeDeadlockTimeout = true;
+    parentHeap = try_relation_open(parentOid, AccessExclusiveLock);
+
+    /* If the table has gone away, we can skip processing it */
+    if (!parentHeap)
+        return;
+
+    /*
+     * Don't process temp tables of other backends ... their local buffer
+     * manager is not going to cope.
+     */
+    if (RELATION_IS_OTHER_TEMP(parentHeap)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot vacuum temporary tables of other sessions")));
+    }
+
+    /*
+     * Also check for active uses of the relation in the current transaction,
+     * including open scans and pending AFTER trigger events.
+     */
+    CheckTableNotInUse(parentHeap, "VACUUM");
+
+    /* Rebuild index of partitioned table */
+    int reindexFlags = REINDEX_REL_SUPPRESS_INDEX_USE;
+    result = reindex_relation(parentOid, reindexFlags, REINDEX_ALL_INDEX, NULL, false, GLOBAL_INDEX);
+    heap_close(parentHeap, NoLock);
+
+    if (result) {
+        /* Update this partition's system catalog tuple in pg_partiton to make it can be cleaned up */
+        PartitionSetAllEnabledClean(RelationGetRelid(parentHeap));
     }
 }
 

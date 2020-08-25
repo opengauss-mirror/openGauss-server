@@ -440,6 +440,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
             RelationGetRelid(rel),
             NULL, /* no conkey */
             0,
+            0,
             InvalidOid, /* no domain */
             InvalidOid, /* no index */
             InvalidOid, /* no foreign key */
