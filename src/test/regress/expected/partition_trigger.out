@@ -107,7 +107,6 @@ SELECT * FROM pt1;
  Fri Jan 01 00:00:00 2016
 (33 rows)
 
-
 SELECT * FROM pt2;
           d_date
 --------------------------
