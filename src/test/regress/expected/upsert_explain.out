@@ -296,3 +296,4 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_node values(1,1
 --? Total runtime: .* ms
 (5 rows)
 
+
