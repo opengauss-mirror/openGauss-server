@@ -724,11 +724,11 @@ bool has_rolvcadmin(Oid role_id)
 /*
  * Initialize user identity during normal backend startup
  */
-void InitializeSessionUserId(const char* role_name)
+void InitializeSessionUserId(const char* role_name, Oid role_id)
 {
     HeapTuple role_tup;
     Form_pg_authid rform;
-    Oid role_id;
+    char* rname = NULL;
     /* Audit user login */
     char details[PGAUDIT_MAXLENGTH];
 
@@ -744,23 +744,33 @@ void InitializeSessionUserId(const char* role_name)
         AssertState(!OidIsValid(u_sess->misc_cxt.AuthenticatedUserId));
     }
 
-    role_tup = SearchSysCache1(AUTHNAME, PointerGetDatum(role_name));
-    if (!HeapTupleIsValid(role_tup)) {
-        /* Audit user login */
-        int rcs = snprintf_truncated_s(details,
-            sizeof(details),
-            "login db(%s) failed-the role(%s)does not exist",
-            u_sess->proc_cxt.MyProcPort->database_name,
-            role_name);
-        securec_check_ss(rcs, "", "");
-        pgaudit_user_login(FALSE, u_sess->proc_cxt.MyProcPort->database_name, details);
+    if (role_name != NULL) {
+        role_tup = SearchSysCache1(AUTHNAME, PointerGetDatum(role_name));
+        if (!HeapTupleIsValid(role_tup)) {
+            /* Audit user login */
+            int rcs = snprintf_truncated_s(details,
+                sizeof(details),
+                "login db(%s) failed-the role(%s)does not exist",
+                u_sess->proc_cxt.MyProcPort->database_name,
+                role_name);
+            securec_check_ss(rcs, "", "");
+            pgaudit_user_login(FALSE, u_sess->proc_cxt.MyProcPort->database_name, details);
 
-        ereport(FATAL, (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-            errmsg("Invalid username/password,login denied.")));
+            ereport(FATAL, (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                errmsg("Invalid username/password,login denied.")));
+        }
+    } else {
+        role_tup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(role_id));
+        if (!HeapTupleIsValid(role_tup)) {
+            ereport(FATAL,
+                (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                    errmsg("role with OID %u does not exist", role_id)));
+        }
     }
 
     rform = (Form_pg_authid)GETSTRUCT(role_tup);
     role_id = HeapTupleGetOid(role_tup);
+    rname = NameStr(rform->rolname);
 
     u_sess->misc_cxt.AuthenticatedUserId = role_id;
     u_sess->misc_cxt.AuthenticatedUserIsSuperuser = rform->rolsuper;
@@ -832,10 +842,11 @@ void InitializeSessionUserIdStandalone(void)
 {
     /*
      * This function should only be called in single-user mode and in
-     * autovacuum workers.
+     * autovacuum workers, and in background workers.
      */
     AssertState(!IsUnderPostmaster || IsAutoVacuumWorkerProcess() ||
-        IsJobSchedulerProcess() || IsJobWorkerProcess() || AM_WAL_SENDER);
+        IsJobSchedulerProcess() || IsJobWorkerProcess() || AM_WAL_SENDER ||
+        IsBackgroundWorker);
 
     /* In pooler stateless reuse mode, to reset session userid */
     if (!g_instance.attr.attr_network.PoolerStatelessReuse) {

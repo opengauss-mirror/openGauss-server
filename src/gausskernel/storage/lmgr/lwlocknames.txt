@@ -96,3 +96,4 @@ GPCCommitLock 88
 GPCClearLock 89
 GPCTimelineLock 90
 TsTagsCacheLock  91
+BackgroundWorkerLock	92

@@ -54,7 +54,7 @@ public:
 
     ~PostgresInitializer();
 
-    void SetDatabaseAndUser(const char* in_dbname, Oid dboid, const char* username);
+    void SetDatabaseAndUser(const char* in_dbname, Oid dboid, const char* username, Oid useroid = InvalidOid);
 
     void GetDatabaseName(char* out_dbname);
 
@@ -90,6 +90,8 @@ public:
     Oid m_dboid;
 
     const char* m_username;
+
+    Oid m_useroid;
 
 private:
     void InitThread();

@@ -683,7 +683,7 @@ void PostgresResetUsernamePgoption(const char* username)
                 u_sess->proc_cxt.MyProcPort->user_name = (char*)GetSuperUserName((char*)username);
             }
 
-            InitializeSessionUserId(username);
+            InitializeSessionUserId(username, InvalidOid);
             am_superuser = superuser();
             u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
         }
@@ -1059,6 +1059,7 @@ PostgresInitializer::PostgresInitializer()
     m_indbname = NULL;
     m_dboid = InvalidOid;
     m_username = NULL;
+    m_useroid = InvalidOid;
     m_isSuperUser = false;
     m_fullpath = NULL;
     memset_s(m_dbname, NAMEDATALEN, 0, NAMEDATALEN);
@@ -1074,11 +1075,13 @@ PostgresInitializer::~PostgresInitializer()
     m_username = NULL;
 }
 
-void PostgresInitializer::SetDatabaseAndUser(const char* in_dbname, Oid dboid, const char* username)
+void PostgresInitializer::SetDatabaseAndUser(
+    const char* in_dbname, Oid dboid, const char* username, Oid useroid)
 {
     m_indbname = in_dbname;
     m_dboid = dboid;
     m_username = username;
+    m_useroid = useroid;
 }
 
 void PostgresInitializer::InitBootstrap()
@@ -1489,12 +1492,19 @@ void PostgresInitializer::InitSession()
 
     StartXact();
 
-    if (IsUnderPostmaster) {
-        CheckAuthentication();
-        InitUser();
-    } else {
+    if (!IsUnderPostmaster) {
         CheckAtLeastOneRoles();
         SetSuperUserStandalone();
+    } else if (IsBackgroundWorker) {
+        if (m_username == NULL && !OidIsValid(m_useroid)) {
+			InitializeSessionUserIdStandalone();
+			m_isSuperUser = true;
+        } else {
+            InitUser();
+        }
+    } else {
+        CheckAuthentication();
+        InitUser();
     }
 
     CheckConnPermission();
@@ -1626,7 +1636,7 @@ void PostgresInitializer::SetSuperUserAndDatabase()
 
 void PostgresInitializer::InitUser()
 {
-    InitializeSessionUserId(m_username);
+    InitializeSessionUserId(m_username, m_useroid);
     m_isSuperUser = superuser();
     u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
 }

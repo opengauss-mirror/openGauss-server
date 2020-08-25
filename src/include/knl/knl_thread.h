@@ -69,6 +69,7 @@
 #include "openssl/ossl_typ.h"
 #include "workload/qnode.h"
 #include "tcop/dest.h"
+#include "postmaster/bgworker.h"
 
 #define MAX_PATH_LEN 1024
 
@@ -2702,6 +2703,11 @@ typedef struct knl_t_mot_context {
     unsigned int mbindFlags;
 } knl_t_mot_context;
 
+typedef struct knl_t_bgworker_context {
+    BackgroundWorkerArray *background_worker_data;
+    BackgroundWorker *my_bgworker_entry;
+} knl_t_bgworker_context;
+
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
@@ -2799,6 +2805,7 @@ typedef struct knl_thrd_context {
     knl_t_heartbeat_context heartbeat_cxt;
     knl_t_poolcleaner_context poolcleaner_cxt;
     knl_t_mot_context mot_cxt;
+    knl_t_bgworker_context bgworker_cxt;
 } knl_thrd_context;
 
 extern void knl_thread_mot_init();

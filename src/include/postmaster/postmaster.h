@@ -249,4 +249,5 @@ extern void GenerateCancelKey(bool isThreadPoolSession);
 extern bool SignalCancelAllBackEnd();
 extern bool IsLocalAddr(Port* port);
 extern uint64_t mc_timers_us(void);
+extern bool PostmasterMarkPIDForWorkerNotify(ThreadId);
 #endif /* _POSTMASTER_H */

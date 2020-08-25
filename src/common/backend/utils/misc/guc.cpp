@@ -459,6 +459,7 @@ static void assign_statistics_memory(int newval, void* extra);
 static void assign_history_memory(int newval, void* extra);
 static bool check_history_memory_limit(int* newval, void** extra, GucSource source);
 static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source);
+static bool check_max_worker_processes(int* newval, void** extra, GucSource source);
 static bool check_job_max_workers(int* newval, void** extra, GucSource source);
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source);
 static void assign_effective_io_concurrency(int newval, void* extra);
@@ -7067,6 +7068,23 @@ static void init_configure_names_int()
             0,
             MAX_BACKENDS,
             check_autovacuum_max_workers,
+            NULL,
+            NULL
+        },
+        {
+            /* see max_connections */
+            {
+                "max_background_workers",
+                PGC_POSTMASTER,
+                RESOURCES_ASYNCHRONOUS,
+                gettext_noop("Maximum number of concurrent background worker processes."),
+                NULL
+            },
+            &g_instance.attr.attr_storage.max_background_workers,
+            8,
+            0,
+            MAX_BACKENDS,
+            check_max_worker_processes,
             NULL,
             NULL
         },
@@ -18748,6 +18766,7 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
     }
 #endif
     if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
+            g_instance.attr.attr_storage.max_background_workers +
             AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;
@@ -18758,6 +18777,7 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
 static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource source)
 {
     if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
+            g_instance.attr.attr_storage.max_background_workers +
             g_instance.attr.attr_network.MaxConnections + AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS > MAX_BACKENDS) {
         return false;
     }
@@ -18767,12 +18787,25 @@ static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource so
 static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source)
 {
     if (g_instance.attr.attr_network.MaxConnections + *newval + g_instance.attr.attr_sql.job_queue_processes +
+            g_instance.attr.attr_storage.max_background_workers +
             AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;
     }
     return true;
 }
+
+static bool check_max_worker_processes(int* newval, void** extra, GucSource source)
+{
+    if (g_instance.attr.attr_network.MaxConnections + g_instance.attr.attr_storage.autovacuum_max_workers +
+            g_instance.attr.attr_sql.job_queue_processes + *newval +
+            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
+        MAX_BACKENDS) {
+        return false;
+    }
+    return true;
+}
+
 
 /*
  * Description: Check wheth out of max backends after max job worker threads.
@@ -18784,6 +18817,7 @@ static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource so
 static bool check_job_max_workers(int* newval, void** extra, GucSource source)
 {
     if (g_instance.attr.attr_network.MaxConnections + g_instance.attr.attr_storage.autovacuum_max_workers + *newval +
+            g_instance.attr.attr_storage.max_background_workers +
             AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;

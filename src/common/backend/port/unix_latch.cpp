@@ -526,8 +526,9 @@ void ResetLatch(volatile Latch* latch)
  */
 void latch_sigusr1_handler(void)
 {
-    if (waiting)
+    if (waiting) {
         sendSelfPipeByte();
+    }
 }
 
 /* Send one byte to the self-pipe, to wake up WaitLatch */

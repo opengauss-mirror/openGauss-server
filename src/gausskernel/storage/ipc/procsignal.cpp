@@ -306,6 +306,7 @@ void procsignal_sigusr1_handler(SIGNAL_ARGS)
     if (CheckProcSignal(PROCSIG_RECOVERY_CONFLICT_BUFFERPIN))
         RecoveryConflictInterrupt(PROCSIG_RECOVERY_CONFLICT_BUFFERPIN);
 
+    SetLatch(&t_thrd.proc->procLatch);
     latch_sigusr1_handler();
 
     errno = save_errno;

@@ -485,6 +485,7 @@ typedef struct knl_g_libpq_context {
 
 typedef struct knl_g_shmem_context {   
     int MaxConnections;
+    int max_parallel_workers;
     int MaxBackends;
     int MaxReserveBackendId;
     int ThreadPoolGroupNum;
@@ -510,6 +511,12 @@ typedef struct knl_g_numa_context {
     size_t maxLength;
     size_t allocIndex;
 } knl_g_numa_context;
+
+typedef struct knl_g_bgworker_context {
+    /* set when there's a worker that needs to be started up */
+    volatile bool start_worker_needed;
+    volatile bool have_crashed_worker;
+} knl_g_bgworker_context;
 
 typedef struct knl_instance_context {
     knl_virtual_role role;
@@ -582,6 +589,7 @@ typedef struct knl_instance_context {
     knl_g_rto_context rto_cxt;
     knl_g_xlog_context xlog_cxt;
     knl_g_numa_context numa_cxt;
+    knl_g_bgworker_context bgworker_cxt;
 } knl_instance_context;
 
 extern void knl_instance_init();

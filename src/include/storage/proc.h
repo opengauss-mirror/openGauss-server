@@ -304,6 +304,8 @@ typedef struct PROC_HDR {
     PGPROC* freeProcs;
     /* Head of list of autovacuum's free PGPROC structures */
     PGPROC* autovacFreeProcs;
+    /* Head of list of bgworker free PGPROC structures */
+    PGPROC* bgworkerFreeProcs;
     /* Head of list of pg_job's free PGPROC structures */
     PGPROC* pgjobfreeProcs;
     /* First pgproc waiting for group XID clear */

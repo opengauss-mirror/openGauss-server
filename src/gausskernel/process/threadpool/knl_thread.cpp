@@ -1405,6 +1405,12 @@ void knl_thread_mot_init()
     knl_t_mot_init(&t_thrd.mot_cxt);
 }
 
+void knl_t_bgworker_init(knl_t_bgworker_context* bgworker_cxt)
+{
+    bgworker_cxt->background_worker_data = NULL;
+    bgworker_cxt->my_bgworker_entry = NULL;
+}
+
 void knl_thread_init(knl_thread_role role)
 {
     t_thrd.role = role;
