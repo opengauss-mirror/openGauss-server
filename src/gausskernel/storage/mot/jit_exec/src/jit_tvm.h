@@ -66,6 +66,9 @@ struct ExecContext {
     /** @var Specifies whether a range scan ended. */
     int* _scan_ended;
 
+    /** @var Specifies whether this is a new scan or a continued previous scan. */
+    int m_newScan;
+
     // Pseudo-LLVM execution info
     /** @var The result code of last expression evaluation. */
     int64_t _expr_rc;

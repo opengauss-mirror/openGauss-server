@@ -58,11 +58,12 @@ extern JitContext* JitCodegenTvmQuery(Query* query, const char* queryString, Jit
  * @param[out] slot The slot used for reporting select result.
  * @param[out] tuplesProcessed The variable used to report the number of processed tuples.
  * @param[out] scanEnded The variable used to report if a range scan ended.
+ * @param newScan Specifies whether this is a new scan or a continued previous scan.
  * @return Zero if succeeded, otherwise an error code.
  * @note This function may cause transaction abort.
  */
-extern int JitExecTvmQuery(
-    JitContext* jitContext, ParamListInfo params, TupleTableSlot* slot, uint64_t* tuplesProcessed, int* scanEnded);
+extern int JitExecTvmQuery(JitContext* jitContext, ParamListInfo params, TupleTableSlot* slot,
+    uint64_t* tuplesProcessed, int* scanEnded, int newScan);
 }  // namespace JitExec
 
 #endif  // JIT_TVM_EXEC_H

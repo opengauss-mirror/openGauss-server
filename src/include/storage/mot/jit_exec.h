@@ -66,7 +66,7 @@ extern void DisableMotCodegen();
  * @param queryString The query text.
  * @return The JIT plan if the query is jittable, otherwise NULL.
  */
-extern JitPlan* IsJittable(Query *query, const char* queryString);
+extern JitPlan* IsJittable(Query* query, const char* queryString);
 
 /**
  * @brief Generate jitted code for a query.
@@ -75,7 +75,10 @@ extern JitPlan* IsJittable(Query *query, const char* queryString);
  * @param jitPlan The JIT plan produced during the call to @ref IsJittable().
  * @return The context of the jitted code required for later execution.
  */
-extern JitContext* JitCodegenQuery(Query *query, const char* queryString, JitPlan* jitPlan);
+extern JitContext* JitCodegenQuery(Query* query, const char* queryString, JitPlan* jitPlan);
+
+/** @brief Resets the scan iteration counter for the JIT context. */
+extern void JitResetScan(JitContext* jitContext);
 
 /**
  * @brief Executed a previously jitted query.
@@ -87,8 +90,8 @@ extern JitContext* JitCodegenQuery(Query *query, const char* queryString, JitPla
  * @return Zero if succeeded, otherwise an error code.
  * @note This function may cause transaction abort.
  */
-extern int JitExecQuery(JitContext* jitContext, ParamListInfo params, TupleTableSlot* slot,  uint64_t* tuplesProcessed, 
-                        int* scanEnded);
+extern int JitExecQuery(
+    JitContext* jitContext, ParamListInfo params, TupleTableSlot* slot, uint64_t* tuplesProcessed, int* scanEnded);
 
 /**
  * @brief Purges the global cache of JIT source stencils from all entries that refer the given relation id.
@@ -106,7 +109,6 @@ extern void FreeSessionJitContextPool(JitContextPool* jitContextPool);
 
 /** @brief Releases all resources associated with a plan.*/
 extern void JitDestroyPlan(JitPlan* plan);
+}  // namespace JitExec
 
-} // namespace JitExec
-
-#endif // JIT_EXEC_H
+#endif  // JIT_EXEC_H

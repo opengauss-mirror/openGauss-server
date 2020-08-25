@@ -915,7 +915,6 @@ MotJitSelectFusion::MotJitSelectFusion(MemoryContext context, CachedPlanSource* 
 
 bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
 {
-    max_rows = FETCH_ALL;
     ParamListInfo params = m_outParams != NULL ? m_outParams : m_params;
     bool success = false;
     setReceiver();
@@ -927,13 +926,17 @@ bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
         int scanEnded = 0;
         rc = JitExec::JitExecQuery(m_cacheplan->mot_jit_context, params, m_reslot, &tpProcessed, &scanEnded);
         if (scanEnded || (tpProcessed == 0) || (rc != 0)) {
-            finish = true; // raise flag so that next round we will bail out (current tuple still must be reported to user)
+            // raise flag so that next round we will bail out (current tuple still must be reported to user)
+            finish = true;
         }
         CHECK_FOR_INTERRUPTS();
         if (tpProcessed > 0) {
             nprocessed++;
             (*m_receiver->receiveSlot)(m_reslot, m_receiver);
             (void)ExecClearTuple(m_reslot);
+            if ((max_rows != FETCH_ALL) && (nprocessed == (unsigned long)max_rows)) {
+                finish = true;
+            }
         }
     }
 

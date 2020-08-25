@@ -1935,6 +1935,26 @@ private:
     Instruction* _itr_inst;
 };
 
+class IsNewScanInstruction : public Instruction {
+public:
+    IsNewScanInstruction()
+    {}
+
+    ~IsNewScanInstruction() final
+    {}
+
+protected:
+    uint64_t ExecImpl(ExecContext* exec_context) final
+    {
+        return (uint64_t)exec_context->m_newScan;
+    }
+
+    void DumpImpl() final
+    {
+        (void)fprintf(stderr, "isNewScan()");
+    }
+};
+
 /** @class GetStateIteratorInstruction */
 class SetStateIteratorInstruction : public Instruction {
 public:
@@ -3041,6 +3061,12 @@ static void AddDestroyCursor(JitTvmCodeGenContext* ctx, JitTvmRuntimeCursor* cur
 {
     AddDestroyIterator(ctx, cursor->begin_itr);
     AddDestroyIterator(ctx, cursor->end_itr);
+}
+
+/** @brief Adds a call to pseudo-function isNewScan(begin_itr). */
+static Instruction* AddIsNewScan(JitTvmCodeGenContext* ctx)
+{
+    return ctx->_builder->addInstruction(new (std::nothrow) IsNewScanInstruction());
 }
 
 /** @brief Adds a call to setStateIterator(itr, begin_itr). */
@@ -5699,6 +5725,18 @@ static JitContext* JitSelectCodegen(const Query* query, const char* query_string
     return jit_context;
 }
 
+static void AddCleanupOldScan(JitTvmCodeGenContext* ctx)
+{
+    // emit code to cleanup previous scan in case this is a new scan
+    JIT_IF_BEGIN(cleanup_old_scan)
+    Instruction* isNewScan = AddIsNewScan(ctx);
+    JIT_IF_EVAL(isNewScan)
+    AddDestroyStateIterators(ctx, JIT_RANGE_SCAN_MAIN);
+    AddDestroyStateIterators(ctx, JIT_RANGE_SCAN_INNER);
+    // sub-query does not have a stateful execution, so no need to cleanup
+    JIT_IF_END()
+}
+
 /** @brief Generates code for range SELECT query with a possible LIMIT clause. */
 static JitContext* JitRangeSelectCodegen(const Query* query, const char* query_string, JitRangeSelectPlan* plan)
 {
@@ -5723,6 +5761,9 @@ static JitContext* JitRangeSelectCodegen(const Query* query, const char* query_s
 
     // clear tuple even if row is not found later
     AddExecClearTuple(ctx);
+
+    // emit code to cleanup previous scan in case this is a new scan
+    AddCleanupOldScan(ctx);
 
     // prepare stateful scan if not done so already, if no row exists then emit code to return from function
     int max_arg = 0;
@@ -6191,6 +6232,9 @@ static JitContext* JitRangeJoinCodegen(const Query* query, const char* query_str
 
     // clear tuple even if row is not found later
     AddExecClearTuple(ctx);
+
+    // emit code to cleanup previous scan in case this is a new scan
+    AddCleanupOldScan(ctx);
 
     // prepare stateful scan if not done so already
     int max_arg = 0;
@@ -6795,8 +6839,8 @@ extern JitContext* JitCodegenTvmQuery(Query* query, const char* query_string, Ji
     return jit_context;
 }
 
-extern int JitExecTvmQuery(
-    JitContext* jit_context, ParamListInfo params, TupleTableSlot* slot, uint64_t* tp_processed, int* scan_ended)
+extern int JitExecTvmQuery(JitContext* jit_context, ParamListInfo params, TupleTableSlot* slot, uint64_t* tp_processed,
+    int* scan_ended, int newScan)
 {
     int result = 0;
     ExecContext* exec_context = jit_context->m_execContext;
@@ -6819,6 +6863,7 @@ extern int JitExecTvmQuery(
         exec_context->_slot = slot;
         exec_context->_tp_processed = tp_processed;
         exec_context->_scan_ended = scan_ended;
+        exec_context->m_newScan = newScan;
 
         result = (int)jit_context->m_tvmFunction->exec(exec_context);
     }
