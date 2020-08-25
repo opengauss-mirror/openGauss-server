@@ -14,3 +14,7 @@ select concat(null,'','','') is null;
 select concat('','') is null;
 
 select ''::int;
+
+select concat_ws('','ABCDE', 2, null, 22);
+
+select concat_ws(null,'ABCDE', 2, null, 22);
