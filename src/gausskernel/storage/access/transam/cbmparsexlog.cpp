@@ -1214,7 +1214,7 @@ static void TrackVMPageModification(XLogReaderState* record)
                     recData += sizeof(TransactionId);
                 xl_heap_insert* xlrec = (xl_heap_insert*)recData;
 
-                if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+                if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED)
                     (void)XLogRecGetBlockTag(record, 0, &rNode, NULL, &heapBlkNo1);
 
                 break;
@@ -1222,7 +1222,7 @@ static void TrackVMPageModification(XLogReaderState* record)
             case XLOG_HEAP_DELETE: {
                 xl_heap_delete* xlrec = (xl_heap_delete*)recData;
 
-                if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+                if (xlrec->flags & XLH_DELETE_ALL_VISIBLE_CLEARED)
                     (void)XLogRecGetBlockTag(record, 0, &rNode, NULL, &heapBlkNo1);
 
                 break;
@@ -1232,10 +1232,10 @@ static void TrackVMPageModification(XLogReaderState* record)
                     recData += sizeof(TransactionId);
                 xl_heap_update* xlrec = (xl_heap_update*)recData;
 
-                if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+                if (xlrec->flags & XLH_UPDATE_OLD_ALL_VISIBLE_CLEARED)
                     (void)XLogRecGetBlockTag(record, 1, &rNode, NULL, &heapBlkNo1);
 
-                if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+                if (xlrec->flags & XLH_UPDATE_OLD_ALL_VISIBLE_CLEARED)
                     (void)XLogRecGetBlockTag(record, 0, &rNode, NULL, &heapBlkNo2);
 
                 break;
@@ -1249,7 +1249,7 @@ static void TrackVMPageModification(XLogReaderState* record)
                 recData += sizeof(TransactionId);
             xl_heap_multi_insert* xlrec = (xl_heap_multi_insert*)recData;
 
-            if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+            if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED)
                 (void)XLogRecGetBlockTag(record, 0, &rNode, NULL, &heapBlkNo1);
         }
     } else

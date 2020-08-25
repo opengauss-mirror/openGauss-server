@@ -367,7 +367,7 @@ void heap_xlog_delete_operator_page(RedoBufferInfo* buffer, void* recorddata, Tr
     /* Mark the page as a candidate for pruning */
     PageSetPrunable(page, recordxid);
 
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED)
         PageClearAllVisible(page);
 
     /* Make sure there is no forward chain link in t_ctid */
@@ -445,7 +445,7 @@ void heap_xlog_insert_operator_page(RedoBufferInfo* buffer, void* recorddata, bo
 
     PageSetLSN(page, buffer->lsn);
 
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED)
         PageClearAllVisible(page);
 }
 
@@ -548,7 +548,7 @@ void heap_xlog_multi_insert_operator_page(RedoBufferInfo* buffer, void* recoredd
 
     PageSetLSN(page, buffer->lsn);
 
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED)
         PageClearAllVisible(page);
 }
 
@@ -592,7 +592,7 @@ void heap_xlog_update_operator_oldpage(RedoBufferInfo* buffer, void* recoreddata
     /* Mark the page as a candidate for pruning */
     PageSetPrunable(page, recordxid);
 
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED)
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED)
         PageClearAllVisible(page);
 
     PageHeader oldPhdr = (PageHeader)page;
@@ -708,7 +708,7 @@ void heap_xlog_update_operator_newpage(RedoBufferInfo* buffer, void* recorddata,
     if (PageAddItem(page, (Item)htup, newlen, xlrec->new_offnum, true, true) == InvalidOffsetNumber)
         ereport(PANIC, (errmsg("heap_update_redo: failed to add tuple")));
 
-    if (xlrec->flags & XLOG_HEAP_NEW_ALL_VISIBLE_CLEARED)
+    if (xlrec->flags & XLH_UPDATE_NEW_ALL_VISIBLE_CLEARED)
         PageClearAllVisible(page);
     if (freespace != NULL) {
         *freespace = PageGetHeapFreeSpace(page);
@@ -889,7 +889,7 @@ static XLogRecParseState* heap_xlog_insert_parse_block(XLogReaderState* record, 
     }
     xlrec = (xl_heap_insert*)rec_data;
 
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED) {
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED) {
         (*blocknum)++;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         if (blockstate == NULL) {
@@ -915,7 +915,7 @@ static XLogRecParseState* heap_xlog_delete_parse_block(XLogReaderState* record, 
 
     XLogRecSetBlockDataState(record, HEAP_DELETE_ORIG_BLOCK_NUM, recordstatehead);
 
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED) {
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED) {
         (*blocknum)++;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         if (blockstate == NULL) {
@@ -973,7 +973,7 @@ static XLogRecParseState* heap_xlog_update_parse_block(XLogReaderState* record, 
         XLogRecSetAuxiBlkNumState(&blockstate->blockparse.extra_rec.blockdatarec, newblk, InvalidForkNumber);
         // OLD BLOCK
 
-        if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED) {
+        if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED) {
             (*blocknum)++;
             XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
             if (blockstate == NULL) {
@@ -985,8 +985,8 @@ static XLogRecParseState* heap_xlog_update_parse_block(XLogReaderState* record, 
         }
     }
 
-    if ((xlrec->flags & XLOG_HEAP_NEW_ALL_VISIBLE_CLEARED) ||
-        ((oldblk == newblk) && (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED))) {
+    if ((xlrec->flags & XLH_UPDATE_NEW_ALL_VISIBLE_CLEARED) ||
+        ((oldblk == newblk) && (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED))) {
         (*blocknum)++;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         if (blockstate == NULL) {
@@ -1279,7 +1279,7 @@ static XLogRecParseState* heap_xlog_multi_insert_parse_block(XLogReaderState* re
     }
     xlrec = (xl_heap_multi_insert*)rec_data;
 
-    if (xlrec->flags & XLOG_HEAP_ALL_VISIBLE_CLEARED) {
+    if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED) {
         (*blocknum)++;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         if (blockstate == NULL) {

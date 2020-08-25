@@ -735,8 +735,30 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     WRITE_INT_FIELD(mergeTargetRelation);
     WRITE_NODE_FIELD(mergeSourceTargetList);
     WRITE_NODE_FIELD(mergeActionList);
+
+    WRITE_ENUM_FIELD(upsertAction, UpsertAction);
+    WRITE_NODE_FIELD(updateTlist);
+    WRITE_NODE_FIELD(exclRelTlist);
+    WRITE_INT_FIELD(exclRelRTIndex);
 }
 
+static void _outUpsertClause(StringInfo str, const UpsertClause* node)
+{
+    WRITE_NODE_TYPE("UPSERTCLAUSE");
+
+    WRITE_NODE_FIELD(targetList);
+    WRITE_INT_FIELD(location);
+}
+
+static void _outUpsertExpr(StringInfo str, const UpsertExpr* node)
+{
+    WRITE_NODE_TYPE("UPSERTEXPR");
+
+    WRITE_ENUM_FIELD(upsertAction, UpsertAction);
+    WRITE_NODE_FIELD(updateTlist);
+    WRITE_NODE_FIELD(exclRelTlist);
+    WRITE_INT_FIELD(exclRelIndex);
+}
 static void _outMergeWhenClause(StringInfo str, const MergeWhenClause* node)
 {
     WRITE_NODE_TYPE("MERGEWHENCLAUSE");
@@ -3317,6 +3339,8 @@ static void _outInsertStmt(StringInfo str, InsertStmt* node)
     WRITE_NODE_FIELD(selectStmt);
     WRITE_NODE_FIELD(returningList);
     WRITE_NODE_FIELD(withClause);
+
+    WRITE_NODE_FIELD(upsertClause);
 }
 
 static void _outUpdateStmt(StringInfo str, UpdateStmt* node)
@@ -3771,6 +3795,7 @@ static void _outQuery(StringInfo str, Query* node)
     WRITE_NODE_FIELD(mergeSourceTargetList);
     WRITE_NODE_FIELD(mergeActionList);
     WRITE_NODE_FIELD(upsertQuery);
+    WRITE_NODE_FIELD(upsertClause);
     WRITE_BOOL_FIELD(isRowTriggerShippable);
     WRITE_BOOL_FIELD(use_star_targets);
     WRITE_BOOL_FIELD(is_from_full_join_rewrite);
@@ -3986,6 +4011,7 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
         WRITE_BOOL_FIELD(isbucket);
         WRITE_NODE_FIELD(buckets);
     }
+    WRITE_BOOL_FIELD(isexcluded);
 }
 
 /*
@@ -5116,7 +5142,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_MergeAction:
                 _outMergeAction(str, (MergeAction*)obj);
                 break;
-
+            case T_UpsertExpr:
+                _outUpsertExpr(str, (UpsertExpr*)obj);
+                break;
             case T_Path:
                 _outPath(str, (Path*)obj);
                 break;
@@ -5288,6 +5316,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_WithClause:
                 _outWithClause(str, (WithClause*)obj);
+                break;
+            case T_UpsertClause:
+                _outUpsertClause(str, (UpsertClause*)obj);
                 break;
             case T_CommonTableExpr:
                 _outCommonTableExpr(str, (CommonTableExpr*)obj);

@@ -1,0 +1,19 @@
+\c upsert
+DROP SCHEMA upsert_test CASCADE;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to type upsert_test.atype
+drop cascades to type upsert_test.btype
+drop cascades to table upsert_test.t_grammer
+drop cascades to table upsert_test.t_default
+drop cascades to table upsert_test.t_data
+drop cascades to table upsert_test.t_trigger
+drop cascades to function upsert_test.upsert_before_func()
+drop cascades to function upsert_test.upsert_after_func()
+DROP SCHEMA upsert_test_unlog CASCADE;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to type upsert_test_unlog.atype
+drop cascades to type upsert_test_unlog.btype
+drop cascades to table upsert_test_unlog.t_hash_unlog_0
+drop cascades to table upsert_test_unlog.t_hash_unlog_1
+drop cascades to table upsert_test_unlog.t_rep_unlog_0
+drop cascades to table upsert_test_unlog.t_rep_unlog_1

@@ -6,6 +6,10 @@
 CREATE SCHEMA test_insert_update_008;
 SET current_schema = test_insert_update_008;
 
+-- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
+-- real upsert will be tested in specialized case.
+SET enable_upsert_to_merge TO ON;
+
 CREATE TABLE products_base
 (
 product_id INTEGER DEFAULT 0,
@@ -66,9 +70,9 @@ EXPLAIN (VERBOSE on, COSTS off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 
 EXPLAIN (VERBOSE on, COSTS off)
 INSERT INTO products_row
@@ -79,18 +83,18 @@ INSERT INTO products_row
         FROM newproducts_row, products_row
         WHERE products_row.total + newproducts_row.total < 1000
     ON DUPLICATE KEY UPDATE
-        product_name = __unnamed_subquery_source__.product_name,
-        category = __unnamed_subquery_source__.category,
-        total = __unnamed_subquery_source__.total;
+        product_name = excluded.product_name,
+        category = excluded.category,
+        total = excluded.total;
 
 EXPLAIN (VERBOSE on, COSTS off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total
         FROM newproducts_row WHERE product_id IS NOT NULL AND product_name IS NOT NULL
     ON DUPLICATE KEY UPDATE
-        product_name = __unnamed_subquery_source__.product_name,
-        category = __unnamed_subquery_source__.category,
-        total = __unnamed_subquery_source__.total;
+        product_name = excluded.product_name,
+        category = excluded.category,
+        total = excluded.total;
 
 -- explain analyze
 BEGIN;
@@ -98,9 +102,9 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 
 -- explain performance
@@ -110,9 +114,9 @@ EXPLAIN PERFORMANCE
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 \o
 
@@ -122,9 +126,9 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 
 -- pretty mode performance
@@ -135,9 +139,9 @@ EXPLAIN (VERBOSE on, COSTS off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 
 -- explain analyze
 BEGIN;
@@ -145,9 +149,9 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 
 -- explain analyze
@@ -156,9 +160,9 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 
 -- explain performance
@@ -168,9 +172,9 @@ EXPLAIN PERFORMANCE
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 
 SET explain_perf_mode = run;
@@ -180,9 +184,9 @@ EXPLAIN PERFORMANCE
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 
 SET explain_perf_mode = summary;
@@ -192,9 +196,9 @@ EXPLAIN PERFORMANCE
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 \o
 

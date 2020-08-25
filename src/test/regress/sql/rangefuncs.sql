@@ -1,3 +1,6 @@
+-- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
+-- real upsert will be tested in specialized case.
+SET enable_upsert_to_merge TO ON;
 
 SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
 

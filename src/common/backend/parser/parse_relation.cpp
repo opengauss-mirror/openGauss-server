@@ -479,7 +479,7 @@ CommonTableExpr* GetCTEForRTE(ParseState* pstate, RangeTblEntry* rte, int rtelev
  * Side effect: if we find a match, mark the RTE as requiring read access
  * for the column.
  */
-Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, int location)
+Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, int location, bool omit_excluded)
 {
     Node* result = NULL;
     int attnum = 0;
@@ -501,6 +501,9 @@ Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, in
      */
     foreach (c, rte->eref->colnames) {
         attnum++;
+        if (omit_excluded && rte->isexcluded) {
+            continue;
+        }
         if (strcmp(strVal(lfirst(c)), colname) == 0) {
             if (result != NULL) {
                 ereport(ERROR,
@@ -607,7 +610,7 @@ Node* colNameToVar(ParseState* pstate, char* colname, bool localonly, int locati
             Node* newresult = NULL;
 
             /* use orig_pstate here to get the right sublevels_up */
-            newresult = scanRTEForColumn(orig_pstate, rte, colname, location);
+            newresult = scanRTEForColumn(orig_pstate, rte, colname, location, true);
             if (newresult != NULL) {
                 if (final_rte != NULL) {
                     *final_rte = rte;
@@ -1087,6 +1090,7 @@ RangeTblEntry* addRangeTableEntry(ParseState* pstate, RangeVar* relation, Alias*
 
     rte->rtekind = RTE_RELATION;
     rte->alias = alias;
+    rte->isexcluded = false;
 
     if (pstate == NULL) {
         ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("pstate can not be NULL")));
@@ -1205,6 +1209,7 @@ RangeTblEntry* addRangeTableEntryForRelation(ParseState* pstate, Relation rel, A
     rte->relkind = rel->rd_rel->relkind;
     rte->ispartrel = RELATION_IS_PARTITIONED(rel);
 	rte->relhasbucket = RELATION_HAS_BUCKET(rel);
+    rte->isexcluded = false;
     /*
      * In cases that target relation's rd_refSynOid is valid, it has been referenced from one synonym.
      * thus, alias name is used to take its raw relname away in order to form the refname.

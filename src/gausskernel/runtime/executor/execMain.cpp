@@ -2762,6 +2762,11 @@ HeapTuple EvalPlanQualFetch(EState *estate, Relation relation, int lockmode, Ite
             ReleaseBuffer(buffer);
 
             switch (test) {
+                case HeapTupleSelfCreated:
+                    ReleaseBuffer(buffer);
+                    ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                        errmsg("attempted to lock invisible tuple")));
+                    break;
                 case HeapTupleSelfUpdated:
                     /* treat it as deleted; do not process */
                     ReleaseBuffer(buffer);

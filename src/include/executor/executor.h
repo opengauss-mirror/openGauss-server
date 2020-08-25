@@ -367,13 +367,15 @@ extern void ExecCloseScanRelation(Relation scanrel);
 extern Partition ExecOpenScanParitition(
     EState* estate, Relation parent, PartitionIdentifier* partID, LOCKMODE lockmode);
 
-extern void ExecOpenIndices(ResultRelInfo* resultRelInfo);
+extern void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative);
 extern void ExecCloseIndices(ResultRelInfo* resultRelInfo);
 extern List* ExecInsertIndexTuples(
-    TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel, Partition p, int2 bucketId);
+    TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel,
+    Partition p, int2 bucketId, bool* conflict);
+extern bool ExecCheckIndexConstraints(TupleTableSlot* slot, EState* estate,
+    Relation targetRel, Partition p, int2 bucketId, ItemPointer conflictTid);
 extern bool check_exclusion_constraint(Relation heap, Relation index, IndexInfo* indexInfo, ItemPointer tupleid,
     Datum* values, const bool* isnull, EState* estate, bool newIndex, bool errorOK);
-
 extern void RegisterExprContextCallback(ExprContext* econtext, ExprContextCallbackFunction function, Datum arg);
 extern void UnregisterExprContextCallback(ExprContext* econtext, ExprContextCallbackFunction function, Datum arg);
 extern List* GetAccessedVarnoList(List* targetList, List* qual);

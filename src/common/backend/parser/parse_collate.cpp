@@ -459,8 +459,8 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
         case T_FromExpr:
         case T_SortGroupClause:
         case T_MergeAction:
+        case T_UpsertExpr:
             (void)expression_tree_walker(node, (bool (*)())assign_collations_walker, (void*)&loccontext);
-
             /*
              * When we're invoked on a query's jointree, we don't need to do
              * anything with join nodes except recurse through them to process

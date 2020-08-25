@@ -222,6 +222,8 @@ static void get_with_clause(Query* query, deparse_context* context);
 static void get_select_query_def(Query* query, deparse_context* context, TupleDesc resultDesc);
 static void get_insert_query_def(Query* query, deparse_context* context);
 static void get_update_query_def(Query* query, deparse_context* context);
+static void get_update_query_targetlist_def(
+    Query* query, List* targetList, RangeTblEntry* rte, deparse_context* context);
 static void get_delete_query_def(Query* query, deparse_context* context);
 static void get_utility_query_def(Query* query, deparse_context* context);
 static void get_basic_select_query(Query* query, deparse_context* context, TupleDesc resultDesc);
@@ -3738,6 +3740,10 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
      * For a SubqueryScan, pretend the subplan is INNER referent.  (We don't
      * use OUTER because that could someday conflict with the normal meaning.)
      * Likewise, for a CteScan, pretend the subquery's plan is INNER referent.
+     * For DUPLICATE KEY UPDATE we just need the inner tlist to point to the
+     * excluded expression's tlist. (Similar to the SubqueryScan we don't want
+     * to reuse OUTER, it's used for RETURNING in some modify table cases,
+     * although not INSERT ... ON DUPLICATE KEY UPDATE).
      */
     if (IsA(ps, SubqueryScanState))
         dpns->inner_planstate = ((SubqueryScanState*)ps)->subplan;
@@ -3749,6 +3755,7 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
         ModifyTableState* mps = (ModifyTableState*)ps;
         dpns->outer_planstate = mps->mt_plans[0];
 
+        dpns->inner_planstate = ps;
         /*
          * For merge into, we should deparse the inner plan,  since the targetlist and qual will
          * reference sourceTargetList, which comes from outer plan of the join (source table)
@@ -3762,6 +3769,11 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
     } else
         dpns->inner_planstate = innerPlanState(ps);
 
+#ifdef ENABLE_MULTIPLE_NODEX
+    if (IsA(ps, ModifyTableState))
+        dpns->inner_tlist = ((ModifyTableState*)ps)->mt_upsert->us_excludedtlist;
+    else
+#endif
     if (dpns->inner_planstate != NULL)
         dpns->inner_tlist = dpns->inner_planstate->plan->targetlist;
     else
@@ -5564,18 +5576,9 @@ static void get_insert_query_def(Query* query, deparse_context* context)
     }
 
     /*
-     * select_rte and values_rte are not required by INSERT queries in XC
-     * Both these should stay null for INSERT queries to work corretly
-     * Consider an example
-     * create table tt as values(1,'One'),(2,'Two');
-     * This query uses values_rte, but we do not need them in XC
-     * because it gets broken down into two queries
-     * CREATE TABLE tt(column1 int4, column2 text)
-     * and
-     * INSERT INTO tt (column1, column2) VALUES ($1, $2)
-     * Note that the insert query does not need values_rte
-     *
-     * Now consider another example
+     * select_rte are not required by INSERT queries in XC
+     * it should stay null for INSERT queries to work corretly
+     * consider an example
      * insert into tt select * from tt
      * This query uses select_rte, but again that is not required in XC
      * Again here the query gets broken down into two queries
@@ -5600,7 +5603,35 @@ static void get_insert_query_def(Query* query, deparse_context* context)
                 }
                 select_rte = rte;
             }
+        }
 
+#ifdef PGXC
+    }
+#endif
+
+    /*
+     * values_rte will be required by INSERT queries in XC
+     * only when the relation is located on a single node
+     * requested by FQS
+     * Consider an example
+     * CREATE NODE GROUP ng WITH (datanode2);
+     * CREATE TABLE tt (column1 int4, column2 text) TO GROUP ng;
+     * INSERT INTO tt (column1) VALUES(1), (2)
+     *
+     * for other cases values_rte should stay null
+     * create table tt as values(1,'One'),(2,'Two');
+     * This query uses values_rte, but we do not need them in XC
+     * because it gets broken down into two queries
+     * CREATE TABLE tt(column1 int4, column2 text)
+     * and
+     * INSERT INTO tt (column1, column2) VALUES ($1, $2)
+     * Note that the insert query does not need values_rte
+     */
+#ifdef PGXC
+    if (context->is_fqs || !(IS_PGXC_COORDINATOR && !IsConnFromCoord())) {
+#endif
+        foreach (l, query->rtable) {
+            rte = (RangeTblEntry*)lfirst(l);
             if (rte->rtekind == RTE_VALUES) {
                 if (values_rte != NULL) {
                     ereport(ERROR, (errcode(ERRCODE_RESTRICT_VIOLATION), errmsg("too many values RTEs in INSERT")));
@@ -5611,6 +5642,7 @@ static void get_insert_query_def(Query* query, deparse_context* context)
 #ifdef PGXC
     }
 #endif
+
     if ((select_rte != NULL) && (values_rte != NULL)) {
         ereport(ERROR, (errcode(ERRCODE_RESTRICT_VIOLATION), errmsg("both subquery and values RTEs in INSERT")));
     }
@@ -5758,20 +5790,36 @@ static void get_insert_query_def(Query* query, deparse_context* context)
         appendStringInfo(buf, "DEFAULT VALUES");
     }
 
-    /* it is an UPSERT statement, add ON DUPLICATE KEY UPDATE expression */
+    /* for MERGE INTO  statement for UPSERT, add ON DUPLICATE KEY UPDATE expression */
     if (query->mergeActionList) {
         appendStringInfo(buf, " ON DUPLICATE KEY UPDATE ");
 
         ListCell* l = NULL;
+        bool update = false;
         foreach (l, query->mergeActionList) {
             MergeAction* mc = (MergeAction*)lfirst(l);
 
             /* only deparse the update clause */
             if (mc->commandType == CMD_UPDATE) {
+                update = true;
                 get_set_target_list(mc->targetList, rte, context);
             } else {
                 continue;
             }
+        }
+        if (!update) {
+            appendStringInfoString(buf, "NOTHING");
+        }
+    }
+
+    /* for INSERT statement for UPSERT, add ON DUPLICATE KEY UPDATE expression */
+    if (query->upsertClause != NULL && query->upsertClause->upsertAction != UPSERT_NONE) {
+        appendStringInfoString(buf, " ON DUPLICATE KEY UPDATE ");
+        UpsertExpr* upsertClause = query->upsertClause;
+        if (upsertClause->upsertAction == UPSERT_NOTHING) {
+            appendStringInfoString(buf, "NOTHING");
+        } else {
+            get_update_query_targetlist_def(query, upsertClause->updateTlist, rte, context);
         }
     }
 
@@ -5789,9 +5837,7 @@ static void get_insert_query_def(Query* query, deparse_context* context)
 static void get_update_query_def(Query* query, deparse_context* context)
 {
     StringInfo buf = context->buf;
-    char* sep = NULL;
     RangeTblEntry* rte = NULL;
-    ListCell* l = NULL;
 
     /* Insert the WITH clause if given */
     get_with_clause(query, context);
@@ -5810,10 +5856,38 @@ static void get_update_query_def(Query* query, deparse_context* context)
         appendStringInfo(buf, " %s", quote_identifier(rte->alias->aliasname));
     }
     appendStringInfoString(buf, " SET ");
+    /* Deparse targetlist */
+    get_update_query_targetlist_def(query, query->targetList, rte, context);
 
+    /* Add the FROM clause if needed */
+    get_from_clause(query, " FROM ", context);
+
+    /* Add a WHERE clause if given */
+    if (query->jointree->quals != NULL) {
+        append_context_keyword(context, " WHERE ", PRETTYINDENT_STD, PRETTYINDENT_STD, 1);
+        get_rule_expr(query->jointree->quals, context, false);
+    }
+
+    /* Add RETURNING if present */
+    if (query->returningList) {
+        append_context_keyword(context, " RETURNING", PRETTYINDENT_STD, PRETTYINDENT_STD, 1);
+        get_target_list(query, query->returningList, context, NULL);
+    }
+}
+
+/* ----------
+ * get_update_query_targetlist_def         - Parse back an UPDATE targetlist
+ * ----------
+ */
+static void get_update_query_targetlist_def(Query* query, List* targetList,
+    RangeTblEntry* rte, deparse_context* context)
+{
+    StringInfo buf = context->buf;
+    ListCell* l;
+    const char* sep;
     /* Add the comma separated list of 'attname = value' */
     sep = "";
-    foreach (l, query->targetList) {
+    foreach (l, targetList) {
         TargetEntry* tle = (TargetEntry*)lfirst(l);
         Node* expr = NULL;
 
@@ -5889,21 +5963,6 @@ static void get_update_query_def(Query* query, deparse_context* context)
             appendStringInfo(buf, " = ");
             get_rule_expr((Node*)tle->expr, context, false);
         }
-    }
-
-    /* Add the FROM clause if needed */
-    get_from_clause(query, " FROM ", context);
-
-    /* Add a WHERE clause if given */
-    if (query->jointree->quals != NULL) {
-        append_context_keyword(context, " WHERE ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 1);
-        get_rule_expr(query->jointree->quals, context, false);
-    }
-
-    /* Add RETURNING if present */
-    if (query->returningList) {
-        append_context_keyword(context, " RETURNING", -PRETTYINDENT_STD, PRETTYINDENT_STD, 1);
-        get_target_list(query, query->returningList, context, NULL);
     }
 }
 

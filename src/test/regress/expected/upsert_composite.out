@@ -1,0 +1,404 @@
+--------------------------------------------------------------------------------------------
+/* 
+ *  procedure
+ */
+--------------------------------------------------------------------------------------------
+\c upsert;
+SET CURRENT_SCHEMA TO upsert_test_procedure;
+-- enable_upsert_to_merge must be off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
+SHOW enable_upsert_to_merge;
+ enable_upsert_to_merge
+------------------------
+ off
+(1 row)
+
+drop table IF EXISTS t_proc;
+NOTICE:  table "t_proc" does not exist, skipping
+create table t_proc(c1 int, c2 int, c3 int unique);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_proc_c3_key" for table "t_proc"
+insert into t_proc select a,a,a from generate_series(1,20) as a;
+select *from t_proc order by c3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  3 |  3 |  3
+  4 |  4 |  4
+  5 |  5 |  5
+  6 |  6 |  6
+  7 |  7 |  7
+  8 |  8 |  8
+  9 |  9 |  9
+ 10 | 10 | 10
+ 11 | 11 | 11
+ 12 | 12 | 12
+ 13 | 13 | 13
+ 14 | 14 | 14
+ 15 | 15 | 15
+ 16 | 16 | 16
+ 17 | 17 | 17
+ 18 | 18 | 18
+ 19 | 19 | 19
+ 20 | 20 | 20
+(20 rows)
+
+create or replace procedure mul_ups( c in INTEGER)
+as
+declare
+val int;
+begin
+	for val in select c3 from t_proc loop
+		insert into t_proc values(c,c, val) on duplicate key update c1 = c, c2 =c;
+	end loop;
+end;
+/
+call mul_ups(100);
+ mul_ups 
+---------
+ 
+(1 row)
+
+select *from t_proc order by c3;
+ c1  | c2  | c3 
+-----+-----+----
+ 100 | 100 |  1
+ 100 | 100 |  2
+ 100 | 100 |  3
+ 100 | 100 |  4
+ 100 | 100 |  5
+ 100 | 100 |  6
+ 100 | 100 |  7
+ 100 | 100 |  8
+ 100 | 100 |  9
+ 100 | 100 | 10
+ 100 | 100 | 11
+ 100 | 100 | 12
+ 100 | 100 | 13
+ 100 | 100 | 14
+ 100 | 100 | 15
+ 100 | 100 | 16
+ 100 | 100 | 17
+ 100 | 100 | 18
+ 100 | 100 | 19
+ 100 | 100 | 20
+(20 rows)
+
+create or replace procedure mul_ups( c in INTEGER)
+as
+declare
+val int;
+begin
+	for val in select c3 from t_proc loop
+		insert into t_proc values(c,c, val) on duplicate key update c1 = $1, c2 =$1;
+	end loop;
+end;
+/
+call mul_ups(200);
+ mul_ups 
+---------
+ 
+(1 row)
+
+select *from t_proc order by c3;
+ c1  | c2  | c3 
+-----+-----+----
+ 200 | 200 |  1
+ 200 | 200 |  2
+ 200 | 200 |  3
+ 200 | 200 |  4
+ 200 | 200 |  5
+ 200 | 200 |  6
+ 200 | 200 |  7
+ 200 | 200 |  8
+ 200 | 200 |  9
+ 200 | 200 | 10
+ 200 | 200 | 11
+ 200 | 200 | 12
+ 200 | 200 | 13
+ 200 | 200 | 14
+ 200 | 200 | 15
+ 200 | 200 | 16
+ 200 | 200 | 17
+ 200 | 200 | 18
+ 200 | 200 | 19
+ 200 | 200 | 20
+(20 rows)
+
+create or replace procedure mul_ups_00()
+as
+declare
+val int;
+begin
+	for val in select c3 from t_proc loop
+		insert into t_proc values(val,val,val) on duplicate key update c1 = 300, c2 =300;
+	end loop;
+end;
+/
+call mul_ups_00();
+ mul_ups_00 
+------------
+ 
+(1 row)
+
+select *from t_proc order by c3;
+ c1  | c2  | c3 
+-----+-----+----
+ 300 | 300 |  1
+ 300 | 300 |  2
+ 300 | 300 |  3
+ 300 | 300 |  4
+ 300 | 300 |  5
+ 300 | 300 |  6
+ 300 | 300 |  7
+ 300 | 300 |  8
+ 300 | 300 |  9
+ 300 | 300 | 10
+ 300 | 300 | 11
+ 300 | 300 | 12
+ 300 | 300 | 13
+ 300 | 300 | 14
+ 300 | 300 | 15
+ 300 | 300 | 16
+ 300 | 300 | 17
+ 300 | 300 | 18
+ 300 | 300 | 19
+ 300 | 300 | 20
+(20 rows)
+
+declare
+val int;
+c int :=400;
+begin
+	for val in select c3 from t_proc loop
+		insert into t_proc values(c,c, val) on duplicate key update c1 = c, c2 =c;
+	end loop;
+end;
+/
+select *from t_proc order by c3;
+ c1  | c2  | c3 
+-----+-----+----
+ 400 | 400 |  1
+ 400 | 400 |  2
+ 400 | 400 |  3
+ 400 | 400 |  4
+ 400 | 400 |  5
+ 400 | 400 |  6
+ 400 | 400 |  7
+ 400 | 400 |  8
+ 400 | 400 |  9
+ 400 | 400 | 10
+ 400 | 400 | 11
+ 400 | 400 | 12
+ 400 | 400 | 13
+ 400 | 400 | 14
+ 400 | 400 | 15
+ 400 | 400 | 16
+ 400 | 400 | 17
+ 400 | 400 | 18
+ 400 | 400 | 19
+ 400 | 400 | 20
+(20 rows)
+
+create or replace procedure mul_ups( c in INTEGER)
+as
+declare
+val int;
+begin
+	for val in select c3 from t_proc loop
+		insert into t_proc values(c,c, val+100) on duplicate key update c1 = $1, c2 =$1;
+	end loop;
+end;
+/
+call mul_ups(500);
+ mul_ups 
+---------
+ 
+(1 row)
+
+select *from t_proc order by c3;
+ c1  | c2  | c3  
+-----+-----+-----
+ 400 | 400 |   1
+ 400 | 400 |   2
+ 400 | 400 |   3
+ 400 | 400 |   4
+ 400 | 400 |   5
+ 400 | 400 |   6
+ 400 | 400 |   7
+ 400 | 400 |   8
+ 400 | 400 |   9
+ 400 | 400 |  10
+ 400 | 400 |  11
+ 400 | 400 |  12
+ 400 | 400 |  13
+ 400 | 400 |  14
+ 400 | 400 |  15
+ 400 | 400 |  16
+ 400 | 400 |  17
+ 400 | 400 |  18
+ 400 | 400 |  19
+ 400 | 400 |  20
+ 500 | 500 | 101
+ 500 | 500 | 102
+ 500 | 500 | 103
+ 500 | 500 | 104
+ 500 | 500 | 105
+ 500 | 500 | 106
+ 500 | 500 | 107
+ 500 | 500 | 108
+ 500 | 500 | 109
+ 500 | 500 | 110
+ 500 | 500 | 111
+ 500 | 500 | 112
+ 500 | 500 | 113
+ 500 | 500 | 114
+ 500 | 500 | 115
+ 500 | 500 | 116
+ 500 | 500 | 117
+ 500 | 500 | 118
+ 500 | 500 | 119
+ 500 | 500 | 120
+(40 rows)
+
+/*
+ * insert
+ */
+drop table if exists t_default;
+NOTICE:  table "t_default" does not exist, skipping
+CREATE TABLE t_default (c1 INT PRIMARY KEY DEFAULT 10, c2 FLOAT DEFAULT 3.0, c3 TIMESTAMP DEFAULT '20200508');
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_default_pkey" for table "t_default"
+create view v_default as select *from t_default order by c1;
+-- insert src
+---- insert values
+truncate t_default;
+insert into t_default values(DEFAULT, DEFAULT, DEFAULT);
+insert into t_default values(1, 2, '20200630');
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  2 | Tue Jun 30 00:00:00 2020
+ 10 |  3 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default values(DEFAULT, DEFAULT, DEFAULT) on duplicate key update c2 = 1;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  2 | Tue Jun 30 00:00:00 2020
+ 10 |  1 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default values(1, 2, '20200630') on duplicate key update c2 = 2;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  2 | Tue Jun 30 00:00:00 2020
+ 10 |  1 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default values(DEFAULT, DEFAULT, DEFAULT),(1, 2, '20200630') on duplicate key update c2 = 3;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  3 | Tue Jun 30 00:00:00 2020
+ 10 |  3 | Fri May 08 00:00:00 2020
+(2 rows)
+
+---- insert subquery
+insert into t_default select *from t_default order by c1 on duplicate key update c2 = 4;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  4 | Tue Jun 30 00:00:00 2020
+ 10 |  4 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default select *from t_default order by c1 limit 1 on duplicate key update c2 = 5;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  5 | Tue Jun 30 00:00:00 2020
+ 10 |  4 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default select *from t_default where c1=10 on duplicate key update c2 = 6;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  5 | Tue Jun 30 00:00:00 2020
+ 10 |  6 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default select *from t_default order by c1 on duplicate key update c2 = 7;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  7 | Tue Jun 30 00:00:00 2020
+ 10 |  7 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default select *from v_default order by c1 on duplicate key update c2 = 8;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  8 | Tue Jun 30 00:00:00 2020
+ 10 |  8 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into  t_default select *from t_default union select c1+1,c2+1,c3+1 from t_default order by c1 on duplicate key update c2 = 9;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  9 | Tue Jun 30 00:00:00 2020
+  2 |  9 | Wed Jul 01 00:00:00 2020
+ 10 |  9 | Fri May 08 00:00:00 2020
+ 11 |  9 | Sat May 09 00:00:00 2020
+(4 rows)
+
+insert into  t_default(c1,c2) select max(c1),c2 from t_default group by c2 on duplicate key update c2 = 10;
+-- index
+---- mul index
+truncate t_default;
+create unique index t_default_mul on t_default(c1,c3);
+insert into t_default values(DEFAULT, DEFAULT, DEFAULT);
+insert into t_default values(1, 2, '20200630');
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  2 | Tue Jun 30 00:00:00 2020
+ 10 |  3 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default values(DEFAULT, DEFAULT, DEFAULT) on duplicate key update c2 = 1;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  2 | Tue Jun 30 00:00:00 2020
+ 10 |  1 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default values(1, 2, '20200630') on duplicate key update c2 = 2;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  2 | Tue Jun 30 00:00:00 2020
+ 10 |  1 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default values(DEFAULT, DEFAULT, DEFAULT),(1, 2, '20200630') on duplicate key update c2 = 3;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  3 | Tue Jun 30 00:00:00 2020
+ 10 |  3 | Fri May 08 00:00:00 2020
+(2 rows)
+
+insert into t_default select *from t_default on duplicate key update c2 = 4;
+select *from t_default order by c1;
+ c1 | c2 |            c3            
+----+----+--------------------------
+  1 |  4 | Tue Jun 30 00:00:00 2020
+ 10 |  4 | Fri May 08 00:00:00 2020
+(2 rows)
+

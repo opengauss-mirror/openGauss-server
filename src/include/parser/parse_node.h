@@ -106,7 +106,6 @@ struct ParseState {
     bool p_hasSubLinks;
     bool p_hasModifyingCTE;
     bool p_is_insert;
-    bool p_is_update;
     bool p_locked_from_parent;
     bool p_resolve_unknowns; /* resolve unknown-type SELECT outputs as type text */
     bool p_hasSynonyms;

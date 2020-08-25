@@ -520,6 +520,14 @@ bool HeapTupleSatisfiesToast(HeapTuple htup, Snapshot snapshot, Buffer buffer)
     if (!HeapTupleHeaderXminCommitted(tuple)) {
         if (HeapTupleHeaderXminInvalid(tuple))
             return false;
+
+        /*
+         * An invalid Xmin can be left behind by a speculative insertion that
+         * is cancelled by super-deleting the tuple.  We shouldn't see any of
+         * those in TOAST tables, but better safe than sorry.
+         */
+        if (!TransactionIdIsValid(HeapTupleHeaderGetXmin(BufferGetPage(buffer), tuple)))
+            return false;
     }
 
     /* otherwise assume the tuple is valid for TOAST. */
@@ -552,8 +560,11 @@ bool HeapTupleSatisfiesToast(HeapTuple htup, Snapshot snapshot, Buffer buffer)
  *	the case where the tuple is share-locked by a MultiXact, even if the
  *	MultiXact includes the current transaction.  Callers that want to
  *	distinguish that case must test for it themselves.)
+ *
+ *	HeapTupleSelfCreated: the tuple didn't exist at all when the scan started, it
+ *	was created during the current CommandId (scan)
  */
-HTSU_Result HeapTupleSatisfiesUpdate(HeapTuple htup, CommandId curcid, Buffer buffer)
+HTSU_Result HeapTupleSatisfiesUpdate(HeapTuple htup, CommandId curcid, Buffer buffer, bool self_visible)
 {
     bool needSync = false;
     HeapTupleHeader tuple = htup->t_data;
@@ -580,8 +591,10 @@ restart:
             return HeapTupleInvisible;
 
         if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple))) {
-            if (HeapTupleHeaderGetCmin(tuple, page) >= curcid)
+            if (HeapTupleHeaderGetCmin(tuple, page) > curcid)
                 return HeapTupleInvisible; /* inserted after scan started */
+            else if (HeapTupleHeaderGetCmin(tuple, page) == curcid && !self_visible)
+                return HeapTupleSelfCreated; /* inserted during the scan */
 
             if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid */
                 return HeapTupleMayBeUpdated;

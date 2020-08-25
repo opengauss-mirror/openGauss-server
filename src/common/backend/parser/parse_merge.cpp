@@ -56,7 +56,8 @@ static void check_system_column_node(Node* node, bool is_insert_update);
 static void check_system_column_reference(List* joinVarList, List* mergeActionList, bool is_insert_update);
 static void checkTargetTableSystemCatalog(Relation targetRel);
 static void check_insert_action_targetlist(List* merge_action_list, List* source_targetlist);
-static bool check_unique_constraint(List*& index_list);
+static bool check_update_action_targetlist(List* update_action_list, List* source_targetlist);
+bool check_unique_constraint(List*& index_list);
 static bool find_valid_unique_constraint(Relation relation, List* colnames, List*& index_list);
 static bool var_in_list(Var* var, List* list);
 static Bitmapset* get_relation_attno_bitmap_by_names(Relation relation, List* colnames);
@@ -1180,6 +1181,16 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
         Assert(stmt->insert_stmt != NULL);
         Assert(IsA(stmt->insert_stmt, InsertStmt));
 
+        if (check_update_action_targetlist(mergeActionList, qry->mergeSourceTargetList)) {
+            if (u_sess->attr.attr_sql.enable_upsert_to_merge) {
+                return qry;
+            }
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_COLUMN),
+                    errmsg("Invalid column reference in the UPDATE target values"),
+                    errhint("Only allow to reference target table's column in the UPDATE clause")));
+        }
+
         Query* insert_query = NULL;
         ParseState* insert_pstate = make_parsestate(NULL);
         insert_pstate->p_resolve_unknowns = pstate->p_resolve_unknowns;
@@ -1768,7 +1779,7 @@ static int count_target_columns(Node* query)
  * @out index_list: unique index list
  * @return: true if there is any primary or unique index
  */
-static bool check_unique_constraint(List*& index_list)
+bool check_unique_constraint(List*& index_list)
 {
     /* There are no indexes */
     if (index_list == NIL) {
@@ -1790,10 +1801,48 @@ static bool check_unique_constraint(List*& index_list)
     return true;
 }
 
+bool check_action_targetlist_condition(List* action_targetlist, List* source_targetlist, bool condition_in)
+{
+    ListCell* var_cell = NULL;
+    /* oops, not insert action found, noting to do */
+    if (action_targetlist == NIL) {
+        return true;
+    }
+    /* let's do the hard work */
+    List* vars_list =
+        pull_var_clause((Node*)action_targetlist, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
+    List* source_vars_list =
+        pull_var_clause((Node*)source_targetlist, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
+    foreach (var_cell, vars_list) {
+        Var* var = (Var*)lfirst(var_cell);
+        if (var_in_list(var, source_vars_list) != condition_in) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool check_update_action_targetlist(List* merge_action_list, List* source_targetlist)
+{
+    ListCell* action_cell = NULL;
+    List* update_action_targetlist = NIL;
+
+    /* first let's locate the insert action */
+    foreach (action_cell, merge_action_list) {
+        MergeAction* action = (MergeAction*)lfirst(action_cell);
+        if (action->commandType == CMD_UPDATE) {
+            update_action_targetlist = action->targetList;
+
+            break;
+        }
+    }
+
+    return !check_action_targetlist_condition(update_action_targetlist, source_targetlist, false);
+}
+
 /* report error if vars in insert_action_targetlist not found in source_targetlist */
 void check_insert_action_targetlist(List* merge_action_list, List* source_targetlist)
 {
-    ListCell* var_cell = NULL;
     ListCell* action_cell = NULL;
     List* insert_action_targetlist = NIL;
 
@@ -1806,25 +1855,10 @@ void check_insert_action_targetlist(List* merge_action_list, List* source_target
             break;
         }
     }
-
-    /* oops, not insert action found, noting to do */
-    if (insert_action_targetlist == NIL) {
-        return;
-    }
-    /* let's do the hard work */
-    List* insert_vars_list =
-        pull_var_clause((Node*)insert_action_targetlist, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
-    List* source_vars_list =
-        pull_var_clause((Node*)source_targetlist, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
-    foreach (var_cell, insert_vars_list) {
-        Var* var = (Var*)lfirst(var_cell);
-
-        /* INSERT can only reference source rel's targetlist */
-        if (!var_in_list(var, source_vars_list)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_COLUMN),
-                    errmsg("Invalid column reference in the INSERT VALUES Clause"),
-                    errhint("You may have referenced target table's column")));
-        }
+    if (!check_action_targetlist_condition(insert_action_targetlist, source_targetlist, true)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_COLUMN),
+                errmsg("Invalid column reference in the INSERT VALUES Clause"),
+                errhint("You may have referenced target table's column")));
     }
 }

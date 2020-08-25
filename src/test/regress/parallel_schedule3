@@ -17,3 +17,11 @@ test: delete update namespace case select_having select_implicit
 test: hw_test_operate_user
 test: hw_createtbl_llt gsqlerr
 test: hw_sql_llt sqlLLT
+
+# test UPSERT
+test: upsert_prepare
+test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
+test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test
+test: upsert_grammer_test_02 upsert_restriction upsert_composite
+test: upsert_trigger_test upsert_explain
+test: upsert_clean

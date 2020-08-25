@@ -335,12 +335,12 @@ static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var,
 
 /*
  * transformAssignedExpr()
- *	This is used in INSERT and UPDATE statements only.	It prepares an
- *	expression for assignment to a column of the target table.
- *	This includes coercing the given value to the target column's type
- *	(if necessary), and dealing with any subfield names or subscripts
- *	attached to the target column itself.  The input expression has
- *	already been through transformExpr().
+ *	This is used in INSERT and UPDATE (including DUPLICATE KEY UPDATE)
+ *	statements only. It prepares an expression for assignment to a column
+ *	of the target table. This includes coercing the given value
+ *	to the target column's type (if necessary), and dealing with
+ *	any subfield names or subscripts attached to the target column itself
+ *	The input expression has already been through transformExpr().
  *
  * pstate		parse state
  * expr			expression to be modified
@@ -496,11 +496,11 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
 
 /*
  * updateTargetListEntry()
- *	This is used in UPDATE statements only. It prepares an UPDATE
- *	TargetEntry for assignment to a column of the target table.
- *	This includes coercing the given value to the target column's type
- *	(if necessary), and dealing with any subfield names or subscripts
- *	attached to the target column itself.
+ *	This is used in UPDATE (and DUPLICATE KEY UPDATE) statements only.
+ *	It prepares an UPDATE TargetEntry for assignment to a column of
+ *	the target table. This includes coercing the given value to the
+ *	target column's type (if necessary), and dealing with any subfield
+ *	names or subscripts attached to the target column itself.
  *
  * pstate		parse state
  * tle			target list entry to be modified

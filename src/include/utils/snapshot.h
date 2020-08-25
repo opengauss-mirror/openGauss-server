@@ -120,7 +120,8 @@ typedef enum {
     HeapTupleInvisible,
     HeapTupleSelfUpdated,
     HeapTupleUpdated,
-    HeapTupleBeingUpdated
+    HeapTupleBeingUpdated,
+    HeapTupleSelfCreated
 } HTSU_Result;
 
 #endif /* SNAPSHOT_H */

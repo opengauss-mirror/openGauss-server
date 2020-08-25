@@ -227,6 +227,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_tsdb                        | bool    |      |         | 
  enable_twophase_commit             | bool    |      |         | 
  enable_upgrade_merge_lock_mode     | bool    |      |         | 
+ enable_upsert_to_merge             | bool    |      |         |
  enable_user_metric_persistent      | bool    |      |         | 
  enable_valuepartition_pruning      | bool    |      |         | 
  enable_vector_engine               | bool    |      |         | 

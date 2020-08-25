@@ -1389,6 +1389,20 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
+        {
+            {
+                "enable_upsert_to_merge",
+                PGC_USERSET,
+                QUERY_TUNING_METHOD,
+                gettext_noop("Enable transform INSERT ON DUPLICATE KEY UDPATE statement to MERGE statement."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.enable_upsert_to_merge,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
 #ifdef ENABLE_MULTIPLE_NODES
         {
             {

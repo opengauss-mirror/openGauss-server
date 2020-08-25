@@ -675,7 +675,7 @@ static void DecodeInsert(LogicalDecodingContext* ctx, XLogRecordBuffer* buf)
     rc = memcpy_s(&change->data.tp.relnode, sizeof(RelFileNode), &target_node, sizeof(RelFileNode));
     securec_check(rc, "\0", "\0");
 
-    if (xlrec->flags & XLOG_HEAP_CONTAINS_NEW_TUPLE) {
+    if (xlrec->flags & XLH_INSERT_CONTAINS_NEW_TUPLE) {
         change->data.tp.newtuple = ReorderBufferGetTupleBuf(ctx->reorder, tuplelen);
 
         DecodeXLogTuple(tupledata, tuplelen, change->data.tp.newtuple);
@@ -741,11 +741,11 @@ static void DecodeUpdate(LogicalDecodingContext* ctx, XLogRecordBuffer* buf)
     change->origin_id = XLogRecGetOrigin(r);
     rc = memcpy_s(&change->data.tp.relnode, sizeof(RelFileNode), &target_node, sizeof(RelFileNode));
     securec_check(rc, "", "");
-    if (xlrec->flags & XLOG_HEAP_CONTAINS_NEW_TUPLE) {
+    if (xlrec->flags & XLH_UPDATE_CONTAINS_NEW_TUPLE) {
         change->data.tp.newtuple = ReorderBufferGetTupleBuf(ctx->reorder, tuplelen_new);
         DecodeXLogTuple(data_new, datalen_new, change->data.tp.newtuple);
     }
-    if (xlrec->flags & XLOG_HEAP_CONTAINS_OLD) {
+    if (xlrec->flags & XLH_UPDATE_CONTAINS_OLD) {
         change->data.tp.oldtuple = ReorderBufferGetTupleBuf(ctx->reorder, tuplelen_old);
 
         DecodeXLogTuple(data_old, datalen_old, change->data.tp.oldtuple);
@@ -790,7 +790,7 @@ static void DecodeDelete(LogicalDecodingContext* ctx, XLogRecordBuffer* buf)
     securec_check(rc, "", "");
 
     /* old primary key stored */
-    if (xlrec->flags & XLOG_HEAP_CONTAINS_OLD) {
+    if (xlrec->flags & XLH_DELETE_CONTAINS_OLD) {
         Assert(XLogRecGetDataLen(r) > (SizeOfHeapDelete + SizeOfHeapHeader));
         change->data.tp.oldtuple = ReorderBufferGetTupleBuf(ctx->reorder, datalen);
 
@@ -848,7 +848,7 @@ static void DecodeMultiInsert(LogicalDecodingContext* ctx, XLogRecordBuffer* buf
          * We decode the tuple in pretty much the same way as DecodeXLogTuple,
          * but since the layout is slightly different, we can't use it here.
          */
-        if (xlrec->flags & XLOG_HEAP_CONTAINS_NEW_TUPLE) {
+        if (xlrec->flags & XLH_INSERT_CONTAINS_NEW_TUPLE) {
             HeapTupleHeader header;
             xlhdr = (xl_multi_insert_tuple*)data;
             data = ((char*)xlhdr) + SizeOfMultiInsertTuple;
@@ -889,7 +889,7 @@ static void DecodeMultiInsert(LogicalDecodingContext* ctx, XLogRecordBuffer* buf
          * xl_multi_insert_tuple record emitted by one heap_multi_insert()
          * call.
          */
-        if ((xlrec->flags & XLOG_HEAP_LAST_MULTI_INSERT) && ((i + 1) == xlrec->ntuples)) {
+        if ((xlrec->flags & XLH_INSERT_LAST_IN_MULTI) && ((i + 1) == xlrec->ntuples)) {
             change->data.tp.clear_toast_afterwards = true;
         } else {
             change->data.tp.clear_toast_afterwards = false;

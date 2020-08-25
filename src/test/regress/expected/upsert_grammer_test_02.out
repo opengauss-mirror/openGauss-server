@@ -1,0 +1,188 @@
+\c upsert
+SET CURRENT_SCHEMA TO upsert_test;
+-- enable_upsert_to_merge must be off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
+SHOW enable_upsert_to_merge;
+ enable_upsert_to_merge 
+------------------------
+ off
+(1 row)
+
+-- support multiple set
+INSERT INTO t_grammer VALUES(11, 1) ON DUPLICATE KEY UPDATE c2 = 2, c4 = ROW(10, 20), c3 = '{10, 20, 30}';
+INSERT INTO t_grammer VALUES(12, 2) ON DUPLICATE KEY UPDATE c2 = 2, c3[1] = 3;
+-- support const value and expr
+INSERT INTO t_grammer VALUES(23) ON DUPLICATE KEY UPDATE c2 = 2;
+INSERT INTO t_grammer VALUES(24) ON DUPLICATE KEY UPDATE c2 = length('test') + 100;
+-- support without table name
+INSERT INTO t_grammer VALUES(31, 1) ON DUPLICATE KEY UPDATE c2 = c1, c4.a = VALUES(c1);
+INSERT INTO t_grammer VALUES(32, 2) ON DUPLICATE KEY UPDATE c2 = c1 + 5, c4.a = VALUES(c1);
+-- support with table name
+INSERT INTO t_grammer VALUES(41, 1) ON DUPLICATE KEY UPDATE c2 = t_grammer.c1, c4.a = VALUES(c1);
+INSERT INTO t_grammer VALUES(42, 2) ON DUPLICATE KEY UPDATE c2 = t_grammer.c1 + 5, c4.a = VALUES(c1);
+-- support EXCLUDED alone and with expr
+INSERT INTO t_grammer VALUES(51, 1) ON DUPLICATE KEY UPDATE c2 = c1 + 5, c4.a = EXCLUDED.c1;
+INSERT INTO t_grammer VALUES(52, 2) ON DUPLICATE KEY UPDATE c2 = t_grammer.c1 + 5, c4.a = EXCLUDED.c1 + 5;
+INSERT INTO t_grammer VALUES(53, 3) ON DUPLICATE KEY UPDATE c4.a = sqrt(EXCLUDED.c1 - EXCLUDED.c2 - 1) + 1, c2 = t_grammer.c1 + 5;
+INSERT INTO t_grammer VALUES(54, 4) ON DUPLICATE KEY UPDATE c4.b = EXCLUDED.c1 + t_grammer.c1;
+INSERT INTO t_grammer VALUES(55, 5) ON DUPLICATE KEY UPDATE c4.a = EXCLUDED.c2, c4.b = EXCLUDED.c1 + sqrt(c1 - 6);
+-- support ARRAY
+INSERT INTO t_grammer VALUES(61, 1) ON DUPLICATE KEY UPDATE c2 = VALUES(c3[1]);
+INSERT INTO t_grammer VALUES(62, 2) ON DUPLICATE KEY UPDATE c5 = VALUES(c3[2,3]);
+INSERT INTO t_grammer VALUES(63, 3) ON DUPLICATE KEY UPDATE c5 = VALUES(c3[2:3]);
+INSERT INTO t_grammer VALUES(64, 4, '{10, 20, 30}') ON DUPLICATE KEY UPDATE c2 = EXCLUDED.c3[1];
+INSERT INTO t_grammer VALUES(65, 5, '{10, 20, 30}') ON DUPLICATE KEY UPDATE c5 = EXCLUDED.c3[2,3];
+INSERT INTO t_grammer VALUES(66, 6, '{10, 20, 30}') ON DUPLICATE KEY UPDATE c5 = EXCLUDED.c3[1:2];
+INSERT INTO t_grammer VALUES(67, 7, '{10, 20, 30}') ON DUPLICATE KEY UPDATE c2 = c3[1];
+INSERT INTO t_grammer VALUES(68, 8, '{10, 20, 30}') ON DUPLICATE KEY UPDATE c5 = c3[2,3];
+INSERT INTO t_grammer VALUES(69, 9, '{10, 20, 30}') ON DUPLICATE KEY UPDATE c5 = c3[1:2];
+-- support user defined type
+INSERT INTO t_grammer VALUES(71, 1) ON DUPLICATE KEY UPDATE c4.a = c3[1] + c1;
+INSERT INTO t_grammer VALUES(72, 2, '{71, 72, 73}') ON DUPLICATE KEY UPDATE c4.a = c3[1] + c1;
+INSERT INTO t_grammer VALUES(73, 3, '{71, 72, 73}') ON DUPLICATE KEY UPDATE c4.a = c3[1] + c1, c4.b = c3[2];
+INSERT INTO t_grammer VALUES(74, 4, '{71, 72, 73}', ROW(74, 75)) ON DUPLICATE KEY UPDATE c4 = ROW(740, 750);
+-- appoint INSERT target column
+INSERT INTO t_grammer (c5, c1, c2) VALUES('{81,82}', 81, DEFAULT) ON DUPLICATE KEY UPDATE c2 = VALUES(c1);
+INSERT INTO t_grammer (c3[1], c3[2], c1) VALUES(881, 882, 82) ON DUPLICATE KEY UPDATE c5 = VALUES(c3), c2 = VALUES(c3[1]);
+INSERT INTO t_grammer (c1, c3, c4) VALUES(83, '{81, 82, 83}', ROW(810, 820)) ON DUPLICATE KEY UPDATE c4 = EXCLUDED.c4;
+INSERT INTO t_grammer (c1, c3, c4.a) VALUES(84, '{81, 82, 83}', 850) ON DUPLICATE KEY UPDATE c4.b = c3[3];
+-- support UPDATE NOTHING
+INSERT INTO t_grammer VALUES(91, 1, '{91, 92, 93}', ROW(94, 95)) ON DUPLICATE KEY UPDATE NOTHING;
+INSERT INTO t_grammer (c5, c1, c2, c4) VALUES('{91,92}', 92, DEFAULT, ROW(910, 920)) ON DUPLICATE KEY UPDATE NOTHING;
+-- UPDATE target: unsupport with schema but support with tablename
+INSERT INTO t_grammer VALUES(0, 0, '{0,0}', ROW(0, 0), '{107, 108}') ON DUPLICATE KEY UPDATE
+	upsert_test.t_grammer.c2 = c2 * 10, upsert_test.t_grammer.c3[1:2] = c5[1:2], upsert_test.t_grammer.c4.a = c1;
+ERROR:  column "upsert_test.t_grammer" of relation "t_grammer" does not exist
+LINE 2:  upsert_test.t_grammer.c2 = c2 * 10, upsert_test.t_grammer.c...
+         ^
+INSERT INTO t_grammer VALUES(101, 1, '{102, 103, 104}', ROW(105, 106), '{107, 108}') ON DUPLICATE KEY UPDATE
+	t_grammer.c2 = c2 * 10, t_grammer.c3[1:2] = c5[1:2], t_grammer.c4.a = c1;
+-- INSERT target: appoint schema
+INSERT INTO upsert_test.t_grammer VALUES(102, 2, '{102, 103, 104}', ROW(105, 106), '{107, 108}') ON DUPLICATE KEY UPDATE
+	t_grammer.c2 = EXCLUDED.c2 * 10, t_grammer.c3[1:2] = c5[1:2], t_grammer.c4.a = VALUES(c1);
+CREATE SCHEMA upsert_test_tmp;
+SET CURRENT_SCHEMA TO upsert_test_tmp;
+INSERT INTO upsert_test.t_grammer VALUES(103, 3, '{102, 103, 104}', ROW(105, 106), '{107, 108}') ON DUPLICATE KEY UPDATE
+	t_grammer.c2 = EXCLUDED.c2 * 10, t_grammer.c3[1:2] = c5[1:2], t_grammer.c4.a = VALUES(c1);
+SET CURRENT_SCHEMA TO upsert_test;
+DROP SCHEMA upsert_test_tmp;
+-- support data type
+INSERT INTO t_data VALUES(11, 11, 11, 11, 11, '11', '11', '11', '2020-04-23', '2020-04-23 11:00', '1:00') ON DUPLICATE KEY UPDATE NOTHING;
+INSERT INTO t_data VALUES(12, 12, 12, 12, 12, '12', '12', '12', '2020-04-24', '2020-04-24 11:00', '2:00') 
+	ON DUPLICATE KEY UPDATE 
+	c_tiny = 13, c_smallint = 13, c_bigint = 13, c_numeric = 13,
+	c_var = '13', c_text = '13', c_bytea = '13', c_date = '2020-05-24', c_timestamp = '2020-05-24 11:00', c_time = '3:00';
+INSERT INTO t_data VALUES(13, 13, 13, 13, 13, '13', '13', '13', '2020-04-25', '2020-04-25 11:00', '4:00') 
+	ON DUPLICATE KEY UPDATE 
+	c_tiny = EXCLUDED.c_tiny + 1, c_smallint = EXCLUDED.c_smallint + 1, c_bigint = EXCLUDED.c_bigint + 1, c_numeric = EXCLUDED.c_numeric + 1,
+	c_var = EXCLUDED.c_var || '3', c_text = EXCLUDED.c_text || '3', c_bytea = EXCLUDED.c_bytea || '3',
+	c_date = EXCLUDED.c_date + '1 day'::interval, c_timestamp = EXCLUDED.c_timestamp + '1 day'::interval, c_time = EXCLUDED.c_time + '1 hour'::interval;
+-- support UPDATE to default
+INSERT INTO t_default DEFAULT VALUES ON DUPLICATE KEY UPDATE c2 = 100, c3 = '2020-05-17';
+INSERT INTO t_default VALUES(91, 0.91, '2020-05-17') ON DUPLICATE KEY UPDATE c2 = DEFAULT, c3 = DEFAULT;
+INSERT INTO t_default VALUES(92, DEFAULT, '2020-05-17') ON DUPLICATE KEY UPDATE c2 = 10, c3 = DEFAULT;
+-- unsupport alias
+INSERT INTO t_grammer AS alias VALUES (91) ON DUPLICATE KEY UPDATE c2 = VALUES(c1);
+ERROR:  syntax error at or near "AS"
+LINE 1: INSERT INTO t_grammer AS alias VALUES (91) ON DUPLICATE KEY ...
+                              ^
+-- unsupport VALUES with expr
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = sqrt(VALUES(c2));
+ERROR:  syntax error at or near "("
+LINE 1: ... VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = sqrt(VALUES(c2));
+                                                                 ^
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(c3[1]) + 1;
+ERROR:  syntax error at or near "+"
+LINE 1: ...VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(c3[1]) + 1;
+                                                                   ^
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(c4.a) + 1;
+ERROR:  only allow column name within VALUES
+LINE 1: ... VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(c4.a) + 1;
+                                                             ^
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(t_grammer.c3[1]) + 1;
+ERROR:  only allow column name within VALUES
+LINE 1: ... VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(t_grammer....
+                                                             ^
+-- unsupport VALUES with table name
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(t_grammer.c4.a);
+ERROR:  only allow column name within VALUES
+LINE 1: ... VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(t_grammer....
+                                                             ^
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(t_grammer.c2);
+ERROR:  only allow column name within VALUES
+LINE 1: ... VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(t_grammer....
+                                                             ^
+-- unsupport DEFAULT with expr
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = DEFAULT + 1;
+ERROR:  syntax error at or near "+"
+LINE 1: ...ammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = DEFAULT + 1;
+                                                                   ^
+-- unsupport user defined typed column's element
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(c4.a);
+ERROR:  only allow column name within VALUES
+LINE 1: ...mmer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = VALUES(c4.a);
+                                                                 ^
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = EXCLUDED.c4.a;
+ERROR:  schema "excluded" does not exist
+CONTEXT:  referenced column: c2
+INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = c4.a;
+ERROR:  missing FROM-clause entry for table "c4"
+LINE 1: ...TO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = c4.a;
+                                                                  ^
+CONTEXT:  referenced column: c2
+SELECT * FROM t_data ORDER BY 1;
+ c_int | c_tiny | c_smallint | c_bigint | c_numeric | c_var | c_text | c_bytea  |          c_date          |       c_timestamp        |  c_time  | c_intarray | c_com 
+-------+--------+------------+----------+-----------+-------+--------+----------+--------------------------+--------------------------+----------+------------+-------
+    11 | 11     |         11 |       11 |        11 | 11    | 11     | \x3131   | Thu Apr 23 00:00:00 2020 | Thu Apr 23 11:00:00 2020 | 01:00:00 |            | 
+    12 | 13     |         13 |       13 |        13 | 13    | 13     | \x3133   | Sun May 24 00:00:00 2020 | Sun May 24 11:00:00 2020 | 03:00:00 |            | 
+    13 | 14     |         14 |       14 |        14 | 133   | 133    | \x313333 | Sun Apr 26 00:00:00 2020 | Sun Apr 26 11:00:00 2020 | 05:00:00 |            | 
+(3 rows)
+
+SELECT * FROM t_grammer ORDER BY 1;
+ c1  |  c2  |      c3       |    c4     |    c5     
+-----+------+---------------+-----------+-----------
+  11 |    2 | {10,20,30}    | (10,20)   | 
+  12 |    2 | {3}           |           | 
+  23 |    2 |               |           | 
+  24 |  104 |               |           | 
+  31 |   31 |               | (31,)     | 
+  32 |   37 |               | (32,)     | 
+  41 |   41 |               | (41,)     | 
+  42 |   47 |               | (42,)     | 
+  51 |   56 |               | (51,)     | 
+  52 |   57 |               | (57,)     | 
+  53 |   58 |               | (8,)      | 
+  54 |    4 |               | (,108)    | 
+  55 |    5 |               | (5,62)    | 
+  61 |      |               |           | 
+  62 |    2 |               |           | 
+  63 |    3 |               |           | 
+  64 |   10 | {10,20,30}    |           | 
+  65 |    5 | {10,20,30}    |           | {20,30}
+  66 |    6 | {10,20,30}    |           | {10,20}
+  67 |   10 | {10,20,30}    |           | 
+  68 |    8 | {10,20,30}    |           | {20,30}
+  69 |    9 | {10,20,30}    |           | {10,20}
+  71 |    1 |               | (,)       | 
+  72 |    2 | {71,72,73}    | (143,)    | 
+  73 |    3 | {71,72,73}    | (144,72)  | 
+  74 |    4 | {71,72,73}    | (740,750) | 
+  81 |   81 |               |           | {81,82}
+  82 |  881 | {881,882}     |           | {881,882}
+  83 | -100 | {81,82,83}    | (810,820) | 
+  84 | -100 | {81,82,83}    | (850,83)  | 
+  91 |    1 | {91,92,93}    | (94,95)   | 
+  92 | -100 |               | (910,920) | {91,92}
+ 101 |   10 | {107,108,104} | (101,106) | {107,108}
+ 102 |   20 | {107,108,104} | (102,106) | {107,108}
+ 103 |   30 | {107,108,104} | (103,106) | {107,108}
+(35 rows)
+
+SELECT * FROM t_default ORDER BY 1;
+--? c1 |        c2        |               c3                
+--?
+--? 10 |              100 | Sun May 17 00:00:00 2020
+--? 91 | .840485369320959 | Wed Apr 29 10:25:28.439693 2020
+--? 92 |               10 | Wed Apr 29 10:25:28.442916 2020
+(3 rows)
+

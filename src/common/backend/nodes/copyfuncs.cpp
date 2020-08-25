@@ -283,6 +283,11 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(mergeSourceTargetList);
     COPY_NODE_FIELD(mergeActionList);
 
+    COPY_SCALAR_FIELD(upsertAction);
+    COPY_NODE_FIELD(updateTlist);
+    COPY_NODE_FIELD(exclRelTlist);
+    COPY_SCALAR_FIELD(exclRelRTIndex);
+
     return newnode;
 }
 
@@ -3264,6 +3269,7 @@ static RangeTblEntry* _copyRangeTblEntry(const RangeTblEntry* from)
     COPY_SCALAR_FIELD(relhasbucket);
     COPY_SCALAR_FIELD(isbucket);
     COPY_NODE_FIELD(buckets);
+    COPY_SCALAR_FIELD(isexcluded);
 
     return newnode;
 }
@@ -3337,6 +3343,28 @@ static WithClause* _copyWithClause(const WithClause* from)
     COPY_NODE_FIELD(ctes);
     COPY_SCALAR_FIELD(recursive);
     COPY_LOCATION_FIELD(location);
+
+    return newnode;
+}
+
+static UpsertClause* _copyUpsertClause(const UpsertClause* from)
+{
+    UpsertClause* newnode = makeNode(UpsertClause);
+
+    COPY_NODE_FIELD(targetList);
+    COPY_LOCATION_FIELD(location);
+
+    return newnode;
+}
+
+static UpsertExpr* _copyUpsertExpr(const UpsertExpr* from)
+{
+    UpsertExpr* newnode = makeNode(UpsertExpr);
+
+    COPY_SCALAR_FIELD(upsertAction);
+    COPY_NODE_FIELD(updateTlist);
+    COPY_NODE_FIELD(exclRelTlist);
+    COPY_SCALAR_FIELD(exclRelIndex);
 
     return newnode;
 }
@@ -3981,6 +4009,7 @@ static Query* _copyQuery(const Query* from)
     COPY_NODE_FIELD(mergeSourceTargetList);
     COPY_NODE_FIELD(mergeActionList);
     COPY_NODE_FIELD(upsertQuery);
+    COPY_NODE_FIELD(upsertClause);
     COPY_SCALAR_FIELD(isRowTriggerShippable);
     COPY_SCALAR_FIELD(use_star_targets);
     COPY_SCALAR_FIELD(is_from_full_join_rewrite);
@@ -3998,6 +4027,7 @@ static InsertStmt* _copyInsertStmt(const InsertStmt* from)
     COPY_NODE_FIELD(selectStmt);
     COPY_NODE_FIELD(returningList);
     COPY_NODE_FIELD(withClause);
+    COPY_NODE_FIELD(upsertClause);
     return newnode;
 }
 
@@ -6164,6 +6194,9 @@ void* copyObject(const void* from)
         case T_FromExpr:
             retval = _copyFromExpr((FromExpr*)from);
             break;
+        case T_UpsertExpr:
+            retval = _copyUpsertExpr((UpsertExpr *)from);
+            break;
         case T_PartitionState:
             retval = _copyPartitionState((PartitionState*)from);
             break;
@@ -6700,6 +6733,9 @@ void* copyObject(const void* from)
             break;
         case T_WithClause:
             retval = _copyWithClause((WithClause*)from);
+            break;
+        case T_UpsertClause:
+            retval = _copyUpsertClause((UpsertClause *)from);
             break;
         case T_CommonTableExpr:
             retval = _copyCommonTableExpr((CommonTableExpr*)from);

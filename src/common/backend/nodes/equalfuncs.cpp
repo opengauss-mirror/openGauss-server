@@ -680,6 +680,15 @@ static bool _equalMergeAction(const MergeAction* a, const MergeAction* b)
     return true;
 }
 
+static bool _equalUpsertExpr(const UpsertExpr* a, const UpsertExpr* b)
+{
+    COMPARE_SCALAR_FIELD(upsertAction);
+    COMPARE_NODE_FIELD(updateTlist);
+    COMPARE_NODE_FIELD(exclRelTlist);
+    COMPARE_SCALAR_FIELD(exclRelIndex);
+
+    return true;
+}
 /*
  * Stuff from relation.h
  */
@@ -818,6 +827,7 @@ static bool _equalQuery(const Query* a, const Query* b)
     COMPARE_NODE_FIELD(mergeSourceTargetList);
     COMPARE_NODE_FIELD(mergeActionList);
     COMPARE_NODE_FIELD(upsertQuery);
+    COMPARE_NODE_FIELD(upsertClause);
     COMPARE_SCALAR_FIELD(isRowTriggerShippable);
     COMPARE_SCALAR_FIELD(use_star_targets);
     COMPARE_SCALAR_FIELD(is_from_full_join_rewrite);
@@ -832,6 +842,7 @@ static bool _equalInsertStmt(const InsertStmt* a, const InsertStmt* b)
     COMPARE_NODE_FIELD(selectStmt);
     COMPARE_NODE_FIELD(returningList);
     COMPARE_NODE_FIELD(withClause);
+    COMPARE_NODE_FIELD(upsertClause);
 
     return true;
 }
@@ -2310,6 +2321,7 @@ static bool _equalRangeTblEntry(const RangeTblEntry* a, const RangeTblEntry* b)
     COMPARE_SCALAR_FIELD(relhasbucket);
     COMPARE_SCALAR_FIELD(isbucket);
     COMPARE_NODE_FIELD(buckets);
+    COMPARE_SCALAR_FIELD(isexcluded);
 
     return true;
 }
@@ -2387,6 +2399,13 @@ static bool _equalWithClause(const WithClause* a, const WithClause* b)
     return true;
 }
 
+static bool _equalUpsertClause(const UpsertClause* a, const UpsertClause* b)
+{
+    COMPARE_NODE_FIELD(targetList);
+    COMPARE_LOCATION_FIELD(location);
+
+   return true;
+}
 static bool _equalCommonTableExpr(const CommonTableExpr* a, const CommonTableExpr* b)
 {
     COMPARE_STRING_FIELD(ctename);
@@ -2891,6 +2910,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_FromExpr:
             retval = _equalFromExpr((FromExpr*)a, (FromExpr*)b);
+            break;
+        case T_UpsertExpr:
+            retval = _equalUpsertExpr((UpsertExpr*)a, (UpsertExpr*)b);
             break;
         case T_JoinExpr:
             retval = _equalJoinExpr((JoinExpr*)a, (JoinExpr*)b);
@@ -3428,6 +3450,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_WithClause:
             retval = _equalWithClause((WithClause*)a, (WithClause*)b);
+            break;
+        case T_UpsertClause:
+            retval = _equalUpsertClause((UpsertClause*)a, (UpsertClause*)b);
             break;
         case T_CommonTableExpr:
             retval = _equalCommonTableExpr((CommonTableExpr*)a, (CommonTableExpr*)b);

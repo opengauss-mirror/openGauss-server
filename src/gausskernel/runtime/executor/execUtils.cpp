@@ -64,6 +64,8 @@ static bool get_last_attnums(Node* node, ProjectionInfo* projInfo);
 static bool index_recheck_constraint(
     Relation index, Oid* constr_procs, Datum* existing_values, const bool* existing_isnull, Datum* new_values);
 static void ShutdownExprContext(ExprContext* econtext, bool isCommit);
+static bool check_violation(Relation heap, Relation index, IndexInfo *indexInfo, ItemPointer tupleid, Datum *values,
+    const bool *isnull, EState *estate, bool newIndex, bool errorOK, CheckWaitMode waitMode, ItemPointer conflictTid);
 
 /* ----------------------------------------------------------------
  *				 Executor state and memory management functions
@@ -1100,7 +1102,7 @@ Partition ExecOpenScanParitition(EState* estate, Relation parent, PartitionIdent
  *		resultRelInfo->ri_RelationDesc.
  * ----------------------------------------------------------------
  */
-void ExecOpenIndices(ResultRelInfo* resultRelInfo)
+void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative)
 {
     Relation resultRelation = resultRelInfo->ri_RelationDesc;
     List* indexoidlist = NIL;
@@ -1156,6 +1158,13 @@ void ExecOpenIndices(ResultRelInfo* resultRelInfo)
         /* extract index key information from the index's pg_index info */
         ii = BuildIndexInfo(indexDesc);
 
+        /*
+         * If the indexes are to be used for speculative insertion, add extra
+         * information required by unique index entries.
+         */
+        if (speculative && ii->ii_Unique) {
+            BuildSpeculativeIndexInfo(indexDesc, ii);
+        }
         relationDescs[i] = indexDesc;
         indexInfoArray[i] = ii;
         i++;
@@ -1196,6 +1205,164 @@ void ExecCloseIndices(ResultRelInfo* resultRelInfo)
 }
 
 /* ----------------------------------------------------------------
+ *     ExecCheckIndexConstraints
+ *
+ *     This routine checks if a tuple violates any unique or
+ *     exclusion constraints.  Returns true if there is no no conflict.
+ *     Otherwise returns false, and the TID of the conflicting
+ *     tuple is returned in *conflictTid.
+ *
+ *     Note that this doesn't lock the values in any way, so it's
+ *     possible that a conflicting tuple is inserted immediately
+ *     after this returns.  But this can be used for a pre-check
+ *     before insertion.
+ * ----------------------------------------------------------------
+ */
+bool ExecCheckIndexConstraints(TupleTableSlot* slot, EState* estate,
+    Relation targetRel, Partition p, int2 bucketId, ItemPointer conflictTid)
+{
+    ResultRelInfo* resultRelInfo = NULL;
+    RelationPtr relationDescs = NULL;
+    int i = 0;
+    int 	numIndices = 0;
+    IndexInfo** indexInfoArray = NULL;
+    Relation heapRelationDesc = NULL;
+    Relation actualHeap = NULL;
+    ExprContext* econtext = NULL;
+    Datum values[INDEX_MAX_KEYS];
+    bool isnull[INDEX_MAX_KEYS];
+    ItemPointerData invalidItemPtr;
+    bool isPartitioned = false;
+    List* partitionIndexOidList = NIL;
+
+    ItemPointerSetInvalid(conflictTid);
+    ItemPointerSetInvalid(&invalidItemPtr);
+
+    /*
+     * Get information from the result relation info structure.
+     */
+    resultRelInfo = estate->es_result_relation_info;
+    numIndices = resultRelInfo->ri_NumIndices;
+    relationDescs = resultRelInfo->ri_IndexRelationDescs;
+    indexInfoArray = resultRelInfo->ri_IndexRelationInfo;
+    heapRelationDesc = resultRelInfo->ri_RelationDesc;
+    actualHeap = targetRel;
+
+    if (RELATION_IS_PARTITIONED(heapRelationDesc)) {
+        Assert(p != NULL && p->pd_part != NULL);
+        isPartitioned = true;
+
+        if (!p->pd_part->indisusable) {
+            return false;
+        }
+    }
+
+    /*
+     * use the EState's per-tuple context for evaluating predicates
+     * and index expressions (creating it if it's not already there).
+     */
+    econtext = GetPerTupleExprContext(estate);
+
+    /* Arrange for econtext's scan tuple to be the tuple under test */
+    econtext->ecxt_scantuple = slot;
+
+    /*
+     * For each index, form index tuple and check if it satisfies the
+     * constraint.
+     */
+    for (i = 0; i < numIndices; i++) {
+        Relation indexRelation = relationDescs[i];
+        IndexInfo* indexInfo;
+        bool satisfiesConstraint;
+        Relation actualIndex = NULL;
+        Oid partitionedindexid = InvalidOid;
+        Oid indexpartitionid = InvalidOid;
+        Partition indexpartition = NULL;
+
+        if (indexRelation == NULL)
+            continue;
+
+        indexInfo = indexInfoArray[i];
+
+        if (!indexInfo->ii_Unique && !indexInfo->ii_ExclusionOps)
+            continue;
+
+        /* If the index is marked as read-only, ignore it */
+        if (!indexInfo->ii_ReadyForInserts)
+            continue;
+
+        if (!indexRelation->rd_index->indimmediate)
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("INSERT ON DUPLICATE KEY UPDATE does not support deferrable"
+                                    " unique constraints/exclusion constraints.")));
+        if (isPartitioned) {
+            partitionedindexid = RelationGetRelid(indexRelation);
+            if (!PointerIsValid(partitionIndexOidList)) {
+                partitionIndexOidList = PartitionGetPartIndexList(p);
+                if (!PointerIsValid(partitionIndexOidList)) {
+                    // no local indexes available
+                    return false;
+                }
+            }
+
+            indexpartitionid = searchPartitionIndexOid(partitionedindexid, partitionIndexOidList);
+
+            searchFakeReationForPartitionOid(estate->esfRelations,
+                estate->es_query_cxt,
+                indexRelation,
+                indexpartitionid,
+                actualIndex,
+                indexpartition,
+                RowExclusiveLock);
+            /* skip unusable index */
+            if (indexpartition->pd_part->indisusable == false) {
+                continue;
+            }
+        } else {
+            actualIndex = indexRelation;
+        }
+
+        if (bucketId != InvalidBktId) {
+            searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt, actualIndex, bucketId, actualIndex);
+        }
+
+        /* Check for partial index */
+        if (indexInfo->ii_Predicate != NIL) {
+            List* predicate;
+
+            /*
+             * If predicate state not set up yet, create it (in the estate's
+             * per-query context)
+             */
+            predicate = indexInfo->ii_PredicateState;
+            if (predicate == NIL) {
+                predicate = (List*)ExecPrepareExpr((Expr*)indexInfo->ii_Predicate, estate);
+                indexInfo->ii_PredicateState = predicate;
+            }
+
+            /* Skip this index-update if the predicate isn't satisfied */
+            if (!ExecQual(predicate, econtext, false)) {
+                continue;
+            }
+        }
+
+        /*
+        * FormIndexDatum fills in its values and isnull parameters with the
+        * appropriate values for the column(s) of the index.
+        */
+        FormIndexDatum(indexInfo, slot, estate, values, isnull);
+
+        satisfiesConstraint = check_violation(actualHeap, actualIndex, indexInfo, &invalidItemPtr, values, isnull,
+            estate, false, true, CHECK_WAIT, conflictTid);
+        if (!satisfiesConstraint) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* ----------------------------------------------------------------
  *		ExecInsertIndexTuples
  *
  *		This routine takes care of inserting index tuples
@@ -1215,8 +1382,8 @@ void ExecCloseIndices(ResultRelInfo* resultRelInfo)
  *		Should we change the API to make it safer?
  * ----------------------------------------------------------------
  */
-List* ExecInsertIndexTuples(
-    TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel, Partition p, int2 bucketId)
+List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* estate,
+    Relation targetPartRel, Partition p, int2 bucketId, bool* conflict)
 {
     List* result = NIL;
     ResultRelInfo* resultRelInfo = NULL;
@@ -1362,6 +1529,8 @@ List* ExecInsertIndexTuples(
          */
         if (!indexRelation->rd_index->indisunique) {
             checkUnique = UNIQUE_CHECK_NO;
+        } else if (conflict != NULL) {
+            checkUnique = UNIQUE_CHECK_PARTIAL;
         } else if (indexRelation->rd_index->indimmediate) {
             checkUnique = UNIQUE_CHECK_YES;
         } else {
@@ -1397,9 +1566,13 @@ List* ExecInsertIndexTuples(
             /*
              * The tuple potentially violates the uniqueness or exclusion
              * constraint, so make a note of the index so that we can re-check
-             * it later.
+             * it later. Speculative inserters are told if there was a
+             * speculative conflict, since that always requires a restart.
              */
             result = lappend_oid(result, RelationGetRelid(indexRelation));
+            if (conflict != NULL) {
+                *conflict = true;
+            }
         }
     }
 
@@ -1434,6 +1607,13 @@ List* ExecInsertIndexTuples(
 bool check_exclusion_constraint(Relation heap, Relation index, IndexInfo* indexInfo, ItemPointer tupleid, Datum* values,
     const bool* isnull, EState* estate, bool newIndex, bool errorOK)
 {
+    return check_violation(heap, index, indexInfo, tupleid, values, isnull,
+        estate, newIndex, errorOK, errorOK ? CHECK_NOWAIT : CHECK_WAIT, NULL);
+}
+
+bool check_violation(Relation heap, Relation index, IndexInfo* indexInfo, ItemPointer tupleid, Datum* values,
+    const bool* isnull, EState* estate, bool newIndex, bool errorOK, CheckWaitMode waitMode, ItemPointer conflictTid)
+{
     Oid* constr_procs = indexInfo->ii_ExclusionProcs;
     uint16* constr_strats = indexInfo->ii_ExclusionStrats;
     Oid* index_collations = index->rd_indcollation;
@@ -1459,6 +1639,13 @@ bool check_exclusion_constraint(Relation heap, Relation index, IndexInfo* indexI
         }
     }
 
+    if (indexInfo->ii_ExclusionOps) {
+        constr_procs = indexInfo->ii_ExclusionProcs;
+        constr_strats = indexInfo->ii_ExclusionStrats;
+    } else {
+        constr_procs = indexInfo->ii_UniqueProcs;
+        constr_strats = indexInfo->ii_UniqueStrats;
+    }
     /*
      * Search the tuples that are in the index for any violations, including
      * tuples that aren't visible yet.
@@ -1503,7 +1690,7 @@ retry:
         /*
          * Ignore the entry for the tuple we're trying to check.
          */
-        if (ItemPointerEquals(tupleid, &tup->t_self)) {
+        if (ItemPointerIsValid(tupleid) && ItemPointerEquals(tupleid, &tup->t_self)) {
             if (found_self) /* should not happen */
                 ereport(ERROR,
                     (errcode(ERRCODE_FETCH_DATA_FAILED),
@@ -1527,33 +1714,44 @@ retry:
         }
 
         /*
-         * At this point we have either a conflict or a potential conflict. If
-         * we're not supposed to raise error, just return the fact of the
-         * potential conflict without waiting to see if it's real.
-         */
-        if (errorOK) {
-            conflict = true;
-            break;
-        }
-
-        /*
+         * At this point we have either a conflict or a potential conflict.
          * If an in-progress transaction is affecting the visibility of this
-         * tuple, we need to wait for it to complete and then recheck.	For
-         * simplicity we do rechecking by just restarting the whole scan ---
-         * this case probably doesn't happen often enough to be worth trying
-         * harder, and anyway we don't want to hold any index internal locks
-         * while waiting.
+         * tuple, we need to wait for it to complete and then recheck (unless
+         * the caller requested not to).  For simplicity we do rechecking by
+         * just restarting the whole scan --- this case probably doesn't
+         * happen often enough to be worth trying harder, and anyway we don't
+         * want to hold any index internal locks while waiting.
          */
         xwait = TransactionIdIsValid(DirtySnapshot.xmin) ? DirtySnapshot.xmin : DirtySnapshot.xmax;
 
-        if (TransactionIdIsValid(xwait)) {
+        if (TransactionIdIsValid(xwait) && waitMode == CHECK_WAIT) {
             index_endscan(index_scan);
+
+            /* for speculative insertion (INSERT ON DUPLICATE KEY UPDATE),
+             * we only need to wait the speculative token lock to be release,
+             * which happens when the tuple is speculative inserted by other
+             * running transction, and has done it's insertion (eithter
+             * finished or aborted).
+             */
             XactLockTableWait(xwait);
             goto retry;
         }
 
         /*
-         * We have a definite conflict.  Report it.
+         * We have a definite conflict (or a potential one, but the caller
+         * didn't want to wait). If we're not supposed to raise error, just
+         * return to the caller.
+         */
+        if (errorOK) {
+            conflict = true;
+            if (conflictTid != NULL)
+                *conflictTid = tup->t_self;
+            break;
+        }
+
+        /*
+         * We have a definite conflict (or a potential one, but the caller
+         * didn't want to wait).  Report it.
          */
         error_new = BuildIndexValueDescription(index, values, isnull);
         error_existing = BuildIndexValueDescription(index, existing_values, existing_isnull);
@@ -1578,7 +1776,7 @@ retry:
 
     /*
      * Ordinarily, at this point the search should have found the originally
-     * inserted tuple, unless we exited the loop early because of conflict.
+     * inserted tuple (if any), unless we exited the loop early because of conflict.
      * However, it is possible to define exclusion constraints for which that
      * wouldn't be true --- for instance, if the operator is <>. So we no
      * longer complain if found_self is still false.

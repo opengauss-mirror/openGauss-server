@@ -210,6 +210,7 @@ typedef enum NodeTag {
     T_RangeTblRef,
     T_JoinExpr,
     T_FromExpr,
+	T_UpsertExpr,
     T_IntoClause,
     T_IndexVar,
 #ifdef PGXC
@@ -304,7 +305,7 @@ typedef enum NodeTag {
 #endif /* PGXC */
     T_StreamPath,
     T_MergeAction,
-
+	T_UpsertState,
     /*
      * TAGS FOR MEMORY NODES (memnodes.h)
      */
@@ -499,7 +500,7 @@ typedef enum NodeTag {
     T_PruningResult,
     T_Position,
     T_MergeWhenClause,
-
+	T_UpsertClause,
     /*
      * TAGS FOR REPLICATION GRAMMAR PARSE NODES (replnodes.h)
      */
@@ -893,5 +894,11 @@ typedef enum JoinType {
     (((1 << (jointype)) & ((1 << JOIN_LEFT) | (1 << JOIN_FULL) | (1 << JOIN_RIGHT) | (1 << JOIN_ANTI) |              \
                               (1 << JOIN_RIGHT_ANTI) | (1 << JOIN_LEFT_ANTI_FULL) | (1 << JOIN_RIGHT_ANTI_FULL))) != \
         0)
+
+typedef enum UpsertAction {
+    UPSERT_NONE,            /* No "DUPLICATE KEY UPDATE" clause */
+    UPSERT_NOTHING,         /* DUPLICATE KEY UPDATE NOTHING */
+    UPSERT_UPDATE           /* DUPLICATE KEY UPDATE ... */
+}UpsertAction;
 
 #endif /* NODES_H */

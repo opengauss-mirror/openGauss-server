@@ -412,7 +412,13 @@ typedef struct ModifyTable {
     Index mergeTargetRelation; /* RT index of the merge target */
     List* mergeSourceTargetList;
     List* mergeActionList; /* actions for MERGE */
-    OpMemInfo mem_info;    /*  Memory info for modify node */
+
+    UpsertAction upsertAction; /* DUPLICATE KEY UPDATE action */
+    List* updateTlist;         /* List of UPDATE target */
+    List* exclRelTlist;        /* target list of the EXECLUDED pseudo relation */
+    Index exclRelRTIndex;      /* RTI of the EXCLUDED pseudo relation */
+
+    OpMemInfo mem_info;    /* Memory info for modify node */
 } ModifyTable;
 
 /* ----------------

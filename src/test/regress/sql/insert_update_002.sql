@@ -2,6 +2,10 @@ DROP SCHEMA test_insert_update_002 CASCADE;
 CREATE SCHEMA test_insert_update_002;
 SET CURRENT_SCHEMA TO test_insert_update_002;
 
+-- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
+-- real upsert will be tested in specialized case.
+SET enable_upsert_to_merge TO ON;
+
 -- test t1 with no index
 CREATE TABLE t1 (
     col1 INT,

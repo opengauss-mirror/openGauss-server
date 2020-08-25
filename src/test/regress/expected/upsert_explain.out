@@ -1,0 +1,298 @@
+--------------------------------------------------------------------------------------------
+/* 
+ *  explain upsert
+ */
+--------------------------------------------------------------------------------------------
+\c upsert;
+SET CURRENT_SCHEMA TO upsert_test_explain;
+-- enable_upsert_to_merge must be off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
+SHOW enable_upsert_to_merge;
+ enable_upsert_to_merge 
+------------------------
+ off
+(1 row)
+
+create temp table up_expl_temp(c1 int, c2 int, c3 int unique) ;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "up_expl_temp_c3_key" for table "up_expl_temp"
+insert into up_expl_hash select a,a,a from generate_series(1,20) as a;
+insert into up_expl_repl select a,a,a from generate_series(1,20) as a;
+insert into up_expl_part select a,a,a from generate_series(1,20) as a;
+insert into up_expl_temp select a,a,a from generate_series(1,20) as a;
+insert into up_expl_unlog select a,a,a from generate_series(1,20) as a;
+insert into up_expl_node select a,a,a from generate_series(1,20) as a;
+insert into up_expl_repl2 select a,a,a,a,a from generate_series(1,20) as a;
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_hash values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on upsert_test_explain.up_expl_hash
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_hash_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_hash values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_hash (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_hash_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN PERFORMANCE insert into up_expl_hash values(1,1,1) on duplicate key update c1 = 2;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+--? Insert on upsert_test_explain.up_expl_hash  (cost=.* rows=1 width=0) (actual time=.* rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_hash_c3_key
+   (Buffers: shared hit=4)
+--?   (CPU: ex c/r=.*, ex row=1, ex cyc=.*, inc cyc=.*)
+--?   ->  Result  (cost=.* rows=1 width=0) (actual time=.* rows=1 loops=1)
+         Output: 1, 1, 1
+--?         (CPU: ex c/r=.*, ex row=1, ex cyc=.*, inc cyc=.*)
+--? Total runtime: .* ms
+(9 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_hash values(1,1,1),(2,2,2)on duplicate key update c1 = 2;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Insert on upsert_test_explain.up_expl_hash
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_hash_c3_key
+   ->  Values Scan on "*VALUES*"
+         Output: "*VALUES*".column1, "*VALUES*".column2, "*VALUES*".column3
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_hash values(1,1,1),(2,2,2)on duplicate key update c1 = 2;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Insert on up_expl_hash (actual rows=2 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_hash_c3_key
+   ->  Values Scan on "*VALUES*" (actual rows=2 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_repl values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on upsert_test_explain.up_expl_repl
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_repl_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_repl values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_repl (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_repl_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_part values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on upsert_test_explain.up_expl_part
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_part_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_part values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_part (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_part_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_temp values(1,1,1) on duplicate key update c1 = 2;
+--?.*QUERY PLAN.*
+--?----.*
+--? Insert on pg_temp_datanod.*.up_expl_temp
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_temp_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_temp values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_temp (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_temp_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_unlog values(1,1,1) on duplicate key update c1 = 2;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Insert on upsert_test_explain.up_expl_unlog
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_unlog_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_unlog values(1,1,1) on duplicate key update c1 = 2;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Insert on up_expl_unlog (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_unlog_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_node values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on upsert_test_explain.up_expl_node
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_node_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_node values(1,1,1) on duplicate key update c1 = 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_node (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: up_expl_node_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_hash values(1,1,1),(2,2,2)on duplicate key update nothing;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Insert on upsert_test_explain.up_expl_hash
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_hash_c3_key
+   ->  Values Scan on "*VALUES*"
+         Output: "*VALUES*".column1, "*VALUES*".column2, "*VALUES*".column3
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_hash values(1,1,1),(2,2,2)on duplicate key update nothing;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Insert on up_expl_hash (actual rows=0 loops=1)
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_hash_c3_key
+   ->  Values Scan on "*VALUES*" (actual rows=2 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_repl values(1,1,1) on duplicate key update nothing;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on upsert_test_explain.up_expl_repl
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_repl_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_repl values(1,1,1) on duplicate key update nothing;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_repl (actual rows=0 loops=1)
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_repl_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_part values(1,1,1) on duplicate key update nothing;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on upsert_test_explain.up_expl_part
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_part_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_part values(1,1,1) on duplicate key update nothing;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_part (actual rows=0 loops=1)
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_part_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_temp values(1,1,1) on duplicate key update nothing;
+--?.*QUERY PLAN.*
+--?----.*
+--? Insert on pg_temp_datanod.*.up_expl_temp
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_temp_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_temp values(1,1,1) on duplicate key update nothing;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_temp (actual rows=0 loops=1)
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_temp_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_unlog values(1,1,1) on duplicate key update nothing;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Insert on upsert_test_explain.up_expl_unlog
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_unlog_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_unlog values(1,1,1) on duplicate key update nothing;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Insert on up_expl_unlog (actual rows=0 loops=1)
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_unlog_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+
+EXPLAIN (VERBOSE on, COSTS off, TIMING off)  insert into up_expl_node values(1,1,1) on duplicate key update nothing;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on upsert_test_explain.up_expl_node
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_node_c3_key
+   ->  Result
+         Output: 1, 1, 1
+(5 rows)
+
+EXPLAIN (ANALYZE on, COSTS off, TIMING off)  insert into up_expl_node values(1,1,1) on duplicate key update nothing;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Insert on up_expl_node (actual rows=0 loops=1)
+   Conflict Resolution: NOTHING
+   Conflict Arbiter Indexes: up_expl_node_c3_key
+   ->  Result (actual rows=1 loops=1)
+--? Total runtime: .* ms
+(5 rows)
+

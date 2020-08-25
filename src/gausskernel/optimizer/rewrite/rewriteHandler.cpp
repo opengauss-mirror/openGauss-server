@@ -57,7 +57,8 @@ static bool acquireLocksOnSubLinks(Node* node, void* context);
 static Query* rewriteRuleAction(
     Query* parsetree, Query* rule_action, Node* rule_qual, int rt_index, CmdType event, bool* returning_flag);
 static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index);
-static void rewriteTargetListIU(Query* parsetree, Relation target_relation, List** attrno_list);
+static List* rewriteTargetListIU(List* targetList, CmdType commandType,
+    Relation target_relation, int result_rtindex, List** attrno_list);
 static TargetEntry* process_matched_tle(TargetEntry* src_tle, TargetEntry* prior_tle, const char* attrName);
 static Node* get_assignment_input(Node* node);
 static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List* attrnos);
@@ -613,9 +614,9 @@ static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index)
  * order of the original tlist's non-junk entries.  This is needed for
  * processing VALUES RTEs.
  */
-static void rewriteTargetListIU(Query* parsetree, Relation target_relation, List** attrno_list)
+static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation target_relation,
+    int result_rtindex, List** attrno_list)
 {
-    CmdType commandType = parsetree->commandType;
     TargetEntry** new_tles;
     List* new_tlist = NIL;
     List* junk_tlist = NIL;
@@ -639,7 +640,7 @@ static void rewriteTargetListIU(Query* parsetree, Relation target_relation, List
     new_tles = (TargetEntry**)palloc0(numattrs * sizeof(TargetEntry*));
     next_junk_attrno = numattrs + 1;
 
-    foreach (temp, parsetree->targetList) {
+    foreach (temp, targetList) {
         TargetEntry* old_tle = (TargetEntry*)lfirst(temp);
 
         if (!old_tle->resjunk) {
@@ -737,8 +738,7 @@ static void rewriteTargetListIU(Query* parsetree, Relation target_relation, List
             Node* new_expr = NULL;
 
             new_expr = (Node*)makeVar(
-                (unsigned int)(parsetree->resultRelation), attrno, att_tup->atttypid, att_tup->atttypmod,
-                att_tup->attcollation, 0);
+                result_rtindex, attrno, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);
 
             new_tle = makeTargetEntry((Expr*)new_expr, (int16)attrno, pstrdup(NameStr(att_tup->attname)), false);
         }
@@ -748,8 +748,8 @@ static void rewriteTargetListIU(Query* parsetree, Relation target_relation, List
     }
 
     pfree_ext(new_tles);
-
-    parsetree->targetList = list_concat(new_tlist, junk_tlist);
+    targetList = list_concat(new_tlist, junk_tlist);
+    return targetList;
 }
 
 /*
@@ -2303,15 +2303,28 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
                 List* attrnos = NIL;
 
                 /* Process the main targetlist ... */
-                rewriteTargetListIU(parsetree, rt_entry_relation, &attrnos);
+                parsetree->targetList =
+                    rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
+                                        rt_entry_relation, parsetree->resultRelation, &attrnos);
                 /* ... and the VALUES expression lists */
                 rewriteValuesRTE(values_rte, rt_entry_relation, attrnos);
             } else {
                 /* Process just the main targetlist */
-                rewriteTargetListIU(parsetree, rt_entry_relation, NULL);
+                parsetree->targetList =
+                    rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
+                                        rt_entry_relation, parsetree->resultRelation, NULL);
+            }
+
+            if (parsetree->upsertClause != NULL &&
+                parsetree->upsertClause->upsertAction == UPSERT_UPDATE) {
+                parsetree->upsertClause->updateTlist =
+                    rewriteTargetListIU(parsetree->upsertClause->updateTlist, CMD_UPDATE,
+                                        rt_entry_relation, parsetree->resultRelation, NULL);
             }
         } else if (event == CMD_UPDATE) {
-            rewriteTargetListIU(parsetree, rt_entry_relation, NULL);
+            parsetree->targetList =
+                rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
+                                    rt_entry_relation, parsetree->resultRelation, NULL);
             rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation);
         } else if (event == CMD_MERGE) {
             /*

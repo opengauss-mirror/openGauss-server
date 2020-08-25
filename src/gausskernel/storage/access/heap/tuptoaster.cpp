@@ -45,7 +45,7 @@
 
 #undef TOAST_DEBUG
 
-static void toast_delete_datum(Relation rel, Datum value);
+static void toast_delete_datum(Relation rel, Datum value, int options);
 static Datum toast_save_datum(Relation rel, Datum value, struct varlena* oldexternal, int options);
 static bool toastid_valueid_exists(Oid toastrelid, Oid valueid, int2 bucketid);
 static struct varlena* toast_fetch_datum(struct varlena* attr);
@@ -332,7 +332,7 @@ Size toast_datum_size(Datum value)
  *	Cascaded delete toast-entries on DELETE
  * ----------
  */
-void toast_delete(Relation rel, HeapTuple oldtup)
+void toast_delete(Relation rel, HeapTuple oldtup, int options)
 {
     TupleDesc tuple_desc;
     Form_pg_attribute* att = NULL;
@@ -381,7 +381,7 @@ void toast_delete(Relation rel, HeapTuple oldtup)
             if (toast_isnull[i])
                 continue;
             else if (VARATT_IS_EXTERNAL_ONDISK_B(PointerGetDatum(value)))
-                toast_delete_datum(rel, value);
+                toast_delete_datum(rel, value, options);
             else if (VARATT_IS_EXTERNAL_INDIRECT(PointerGetDatum(value)))
                 ereport(ERROR,
                     (errcode(ERRCODE_FETCH_DATA_FAILED), errmsg("attempt to delete tuple containing indirect datums")));
@@ -931,7 +931,7 @@ HeapTuple toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtu
     if (need_delold) {
         for (i = 0; i < num_attrs; i++) {
             if (toast_delold[i]) {
-                toast_delete_datum(rel, toast_oldvalues[i]);
+                toast_delete_datum(rel, toast_oldvalues[i], options);
             }
         }
     }
@@ -1461,7 +1461,7 @@ static Datum toast_save_datum(Relation rel, Datum value, struct varlena* oldexte
  *	Delete a single external stored value.
  * ----------
  */
-static void toast_delete_datum(Relation rel, Datum value)
+static void toast_delete_datum(Relation rel, Datum value, int options)
 {
     struct varlena* attr = (struct varlena*)DatumGetPointer(value);
     struct varatt_external toast_pointer;
@@ -1501,7 +1501,7 @@ static void toast_delete_datum(Relation rel, Datum value)
         /*
          * Have a chunk, delete it
          */
-        simple_heap_delete(toastrel, &toasttup->t_self);
+        simple_heap_delete(toastrel, &toasttup->t_self, options);
 
         if (u_sess->attr.attr_storage.enable_debug_vacuum)
             elogVacuumInfo(toastrel, toasttup, "toast_delete_datum", u_sess->cmd_cxt.OldestXmin);

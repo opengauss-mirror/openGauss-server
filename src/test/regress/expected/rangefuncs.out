@@ -1,3 +1,6 @@
+-- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
+-- real upsert will be tested in specialized case.
+SET enable_upsert_to_merge TO ON;
 SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
                name                | setting 
 -----------------------------------+---------
@@ -74,12 +77,13 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_thread_pool                | off
  enable_tidscan                    | on
  enable_upgrade_merge_lock_mode    | off
+ enable_upsert_to_merge            | on
  enable_user_metric_persistent     | on
  enable_valuepartition_pruning     | on
  enable_vector_engine              | on
  enable_wdr_snapshot               | off
  enable_xlog_prune                 | on
-(78 rows)
+(79 rows)
 
 CREATE TABLE foo2(fooid int, f2 int);
 INSERT INTO foo2 VALUES(1, 11);

@@ -82,6 +82,8 @@ THR_LOCAL post_parse_analyze_hook_type post_parse_analyze_hook = NULL;
 
 static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt);
 static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt);
+static void checkUpsertTargetlist(Relation targetTable, List* updateTlist);
+static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upsertClause, RangeVar* relation);
 static int count_rowexpr_columns(ParseState* pstate, Node* expr);
 static Query* transformSelectStmt(
     ParseState* pstate, SelectStmt* stmt, bool isFirstNode = true, bool isCreateView = false);
@@ -90,6 +92,7 @@ static Query* transformSetOperationStmt(ParseState* pstate, SelectStmt* stmt);
 static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, bool isTopLevel, List** targetlist);
 static void determineRecursiveColTypes(ParseState* pstate, Node* larg, List* nrtargetlist);
 static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt);
+static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List* origTlist, RangeVar* stmtrel);
 static List* transformReturningList(ParseState* pstate, List* returningList);
 static Query* transformDeclareCursorStmt(ParseState* pstate, DeclareCursorStmt* stmt);
 static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt);
@@ -1002,6 +1005,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     ListCell* icols = NULL;
     ListCell* attnos = NULL;
     ListCell* lc = NULL;
+    AclMode    targetPerms = ACL_INSERT;
 
     /* There can't be any outer WITH to worry about */
     AssertEreport(pstate->p_ctenamespace == NIL, MOD_OPT, "para should be NIL");
@@ -1068,13 +1072,33 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
      * mentioned in the SELECT part.  Note that the target table is not added
      * to the joinlist or namespace.
      */
-    qry->resultRelation = setTargetTable(pstate, stmt->relation, false, false, ACL_INSERT);
+    if (stmt->upsertClause != NULL && stmt->upsertClause->targetList != NIL) {
+        targetPerms |= ACL_UPDATE;
+    }
+    qry->resultRelation = setTargetTable(pstate, stmt->relation, false, false, targetPerms);
     if (pstate->p_target_relation != NULL &&
         ((unsigned int)RelationGetInternalMask(pstate->p_target_relation) & INTERNAL_MASK_DINSERT)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Un-support feature"),
                 errdetail("internal relation doesn't allow INSERT")));
+    }
+    if (pstate->p_target_relation != NULL && stmt->upsertClause != NULL) {
+        /* non-supported upsert cases */
+        if (!u_sess->attr.attr_sql.enable_upsert_to_merge && RelationIsColumnFormat(pstate->p_target_relation)) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on column orientated table."))));
+        }
+
+        if (RelationIsForeignTable(pstate->p_target_relation)) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on foreign table."))));
+        }
+
+        if (RelationIsView(pstate->p_target_relation)) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on VIEW."))));
+        }
     }
 
     /* data redistribution for DFS table.
@@ -1439,6 +1463,11 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         attnos = lnext(attnos);
     }
 
+    /* Process DUPLICATE KEY UPDATE, if any. */
+    if (stmt->upsertClause) {
+        qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause, stmt->relation);
+    }
+
     /*
      * If we have a RETURNING clause, we need to add the target relation to
      * the query namespace before processing it, so that Var references in
@@ -1478,6 +1507,153 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     /* Set query tdTruncCastStatus to recored if auto truncation enabled or not. */
     qry->tdTruncCastStatus = pstate->tdTruncCastStatus;
     return qry;
+}
+
+static void checkUpsertTargetlist(Relation targetTable, List* updateTlist)
+{
+    List* index_list = RelationGetIndexInfoList(targetTable);
+    if (check_unique_constraint(index_list)) {
+        ListCell* target = NULL;
+        ListCell* index = NULL;
+        IndexInfo* index_info = NULL;
+        Bitmapset* target_attrs = NULL; /* attr bitmap according to targetlist */
+        Bitmapset* index_attrs = NULL; /* attr bitmap according to index */
+        TargetEntry* tle = NULL;
+
+        foreach (target, updateTlist) {
+            tle = (TargetEntry*)lfirst(target);
+            target_attrs = bms_add_member(target_attrs, tle->resno);
+        }
+
+        foreach (index, index_list) {
+            index_info = (IndexInfo*)lfirst(index);
+            for (int i = 0; i < index_info->ii_NumIndexAttrs; i++) {
+                int attrno = index_info->ii_KeyAttrNumbers[i];
+
+                if (attrno > 0) {
+                    index_attrs = bms_add_member(index_attrs, attrno);
+                }
+            }
+        }
+
+        if (bms_overlap(index_attrs, target_attrs)) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                         errmsg("INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key."))));
+        }
+    }
+}
+
+List* BuildExcludedTargetlist(Relation targetrel, Index exclRelIndex)
+{
+    List* result = NIL;
+    int attno;
+    Var* var;
+    TargetEntry* te;
+
+    /*
+     * Note that resnos of the tlist must correspond to attnos of the
+     * underlying relation, hence we need entries for dropped columns too.
+     */
+    for (attno = 0; attno < RelationGetNumberOfAttributes(targetrel); attno++) {
+        Form_pg_attribute attr = targetrel->rd_att->attrs[attno];
+        char* name;
+
+        if (attr->attisdropped) {
+            /*
+             * can't use atttypid here, but it doesn't really matter what type
+             * the Const claims to be.
+             */
+            var = (Var*)makeNullConst(INT4OID, -1, InvalidOid);
+            name = NULL;
+        } else {
+            var = makeVar(exclRelIndex, attno + 1, attr->atttypid, attr->atttypmod,
+                          attr->attcollation, 0);
+            name = pstrdup(NameStr(attr->attname));
+        }
+
+        te = makeTargetEntry((Expr*)var, attno + 1, name, false);
+
+        result = lappend(result, te);
+    }
+
+    /*
+     * Add a whole-row-Var entry to support references to "EXCLUDED.*".  Like
+     * the other entries in the EXCLUDED tlist, its resno must match the Var's
+     * varattno, else the wrong things happen while resolving references in
+     * setrefs.c.  This is against normal conventions for targetlists, but
+     * it's okay since we don't use this as a real tlist.
+     */
+    var = makeVar(exclRelIndex, InvalidAttrNumber, targetrel->rd_rel->reltype,
+                  -1, InvalidOid, 0);
+    te = makeTargetEntry((Expr*)var, InvalidAttrNumber, NULL, true);
+    result = lappend(result, te);
+
+    return result;
+}
+
+static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upsertClause, RangeVar* relation)
+{
+    UpsertExpr* result = NULL;
+    List* updateTlist = NIL;
+    RangeTblEntry* exclRte = NULL;
+    int exclRelIndex = 0;
+    List* exclRelTlist = NIL;
+    UpsertAction action = UPSERT_NOTHING;
+    Relation targetrel = pstate->p_target_relation;
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (targetrel->rd_rel->relhastriggers) {
+        ereport(WARNING,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("INSERT ON DUPLICATE KEY UPDATE will ignore triggers.")));
+    }
+#endif
+
+    if (upsertClause->targetList != NIL) {
+        pstate->p_is_insert = false;
+        action = UPSERT_UPDATE;
+        exclRte = addRangeTableEntryForRelation(pstate, targetrel, makeAlias("excluded", NIL), false, false);
+        exclRte->isexcluded = true;
+        exclRelIndex = list_length(pstate->p_rtable);
+
+        /*
+         * Build a targetlist for the EXCLUDED pseudo relation. Out of
+         * simplicity we do that here, because expandRelAttrs() happens to
+         * nearly do the right thing; specifically it also works with views.
+         * It'd be more proper to instead scan some pseudo scan node, but it
+         * doesn't seem worth the amount of code required.
+         *
+         * The only caveat of this hack is that the permissions expandRelAttrs
+         * adds have to be reset. markVarForSelectPriv() will add the exact
+         * required permissions back.
+         */
+
+        exclRelTlist = BuildExcludedTargetlist(targetrel, exclRelIndex);
+        exclRte->requiredPerms = 0;
+        exclRte->selectedCols = NULL;
+
+        /*
+         * Add EXCLUDED and the target RTE to the namespace, so that they can
+         * be used in the UPDATE statement.
+         */
+        addRTEtoQuery(pstate, exclRte, false, true, true);
+        addRTEtoQuery(pstate, pstate->p_target_rangetblentry, false, true, true);
+
+        updateTlist = transformTargetList(pstate, upsertClause->targetList);
+        updateTlist = transformUpdateTargetList(pstate, updateTlist, upsertClause->targetList, relation);
+        /* We can't update primary or unique key in upsert, check it here */
+        if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+            checkUpsertTargetlist(pstate->p_target_relation, updateTlist);
+        }
+    }
+
+    /* Finally, build DUPLICATE KEY UPDATE [NOTHING | ... ] expression */
+    result = makeNode(UpsertExpr);
+    result->updateTlist = updateTlist;
+    result->exclRelIndex = exclRelIndex;
+    result->exclRelTlist = exclRelTlist;
+    result->upsertAction = action;
+    return result;
 }
 
 /*
@@ -2656,13 +2832,10 @@ void fixResTargetListWithTableNameRef(Relation rd, RangeVar* rel, List* clause_l
 static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
 {
     Query* qry = makeNode(Query);
-    RangeTblEntry* target_rte = NULL;
     Node* qual = NULL;
-    ListCell* origTargetList = NULL;
-    ListCell* tl = NULL;
 
     qry->commandType = CMD_UPDATE;
-    pstate->p_is_update = true;
+    pstate->p_is_insert = false;
 
     /* set io state for backend status for the thread, we will use it to check user space */
     pgstat_set_io_state(IOSTATE_READ);
@@ -2714,7 +2887,6 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
     transformFromClause(pstate, stmt->fromClause);
 
     qry->targetList = transformTargetList(pstate, stmt->targetList);
-
     qual = transformWhereClause(pstate, stmt->whereClause, "WHERE");
 
     qry->returningList = transformReturningList(pstate, stmt->returningList);
@@ -2752,6 +2924,24 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
      * Now we are done with SELECT-like processing, and can get on with
      * transforming the target list to match the UPDATE target columns.
      */
+    qry->targetList = transformUpdateTargetList(pstate, qry->targetList, stmt->targetList, stmt->relation);
+
+    assign_query_collations(pstate, qry);
+    return qry;
+}
+
+/*
+ * transformUpdateTargetList -
+ * handle SET clause in UPDATE/INSERT ... DUPLICATE KEY UPDATE
+ */
+static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List* origTlist, RangeVar* stmtrel)
+{
+    List* tlist = NIL;
+    RangeTblEntry* target_rte = NULL;
+    ListCell* orig_tl = NULL;
+    ListCell* tl = NULL;
+
+    tlist = qryTlist;
 
     /* Prepare to assign non-conflicting resnos to resjunk attributes */
     if (pstate->p_next_resno <= pstate->p_target_relation->rd_rel->relnatts) {
@@ -2760,9 +2950,9 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
 
     /* Prepare non-junk columns for assignment to target table */
     target_rte = pstate->p_target_rangetblentry;
-    origTargetList = list_head(stmt->targetList);
+    orig_tl = list_head(origTlist);
 
-    foreach (tl, qry->targetList) {
+    foreach (tl, tlist) {
         TargetEntry* tle = (TargetEntry*)lfirst(tl);
         ResTarget* origTarget = NULL;
         int attrno;
@@ -2778,14 +2968,16 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
             tle->resname = NULL;
             continue;
         }
-        if (origTargetList == NULL) {
+
+        if (orig_tl == NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("UPDATE target count mismatch --- internal error")));
         }
-        origTarget = (ResTarget*)lfirst(origTargetList);
+        origTarget = (ResTarget*)lfirst(orig_tl);
         AssertEreport(IsA(origTarget, ResTarget), MOD_OPT, "Node type inconsistant here");
-
-        fixResTargetNameWithTableNameRef(pstate->p_target_relation, stmt->relation, origTarget);
+        if (stmtrel != NULL) {
+            fixResTargetNameWithTableNameRef(pstate->p_target_relation, stmtrel, origTarget);
+        }
 
         attrno = attnameAttNum(pstate->p_target_relation, origTarget->name, true);
         if (attrno == InvalidAttrNumber) {
@@ -2812,16 +3004,14 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
         /* Mark the target column as requiring update permissions */
         target_rte->updatedCols = bms_add_member(target_rte->updatedCols, attrno - FirstLowInvalidHeapAttributeNumber);
 
-        origTargetList = lnext(origTargetList);
+        orig_tl = lnext(orig_tl);
     }
-    if (origTargetList != NULL) {
+    if (orig_tl != NULL) {
         ereport(
             ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION), errmsg("UPDATE target count mismatch --- internal error")));
     }
 
-    assign_query_collations(pstate, qry);
-
-    return qry;
+    return tlist;
 }
 
 /*

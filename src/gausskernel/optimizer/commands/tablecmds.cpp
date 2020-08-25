@@ -18804,7 +18804,7 @@ static void checkValidationForExchangeCStore(Relation partTableRel, Relation ord
         // init cstore partition insert
         resultRelInfo = makeNode(ResultRelInfo);
         InitResultRelInfo(resultRelInfo, partTableRel, 1, 0);
-        ExecOpenIndices(resultRelInfo);
+        ExecOpenIndices(resultRelInfo, false);
         resultRelInfo->ri_junkFilter = makeNode(JunkFilter);
         resultRelInfo->ri_junkFilter->jf_junkAttNo = tididx;
         resultRelInfo->ri_junkFilter->jf_xc_part_id = tableoidIdx;

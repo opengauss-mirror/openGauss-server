@@ -1304,6 +1304,9 @@ static Query* _readQuery(void)
     IF_EXIST(upsertQuery) {
         READ_NODE_FIELD(upsertQuery);
     }
+    IF_EXIST(upsertClause) {
+        READ_NODE_FIELD(upsertClause);
+    }
     IF_EXIST(isRowTriggerShippable) {
         READ_BOOL_FIELD(isRowTriggerShippable);
     }
@@ -2659,6 +2662,10 @@ static RangeTblEntry* _readRangeTblEntry(void)
         READ_NODE_FIELD(buckets);
     }
 
+    IF_EXIST(isexcluded) {
+        READ_BOOL_FIELD(isexcluded);
+    }
+
     READ_DONE();
 }
 
@@ -3391,6 +3398,44 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     IF_EXIST(mergeActionList) {
         READ_NODE_FIELD(mergeActionList);
     }
+
+    IF_EXIST(upsertAction) {
+        READ_ENUM_FIELD(upsertAction, UpsertAction);
+    }
+
+    IF_EXIST(updateTlist) {
+        READ_NODE_FIELD(updateTlist);
+    }
+
+    IF_EXIST(exclRelTlist) {
+        READ_NODE_FIELD(exclRelTlist);
+    }
+
+    IF_EXIST(exclRelRTIndex) {
+        READ_INT_FIELD(exclRelRTIndex);
+    }
+
+    READ_DONE();
+}
+
+static UpsertExpr* _readUpsertExpr(void)
+{
+    READ_LOCALS(UpsertExpr);
+
+    READ_ENUM_FIELD(upsertAction, UpsertAction);
+    READ_NODE_FIELD(updateTlist);
+    READ_NODE_FIELD(exclRelTlist);
+    READ_INT_FIELD(exclRelIndex);
+
+    READ_DONE();
+}
+
+static UpsertClause* _readUpsertClause(void)
+{
+    READ_LOCALS(UpsertClause);
+
+    READ_NODE_FIELD(targetList);
+    READ_INT_FIELD(location);
 
     READ_DONE();
 }
@@ -5197,6 +5242,10 @@ Node* parseNodeString(void)
         return_value = _readAddPartitionState();
     } else if (MATCH("ROWNUM", 6)) {
         return_value = _readRownum();
+    } else if (MATCH("UPSERTEXPR", 10)) {
+        return_value = _readUpsertExpr();
+    } else if (MATCH("UPSERTCLAUSE", 12)) {
+        return_value = _readUpsertClause();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

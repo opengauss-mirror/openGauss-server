@@ -4,6 +4,9 @@
 -- initial
 CREATE SCHEMA test_insert_update_008;
 SET current_schema = test_insert_update_008;
+-- SET enable_upsert_to_merge=ON to test the upsert implemented by merge,
+-- real upsert will be tested in specialized case.
+SET enable_upsert_to_merge TO ON;
 CREATE TABLE products_base
 (
 product_id INTEGER DEFAULT 0,
@@ -58,9 +61,9 @@ EXPLAIN (VERBOSE on, COSTS off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
                                                                                                                             QUERY PLAN                                                                                                                             
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Merge on test_insert_update_008.products_row
@@ -84,9 +87,9 @@ INSERT INTO products_row
         FROM newproducts_row, products_row
         WHERE products_row.total + newproducts_row.total < 1000
     ON DUPLICATE KEY UPDATE
-        product_name = __unnamed_subquery_source__.product_name,
-        category = __unnamed_subquery_source__.category,
-        total = __unnamed_subquery_source__.total;
+        product_name = excluded.product_name,
+        category = excluded.category,
+        total = excluded.total;
                                                                                                                                                  QUERY PLAN                                                                                                                                                  
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Merge on test_insert_update_008.products_row
@@ -113,9 +116,9 @@ INSERT INTO products_row
     SELECT product_id, product_name, category, total
         FROM newproducts_row WHERE product_id IS NOT NULL AND product_name IS NOT NULL
     ON DUPLICATE KEY UPDATE
-        product_name = __unnamed_subquery_source__.product_name,
-        category = __unnamed_subquery_source__.category,
-        total = __unnamed_subquery_source__.total;
+        product_name = excluded.product_name,
+        category = excluded.category,
+        total = excluded.total;
                                                                                                                             QUERY PLAN                                                                                                                             
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Merge on test_insert_update_008.products_row
@@ -137,9 +140,9 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Merge on products_row (actual rows=4 loops=1)
@@ -162,9 +165,9 @@ EXPLAIN PERFORMANCE
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 \o
 -- explain analyze
@@ -173,9 +176,9 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Merge on products_row (actual rows=4 loops=1)
@@ -198,9 +201,9 @@ EXPLAIN (VERBOSE on, COSTS off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
                                                                                                                             QUERY PLAN                                                                                                                             
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Merge on test_insert_update_008.products_row
@@ -221,9 +224,9 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Merge on products_row (actual rows=4 loops=1)
@@ -245,9 +248,9 @@ EXPLAIN (ANALYZE on, COSTS off, TIMING off)
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
                                 QUERY PLAN                                 
 ---------------------------------------------------------------------------
  Merge on products_row (actual rows=4 loops=1)
@@ -270,9 +273,9 @@ EXPLAIN PERFORMANCE
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 SET explain_perf_mode = run;
 BEGIN;
@@ -280,9 +283,9 @@ EXPLAIN PERFORMANCE
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 SET explain_perf_mode = summary;
 BEGIN;
@@ -290,9 +293,9 @@ EXPLAIN PERFORMANCE
 INSERT INTO products_row
     SELECT product_id, product_name, category, total FROM newproducts_row
     ON DUPLICATE KEY UPDATE
-    product_name = __unnamed_subquery_source__.product_name,
-    category = __unnamed_subquery_source__.category,
-    total = __unnamed_subquery_source__.total;
+    product_name = excluded.product_name,
+    category = excluded.category,
+    total = excluded.total;
 ROLLBACK;
 \o
 CREATE TABLE item

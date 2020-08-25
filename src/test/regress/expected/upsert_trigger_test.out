@@ -1,0 +1,148 @@
+\c upsert
+SET CURRENT_SCHEMA TO upsert_test;
+-- enable_upsert_to_merge must be off, or upsert will be translated to merge.
+SET enable_upsert_to_merge TO OFF;
+SHOW enable_upsert_to_merge;
+ enable_upsert_to_merge 
+------------------------
+ off
+(1 row)
+
+CREATE FUNCTION upsert_before_func()
+  RETURNS TRIGGER language plpgsql AS
+$$
+BEGIN
+  IF (TG_OP = 'UPDATE') THEN
+    RAISE warning 'before update (old): %', old.*::TEXT;
+    RAISE warning 'before update (new): %', new.*::TEXT;
+  elsIF (TG_OP = 'INSERT') THEN
+    RAISE warning 'before insert (new): %', new.*::TEXT;
+    IF NEW.key % 2 = 0 THEN
+      NEW.color := NEW.color || ' trig modified';
+      RAISE warning 'before insert (new, modified): %', new.*::TEXT;
+    END IF;
+  END IF;
+  RETURN new;
+END;
+$$;
+CREATE TRIGGER upsert_before_trig BEFORE INSERT OR UPDATE ON t_trigger
+  FOR EACH ROW EXECUTE procedure upsert_before_func();
+CREATE FUNCTION upsert_after_func()
+  RETURNS TRIGGER language plpgsql AS
+$$
+BEGIN
+  IF (TG_OP = 'UPDATE') THEN
+    RAISE warning 'after update (old): %', old.*::TEXT;
+    RAISE warning 'after update (new): %', new.*::TEXT;
+  elsIF (TG_OP = 'INSERT') THEN
+    RAISE warning 'after insert (new): %', new.*::TEXT;
+  END IF;
+  RETURN null;
+END;
+$$;
+CREATE TRIGGER upsert_after_trig AFTER INSERT OR UPDATE ON t_trigger
+  FOR EACH ROW EXECUTE procedure upsert_after_func();
+INSERT INTO t_trigger values(1, 'black') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (1,black)
+WARNING:  after insert (new): (1,black)
+INSERT INTO t_trigger values(2, 'red') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (2,red)
+WARNING:  before insert (new, modified): (2,"red trig modified")
+WARNING:  after insert (new): (2,"red trig modified")
+INSERT INTO t_trigger values(3, 'orange') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (3,orange)
+WARNING:  after insert (new): (3,orange)
+INSERT INTO t_trigger values(4, 'green') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (4,green)
+WARNING:  before insert (new, modified): (4,"green trig modified")
+WARNING:  after insert (new): (4,"green trig modified")
+INSERT INTO t_trigger values(5, 'purple') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (5,purple)
+WARNING:  after insert (new): (5,purple)
+INSERT INTO t_trigger values(6, 'white') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (6,white)
+WARNING:  before insert (new, modified): (6,"white trig modified")
+WARNING:  after insert (new): (6,"white trig modified")
+INSERT INTO t_trigger values(7, 'pink') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (7,pink)
+WARNING:  after insert (new): (7,pink)
+INSERT INTO t_trigger values(8, 'yellow') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (8,yellow)
+WARNING:  before insert (new, modified): (8,"yellow trig modified")
+WARNING:  after insert (new): (8,"yellow trig modified")
+SELECT * FROM t_trigger ORDER BY key;
+ key |        color         
+-----+----------------------
+   1 | black
+   2 | red trig modified
+   3 | orange
+   4 | green trig modified
+   5 | purple
+   6 | white trig modified
+   7 | pink
+   8 | yellow trig modified
+(8 rows)
+
+INSERT INTO t_trigger values(2, 'black') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (2,black)
+WARNING:  before insert (new, modified): (2,"black trig modified")
+WARNING:  before update (old): (2,"red trig modified")
+WARNING:  before update (new): (2,"updated red trig modified")
+WARNING:  after update (old): (2,"red trig modified")
+WARNING:  after update (new): (2,"updated red trig modified")
+INSERT INTO t_trigger values(3, 'red') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (3,red)
+WARNING:  before update (old): (3,orange)
+WARNING:  before update (new): (3,"updated orange")
+WARNING:  after update (old): (3,orange)
+WARNING:  after update (new): (3,"updated orange")
+INSERT INTO t_trigger values(4, 'orange') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (4,orange)
+WARNING:  before insert (new, modified): (4,"orange trig modified")
+WARNING:  before update (old): (4,"green trig modified")
+WARNING:  before update (new): (4,"updated green trig modified")
+WARNING:  after update (old): (4,"green trig modified")
+WARNING:  after update (new): (4,"updated green trig modified")
+INSERT INTO t_trigger values(5, 'green') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (5,green)
+WARNING:  before update (old): (5,purple)
+WARNING:  before update (new): (5,"updated purple")
+WARNING:  after update (old): (5,purple)
+WARNING:  after update (new): (5,"updated purple")
+INSERT INTO t_trigger values(6, 'purple') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (6,purple)
+WARNING:  before insert (new, modified): (6,"purple trig modified")
+WARNING:  before update (old): (6,"white trig modified")
+WARNING:  before update (new): (6,"updated white trig modified")
+WARNING:  after update (old): (6,"white trig modified")
+WARNING:  after update (new): (6,"updated white trig modified")
+INSERT INTO t_trigger values(7, 'white') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (7,white)
+WARNING:  before update (old): (7,pink)
+WARNING:  before update (new): (7,"updated pink")
+WARNING:  after update (old): (7,pink)
+WARNING:  after update (new): (7,"updated pink")
+INSERT INTO t_trigger values(8, 'pink') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (8,pink)
+WARNING:  before insert (new, modified): (8,"pink trig modified")
+WARNING:  before update (old): (8,"yellow trig modified")
+WARNING:  before update (new): (8,"updated yellow trig modified")
+WARNING:  after update (old): (8,"yellow trig modified")
+WARNING:  after update (new): (8,"updated yellow trig modified")
+INSERT INTO t_trigger values(9, 'yellow') ON DUPLICATE KEY UPDATE color = 'updated ' || t_trigger.color;
+WARNING:  before insert (new): (9,yellow)
+WARNING:  after insert (new): (9,yellow)
+SELECT * FROM t_trigger ORDER BY key;
+ key |            color             
+-----+------------------------------
+   1 | black
+   2 | updated red trig modified
+   3 | updated orange
+   4 | updated green trig modified
+   5 | updated purple
+   6 | updated white trig modified
+   7 | updated pink
+   8 | updated yellow trig modified
+   9 | yellow
+(9 rows)
+

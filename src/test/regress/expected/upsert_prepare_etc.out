@@ -1,0 +1,4 @@
+CREATE DATABASE upsert_etc;
+\c upsert_etc;
+CREATE SCHEMA upsert_test_etc;
+SET CURRENT_SCHEMA TO upsert_test_etc;
