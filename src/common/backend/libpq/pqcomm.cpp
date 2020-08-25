@@ -145,6 +145,28 @@ static int Lock_AF_UNIX(unsigned short portNumber, const char* unixSocketName, b
 static int Setup_AF_UNIX(bool is_create_psql_sock);
 #endif /* HAVE_UNIX_SOCKETS */
 
+static void socket_comm_reset(void);
+static int  socket_flush(void);
+static int  socket_flush_if_writable(void);
+static bool socket_is_send_pending(void);
+static int  socket_putmessage(char msgtype, const char *s, size_t len);
+static int socket_putmessage_noblock(char msgtype, const char *s, size_t len);
+static void socket_startcopyout(void);
+static void socket_endcopyout(bool errorAbort);
+
+static PQcommMethods PqCommSocketMethods = {
+    socket_comm_reset,
+    socket_flush,
+    socket_flush_if_writable,
+    socket_is_send_pending,
+    socket_putmessage,
+    socket_putmessage_noblock,
+    socket_startcopyout,
+    socket_endcopyout	
+};
+
+THR_LOCAL PQcommMethods *PqCommMethods = &PqCommSocketMethods;
+
 extern bool FencedUDFMasterMode;
 
 /* --------------------------------
@@ -458,7 +480,7 @@ void pq_init(void)
  * inside a pqcomm.c routine (which ideally will never happen, but...)
  * --------------------------------
  */
-void pq_comm_reset(void)
+static void socket_comm_reset(void)
 {
     /* Do not throw away pending data, but do reset the busy flag */
     t_thrd.libpq_cxt.PqCommBusy = false;
@@ -1612,7 +1634,7 @@ static int internal_putbytes(const char* s, size_t len)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-int pq_flush(void)
+static int socket_flush(void)
 {
     int res = 0;
 
@@ -1769,7 +1791,7 @@ static int internal_flush(void)
  * Returns 0 if OK, or EOF if trouble.
  * --------------------------------
  */
-int pq_flush_if_writable(void)
+static int socket_flush_if_writable(void)
 {
     int res;
 
@@ -1868,7 +1890,7 @@ void pq_flush_timedwait(int timeout)
  *		pq_is_send_pending	- is there any pending data in the output buffer?
  * --------------------------------
  */
-bool pq_is_send_pending(void)
+static bool socket_is_send_pending(void)
 {
     return (t_thrd.libpq_cxt.PqSendStart < t_thrd.libpq_cxt.PqSendPointer);
 }
@@ -1905,7 +1927,7 @@ bool pq_is_send_pending(void)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-int pq_putmessage(char msgtype, const char* s, size_t len)
+static int socket_putmessage(char msgtype, const char* s, size_t len)
 {
     if (t_thrd.libpq_cxt.DoingCopyOut || t_thrd.libpq_cxt.PqCommBusy) {
         return 0;
@@ -1941,7 +1963,7 @@ fail:
  *		If the output buffer is too small to hold the message, the buffer
  *		is enlarged.
  */
-int pq_putmessage_noblock(char msgtype, const char* s, size_t len)
+static int socket_putmessage_noblock(char msgtype, const char* s, size_t len)
 {
     int res;
     int required;
@@ -1967,7 +1989,7 @@ int pq_putmessage_noblock(char msgtype, const char* s, size_t len)
  *			is beginning
  * --------------------------------
  */
-void pq_startcopyout(void)
+static void socket_startcopyout(void)
 {
     t_thrd.libpq_cxt.DoingCopyOut = true;
 }
@@ -1982,7 +2004,7 @@ void pq_startcopyout(void)
  *		not allow binary transfers, so a textual terminator is always correct.
  * --------------------------------
  */
-void pq_endcopyout(bool errorAbort)
+static void socket_endcopyout(bool errorAbort)
 {
     if (!t_thrd.libpq_cxt.DoingCopyOut) {
         return;

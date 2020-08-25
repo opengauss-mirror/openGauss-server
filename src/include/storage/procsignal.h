@@ -55,6 +55,7 @@ typedef enum {
     PROCSIG_RECOVERY_CONFLICT_STARTUP_DEADLOCK,
     PROCSIG_EXECUTOR_FLAG,
 
+    PROCSIG_PARALLEL_MESSAGE,   /* message from cooperating parallel backend */
     NUM_PROCSIGNALS /* Must be last! */
 } ProcSignalReason;
 
