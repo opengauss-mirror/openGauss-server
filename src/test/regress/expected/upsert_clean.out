@@ -1,12 +1,13 @@
 \c upsert
 DROP SCHEMA upsert_test CASCADE;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to type upsert_test.atype
 drop cascades to type upsert_test.btype
 drop cascades to table upsert_test.t_grammer
 drop cascades to table upsert_test.t_default
 drop cascades to table upsert_test.t_data
 drop cascades to table upsert_test.t_trigger
+drop cascades to table upsert_test."excluded"
 drop cascades to function upsert_test.upsert_before_func()
 drop cascades to function upsert_test.upsert_after_func()
 DROP SCHEMA upsert_test_unlog CASCADE;

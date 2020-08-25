@@ -17418,6 +17418,10 @@ columnref:	ColId
 				{
 					$$ = makeColumnRef($1, $2, @1, yyscanner);
 				}
+			| EXCLUDED indirection
+				{
+					$$ = makeColumnRef("excluded", $2, @2, yyscanner);
+				}
 		;
 
 indirection_el:
@@ -17810,7 +17814,6 @@ SignedIconst: Iconst								{ $$ = $1; }
 ColId:		IDENT									{ $$ = $1; }
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
-			| EXCLUDED						{ $$ = pstrdup($1); }
 		;
 
 /* Type/function identifier --- names that can be type or function names.

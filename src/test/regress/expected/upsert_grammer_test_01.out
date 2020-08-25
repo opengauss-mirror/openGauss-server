@@ -186,3 +186,25 @@ SELECT * FROM t_default ORDER BY 1;
 --? 92 | .840485369320959 | Sun May 17 00:00:00 2020
 (3 rows)
 
+-- for table named excluded
+INSERT INTO excluded values(1,1),(2,2) ON DUPLICATE KEY UPDATE b = excluded.b + 1;
+ERROR:  syntax error at or near "excluded"
+LINE 1: INSERT INTO excluded values(1,1),(2,2) ON DUPLICATE KEY UPDA...
+                    ^
+INSERT INTO "excluded" values(1,1),(2,2) ON DUPLICATE KEY UPDATE b = excluded.b + 1;
+ERROR:  table reference "excluded" is ambiguous
+LINE 1: ...alues(1,1),(2,2) ON DUPLICATE KEY UPDATE b = excluded.b + 1;
+                                                                ^
+CONTEXT:  referenced column: b
+INSERT INTO "excluded" values(5,5),(6,6) ON DUPLICATE KEY UPDATE b = 1;
+SELECT * FROM excluded;
+ERROR:  syntax error at or near "excluded"
+LINE 1: SELECT * FROM excluded;
+                      ^
+SELECT * FROM "excluded";
+ a | b 
+---+---
+ 5 | 5
+ 6 | 6
+(2 rows)
+
