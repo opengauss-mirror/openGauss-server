@@ -41,6 +41,7 @@
 #include "catalog/index.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
+#include "catalog/storage_gtt.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "commands/cluster.h"
 #include "commands/tablespace.h"
@@ -1201,6 +1202,10 @@ static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc
  */
 static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
 {
+    if (RELATION_IS_GLOBAL_TEMP(rel) && !gtt_storage_attached(RelationGetRelid(rel))) {
+        return true;
+    }
+
     char* buf = (char*)palloc(BLCKSZ);
     BlockNumber nblocks;
     BlockNumber blkno;
@@ -1256,6 +1261,10 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
  */
 static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
 {
+    if (RELATION_IS_GLOBAL_TEMP(rel) && !gtt_storage_attached(RelationGetRelid(rel))) {
+        return true;
+    }
+
     HeapScanDesc scandesc;
     HeapTuple tuple;
     TupleDesc tupleDesc;
