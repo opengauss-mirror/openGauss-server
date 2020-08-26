@@ -611,7 +611,7 @@ void RecoveryManager::FreeRedoSegment(LogSegment* segment)
 
 bool RecoveryManager::ApplyRedoLog(uint64_t redoLsn, char* data, size_t len)
 {
-    if (redoLsn < m_lsn) {
+    if (redoLsn <= m_lsn) {
         // ignore old redo records which are prior to our checkpoint LSN
         MOT_LOG_DEBUG("ApplyRedoLog - ignoring old redo record. Checkpoint LSN: %lu, redo LSN: %lu", m_lsn, redoLsn);
         return true;

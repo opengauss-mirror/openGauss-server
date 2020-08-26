@@ -1170,12 +1170,10 @@ bool MOTAdaptor::SetMatchingExpr(
     MOTFdwStateSt* state, MatchIndexArr* marr, int16_t colId, KEY_OPER op, Expr* expr, Expr* parent, bool set_local)
 {
     bool res = false;
-    MOT::TxnManager* txn = GetSafeTxn();
     uint16_t numIx = state->m_table->GetNumIndexes();
 
     for (uint16_t i = 0; i < numIx; i++) {
-        // MOT::Index *ix = state->table->getIndex(i);
-        MOT::Index* ix = txn->GetIndex(state->m_table, i);
+        MOT::Index *ix = state->m_table->GetIndex(i);
         if (ix != nullptr && ix->IsFieldPresent(colId)) {
             if (marr->m_idx[i] == nullptr) {
                 marr->m_idx[i] = (MatchIndex*)palloc0(sizeof(MatchIndex));
@@ -1211,7 +1209,6 @@ inline int32_t MOTAdaptor::AddParam(List** params, Expr* expr)
 
 MatchIndex* MOTAdaptor::GetBestMatchIndex(MOTFdwStateSt* festate, MatchIndexArr* marr, int numClauses, bool setLocal)
 {
-    MOT::TxnManager* txn = GetSafeTxn();
     MatchIndex* best = nullptr;
     double bestCost = INT_MAX;
     uint16_t numIx = festate->m_table->GetNumIndexes();
@@ -1282,7 +1279,7 @@ MatchIndex* MOTAdaptor::GetBestMatchIndex(MOTFdwStateSt* festate, MatchIndexArr*
     }
     if (best != nullptr && best->m_ix != nullptr) {
         for (uint16_t i = 0; i < numIx; i++) {
-            if (best->m_ix == txn->GetIndex(festate->m_table, i)) {
+            if (best->m_ix == festate->m_table->GetIndex(i)) {
                 best->m_ixPosition = i;
                 break;
             }
@@ -2030,7 +2027,7 @@ uint64_t MOTAdaptor::GetTableIndexSize(uint64_t tabId, uint64_t ixId)
         }
 
         if (ixId > 0) {
-            ix = txn->GetIndexByExternalId(tabId, ixId);
+            ix = tab->GetIndexByExtId(ixId);
             if (ix == nullptr) {
                 ereport(ERROR,
                     (errmodule(MOD_MM),
@@ -2893,7 +2890,7 @@ void MatchIndex::Deserialize(ListCell* cell, uint64_t exTableID)
     m_ixPosition = (int32_t)((Const*)lfirst(cell))->constvalue;
     MOT::Table* table = txn->GetTableByExternalId(exTableID);
     if (table != nullptr) {
-        m_ix = txn->GetIndex(table, m_ixPosition);
+        m_ix = table->GetIndex(m_ixPosition);
     }
 
     cell = lnext(cell);

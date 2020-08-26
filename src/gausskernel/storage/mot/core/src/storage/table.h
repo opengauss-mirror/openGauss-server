@@ -63,7 +63,7 @@ class alignas(CL_SIZE) Table : public Serializable {
     // allow privileged access
     friend TxnManager;
     friend TxnInsertAction;
-    friend Index;
+    friend MOT::Index;
     friend RecoveryManager;
     friend TxnDDLAccess;
 
@@ -148,7 +148,7 @@ public:
      * @brief Retrieves the primary index of the table.
      * @return The index object.
      */
-    inline Index* GetPrimaryIndex() const
+    inline MOT::Index* GetPrimaryIndex() const
     {
         return m_primaryIndex;
     }
@@ -158,9 +158,9 @@ public:
      * @param indexName The name of the index to retrieve.
      * @return The secondary index with indicating whether it has unique keys or not.
      */
-    inline Index* GetSecondaryIndex(const string& indexName)
+    inline MOT::Index* GetSecondaryIndex(const string& indexName)
     {
-        Index* result = nullptr;
+        MOT::Index* result = nullptr;
         SecondaryIndexMap::iterator itr = m_secondaryIndexes.find(indexName);
         if (MOT_EXPECT_TRUE(itr != m_secondaryIndexes.end())) {
             result = itr->second;
@@ -168,12 +168,12 @@ public:
         return result;
     }
 
-    inline Index* GetSecondaryIndex(uint16_t ix) const
+    inline MOT::Index* GetSecondaryIndex(uint16_t ix) const
     {
-        return (Index*)m_indexes[ix];
+        return (MOT::Index*)m_indexes[ix];
     }
 
-    inline Index* GetIndex(uint16_t ix) const
+    inline MOT::Index* GetIndex(uint16_t ix) const
     {
         return m_indexes[ix];
     }
@@ -182,7 +182,7 @@ public:
      * @brief Sets the primary index for the table.
      * @param index The index to set.
      */
-    void SetPrimaryIndex(Index* index);
+    void SetPrimaryIndex(MOT::Index* index);
 
     /**
      * @brief Sets the primary index for the table (replaces previously created fake primary.
@@ -190,7 +190,7 @@ public:
      * @param txn The current transaction.
      * @param tid Current thread id
      */
-    bool UpdatePrimaryIndex(Index* index, TxnManager* txn, uint32_t tid);
+    bool UpdatePrimaryIndex(MOT::Index* index, TxnManager* txn, uint32_t tid);
 
     /**
      * @brief Adds a secondary index to the table.
@@ -200,7 +200,7 @@ public:
      * @param tid The identifier of the requesting process/thread.
      * @return Boolean value denoting success or failure.
      */
-    bool AddSecondaryIndex(const string& indexName, Index* index, TxnManager* txn, uint32_t tid);
+    bool AddSecondaryIndex(const string& indexName, MOT::Index* index, TxnManager* txn, uint32_t tid);
 
     /**
      * @brief Index a table using a secondary index.
@@ -216,14 +216,55 @@ public:
      * @param txn The txn manager object.
      * @return RC value denoting the operation's completion status.
      */
-    RC RemoveSecondaryIndex(char* name, TxnManager* txn);
+    RC RemoveSecondaryIndex(MOT::Index* index, TxnManager* txn);
 
     /**
-     * @brief Deletes a primary index.
+     * @brief Remove Index from table meta data.
+     * @param index The index to use.
+     * @return void.
+     */
+    void RemoveSecondaryIndexFromMetaData(MOT::Index* index) {
+        if (!index->IsPrimaryKey()) {
+            uint16_t rmIx = 0;
+            for (uint16_t i = 1; i < m_numIndexes; i++) {
+                if (m_indexes[i] == index) {
+                    rmIx = i;
+                    break;
+                }
+            }
+
+            // prevent removing primary by mistake
+            if (rmIx > 0) {
+                m_numIndexes--;
+                for (uint16_t i = rmIx; i < m_numIndexes; i++) {
+                    m_indexes[i] = m_indexes[i + 1];
+                }
+
+                m_secondaryIndexes[index->GetName()] = nullptr;
+                m_indexes[m_numIndexes] = nullptr;
+            }
+        }
+    }
+
+    /**
+     * @brief Add Index to table meta data.
+     * @param index The index to use.
+     * @return void.
+     */
+    void AddSecondaryIndexToMetaData(MOT::Index* index) {
+        if (!index->IsPrimaryKey()) {
+            m_secondaryIndexes[index->GetName()] = index;
+            m_indexes[m_numIndexes] = index;
+            ++m_numIndexes;
+        }
+    }
+
+    /**
+     * @brief Deletes an index.
      * @param the index to remove.
      * @return RC value denoting the operation's completion status.
      */
-    RC DeletePrimaryIndex(MOT::Index* index);
+    RC DeleteIndex(MOT::Index* index);
 
     /**
      * @brief Checks if table contains data.
@@ -262,13 +303,13 @@ public:
      * @brief Increases the column usage on an index.
      * @param index The index to perform on.
      */
-    void IncIndexColumnUsage(Index* index);
+    void IncIndexColumnUsage(MOT::Index* index);
 
     /**
      * @brief Deccreases the column usage on an index.
      * @param index The index to perform on.
      */
-    void DecIndexColumnUsage(Index* index);
+    void DecIndexColumnUsage(MOT::Index* index);
 
     /**
      * @brief Retrieves an iterator to the first row in the primary index.
@@ -288,7 +329,7 @@ public:
      * @param result The resulting row (indirected through sItem object).
      * @return Result code denoting success or failure reason.
      */
-    inline RC QuerySecondaryIndex(const Index* index, Key const* const& key, void*& result)
+    inline RC QuerySecondaryIndex(const MOT::Index* index, Key const* const& key, void*& result)
     {
         RC rc = RC_OK;
 
@@ -312,7 +353,7 @@ public:
      * @param pid The identifier of the requesting process/thread.
      * @return Result code denoting success or failure reason.
      */
-    inline RC QuerySecondaryIndex(const Index* index, Key const* const& key, bool matchKey, IndexIterator*& result,
+    inline RC QuerySecondaryIndex(const MOT::Index* index, Key const* const& key, bool matchKey, IndexIterator*& result,
         bool forwardDirection, uint32_t pid)
     {
         RC rc = RC_OK;
@@ -356,7 +397,7 @@ public:
      * @param pid The logical identifier of the requesting thread.
      * @return Return code denoting success or failure reason.
      */
-    inline RC FindRowByIndexId(Index* index, Key const* const& key, Sentinel*& result, const uint32_t& pid)
+    inline RC FindRowByIndexId(MOT::Index* index, Key const* const& key, Sentinel*& result, const uint32_t& pid)
     {
         RC rc = RC_ERROR;
 
@@ -473,7 +514,7 @@ public:
      * @param index The secondary index.
      * @return The secondary index key length.
      */
-    uint16_t GetLengthSecondaryKey(Index* index) const
+    uint16_t GetLengthSecondaryKey(MOT::Index* index) const
     {
         return index->GetKeyLength();
     }
@@ -519,7 +560,7 @@ public:
      * @param tid The logical identifier of the requesting thread.
      * @return Status of the operation.
      */
-    bool CreateSecondaryIndexDataNonTransactional(Index* index, uint32_t tid);
+    bool CreateSecondaryIndexDataNonTransactional(MOT::Index* index, uint32_t tid);
 
     /**
      * @brief Inserts a new row into transactional storage.
@@ -787,7 +828,7 @@ private:
     // we have only index-organized-tables (IOT) so this is the pointer to the index
     // representing the table
     /** @var The primary index holding all rows. */
-    Index* m_primaryIndex;
+    MOT::Index* m_primaryIndex;
 
     /** @var Number of fields in the table schema. */
     uint32_t m_fieldCnt;
@@ -807,7 +848,7 @@ private:
     Column** m_columns = NULL;
 
     /** @var Secondary index array. */
-    Index** m_indexes = NULL;
+    MOT::Index** m_indexes = NULL;
 
     /** @var Current table unique identifier. */
     uint32_t m_tableId = tableCounter++;
@@ -817,7 +858,7 @@ private:
     uint64_t m_tableExId;
 
     /** @typedef Secondary index map (indexed by index name). */
-    typedef std::map<string, Index*> SecondaryIndexMap;
+    typedef std::map<string, MOT::Index*> SecondaryIndexMap;
 
     /** @var Secondary index map accessed by name. */
     SecondaryIndexMap m_secondaryIndexes;
@@ -879,6 +920,8 @@ public:
         IndexOrder m_indexOrder;
 
         IndexingMethod m_indexingMethod;
+
+        uint64_t m_indexExtId;
 
         int16_t m_numKeyFields;
 

@@ -138,7 +138,7 @@ void Table::ClearThreadMemoryCache()
     }
 }
 
-void Table::IncIndexColumnUsage(Index* index)
+void Table::IncIndexColumnUsage(MOT::Index* index)
 {
     int16_t const* index_cols = index->GetColumnKeyFields();
     for (int16_t i = 0; i < index->GetNumFields(); i++) {
@@ -149,7 +149,7 @@ void Table::IncIndexColumnUsage(Index* index)
     }
 }
 
-void Table::DecIndexColumnUsage(Index* index)
+void Table::DecIndexColumnUsage(MOT::Index* index)
 {
     int16_t const* index_cols = index->GetColumnKeyFields();
     for (int16_t i = 0; i < index->GetNumFields(); i++) {
@@ -179,7 +179,7 @@ bool Table::IsTableEmpty(uint32_t tid)
     return res;
 }
 
-void Table::SetPrimaryIndex(Index* index)
+void Table::SetPrimaryIndex(MOT::Index* index)
 {
     if (index != nullptr) {
         index->SetTable(this);
@@ -188,11 +188,11 @@ void Table::SetPrimaryIndex(Index* index)
     m_indexes[0] = index;
 }
 
-bool Table::UpdatePrimaryIndex(Index* index, TxnManager* txn, uint32_t tid)
+bool Table::UpdatePrimaryIndex(MOT::Index* index, TxnManager* txn, uint32_t tid)
 {
     if (this->m_primaryIndex) {
         if (txn == nullptr) {
-            if (DeletePrimaryIndex(this->m_primaryIndex) != RC_OK) {
+            if (DeleteIndex(this->m_primaryIndex) != RC_OK) {
                 return false;
             }
         } else {
@@ -212,15 +212,16 @@ bool Table::UpdatePrimaryIndex(Index* index, TxnManager* txn, uint32_t tid)
     return true;
 }
 
-RC Table::DeletePrimaryIndex(MOT::Index* index)
+RC Table::DeleteIndex(MOT::Index* index)
 {
+    GcManager::ClearIndexElements(index->GetIndexId());
     DecIndexColumnUsage(index);
     delete index;
 
     return RC::RC_OK;
 }
 
-bool Table::AddSecondaryIndex(const string& indexName, Index* index, TxnManager* txn, uint32_t tid)
+bool Table::AddSecondaryIndex(const string& indexName, MOT::Index* index, TxnManager* txn, uint32_t tid)
 {
     // OA: Should we check for duplicate indices with same name?
     // first create secondary index data
@@ -247,7 +248,7 @@ bool Table::AddSecondaryIndex(const string& indexName, Index* index, TxnManager*
     return true;
 }
 
-bool Table::CreateSecondaryIndexDataNonTransactional(Index* index, uint32_t tid)
+bool Table::CreateSecondaryIndexDataNonTransactional(MOT::Index* index, uint32_t tid)
 {
     MaxKey key;
     bool ret = true;
@@ -286,7 +287,7 @@ bool Table::CreateSecondaryIndexDataNonTransactional(Index* index, uint32_t tid)
     }
     return ret;
 }
-bool Table::CreateSecondaryIndexData(Index* index, TxnManager* txn)
+bool Table::CreateSecondaryIndexData(MOT::Index* index, TxnManager* txn)
 {
     RC status = RC_OK;
     bool error = false;
@@ -459,6 +460,7 @@ RC Table::InsertRow(Row* row, TxnManager* txn)
 
     key = txn->GetTxnKey(ix);
     if (key == nullptr) {
+        DestroyRow(row);
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Insert Row", "Failed to create primary key");
         return RC_MEMORY_ALLOCATION_ERROR;
     }
@@ -485,6 +487,7 @@ RC Table::InsertRow(Row* row, TxnManager* txn)
                     MOTCurrTxn->DestroyTxnKey(cleanupKeys[j]);
                 }
             }
+            DestroyRow(row);
             MOTCurrTxn->Rollback();
             return RC_MEMORY_ALLOCATION_ERROR;
         }
@@ -560,7 +563,7 @@ Row* Table::RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcMan
 {
     MaxKey key;
     Row* OutputRow = nullptr;
-    Index* ix = sentinel->GetIndex();
+    MOT::Index* ix = sentinel->GetIndex();
     Sentinel* currSentinel = nullptr;
     MOT_ASSERT(sentinel != nullptr);
     RC rc = sentinel->RefCountUpdate(DEC, tid);
@@ -832,12 +835,13 @@ char* Table::DesrializeMeta(char* dataIn, CommonColumnMeta& meta)
     return dataIn;
 }
 
-size_t Table::SerializeItemSize(Index* index)
+size_t Table::SerializeItemSize(MOT::Index* index)
 {
     size_t ret = SerializableSTR::SerializeSize(index->m_name) +
                  SerializablePOD<uint32_t>::SerializeSize(index->m_keyLength) +
                  SerializablePOD<IndexOrder>::SerializeSize(index->m_indexOrder) +
                  SerializablePOD<IndexingMethod>::SerializeSize(index->m_indexingMethod) +
+                 SerializablePOD<uint64_t>::SerializeSize(index->m_indexExtId) +
                  SerializablePOD<bool>::SerializeSize(index->GetUnique()) +
                  SerializablePOD<int16_t>::SerializeSize(index->m_numKeyFields) +
                  SerializablePOD<uint32_t>::SerializeSize(index->m_numTableFields) +
@@ -847,7 +851,7 @@ size_t Table::SerializeItemSize(Index* index)
     return ret;
 }
 
-char* Table::SerializeItem(char* dataOut, Index* index)
+char* Table::SerializeItem(char* dataOut, MOT::Index* index)
 {
     if (!index || !dataOut) {
         return nullptr;
@@ -860,6 +864,7 @@ char* Table::SerializeItem(char* dataOut, Index* index)
     dataOut = SerializablePOD<uint32_t>::Serialize(dataOut, keyLength);
     dataOut = SerializablePOD<IndexOrder>::Serialize(dataOut, index->m_indexOrder);
     dataOut = SerializablePOD<IndexingMethod>::Serialize(dataOut, index->m_indexingMethod);
+    dataOut = SerializablePOD<uint64_t>::Serialize(dataOut, index->m_indexExtId);
     dataOut = SerializablePOD<bool>::Serialize(dataOut, index->GetUnique());
     dataOut = SerializablePOD<int16_t>::Serialize(dataOut, index->m_numKeyFields);
     dataOut = SerializablePOD<uint32_t>::Serialize(dataOut, index->m_numTableFields);
@@ -869,24 +874,21 @@ char* Table::SerializeItem(char* dataOut, Index* index)
     return dataOut;
 }
 
-RC Table::RemoveSecondaryIndex(char* name, TxnManager* txn)
+RC Table::RemoveSecondaryIndex(MOT::Index* index, TxnManager* txn)
 {
     int rmIx = -1;
-    std::string ixName(name);
-    Index* index = nullptr;
     RC res = RC_OK;
     do {
-        SecondaryIndexMap::iterator itr = m_secondaryIndexes.find(ixName);
+        SecondaryIndexMap::iterator itr = m_secondaryIndexes.find(index->GetName());
         if (MOT_EXPECT_TRUE(itr != m_secondaryIndexes.end())) {
-            index = itr->second;
             MOT_LOG_DEBUG("logging drop index operation (tableId %u), index name: %s index id = %d \n",
                 GetTableId(),
                 index->GetName().c_str(),
                 index->GetIndexId());
             m_secondaryIndexes.erase(itr);
         } else {
-            if (m_numIndexes > 0 && (strcmp(m_indexes[0]->GetName().c_str(), name) == 0)) {
-                MOT_LOG_INFO("Trying to remove primary index %s, not supported", name);
+            if (m_numIndexes > 0 && (strcmp(m_indexes[0]->GetName().c_str(), index->GetName().c_str()) == 0)) {
+                MOT_LOG_INFO("Trying to remove primary index %s, not supported", index->GetName().c_str());
                 break;
             }
 
@@ -926,6 +928,7 @@ char* Table::DesrializeMeta(char* dataIn, CommonIndexMeta& meta)
     dataIn = SerializablePOD<uint32_t>::Deserialize(dataIn, meta.m_keyLength);
     dataIn = SerializablePOD<IndexOrder>::Deserialize(dataIn, meta.m_indexOrder);
     dataIn = SerializablePOD<IndexingMethod>::Deserialize(dataIn, meta.m_indexingMethod);
+    dataIn = SerializablePOD<uint64_t>::Deserialize(dataIn, meta.m_indexExtId);
     dataIn = SerializablePOD<bool>::Deserialize(dataIn, meta.m_unique);
     dataIn = SerializablePOD<int16_t>::Deserialize(dataIn, meta.m_numKeyFields);
     dataIn = SerializablePOD<uint32_t>::Deserialize(dataIn, meta.m_numTableFields);
@@ -936,11 +939,11 @@ char* Table::DesrializeMeta(char* dataIn, CommonIndexMeta& meta)
     return dataIn;
 }
 
-RC Table::CreateIndexFromMeta(
-    CommonIndexMeta& meta, bool primary, uint32_t tid, bool addToTable /* = true */, Index** outIndex /* = nullptr */)
+RC Table::CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid, bool addToTable /* = true */,
+    MOT::Index** outIndex /* = nullptr */)
 {
     IndexTreeFlavor flavor = DEFAULT_TREE_FLAVOR;
-    Index* ix = nullptr;
+    MOT::Index* ix = nullptr;
 
     MOT_LOG_DEBUG("%s: %s (%s)", __func__, meta.m_name.c_str(), primary ? "primary" : "secondary");
     if (meta.m_indexingMethod == IndexingMethod::INDEXING_METHOD_TREE) {
@@ -973,6 +976,7 @@ RC Table::CreateIndexFromMeta(
     ix->SetFakePrimary(meta.m_fake);
     ix->SetNumIndexFields(meta.m_numKeyFields);
     ix->SetTable(this);
+    ix->SetExtId(meta.m_indexExtId);
     if (ix->IndexInit(meta.m_keyLength, meta.m_unique, meta.m_name, nullptr) != RC_OK) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create Index from meta-data", "Failed to initialize index");
         delete ix;
@@ -1139,7 +1143,7 @@ RC Table::DropImpl()
         MOT_LOG_DEBUG("DropImpl numIndexes = %d \n", m_numIndexes);
         for (int i = m_numIndexes - 1; i >= 0; i--) {
             if (m_indexes[i] != nullptr) {
-                Index* index = m_indexes[i];
+                MOT::Index* index = m_indexes[i];
                 // first remove index from table metadata to prevent it's usage
                 m_indexes[i] = nullptr;
                 GcManager::ClearIndexElements(index->GetIndexId());

@@ -522,6 +522,7 @@ void RecoveryManager::InsertRow(uint64_t tableId, uint64_t exId, char* keyData, 
                     MOTCurrTxn->DestroyTxnKey(cleanupKeys[j]);
                 }
             }
+            table->DestroyRow(row);
             MOTCurrTxn->Rollback();
             return;
         }
@@ -541,7 +542,6 @@ void RecoveryManager::InsertRow(uint64_t tableId, uint64_t exId, char* keyData, 
         status = RC_OK;
     } else if (status == RC_MEMORY_ALLOCATION_ERROR) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Insert Row", "failed to insert row");
-        table->DestroyRow(row);
     }
 }
 
