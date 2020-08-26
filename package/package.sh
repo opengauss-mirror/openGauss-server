@@ -398,6 +398,7 @@ function target_file_copy()
     sed -i '/gs_lcctl/d' binfile
     sed -i '/gs_wsr/d' binfile
     sed -i '/gs_gucZenith/d' binfile
+    sed -i '/gs_expansion/d' binfile
     bin_script=$(cat binfile)
     rm binfile script_file
     cd $BUILD_DIR

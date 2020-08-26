@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_expansion is a utility to expansion standby node databases
+#############################################################################
+
+import os
+import pwd
+import sys
+import threading
+import uuid
+import subprocess
+import weakref
+
+sys.path.append(sys.path[0])
+from gspylib.common.DbClusterInfo import dbClusterInfo, \
+    readOneClusterConfigItem, initParserXMLFile, dbNodeInfo, checkPathVaild
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.Common import DefaultValue
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.common.ParameterParsecheck import Parameter
+from impl.preinstall.OLAP.PreinstallImplOLAP import PreinstallImplOLAP
+from gspylib.threads.SshTool import SshTool
+from impl.expansion.ExpansionImpl import ExpansionImpl
+
+ENV_LIST = ["MPPDB_ENV_SEPARATE_PATH", "GPHOME", "PATH",
+            "LD_LIBRARY_PATH", "PYTHONPATH", "GAUSS_WARNING_TYPE",
+            "GAUSSHOME", "PATH", "LD_LIBRARY_PATH",
+            "S3_CLIENT_CRT_FILE", "GAUSS_VERSION", "PGHOST",
+            "GS_CLUSTER_NAME", "GAUSSLOG", "GAUSS_ENV", "umask"]
+
+class Expansion(ParallelBaseOM):
+    """
+    """
+    
+    def __init__(self):
+        """
+        """
+        ParallelBaseOM.__init__(self)
+        # new added standby node backip list
+        self.newHostList = []
+        self.clusterInfoDict = {}
+        self.backIpNameMap = {}
+        self.packagepath = os.path.realpath(
+                    os.path.join(os.path.realpath(__file__), "../../"))
+
+        self.standbyLocalMode = False
+
+    def usage(self):
+        """
+gs_expansion is a utility to expansion standby node for a cluster.
+
+Usage:
+    gs_expansion -? | --help
+    gs_expansion -V | --version
+    gs_expansion -U USER -G GROUP -X XMLFILE -h nodeList [-L] 
+General options:
+    -U                                 Cluster user.
+    -G                                 Group of the cluster user.
+    -X                                 Path of the XML configuration file.
+    -h                                 New standby node node backip list. 
+                                       Separate multiple nodes with commas (,).
+                                       such as '-h 192.168.0.1,192.168.0.2'
+    -L                                 The standby database installed with 
+                                       local mode.
+    -?, --help                         Show help information for this
+                                       utility, and exit the command line mode.
+    -V, --version                      Show version information.
+        """
+        print(self.usage.__doc__)
+    
+    def parseCommandLine(self):
+        """
+        parse parameter from command line
+        """
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("expansion")  
+
+        # parameter -h or -?
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(0)
+        # Resolves command line arguments
+        # parameter -U
+        if (ParaDict.__contains__("user")):
+            self.user = ParaDict.get("user")
+            DefaultValue.checkPathVaild(self.user)
+        # parameter -G
+        if (ParaDict.__contains__("group")):
+            self.group = ParaDict.get("group")
+        # parameter -X
+        if (ParaDict.__contains__("confFile")):
+            self.xmlFile = ParaDict.get("confFile")
+        # parameter -L
+        if (ParaDict.__contains__("localMode")):
+            self.localMode = ParaDict.get("localMode")
+            self.standbyLocalMode = ParaDict.get("localMode")
+        # parameter -l
+        if (ParaDict.__contains__("logFile")):
+            self.logFile = ParaDict.get("logFile")
+        #parameter -h
+        if (ParaDict.__contains__("nodename")):
+            self.newHostList = ParaDict.get("nodename")
+
+
+    def checkParameters(self):
+        """
+        function: Check parameter from command line
+        input: NA
+        output: NA
+        """
+
+        # check user | group | xmlfile | node
+        if len(self.user) == 0:
+           GaussLog.exitWithError(ErrorCode.GAUSS_357["GAUSS_35701"] % "-U")
+        if len(self.group) == 0:
+           GaussLog.exitWithError(ErrorCode.GAUSS_357["GAUSS_35701"] % "-G")
+        if len(self.xmlFile) == 0:
+           GaussLog.exitWithError(ErrorCode.GAUSS_357["GAUSS_35701"] % "-X")
+        if len(self.newHostList) == 0:
+           GaussLog.exitWithError(ErrorCode.GAUSS_357["GAUSS_35701"] % "-h")
+        
+        clusterInfo = ExpansipnClusterInfo()
+        hostNameIpDict = clusterInfo.initFromXml(self.xmlFile)
+        clusterDict = clusterInfo.getClusterDirectorys()
+        backIpList = clusterInfo.getClusterBackIps()
+        nodeNameList = clusterInfo.getClusterNodeNames()
+
+        self.nodeNameList = nodeNameList
+        self.backIpNameMap = {}
+        for backip in backIpList:
+            self.backIpNameMap[backip] = clusterInfo.getNodeNameByBackIp(backip)
+
+        # check parameter node must in xml config file
+        for nodeid in self.newHostList:
+              if nodeid not in backIpList:
+                   GaussLog.exitWithError(ErrorCode.GAUSS_357["GAUSS_35702"] % \
+                       nodeid) 
+
+        # get corepath and toolpath from xml file 
+        corePath = clusterInfo.readClustercorePath(self.xmlFile)
+        toolPath = clusterInfo.getToolPath(self.xmlFile)
+        # parse xml file and cache node info
+        clusterInfoDict = {}
+        clusterInfoDict["appPath"] = clusterDict["appPath"][0]
+        clusterInfoDict["logPath"] = clusterDict["logPath"][0]
+        clusterInfoDict["corePath"] = corePath
+        clusterInfoDict["toolPath"] = toolPath
+        for nodeName in nodeNameList:
+            hostInfo = hostNameIpDict[nodeName]
+            ipList = hostInfo[0]
+            portList = hostInfo[1]
+            backIp = ""
+            sshIp = ""
+            if len(ipList) == 1:
+                backIp = sshIp = ipList[0]
+            elif len(ipList) == 2:
+                backIp = ipList[0]
+                sshIp = ipList[1]
+            port = portList[0]
+            cluster = clusterDict[nodeName]
+            dataNode = cluster[2]
+            clusterInfoDict[nodeName] = {
+                "backIp": backIp,
+                "sshIp": sshIp,
+                "port": port,
+                "localport": int(port) + 1,
+                "localservice": int(port) + 4,
+                "heartBeatPort": int(port) + 3,
+                "dataNode": dataNode,
+                "instanceType": -1
+            }
+
+        nodeIdList = clusterInfo.getClusterNodeIds()
+        for id in nodeIdList:
+            insType = clusterInfo.getdataNodeInstanceType(id)
+            hostName = clusterInfo.getHostNameByNodeId(id)
+            clusterInfoDict[hostName]["instanceType"] = insType
+        self.clusterInfoDict = clusterInfoDict
+        
+	
+    def initLogs(self):
+        """
+        init log file
+        """
+        # if no log file
+        if (self.logFile == ""):
+            self.logFile = DefaultValue.getOMLogPath(
+                DefaultValue.EXPANSION_LOG_FILE, self.user, "",
+                self.xmlFile)
+        # if not absolute path
+        if (not os.path.isabs(self.logFile)):
+            GaussLog.exitWithError(ErrorCode.GAUSS_502["GAUSS_50213"] % "log")
+
+        self.initLogger("gs_expansion")
+        self.logger.ignoreErr = True
+
+class ExpansipnClusterInfo(dbClusterInfo):
+
+    def __init__(self):
+        dbClusterInfo.__init__(self)
+
+    def getToolPath(self, xmlFile):
+        """
+        function : Read tool path from default xml file
+        input : String
+        output : String
+        """
+        self.setDefaultXmlFile(xmlFile)
+        # read gaussdb tool path from xml file
+        (retStatus, retValue) = readOneClusterConfigItem(
+            initParserXMLFile(xmlFile), "gaussdbToolPath", "cluster")
+        if retStatus != 0:
+            raise Exception(ErrorCode.GAUSS_512["GAUSS_51200"]
+                            % "gaussdbToolPath" + " Error: \n%s" % retValue)
+        toolPath = os.path.normpath(retValue)
+        checkPathVaild(toolPath)
+        return toolPath
+
+if __name__ == "__main__":
+    """
+    """
+    expansion = Expansion()
+    expansion.parseCommandLine()
+    expansion.checkParameters()
+    expansion.initLogs()
+    expImpl = ExpansionImpl(expansion)
+    expImpl.run()
+    
