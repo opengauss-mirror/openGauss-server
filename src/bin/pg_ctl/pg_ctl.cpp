@@ -4069,7 +4069,7 @@ static void kill_proton_force(void)
     struct timeval timeOut;
     char Lrealpath[MAX_REALPATH_LEN + 1] = {0};
     char cmd[MAX_REALPATH_LEN + 1] = {
-        "ps c -eo pid,euid,cmd | grep gaussdb | grep -v grep | awk '{if($2 == curuid && $1!=\"-n\") print "
+        "ps c -eo pid,euid,cmd | grep GaussMaster | grep -v grep | awk '{if($2 == curuid && $1!=\"-n\") print "
         "\"/proc/\"$1\"/cwd\"}' curuid=`id -u`| xargs ls -l | awk '{if ($NF==\""};
     char cmdexten[] = {"\")  print $(NF-2)}' | awk -F/ '{print $3 }' | xargs kill -9 >/dev/null 2>&1 "};
     errno_t tnRet = EOK;
