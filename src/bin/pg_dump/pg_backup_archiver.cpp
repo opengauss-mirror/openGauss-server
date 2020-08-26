@@ -2844,6 +2844,10 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
 {
     const char* type = te->desc;
 
+    /* Use ALTER TABLE for MATERIALIZED VIEW */
+	if (strcmp(type, "MATERIALIZED VIEW") == 0)
+		type = "TABLE";
+
     /* objects named by a schema and name */
     if (strcmp(type, "COLLATION") == 0 || strcmp(type, "CONVERSION") == 0 || strcmp(type, "DOMAIN") == 0 ||
         strcmp(type, "TABLE") == 0 || strcmp(type, "SYNONYM") == 0 || strcmp(type, "VIEW") == 0 ||
@@ -3086,7 +3090,8 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
             strcmp(te->desc, "OPERATOR") == 0 || strcmp(te->desc, "OPERATOR CLASS") == 0 ||
             strcmp(te->desc, "OPERATOR FAMILY") == 0 || strcmp(te->desc, "PROCEDURAL LANGUAGE") == 0 ||
             strcmp(te->desc, "SCHEMA") == 0 || strcmp(te->desc, "TABLE") == 0 || strcmp(te->desc, "SYNONYM") == 0 ||
-            strcmp(te->desc, "TYPE") == 0 || strcmp(te->desc, "VIEW") == 0 || strcmp(te->desc, "SEQUENCE") == 0 ||
+            strcmp(te->desc, "TYPE") == 0 || strcmp(te->desc, "VIEW") == 0 || 
+            strcmp(te->desc, "MATERIALIZED VIEW") == 0 || strcmp(te->desc, "SEQUENCE") == 0 ||
             strcmp(te->desc, "TEXT SEARCH DICTIONARY") == 0 || strcmp(te->desc, "TEXT SEARCH CONFIGURATION") == 0 ||
             strcmp(te->desc, "FOREIGN DATA WRAPPER") == 0 || strcmp(te->desc, "SERVER") == 0) {
             PQExpBuffer temp = createPQExpBuffer();
