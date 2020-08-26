@@ -34,7 +34,7 @@
 #include "postgres_fe.h"
 
 #include "getopt_long.h"
-#include "libpq-fe.h"
+#include "libpq/libpq-fe.h"
 #include "libpq/pqsignal.h"
 #include "portability/instr_time.h"
 
@@ -161,6 +161,7 @@ int progress = 0;          /* thread progress report every this seconds */
 int progress_nclients = 0; /* number of clients for progress report */
 int progress_nthreads = 0; /* number of threads for progress report */
 bool is_connect;           /* establish connection for each transaction */
+bool is_mot = false;       /* use memory tables */
 bool is_latencies;         /* report per-command latencies */
 int main_pid;              /* main process id used in log filename */
 
@@ -418,6 +419,7 @@ static void usage(const char* progname)
            "  %s [OPTION]... [DBNAME]\n"
            "\nInitialization options:\n"
            "  -i           invokes initialization mode\n"
+           "  -m           use memory tables (mot)\n"
            "  -F NUM       fill factor\n"
 #ifdef PGXC
            "  -k           distribute by primary key branch id - bid\n"
@@ -955,6 +957,9 @@ top:
 #endif
         }
 
+        /* identify transaction errors */
+        bool error_found = false;
+
         if (commands[st->state]->type == SQL_COMMAND) {
             /*
              * Read and discard the query result; note this is not included in
@@ -966,7 +971,12 @@ top:
                 case PGRES_TUPLES_OK:
                     break; /* OK */
                 default:
-                    fprintf(stderr, "Client %d aborted in state %d: %s", st->id, st->state, PQerrorMessage(st->con));
+                    error_found = true;
+                    if (!is_mot) {
+                        fprintf(
+                            stderr, "Client %d aborted in state %d: %s", st->id, st->state, PQerrorMessage(st->con));
+                    }
+                    break;
             }
             PQclear(res);
             discard_response(st);
@@ -978,7 +988,10 @@ top:
                 st->con = NULL;
             }
 
-            ++st->cnt;
+            if (!error_found) {
+                ++st->cnt;
+            }
+
             if ((st->cnt >= nxacts && duration <= 0) || timer_exceeded)
                 return clientDone(st, true); /* exit success */
         }
@@ -1412,6 +1425,10 @@ static void init(void)
         "alter table pgbench_tellers add primary key (ttid)",
         "alter table pgbench_accounts add primary key (aid)"};
 
+    static char* DDLAFTERs_mot[] = {"alter foreign table pgbench_branches add primary key (bid)",
+        "alter foreign table pgbench_tellers add primary key (ttid)",
+        "alter foreign table pgbench_accounts add primary key (aid)"};
+
 #ifdef PGXC
     static char* DDLAFTERs_bid[] = {"alter table pgbench_branches add primary key (bid)",
         "alter table pgbench_tellers add primary key (ttid,bid)",
@@ -1430,11 +1447,23 @@ static void init(void)
     for (i = 0; i < (int)lengthof(DDLs); i++) {
         int hasWithOpts = 0;
         char opts[256];
+        char check_buffer[256];
         char buffer[256];
         struct ddlinfo* ddl = &DDLs[i];
 
         /* Remove old table, if it exists. */
-        snprintf(buffer, 256, "drop table if exists %s", ddl->table);
+        snprintf(check_buffer,
+            256,
+            "select table_type from information_schema.tables where table_name = '%s' and table_type = 'FOREIGN TABLE'",
+            ddl->table);
+        PGresult *res = PQexec(con, check_buffer);
+
+        if (PQntuples(res) == 0) {
+            snprintf(buffer, 256, "drop table if exists %s", ddl->table);
+        } else {
+            snprintf(buffer, 256, "drop foreign table if exists %s", ddl->table);
+        }
+        PQclear(res);
         executeStatement(con, buffer);
 
         /* Construct new create table statement. */
@@ -1482,6 +1511,7 @@ static void init(void)
                 ddl->distribute_by);
         else
 #endif
+        if (!is_mot) {
             snprintf(buffer,
                 256,
                 "create%s table %s(%s)%s",
@@ -1489,6 +1519,13 @@ static void init(void)
                 ddl->table,
                 ddl->cols,
                 opts);
+        } else {
+            snprintf(buffer,
+                256,
+                "create foreign table %s(%s)",
+                ddl->table,
+                ddl->cols);
+        }
 
         executeStatement(con, buffer);
     }
@@ -1512,6 +1549,16 @@ static void init(void)
     */
 
 #define MINI_BATCH 5000
+    /* if mot create primary keys before data load */
+    if (is_mot) {
+        fprintf(stderr, "set primary key on memory tables...\n");
+        for (i = 0; i < (int)lengthof(DDLAFTERs_mot); i++) {
+            char buffer[256];
+            strncpy(buffer, DDLAFTERs_mot[i], 256);
+            executeStatement(con, buffer, true);
+        }
+    }
+
     for (i = 0; i < nbranches * scale;) {
         executeStatement(con, "start transaction");
         int k = 0;
@@ -1580,30 +1627,31 @@ static void init(void)
     /*
      * create indexes
      */
-    fprintf(stderr, "set primary key...\n");
+    if (!is_mot) {
+        fprintf(stderr, "set primary key...\n");
 #ifdef PGXC
-    /*
-     * If all the tables are distributed according to bid, create an index on it
-     * instead.
-     */
-    if (use_branch) {
-        for (i = 0; i < (int)lengthof(DDLAFTERs_bid); i++) {
-            char buffer[256];
+        /*
+         * If all the tables are distributed according to bid, create an index on it
+         * instead.
+         */
+        if (use_branch) {
+            for (i = 0; i < (int)lengthof(DDLAFTERs_bid); i++) {
+                char buffer[256];
 
-            strncpy(buffer, DDLAFTERs_bid[i], 256);
+                strncpy(buffer, DDLAFTERs_bid[i], 256);
 
-            if (index_tablespace != NULL) {
-                char* escape_tablespace = NULL;
+                if (index_tablespace != NULL) {
+                    char* escape_tablespace = NULL;
 
-                escape_tablespace = PQescapeIdentifier(con, index_tablespace, strlen(index_tablespace));
-                snprintf(
-                    buffer + strlen(buffer), 256 - strlen(buffer), " using index tablespace %s", escape_tablespace);
-                PQfreemem(escape_tablespace);
+                    escape_tablespace = PQescapeIdentifier(con, index_tablespace, strlen(index_tablespace));
+                    snprintf(
+                        buffer + strlen(buffer), 256 - strlen(buffer), " using index tablespace %s", escape_tablespace);
+                    PQfreemem(escape_tablespace);
+                }
+
+                executeStatement(con, buffer, true);
             }
-
-            executeStatement(con, buffer, true);
-        }
-    } else
+        } else
 #endif
         for (i = 0; i < (int)lengthof(DDLAFTERs); i++) {
             char buffer[256];
@@ -1621,6 +1669,7 @@ static void init(void)
 
             executeStatement(con, buffer, true);
         }
+    }
 
     /* vacuum */
     fprintf(stderr, "vacuum...");
@@ -2078,9 +2127,9 @@ int main(int argc, char** argv)
     memset(state, 0, sizeof(CState));
 
 #ifdef PGXC
-    while ((c = getopt_long(argc, argv, "ih:knvp:dSNc:j:Crs:t:T:U:lf:D:F:M:O:P:R:W:", long_options, &optindex)) != -1)
+    while ((c = getopt_long(argc, argv, "ih:mknvp:dSNc:j:Crs:t:T:U:lf:D:F:M:O:P:R:W:", long_options, &optindex)) != -1)
 #else
-    while ((c = getopt_long(argc, argv, "ih:nvp:dSNc:j:Crs:t:T:U:lf:D:F:M:P:R:W:", long_options, &optindex)) != -1)
+    while ((c = getopt_long(argc, argv, "ih:mnvp:dSNc:j:Crs:t:T:U:lf:D:F:M:P:R:W:", long_options, &optindex)) != -1)
 #endif
     {
         switch (c) {
@@ -2092,6 +2141,9 @@ int main(int argc, char** argv)
                 use_branch = true;
                 break;
 #endif
+            case 'm':
+                is_mot = true;
+                break;
             case 'h':
                 pghost = optarg;
                 break;
@@ -2217,6 +2269,10 @@ int main(int argc, char** argv)
             } break;
             case 'F':
                 fillfactor = atoi(optarg);
+                if (is_mot) {
+                    fprintf(stderr, "fillfactor is not supported with memory tables\n");
+                    exit(1);
+                }
                 if ((fillfactor < 10) || (fillfactor > 100)) {
                     fprintf(stderr, "invalid fillfactor: %d\n", fillfactor);
                     exit(1);
@@ -2264,9 +2320,17 @@ int main(int argc, char** argv)
                 /* This covers long options which take no argument. */
                 break;
             case 2: /* tablespace */
+                if (is_mot) {
+                    fprintf(stderr, "tablespace is not supported with memory tables\n");
+                    exit(1);
+                }
                 tablespace = optarg;
                 break;
             case 3: /* index-tablespace */
+                if (is_mot) {
+                    fprintf(stderr, "index_tablespace is not supported with memory tables\n");
+                    exit(1);
+                }
                 index_tablespace = optarg;
                 break;
             default:
