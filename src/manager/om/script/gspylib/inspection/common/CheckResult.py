@@ -25,6 +25,12 @@ from gspylib.inspection.common import SharedFuncs
 from gspylib.common.Common import DefaultValue
 from gspylib.inspection.common.Log import LoggerFactory
 
+class GsCheckEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, bytes):
+            return str(obj, encoding='utf-8')
+        return json.JSONEncoder.default(self, obj)
+
 
 class ResultStatus(object):
     OK = "OK"
@@ -242,4 +248,4 @@ class CheckResult(object):
                 local['raw'] = localitem.raw
                 localList.append(local)
             resultDic['hosts'] = localList
-        return json.dumps(resultDic, indent=2)
+        return json.dumps(resultDic, cls=GsCheckEncoder, indent=2)

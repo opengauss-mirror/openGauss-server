@@ -39,8 +39,7 @@ class CheckMpprcFile(BaseItem):
             return
         try:
             with open(mpprcFile, 'r') as fp:
-                mpp_content = fp.read()
-                env_list = mpp_content.split('\n')
+                env_list = fp.readlines()
             while '' in env_list:
                 env_list.remove('')
             # get ec content
@@ -67,12 +66,16 @@ class CheckMpprcFile(BaseItem):
                           "GAUSS_ENV", "KRB5_CONFIG", "PGKRBSRVNAME",
                           "KRBHOSTNAME", "ETCD_UNSUPPORTED_ARCH"]
             # black elements
-            list_black = ["|", ";", "&", "$", "<", ">", "`", "\\", "'", "\"",
-                          "{", "}", "(", ")", "[", "]", "~", "*", "?", " ",
+            list_black = ["|", ";", "&", "<", ">", "`", "\\", "'", "\"",
+                          "{", "}", "(", ")", "[", "]", "~", "*", "?",
                           "!", "\n"]
             for env in env_list:
                 env = env.strip()
                 if env == "":
+                    continue
+                if len(env.split()) != 2:
+                    return
+                if env.split()[0] == "umask" and env.split()[1] == "077":
                     continue
                 for black in list_black:
                     flag = env.find(black)

@@ -88,9 +88,9 @@ class CheckNTPD(BaseItem):
     def postAnalysis(self, itemResult, category="", name=""):
         errors = []
         for i in itemResult.getLocalItems():
-            if (i.rst == ResultStatus.NG):
+            if i.rst == ResultStatus.NG :
                 errors.append("%s: %s" % (i.host, i.val))
-        if (len(errors) > 0):
+        if len(errors) > 0:
             itemResult.rst = ResultStatus.NG
             itemResult.analysis = "\n".join(errors)
             return itemResult

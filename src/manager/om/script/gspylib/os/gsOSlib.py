@@ -295,9 +295,12 @@ class PlatformCommand():
         """
         pidList = []
         for pid in psutil.pids():
-            p = psutil.Process(pid)
-            if procName == p.name():
-                pidList.append(pid)
+            try:
+                p = psutil.Process(pid)
+                if procName == p.name():
+                    pidList.append(pid)
+            except psutil.NoSuchProcess:
+                pass
         return pidList
 
     def killProcessByProcName(self, procName, killType=2):

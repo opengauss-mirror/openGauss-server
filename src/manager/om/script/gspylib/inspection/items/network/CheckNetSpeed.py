@@ -75,14 +75,14 @@ class CheckNetSpeed(BaseItem):
     def runClient(self, self_index, ipList):
         base_listen_port = DEFAULT_LISTEN_PORT
         max_server = 10
-        group = self_index / max_server
+        group = self_index // max_server
         path = self.context.basePath
         port = base_listen_port + self_index % max_server
         for ip in ipList:
             index = ipList.index(ip)
             if (index == self_index):
                 continue
-            if (index / max_server != group):
+            if (index // max_server != group):
                 continue
             try:
                 p = subprocess.Popen([path + "/lib/checknetspeed/speed_test",

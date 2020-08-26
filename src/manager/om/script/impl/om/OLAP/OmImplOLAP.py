@@ -19,6 +19,8 @@
 #############################################################################
 import subprocess
 import sys
+import re
+import time
 
 sys.path.append(sys.path[0] + "/../../../../")
 from gspylib.common.DbClusterInfo import dbClusterInfo, queryCmd
@@ -221,11 +223,28 @@ class OmImplOLAP(OmImpl):
         self.context.g_opts.security_mode)
         if self.dataDir != "":
             cmd += " -D %s" % self.dataDir
+        starttime = time.time()
         (statusMap, output) = self.sshTool.getSshStatusOutput(cmd, hostList)
         for nodeName in hostList:
             if statusMap[nodeName] != 'Success':
                 raise Exception(
                     ErrorCode.GAUSS_536["GAUSS_53600"] % (cmd, output))
+        if re.search("another server might be running", output):
+            self.logger.log(output)
+        if startType == "cluster":
+            cmd = "source %s; gs_om -t status|grep cluster_state|grep Normal" \
+                  % self.context.g_opts.mpprcFile
+            while time.time() <= time_out + starttime:
+                status = subprocess.getstatusoutput(cmd)[0]
+                if status != 0:
+                    self.logger.log("Waiting for check cluster state...")
+                    time.sleep(5)
+                else:
+                    break
+            if time.time() > time_out + starttime:
+                raise Exception(ErrorCode.GAUSS_516["GAUSS_51610"] % "cluster"
+                                + "Start timeout, please check the process"
+                                  " status manually")
         self.logger.log("=========================================")
         self.logger.log("Successfully started.")
         self.logger.debug("Operation succeeded: Start.")

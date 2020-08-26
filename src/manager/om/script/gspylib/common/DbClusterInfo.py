@@ -1525,7 +1525,12 @@ class dbClusterInfo():
                                 "sync_state                : %s\n" %
                                 syncInfo.syncState)
                         if syncInfo.secondPeerRole == "":
-                            syncInfo.secondPeerRole = "Unknown"
+                            outText = outText + "\n------------------------" \
+                                                "---------------" \
+                                      "--------------------------------\n\n"
+                            continue
+                        if syncInfo.secondSyncState == "":
+                            syncInfo.secondSyncState = "Unknown"
                         outText = outText + (
                                 "secondary_state           : %s\n" %
                                 syncInfo.secondPeerRole)
@@ -1553,8 +1558,6 @@ class dbClusterInfo():
                         outText = outText + (
                                 "receiver_replay_location  : %s\n" %
                                 syncInfo.secondReceiverReplayLocation)
-                        if syncInfo.secondSyncState == "":
-                            syncInfo.secondSyncState = "Unknown"
                         outText = outText + (
                                 "sync_state                : %s\n" %
                                 syncInfo.secondSyncState)
@@ -1847,8 +1850,7 @@ class dbClusterInfo():
                     else:
                         outText = outText + "    "
                     outText = outText + (
-                            "%s " % self.__getDnRole(roleStatusArray[i],
-                                                     dnInst.instanceType))
+                            "%s " % self.__getDnRole(dnInst.instanceType))
                     if dnNodeCount == 1:
                         outText = outText + ("%-7s" % "Primary")
                     else:
@@ -1863,9 +1865,12 @@ class dbClusterInfo():
         except Exception as e:
             raise Exception(ErrorCode.GAUSS_516["GAUSS_51652"] % str(e))
 
-    def __getDnRole(self, roleStatus, instanceType):
-        if roleStatus in DN_ROLE_MAP.keys():
-            return DN_ROLE_MAP[roleStatus]
+    def __getDnRole(self, instanceType):
+        """
+        function : Get DnRole by instanceType
+        input : Int
+        output : String
+        """
         if instanceType == MASTER_INSTANCE:
             return "P"
         elif instanceType == STANDBY_INSTANCE:

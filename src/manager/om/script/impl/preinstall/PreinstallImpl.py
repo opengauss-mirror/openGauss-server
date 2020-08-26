@@ -509,7 +509,7 @@ class PreinstallImpl:
         # the temporary Files for /etc/hosts
         tmp_hostipname = "./tmp_hostsiphostname_%d" % os.getpid()
         # Delete the line with 'HOSTS_MAPPING_FLAG' in the /etc/hosts
-        cmd = "grep -v '%s' %s > %s && cp %s %s && rm -rf '%s'" % \
+        cmd = "grep -v '%s' %s > %s ; cp %s %s && rm -rf '%s'" % \
               ("#Gauss.* IP Hosts Mapping", '/etc/hosts', tmp_hostipname,
                tmp_hostipname, '/etc/hosts', tmp_hostipname)
         (status, output) = DefaultValue.retryGetstatusoutput(cmd)
@@ -559,7 +559,7 @@ class PreinstallImpl:
         tmp_hostipname = "./tmp_hostsiphostname_%d" % os.getpid()
         # Delete the line with 'HOSTS_MAPPING_FLAG' in the /etc/hosts
         cmd = "if [ -f '%s' ]; then grep -v '%s' %s > %s " \
-              "&& cp %s %s && rm -rf '%s'; fi" % \
+              "; cp %s %s ; rm -rf '%s'; fi" % \
               ('/etc/hosts', "#Gauss.* IP Hosts Mapping", '/etc/hosts',
                tmp_hostipname, tmp_hostipname, '/etc/hosts', tmp_hostipname)
         # exec the cmd on all remote nodes

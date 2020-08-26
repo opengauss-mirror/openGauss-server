@@ -83,12 +83,32 @@ DEFAULT_TIMEOUT = 1500
 # because single clusters don't need to perform consistency checks and
 # internal communication class checks
 SINGLE_SKIP = ["CheckTimeZone", "CheckEncoding", "CheckKernelVer",
-               "CheckNTPD",
-               "CheckNoCheckSum", "CheckCpuCount",
+               "CheckNTPD", "CheckNoCheckSum", "CheckCpuCount",
                "CheckMemInfo", "CheckDiskConfig",
                "CheckUpVer", "CheckPgxcgroup", "CheckPing",
-               "CheckNetWorkDrop",
-               "CheckNetSpeed"]
+               "CheckNetWorkDrop", "CheckNetSpeed"]
+
+SETITEM_SKIP = ["CheckCPU", "CheckTimeZone", "CheckOSVer", "CheckNTPD",
+                "CheckSshdService", "CheckNoCheckSum", "CheckEtcHosts",
+                "CheckCpuCount", "CheckHyperThread", "CheckMemInfo",
+                "CheckKernelVer", "CheckEncoding", "CheckBootItems",
+                "CheckDropCache", "CheckFilehandle", "CheckKeyProAdj",
+                "CheckDiskFormat", "CheckInodeUsage", "CheckSpaceUsage",
+                "CheckDiskConfig", "CheckXid", "CheckSysTabSize",
+                "CheckClusterState", "CheckConfigFileDiff", "CheckUpVer",
+                "CheckEnvProfile", "CheckGaussVer", "CheckPortRange",
+                "CheckReadonlyMode", "CheckCatchup", "CheckProcessStatus",
+                "CheckSpecialFile", "CheckCollector", "CheckLargeFile",
+                "CheckProStartTime", "CheckMpprcFile", "CheckLockNum",
+                "CheckCurConnCount", "CheckCursorNum", "CheckPgxcgroup",
+                "CheckLockState", "CheckIdleSession", "CheckDBConnection",
+                "CheckSysTable", "CheckSysTabSize", "CheckTableSpace",
+                "CheckTableSkew", "CheckDNSkew", "CheckCreateView",
+                "CheckHashIndex", "CheckNextvalInDefault", "CheckPgxcRedistb",
+                "CheckReturnType", "CheckSysadminUser", "CheckTDDate",
+                "CheckDropColumn", "CheckDiskFailure", "CheckPing",
+                "CheckNetWorkDrop", "CheckUsedPort", "CheckNICModel",
+                "CheckRouting", "CheckNetSpeed", "CheckDataDiskUsage"]
 
 
 class CmdOptions():
@@ -358,10 +378,10 @@ class CheckContext():
         input : remote host name and password map
         output : NA
         '''
-        if (len(hosts) == 0 or g_opts.isSingle):
+        if len(hosts) == 0 or g_opts.isSingle:
             return
         fileName = self.getCacheFile()
-        if (not os.path.isfile(fileName)):
+        if not os.path.isfile(fileName):
             raise CheckException("File %s is not exist or invalid" % fileName)
         try:
             pool = ThreadPool(DefaultValue.getCpuSet())
@@ -390,7 +410,8 @@ Usage:
 
 General options:
   -i                                Health check item number.
-                                    OLAP Example: -i CheckCPU,CheckMTU,CheckPing.
+                                    OLAP Example: -i CheckCPU,CheckMTU,
+                                                      CheckPing.
   -e                                Health check scene name.
                                     OLAP Example: -e inspect/upgrade/slow_node/
                                     binary_upgrade/health/install/longtime
@@ -398,17 +419,19 @@ General options:
   -L                                Run the command as local mode.
   -l                                Path of log file.
   -o                                Save the result to the specified directory.
-      --cid                         The check ID used for identify a check process,
-                                    only for internal use.
+      --cid                         The check ID used for identify a check
+                                    process, only for internal use.
       --skip-root-items             Skip the items with root privileges.
       --disk-threshold              Set disk threshold for checking disk usage,
                                     only for CheckDataDiskUsage.
       --format                      Set the format of the result report.
       --set                         Set abnormal items if supported
-      --time-out                    Set the timeout for scene check, default 1500 seconds.
+      --time-out                    Set the timeout for scene check, default
+                                    1500 seconds.
       --routing                     The network segment with business ip,
                                     example: 192.168.1.1:255.255.255.0
-      --skip-items                  Skip the specified check item or setting item with scene check
+      --skip-items                  Skip the specified check item or setting
+                                    item with scene check
                                     Example: --skip-items CheckCPU,CheckMTU
   -?, --help                        Show help information for this utility,
                                     and exit the command line mode.
@@ -453,7 +476,7 @@ def parseCommandLine():
     g_opts = CmdOptions()
     ParaObj = Parameter()
     ParaDict = ParaObj.ParameterCommandLine("check")
-    if ("helpFlag" in list(ParaDict.keys())):
+    if "helpFlag" in list(ParaDict.keys()):
         usage()
         sys.exit(0)
 
@@ -475,50 +498,51 @@ def parseCommandLine():
             raise UseBothParameterException(
                 (paraNameMap[para], paraNameMap[irrelevantPara[para]]))
 
-    if ("itemstr" in list(ParaDict.keys())):
+    if "itemstr" in list(ParaDict.keys()):
         g_opts.items = ParaDict["itemstr"]
-    if ("scenes" in list(ParaDict.keys())):
+    if "scenes" in list(ParaDict.keys()):
         g_opts.scene = ParaDict["scenes"]
-    if ("outFile" in list(ParaDict.keys())):
+    if "outFile" in list(ParaDict.keys()):
         g_context.outPath = ParaDict["outFile"]
-    if ("logFile" in list(ParaDict.keys())):
+    if "logFile" in list(ParaDict.keys()):
         g_opts.logFile = ParaDict["logFile"]
-    if ("user" in list(ParaDict.keys())):
+    if "user" in list(ParaDict.keys()):
         g_context.user = ParaDict["user"]
-    if ("hostfile" in list(ParaDict.keys())):
+    if "hostfile" in list(ParaDict.keys()):
         for node in g_file.readFile(ParaDict["hostfile"]):
             g_opts.nodes.append(node.strip())
-    if ("cid" in list(ParaDict.keys())):
+    if "cid" in list(ParaDict.keys()):
         g_context.setCheckID(ParaDict["cid"])
         g_opts.distributing = True
-    if ("localMode" in list(ParaDict.keys())):
+    if "localMode" in list(ParaDict.keys()):
         g_opts.localMode = True
-    if ("skipRootItems" in list(ParaDict.keys())):
+    if "skipRootItems" in list(ParaDict.keys()):
         g_opts.skipRootItems = True
-    if ("disk-threshold" in list(ParaDict.keys())):
+    if "disk-threshold" in list(ParaDict.keys()):
         g_context.thresholdDn = ParaDict["disk-threshold"]
-    if ("set" in list(ParaDict.keys())):
+    if "set" in list(ParaDict.keys()):
         g_context.set = True
-    if ("routing" in list(ParaDict.keys())):
+    if "routing" in list(ParaDict.keys()):
         g_opts.routing = ParaDict["routing"]
-    if ("skipItems" in list(ParaDict.keys())):
+    if "skipItems" in list(ParaDict.keys()):
         g_opts.skipItems = ParaDict["skipItems"]
-    if ("nodegroup_name" in list(ParaDict.keys())):
+    if "nodegroup_name" in list(ParaDict.keys()):
         g_context.LCName = ParaDict["nodegroup_name"]
-    if ("shrinkNodes" in list(ParaDict.keys())):
+    if "shrinkNodes" in list(ParaDict.keys()):
         g_context.ShrinkNodes = ParaDict["shrinkNodes"]
-    if ("time_out" in list(ParaDict.keys())):
+    if "time_out" in list(ParaDict.keys()):
         try:
             g_opts.timeout = int(ParaDict["time_out"])
         except Exception:
             raise CheckException("The parameter timeout set invalid value")
-        if (g_opts.timeout < DEFAULT_TIMEOUT):
+        if g_opts.timeout < DEFAULT_TIMEOUT:
             raise CheckException(
-                "The timeout parameter must be set larger than default value 1500 seconds")
+                "The timeout parameter must be set larger than default "
+                "value 1500 seconds")
     setTimeOut()
-    if ("format" in list(ParaDict.keys())):
+    if "format" in list(ParaDict.keys()):
         g_opts.format = ParaDict["format"]
-        if (g_opts.format not in formatList):
+        if g_opts.format not in formatList:
             raise CheckException(
                 "Format %s is not available,the valid format is %s" % (
                     g_opts.format, ",".join(formatList)))
@@ -546,13 +570,13 @@ def checkParameter():
 
 def checkuser():
     # The new node scenario does not need the -U parameter
-    if (__isRoot() and not g_opts.localMode):
+    if __isRoot() and not g_opts.localMode:
         g_context.user = None
         return
     # Default mode -U for the current user
-    if (not __isRoot() and not g_context.user):
+    if not __isRoot() and not g_context.user:
         g_context.user = SharedFuncs.getCurrentUser()
-    if (g_context.user):
+    if g_context.user:
         if not __isRoot() and g_context.user != SharedFuncs.getCurrentUser():
             raise CheckException(
                 "The user %s is not current user" % g_context.user)
@@ -561,22 +585,22 @@ def checkuser():
         except Exception:
             raise CheckException(
                 "The user %s is not a effective user." % g_context.user)
-        if (user_uid == 0):
+        if user_uid == 0:
             raise CheckException("The -U parameter can not be the root user.")
         isClusterUser = SharedFuncs.checkClusterUser(g_context.user,
                                                      __getMpprcFile())
-        if (isClusterUser):
+        if isClusterUser:
             # get cluster information
             g_context.mpprc = __getMpprcFile()
             clusterInfo = g_context.loadClusterInfo(g_context.user)
-            if (clusterInfo):
+            if clusterInfo:
                 g_opts.cluster = clusterInfo
             else:
                 isClusterUser = False
-        if (not isClusterUser):
+        if not isClusterUser:
             raise CheckException(
                 "The user %s is not valid cluster user" % g_context.user)
-        if (g_opts.localMode or g_opts.distributing):
+        if g_opts.localMode or g_opts.distributing:
             return
 
         # Check cluster user trust
@@ -588,14 +612,14 @@ def checkuser():
         psshPath = os.path.join(appPath, 'script/gspylib/pssh/bin/pssh')
         cmd = "%s -H %s 'id' " % (psshPath, " -H ".join(dbNameList))
         (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             errorNode = []
             for result in output.split('\n'):
-                if (result.strip() == ""):
+                if result.strip() == "":
                     continue
                 resultInfo = result.split()
                 # Analyze the results
-                if (len(resultInfo) > 3 and resultInfo[2] == "[SUCCESS]"):
+                if len(resultInfo) > 3 and resultInfo[2] == "[SUCCESS]":
                     continue
                 elif (len(resultInfo) > 3 and resultInfo[2] == "[FAILURE]" and
                       resultInfo[3] in dbNameList):
@@ -604,7 +628,7 @@ def checkuser():
                     raise CheckException(
                         "Failed to check user trust. commands: %s Error:/n%s"
                         % (cmd, output))
-            if (errorNode):
+            if errorNode:
                 raise CheckException(
                     "Failed to check user trust with %s" % errorNode)
             else:
@@ -613,20 +637,20 @@ def checkuser():
 
 
 def createPath(path, user=""):
-    if (path == "/dev/null"):
+    if path == "/dev/null":
         return
-    if (os.path.isdir(path)):
+    if os.path.isdir(path):
         # test write permissions
-        if (not g_file.checkDirWriteable(path)):
+        if not g_file.checkDirWriteable(path):
             raise CheckException(
                 "Failed to create or delete file in the [%s]." % path)
-    elif (os.path.isfile(path)):
+    elif os.path.isfile(path):
         raise CheckException("The out path [%s] must be a directory." % path)
     else:
         # path is not exist. recursively create the path
         g_file.createDirectory(path, True, DefaultValue.KEY_DIRECTORY_MODE)
     # Modify the file owner
-    if (__isRoot() and user):
+    if __isRoot() and user:
         g_file.changeOwner(user, path)
 
 
@@ -651,11 +675,12 @@ def initLogFile():
     output: NA
     """
     global g_context, g_logger
-    # load the context when the script ruuning on local mode and the context was cached before
+    # load the context when the script ruuning on local mode and the context
+    # was cached before
     g_context.tmpPath = getTmpPath()
-    if (g_context.isCached()):
+    if g_context.isCached():
         g_context = g_context.load()
-        if (__getLocalNode(g_context.nodes) in g_context.newNodes):
+        if __getLocalNode(g_context.nodes) in g_context.newNodes:
             g_context.mpprc = None
             g_context.user = None
             g_context.cluster = None
@@ -667,9 +692,9 @@ def initLogFile():
     else:
         # Parameter specified first, followed by default GAUSSLOG,
         # last temporary directory
-        if (g_opts.logFile):
+        if g_opts.logFile:
             g_context.logFile = os.path.realpath(g_opts.logFile)
-        elif (g_opts.cluster):
+        elif g_opts.cluster:
             g_context.logFile = os.path.join(g_opts.cluster.logPath,
                                              '%s/om/gs_check.log'
                                              % g_context.user)
@@ -687,16 +712,16 @@ def initLogFile():
         # Load support check items by parsing the project folder
         g_context.loadSupportItems()
         # load the scene configuration
-        if (g_opts.scene):
+        if g_opts.scene:
             g_context.loadSceneConfiguration(g_opts.scene)
         # load cluster info
-        if (g_opts.cluster):
+        if g_opts.cluster:
             g_context.cluster = g_opts.cluster
             g_context.oldNodes = g_opts.cluster.getClusterSshIps()[0]
         # load nodes
-        if (g_opts.nodes):
+        if g_opts.nodes:
             for node in g_opts.nodes:
-                if (node not in g_context.oldNodes):
+                if node not in g_context.oldNodes:
                     g_context.newNodes.append(node)
         g_context.nodes = g_context.oldNodes + g_context.newNodes
 
@@ -716,11 +741,11 @@ def getRootUserPwd():
         g_logger.debug("Ask user input password interactive")
         for host in g_context.nodes:
             isPwdOk = SharedFuncs.verifyPasswd(host, rootuser, rootpwd)
-            if (not isPwdOk):
+            if not isPwdOk:
                 # try to connect remote node again
                 rootpwd = __retryConnection(host, rootuser)
             g_opts.pwdMap[host] = (rootuser, rootpwd)
-        if (pwd.getpwnam(rootuser).pw_uid != 0):
+        if pwd.getpwnam(rootuser).pw_uid != 0:
             raise CheckException("Enter the user [%s] does not have"
                                  " root privileges." % rootuser)
         # print message on screen
@@ -735,7 +760,7 @@ def parseCheckContext():
     """
     global g_context
     initLogFile()
-    if (g_context.isCached()):
+    if g_context.isCached():
         return
     g_logger.debug("Start to parse the check items config file")
     items_all = []
@@ -744,7 +769,7 @@ def parseCheckContext():
     failedItems = []
     singleSkipList = []
     # generate the items from scene configuration
-    if (g_opts.scene):
+    if g_opts.scene:
         items_oldNode, failedItems = __parseScene(g_opts.scene)
         items_all += items_oldNode
     # generate the items from -i parameter value
@@ -756,23 +781,23 @@ def parseCheckContext():
             else:
                 items_all.append(item)
     for item in items_all:
-        if (not g_context.set and item['name'] in g_opts.skipItems):
+        if not g_context.set and item['name'] in g_opts.skipItems:
             items_all.remove(item)
             continue
-        if (g_context.set and item['set_permission'] == 'root'):
+        if g_context.set and item['set_permission'] == 'root':
             g_context.rootItems.append(item)
-        if (g_opts.skipRootItems and item['permission'] == 'root'):
+        if g_opts.skipRootItems and item['permission'] == 'root':
             items_all.remove(item)
             continue
-        if (item['permission'] == 'root'):
+        if item['permission'] == 'root':
             g_context.rootItems.append(item)
-        if (g_opts.isSingle and item['name'] in SINGLE_SKIP):
+        if g_opts.isSingle and item['name'] in SINGLE_SKIP:
             singleSkipList.append(item['name'])
             continue
-        if (item['name'] == "CheckRouting"):
-            if (g_opts.routing):
+        if item['name'] == "CheckRouting":
+            if g_opts.routing:
                 g_context.routing = g_opts.routing
-            elif (g_opts.cluster):
+            elif g_opts.cluster:
                 workIP = g_opts.cluster.getDbNodeByName(
                     DefaultValue.GetHostIpOrName()).backIps[0]
                 g_context.routing = "%s:%s" % (
@@ -781,16 +806,16 @@ def parseCheckContext():
                 raise CheckException(
                     "The --routing is required when cluster dosen't exist")
         g_context.items.append(item)
-    if (len(singleSkipList) != 0):
+    if len(singleSkipList) != 0:
         __printOnScreen(
             "The following items are skipped when the type of cluster is"
             " single:\n[%s]" % ",".join(singleSkipList))
-    if (not items_newNode):
+    if not items_newNode:
         g_context.oldItems = g_context.items
     else:
         g_context.oldItems = items_oldNode
         g_context.newItems = items_newNode
-    if (g_context.set and items_all):
+    if g_context.set and items_all:
         # Settings will have a big impact and need to be confirmed
         confirmItem = {
             "CheckCrontabLeft": "Clear om_monitor in crond service",
@@ -798,36 +823,41 @@ def parseCheckContext():
                             "'/var/log/Bigdata/','/home/omm/'",
             "CheckProcessLeft": "Kill all process with gaussdb and omm user",
             "CheckOmmUserExist": "Delete system user omm",
-            "CheckPortConflict": "kill all process with occupies the 25xxx port"
+            "CheckPortConflict": "kill all process with occupies "
+                                 "the 25xxx port"
         }
         confirmMsg = ""
         for item in items_all:
-            if (item['name'] in list(confirmItem.keys())):
+            if item['name'] in list(confirmItem.keys()):
                 confirmMsg += confirmItem[item['name']] + "\n"
-        if (confirmMsg):
-            confirmMsg = "Warning: Executing the settings will do the following at the [%s] node:\n" % \
+            if item['name'] in SETITEM_SKIP:
+                g_context.skipSetItem.append(item['name'])
+
+        if confirmMsg:
+            confirmMsg = "Warning: Executing the settings will do " \
+                         "the following at the [%s] node:\n" % \
                          ','.join(g_context.newNodes) + confirmMsg
             __printOnScreen(confirmMsg)
             flag = input("Execution settings? (Y/N):")
-            while (True):
+            while True:
                 # If it is not yes or all, it has been imported
-                if (not flag.upper() in ("Y", "N", "YES", "NO")):
+                if not flag.upper() in ("Y", "N", "YES", "NO"):
                     flag = input("Please type 'yes' or 'no': ")
                     continue
                 break
-            if (flag.upper() in ("Y", "YES")):
+            if flag.upper() in ("Y", "YES"):
                 pass
-            if (flag.upper() in ("N", "NO")):
-                skipSetItem = []
+            if flag.upper() in ("N", "NO"):
                 for Item in g_context.newItems:
-                    if (Item['name'] in list(confirmItem.keys())):
+                    if Item['name'] in list(confirmItem.keys()):
                         g_context.newItems.remove(Item)
-                        skipSetItem.append(Item['name'])
+                        g_context.skipSetItem.append(Item['name'])
                 __printOnScreen(
-                    'Skip the settings for [%s]' % ','.join(skipSetItem))
-    if (failedItems):
+                    'Skip the settings for [%s]'
+                    % ','.join(g_context.skipSetItem))
+    if failedItems:
         raise ParseItemException(failedItems)
-    if (not g_context.items):
+    if not g_context.items:
         raise CheckException("No check item can be performed,"
                              " please confirm the input parameters.")
 
@@ -853,7 +883,7 @@ def __printOnScreen(msg):
     """
     function: print message on screen
     """
-    if (g_opts.localMode or g_opts.distributing):
+    if g_opts.localMode or g_opts.distributing:
         return
     g_logger.info(msg)
 
@@ -884,7 +914,7 @@ def __getLocalNode(nodes):
     """
     if nodes:
         for n in nodes:
-            if (SharedFuncs.is_local_node(n)):
+            if SharedFuncs.is_local_node(n):
                 return n
     return DefaultValue.GetHostIpOrName()
 
@@ -893,7 +923,7 @@ def __getSeparatedValue(value, separator=","):
     '''
     get command line value which were separated by ","
     '''
-    if (separator not in value):
+    if separator not in value:
         return [value]
     return value.split(separator)
 
@@ -924,7 +954,7 @@ def __retryConnection(host, user):
             "Please enter password for user[%s] on the node[%s]:"
             % (user, host))
         isOK = SharedFuncs.verifyPasswd(host, user, passwd)
-        if (isOK):
+        if isOK:
             return passwd
         else:
             continue
@@ -938,27 +968,27 @@ def __getMpprcFile():
     """
     # get mpprc file
     envValue = DefaultValue.getEnv("MPPDB_ENV_SEPARATE_PATH")
-    if (envValue is not None and os.path.isfile(envValue)):
+    if envValue is not None and os.path.isfile(envValue):
         return envValue
-    elif (not __isRoot() and DefaultValue.getEnv('GAUSS_ENV')):
+    elif not __isRoot() and DefaultValue.getEnv('GAUSS_ENV'):
         cmd = "echo ~ 2>/dev/null"
         (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             raise CheckException(
                 "Fetching user environment variable file failed."
                 " Please setup environment variables." + "The cmd is %s" % cmd)
         else:
             return os.path.join(output, ".bashrc")
-    elif (__isRoot() and g_context.user):
+    elif __isRoot() and g_context.user:
         cmd = "su - %s -c 'echo ~ 2>/dev/null'" % g_context.user
         (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             raise CheckException(
                 "Failed to get user [%s] home directory. Error: %s\n" % (
                     g_context.user, output) + "The cmd is %s" % cmd)
         else:
             return os.path.join(output, ".bashrc")
-    elif (__isRoot()):
+    elif __isRoot():
         return ""
     else:
         raise CheckException("The separated mpprc file was not found."
@@ -986,7 +1016,7 @@ def __parseScene(sceneName):
     '''
     function: parse scene configure file
     '''
-    if (not sceneName):
+    if not sceneName:
         raise NotEmptyException("scene name")
     # Get scene xml
     xmlFile = "%s/config/scene_%s.xml" % (g_context.basePath, sceneName)
@@ -1003,7 +1033,7 @@ def __parseScene(sceneName):
     for elem in rootNode.findall('allowitems/item'):
         elemName = elem.attrib['name']
         # check the check item whether exist or not
-        if (elemName not in list(g_context.supportItems.keys())):
+        if elemName not in list(g_context.supportItems.keys()):
             raise NotExistException("elemName", "support items")
         # save threshold as text and parse them later
         subElem = elem.find('threshold')
@@ -1014,7 +1044,7 @@ def __parseScene(sceneName):
     # parse categories and get all items
     for category in rootNode.findall('allowcategories/category'):
         cpath = "%s/items/%s" % (g_context.basePath, category.attrib['name'])
-        if (os.path.isdir(cpath)):
+        if os.path.isdir(cpath):
             itemNames.extend(x[:-3] for x in os.listdir(cpath) if
                              x[:-3] not in itemNames and x.endswith(".py"))
 
@@ -1032,10 +1062,10 @@ def __parseScene(sceneName):
             failedItems.append(i)
 
         # overwrite the threshold parameters
-        if (thresholds and i in list(thresholds.keys())):
+        if thresholds and i in list(thresholds.keys()):
             # parse the threshold of check item
             sceneThreshold = __parseThreshold(thresholds[i])
-            if (item['threshold']):
+            if item['threshold']:
                 item['threshold'] = dict(item['threshold'], **sceneThreshold)
             else:
                 item['threshold'] = sceneThreshold
@@ -1047,14 +1077,14 @@ def __parseOneItem(itemName):
     '''
     function: parse one check item and get the full information
     '''
-    if (not itemName):
+    if not itemName:
         raise NotEmptyException("Item name")
     item = {}
     # try to load check item configuration from xml file
     xmlFile = "%s/config/items.xml" % g_context.basePath
     for event, elem in ETree.iterparse(xmlFile):
-        if (event == 'end'):
-            if (elem.tag == 'checkitem' and elem.attrib['name'] == itemName):
+        if event == 'end':
+            if elem.tag == 'checkitem' and elem.attrib['name'] == itemName:
                 # Parse the xml file
                 item['id'] = elem.attrib['id']
                 item['name'] = elem.attrib['name']
@@ -1076,7 +1106,7 @@ def __parseOneItem(itemName):
                                                    'default')
                 # Get the threshold
                 threshold = elem.find('threshold')
-                if (threshold is not None and threshold.text is not None):
+                if threshold is not None and threshold.text is not None:
                     # parse the threshold of check item
                     item["threshold"] = __parseThreshold(
                         threshold.text.strip())
@@ -1089,7 +1119,7 @@ def __parseAttr(elem, attr, language='zh'):
     function: parse the xml attr with language
     '''
     val = elem.find('/'.join([attr, language]))
-    if (val is not None and val.text is not None):
+    if val is not None and val.text is not None:
         return val.text.strip().encode('utf-8')
     return ""
 
@@ -1100,7 +1130,7 @@ def __parseProperty(elem, propertyName, defaultValue):
     '''
     prop = elem.find(propertyName)
     result = defaultValue
-    if (prop is not None and prop.text is not None):
+    if prop is not None and prop.text is not None:
         result = prop.text.strip()
     return result
 
@@ -1110,10 +1140,10 @@ def __parseThreshold(value, separator=";"):
     function: parse the threshold of check item
     '''
     result = {}
-    if (separator not in value and "=" not in value):
+    if separator not in value and "=" not in value:
         return result
 
-    if (separator not in value and "=" in value):
+    if separator not in value and "=" in value:
         d = value.strip().split('=')
         result[d[0]] = d[1]
     else:
@@ -1137,11 +1167,11 @@ def getMTUValue(node):
         sshIp = node
     # get all network card information
     cmd1 = """printf \"\n\n`/sbin/ifconfig -a`\n\n\" """
-    if (not g_opts.pwdMap):
+    if not g_opts.pwdMap:
         output = SharedFuncs.runSshCmd(cmd1, sshIp, g_context.user)
     else:
         username, passwd = g_opts.pwdMap[node]
-        if (username is None or passwd is None):
+        if username is None or passwd is None:
             raise CheckException("Retrive username and password error.")
         output = SharedFuncs.runSshCmdWithPwd(cmd1, sshIp, username, passwd)
     # Separate each network card
@@ -1151,37 +1181,37 @@ def getMTUValue(node):
     mtuValue = ""
     # find network card by IP
     for eachNet in networkInfoList:
-        if (eachNet.find(addr) > 0 and eachNet.find('inet') > 0):
+        if eachNet.find(addr) > 0 and eachNet.find('inet') > 0:
             networkInfo = eachNet
             break
-    if (not networkInfo):
+    if not networkInfo:
         raise CheckException(
             "Failed to get network card information with '%s'." % node)
     # get network number
     networkNum = networkInfo.split()[0]
     # Remove : if it exists
-    if (networkNum[-1] == ":"):
+    if networkNum[-1] == ":":
         networkNum = networkNum[:-1]
     for eachLine in networkInfo.split('\n'):
         # get mtu Value with SuSE and redHat6.x
-        if (eachLine.find('MTU') > 0):
+        if eachLine.find('MTU') > 0:
             mtuValue = eachLine.split(':')[1].split(' ')[0].strip()
             break
         # get mtu Value with redHat7.x
-        elif (eachLine.find('mtu') > 0):
+        elif eachLine.find('mtu') > 0:
             mtuValue = eachLine.split()[-1]
             break
         else:
             continue
-    if (not networkNum):
+    if not networkNum:
         raise CheckException(
             "Failed to get network card number with '%s'." % node)
-    if (not mtuValue):
+    if not mtuValue:
         raise CheckException(
             "Failed to get network card mtu value with '%s' '%s'."
             % (node, networkNum))
     # The nodes are grouped by MTU value
-    if (not mtuValue in list(g_mtuMap.keys())):
+    if not mtuValue in list(g_mtuMap.keys()):
         g_mtuMap[mtuValue] = ["%s-%s" % (node, networkNum)]
     else:
         g_mtuMap[mtuValue].append("%s-%s" % (node, networkNum))
@@ -1194,10 +1224,10 @@ def preCheck():
     output: NA
     """
     # patch ssh config
-    if (__isRoot()):
+    if __isRoot():
         cmd = "grep -E '^MaxStartups[\ \t]+1000' /etc/ssh/sshd_config"
         (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             cmd = "sed -i '/MaxStartups/d' /etc/ssh/sshd_config &&" \
                   " echo 'MaxStartups 1000' >> /etc/ssh/sshd_config &&" \
                   " service sshd reload"
@@ -1215,7 +1245,7 @@ def preCheck():
     except Exception as e:
         raise Exception(str(e))
     # According to the number of groups to determine whether the same
-    if (len(list(g_mtuMap.keys())) > 1):
+    if len(list(g_mtuMap.keys())) > 1:
         warningMsg = "Warning: The MTU value is inconsistent on all node," \
                      " maybe checking will be slower or hang."
         for mtuValue in list(g_mtuMap.keys()):
@@ -1248,8 +1278,8 @@ def doCheck():
     output: NA
     """
     # Local mode
-    if (g_opts.localMode):
-        if (__isDistributing()):
+    if g_opts.localMode:
+        if __isDistributing():
             # load check item dynamic and get the execute result
             doRunCheck()
         else:
@@ -1288,23 +1318,23 @@ def doCheck():
         # Time to hit the log
         LogCount = 0
         lastTimeProgress = -1
-        while (len(nodes) and datetime.now() <= g_endTime):
+        while len(nodes) and datetime.now() <= g_endTime:
             totleCount = 0
             slowNode = []
             for node in nodes:
                 # Get user and password
                 username, passwd = __getUserAndPwd(node)
-                if (node in g_context.oldNodes):
+                if node in g_context.oldNodes:
                     itemCount_node = len(g_context.oldItems)
                 else:
                     itemCount_node = len(g_context.newItems)
                 # Local execution
-                if (SharedFuncs.is_local_node(node)):
+                if SharedFuncs.is_local_node(node):
                     checkCount = SharedFuncs.checkComplete(
                         checkID, node, g_context.hostMapping[node],
                         g_context.user, g_context.tmpPath)
                 # Executed in new node scene
-                elif (node in g_context.newNodes):
+                elif node in g_context.newNodes:
                     checkCount = SharedFuncs.checkComplete(
                         checkID, node, g_context.hostMapping[node], username,
                         g_context.tmpPath, passwd)
@@ -1318,14 +1348,14 @@ def doCheck():
                     checkCount = 0
                 # If there is a node check completed,
                 # some nodes just started,record slow node
-                if (overNodes > 0 and checkCount < 2):
+                if overNodes > 0 and checkCount < 2:
                     slowNode.append(node)
-                if (checkCount == itemCount_node):
+                if checkCount == itemCount_node:
                     nodes.remove(node)
                     # Record the number of completed nodes
                     overNodes += 1
-                    if (not SharedFuncs.is_local_node(node)):
-                        if (node in g_context.newNodes):
+                    if not SharedFuncs.is_local_node(node):
+                        if node in g_context.newNodes:
                             outItems = []
                             for i in itemsName:
                                 outItems.append("%s/%s_%s_%s.out" % (
@@ -1353,23 +1383,23 @@ def doCheck():
             # Update execution progress
             progressInfo = totleCount // len(g_context.nodes)
             # Refresh only as the schedule changes
-            if (lastTimeProgress < progressInfo <= itemCount):
+            if lastTimeProgress < progressInfo <= itemCount:
                 progress_manager.update("Checking...", progressInfo)
                 lastTimeProgress = progressInfo
             # Suggest the slow node to log every 30 seconds
-            if (slowNode and itemCount > 1 and LogCount % 30 == 0):
+            if slowNode and itemCount > 1 and LogCount % 30 == 0:
                 logMsg = "Warning: The node [%s] check progress" \
                          " is slow." % ",".join(slowNode)
                 g_logger.debug(logMsg)
 
             for t in threads:
-                if (t.exitcode == 1):
+                if t.exitcode == 1:
                     raise ThreadCheckException(t.name, t.exception)
 
         for t in threads:
             t.join(1)
 
-        if (datetime.now() > g_endTime):
+        if datetime.now() > g_endTime:
             raise TimeoutException(nodes)
 
         __printOnScreen("Start to analysis the check result")
@@ -1395,11 +1425,11 @@ def doRunCheck():
     """
     outputPath = g_context.tmpPath
     localHost = __getLocalNode(g_context.nodes)
-    if (localHost in g_context.newNodes):
+    if localHost in g_context.newNodes:
         items = g_context.newItems
     else:
         items = g_context.oldItems
-    if (g_context.hostMapping):
+    if g_context.hostMapping:
         localHost = g_context.hostMapping[localHost]
     for item in items:
         content = ""
@@ -1416,9 +1446,9 @@ def doRunCheck():
         itemResult = __analysisResult(content, item['name'])
         g_result.append(itemResult)
     # run the check process distributing and no need to clean the resource
-    if (__isDistributing()):
+    if __isDistributing():
         g_logger.debug("run check items done and exit the command")
-    if (g_opts.format == 'default'):
+    if g_opts.format == 'default':
         # Initialize the self.clusterInfo variable
         print(g_result.outputRaw())
 
@@ -1448,11 +1478,11 @@ def __prepareCmd(items, user, checkid):
     userParam = ""
     checkIdParam = ""
     routingParam = ""
-    if (user):
+    if user:
         userParam = " -U %s " % user
-    if (checkid):
+    if checkid:
         checkIdParam = " --cid=%s " % checkid
-    if (g_context.routing):
+    if g_context.routing:
         routingParam = "--routing %s" % g_context.routing
     cmd = "%s/gs_check -i %s %s %s -L %s -o %s -l %s" % (
         cmdPath, ",".join(itemsName), userParam, checkIdParam,
@@ -1472,7 +1502,7 @@ def doLocalCheck(host):
                            g_context.checkID)
     else:
         cmd = __prepareCmd(g_context.newItems, "", g_context.checkID)
-    if (SharedFuncs.is_local_node(host)):
+    if SharedFuncs.is_local_node(host):
         if __hasRootItems():
             SharedFuncs.runRootCmd(cmd, g_opts.pwdMap[host][0],
                                    g_opts.pwdMap[host][1], g_context.mpprc)
@@ -1484,7 +1514,7 @@ def doLocalCheck(host):
         else:
             # get username and password for certain node
             username, passwd = __getUserAndPwd(host)
-            if (host in g_context.newNodes):
+            if host in g_context.newNodes:
                 SharedFuncs.runSshCmdWithPwd(cmd, host, username, passwd)
             else:
                 SharedFuncs.runSshCmdWithPwd(cmd, host, username, passwd,
@@ -1496,7 +1526,7 @@ def __analysisResult(output, itemName):
     function: analysis the check result
     """
     item_result = ItemResult.parse(output)
-    if (not item_result):
+    if not item_result:
         raise CheckException("analysis result occurs error")
     try:
         # load support item
@@ -1616,11 +1646,15 @@ def __checkFileExist(path, filePattern):
 def killChildProcess(node):
     checkID = g_context.checkID
     # cmd with switch users
-    cmd_switch = """proc_pid_list=`ps -ef | grep 'cid=%s'| grep -v 'grep'|awk '{print \$2}'` """ % checkID
-    cmd_switch += """ && (if [ X\"$proc_pid_list\" != X\"\" ]; then echo \"$proc_pid_list\" | xargs kill -9 ; fi)"""
+    cmd_switch = """proc_pid_list=`ps -ef | grep 'cid=%s'| grep -v 'grep'""" \
+                 """|awk '{print \$2}'` """ % checkID
+    cmd_switch += """ && (if [ X\"$proc_pid_list\" != X\"\" ]; """ \
+                  """then echo \"$proc_pid_list\" | xargs kill -9 ; fi)"""
     # cmd with not switch users
-    cmd_current = """proc_pid_list=`ps -ef | grep 'cid=%s'| grep -v 'grep'|awk "{print \\\$2}"` """ % checkID
-    cmd_current += """ && (if [ X"$proc_pid_list" != X"" ]; then echo "$proc_pid_list" | xargs kill -9 ; fi)"""
+    cmd_current = """proc_pid_list=`ps -ef | grep 'cid=%s'| grep -v 'grep'""" \
+                  """|awk "{print \\\$2}"` """ % checkID
+    cmd_current += """ && (if [ X"$proc_pid_list" != X"" ]; then """ \
+                   """echo "$proc_pid_list" | xargs kill -9 ; fi)"""
 
     username, passwd = __getUserAndPwd(node)
     if SharedFuncs.is_local_node(node) and not __hasRootItems():
@@ -1633,7 +1667,7 @@ def killChildProcess(node):
 
 def cleanTmpDir(node):
     # clean tmp files in all the nodes
-    cmd = r"rm -rf %s" % (g_context.tmpPath)
+    cmd = r"rm -rf %s" % g_context.tmpPath
     if SharedFuncs.is_local_node(node):
         SharedFuncs.runShellCmd(cmd)
     else:
@@ -1665,7 +1699,7 @@ def cleanEnvironment(skiplog=False):
             g_logger.debug(str(e))
 
     # clean tmp files in all the nodes
-    cmd = r"rm -rf %s" % (g_context.tmpPath)
+    cmd = r"rm -rf %s" % g_context.tmpPath
     if g_opts.localMode:
         SharedFuncs.runShellCmd(cmd)
     else:

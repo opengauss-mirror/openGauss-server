@@ -150,8 +150,8 @@ gs_sshexkey is a utility to create SSH trust among nodes in a cluster.
 Usage:
   gs_sshexkey -? | --help
   gs_sshexkey -V | --version
-  gs_sshexkey -f HOSTFILE [-W PASSWORD] [...] [--skip-hostname-set]
-                          [-l LOGFILE]
+  gs_sshexkey -f HOSTFILE [-l LOGFILE] [--skip-hostname-set]
+                          
 
 General options:
   -f                          Host file containing the IP address of nodes.
@@ -478,10 +478,8 @@ General options:
             if (not os.path.exists("/etc/hosts")):
                 raise Exception(ErrorCode.GAUSS_512["GAUSS_51221"] +
                                 " Error: \nThe /etc/hosts does not exist.")
-            (status, output) = g_OSlib.getGrepValue("-v",
-                                                    " #Gauss.* IP Hosts "
-                                                    "Mapping",
-                                                    '/etc/hosts')
+            cmd = "grep -v '" + HOSTS_MAPPING_FLAG + "' /etc/hosts"
+            (status, output) = subprocess.getstatusoutput(cmd)
             try:
                 g_file.createFile(tmpHostIpName)
                 g_file.changeMode(DefaultValue.KEY_FILE_MODE, tmpHostIpName)
@@ -536,7 +534,7 @@ General options:
             ssh.close()
             raise Exception(ErrorCode.GAUSS_503["GAUSS_50317"]
                             + " Error: \n%s" % str(e))
-        cmd = "grep -v '%s' %s > %s && cp %s %s && rm -rf %s" \
+        cmd = "grep -v '%s' %s > %s ; cp %s %s && rm -rf %s" \
               % (" #Gauss.* IP Hosts Mapping", '/etc/hosts', tmpHostIpName,
                  tmpHostIpName, '/etc/hosts', tmpHostIpName)
         channel = ssh.open_session()
@@ -631,7 +629,7 @@ General options:
                     if (boolInvalidIp):
                         boolInvalidIp = False
                         continue
-                    cmd = "grep -v '%s' %s > %s && cp %s %s && rm -rf %s" % (
+                    cmd = "grep -v '%s' %s > %s ; cp %s %s && rm -rf %s" % (
                         " #Gauss.* IP Hosts Mapping", '/etc/hosts', tmpHostIpName,
                         tmpHostIpName, '/etc/hosts', tmpHostIpName)
                     channel = ssh.open_session()

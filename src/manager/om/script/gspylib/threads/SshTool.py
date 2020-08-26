@@ -230,9 +230,15 @@ class SshTool():
             g_file.removeFile(tmp_hosts)
             if output is not None:
                 output = str(output, encoding='utf-8')
-                GaussLog.printMessage(output.strip())
                 if re.search("\[GAUSS\-", output):
+                    if re.search("Please enter password", output):
+                        GaussLog.printMessage(
+                            ErrorCode.GAUSS_503["GAUSS_50306"] % user)
+                    else:
+                        GaussLog.printMessage(output.strip())
                     sys.exit(1)
+                else:
+                    GaussLog.printMessage(output.strip())
             else:
                 sys.exit(1)
         except Exception as e:
