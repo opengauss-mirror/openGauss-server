@@ -485,7 +485,7 @@ IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* plans
 
     m_keyInit = false;
     m_keyNum = list_length(node->indexqual);
-    ;
+
     m_scanKeys = (ScanKey)palloc0(m_keyNum * sizeof(ScanKeyData));
 
     /* init params */

@@ -76,6 +76,7 @@ public:
     void HandlePoolerReload();
     SessionMemoryDetail* getSessionMemoryDetail(uint32* num);
     knl_session_context* GetSessionByIdx(int idx);
+    int FindCtrlIdxBySessId(uint64 id);
 
     inline int GetActiveSessionCount()
     {
