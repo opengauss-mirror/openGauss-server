@@ -22,6 +22,12 @@ CREATE TABLE t_data (c_int INT PRIMARY KEY, c_tiny TINYINT, c_smallint SMALLINT,
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_data_pkey" for table "t_data"
 CREATE TABLE t_trigger (key INT PRIMARY KEY, color TEXT);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_trigger_pkey" for table "t_trigger"
+CREATE TABLE excluded (a int primary key, b int);
+ERROR:  syntax error at or near "excluded"
+LINE 1: CREATE TABLE excluded (a int primary key, b int);
+                     ^
+CREATE TABLE "excluded" (a int primary key, b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "excluded_pkey" for table "excluded"
 -- unlogged table
 CREATE SCHEMA upsert_test_unlog;
 SET CURRENT_SCHEMA TO upsert_test_unlog;

@@ -111,3 +111,10 @@ INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = c4.a;
 SELECT * FROM t_data ORDER BY 1;
 SELECT * FROM t_grammer ORDER BY 1;
 SELECT * FROM t_default ORDER BY 1;
+
+-- for table named excluded
+INSERT INTO excluded values(1,1),(2,2) ON DUPLICATE KEY UPDATE b = excluded.b + 1;
+INSERT INTO "excluded" values(1,1),(2,2) ON DUPLICATE KEY UPDATE b = excluded.b + 1;
+INSERT INTO "excluded" values(5,5),(6,6) ON DUPLICATE KEY UPDATE b = 1;
+SELECT * FROM excluded;
+SELECT * FROM "excluded";

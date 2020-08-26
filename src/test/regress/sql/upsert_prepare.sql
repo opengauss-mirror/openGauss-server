@@ -20,6 +20,9 @@ CREATE TABLE t_data (c_int INT PRIMARY KEY, c_tiny TINYINT, c_smallint SMALLINT,
 	c_var VARCHAR, c_text TEXT, c_bytea BYTEA, c_date DATE, c_timestamp TIMESTAMP, c_time TIME,
 	c_intarray INT[3], c_com atype);
 CREATE TABLE t_trigger (key INT PRIMARY KEY, color TEXT);
+CREATE TABLE excluded (a int primary key, b int);
+CREATE TABLE "excluded" (a int primary key, b int);
+
 
 -- unlogged table
 CREATE SCHEMA upsert_test_unlog;
