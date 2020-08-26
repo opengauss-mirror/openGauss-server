@@ -96,6 +96,9 @@ public:
         m_unique = isUnique;
 
         m_indexId = m_indexCounter.fetch_add(1, std::memory_order_relaxed);
+        if (m_indexExtId == 0) {
+            m_indexExtId = m_indexId;
+        }
         if (m_keyLength > MAX_KEY_SIZE)
             return RC_INDEX_EXCEEDS_MAX_SIZE;
 
@@ -716,6 +719,57 @@ protected:
     virtual Sentinel* IndexRemoveImpl(const Key* key, uint32_t pid) = 0;
 
     DECLARE_CLASS_LOGGER()
+};
+
+/**
+ * @class MOTIndexArr
+ * @brief This class contains a temporary copy of index array of the table.
+ */
+class MOTIndexArr {
+public:
+    explicit MOTIndexArr(MOT::Table* table);
+
+    MOT::Index* GetIndex(uint16_t ix)
+    {
+        if (likely(ix < m_numIndexes)) {
+            return m_indexArr[ix];
+        }
+
+        return nullptr;
+    }
+
+    uint16_t GetIndexIx(uint16_t ix)
+    {
+        if (likely(ix < m_numIndexes)) {
+            return m_origIx[ix];
+        }
+
+        return MAX_NUM_INDEXES;
+    }
+
+    void Add(uint16_t ix, MOT::Index* index)
+    {
+        if (likely(m_numIndexes < MAX_NUM_INDEXES)) {
+            m_indexArr[m_numIndexes] = index;
+            m_origIx[m_numIndexes] = ix;
+            m_numIndexes++;
+        }
+    }
+
+    uint16_t GetNumIndexes()
+    {
+        return m_numIndexes;
+    }
+
+    MOT::Table* GetTable()
+    {
+        return m_table;
+    }
+private:
+    MOT::Index* m_indexArr[MAX_NUM_INDEXES];
+    MOT::Table* m_table;
+    uint16_t m_origIx[MAX_NUM_INDEXES];
+    uint16_t m_numIndexes;
 };
 }  // namespace MOT
 

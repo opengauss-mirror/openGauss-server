@@ -96,9 +96,14 @@ TxnDDLAccess::DDLAccess* TxnDDLAccess::Get(uint16_t index)
 
 TxnDDLAccess::DDLAccess* TxnDDLAccess::GetByOid(uint64_t oid)
 {
-    for (int i = 0; i < m_size; i++)
-        if (m_accessList[i]->GetOid() == oid)
+    if (m_size == 0) {
+        return nullptr;
+    }
+    for (int i = m_size - 1; i >= 0; i--) {
+        if (m_accessList[i]->GetOid() == oid) {
             return m_accessList[i];
+        }
+    }
 
     return nullptr;
 }

@@ -62,7 +62,7 @@ InsItem* TxnManager::GetNextInsertItem(Index* index)
     return m_accessMgr->GetInsertMgr()->GetInsertItem(index);
 }
 
-Key* TxnManager::GetTxnKey(Index* index)
+Key* TxnManager::GetTxnKey(MOT::Index* index)
 {
     int size = index->GetAlignedKeyLength() + sizeof(Key);
     void* buf = MemSessionAlloc(size);
@@ -429,7 +429,7 @@ void TxnManager::UndoInserts()
     for (const auto& ra_pair : OrderedSet) {
         Access* ac = ra_pair.second;
         if (ac->m_type == AccessType::INS) {
-            Index* index_ = ac->GetSentinel()->GetIndex();
+            MOT::Index* index_ = ac->GetSentinel()->GetIndex();
             // Row is local and was not inserted in the commit
             if (index_->GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
                 // Release local row to the GC!!!!!
@@ -448,7 +448,7 @@ RC TxnManager::RollbackInsert(Access* ac)
     Sentinel* outputSen = nullptr;
     RC rc;
     Sentinel* sentinel = ac->GetSentinel();
-    Index* index_ = sentinel->GetIndex();
+    MOT::Index* index_ = sentinel->GetIndex();
 
     MOT_ASSERT(sentinel != nullptr);
     rc = sentinel->RefCountUpdate(DEC, GetThdId());
@@ -498,8 +498,8 @@ void TxnManager::RollbackDDLs()
 
     // rollback DDLs in reverse order (avoid rolling back parent object before rolling back child)
     for (int i = m_txnDdlAccess->Size() - 1; i >= 0; i--) {
-        Index* index = nullptr;
-        Index** indexes = nullptr;
+        MOT::Index* index = nullptr;
+        MOTIndexArr* indexArr = nullptr;
         Table* table = nullptr;
         TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->Get(i);
         switch (ddl_access->GetDDLAccessType()) {
@@ -516,23 +516,28 @@ void TxnManager::RollbackDDLs()
                 MOT_LOG_INFO("Rollback of drop table %s", table->GetLongTableName().c_str());
                 break;
             case DDL_ACCESS_TRUNCATE_TABLE:
-                indexes = (Index**)ddl_access->GetEntry();
-                table = indexes[0]->GetTable();
-                MOT_LOG_INFO("Rollback of truncate table %s", table->GetLongTableName().c_str());
-                table->WrLock();
-                for (int idx = 0; idx < table->GetNumIndexes(); idx++) {
-                    index = table->m_indexes[idx];
-                    table->m_indexes[idx] = indexes[idx];
-                    if (idx == 0)
-                        table->m_primaryIndex = indexes[idx];
-                    else
-                        table->m_secondaryIndexes[indexes[idx]->GetName()] = indexes[idx];
-                    GcManager::ClearIndexElements(index->GetIndexId());
-                    index->Truncate(true);
-                    delete index;
+                indexArr = (MOTIndexArr*)ddl_access->GetEntry();
+                if (indexArr->GetNumIndexes() > 0) {
+                    MOT_ASSERT(indexArr->GetNumIndexes() == table->GetNumIndexes());
+                    table = indexArr->GetTable();
+                    MOT_LOG_INFO("Rollback of truncate table %s", table->GetLongTableName().c_str());
+                    table->WrLock();
+                    for (int idx = 0; idx < indexArr->GetNumIndexes(); idx++) {
+                        uint16_t oldIx = indexArr->GetIndexIx(idx);
+                        MOT::Index* oldIndex = indexArr->GetIndex(idx);
+                        index = table->m_indexes[oldIx];
+                        table->m_indexes[oldIx] = oldIndex;
+                        if (idx == 0)
+                            table->m_primaryIndex = oldIndex;
+                        else
+                            table->m_secondaryIndexes[oldIndex->GetName()] = oldIndex;
+                        GcManager::ClearIndexElements(index->GetIndexId());
+                        index->Truncate(true);
+                        delete index;
+                    }
+                    table->Unlock();
                 }
-                table->Unlock();
-                delete[] indexes;
+                delete indexArr;
                 break;
             case DDL_ACCESS_CREATE_INDEX:
                 index = (Index*)ddl_access->GetEntry();
@@ -543,10 +548,9 @@ void TxnManager::RollbackDDLs()
                 table->WrLock();
                 if (index->IsPrimaryKey()) {
                     table->SetPrimaryIndex(nullptr);
-                    GcManager::ClearIndexElements(index->GetIndexId());
-                    table->DeletePrimaryIndex(index);
+                    table->DeleteIndex(index);
                 } else {
-                    table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
+                    table->RemoveSecondaryIndex(index, this);
                 }
                 table->Unlock();
                 break;
@@ -556,11 +560,13 @@ void TxnManager::RollbackDDLs()
                 MOT_LOG_INFO("Rollback of drop index %s for table %s",
                     index->GetName().c_str(),
                     table->GetLongTableName().c_str());
+                table->WrLock();
                 if (index->IsPrimaryKey()) {
-                    table->WrLock();
                     table->SetPrimaryIndex(index);
-                    table->Unlock();
+                } else {
+                    table->AddSecondaryIndexToMetaData(index);
                 }
+                table->Unlock();
                 break;
             default:
                 break;
@@ -574,8 +580,8 @@ void TxnManager::WriteDDLChanges()
     if (m_txnDdlAccess->Size() == 0)
         return;
 
-    Index* index = nullptr;
-    Index** indexes = nullptr;
+    MOT::Index* index = nullptr;
+    MOTIndexArr* indexArr = nullptr;
     Table* table = nullptr;
     for (uint16_t i = 0; i < m_txnDdlAccess->Size(); i++) {
         TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->Get(i);
@@ -587,18 +593,20 @@ void TxnManager::WriteDDLChanges()
                 GetTableManager()->DropTable((Table*)ddl_access->GetEntry(), m_sessionContext);
                 break;
             case DDL_ACCESS_TRUNCATE_TABLE:
-                indexes = (Index**)ddl_access->GetEntry();
-                table = indexes[0]->GetTable();
-                table->WrLock();
-                table->m_rowCount = 0;
-                for (int i = 0; i < table->GetNumIndexes(); i++) {
-                    index = indexes[i];
-                    GcManager::ClearIndexElements(index->GetIndexId());
-                    index->Truncate(true);
-                    delete index;
+                indexArr = (MOTIndexArr*)ddl_access->GetEntry();
+                if (indexArr->GetNumIndexes() > 0) {
+                    table = indexArr->GetTable();
+                    table->WrLock();
+                    table->m_rowCount = 0;
+                    for (int i = 0; i < indexArr->GetNumIndexes(); i++) {
+                        index = indexArr->GetIndex(i);
+                        GcManager::ClearIndexElements(index->GetIndexId());
+                        index->Truncate(true);
+                        delete index;
+                    }
+                    table->Unlock();
                 }
-                table->Unlock();
-                delete[] indexes;
+                delete indexArr;
                 break;
             case DDL_ACCESS_CREATE_INDEX:
                 index = (Index*)ddl_access->GetEntry();
@@ -616,11 +624,8 @@ void TxnManager::WriteDDLChanges()
                 table->WrLock();
                 if (index->IsPrimaryKey()) {
                     table->SetPrimaryIndex(nullptr);
-                    GcManager::ClearIndexElements(index->GetIndexId());
-                    table->DeletePrimaryIndex(index);
-                } else {
-                    table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
                 }
+                table->DeleteIndex(index);
                 table->Unlock();
                 break;
             default:
@@ -886,7 +891,7 @@ RC TxnInsertAction::ExecuteOptimisticInsert(Row* row)
     while (currentItem != EndCursor()) {
         isInserted = true;
         isMappedToCache = false;
-        bool res = reinterpret_cast<Index*>(currentItem->m_index)
+        bool res = reinterpret_cast<MOT::Index*>(currentItem->m_index)
                        ->IndexInsert(pIndexInsertResult, currentItem->m_key, m_manager->GetThdId(), rc);
         if (unlikely(rc == RC_MEMORY_ALLOCATION_ERROR)) {
             ReportError(rc);
@@ -953,7 +958,7 @@ end:
         if (isInserted == true) {
             if (isMappedToCache == false) {
                 RC rc = pIndexInsertResult->RefCountUpdate(DEC, m_manager->GetThdId());
-                Index* index_ = pIndexInsertResult->GetIndex();
+                MOT::Index* index_ = pIndexInsertResult->GetIndex();
                 if (rc == RC::RC_INDEX_DELETE) {
                     // Memory reclamation need to release the key from the primary sentinel back to the pool
                     MOT_ASSERT(pIndexInsertResult->GetCounter() == 0);
@@ -1022,6 +1027,8 @@ Table* TxnManager::GetTableByExternalId(uint64_t id)
         switch (ddl_access->GetDDLAccessType()) {
             case DDL_ACCESS_CREATE_TABLE:
                 return (Table*)ddl_access->GetEntry();
+            case DDL_ACCESS_TRUNCATE_TABLE:
+                return ((MOTIndexArr*)ddl_access->GetEntry())->GetTable();
             case DDL_ACCESS_DROP_TABLE:
                 return nullptr;
             default:
@@ -1034,55 +1041,11 @@ Table* TxnManager::GetTableByExternalId(uint64_t id)
 
 Index* TxnManager::GetIndexByExternalId(uint64_t table_id, uint64_t index_id)
 {
-    TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(index_id);
-    if (ddl_access != nullptr) {
-        switch (ddl_access->GetDDLAccessType()) {
-            case DDL_ACCESS_CREATE_INDEX:
-                return (Index*)ddl_access->GetEntry();
-            case DDL_ACCESS_DROP_INDEX:
-                return nullptr;
-            default:
-                break;
-        }
-    }
-
-    Table* table = GetTableManager()->GetTableByExternal(table_id);
+    Table* table = GetTableByExternalId(table_id);
     if (table == nullptr) {
         return nullptr;
     } else {
         return table->GetIndexByExtId(index_id);
-    }
-}
-
-Index* TxnManager::GetIndex(uint64_t table_id, uint16_t position)
-{
-    TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(table_id);
-    Table* table = GetTableByExternalId(table_id);
-    return GetIndex(table, position);
-}
-
-Index* TxnManager::GetIndex(Table* table, uint16_t position)
-{
-    MOT_ASSERT(table != nullptr);
-    Index* index = table->GetIndex(position);
-    MOT_ASSERT(index != nullptr);
-    TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(index->GetExtId());
-    if (ddl_access != nullptr) {
-        switch (ddl_access->GetDDLAccessType()) {
-            case DDL_ACCESS_CREATE_INDEX:
-                return index;
-            case DDL_ACCESS_DROP_INDEX:
-                return nullptr;
-            default:
-                // should print error, the only index operation which are supported
-                // are create and drop
-                return nullptr;
-        }
-    } else {
-        if (index->GetIsCommited())
-            return index;
-        else
-            return nullptr;
     }
 }
 
@@ -1104,15 +1067,11 @@ RC TxnManager::DropTable(Table* table)
     RC res = RC_OK;
 
     // we allocate all memory before action takes place, so that if memory allocation fails, we can report error safely
-    TxnDDLAccess::DDLAccess* new_ddl_access = nullptr;
-    TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(table->GetTableExId());
-    if ((ddl_access == nullptr) || (ddl_access->GetDDLAccessType() == DDL_ACCESS_TRUNCATE_TABLE)) {
-        new_ddl_access =
-            new (std::nothrow) TxnDDLAccess::DDLAccess(table->GetTableExId(), DDL_ACCESS_DROP_TABLE, (void*)table);
-        if (new_ddl_access == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Drop Table", "Failed to allocate DDL Access object");
-            return RC_MEMORY_ALLOCATION_ERROR;
-        }
+    TxnDDLAccess::DDLAccess* new_ddl_access =
+        new (std::nothrow) TxnDDLAccess::DDLAccess(table->GetTableExId(), DDL_ACCESS_DROP_TABLE, (void*)table);
+    if (new_ddl_access == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Drop Table", "Failed to allocate DDL Access object");
+        return RC_MEMORY_ALLOCATION_ERROR;
     }
 
     if (!m_isLightSession) {
@@ -1132,48 +1091,7 @@ RC TxnManager::DropTable(Table* table)
         }
     }
 
-    if (ddl_access != nullptr) {
-        if (ddl_access->GetDDLAccessType() == DDL_ACCESS_CREATE_TABLE) {
-            // this table was created in this transaction, can delete it from the ddl_access
-            m_txnDdlAccess->EraseByOid(table->GetTableExId());
-            // check for create and drop index ddls
-            for (uint16_t i = 0; i < table->GetNumIndexes(); i++) {
-                m_txnDdlAccess->EraseByOid(table->GetIndex(i)->GetExtId());
-            }
-            // erase drop fake primary index if exists
-            TxnDDLAccess::DDLAccess* iddl = m_txnDdlAccess->GetByOid(table->GetTableExId() + 1);
-            if (iddl != nullptr) {
-                MOT::Index* ix = (MOT::Index*)iddl->GetEntry();
-                GcManager::ClearIndexElements(ix->GetIndexId());
-                table->DeletePrimaryIndex(ix);
-            }
-            table->DropImpl();
-            RemoveTableFromStat(table);
-            delete table;
-        } else if (ddl_access->GetDDLAccessType() == DDL_ACCESS_TRUNCATE_TABLE) {
-            Index** indexes = (Index**)ddl_access->GetEntry();
-            table->WrLock();
-            for (int i = 0; i < table->GetNumIndexes(); i++) {
-                Index* newIndex = table->m_indexes[i];
-                Index* oldIndex = indexes[i];
-                table->m_indexes[i] = oldIndex;
-                if (i != 0)
-                    table->m_secondaryIndexes[oldIndex->GetName()] = oldIndex;
-                else
-                    table->m_primaryIndex = oldIndex;
-                // need to check if need to release memory in a different way? GC?
-                // assumption is the we deleted all rows
-                delete newIndex;
-            }
-            table->Unlock();
-            delete[] indexes;
-            m_txnDdlAccess->EraseByOid(table->GetTableExId());
-            m_txnDdlAccess->Add(new_ddl_access);
-        }
-    } else {
-        m_txnDdlAccess->Add(new_ddl_access);
-    }
-
+    m_txnDdlAccess->Add(new_ddl_access);
     return RC_OK;
 }
 
@@ -1182,32 +1100,28 @@ RC TxnManager::TruncateTable(Table* table)
     RC res = RC_OK;
     if (m_isLightSession)  // really?
         return res;
-    TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(table->GetTableExId());
-    if (ddl_access != nullptr) {
-        // must be create table or truncate table
-        MOT_ASSERT(ddl_access->GetDDLAccessType() == DDL_ACCESS_CREATE_TABLE ||
-                   ddl_access->GetDDLAccessType() == DDL_ACCESS_TRUNCATE_TABLE);
-        // this is a table that we created or truncated before, should remove all the rows
-        // belonging to this table from the access and continue
-        TxnOrderedSet_t& access_row_set = m_accessMgr->GetOrderedRowSet();
-        TxnOrderedSet_t::iterator it = access_row_set.begin();
-        while (it != access_row_set.end()) {
-            Access* ac = it->second;
-            if (ac->GetTxnRow()->GetTable() == table) {
-                if (ac->m_type == INS)
-                    RollbackInsert(ac);
-                it = access_row_set.erase(it);
-                // need to perform index clean-up!
-                m_accessMgr->PubReleaseAccess(ac);
-            } else {
-                it++;
-            }
+
+    TxnOrderedSet_t& access_row_set = m_accessMgr->GetOrderedRowSet();
+    TxnOrderedSet_t::iterator it = access_row_set.begin();
+    while (it != access_row_set.end()) {
+        Access* ac = it->second;
+        if (ac->GetTxnRow()->GetTable() == table) {
+            if (ac->m_type == INS)
+                RollbackInsert(ac);
+            it = access_row_set.erase(it);
+            // need to perform index clean-up!
+            m_accessMgr->PubReleaseAccess(ac);
+        } else {
+            it++;
         }
-    } else {
-        Index** indexes = nullptr;
-        indexes = new (std::nothrow) Index*[MAX_NUM_INDEXES];
-        if (indexes == nullptr) {
-            // print error, clould not allocate memory
+    }
+
+    TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(table->GetTableExId());
+    if (ddl_access == nullptr) {
+        MOTIndexArr* indexesArr = nullptr;
+        indexesArr = new (std::nothrow) MOTIndexArr(table);
+        if (indexesArr == nullptr) {
+            // print error, could not allocate memory
             MOT_REPORT_ERROR(MOT_ERROR_OOM,
                 "Truncate Table",
                 "Failed to allocate memory for %u index objects",
@@ -1216,36 +1130,39 @@ RC TxnManager::TruncateTable(Table* table)
         }
         // allocate DDL before work and fail immediately if required
         ddl_access = new (std::nothrow)
-            TxnDDLAccess::DDLAccess(table->GetTableExId(), DDL_ACCESS_TRUNCATE_TABLE, (void*)indexes);
+            TxnDDLAccess::DDLAccess(table->GetTableExId(), DDL_ACCESS_TRUNCATE_TABLE, (void*)indexesArr);
         if (ddl_access == nullptr) {
             MOT_REPORT_ERROR(MOT_ERROR_OOM, "Truncate Table", "Failed to allocate memory for DDL Access object");
-            delete[] indexes;
+            delete indexesArr;
             return RC_MEMORY_ALLOCATION_ERROR;
         }
 
-        for (int i = 0; i < table->GetNumIndexes(); i++) {
-            Index* index_copy = table->GetIndex(i)->CloneEmpty();
+        for (uint16_t i = 0; i < table->GetNumIndexes(); i++) {
+            MOT::Index* index = table->GetIndex(i);
+            MOT::Index* index_copy = index->CloneEmpty();
             if (index_copy == nullptr) {
-                // print error, clould not allocate memory for index
+                // print error, could not allocate memory for index
                 MOT_REPORT_ERROR(MOT_ERROR_OOM,
                     "Truncate Table",
                     "Failed to clone empty index %s",
-                    table->GetIndex(i)->GetName().c_str());
-                for (int j = 0; j < i; j++) {
+                    index->GetName().c_str());
+                for (uint16_t j = 0; j < indexesArr->GetNumIndexes(); j++) {
                     // cleanup of previous created indexes copy
-                    Index* newIndex = table->m_indexes[j];
-                    Index* oldIndex = indexes[j];
-                    table->m_indexes[j] = oldIndex;
-                    if (j != 0)  // is secondary
+                    MOT::Index* oldIndex = indexesArr->GetIndex(j);
+                    uint16_t oldIx = indexesArr->GetIndexIx(j);
+                    MOT::Index* newIndex = table->m_indexes[oldIx];
+                    table->m_indexes[oldIx] = oldIndex;
+                    if (oldIx != 0)  // is secondary
                         table->m_secondaryIndexes[oldIndex->GetName()] = oldIndex;
                     else  // is primary
                         table->m_primaryIndex = oldIndex;
                     delete newIndex;
                 }
                 delete ddl_access;
+                delete indexesArr;
                 return RC_MEMORY_ALLOCATION_ERROR;
             }
-            indexes[i] = table->GetIndex(i);
+            indexesArr->Add(i, index);
             table->m_indexes[i] = index_copy;
             if (i != 0)  // is secondary
                 table->m_secondaryIndexes[index_copy->GetName()] = index_copy;
@@ -1258,7 +1175,7 @@ RC TxnManager::TruncateTable(Table* table)
     return res;
 }
 
-RC TxnManager::CreateIndex(Table* table, Index* index, bool is_primary)
+RC TxnManager::CreateIndex(Table* table, MOT::Index* index, bool is_primary)
 {
 
     // allocate DDL before work and fail immediately if required
@@ -1314,42 +1231,35 @@ RC TxnManager::CreateIndex(Table* table, Index* index, bool is_primary)
 RC TxnManager::DropIndex(MOT::Index* index)
 {
     // allocate DDL before work and fail immediately if required
-    TxnDDLAccess::DDLAccess* new_ddl_access = nullptr;
-    TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(index->GetExtId());
-    if (ddl_access == nullptr) {
-        new_ddl_access =
-            new (std::nothrow) TxnDDLAccess::DDLAccess(index->GetExtId(), DDL_ACCESS_DROP_INDEX, (void*)index);
-        if (new_ddl_access == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Drop Index", "Failed to allocate DDL Access object");
-            return RC_MEMORY_ALLOCATION_ERROR;
-        }
+    TxnDDLAccess::DDLAccess* new_ddl_access =
+        new (std::nothrow) TxnDDLAccess::DDLAccess(index->GetExtId(), DDL_ACCESS_DROP_INDEX, (void*)index);
+    if (new_ddl_access == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Drop Index", "Failed to allocate DDL Access object");
+        return RC_MEMORY_ALLOCATION_ERROR;
     }
 
     RC res = RC_OK;
     Table* table = index->GetTable();
 
-    if (!index->IsPrimaryKey()) {
-        RollbackSecondaryIndexInsert(index);
+    if (!m_isLightSession && !index->IsPrimaryKey()) {
+        TxnOrderedSet_t& access_row_set = m_accessMgr->GetOrderedRowSet();
+        TxnOrderedSet_t::iterator it = access_row_set.begin();
+        while (it != access_row_set.end()) {
+            Access* ac = it->second;
+            if (ac->GetSentinel()->GetIndex() == index) {
+                if (ac->m_type == INS)
+                    RollbackInsert(ac);
+                it = access_row_set.erase(it);
+                // need to perform index clean-up!
+                m_accessMgr->PubReleaseAccess(ac);
+            } else {
+                it++;
+            }
+        }
     }
 
-    if (ddl_access != nullptr) {
-        // this index was created in this transaction, can delete it from the ddl_access
-        // table->removeSecondaryIndex also performs releases the object
-        m_txnDdlAccess->EraseByOid(index->GetExtId());
-        if (index->IsPrimaryKey()) {
-            res = table->DeletePrimaryIndex(index);
-        } else {
-            res = table->RemoveSecondaryIndex((char*)index->GetName().c_str(), this);
-        }
-        if (res != RC_OK) {
-            // print Error
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Drop Index", "Failed to remove secondary index");
-            return res;
-        }
-    } else {
-        m_txnDdlAccess->Add(new_ddl_access);
-    }
-
+    table->RemoveSecondaryIndexFromMetaData(index);
+    m_txnDdlAccess->Add(new_ddl_access);
     return res;
 }
 

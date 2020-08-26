@@ -515,8 +515,6 @@ private:
 public:
     Table* GetTableByExternalId(uint64_t id);
     Index* GetIndexByExternalId(uint64_t table_id, uint64_t index_id);
-    Index* GetIndex(uint64_t table_id, uint16_t position);
-    Index* GetIndex(Table* table, uint16_t position);
     RC CreateTable(Table* table);
     RC DropTable(Table* table);
     RC CreateIndex(Table* table, Index* index, bool is_primary);
@@ -591,7 +589,7 @@ public:
     bool m_isLightSession;
 
     /** @var In case of unique violation this will be set to a violating index */
-    Index* m_errIx;
+    MOT::Index* m_errIx;
 
     /** @var In case of error this will contain the exact error code */
     RC m_err;
