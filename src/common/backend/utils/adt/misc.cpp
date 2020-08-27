@@ -280,11 +280,11 @@ Datum pg_terminate_session(PG_FUNCTION_ARGS)
 {
     ThreadId tid = PG_GETARG_INT64(0);
     uint64 sid = PG_GETARG_INT64(1);
-    int r = 0;
+    int r = -1;
 
     if (tid == sid) {
         r = kill_backend(tid);
-    } else {
+    } else if (ENABLE_THREAD_POOL) {
         ThreadPoolSessControl *sess_ctrl = g_threadPoolControler->GetSessionCtrl();
         int ctrl_idx = sess_ctrl->FindCtrlIdxBySessId(sid);
         r = sess_ctrl->SendSignal((int)ctrl_idx, SIGTERM);

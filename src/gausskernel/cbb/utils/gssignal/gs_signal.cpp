@@ -663,31 +663,21 @@ static bool gs_signal_handle_check(const GsSndSignal* local_node)
         case SIGNAL_CHECK_STREAM_STOP: {
             if (u_sess != NULL && local_node->check.debug_query_id == u_sess->debug_query_id) {
                 return true;
-            } else {
-                ereport(DEBUG2,
-                    (errmodule(MOD_STREAM),
-                        errcode(ERRCODE_LOG),
-                        errmsg("receive stop signal from queryid %lu, but current queryid is %lu.",
-                            local_node->check.debug_query_id,
-                            u_sess != NULL ? u_sess->debug_query_id : 0)));
-                return false;
             }
-            break;
+
+            ereport(DEBUG2,
+                (errmodule(MOD_STREAM), errcode(ERRCODE_LOG),
+                    errmsg("receive stop signal from queryid %lu, but current queryid is %lu.",
+                        local_node->check.debug_query_id,
+                        u_sess != NULL ? u_sess->debug_query_id : 0)));
+            return false;
         }
         case SIGNAL_CHECK_SESS_KEY: {
-            if (u_sess != NULL && local_node->check.session_id == u_sess->session_id) {
-                return true;
-            } else {
-                return false;
-            }
-            break;
+            return (u_sess != NULL && local_node->check.session_id == u_sess->session_id);
         }
-        default: {
-            break;
-        }
+        default: 
+            return true;
     }
-
-    return true;
 }
 
 /*

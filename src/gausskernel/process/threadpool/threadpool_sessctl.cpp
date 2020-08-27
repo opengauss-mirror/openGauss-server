@@ -238,8 +238,8 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
             if (val == 0) {
                 if (sess != NULL) {
                     if (sess->status == KNL_SESS_ATTACH) {
-                    	t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_SESS_KEY;
-                    	t_thrd.sig_cxt.session_id = sess->session_id;
+                        t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_SESS_KEY;
+                        t_thrd.sig_cxt.session_id = sess->session_id;
                         status = gs_signal_send(sess->attachPid, signal);
                         t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_NONE;
                         t_thrd.sig_cxt.session_id = 0;
@@ -528,9 +528,11 @@ int ThreadPoolSessControl::FindCtrlIdxBySessId(uint64 id)
     int cidx = 0;
     for (cidx = 0; cidx < m_maxActiveSessionCount; cidx++) {
         if (m_base[cidx].sess != NULL && m_base[cidx].sess->session_id == id) {
-            break;
+            return cidx + m_maxReserveSessionCount;
         }
     }
 
-    return cidx + m_maxReserveSessionCount;
+    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid session id")));
+
+    return -1;
 }
