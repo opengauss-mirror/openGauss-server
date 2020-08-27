@@ -38,13 +38,15 @@ typedef void (*gs_sigfunc)(int);
 typedef enum GsSignalCheckType {
     SIGNAL_CHECK_NONE,
     SIGNAL_CHECK_EXECUTOR_STOP,
-    SIGNAL_CHECK_STREAM_STOP
+    SIGNAL_CHECK_STREAM_STOP,
+    SIGNAL_CHECK_SESS_KEY
 } GsSignalCheckType;
 
 /* the struct of signal check */
 typedef struct GsSignalCheck {
     GsSignalCheckType check_type;
     uint64 debug_query_id;
+    uint64 session_id;
 } GsSignalCheck;
 
 /* the struct of signal to be handled and the signal sender's thread id */

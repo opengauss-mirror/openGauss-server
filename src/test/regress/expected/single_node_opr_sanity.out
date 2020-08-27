@@ -1185,6 +1185,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2096 | pg_terminate_backend
  2097 | pg_get_variable_info
  2098 | pg_get_functiondef
+ 2099 | pg_terminate_session
  2100 | avg
  2101 | avg
  2102 | avg
@@ -2676,7 +2677,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
  9999 | pg_test_err_contain_err
-(2275 rows)
+(2276 rows)
 
 -- Check prokind
 select count(*) from pg_proc where prokind = 'a';
@@ -2694,7 +2695,7 @@ select count(*) from pg_proc where prokind = 'w';
 select count(*) from pg_proc where prokind = 'f';
  count 
 -------
-  3149
+  3150
 (1 row)
 
 select count(*) from pg_proc where prokind = 'p';

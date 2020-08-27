@@ -1929,6 +1929,7 @@ typedef struct knl_t_libwalreceiver_context {
 typedef struct knl_t_sig_context {
     unsigned long signal_handle_cnt;
     GsSignalCheckType gs_sigale_check_type;
+    uint64 session_id;
 } knl_t_sig_context;
 
 typedef struct knl_t_slot_context {
