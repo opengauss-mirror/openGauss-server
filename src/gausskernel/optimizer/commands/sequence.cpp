@@ -2090,7 +2090,8 @@ static void process_owned_by(const Relation seqrel, List* owned_by)
 
         /* Must be a regular table */
         if (tablerel->rd_rel->relkind != RELKIND_RELATION &&
-                !(tablerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(RelationGetRelid(tablerel))))
+                !(tablerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && (isMOTFromTblOid(RelationGetRelid(tablerel)) || 
+                    isPostgresFDWFromTblOid(RelationGetRelid(tablerel)))))
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("referenced relation \"%s\" is not a table", RelationGetRelationName(tablerel))));
