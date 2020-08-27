@@ -83,6 +83,8 @@ static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid);
 static void SetTriggerFlags(TriggerDesc* trigdesc, const Trigger* trigger);
 static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
     int2 bucketid, ItemPointer tid, TupleTableSlot** newSlot);
+
+static void ReleaseFakeRelation(Relation relation, Partition part, Relation* fakeRelation);
 static bool TriggerEnabled(EState* estate, ResultRelInfo* relinfo, Trigger* trigger, TriggerEvent event,
     const Bitmapset* modifiedCols, HeapTuple oldtup, HeapTuple newtup);
 static HeapTuple ExecCallTriggerFunc(
@@ -2624,12 +2626,7 @@ static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
             case HeapTupleSelfUpdated:
                 /* treat it as deleted; do not process */
                 ReleaseBuffer(buffer);
-                if (RELATION_IS_PARTITIONED(relation)) {
-                    partitionClose(relation, part, NoLock);
-                }
-                if (RELATION_OWN_BUCKET(relation)) {
-                    releaseDummyRelation(&fakeRelation);
-                }
+                ReleaseFakeRelation(relation, part, &fakeRelation);
                 return NULL;
 
             case HeapTupleMayBeUpdated:
@@ -2665,12 +2662,7 @@ static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
                  * if tuple was deleted or PlanQual failed for updated tuple -
                  * we must not process this tuple!
                  */
-                if (RELATION_IS_PARTITIONED(relation)) {
-                    partitionClose(relation, part, NoLock);
-                }
-                if (RELATION_OWN_BUCKET(relation)) {
-                    releaseDummyRelation(&fakeRelation);
-                }
+                ReleaseFakeRelation(relation, part, &fakeRelation);
                 return NULL;
 
             default:
@@ -2716,14 +2708,18 @@ static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
     result = heapCopyTuple(&tuple, RelationGetDescr(relation), BufferGetPage(buffer));
     ReleaseBuffer(buffer);
 
-    if (RELATION_IS_PARTITIONED(relation)) {
-        partitionClose(relation, part, NoLock);
-    }
-    if (RELATION_OWN_BUCKET(relation)) {
-        releaseDummyRelation(&fakeRelation);
-    }
+    ReleaseFakeRelation(relation, part, &fakeRelation);
 
     return result;
+}
+
+static void ReleaseFakeRelation(Relation relation, Partition part, Relation* fakeRelation){
+    if (RELATION_IS_PARTITIONED(relation)) {
+        partitionClose(relation, part, NoLock);
+        releaseDummyRelation(fakeRelation);
+    } else if (RELATION_OWN_BUCKET(relation)) {
+        releaseDummyRelation(fakeRelation);
+    }
 }
 
 /*

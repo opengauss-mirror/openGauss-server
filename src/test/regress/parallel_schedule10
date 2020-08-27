@@ -74,3 +74,5 @@ test: with
 
 # run alter object to test pg_object
 #test: pg_object_test
+test: partition_foreign_key
+test: partition_trigger
