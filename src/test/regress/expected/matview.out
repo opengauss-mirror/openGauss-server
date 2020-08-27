@@ -552,3 +552,64 @@ SELECT * FROM mvtest2;
 (0 rows)
 
 ROLLBACK;
+-- make sure that materialized view can not be created on temp table (local or global)
+drop TABLE if exists simple_table_g cascade;
+NOTICE:  table "simple_table_g" does not exist, skipping
+drop TABLE if exists simple_table_t cascade;
+NOTICE:  table "simple_table_t" does not exist, skipping
+create GLOBAL TEMP TABLE class_global
+(
+    class_id int primary key,
+    class_name varchar(10) not null
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "class_global_pkey" for table "class_global"
+create TEMP TABLE student_tmp
+(
+    id int primary key,
+    name varchar(10) not null,
+    class_id int
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "student_tmp_pkey" for table "student_tmp"
+insert into class_global values (101, '1-1');
+insert into class_global values (102, '1-2');
+insert into class_global values (104, '1-4');
+insert into student_tmp values (1, 'aaa', 101);
+insert into student_tmp values (2, 'bbb', 101);
+insert into student_tmp values (3, 'ccc', 102);
+insert into student_tmp values (4, 'ddd', 102);
+insert into student_tmp values (5, 'eee', 102);
+insert into student_tmp values (6, 'fff', 103);
+CREATE TABLE simple_table_g AS SELECT * FROM class_global;
+CREATE TABLE simple_table_t AS SELECT * FROM student_tmp;
+CREATE MATERIALIZED VIEW mvtest_g AS SELECT * FROM class_global; --error
+ERROR:  materialized views must not use global temporary tables or views
+CREATE MATERIALIZED VIEW mvtest_t AS SELECT * FROM student_tmp; --error
+ERROR:  materialized views must not use temporary tables or views
+CREATE MATERIALIZED VIEW mvtest_mv_g AS SELECT * FROM student_tmp where class_id in (select class_id from class_global); --error
+ERROR:  materialized views must not use temporary tables or views
+CREATE MATERIALIZED VIEW mvtest_mv_g AS SELECT * FROM class_global where class_id in (select class_id from student_tmp); --error
+ERROR:  materialized views must not use temporary tables or views
+CREATE MATERIALIZED VIEW mvtest_s_g AS SELECT * FROM simple_table_g; --ok
+CREATE MATERIALIZED VIEW mvtest_s_t AS SELECT * FROM simple_table_t; --ok
+select * from mvtest_s_g;
+ class_id | class_name 
+----------+------------
+      101 | 1-1
+      102 | 1-2
+      104 | 1-4
+(3 rows)
+
+select * from mvtest_s_t;
+ id | name | class_id 
+----+------+----------
+  1 | aaa  |      101
+  2 | bbb  |      101
+  3 | ccc  |      102
+  4 | ddd  |      102
+  5 | eee  |      102
+  6 | fff  |      103
+(6 rows)
+
+drop  MATERIALIZED VIEW mvtest_s_g cascade;
+drop  MATERIALIZED VIEW mvtest_s_t cascade;
+drop  Table class_global cascade;

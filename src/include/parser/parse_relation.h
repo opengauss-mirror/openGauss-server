@@ -55,6 +55,9 @@ extern Name attnumAttName(Relation rd, int attid);
 extern Oid attnumTypeId(Relation rd, int attid);
 extern Oid attnumCollationId(Relation rd, int attid);
 extern bool isQueryUsingTempRelation(Query* query);
+/* global temp table check */
+extern bool is_query_using_gtt(Query* query);
+
 #ifdef PGXC
 extern int specialAttNum(const char* attname);
 #endif
