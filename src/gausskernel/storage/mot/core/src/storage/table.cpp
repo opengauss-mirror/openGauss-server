@@ -191,6 +191,7 @@ void Table::SetPrimaryIndex(MOT::Index* index)
 bool Table::UpdatePrimaryIndex(MOT::Index* index, TxnManager* txn, uint32_t tid)
 {
     if (this->m_primaryIndex) {
+        DecIndexColumnUsage(this->m_primaryIndex);
         if (txn == nullptr) {
             if (DeleteIndex(this->m_primaryIndex) != RC_OK) {
                 return false;
@@ -215,7 +216,6 @@ bool Table::UpdatePrimaryIndex(MOT::Index* index, TxnManager* txn, uint32_t tid)
 RC Table::DeleteIndex(MOT::Index* index)
 {
     GcManager::ClearIndexElements(index->GetIndexId());
-    DecIndexColumnUsage(index);
     delete index;
 
     return RC::RC_OK;
@@ -317,6 +317,8 @@ bool Table::CreateSecondaryIndexData(MOT::Index* index, TxnManager* txn)
             status = txn->AccessLookup(RD, it->GetPrimarySentinel(), tmpRow);
             switch (status) {
                 case RC::RC_LOCAL_ROW_DELETED:
+                    row = nullptr;
+                    break;
                 case RC::RC_LOCAL_ROW_NOT_FOUND:
                     break;
                 case RC::RC_LOCAL_ROW_FOUND:

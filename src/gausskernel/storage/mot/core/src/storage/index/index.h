@@ -500,6 +500,11 @@ public:
         return ((m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY && m_fake) ? true : false);
     }
 
+    inline bool IsUnique()
+    {
+        return m_unique;
+    }
+
     inline void SetIsCommited(bool isCommited)
     {
         m_isCommited = isCommited;
@@ -765,6 +770,7 @@ public:
     {
         return m_table;
     }
+
 private:
     MOT::Index* m_indexArr[MAX_NUM_INDEXES];
     MOT::Table* m_table;

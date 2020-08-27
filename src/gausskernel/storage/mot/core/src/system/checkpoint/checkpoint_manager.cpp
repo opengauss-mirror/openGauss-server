@@ -109,14 +109,27 @@ bool CheckpointManager::CreateSnapShot()
     // phase that are not yet completed
     WaitPrevPhaseCommittedTxnComplete();
 
-    // Move to prepare
+    // Move to PREPARE phase
     m_lock.WrLock();
     MoveToNextPhase();
     m_lock.WrUnlock();
 
-    while (m_phase != CheckpointPhase::CAPTURE) {
+    while (m_phase != CheckpointPhase::RESOLVE) {
         usleep(50000L);
     }
+
+    // Ensure that all the transactions that started commit in PREPARE phase are completed.
+    WaitPrevPhaseCommittedTxnComplete();
+
+    // Now in RESOLVE phase, no transaction is allowed to start the commit.
+    // It is safe now to obtain a list of all tables to included in this checkpoint.
+    // The tables are read locked in order to avoid drop/truncate during checkpoint.
+    FillTasksQueue();
+
+    // Move to CAPTURE phase
+    m_lock.WrLock();
+    MoveToNextPhase();
+    m_lock.WrUnlock();
 
     return !m_errorSet;
 }
@@ -328,12 +341,6 @@ void CheckpointManager::MoveToNextPhase()
 
     m_phase = (CheckpointPhase)nextPhase;
     m_cntBit = !m_cntBit;
-
-    if (m_phase == CheckpointPhase::PREPARE) {
-        // Obtain a list of all tables. The tables are read locked
-        // in order to avoid delete/truncate during checkpoint.
-        FillTasksQueue();
-    }
 
     if (m_phase == CheckpointPhase::CAPTURE) {
         if (m_redoLogHandler != nullptr) {

@@ -315,6 +315,13 @@ public:
             return false;
         }
 
+        /*
+         * In recovery/replay, OCC Validation should always wait, since there should not be any conflict.
+         * The checkpoint locks the row before writing to the checkpoint buffer. So, if the OCC validation
+         * is set to true, commit transaction might fail with RC_ABORT during replay.
+         */
+        ctx->GetTxnManager()->SetValidationNoWait(false);
+
         return true;
     }
 

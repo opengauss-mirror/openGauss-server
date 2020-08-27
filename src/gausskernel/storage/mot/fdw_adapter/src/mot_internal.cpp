@@ -1173,7 +1173,7 @@ bool MOTAdaptor::SetMatchingExpr(
     uint16_t numIx = state->m_table->GetNumIndexes();
 
     for (uint16_t i = 0; i < numIx; i++) {
-        MOT::Index *ix = state->m_table->GetIndex(i);
+        MOT::Index* ix = state->m_table->GetIndex(i);
         if (ix != nullptr && ix->IsFieldPresent(colId)) {
             if (marr->m_idx[i] == nullptr) {
                 marr->m_idx[i] = (MatchIndex*)palloc0(sizeof(MatchIndex));

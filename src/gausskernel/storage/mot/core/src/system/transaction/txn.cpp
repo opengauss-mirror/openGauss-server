@@ -240,7 +240,6 @@ RC TxnManager::CommitInternal(uint64_t csn)
     }
     // first write to redo log, then write changes
     m_redoLog.Commit();
-    WriteDDLChanges();
     if (!m_occManager.WriteChanges(this))
         return RC_PANIC;
     if (GetGlobalConfiguration().m_enableCheckpoint) {
@@ -282,7 +281,7 @@ RC TxnManager::LiteCommit(uint64_t transcationId)
 
         // first write to redo log, then write changes
         m_redoLog.Commit();
-        WriteDDLChanges();
+        CleanDDLChanges();
         Cleanup();
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddCommitTxn();
@@ -308,7 +307,6 @@ RC TxnManager::CommitPrepared(uint64_t transactionId)
     m_redoLog.CommitPrepared();
 
     // Run second validation phase
-    WriteDDLChanges();
     if (!m_occManager.WriteChanges(this))
         return RC_PANIC;
     GetCheckpointManager()->TransactionCompleted(this);
@@ -329,7 +327,7 @@ RC TxnManager::LiteCommitPrepared(uint64_t transactionId)
 
         // first write to redo log, then write changes
         m_redoLog.CommitPrepared();
-        WriteDDLChanges();
+        CleanDDLChanges();
         Cleanup();
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddCommitPreparedTxn();
@@ -344,6 +342,7 @@ RC TxnManager::EndTransaction()
         m_occManager.ReleaseLocks(this);
         m_occManager.CleanRowsFromIndexes(this);
     }
+    CleanDDLChanges();
     Cleanup();
     return RC::RC_OK;
 }
@@ -547,6 +546,7 @@ void TxnManager::RollbackDDLs()
                     table->GetLongTableName().c_str());
                 table->WrLock();
                 if (index->IsPrimaryKey()) {
+                    table->DecIndexColumnUsage(index);
                     table->SetPrimaryIndex(nullptr);
                     table->DeleteIndex(index);
                 } else {
@@ -562,6 +562,7 @@ void TxnManager::RollbackDDLs()
                     table->GetLongTableName().c_str());
                 table->WrLock();
                 if (index->IsPrimaryKey()) {
+                    table->IncIndexColumnUsage(index);
                     table->SetPrimaryIndex(index);
                 } else {
                     table->AddSecondaryIndexToMetaData(index);
@@ -574,7 +575,7 @@ void TxnManager::RollbackDDLs()
     }
 }
 
-void TxnManager::WriteDDLChanges()
+void TxnManager::CleanDDLChanges()
 {
     // early exit
     if (m_txnDdlAccess->Size() == 0)
@@ -596,15 +597,11 @@ void TxnManager::WriteDDLChanges()
                 indexArr = (MOTIndexArr*)ddl_access->GetEntry();
                 if (indexArr->GetNumIndexes() > 0) {
                     table = indexArr->GetTable();
-                    table->WrLock();
                     table->m_rowCount = 0;
                     for (int i = 0; i < indexArr->GetNumIndexes(); i++) {
                         index = indexArr->GetIndex(i);
-                        GcManager::ClearIndexElements(index->GetIndexId());
-                        index->Truncate(true);
-                        delete index;
+                        table->DeleteIndex(index);
                     }
-                    table->Unlock();
                 }
                 delete indexArr;
                 break;
@@ -612,21 +609,11 @@ void TxnManager::WriteDDLChanges()
                 index = (Index*)ddl_access->GetEntry();
                 table = index->GetTable();
                 index->SetIsCommited(true);
-                if (index->IsPrimaryKey()) {
-                    table->WrLock();
-                    table->SetPrimaryIndex(index);
-                    table->Unlock();
-                }
                 break;
             case DDL_ACCESS_DROP_INDEX:
                 index = (Index*)ddl_access->GetEntry();
                 table = index->GetTable();
-                table->WrLock();
-                if (index->IsPrimaryKey()) {
-                    table->SetPrimaryIndex(nullptr);
-                }
                 table->DeleteIndex(index);
-                table->Unlock();
                 break;
             default:
                 break;
@@ -1142,10 +1129,8 @@ RC TxnManager::TruncateTable(Table* table)
             MOT::Index* index_copy = index->CloneEmpty();
             if (index_copy == nullptr) {
                 // print error, could not allocate memory for index
-                MOT_REPORT_ERROR(MOT_ERROR_OOM,
-                    "Truncate Table",
-                    "Failed to clone empty index %s",
-                    index->GetName().c_str());
+                MOT_REPORT_ERROR(
+                    MOT_ERROR_OOM, "Truncate Table", "Failed to clone empty index %s", index->GetName().c_str());
                 for (uint16_t j = 0; j < indexesArr->GetNumIndexes(); j++) {
                     // cleanup of previous created indexes copy
                     MOT::Index* oldIndex = indexesArr->GetIndex(j);

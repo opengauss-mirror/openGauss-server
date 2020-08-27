@@ -187,8 +187,7 @@ public:
           m_errorSet(false),
           m_clogCallback(nullptr),
           m_threadId(AllocThreadId()),
-          m_maxConnections(GetGlobalConfiguration().m_maxConnections),
-          m_numRedoOps(0)
+          m_maxConnections(GetGlobalConfiguration().m_maxConnections)
     {}
 
     ~RecoveryManager()
@@ -612,11 +611,6 @@ public:
         m_inProcessTxLock.unlock();
     }
 
-    inline void IncreaseTableDeletesStat(Table* t)
-    {
-        m_tableDeletesStat[t]++;
-    }
-
     inline void SetLastReplayLsn(uint64_t lastReplayLsn)
     {
         if (m_lastReplayLsn < lastReplayLsn) {
@@ -629,13 +623,9 @@ public:
         return m_lastReplayLsn;
     }
 
-    void ClearTableCache();
-
     LogStats* m_logStats;
 
     std::map<uint64_t, TableInfo*> m_preCommitedTables;
-
-    std::unordered_map<Table*, uint32_t> m_tableDeletesStat;
 
 private:
     static constexpr uint32_t NUM_REDO_RECOVERY_THREADS = 1;
@@ -958,18 +948,6 @@ private:
         Table* table, OperationCode opCode, uint64_t csn, uint64_t transactionId, uint32_t tid, Row* row, RC& status);
 
     /**
-     * @brief checks if a duplicate row exists in the table
-     * @param table the table object pointer
-     * @param keyData key's data buffer.
-     * @param keyLen key's data buffer len.
-     * @param rowData row's data buffer.
-     * @param rowLen row's data buffer len.
-     * @param tid the thread id of the recovering thread.
-     */
-    static bool DuplicateRow(
-        Table* table, char* keyData, uint16_t keyLen, char* rowData, uint64_t rowLen, uint32_t tid);
-
-    /**
      * @brief checks if an operation is supported by the recovery.
      * @param op the operation code to check.
      * @return Boolean value denoting if the op is supported.
@@ -1107,8 +1085,6 @@ private:
     SurrogateState m_sState;
 
     uint16_t m_maxConnections;
-
-    uint32_t m_numRedoOps;
 };
 }  // namespace MOT
 

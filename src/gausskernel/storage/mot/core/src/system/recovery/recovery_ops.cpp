@@ -286,7 +286,8 @@ uint32_t RecoveryManager::RecoverLogOperationInsert(
 
 uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn, uint32_t tid, RC& status)
 {
-    uint64_t tableId, rowLength, exId;
+    uint64_t tableId;
+    uint64_t exId;
     uint16_t keyLength;
     uint8_t *keyData, *rowData;
     status = RC_OK;
@@ -326,9 +327,9 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Update Row", "failed to allocate key");
         return 0;
     }
+
     key->CpKey((const uint8_t*)keyData, keyLength);
     Row* row = MOTCurrTxn->RowLookupByKey(table, RD_FOR_UPDATE, key);
-
     if (row == nullptr) {
         // Row not found. Error!!! Got an update for non existing row.
         MOTCurrTxn->DestroyTxnKey(key);
@@ -341,19 +342,18 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
         return 0;
     }
 
-    bool doUpdate = true;
-
-    // In case row has higher CSN, don't perform the update
-    // we still need to calculate the length of the operation
-    // in order to skip for the next one
-    // CSNs can be equal if updated during the same transaction
     if (row->GetCommitSequenceNumber() > csn) {
-        MOT_LOG_WARN("Recovery Manager Update Row, tableId: %lu - row csn is newer! %lu > %lu {%s}",
-            tableId,
+        // Row CSN is newer. Error!!!
+        MOTCurrTxn->DestroyTxnKey(key);
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+            "Recovery Manager Update Row",
+            "row CSN is newer! %lu > %lu, key: %s, tableId: %lu",
             row->GetCommitSequenceNumber(),
             csn,
-            key->GetKeyStr().c_str());
-        doUpdate = false;
+            key->GetKeyStr().c_str(),
+            tableId);
+        status = RC_ERROR;
+        return 0;
     }
 
     uint16_t num_columns = table->GetFieldCount() - 1;
@@ -369,28 +369,22 @@ uint32_t RecoveryManager::RecoverLogOperationUpdate(uint8_t* data, uint64_t csn,
         if (updated_columns_it.IsSet()) {
             if (valid_columns_it.IsSet()) {
                 Column* column = table->GetField(updated_columns_it.GetPosition() + 1);
-                if (doUpdate) {
-                    row_valid_columns.SetBit(updated_columns_it.GetPosition());
-                    erc = memcpy_s(rowData + column->m_offset, column->m_size, data, column->m_size);
-                    securec_check(erc, "\0", "\0");
-                }
+                row_valid_columns.SetBit(updated_columns_it.GetPosition());
+                erc = memcpy_s(rowData + column->m_offset, column->m_size, data, column->m_size);
+                securec_check(erc, "\0", "\0");
                 size += column->m_size;
                 data += column->m_size;
             } else {
-                if (doUpdate) {
-                    row_valid_columns.UnsetBit(updated_columns_it.GetPosition());
-                }
+                row_valid_columns.UnsetBit(updated_columns_it.GetPosition());
             }
         }
         valid_columns_it.Next();
         updated_columns_it.Next();
     }
 
-    if (doUpdate) {
-        MOTCurrTxn->UpdateLastRowState(MOT::AccessType::WR);
-    }
+    MOTCurrTxn->UpdateLastRowState(MOT::AccessType::WR);
     MOTCurrTxn->DestroyTxnKey(key);
-    if (MOT::GetRecoveryManager()->m_logStats != nullptr && doUpdate)
+    if (MOT::GetRecoveryManager()->m_logStats != nullptr)
         MOT::GetRecoveryManager()->m_logStats->IncUpdate(tableId);
     return sizeof(OperationCode) + sizeof(tableId) + sizeof(exId) + sizeof(keyLength) + keyLength +
            updated_columns.GetLength() + valid_columns.GetLength() + size;
@@ -536,12 +530,8 @@ void RecoveryManager::InsertRow(uint64_t tableId, uint64_t exId, char* keyData, 
         row->GetPrimarySentinel()->Lock(0);
     }
 
-    if (status == RC_UNIQUE_VIOLATION && DuplicateRow(table, keyData, keyLen, rowData, rowLen, tid)) {
-        // Same row already exists. ok.
-        // no need to destroy row (already destroyed by TxnManager::InsertRow() in case of unique violation)
-        status = RC_OK;
-    } else if (status == RC_MEMORY_ALLOCATION_ERROR) {
-        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Insert Row", "failed to insert row");
+    if (status != RC_OK) {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Recovery Manager Insert Row", "failed to insert row (status %u)", status);
     }
 }
 
@@ -583,8 +573,6 @@ void RecoveryManager::DeleteRow(
                     RcToString(status),
                     status);
             }
-        } else {
-            GetRecoveryManager()->IncreaseTableDeletesStat(table);
         }
     } else {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Recovery Manager Delete Row", "getData failed");
@@ -620,6 +608,7 @@ void RecoveryManager::UpdateRow(uint64_t tableId, uint64_t exId, char* keyData, 
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Update Row", "failed to create key");
         return;
     }
+
     key->CpKey((const uint8_t*)keyData, keyLen);
     Row* row = MOTCurrTxn->RowLookupByKey(table, RD_FOR_UPDATE, key);
     if (row == nullptr) {
@@ -642,10 +631,17 @@ void RecoveryManager::UpdateRow(uint64_t tableId, uint64_t exId, char* keyData, 
             }
             MOTCurrTxn->UpdateLastRowState(MOT::AccessType::WR);
         } else {
-            MOT_LOG_WARN("RecoveryManager::updateRow, tableId: %lu - row csn is newer! %lu > %lu",
-                tableId,
+            // Row CSN is newer. Error!!!
+            MOTCurrTxn->DestroyTxnKey(key);
+            status = RC_ERROR;
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                "RecoveryManager::updateRow",
+                "row CSN is newer! %lu > %lu, key: %s, tableId: %lu",
                 row->GetCommitSequenceNumber(),
-                csn);
+                csn,
+                key->GetKeyStr().c_str(),
+                tableId);
+            return;
         }
     }
     MOTCurrTxn->DestroyTxnKey(key);
@@ -723,8 +719,6 @@ void RecoveryManager::DropTable(char* data, RC& status)
             "Failed to drop table %s [%" PRIu64 "])",
             tableName.c_str(),
             externalTableId);
-    } else {
-        MOT::GetRecoveryManager()->m_tableDeletesStat.erase(table);
     }
     MOT_LOG_DEBUG("RecoveryManager::DropTable: table %s [%" PRIu64 "] dropped", tableName.c_str(), externalTableId);
 }
@@ -747,7 +741,10 @@ void RecoveryManager::CreateIndex(char* data, uint32_t tid, RC& status)
 
     in = table->DesrializeMeta(in, idx);
     bool primary = idx.m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY;
-    MOT_LOG_DEBUG("createIndex: creating %s Index", primary ? "Primary" : "Secondary");
+    MOT_LOG_DEBUG("createIndex: creating %s Index, %s %lu",
+        primary ? "Primary" : "Secondary",
+        idx.m_name.c_str(),
+        idx.m_indexExtId);
     Index* index = nullptr;
     status = table->CreateIndexFromMeta(idx, primary, tid, false, &index);
     if (status != RC_OK) {
@@ -1081,52 +1078,6 @@ void RecoveryManager::RecoverTwoPhaseAbort(
             row->m_rowHeader.Release();
         }
     }
-}
-
-bool RecoveryManager::DuplicateRow(
-    Table* table, char* keyData, uint16_t keyLen, char* rowData, uint64_t rowLen, uint32_t tid)
-{
-    bool res = false;
-    Key* key = nullptr;
-    RC rc = RC_ERROR;
-    Row* row = nullptr;
-    Index* index = nullptr;
-    do {
-        index = table->GetPrimaryIndex();
-        if (index == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Recovery Manager Duplicate Row", "failed to find the primary index");
-            break;
-        }
-        key = index->CreateNewKey();
-        if (key == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Duplicate Row", "failed to create a key");
-            break;
-        }
-        key->CpKey((const uint8_t*)keyData, keyLen);
-
-        Row* row = index->IndexRead(key, tid);
-        if (row == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Recovery Manager Duplicate Row", "failed to find row");
-            break;
-        }
-        if (memcmp(row->GetData(), rowData, rowLen)) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-                "Recovery Manager Duplicate Row",
-                "rows differ! (Table %lu:%u:%s nidx: %u)",
-                table->GetTableExId(),
-                table->GetTableId(),
-                table->GetTableName().c_str(),
-                table->GetNumIndexes());
-            CheckpointUtils::Hexdump("New Row", rowData, rowLen);
-            CheckpointUtils::Hexdump("Orig Row", (char*)row->GetData(), rowLen);
-            break;
-        }
-        res = true;
-    } while (0);
-
-    if (key != nullptr && index != nullptr)
-        index->DestroyKey(key);
-    return res;
 }
 
 bool RecoveryManager::BeginTransaction(uint64_t replayLsn /* = 0 */)
