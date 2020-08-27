@@ -864,6 +864,7 @@ void dw_init()
 
         ereport(LOG, (errmodule(MOD_DW), errmsg("Double write exit after recovering partial write")));
     }
+    smgrcloseall();
 }
 
 static void dw_encrypt_page(char* dest_addr)
