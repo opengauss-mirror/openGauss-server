@@ -19,7 +19,7 @@
 /*
  * We have to use postgres.h not postgres_fe.h here, because there's so much
  * backend-only stuff in the XLOG include files we need.  But we need a
- * frontend-ish environment otherwise.  Hence this ugly hack.
+ * frontend-ish environment otherwise. Hence this ugly hack.
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
@@ -31,13 +31,10 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#ifdef HAVE_LIBZ
-#include "zlib.h"
-#endif
-
 #include "getopt_long.h"
 #include "receivelog.h"
 #include "streamutil.h"
+#include "gs_tar_const.h"
 #include "bin/elog.h"
 #include "lib/string.h"
 
@@ -55,7 +52,6 @@ typedef struct TablespaceList {
 /* Global options */
 char* basedir = NULL;
 static TablespaceList tablespacee_dirs = {NULL, NULL};
-static const int BLOCK_SIZE = 2560; /* gs_tar block size */
 char* g_xlogOption = NULL;
 char format = 'p'; /* p(lain)/t(ar) */
 char* label = "gs_basebackup base backup";
@@ -65,17 +61,6 @@ int compresslevel = 0;
 bool includewal = false;
 bool streamwal = false;
 bool fastcheckpoint = false;
-
-/* fileStream result */
-static const int READ_ERROR = -2;
-
-/* gs_tar offset */
-static const int LEN_LEFT = 1048;
-static const int FILE_PADDING = 511; /*  All files are padded up to 512 bytes */
-static const int FILE_TYPE = 1080;
-
-/* file type */
-static const char TYPE_DICTORY = '5';
 
 extern char** tblspaceDirectory;
 extern int tblspaceCount;
@@ -122,21 +107,8 @@ static int GsTar(int argc, char** argv);
 static int GsBaseBackup(int argc, char** argv);
 
 static const char* get_tablespace_mapping(const char* dir);
-extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose);
-
-#ifdef HAVE_LIBZ
-static const char* get_gz_error(gzFile gzf)
-{
-    int errnum;
-    const char* errmsg = NULL;
-
-    errmsg = gzerror(gzf, &errnum);
-    if (errnum == Z_ERRNO)
-        return strerror(errno);
-    else
-        return errmsg;
-}
-#endif
+extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose,
+    const char format = 'p', const int compresslevel = 0);
 
 /*
  * Split argument into old_dir and new_dir and append to tablespace mapping
@@ -144,7 +116,7 @@ static const char* get_gz_error(gzFile gzf)
  */
 static void tablespace_list_append(const char* arg)
 {
-    TablespaceListCell* cell = (TablespaceListCell*)malloc(sizeof(TablespaceListCell));
+    TablespaceListCell* cell = (TablespaceListCell*)xmalloc0(sizeof(TablespaceListCell));
     char* dst = NULL;
     char* dst_ptr = NULL;
     const char* arg_ptr = NULL;
@@ -601,32 +573,6 @@ static void progress_report(int tablespacenum, const char* filename)
     fprintf(stderr, "\r");
 }
 
-#ifdef HAVE_LIBZ
-static gzFile openGzFile(const char* filename)
-{
-    gzFile ztarfile = gzopen(filename, "wb");
-    if (gzsetparams(ztarfile, compresslevel, Z_DEFAULT_STRATEGY) != Z_OK) {
-        fprintf(
-            stderr, _("%s: could not set compression level %d: %s\n"), progname, compresslevel, get_gz_error(ztarfile));
-        disconnect_and_exit(1);
-    }
-    return ztarfile;
-}
-
-static void writeGzFile(gzFile ztarfile, char* copybuf, int buf_size, char* filename)
-{
-    if (gzwrite(ztarfile, copybuf, buf_size) != buf_size) {
-        fprintf(stderr,
-            _("%s: could not write to compressed file \"%s\": %s\n"),
-            progname,
-            filename,
-            get_gz_error(ztarfile));
-        disconnect_and_exit(1);
-    }
-}
-
-#endif
-
 /*
  * Receive a tar format file from the connection to the server, and write
  * the data from this file directly into a tar file. If compression is
@@ -687,7 +633,15 @@ static void ReceiveTarFile(PGconn* conn, PGresult* res, int rownum)
             if (compresslevel != 0) {
                 errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/base.tar.gz", basedir);
                 securec_check_ss_c(errorno, "", "");
-                ztarfile = openGzFile(filename);
+                ztarfile = openGzFile(filename, compresslevel);
+                if (ztarfile == NULL) {
+                    fprintf(stderr,
+                        _("%s: could not set compression level %d: %s\n"),
+                        progname,
+                        compresslevel,
+                        get_gz_error(ztarfile));
+                    disconnect_and_exit(1);
+                }
             } else
 #endif
             {
@@ -706,7 +660,7 @@ static void ReceiveTarFile(PGconn* conn, PGresult* res, int rownum)
             errorno = snprintf_s(
                 filename, sizeof(filename), sizeof(filename) - 1, "%s/%s.tar.gz", basedir, PQgetvalue(res, rownum, 0));
             securec_check_ss_c(errorno, "", "");
-            ztarfile = openGzFile(filename);
+            ztarfile = openGzFile(filename, compresslevel);
         } else
 #endif
         {
@@ -760,30 +714,6 @@ static void ReceiveTarFile(PGconn* conn, PGresult* res, int rownum)
 
         int r = PQgetCopyData(conn, &copybuf, 0);
         if (r == -1) {
-            /*
-             * End of chunk. Close file (but not stdout).
-             *
-             * Also, write two completely empty blocks at the end of the tar
-             * file, as required by some tar programs.
-             */
-            char zerobuf[1024];
-
-            errorno = memset_s(zerobuf, sizeof(zerobuf), 0, sizeof(zerobuf));
-            securec_check_c(errorno, "", "");
-#ifdef HAVE_LIBZ
-            if (ztarfile != NULL) {
-                writeGzFile(ztarfile, zerobuf, sizeof(zerobuf), filename);
-            } else
-#endif
-            {
-                if (fwrite(zerobuf, sizeof(zerobuf), 1, tarfile) != 1) {
-                    fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
-                    fclose(tarfile);
-                    tarfile = NULL;
-                    disconnect_and_exit(1);
-                }
-            }
-
 #ifdef HAVE_LIBZ
             if (ztarfile != NULL) {
                 if (gzclose(ztarfile) != 0) {
@@ -807,7 +737,6 @@ static void ReceiveTarFile(PGconn* conn, PGresult* res, int rownum)
                     tarfile = NULL;
                 }
             }
-
             break;
         } else if (r == -2) {
             fprintf(stderr, _("%s: could not read COPY data: %s"), progname, PQerrorMessage(conn));
@@ -816,7 +745,14 @@ static void ReceiveTarFile(PGconn* conn, PGresult* res, int rownum)
 
 #ifdef HAVE_LIBZ
         if (ztarfile != NULL) {
-            writeGzFile(ztarfile, copybuf, r, filename);
+            if (!writeGzFile(ztarfile, copybuf, r)) {
+                fprintf(stderr,
+                    _("%s: could not write to compressed file \"%s\": %s\n"),
+                    progname,
+                    filename,
+                    get_gz_error(ztarfile));
+                disconnect_and_exit(1);
+            }
         } else
 #endif
         {
@@ -960,7 +896,7 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             }
 
             break;
-        } else if (r == READ_ERROR) {
+        } else if (r == TAR_READ_ERROR) {
             fprintf(stderr, _("%s: could not read COPY data: %s"), progname, PQerrorMessage(conn));
             disconnect_and_exit(1);
         }
@@ -972,13 +908,13 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             /*
              * No current file, so this must be the header for a new file
              */
-            if (r != BLOCK_SIZE) {
+            if (r != TAR_BLOCK_SIZE) {
                 fprintf(stderr, _("%s: invalid tar block header size: %d\n"), progname, r);
                 disconnect_and_exit(1);
             }
-            totaldone += BLOCK_SIZE;
+            totaldone += TAR_BLOCK_SIZE;
 
-            if (sscanf_s(copybuf + LEN_LEFT, "%201o", &current_len_left) != 1) {
+            if (sscanf_s(copybuf + TAR_LEN_LEFT, "%201o", &current_len_left) != 1) {
                 fprintf(stderr, _("%s: could not parse file size\n"), progname);
                 disconnect_and_exit(1);
             }
@@ -992,7 +928,7 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             /*
              * All files are padded up to 512 bytes
              */
-            current_padding = ((current_len_left + FILE_PADDING) & ~FILE_PADDING) - current_len_left;
+            current_padding = ((current_len_left + TAR_FILE_PADDING) & ~TAR_FILE_PADDING) - current_len_left;
 
             /*
              * First part of header is zero terminated filename
@@ -1010,7 +946,7 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 /*
                  * Ends in a slash means directory or symlink to directory
                  */
-                if (copybuf[FILE_TYPE] == TYPE_DICTORY) {
+                if (copybuf[TAR_FILE_TYPE] == TAR_TYPE_DICTORY) {
                     /*
                      * Directory
                      */
@@ -1039,12 +975,12 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                             filename,
                             strerror(errno));
 #endif
-                } else if (copybuf[FILE_TYPE] == '2') {
+                } else if (copybuf[TAR_FILE_TYPE] == '2') {
                     /*
                      * Symbolic link
                      */
                     filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
-                    mapped_tblspc_path = get_tablespace_mapping(&copybuf[FILE_TYPE + 1]);
+                    mapped_tblspc_path = get_tablespace_mapping(&copybuf[TAR_FILE_TYPE + 1]);
                     if (symlink(mapped_tblspc_path, filename) != 0) {
                         if (IsXlogDir(filename)) {
                             fprintf(stderr,
@@ -1072,7 +1008,7 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                         sizeof(absolut_path) - 1,
                         "%s/%s",
                         basedir,
-                        &copybuf[FILE_TYPE + 1]);
+                        &copybuf[TAR_FILE_TYPE + 1]);
                     securec_check_ss_c(errorno, "\0", "\0");
 
                     if (symlink(absolut_path, filename) != 0) {
@@ -1517,9 +1453,7 @@ static void BaseBackup(void)
         exit(1);
     }
     ClearAndFreePasswd();
-    if (format == 'p') {
-        FetchMotCheckpoint(basedir, conn, progname, (bool)verbose);
-    }
+    FetchMotCheckpoint(basedir, conn, progname, (bool)verbose, format, compresslevel);
     PQfinish(conn);
     conn = NULL;
 
@@ -1555,7 +1489,7 @@ static void remove_dw_file(const char* dw_file_name, const char* target_dir, cha
 /* *
  * * delete existing double write file if existed, recreate it and write one page of zero
  * * @param target_dir data base root dir
- *     */
+ * */
 static void backup_dw_file(const char* target_dir)
 {
     int rc;
@@ -1708,12 +1642,12 @@ static int GsTar(int argc, char** argv)
             copybuf = NULL;
         }
 
-        current_len_left = current_len_left == 0 && current_padding == 0 ? BLOCK_SIZE : current_len_left;
+        current_len_left = current_len_left == 0 && current_padding == 0 ? TAR_BLOCK_SIZE : current_len_left;
         if (current_len_left == 0 && current_padding != 0) {
-            copybuf = (char*)malloc(current_padding);
+            copybuf = (char*)xmalloc0(current_padding);
             r = fread(copybuf, 1, current_padding, tarfile);
         } else {
-            copybuf = (char*)malloc(current_len_left);
+            copybuf = (char*)xmalloc0(current_len_left);
             r = fread(copybuf, 1, current_len_left, tarfile);
             // end of file
             if ((uint64)r < current_len_left) {
@@ -1742,12 +1676,12 @@ static int GsTar(int argc, char** argv)
             int filemode;
 
             /* No current file, so this must be the header for a new file */
-            if (r != BLOCK_SIZE) {
+            if (r != TAR_BLOCK_SIZE) {
                 fprintf(stderr, "%s: invalid tar block header size: %d\n", progname, r);
                 fclose(tarfile);
                 return -1;
             }
-            totaldone += BLOCK_SIZE;
+            totaldone += TAR_BLOCK_SIZE;
 
             if (sscanf_s(copybuf + 1048, "%201o", &current_len_left) != 1) {
                 fprintf(stderr, "%s: could not parse file size\n", progname);
@@ -1858,7 +1792,7 @@ static int GsTar(int argc, char** argv)
                         }
                     }
                 } else {
-                    pg_log(PG_WARNING, "unrecognized link indicator \"%c\"\n", copybuf[FILE_TYPE]);
+                    pg_log(PG_WARNING, "unrecognized link indicator \"%c\"\n", copybuf[TAR_FILE_TYPE]);
                     return -1;
                 }
                 continue; /* directory or link handled */
@@ -1979,7 +1913,7 @@ static int GsBaseBackup(int argc, char** argv)
         }
     }
 
-    while ((c = getopt_long(argc, argv, "D:l:c:h:p:U:s:X:F:T:wWvPxz", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "D:l:c:h:p:U:s:X:F:T:Z:wWvPxz", long_options, &option_index)) != -1) {
         switch (c) {
             case 'D': {
                 GS_FREE(basedir);
