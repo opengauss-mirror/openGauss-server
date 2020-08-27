@@ -216,6 +216,17 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
     }
 
     knl_sess_control* ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
+    knl_session_context* sess = ctrl->sess;
+
+    /* check permission */
+    if (!superuser()) {
+        if (sess->proc_cxt.MyRoleId != GetUserId()) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    (errmsg("must be system admin or have the same role to terminate other backend"))));
+        }
+    }
+
     volatile sig_atomic_t* plock = &ctrl->lock;
     sig_atomic_t val;
     do {
@@ -223,13 +234,18 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
             /*  perform an atomic compare and swap. */
             val = __sync_val_compare_and_swap(plock, 0, 1);
             if (val == 0) {
-                if (ctrl->sess != NULL) {
-                    if (ctrl->sess->status == KNL_SESS_ATTACH) {
-                        status = gs_signal_send(ctrl->sess->attachPid, signal);
-                    } else if (ctrl->sess->status == KNL_SESS_DETACH) {
+                if (sess != NULL) {
+                    if (sess->status == KNL_SESS_ATTACH) {
+                    	t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_SESS_KEY;
+                    	t_thrd.sig_cxt.session_id = sess->session_id;
+                        status = gs_signal_send(sess->attachPid, signal);
+                        t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_NONE;
+                        t_thrd.sig_cxt.session_id = 0;
+                    } else if (sess->status == KNL_SESS_DETACH) {
                         switch (signal) {
                             case SIGTERM:
-                                ctrl->sess->status = KNL_SESS_CLOSE;
+                                sess->status = KNL_SESS_CLOSE;
+                                CloseClientSocket(sess, false);
                                 status = 0;
                                 break;
                             default:
@@ -503,4 +519,16 @@ knl_session_context* ThreadPoolSessControl::GetSessionByIdx(int idx)
     } else {
         return NULL;
     }
+}
+
+int ThreadPoolSessControl::FindCtrlIdxBySessId(uint64 id)
+{
+    int cidx = 0;
+    for (cidx = 0; cidx < m_maxActiveSessionCount; cidx++) {
+        if (m_base[cidx].sess != NULL && m_base[cidx].sess->session_id == id) {
+            break;
+        }
+    }
+
+    return cidx + m_maxReserveSessionCount;
 }

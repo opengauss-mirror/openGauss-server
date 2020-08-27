@@ -309,6 +309,7 @@ class DefaultValue():
     LCCTL_LOG_FILE = "gs_lcctl.log"
     RESIZE_LOG_FILE = "gs_resize.log"
     HOTPATCH_LOG_FILE = "gs_hotpatch.log"
+    EXPANSION_LOG_FILE = "gs_expansion.log"
     # hotpatch action
     HOTPATCH_ACTION_LIST = ["load", "unload", "active", "deactive",
                             "info", "list"]

@@ -93,6 +93,8 @@ gs_ssh = ["-?", "--help", "-V", "--version", "-c:"]
 gs_checkos = ["-?", "--help", "-V", "--version", "-h:", "-f:", "-o:",
               "-i:", "--detail",
               "-l:", "-X:"]
+gs_expansion = ["-?", "--help", "-V", "--version", "-U:", "-G:", "-L", 
+            "-X:", "-h:", "--sep-env-file="]
 
 # gs_om child branch
 gs_om_start = ["-t:", "-?", "--help", "-V", "--version", "-h:", "-I:",
@@ -153,7 +155,8 @@ ParameterDict = {"preinstall": gs_preinstall,
                  "postuninstall": gs_postuninstall,
                  "view": gs_om_view,
                  "query": gs_om_query,
-                 "refreshconf": gs_om_refreshconf
+                 "refreshconf": gs_om_refreshconf,
+                 "expansion": gs_expansion
                  }
 
 # List of scripts with the -t parameter

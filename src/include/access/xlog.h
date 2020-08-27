@@ -94,7 +94,12 @@ typedef enum {
 } RecoveryTargetType;
 
 /* WAL levels */
-typedef enum WalLevel { WAL_LEVEL_MINIMAL = 0, WAL_LEVEL_ARCHIVE, WAL_LEVEL_HOT_STANDBY, WAL_LEVEL_LOGICAL } WalLevel;
+typedef enum WalLevel {
+    WAL_LEVEL_MINIMAL = 0,
+    WAL_LEVEL_ARCHIVE,
+    WAL_LEVEL_HOT_STANDBY,
+    WAL_LEVEL_LOGICAL
+} WalLevel;
 
 #define XLogArchivingActive() \
     (u_sess->attr.attr_common.XLogArchiveMode && g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_ARCHIVE)

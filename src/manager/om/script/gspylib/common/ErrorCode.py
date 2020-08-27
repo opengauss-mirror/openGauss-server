@@ -1092,6 +1092,24 @@ class ErrorCode():
         'GAUSS_53612': "[GAUSS-53612]: Can not find any catalog in database %s"
     }
 
+    ##########################################################################
+    # gs_expansion
+    # [GAUSS-537] : gs_expansion failed
+    ##########################################################################
+    GAUSS_357 = {
+        "GAUSS_35700": "[GAUSS-35700] Expansion standby node failed.",
+        "GAUSS_35701": "[GAUSS-35701] Empty parameter. The %s parameter is" 
+                       "missing in the command.",
+        "GAUSS_35702": "[GAUSS-35702] Unrecognized parameter, standby host "
+                       "backip %s is not in the "
+                       "XML configuration file",
+        "GAUSS_35703": "[GAUSS-35703] Check standby database Failed. The "
+                       "database on node is abnormal. \n"
+                       "node [%s], user [%s], dataNode [%s]. \n"
+                       "You can use command \"gs_ctl query -D %s\" for more "
+                       "detail."
+    }
+
 
 class OmError(BaseException):
     """

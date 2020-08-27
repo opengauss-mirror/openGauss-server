@@ -290,7 +290,8 @@ static char* get_string_by_sync_mode(bool syncmode);
 static void free_ctl();
 extern int GetLengthAndCheckReplConn(const char* ConnInfoList);
 extern BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint32 term);
-extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose);
+extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose,
+    const char format = 'p', const int compresslevel = 0);
 extern char* GetOptionValueFromFile(const char* fileName, const char* option);
 
 void check_input_for_security(char* input_env_value)
@@ -2268,7 +2269,7 @@ static void do_query(void)
 }
 
 static bool check_pid_exists(pgpid_t pid)
-{   
+{
     FILE* fp = NULL;
     char buf[1024] = {0};
     char command[128] = {0};

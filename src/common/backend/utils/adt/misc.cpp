@@ -238,15 +238,9 @@ Datum signal_backend(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(true);
 }
 
-/*
- * Signal to terminate a backend process.  This is allowed if you are superuser
- * or have the same role as the process being terminated.
- */
-Datum pg_terminate_backend(PG_FUNCTION_ARGS)
-{
-    ThreadId tid = PG_GETARG_INT64(0);
-    int r = 0;
 
+static int kill_backend(ThreadId tid)
+{
     /*
      * It is forbidden to kill backend in the online expansion to protect
      * the lock session from being interrupted by external applications.
@@ -256,18 +250,47 @@ Datum pg_terminate_backend(PG_FUNCTION_ARGS)
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("kill backend is prohibited during online expansion."))));
     }
 
-    r = pg_signal_backend(tid, SIGTERM);
+    int r = pg_signal_backend(tid, SIGTERM);
     if (r == SIGNAL_BACKEND_NOPERMISSION) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("must be system admin or have the same role to terminate other backend"))));
     }
-
-    if (t_thrd.proc && t_thrd.proc->workingVersionNum >= 92060) {
+    
+    if (t_thrd.proc != NULL) {
         uint64 query_id = get_query_id_beentry(tid);
         (void)gs_close_all_stream_by_debug_id(query_id);
     }
+
+    return r;
+}
+
+/*
+ * Signal to terminate a backend process.  This is allowed if you are superuser
+ * or have the same role as the process being terminated.
+ */
+Datum pg_terminate_backend(PG_FUNCTION_ARGS)
+{
+    ThreadId tid = PG_GETARG_INT64(0);
+    int r = kill_backend(tid);
     PG_RETURN_BOOL(r == SIGNAL_BACKEND_SUCCESS);
+}
+
+Datum pg_terminate_session(PG_FUNCTION_ARGS)
+{
+    ThreadId tid = PG_GETARG_INT64(0);
+    uint64 sid = PG_GETARG_INT64(1);
+    int r = 0;
+
+    if (tid == sid) {
+        r = kill_backend(tid);
+    } else {
+        ThreadPoolSessControl *sess_ctrl = g_threadPoolControler->GetSessionCtrl();
+        int ctrl_idx = sess_ctrl->FindCtrlIdxBySessId(sid);
+        r = sess_ctrl->SendSignal((int)ctrl_idx, SIGTERM);
+    }
+
+    PG_RETURN_BOOL(r == 0);
 }
 
 /*

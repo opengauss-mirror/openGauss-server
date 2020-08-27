@@ -215,6 +215,10 @@ static void gs_signal_send_mark(GsNode* local_node, GsSignalCheckType check_type
             }
             break;
         }
+        case SIGNAL_CHECK_SESS_KEY: {
+            local_node->sig_data.check.session_id = t_thrd.sig_cxt.session_id;
+            break;
+        }
         default: {
             break;
         }
@@ -666,6 +670,14 @@ static bool gs_signal_handle_check(const GsSndSignal* local_node)
                         errmsg("receive stop signal from queryid %lu, but current queryid is %lu.",
                             local_node->check.debug_query_id,
                             u_sess != NULL ? u_sess->debug_query_id : 0)));
+                return false;
+            }
+            break;
+        }
+        case SIGNAL_CHECK_SESS_KEY: {
+            if (u_sess != NULL && local_node->check.session_id == u_sess->session_id) {
+                return true;
+            } else {
                 return false;
             }
             break;
