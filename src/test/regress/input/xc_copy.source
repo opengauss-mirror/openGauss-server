@@ -65,8 +65,8 @@ copy xccopydef (id1, id2) from stdin (delimiter '|');
 \.
 
 copy xccopydef (id1, id2) from stdin (format 'csv');
-3 , \\\\x135
-, abcd
+4 , \\\\x135
+5 , abcd
 \.
 
 
