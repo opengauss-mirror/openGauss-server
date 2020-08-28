@@ -368,6 +368,28 @@ fetch from foo;
 
 abort;
 
+-- Test for prepared xacts
+create table prepared_xact_test(a int);
+start transaction;
+insert into prepared_xact_test values (1);
+prepare transaction 'pxact1';
+commit;
+select * from prepared_xact_test;
+select gid from pg_prepared_xacts;
+commit prepared 'pxact1';
+select * from prepared_xact_test;
+select * from pg_prepared_xacts;
+
+begin;
+insert into prepared_xact_test values (2);
+prepare transaction 'pxact2';
+select gid from pg_prepared_xacts;
+rollback prepared 'pxact2';
+select * from prepared_xact_test;
+select * from pg_prepared_xacts;
+
+drop table prepared_xact_test;
+
 -- Test for proper cleanup after a failure in a cursor portal
 -- that was created in an outer subtransaction
 CREATE FUNCTION invert(x float8) RETURNS float8 LANGUAGE plpgsql AS
