@@ -74,6 +74,7 @@ RedoLogBuffer* AsyncRedoLogHandler::CreateBuffer()
 
 void AsyncRedoLogHandler::DestroyBuffer(RedoLogBuffer* buffer)
 {
+    buffer->Reset();
     m_bufferPool.Free(buffer);
 }
 
@@ -131,6 +132,7 @@ bool AsyncRedoLogHandler::TrySwitchBuffers(int index)
 void AsyncRedoLogHandler::FreeBuffers(RedoLogBufferArray& bufferArray)
 {
     for (uint32_t i = 0; i < bufferArray.Size(); i++) {
+        bufferArray[i]->Reset();
         m_bufferPool.Free(bufferArray[i]);
     }
 }

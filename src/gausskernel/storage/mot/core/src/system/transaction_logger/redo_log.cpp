@@ -56,6 +56,7 @@ bool RedoLog::Init()
         }
         if (m_redoBuffer == nullptr)
             return false;
+        ResetBuffer();
     }
     return true;
 }
