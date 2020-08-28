@@ -4619,6 +4619,7 @@ static IndexStmt* _readIndexStmt()
     READ_STRING_FIELD(accessMethod);
     READ_STRING_FIELD(tableSpace);
     READ_NODE_FIELD(indexParams);
+    READ_NODE_FIELD(indexIncludingParams);
     READ_NODE_FIELD(options);
     READ_NODE_FIELD(whereClause);
     READ_NODE_FIELD(excludeOpNames);

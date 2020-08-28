@@ -14,7 +14,7 @@ vacuum analyze test_gpi_more_invalid;
 start transaction;
 alter table test_gpi_more_invalid add partition p6 values less than (4001);
 update test_gpi_more_invalid set a = 3000 + a where a <= 100;
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 explain (costs off) select * from test_gpi_more_invalid where a >= 3000;
 --100 rows
 select count(*) from test_gpi_more_invalid where a > 3000;
@@ -39,10 +39,10 @@ select count(*) from test_gpi_more_invalid where a <= 100 and b = 100000;
 -- 0 rows
 select count(*) from test_gpi_more_invalid where a >= 3000;
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 vacuum analyze test_gpi_more_invalid;
 -- test_gpi_more_invalid have wait_clean_gpi=n
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 
 explain (costs off) select count(*) from test_gpi_more_invalid where a <= 100;
 explain (costs off) select count(*) from test_gpi_more_invalid where a >= 4000;
@@ -72,7 +72,7 @@ update test_gpi_more_invalid set b = 1001 where c = 200;
 commit;
 
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 
 set enable_seqscan = off;
 -- rows 100
@@ -121,17 +121,17 @@ select * from test_gpi_more_invalid where b = 300000 and c = 700 for update;
 update test_gpi_more_invalid set a = a + 1000 where a > 1000 or a < 500;
 select count(*) from test_gpi_more_invalid where c = 100 and b = 2000;
 -- test_gpi_more_invalid/p5 have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 abort;
 
 --failed
 vacuum full pg_partition;
 
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 vacuum analyze test_gpi_more_invalid;
 -- test_gpi_more_invalid have wait_clean_gpi=n
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 
 -- success
 vacuum full pg_partition;
@@ -159,14 +159,14 @@ commit;
 -- all global index unusuable 
 select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 
 vacuum full test_gpi_more_invalid;
 
 -- all global index unusuable
 select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 
 alter index local_index_gpi_more_invalid_a_b unusable;
 
@@ -200,12 +200,12 @@ vacuum interval_normal_date;
 start transaction;
 insert into interval_normal_date select '2020-6-02', r,r  from generate_series(0,500) as r;
 explain (costs off) select count(*) from interval_normal_date where b <= 500;
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 alter table interval_normal_date drop partition sys_p2;
 commit;
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 vacuum  analyze interval_normal_date;
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 
 drop table if exists interval_partition_table_vacuum;
 create table interval_partition_table_vacuum
@@ -232,7 +232,7 @@ vacuum interval_partition_table_vacuum;
 vacuum analyze interval_partition_table_vacuum;
 \parallel off
 
-set enable_bitmascan = off;
+set enable_bitmapscan = off;
 explain (costs off) select count(*) from interval_partition_table_vacuum where c1 = 1;
 -- 11293 rows
 select count(*) from interval_partition_table_vacuum where c1 = 1;
@@ -242,7 +242,7 @@ select true from (select count(*) as count from pg_partition a, pg_class b where
 vacuum analyze interval_partition_table_vacuum;
 -- 0 rows
 select count(*) from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_partition_table_vacuum' and a.reloptions[3] like '%wait_clean_gpi=y%';
-reset enable_bitmascan;
+reset enable_bitmapscan;
 
 -- clean table
 drop table interval_partition_table_vacuum;

@@ -220,6 +220,10 @@ SELECT * FROM gpi_bitmap_table2 WHERE c1 = 10000 OR c2 = 30000;
 (2 rows)
 
 DROP TABLE idx1_gpi_bitmap_table1;
+ERROR:  "idx1_gpi_bitmap_table1" is not a table
+HINT:  Use DROP INDEX to remove an global partition index.
 DROP TABLE idx1_gpi_bitmap_table2;
+ERROR:  "idx1_gpi_bitmap_table2" is not a table
+HINT:  Use DROP INDEX to remove an global partition index.
 SET enable_seqscan=on;
 SET enable_indexscan=on;

@@ -456,9 +456,6 @@ void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup)
     OffsetNumber last_off;
     Size pgspc;
     Size itupsz;
-    BTPageOpaqueInternal pageop;
-    int indnatts = IndexRelationGetNumberOfAttributes(wstate->index);
-    int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(wstate->index);
 
     /*
      * This is a handy place to check for cancel interrupts during the btree
@@ -538,6 +535,8 @@ void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup)
         *hii = *ii;
         ItemIdSetUnused(ii); /* redundant */
         ((PageHeader)opage)->pd_lower -= sizeof(ItemIdData);
+        int indnatts = IndexRelationGetNumberOfAttributes(wstate->index);
+        int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(wstate->index);
 
         if (indnkeyatts != indnatts && P_ISLEAF(opageop)) {
             /*
@@ -612,7 +611,6 @@ void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup)
         last_off = P_FIRSTKEY;
     }
 
-    pageop = (BTPageOpaqueInternal) PageGetSpecialPointer(npage);
     /*
      * If the new item is the first for its page, stash a copy for later. Note
      * this will only happen for the first item on a level; on later pages,

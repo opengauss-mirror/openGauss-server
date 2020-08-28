@@ -85,15 +85,17 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
         conkeyArray = NULL;
     }
 
+    // index attrs have key attrs and include attrs, the num of include attrs maybe 0
     if (constraintNTotalKeys > constraintNKeys) {
-        Datum* conincluding;
         int j = 0;
         int constraintNIncludedKeys = constraintNTotalKeys - constraintNKeys;
 
-        conincluding = (Datum*)palloc(constraintNIncludedKeys * sizeof(Datum));
-        for (i = constraintNKeys; i < constraintNTotalKeys; i++)
+        Datum* conincluding = (Datum*)palloc(constraintNIncludedKeys * sizeof(Datum));
+        for (i = constraintNKeys; i < constraintNTotalKeys; i++) {
             conincluding[j++] = Int16GetDatum(constraintKey[i]);
+        }
         conincludingArray = construct_array(conincluding, constraintNIncludedKeys, INT2OID, 2, true, 's');
+        pfree_ext(conincluding);
     } else {
         conincludingArray = NULL;
     }
@@ -167,10 +169,11 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
     else
         nulls[Anum_pg_constraint_conkey - 1] = true;
 
-    if (conincludingArray)
+    if (conincludingArray) {
         values[Anum_pg_constraint_conincluding - 1] = PointerGetDatum(conincludingArray);
-    else
+    } else {
         nulls[Anum_pg_constraint_conincluding - 1] = true;
+    }
 
     if (confkeyArray != NULL)
         values[Anum_pg_constraint_confkey - 1] = PointerGetDatum(confkeyArray);

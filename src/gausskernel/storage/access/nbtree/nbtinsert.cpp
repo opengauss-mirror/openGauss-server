@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * nbtinsert.cpp
- *	  Item insertion in Lehman and Yao btrees for Postgres.
+ *    Item insertion in Lehman and Yao btrees for Postgres.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -235,7 +235,6 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
         ItemId curitemid;
         IndexTuple curitup;
         BlockNumber nblkno;
-        bool isNull;
 
         /*
          * make sure the offset points to an actual item before trying to
@@ -273,8 +272,9 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                 /* okay, we gotta fetch the heap tuple ... */
                 curitup = (IndexTuple)PageGetItem(page, curitemid);
                 htid = curitup->t_tid;
-                Oid curPartOid;
+                Oid curPartOid = InvalidOid;
                 Datum datum;
+                bool isNull = false;
                 if (RelationIsGlobalIndex(rel)) {
                     datum =
                         index_getattr(curitup, IndexRelationGetNumberOfAttributes(rel), RelationGetDescr(rel), &isNull);
@@ -305,12 +305,10 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                  * abnormal condition.
                  */
                 if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0) {
-                    if (RelationIsGlobalIndex(rel)) {
-                        if (curPartOid != heapRel->rd_id) {
-                            ereport(ERROR,
-                                (errcode(ERRCODE_INDEX_CORRUPTED),
-                                    errmsg("failed to re-find tuple within GPI \"%s\"", RelationGetRelationName(rel))));
-                        }
+                    if (RelationIsGlobalIndex(rel) && curPartOid != heapRel->rd_id) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("failed to re-find tuple within GPI \"%s\"", RelationGetRelationName(rel))));
                     }
                     found = true;
                 } else if (heap_hot_search(&htid, tarRel, &SnapshotDirty, &all_dead)) {
@@ -414,7 +412,6 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                      * killed.
                      */
                     /* okay, we gotta fetch the heap tuple ... */
-                    curitup = (IndexTuple)PageGetItem(page, curitemid);
                     ItemIdMarkDead(curitemid);
                     opaque->btpo_flags |= BTP_HAS_GARBAGE;
 
@@ -2022,10 +2019,6 @@ static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int key
      * for regular non-truncated leaf tuples and P_HIKEY tuple on
      * rightmost leaf page.
      */
-    Assert((P_RIGHTMOST((BTPageOpaqueInternal)PageGetSpecialPointer(page)) || offnum != P_HIKEY)
-               ? BTreeTupleGetNAtts(itup, idxrel) == itupdesc->natts
-               : true);
-
     for (i = 1; i <= keysz; i++) {
         AttrNumber attno;
         Datum datum;

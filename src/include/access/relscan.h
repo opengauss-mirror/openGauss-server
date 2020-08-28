@@ -126,7 +126,7 @@ typedef struct IndexScanDescData {
     /* scan parameters */
     Relation heapRelation;   /* heap relation descriptor, or NULL */
     Relation indexRelation;  /* index relation descriptor */
-    GPIScanDesc xs_gpi_scan;  /* global partition index scan use information */
+    GPIScanDesc xs_gpi_scan; /* global partition index scan use information */
     Snapshot xs_snapshot;    /* snapshot to see */
     int numberOfKeys;        /* number of index qualifier conditions */
     int numberOfOrderBys;    /* number of ordering operators */

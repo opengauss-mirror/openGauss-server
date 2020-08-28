@@ -45,6 +45,7 @@
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
+#include "catalog/heap.h"
 #include "commands/comment.h"
 #include "commands/defrem.h"
 #include "commands/tablespace.h"
@@ -2225,6 +2226,7 @@ static char* pg_get_indexdef_worker(
     StringInfoData buf;
     char* str = NULL;
     char* sep = NULL;
+    int indnkeyatts;
 
     /*
      * Fetch the pg_index tuple by the Oid of the index
@@ -2237,6 +2239,7 @@ static char* pg_get_indexdef_worker(
 
     indrelid = idxrec->indrelid;
     Assert(indexrelid == idxrec->indexrelid);
+    indnkeyatts = GetIndexKeyAttsByTuple(NULL, ht_idx);
 
     /* Must get indcollation, indclass, and indoption the hard way */
     indcoll_datum = SysCacheGetAttr(INDEXRELID, ht_idx, Anum_pg_index_indcollation, &isnull);
@@ -2326,9 +2329,9 @@ static char* pg_get_indexdef_worker(
         /*
          * Ignore non-key attributes if told to.
          */
-        if (keyno >= idxrec->indnkeyatts)
+        if (keyno >= indnkeyatts) {
             break;
-
+        }
         if (!colno) {
             appendStringInfoString(&buf, sep);
         }
@@ -2370,7 +2373,7 @@ static char* pg_get_indexdef_worker(
         if (!attrs_only && (!colno || colno == keyno + 1)) {
             Oid indcoll;
 
-            if (keyno >= idxrec->indnkeyatts) {
+            if (keyno >= indnkeyatts) {
                 continue;
             }
 
@@ -2670,9 +2673,7 @@ static char* pg_get_constraintdef_worker(Oid constraint_id, bool full_command, i
             val = SysCacheGetAttr(CONSTROID, tup, Anum_pg_constraint_conincluding, &isnull);
             if (!isnull) {
                 appendStringInfoString(&buf, " INCLUDE (");
-
                 decompile_column_index_array(val, con_form->conrelid, &buf);
-
                 appendStringInfoChar(&buf, ')');
             }
 

@@ -28,7 +28,7 @@
 typedef struct IndexBuildResult {
     double heap_tuples;  /* # of tuples seen in parent table */
     double index_tuples; /* # of tuples inserted into index */
-    double* global_index_tuples;
+    double* all_part_tuples;
 } IndexBuildResult;
 
 /*

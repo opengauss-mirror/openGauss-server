@@ -146,4 +146,6 @@ extern bool* check_partkey_has_timestampwithzone(Relation partTableRel);
 
 extern Oid AddNewIntervalPartition(Relation rel, HeapTuple insertTuple);
 
+extern int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple);
+
 #endif   /* HEAP_H */

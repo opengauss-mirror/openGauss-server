@@ -177,9 +177,10 @@ Relation index_open(Oid relation_id, LOCKMODE lockmode, int2 bucket_id)
     Relation r;
 
     r = relation_open(relation_id, lockmode, bucket_id);
-    if (r->rd_rel->relkind != RELKIND_INDEX && r->rd_rel->relkind != RELKIND_GLOBAL_INDEX)
+    if (!RelationIsIndex(r)) {
         ereport(
             ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not an index", RelationGetRelationName(r))));
+    }
     return r;
 }
 
@@ -627,7 +628,6 @@ HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction)
                 } 
                 scan->heapRelation = scan->xs_gpi_scan->fakePartRelation;
             }
-
         } else {
             /*
              * We are resuming scan of a HOT chain after having returned an

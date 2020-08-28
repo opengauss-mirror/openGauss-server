@@ -1189,16 +1189,17 @@ Relation partitionGetRelation(Relation rel, Partition part)
     relation->rd_rel->relcudescidx = part->pd_part->relcudescidx;
     relation->rd_rel->reldeltarelid = part->pd_part->reldeltarelid;
     relation->rd_rel->reldeltaidx = part->pd_part->reldeltaidx;
-	relation->rd_bucketoid = rel->rd_bucketoid;
+    relation->rd_bucketoid = rel->rd_bucketoid;
     if (REALTION_BUCKETKEY_INITED(rel))
         relation->rd_bucketkey = rel->rd_bucketkey;
     else
         relation->rd_bucketkey = NULL;
     relation->rd_att = rel->rd_att;
-    relation->rd_partHeapOid =  part->pd_part->indextblid;
+    relation->rd_partHeapOid = part->pd_part->indextblid;
     relation->rd_index = rel->rd_index;
     relation->rd_indextuple = rel->rd_indextuple;
     relation->rd_am = rel->rd_am;
+    relation->rd_indnkeyatts = rel->rd_indnkeyatts;
 
     if (!OidIsValid(rel->rd_rel->relam)) {
         relation->rd_indexcxt = NULL;
@@ -1541,7 +1542,7 @@ static bool PartitionStatusIsLive(Oid partOid, Bitmapset** liveParts)
     return false;
 }
 
-/* Check one invisible partition whether enable clean, and save in Bitmapset enableCleanParts */
+/* Check one invisible partition whether enable clean */
 static bool InvisblePartEnableClean(HeapTuple partTuple, TupleDesc tupleDesc)
 {
     Datum partOptions;
@@ -1555,7 +1556,7 @@ static bool InvisblePartEnableClean(HeapTuple partTuple, TupleDesc tupleDesc)
     return false;
 }
 
-/* Just for lazy vacuum check one partition's status */
+/* Just for lazy vacuum get one partition's status */
 static PartStatus PartTupleStatusForVacuum(HeapTuple partTuple, Buffer buffer, TransactionId oldestXmin)
 {
     PartStatus partStatus = PART_METADATA_NOEXIST;
@@ -1671,7 +1672,7 @@ PartStatus PartitionGetMetadataStatus(Oid partOid, bool vacuumFlag)
     return PART_METADATA_NOEXIST;
 }
 
-/* Set reloptions walt_clean_gpi, Just for pg_partition's tuple */
+/* Set reloptions wait_clean_gpi, Just for pg_partition's tuple */
 Datum SetWaitCleanGpiRelOptions(Datum oldOptions, bool enable)
 {
     Datum newOptions;
@@ -1972,7 +1973,7 @@ void PartitionGetAllInvisibleParts(Oid parentOid, Bitmapset** invisibleParts)
 
 /*
  * Check whether contain a tuple in pg_partition, which includes
- * wait_clean_gpi=y in the reloPTIONS of the tuple
+ * wait_clean_gpi=y in the reloptions of the tuple
  *
  * Notes: this function is called only when vacuum full pg_partition
  */

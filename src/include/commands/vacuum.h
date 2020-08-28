@@ -386,10 +386,10 @@ extern int compute_attr_target(Form_pg_attribute attr);
 
 extern void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tuples,
     BlockNumber num_all_visible_pages, TransactionId frozenxid);
-extern void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, int* nindexes_global,
+extern void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, int* nindexesGlobal,
     Relation** Irel, Relation** indexrel, Partition** indexpart);
 extern void vac_close_part_indexes(
-    int nindexes, int nindexes_global, Relation* Irel, Relation* indexrel, Partition* indexpart, LOCKMODE lockmode);
+    int nindexes, int nindexesGlobal, Relation* Irel, Relation* indexrel, Partition* indexpart, LOCKMODE lockmode);
 extern void vac_update_pgclass_partitioned_table(Relation partitionRel, bool hasIndex, TransactionId newFrozenXid);
 
 extern void CStoreVacUpdateNormalRelStats(Oid relid, TransactionId frozenxid, Relation pgclassRel);

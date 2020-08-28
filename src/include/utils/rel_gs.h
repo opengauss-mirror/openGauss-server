@@ -586,10 +586,9 @@ static inline bool IsCompressedByCmprsInPgclass(const RelCompressType cmprInPgcl
 /* Partition get reloptions whether have wait_clean_gpi for parition */
 static inline bool PartitionEnableWaitCleanGpi(Partition partition)
 {
-    if (PointerIsValid(partition) && partition->rd_options != NULL) {
-        if (pg_strcasecmp(OptEnabledWaitCleanGpi, ParitionGetWaitCleanGpi(partition)) == 0) {
-            return true;
-        }
+    if (PointerIsValid(partition) && partition->rd_options != NULL &&
+        pg_strcasecmp(OptEnabledWaitCleanGpi, ParitionGetWaitCleanGpi(partition)) == 0) {
+        return true;
     }
 
     return false;
@@ -598,10 +597,9 @@ static inline bool PartitionEnableWaitCleanGpi(Partition partition)
 /* Relation get reloptions whether have wait_clean_gpi for relation */
 static inline bool RelationEnableWaitCleanGpi(Relation relation)
 {
-    if (PointerIsValid(relation) && relation->rd_options != NULL) {
-        if (pg_strcasecmp(OptEnabledWaitCleanGpi, RelationGetWaitCleanGpi(relation)) == 0) {
-            return true;
-        }
+    if (PointerIsValid(relation) && relation->rd_options != NULL &&
+        pg_strcasecmp(OptEnabledWaitCleanGpi, RelationGetWaitCleanGpi(relation)) == 0) {
+        return true;
     }
 
     return false;

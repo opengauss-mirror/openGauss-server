@@ -2970,8 +2970,8 @@ static void StoreRelCheck(
         is_validated,
         RelationGetRelid(rel), /* relation */
         attNos,                /* attrs in the constraint */
-        keycount, /* # key attrs in the constraint */
-        keycount, /* # total attrs in the constraint */
+        keycount,              /* # key attrs in the constraint */
+        keycount,              /* # total attrs in the constraint */
         InvalidOid,            /* not a domain constraint */
         InvalidOid,            /* no associated index */
         InvalidOid,            /* Foreign key fields */
@@ -5513,11 +5513,9 @@ void heap_truncate_one_part(Relation rel, Oid partOid)
             parentIndId = (((Form_pg_partition)GETSTRUCT(partIndexTuple)))->parentid;
             partIndId = HeapTupleGetOid(partIndexTuple);
             parentIndex = index_open(parentIndId, AccessShareLock);
-            if (!RelationIsGlobalIndex(parentIndex)) {
-                indexPart = partitionOpen(parentIndex, partIndId, AccessExclusiveLock);
-                reindex_partIndex(rel, p, parentIndex, indexPart);
-                partitionClose(parentIndex, indexPart, NoLock);
-            }
+            indexPart = partitionOpen(parentIndex, partIndId, AccessExclusiveLock);
+            reindex_partIndex(rel, p, parentIndex, indexPart);
+            partitionClose(parentIndex, indexPart, NoLock);
             index_close(parentIndex, NoLock);
         }
     }
@@ -5883,8 +5881,8 @@ List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
             true,                      /* Is Validated */
             RelationGetRelid(rel),     /* relation */
             attNums,                   /* attrs in the constraint */
-            colNum,                    /* # attrs in the constraint */
-            colNum,                    /* # attrs in the constraint */
+            colNum,                    /* # key attrs in the constraint */
+            colNum,                    /* total # attrs (include attrs and key attrs) in the constraint */
             InvalidOid,                /* not a domain constraint */
             InvalidOid,                /* no associated index */
             InvalidOid,                /* Foreign key fields */
@@ -6129,4 +6127,26 @@ static void LockSeqConstraints(Relation rel, List* Constraints)
     context.funcids = NIL;
 
     return;
+}
+
+/* Get index's indnkeyatts value with indexTuple */
+int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple)
+{
+    bool isnull = false;
+    Datum indkeyDatum;
+    TupleDesc tupleDesc = RelationIsValid(relation) ? RelationGetDescr(relation) : GetDefaultPgIndexDesc();
+    Form_pg_index index = (Form_pg_index)GETSTRUCT(indexTuple);
+
+    /*
+     * This scenario will only occur after the upgrade, This scenario means that
+     * the indnatts and Indnkeyatts of all current indexes are equal
+     */
+    if (heap_attisnull(indexTuple, Anum_pg_index_indnkeyatts, NULL)) {
+        return index->indnatts;
+    }
+
+    indkeyDatum = fastgetattr(indexTuple, Anum_pg_index_indnkeyatts, tupleDesc, &isnull);
+    Assert(!isnull);
+
+    return DatumGetInt16(indkeyDatum);
 }

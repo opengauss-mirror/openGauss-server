@@ -463,6 +463,7 @@ SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 (1 row)
 
 VACUUM full interval_partition_table_004;
+set enable_seqscan = off;
 explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
@@ -479,6 +480,7 @@ SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
  11293
 (1 row)
 
+reset enable_seqscan;
 --drop table and index
 drop index if exists ip_index_global;
 drop index if exists ip_index_local;

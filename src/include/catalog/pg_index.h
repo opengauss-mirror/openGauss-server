@@ -34,7 +34,6 @@ CATALOG(pg_index,2610) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
     Oid         indexrelid;      /* OID of the index */
     Oid         indrelid;        /* OID of the relation it indexes */
     int2        indnatts;        /* total number of columns in index */
-    int2        indnkeyatts;     /* number of key columns in index */
     bool        indisunique;     /* is this a unique index? */
     bool        indisprimary;    /* is this index for primary key? */
     bool        indisexclusion;  /* is this index for exclusion constraint? */
@@ -59,6 +58,7 @@ CATALOG(pg_index,2610) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
     pg_node_tree indpred;         /* expression tree for predicate, if a partial
                                     * index; else NULL */
     bool        indisreplident; /* is this index the identity for replication? */
+    int2        indnkeyatts;     /* number of key columns in index */
 #endif
 } FormData_pg_index;
 
@@ -77,23 +77,24 @@ typedef FormData_pg_index *Form_pg_index;
 #define Anum_pg_index_indexrelid          1
 #define Anum_pg_index_indrelid            2
 #define Anum_pg_index_indnatts            3
-#define Anum_pg_index_indnkeyatts         4
-#define Anum_pg_index_indisunique         5
-#define Anum_pg_index_indisprimary        6
-#define Anum_pg_index_indisexclusion      7
-#define Anum_pg_index_indimmediate        8
-#define Anum_pg_index_indisclustered      9
-#define Anum_pg_index_indisusable         10
-#define Anum_pg_index_indisvalid          11
-#define Anum_pg_index_indcheckxmin        12
-#define Anum_pg_index_indisready          13
-#define Anum_pg_index_indkey              14
-#define Anum_pg_index_indcollation        15
-#define Anum_pg_index_indclass            16
-#define Anum_pg_index_indoption           17
-#define Anum_pg_index_indexprs            18
-#define Anum_pg_index_indpred             19
-#define Anum_pg_index_indisreplident      20
+#define Anum_pg_index_indisunique         4
+#define Anum_pg_index_indisprimary        5
+#define Anum_pg_index_indisexclusion      6
+#define Anum_pg_index_indimmediate        7
+#define Anum_pg_index_indisclustered      8
+#define Anum_pg_index_indisusable         9
+#define Anum_pg_index_indisvalid          10
+#define Anum_pg_index_indcheckxmin        11
+#define Anum_pg_index_indisready          12
+#define Anum_pg_index_indkey              13
+#define Anum_pg_index_indcollation        14
+#define Anum_pg_index_indclass            15
+#define Anum_pg_index_indoption           16
+#define Anum_pg_index_indexprs            17
+#define Anum_pg_index_indpred             18
+#define Anum_pg_index_indisreplident      19
+#define Anum_pg_index_indnkeyatts         20
+
 /*
  * Index AMs that support ordered scans must support these two indoption
  * bits.  Otherwise, the content of the per-column indoption fields is

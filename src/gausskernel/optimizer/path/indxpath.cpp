@@ -971,7 +971,10 @@ static List* build_paths_for_OR(
         if (!index->amhasgetbitmap)
             continue;
 
-        /* Ignore global partition index if caller don't set use global part index flag */
+        /*
+         * Ignore global partition index if caller don't set use global part index flag
+         * Ignore local partition or normal index if caller set use global part index flag
+         */
         if (index->isGlobal != justUseGloalPartIndex) {
             continue;
         }
@@ -1415,11 +1418,11 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, 
     List* bestpaths = NIL;
     Cost bestcost = 0;
     int i;
-    int globalPartPaths = list_length(globalPartIndexPaths);
+    int gpinPaths = list_length(globalPartIndexPaths);
     PathClauseUsage** globalPathinfoarray;
 
     AssertEreport(npaths > 0, MOD_OPT, "Path number is incorrect");
-    if (npaths == 1 && globalPartPaths == 0)
+    if (npaths == 1 && gpinPaths == 0)
         return (Path*)linitial(paths); /* easy case */
 
     /*
@@ -1478,18 +1481,18 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, 
     pathinfoarray = GetPathClauseUsage(paths, clauselist, &npaths);
 
     /* Global part index path and local part index path use same clauselist */
-    globalPathinfoarray = GetPathClauseUsage(globalPartIndexPaths, clauselist, &globalPartPaths);
+    globalPathinfoarray = GetPathClauseUsage(globalPartIndexPaths, clauselist, &gpinPaths);
 
     /* If only one surviving path, we're done */
-    if (npaths == 1 && globalPartPaths == 0)
+    if (npaths == 1 && gpinPaths == 0)
         return pathinfoarray[0]->path;
 
     /* Sort the surviving paths by index access cost */
     qsort(pathinfoarray, (size_t)npaths, sizeof(PathClauseUsage*), path_usage_comparator);
 
     /* Sort the surviving paths by index access cost for global partition index paths */
-    if (globalPartPaths > 1) {
-        qsort(globalPathinfoarray, (size_t)globalPartPaths, sizeof(PathClauseUsage*), path_usage_comparator);
+    if (gpinPaths > 1) {
+        qsort(globalPathinfoarray, (size_t)gpinPaths, sizeof(PathClauseUsage*), path_usage_comparator);
     }
 
     /*
@@ -1516,9 +1519,9 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, 
          *
          * Notes: For global partition index, the start judgment point is 0.
          */
-        if (globalPartPaths > 0) {
+        if (gpinPaths > 0) {
             chooseInfo.startPath = 0;
-            ChooseBitmapAndWithMultiIndex(root, rel, &chooseInfo, globalPathinfoarray, globalPartPaths);
+            ChooseBitmapAndWithMultiIndex(root, rel, &chooseInfo, globalPathinfoarray, gpinPaths);
         }
 
         /* Keep the cheapest AND-group (or singleton) */

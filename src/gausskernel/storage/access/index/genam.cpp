@@ -23,6 +23,7 @@
 #include "access/relscan.h"
 #include "access/transam.h"
 #include "catalog/index.h"
+#include "catalog/heap.h"
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
 #include "utils/acl.h"
@@ -207,6 +208,7 @@ char* BuildIndexValueDescription(Relation index_relation, Datum* values, const b
 
     indrelid = idxrec->indrelid;
     Assert(indexrelid == idxrec->indexrelid);
+    int tuplekeyatts = GetIndexKeyAttsByTuple(NULL, ht_idx);
     /* Table-level SELECT is enough, if the user has it */
     aclresult = pg_class_aclcheck(indrelid, GetUserId(), ACL_SELECT);
     if (aclresult != ACLCHECK_OK) {
@@ -214,7 +216,7 @@ char* BuildIndexValueDescription(Relation index_relation, Datum* values, const b
          * No table-level access, so step through the columns in the
          * index and make sure the user has SELECT rights on all of them.
          */
-        for (keyno = 0; keyno < idxrec->indnkeyatts; keyno++) {
+        for (keyno = 0; keyno < tuplekeyatts; keyno++) {
             AttrNumber attnum = idxrec->indkey.values[keyno];
             aclresult = pg_attribute_aclcheck(indrelid, attnum, GetUserId(), ACL_SELECT);
             if (aclresult != ACLCHECK_OK) {
@@ -551,8 +553,7 @@ HeapTuple systable_getnext_back(SysScanDesc sysscan)
 static void GPIInitFakeRelTable(GPIScanDesc gpiScan, MemoryContext cxt)
 {
     HASHCTL ctl;
-    errno_t errorno;
-    errorno = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    errno_t errorno = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
     securec_check_c(errorno, "\0", "\0");
     ctl.keysize = sizeof(PartRelIdCacheKey);
     ctl.entrysize = sizeof(PartRelIdCacheEnt);

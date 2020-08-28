@@ -1258,8 +1258,9 @@ static void relation_build_tuple_desc(Relation relation, bool onlyLoadInitDefVal
     {
         int i;
 
-        for (i = 0; i < RelationGetNumberOfAttributes(relation); i++)
+        for (i = 0; i < RelationGetNumberOfAttributes(relation); i++) {
             Assert(relation->rd_att->attrs[i]->attcacheoff == -1);
+        }
     }
 #endif
 
@@ -1268,8 +1269,9 @@ static void relation_build_tuple_desc(Relation relation, bool onlyLoadInitDefVal
      * attribute: it must be zero.	This eliminates the need for special cases
      * for attnum=1 that used to exist in fastgetattr() and index_getattr().
      */
-    if (RelationGetNumberOfAttributes(relation) > 0)
+    if (RelationGetNumberOfAttributes(relation) > 0) {
         relation->rd_att->attrs[0]->attcacheoff = 0;
+    }
 
     /*
      * Set up constraint/default info
@@ -2005,6 +2007,27 @@ static void relation_init_physical_addr(Relation relation)
 }
 
 /*
+ * Initialize index key number for an index relation
+ */
+static void IndexRelationInitKeyNums(Relation relation)
+{
+    int indnkeyatts;
+    bool isnull = false;
+
+    if (heap_attisnull(relation->rd_indextuple, Anum_pg_index_indnkeyatts, NULL)) {
+        /* This scenario will only occur after the upgrade */
+        indnkeyatts = RelationGetNumberOfAttributes(relation);
+    } else {
+        Datum indkeyDatum =
+            heap_getattr(relation->rd_indextuple, Anum_pg_index_indnkeyatts, get_pg_index_descriptor(), &isnull);
+        Assert(!isnull);
+        indnkeyatts = DatumGetInt16(indkeyDatum);
+    }
+
+    relation->rd_indnkeyatts = indnkeyatts;
+}
+
+/*
  * Initialize index-access-method support data for an index relation
  */
 void RelationInitIndexAccessInfo(Relation relation)
@@ -2063,6 +2086,8 @@ void RelationInitIndexAccessInfo(Relation relation)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("relnatts disagrees with indnatts for index %u", RelationGetRelid(relation))));
+
+    IndexRelationInitKeyNums(relation);
     indnkeyatts = IndexRelationGetNumberOfKeyAttributes(relation);
     amsupport = aform->amsupport;
 
@@ -4525,6 +4550,17 @@ static TupleDesc get_pg_index_descriptor(void)
 }
 
 /*
+ * Replace with get_pg_index_descriptor
+ *
+ * Ban to release return value since it is a static value, and it is used
+ * frequently in relation operation
+ */
+TupleDesc GetDefaultPgIndexDesc(void)
+{
+    return get_pg_index_descriptor();
+}
+
+/*
  * Load any default attribute value definitions for the relation.
  */
 static void attr_default_fetch(Relation relation)
@@ -4662,7 +4698,6 @@ void SaveCopyList(Relation relation, List* result, int oidIndex)
 
 /*
  * RelationGetSpecificKindIndexList -- get a list of OIDs of global indexes on this relation or not
- * if isGlobal is true get list of global indexes ;if isGlobal is false get list of index without global
  */
 List* RelationGetSpecificKindIndexList(Relation relation, bool isGlobal)
 {
@@ -5827,6 +5862,7 @@ static bool load_relcache_init_file(bool shared)
             /* Fix up internal pointers in the tuple -- see heap_copytuple */
             rel->rd_indextuple->t_data = (HeapTupleHeader)((char*)rel->rd_indextuple + HEAPTUPLESIZE);
             rel->rd_index = (Form_pg_index)GETSTRUCT(rel->rd_indextuple);
+            IndexRelationInitKeyNums(rel);
 
             /* next, read the access method tuple form */
             if (fread(&len, 1, sizeof(len), fp) != sizeof(len))

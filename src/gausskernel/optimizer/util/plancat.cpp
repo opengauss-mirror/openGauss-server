@@ -258,7 +258,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             info->reltablespace = RelationGetForm(indexRelation)->reltablespace;
             info->rel = rel;
             info->ncolumns = ncolumns = index->indnatts;
-            info->nkeycolumns = nkeycolumns = index->indnkeyatts;
+            info->nkeycolumns = nkeycolumns = IndexRelationGetNumberOfKeyAttributes(indexRelation);
             info->indexkeys = (int*)palloc(sizeof(int) * ncolumns);
             info->indexcollations = (Oid*)palloc(sizeof(Oid) * nkeycolumns);
             info->opfamily = (Oid*)palloc(sizeof(Oid) * nkeycolumns);

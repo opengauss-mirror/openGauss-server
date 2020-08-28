@@ -431,11 +431,11 @@ typedef struct xl_btree_newroot {
                   ItemPointerGetOffsetNumberNoCheck(&(itup)->t_tid) & BT_N_KEYS_OFFSET_MASK)                    \
             : IndexRelationGetNumberOfAttributes(rel))
 
-#define BTreeTupleSetNAtts(itup, n)                                            \
-    do {                                                                       \
-        (itup)->t_info |= INDEX_ALT_TID_MASK;                                  \
-        Assert(((n) & BT_RESERVED_OFFSET_MASK) == 0);                            \
-        ItemPointerSetOffsetNumber(&(itup)->t_tid, (n) & BT_N_KEYS_OFFSET_MASK); \
+#define BTreeTupleSetNAtts(itup, n)                                                 \
+    do {                                                                            \
+        (itup)->t_info |= INDEX_ALT_TID_MASK;                                       \
+        Assert(((n) & BT_RESERVED_OFFSET_MASK) == 0);                               \
+        ItemPointerSetOffsetNumber(&(itup)->t_tid, (n) & BT_N_KEYS_OFFSET_MASK);    \
     } while (0)
 
 /*

@@ -97,9 +97,9 @@ Datum btbuild(PG_FUNCTION_ARGS)
     buildstate.spool = _bt_spoolinit(index, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
 
     /* do the heap scan */
-    double* globalIndexTuples = NULL;
+    double* allPartTuples = NULL;
     if (RelationIsGlobalIndex(index)) {
-        globalIndexTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, btbuildCallback, (void*)&buildstate);
+        allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, btbuildCallback, (void*)&buildstate);
     } else {
         reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, btbuildCallback, (void*)&buildstate);
     }
@@ -134,7 +134,7 @@ Datum btbuild(PG_FUNCTION_ARGS)
 
     result->heap_tuples = reltuples;
     result->index_tuples = buildstate.indtuples;
-    result->global_index_tuples = globalIndexTuples;
+    result->all_part_tuples = allPartTuples;
 
     PG_RETURN_POINTER(result);
 }
@@ -969,7 +969,7 @@ restart:
                 Oid partOid = InvalidOid;
                 if (RelationIsGlobalIndex(rel)) {
                     bool isnull = false;
-                    partOid = index_getattr(itup, partitionOidAttr, tupdesc, &isnull);
+                    partOid = DatumGetUInt32(index_getattr(itup, partitionOidAttr, tupdesc, &isnull));
                     Assert(!isnull);
                 }
                 if (callback(htup, callback_state, partOid)) {

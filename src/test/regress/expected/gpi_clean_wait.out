@@ -13,11 +13,11 @@ vacuum analyze test_gpi_more_invalid;
 start transaction;
 alter table test_gpi_more_invalid add partition p6 values less than (4001);
 update test_gpi_more_invalid set a = 3000 + a where a <= 100;
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
 -----------------------+----------+---------------------------------------------------
- test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
  p6                    | p        | {orientation=row,compression=no,wait_clean_gpi=y}
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
 (2 rows)
 
 explain (costs off) select * from test_gpi_more_invalid where a >= 3000;
@@ -78,7 +78,7 @@ select count(*) from test_gpi_more_invalid where a >= 3000;
 (1 row)
 
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
 -----------------------+----------+---------------------------------------------------
  test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
@@ -86,7 +86,7 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 
 vacuum analyze test_gpi_more_invalid;
 -- test_gpi_more_invalid have wait_clean_gpi=n
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
  relname | parttype | reloptions 
 ---------+----------+------------
 (0 rows)
@@ -187,7 +187,7 @@ ERROR:  duplicate key value violates unique constraint "global_index_gpi_more_in
 DETAIL:  Key (b)=(1001) already exists.
 commit;
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
 -----------------------+----------+---------------------------------------------------
  test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
@@ -340,11 +340,11 @@ select count(*) from test_gpi_more_invalid where c = 100 and b = 2000;
 (1 row)
 
 -- test_gpi_more_invalid/p5 have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
 -----------------------+----------+---------------------------------------------------
- test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
  p5                    | p        | {orientation=row,compression=no,wait_clean_gpi=y}
+ test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
 (2 rows)
 
 abort;
@@ -353,7 +353,7 @@ vacuum full pg_partition;
 WARNING:  system table pg_partition contain relation test_gpi_more_invalid have reloptions wait_clean_gpi=y,must run the vacuum (full) test_gpi_more_invalid first
 WARNING:  skipping "pg_partition" --- only table or database can vacuum it
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
 -----------------------+----------+---------------------------------------------------
  test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
@@ -361,7 +361,7 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 
 vacuum analyze test_gpi_more_invalid;
 -- test_gpi_more_invalid have wait_clean_gpi=n
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
  relname | parttype | reloptions 
 ---------+----------+------------
 (0 rows)
@@ -432,7 +432,7 @@ select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid 
 (5 rows)
 
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
 -----------------------+----------+---------------------------------------------------
  test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
@@ -451,7 +451,7 @@ select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid 
 (5 rows)
 
 -- test_gpi_more_invalid have wait_clean_gpi=y
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
 -----------------------+----------+---------------------------------------------------
  test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
@@ -515,7 +515,7 @@ explain (costs off) select count(*) from interval_normal_date where b <= 500;
                Index Cond: (b <= 500)
 (5 rows)
 
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
        relname        | parttype |                    reloptions                     
 ----------------------+----------+---------------------------------------------------
  interval_normal_date | r        | {orientation=row,compression=no,wait_clean_gpi=y}
@@ -524,14 +524,14 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 
 alter table interval_normal_date drop partition sys_p2;
 commit;
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
        relname        | parttype |                    reloptions                     
 ----------------------+----------+---------------------------------------------------
  interval_normal_date | r        | {orientation=row,compression=no,wait_clean_gpi=y}
 (1 row)
 
 vacuum  analyze interval_normal_date;
-select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by b.relname;
+select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'interval_normal_date' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
  relname | parttype | reloptions 
 ---------+----------+------------
 (0 rows)
@@ -560,8 +560,7 @@ vacuum 	interval_partition_table_vacuum;
 vacuum interval_partition_table_vacuum;
 vacuum analyze interval_partition_table_vacuum;
 \parallel off
-set enable_bitmascan = off;
-ERROR:  unrecognized configuration parameter "enable_bitmascan"
+set enable_bitmapscan = off;
 explain (costs off) select count(*) from interval_partition_table_vacuum where c1 = 1;
                                                   QUERY PLAN                                                   
 ---------------------------------------------------------------------------------------------------------------
@@ -592,8 +591,7 @@ select count(*) from pg_partition a, pg_class b where a.parentid = b.oid and b.r
      0
 (1 row)
 
-reset enable_bitmascan;
-ERROR:  unrecognized configuration parameter "enable_bitmascan"
+reset enable_bitmapscan;
 -- clean table
 drop table interval_partition_table_vacuum;
 drop table interval_normal_date;

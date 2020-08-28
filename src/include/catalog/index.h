@@ -56,7 +56,23 @@ typedef enum CheckWaitMode
 
 extern void index_check_primary_key(Relation heapRel, IndexInfo *indexInfo, bool is_alter_table);
 
-typedef struct {
+/*
+ * Parameter isPartitionedIndex indicates whether the index is a partition index.
+ * Parameter isGlobalPartitionedIndex indicates whether the index is a global partition index
+ * -------------------------------------------------------------------------
+ * | isPartitionedIndex | isGlobalPartitionedIndex |      Description       |
+ * -------------------------------------------------------------------------
+ * |        false       |           false          | normal relation index  |
+ * -------------------------------------------------------------------------
+ * |        true        |           false          | local partition index  |
+ * -------------------------------------------------------------------------
+ * |        false       |           true           | can not happen         |
+ * -------------------------------------------------------------------------
+ * |        true        |           true           | global partition index |
+ * -------------------------------------------------------------------------
+ */
+typedef struct
+{
     Oid  existingPSortOid;
     bool isPartitionedIndex;
     bool isGlobalPartitionedIndex;

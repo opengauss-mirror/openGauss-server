@@ -2382,7 +2382,7 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
     heap_close(rd, RowExclusiveLock);
 }
 
-void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, int* nindexes_global, Relation** Irel,
+void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, int* nindexesGlobal, Relation** Irel,
     Relation** indexrel, Partition** indexpart)
 {
     List* localIndOidList = NIL;
@@ -2458,7 +2458,7 @@ void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes
             index_close(indrel, lockmode);
         }
     }
-    *nindexes_global = j;
+    *nindexesGlobal = j;
     *nindexes += j;
 
     list_free(localIndOidList);
@@ -2466,13 +2466,13 @@ void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes
 }
 
 void vac_close_part_indexes(
-    int nindexes, int nindexes_global, Relation* Irel, Relation* indexrel, Partition* indexpart, LOCKMODE lockmode)
+    int nindexes, int nindexesGlobal, Relation* Irel, Relation* indexrel, Partition* indexpart, LOCKMODE lockmode)
 {
     if (Irel == NULL) {
         return;
     }
 
-    int nindexes_local = nindexes - nindexes_global;
+    int nindexes_local = nindexes - nindexesGlobal;
     while (nindexes--) {
         Relation rel = Irel[nindexes];
         if (nindexes < nindexes_local) {
@@ -3557,11 +3557,10 @@ static bool GPIIsInvisibleTuple(ItemPointer itemptr, void* state, Oid partOid)
     if (partStat == PART_METADATA_INVISIBLE) {
         pvacStates->invisMap = bms_add_member(pvacStates->invisMap, partOid);
         return true;
-    } else {
-        // visible include EXIST and NOEXIST
-        pvacStates->visMap = bms_add_member(pvacStates->visMap, partOid);
-        return false;
     }
+    // visible include EXIST and NOEXIST
+    pvacStates->visMap = bms_add_member(pvacStates->visMap, partOid);
+    return false;
 }
 
 // clean invisible tuples for global partition index

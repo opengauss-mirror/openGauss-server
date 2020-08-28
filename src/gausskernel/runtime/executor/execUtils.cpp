@@ -1483,7 +1483,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
         if (ispartitionedtable && !RelationIsGlobalIndex(indexRelation)) {
             /* The GPI index insertion is the same as that of a common table */
             if (RelationIsGlobalIndex(indexRelation)) {
-                if (indexRelation->rd_index->indisusable == false) {
+                if (!indexRelation->rd_index->indisusable) {
                     continue;
                 }
                 actualindex = indexRelation;
@@ -1507,7 +1507,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                     indexpartition,
                     RowExclusiveLock);
                 // skip unusable index
-                if (false == indexpartition->pd_part->indisusable) {
+                if (!indexpartition->pd_part->indisusable) {
                     continue;
                 }
             }

@@ -58,7 +58,6 @@ extern int RelationGetIndexNum(Relation relation);
 extern Oid RelationGetOidIndex(Relation relation);
 extern Oid RelationGetReplicaIndex(Relation relation);
 extern List* RelationGetIndexExpressions(Relation relation);
-extern List* RelationGetIndexExpressions(Relation relation);
 extern List* RelationGetDummyIndexExpressions(Relation relation);
 extern List* RelationGetIndexPredicate(Relation relation);
 
@@ -132,6 +131,7 @@ extern void RelationCacheInitFileRemove(void);
 
 extern TupleDesc BuildHardcodedDescriptor(int natts, const FormData_pg_attribute* attrs, bool hasoids);
 extern TupleDesc GetDefaultPgClassDesc(void);
+extern TupleDesc GetDefaultPgIndexDesc(void);
 
 extern bool CheckRelationInRedistribution(Oid rel_oid);
 

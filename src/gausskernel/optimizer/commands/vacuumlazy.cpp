@@ -166,7 +166,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
     LVRelStats* vacrelstats = NULL;
     Relation* Irel = NULL;
     int nindexes;
-    int nindexes_global;
+    int nindexesGlobal;
     PGRUsage ru0;
     TimestampTz starttime = 0;
     long secs;
@@ -385,7 +385,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
 
     /* Open all indexes of the relation */
     if (RelationIsPartition(onerel)) {
-        vac_open_part_indexes(vacstmt, RowExclusiveLock, &nindexes, &nindexes_global, &Irel, &indexrel, &indexpart);
+        vac_open_part_indexes(vacstmt, RowExclusiveLock, &nindexes, &nindexesGlobal, &Irel, &indexrel, &indexpart);
     } else {
         vac_open_indexes(onerel, RowExclusiveLock, &nindexes, &Irel);
     }
@@ -449,7 +449,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
             vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex, new_frozen_xid);
 
         // update stats of local partition indexes
-        for (int idx = 0; idx < nindexes - nindexes_global; idx++) {
+        for (int idx = 0; idx < nindexes - nindexesGlobal; idx++) {
             if (vacrelstats->idx_estimated[idx]) {
                 continue;
             }
@@ -464,9 +464,9 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         }
 
         // update stats of global partition indexes
-        Assert((nindexes - nindexes_global) >= 0);
+        Assert((nindexes - nindexesGlobal) >= 0);
         Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
-        for (int idx = nindexes - nindexes_global; idx < nindexes; idx++) {
+        for (int idx = nindexes - nindexesGlobal; idx < nindexes; idx++) {
             if (vacrelstats->idx_estimated[idx]) {
                 continue;
             }
@@ -504,7 +504,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
 
     /* Done with indexes */
     if (RelationIsPartition(onerel)) {
-        vac_close_part_indexes(nindexes, nindexes_global, Irel, indexrel, indexpart, NoLock);
+        vac_close_part_indexes(nindexes, nindexesGlobal, Irel, indexrel, indexpart, NoLock);
     } else {
         vac_close_indexes(nindexes, Irel, NoLock);
     }

@@ -3042,7 +3042,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
         gettext_noop("view"),
         gettext_noop("materialized view"),
         gettext_noop("index"),
-        gettext_noop("index"),
+        gettext_noop("global partition index"),
         gettext_noop("sequence"),
         gettext_noop("special"),
         gettext_noop("foreign table"),

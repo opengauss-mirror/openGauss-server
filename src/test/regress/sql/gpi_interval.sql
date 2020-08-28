@@ -272,8 +272,10 @@ ANALYZE interval_partition_table_004;
 explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 VACUUM full interval_partition_table_004;
+set enable_seqscan = off;
 explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
 SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+reset enable_seqscan;
 
 --drop table and index
 drop index if exists ip_index_global;

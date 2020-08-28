@@ -189,10 +189,9 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
                     /* If the current partition is invalid, the next page is directly processed */
                     tbmres = NULL;
                     continue;
-                } else {
-                    scan->rs_rd = node->gpi_scan->fakePartRelation;
-                    scan->rs_nblocks = RelationGetNumberOfBlocks(scan->rs_rd);
                 }
+                scan->rs_rd = node->gpi_scan->fakePartRelation;
+                scan->rs_nblocks = RelationGetNumberOfBlocks(scan->rs_rd);
             }
 
 #ifdef USE_PREFETCH

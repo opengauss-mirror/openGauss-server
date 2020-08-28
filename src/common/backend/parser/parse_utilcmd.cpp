@@ -1996,6 +1996,7 @@ static IndexStmt* generateClonedIndexStmt(
     Datum datum;
     bool isnull = false;
     bool isResize = false;
+    int indnkeyatts;
 
     /*
      * Fetch pg_class tuple of source index.  We can't use the copy in the
@@ -2011,6 +2012,7 @@ static IndexStmt* generateClonedIndexStmt(
     htIdx = source_idx->rd_indextuple;
     idxrec = (Form_pg_index)GETSTRUCT(htIdx);
     indrelid = idxrec->indrelid;
+    indnkeyatts = IndexRelationGetNumberOfKeyAttributes(source_idx);
 
     /* Fetch pg_am tuple for source index from relcache entry */
     amrec = source_idx->rd_am;
@@ -2152,7 +2154,7 @@ static IndexStmt* generateClonedIndexStmt(
     index->indexIncludingParams = NIL;
 
     indexprItem = list_head(indexprs);
-    for (keyno = 0; keyno < idxrec->indnkeyatts; keyno++) {
+    for (keyno = 0; keyno < indnkeyatts; keyno++) {
         IndexElem* iparam = NULL;
         AttrNumber attnum = idxrec->indkey.values[keyno];
         uint16 opt = (uint16)source_idx->rd_indoption[keyno];
@@ -2242,7 +2244,7 @@ static IndexStmt* generateClonedIndexStmt(
     }
 
     /* Handle included columns separately */
-    if (idxrec->indnkeyatts != idxrec->indnatts) {
+    if (indnkeyatts != idxrec->indnatts) {
         /* Only global-partition-index would satisfy this condition in the current code */
         index->isGlobal = true;
     }
@@ -2678,6 +2680,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
         Datum indclassDatum;
         bool isnull = true;
         int i;
+        int indnkeyatts;
 
         /* Grammar should not allow this with explicit column list */
         AssertEreport(constraint->keys == NIL, MOD_OPT, "");
@@ -2703,6 +2706,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
         /* Open the index (this will throw an error if it is not an index) */
         indexRel = index_open(indexOid, AccessShareLock);
         indexForm = indexRel->rd_index;
+        indnkeyatts = IndexRelationGetNumberOfKeyAttributes(indexRel);
 
         /* check the conditons for this function,
          * and verify the index is usable
@@ -2733,7 +2737,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
                                   RELATION_HAS_BUCKET(heapRel));
             attname = pstrdup(NameStr(attform->attname));
 
-            if (i < indexForm->indnkeyatts) {
+            if (i < indnkeyatts) {
                 /*
                  * Insist on default opclass and sort options.  While the
                  * index would still work as a constraint with non-default
@@ -2948,11 +2952,11 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
 
                     rel = heap_openrv(inh, AccessShareLock);
                     /* check user requested inheritance from valid relkind */
-                    if (rel->rd_rel->relkind != RELKIND_RELATION && rel->rd_rel->relkind != RELKIND_FOREIGN_TABLE &&
-                        rel->rd_rel->relkind != PARTTYPE_PARTITIONED_RELATION)
+                    if (rel->rd_rel->relkind != RELKIND_RELATION && rel->rd_rel->relkind != RELKIND_FOREIGN_TABLE) {
                         ereport(ERROR,
                             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                                 errmsg("inherited relation \"%s\" is not a table or foreign table", inh->relname)));
+                    }
                     for (count = 0; count < rel->rd_att->natts; count++) {
                         Form_pg_attribute inhattr = TupleDescAttr(rel->rd_att, count);
                         char* inhname = NameStr(inhattr->attname);

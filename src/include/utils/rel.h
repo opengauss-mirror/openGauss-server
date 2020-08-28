@@ -159,6 +159,7 @@ typedef struct RelationData {
     /* use "struct" here to avoid needing to include htup.h: */
     struct HeapTupleData* rd_indextuple; /* all of pg_index tuple */
     Form_pg_am rd_am;                    /* pg_am tuple for index's AM */
+    int rd_indnkeyatts;     /* index relation's indexkey nums */
 
     /*
      * index access support info (used only for an index relation)
@@ -404,7 +405,8 @@ typedef struct StdRdOptions {
  * IndexRelationGetNumberOfKeyAttributes
  *		Returns the number of key attributes in an index.
  */
-#define IndexRelationGetNumberOfKeyAttributes(relation) ((relation)->rd_index->indnkeyatts)
+#define IndexRelationGetNumberOfKeyAttributes(relation) \
+    (AssertMacro((relation)->rd_indnkeyatts != 0), ((relation)->rd_indnkeyatts))
 
 /*
  * RelationGetDescr

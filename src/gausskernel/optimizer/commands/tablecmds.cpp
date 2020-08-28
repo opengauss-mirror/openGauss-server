@@ -2797,14 +2797,13 @@ static void RangeVarCallbackForDropRelation(
         return; /* concurrently dropped, so nothing to do */
     classform = (Form_pg_class)GETSTRUCT(tuple);
 
-    char expected_relkind = relkind;
+    char expected_relkind = classform->relkind;
     if (classform->relkind == RELKIND_GLOBAL_INDEX) {
-        expected_relkind = RELKIND_GLOBAL_INDEX;
+        expected_relkind = RELKIND_INDEX;
     }
-    if ((classform->relkind != expected_relkind) &&
-        !(u_sess->attr.attr_common.IsInplaceUpgrade &&
-        expected_relkind == RELKIND_RELATION &&
-        classform->relkind == RELKIND_TOASTVALUE)) {
+
+    if ((expected_relkind != relkind) && !(u_sess->attr.attr_common.IsInplaceUpgrade &&
+        relkind == RELKIND_RELATION && expected_relkind == RELKIND_TOASTVALUE)) {
         DropErrorMsgWrongType(rel->relname, classform->relkind, relkind);
     }
 
@@ -8150,6 +8149,7 @@ static void ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmo
         HeapTuple indexTuple;
         Form_pg_index indexStruct;
         int i;
+        int indnkeyatts;
 
         indexTuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexoid));
         if (!HeapTupleIsValid(indexTuple)) {
@@ -8157,6 +8157,7 @@ static void ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmo
                 ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for index %u", indexoid)));
         }
         indexStruct = (Form_pg_index)GETSTRUCT(indexTuple);
+        indnkeyatts = GetIndexKeyAttsByTuple(NULL, indexTuple);
 
         /* If the index is not a primary key, skip the check */
         if (indexStruct->indisprimary) {
@@ -8164,7 +8165,7 @@ static void ATExecDropNotNull(Relation rel, const char* colName, LOCKMODE lockmo
              * Loop over each attribute in the primary key and see if it
              * matches the to-be-altered attribute
              */
-            for (i = 0; i < indexStruct->indnkeyatts; i++) {
+            for (i = 0; i < indnkeyatts; i++) {
                 if (indexStruct->indkey.values[i] == attnum)
                     ereport(ERROR,
                         (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
@@ -9833,6 +9834,7 @@ static int transformFkeyGetPrimaryKey(
     Datum indclassDatum;
     bool isnull = false;
     oidvector* indclass = NULL;
+    int indnkeyatts = 0;
     int i;
 
     /*
@@ -9854,6 +9856,7 @@ static int transformFkeyGetPrimaryKey(
         }
 
         indexStruct = (Form_pg_index)GETSTRUCT(indexTuple);
+        indnkeyatts = GetIndexKeyAttsByTuple(NULL, indexTuple);
         if (indexStruct->indisprimary && IndexIsValid(indexStruct)) {
             /*
              * Refuse to use a deferrable primary key.	This is per SQL spec,
@@ -9892,7 +9895,7 @@ static int transformFkeyGetPrimaryKey(
      * assume a primary key cannot have expressional elements)
      */
     *attnamelist = NIL;
-    for (i = 0; i < indexStruct->indnkeyatts; i++) {
+    for (i = 0; i < indnkeyatts; i++) {
         int pkattno = indexStruct->indkey.values[i];
 
         attnums[i] = pkattno;
@@ -9932,6 +9935,7 @@ static Oid transformFkeyCheckAttrs(Relation pkrel, int numattrs, int16* attnums,
     foreach (indexoidscan, indexoidlist) {
         HeapTuple indexTuple;
         Form_pg_index indexStruct;
+        int indnkeyatts;
         int i, j;
 
         indexoid = lfirst_oid(indexoidscan);
@@ -9941,13 +9945,14 @@ static Oid transformFkeyCheckAttrs(Relation pkrel, int numattrs, int16* attnums,
                 ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for index %u", indexoid)));
         }
         indexStruct = (Form_pg_index)GETSTRUCT(indexTuple);
+        indnkeyatts = GetIndexKeyAttsByTuple(NULL, indexTuple);
 
         /*
          * Must have the right number of columns; must be unique and not a
          * partial index; forget it if there are any expressions, too. Invalid
          * indexes are out as well.
          */
-        if (indexStruct->indnkeyatts == numattrs && indexStruct->indisunique && IndexIsValid(indexStruct) &&
+        if (indnkeyatts == numattrs && indexStruct->indisunique && IndexIsValid(indexStruct) &&
             heap_attisnull(indexTuple, Anum_pg_index_indpred, NULL) &&
             heap_attisnull(indexTuple, Anum_pg_index_indexprs, NULL)) {
             /* Must get indclass the hard way */
