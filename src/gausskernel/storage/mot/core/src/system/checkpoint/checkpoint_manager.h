@@ -357,7 +357,7 @@ private:
 
     inline bool IsAutoCompletePhase() const
     {
-        if (m_phase == PREPARE || m_phase == RESOLVE)
+        if (m_phase == PREPARE)
             return true;
         else
             return false;

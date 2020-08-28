@@ -462,6 +462,17 @@ public:
         m_failedCommitPrepared = value;
     }
 
+    /**
+     * @brief Sets or clears the validate-no-wait flag in OccTransactionManager.
+     * @detail Determines whether to call Access::lock() or
+     * Access::try_lock() on each access item in the write set.
+     * @param b The new validate-no-wait flag state.
+     */
+    void SetValidationNoWait(bool b)
+    {
+        m_occManager.SetValidationNoWait(b);
+    }
+
 private:
     static constexpr uint32_t SESSION_ID_BITS = 32;
 
@@ -469,7 +480,7 @@ private:
      * @brief Apply all transactional DDL changes. DDL changes are not handled
      * by occ.
      */
-    void WriteDDLChanges();
+    void CleanDDLChanges();
 
     /**
      * @brief Reclaims all resources associated with the transaction and

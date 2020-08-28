@@ -223,7 +223,8 @@ public:
      * @param index The index to use.
      * @return void.
      */
-    void RemoveSecondaryIndexFromMetaData(MOT::Index* index) {
+    void RemoveSecondaryIndexFromMetaData(MOT::Index* index)
+    {
         if (!index->IsPrimaryKey()) {
             uint16_t rmIx = 0;
             for (uint16_t i = 1; i < m_numIndexes; i++) {
@@ -235,6 +236,7 @@ public:
 
             // prevent removing primary by mistake
             if (rmIx > 0) {
+                DecIndexColumnUsage(index);
                 m_numIndexes--;
                 for (uint16_t i = rmIx; i < m_numIndexes; i++) {
                     m_indexes[i] = m_indexes[i + 1];
@@ -251,8 +253,10 @@ public:
      * @param index The index to use.
      * @return void.
      */
-    void AddSecondaryIndexToMetaData(MOT::Index* index) {
+    void AddSecondaryIndexToMetaData(MOT::Index* index)
+    {
         if (!index->IsPrimaryKey()) {
+            IncIndexColumnUsage(index);
             m_secondaryIndexes[index->GetName()] = index;
             m_indexes[m_numIndexes] = index;
             ++m_numIndexes;
@@ -289,7 +293,9 @@ public:
     {
         m_rowPool->ClearFreeCache();
         for (int i = 0; i < m_numIndexes; i++) {
-            m_indexes[i]->ClearFreeCache();
+            if (m_indexes[i] != nullptr) {
+                m_indexes[i]->ClearFreeCache();
+            }
         }
     }
 

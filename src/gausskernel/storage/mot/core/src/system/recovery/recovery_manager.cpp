@@ -36,9 +36,6 @@
 namespace MOT {
 DECLARE_LOGGER(RecoveryManager, Recovery);
 
-constexpr uint32_t NUM_DELETE_THRESHOLD = 5000;
-constexpr uint32_t NUM_DELETE_MAX_INC = 500;
-
 bool RecoveryManager::Initialize()
 {
     // in a thread-pooled envelope the affinity could be disabled, so we use task affinity here
@@ -572,13 +569,6 @@ bool RecoveryManager::RecoverDbEnd()
         m_logStats->Print();
     }
 
-    if (m_numRedoOps != 0) {
-        ClearTableCache();
-        GcManager* gc = MOT_GET_CURRENT_SESSION_CONTEXT()->GetTxnManager()->GetGcSession();
-        if (gc != nullptr) {
-            gc->GcEndTxn();
-        }
-    }
     bool success = !m_errorSet;
     MOT_LOG_INFO("MOT recovery %s", success ? "completed" : "failed");
     return success;
@@ -787,18 +777,6 @@ RC RecoveryManager::RedoSegment(LogSegment* segment, uint64_t csn, uint64_t tran
             // update transactional state
             if (wasCommit) {
                 txnStarted = false;
-            }
-
-            GcManager* gc = MOTCurrTxn->GetGcSession();
-            if (m_numRedoOps == 0 && gc != nullptr) {
-                gc->GcStartTxn();
-            }
-            if (++m_numRedoOps > NUM_DELETE_THRESHOLD) {
-                ClearTableCache();
-                if (gc != nullptr) {
-                    gc->GcEndTxn();
-                }
-                m_numRedoOps = 0;
             }
         } else {
             operationData +=
@@ -1374,23 +1352,6 @@ bool RecoveryManager::IsRecoveryMemoryLimitReached(uint32_t numThreads)
         return true;
     } else {
         return false;
-    }
-}
-
-void RecoveryManager::ClearTableCache()
-{
-    auto it = m_tableDeletesStat.begin();
-    while (it != m_tableDeletesStat.end()) {
-        auto table = *it;
-        if (table.second > NUM_DELETE_MAX_INC) {
-            MOT_LOG_TRACE("RecoveryManager::ClearTableCache: Table = %s items = %lu\n",
-                table.first->GetTableName().c_str(),
-                table.second);
-            table.first->ClearRowCache();
-            it = m_tableDeletesStat.erase(it);
-        } else {
-            it++;
-        }
     }
 }
 }  // namespace MOT
