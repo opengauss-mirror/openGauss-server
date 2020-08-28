@@ -2079,6 +2079,14 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
      * callbacks will release the locks the transaction held.
      */
     if (isCommit) {
+        CommitSeqNo csn = SetXact2CommitInProgress(xid, 0);
+        if (XLogStandbyInfoActive()) {
+            XLogBeginInsert();
+            XLogRegisterData((char*)(&xid), sizeof(TransactionId));
+            XLogRegisterData((char*)(&csn), sizeof(CommitSeqNo));
+            XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_COMMITTING);
+        }
+        setCommitCsn(getNextCSN());
         pgxact->needToSyncXid = true;
         RecordTransactionCommitPrepared(xid,
             hdr->nsubxacts,
