@@ -37,20 +37,6 @@
 namespace MOT {
 DECLARE_LOGGER(ConfigManager, Configuration)
 
-// Initialization helper macro (for system calls)
-#define CHECK_SYS_INIT_STATUS(rc, syscall, format, ...)                                                           \
-    if (rc != 0) {                                                                                                \
-        MOT_REPORT_SYSTEM_PANIC_CODE(rc, syscall, "Configuration Manager Initialization", format, ##__VA_ARGS__); \
-        break;                                                                                                    \
-    }
-
-// Initialization helper macro (for sub-service initialization)
-#define CHECK_INIT_STATUS(result, format, ...)                                                               \
-    if (!result) {                                                                                           \
-        MOT_REPORT_PANIC(MOT_ERROR_INTERNAL, "Configuration Manager Initialization", format, ##__VA_ARGS__); \
-        break;                                                                                               \
-    }
-
 ConfigManager* ConfigManager::m_manager = nullptr;
 
 ConfigManager::ConfigManager() : m_configLoaderCount(0), m_listenerCount(0)
@@ -301,26 +287,22 @@ const ConfigTree* ConfigManager::GetConfigTree(const char* configName) const
 
 bool ConfigManager::Initialize(char** argv, int argc)
 {
-    bool result = false;
+    bool result = true;
 
     char* envvar = getenv("MOT_DEBUG_CFG_LOAD");
     if (envvar && (strcmp(envvar, "TRUE") == 0)) {
         SetLogComponentLogLevel("Configuration", LogLevel::LL_DEBUG);
     }
 
-    do {
-        // add command line configuration loader
-        if (argv != nullptr && argc != 0) {
-            result = AddCmdLineConfigLoader(argv, argc);
-            CHECK_INIT_STATUS(result, "Failed to create command line configuration loader");
+    // add command line configuration loader
+    if (argv != nullptr && argc != 0) {
+        result = AddCmdLineConfigLoader(argv, argc);
+        if (!result) {
+            MOT_REPORT_PANIC(MOT_ERROR_INTERNAL,
+                "Configuration Manager Initialization",
+                "Failed to create command line configuration loader");
         }
-
-        // register special listener (workaround until full integration of configuration module)
-        // must be first listener, other listeners rely on it to be updated with latest configuration
-        MOTConfiguration& motCfg = GetGlobalConfiguration();
-        result = AddConfigChangeListener(&motCfg);
-        CHECK_INIT_STATUS(result, "Failed to register main configuration listener");
-    } while (0);
+    }
 
     return result;
 }

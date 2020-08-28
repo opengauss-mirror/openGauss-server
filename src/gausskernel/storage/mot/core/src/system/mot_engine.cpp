@@ -571,15 +571,24 @@ bool MOTEngine::InitializeConfiguration(const char* configFilePath, int argc, ch
         }
     }
 
-    // initialize  global configuration singleton
-    GetGlobalConfiguration().Initialize();
+    // explicitly initialize global configuration singleton
+    MOTConfiguration& motCfg = GetGlobalConfiguration();
+    motCfg.Initialize();
 
     // create manager, and configure it with configuration file loader
-    if (!ConfigManager::CreateInstance(argv + 1, argc - 1)) {
+    if (!ConfigManager::CreateInstance(argv, argc)) {
         MOT_LOG_ERROR("Failed to create configuration manager instance");
         result = false;
     } else {
-        if (configFilePath != nullptr) {
+        // register global configuration as first listener (other listeners rely on it)
+        result = ConfigManager::GetInstance().AddConfigChangeListener(&motCfg);
+        if (!result) {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                "Load Configuration",
+                "Failed to register main configuration listener at the configuration manager");
+            ConfigManager::DestroyInstance();
+        } else if (configFilePath != nullptr) {
+            // add configuration file loader
             result = ConfigManager::GetInstance().AddConfigFile(configFilePath);
             if (!result) {
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,

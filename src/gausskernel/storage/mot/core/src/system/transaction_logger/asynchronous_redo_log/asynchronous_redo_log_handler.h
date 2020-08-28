@@ -30,6 +30,7 @@
 #include "redo_log_handler.h"
 #include "redo_log_buffer_pool.h"
 #include "rw_lock.h"
+#include "mot_configuration.h"
 
 namespace MOT {
 class TxnManager;
@@ -88,7 +89,7 @@ private:
 
     RedoLogBufferPool m_bufferPool;
     // array of RedoLogBufferArray for switching in cyclic manner.
-    RedoLogBufferArray m_redoLogBufferArrayArray[MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT];
+    RedoLogBufferArray m_redoLogBufferArrayArray[MOTConfiguration::MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT];
     uint32_t m_redoLogBufferArrayCount;
     volatile int m_activeBuffer;
     bool m_initialized;

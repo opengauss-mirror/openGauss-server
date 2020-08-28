@@ -267,7 +267,7 @@ protected:
         // the layered configuration tree in the configuration manager
         MOT_LOG_TRACE("Triggering initial partial configuration loading for external configuration overlaying");
         MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
-        motCfg.OnConfigChange();  // trigger partial load
+        motCfg.LoadPartial();  // trigger partial load
 
         // load any relevant GUC values here
         bool result = ConfigureMaxConnections();

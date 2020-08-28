@@ -78,8 +78,8 @@ public:
     /**
      * @brief Creates singleton instance using command line arguments as configuration source. Must be called once
      * during engine startup.
-     * @param argv Command line argument array.
-     * @param argc Command line argument array size.
+     * @param[opt] argc Command line argument count (excluding program name first argument).
+     * @param[opt] argv Command line argument array (excluding program name first argument).
      * @return True if instance creation succeeded.
      */
     static bool CreateInstance(char** argv = nullptr, int argc = 0);
