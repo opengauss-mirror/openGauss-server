@@ -300,10 +300,6 @@ inline void Prefetch(const void* ptr)
 
 /** @define Constant denoting indentation used for MOT printouts. */
 #define PRINT_REPORT_INDENT 2
-
-/** @define Min and Max values for asynchronous redo log buffer array count. */
-#define MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT 8
-#define MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT 128
 }  // namespace MOT
 
 #endif  // MOT_GLOBAL_H

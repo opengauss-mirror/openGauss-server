@@ -27,6 +27,7 @@
 
 #include <set>
 #include <climits>
+#include <cstdint>
 
 #include "affinity.h"
 #include "global.h"
@@ -70,6 +71,18 @@ public:
     {
         MOT_LOG_TRACE("Reloading configuration after change");
         LoadConfig();
+    }
+
+    /**
+     * @brief Load partial configuration (i.e. not all loaders are fully loaded yet). In such case we suppress all
+     * messages.
+     */
+    inline void LoadPartial()
+    {
+        MOT_LOG_TRACE("Loading partial configuration after change");
+        m_suppressLog = true;
+        LoadConfig();
+        m_suppressLog = false;
     }
 
     /**
@@ -382,11 +395,15 @@ public:
     MOTConfiguration& operator=(const MOTConfiguration&& orig) = delete;
     /** @endcond */
 
+    /** @var Asynchronous redo-log buffer array bounds (exposed as public for external use). */
+    static constexpr uint32_t MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 8;
+    static constexpr uint32_t MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 128;
+
 private:
     /** @var A singleton instance available for static initializers. */
     static MOTConfiguration motGlobalConfiguration;
 
-    /** @var Map of CPUs to numa nodes */
+    /** @var Map of CPUs to NUMA nodes */
     CpuNodeMap m_cpuNodeMapper;
 
     CpuMap m_osCpuMap;
@@ -396,7 +413,20 @@ private:
     /** @var The total memory value to be used when loading memory percent values. By default uses system total. */
     uint32_t m_totalMemoryMb;
 
-    // Default logger configuration
+    /** @var Controls suppressing of log messages during configuration loading. */
+    bool m_suppressLog;
+
+    /** @var Memory scaling constants (from bytes). */
+    static constexpr uint64_t SCALE_BYTES = 1;
+    static constexpr uint64_t SCALE_KILO_BYTES = KILO_BYTE;
+    static constexpr uint64_t SCALE_MEGA_BYTES = MEGA_BYTE;
+
+    /** @var Time scaling constants (from micros). */
+    static constexpr uint64_t SCALE_MICROS = 1;
+    static constexpr uint64_t SCALE_MILLIS = 1000;
+    static constexpr uint64_t SCALE_SECONDS = 1000000;
+
+    /** ------------------ Default Redo-Log Configuration ------------ */
     /** @var Default enable file logger. */
     static constexpr bool DEFAULT_ENABLE_REDO_LOG = true;
 
@@ -409,20 +439,23 @@ private:
     /** @var Default asynchronous redo log buffer array count. */
     static constexpr uint32_t DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 24;
 
-    // default commit configuration
     /** @var Default enable group commit. */
     static constexpr bool DEFAULT_ENABLE_GROUP_COMMIT = false;
 
     /** @var Default group commit size. */
     static constexpr uint64_t DEFAULT_GROUP_COMMIT_SIZE = 16;
+    static constexpr uint64_t MIN_GROUP_COMMIT_SIZE = 2;
+    static constexpr uint64_t MAX_GROUP_COMMIT_SIZE = 1000;
 
     /** @var Default group commit timeout. */
     static constexpr const char* DEFAULT_GROUP_COMMIT_TIMEOUT = "10 ms";
 
     /** @var Default group commit timeout in micro-seconds. */
     static constexpr uint64_t DEFAULT_GROUP_COMMIT_TIMEOUT_USEC = 10000;
+    static constexpr uint64_t MIN_GROUP_COMMIT_TIMEOUT_USEC = 100;
+    static constexpr uint64_t MAX_GROUP_COMMIT_TIMEOUT_USEC = 200000;  // 200 ms
 
-    // default checkpoint configuration
+    /** ------------------ Default Checkpoint Configuration ------------ */
     /** @var Default enable checkpoint. */
     static constexpr bool DEFAULT_ENABLE_CHECKPOINT = true;
 
@@ -434,19 +467,25 @@ private:
 
     /**  @var Default checkpoint segments size */
     static constexpr const char* DEFAULT_CHECKPOINT_SEGSIZE = "16 MB";
-    static constexpr uint32_t DEFAULT_CHECKPOINT_SEGSIZE_BYTES = (16 * 1024 * 1024);
+    static constexpr uint32_t DEFAULT_CHECKPOINT_SEGSIZE_BYTES = 16 * MEGA_BYTE;
+    static constexpr uint32_t MIN_CHECKPOINT_SEGSIZE_BYTES = 16 * MEGA_BYTE;
+    static constexpr uint32_t MAX_CHECKPOINT_SEGSIZE_BYTES = 512 * MEGA_BYTE;
 
     /** @var Default number of worker threads to spawn */
     static constexpr uint32_t DEFAULT_CHECKPOINT_WORKERS = 3;
+    static constexpr uint32_t MIN_CHECKPOINT_WORKERS = 1;
+    static constexpr uint32_t MAX_CHECKPOINT_WORKERS = 1024;
 
-    // default recovery configuration
+    /** ------------------ Default Recovery Configuration ------------ */
     /** @var Default number of workers used in recovery from checkpoint. */
     static constexpr uint32_t DEFAULT_CHECKPOINT_RECOVERY_WORKERS = 3;
+    static constexpr uint32_t MIN_CHECKPOINT_RECOVERY_WORKERS = 1;
+    static constexpr uint32_t MAX_CHECKPOINT_RECOVERY_WORKERS = 1024;
 
     /** @var Default enable log recovery statistics. */
     static constexpr bool DEFAULT_ENABLE_LOG_RECOVERY_STATS = false;
 
-    // default machine configuration
+    /** ------------------ Default Machine Configuration ------------ */
     /** @var Default number of NUMA nodes of the machine. */
     static constexpr uint16_t DEFAULT_NUMA_NODES = 1;
 
@@ -459,13 +498,15 @@ private:
     /* @var Default upper bound number of pg nodes on the machine. */
     static constexpr uint16_t DEFAULT_MAX_DATA_NODES = 1;
 
-    // default statistics configuration
+    /** ------------------ Default Statistics Configuration ------------ */
     /** @var Default enable statistics printing. */
     static constexpr bool DEFAULT_ENABLE_STATS = false;
 
     /** @var Default statistics printing period in seconds. */
     static constexpr const char* DEFAULT_STATS_PRINT_PERIOD = "1 minutes";
     static constexpr uint32_t DEFAULT_STATS_PRINT_PERIOD_SECONDS = 60;
+    static constexpr uint32_t MIN_STATS_PRINT_PERIOD_SECONDS = 1;
+    static constexpr uint32_t MAX_STATS_PRINT_PERIOD_SECONDS = 86400;  // 1 day
 
     /** @var Default full statistics printing period in seconds. */
     static constexpr const char* DEFAULT_FULL_STATS_PRINT_PERIOD = "5 minutes";
@@ -495,7 +536,7 @@ private:
     /** @var Default enable JIT execution statistics printing. */
     static constexpr bool DEFAULT_ENABLE_JIT_STAT_PRINT = false;
 
-    // default error log configuration
+    /** ------------------ Default Error-Log Configuration ------------ */
     /** @var Default log level limit. */
     static constexpr LogLevel DEFAULT_LOG_LEVEL = LogLevel::LL_INFO;
 
@@ -508,15 +549,19 @@ private:
     /** @var Default log level for configuration loading on startup messages. */
     static constexpr LogLevel DEFAULT_CFG_STARTUP_LOG_LEVEL = LogLevel::LL_TRACE;
 
-    // default memory configuration
+    /** ------------------ Default Memory Configuration ------------ */
     /** @var Default enable NUMA. */
     static constexpr bool DEFAULT_ENABLE_NUMA = true;
 
     /** @var Default maximum number of threads in the system. */
     static constexpr uint16_t DEFAULT_MAX_THREADS = 1024;
+    static constexpr uint16_t MIN_MAX_THREADS = 1;
+    static constexpr uint16_t MAX_MAX_THREADS = UINT16_MAX;
 
     /** @var Default maximum number of connections in the system. */
     static constexpr uint32_t DEFAULT_MAX_CONNECTIONS = 1024;
+    static constexpr uint32_t MIN_MAX_CONNECTIONS = 1;
+    static constexpr uint32_t MAX_MAX_CONNECTIONS = UINT16_MAX;
 
     /** @var Default thread affinity policy. */
     static constexpr AffinityMode DEFAULT_AFFINITY_MODE = AffinityMode::FILL_PHYSICAL_FIRST;
@@ -526,28 +571,40 @@ private:
 
     /** @var Default maximum limit for MOT global memory. */
     static constexpr const char* DEFAULT_MAX_MOT_GLOBAL_MEMORY = "80%";
-    static constexpr uint32_t DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB = 8 * 1024;
+    static constexpr uint32_t DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB = 8 * KILO_BYTE;  // 8 GB
+    static constexpr uint32_t MIN_MAX_MOT_GLOBAL_MEMORY_MB = 128;                // 128 MB
+    static constexpr uint32_t MAX_MAX_MOT_GLOBAL_MEMORY_MB = 512 * MEGA_BYTE;    // 512 TB
 
     /** @var Default minimum (pre-allocated) limit for MOT global memory. */
     static constexpr const char* DEFAULT_MIN_MOT_GLOBAL_MEMORY = "0 GB";
     static constexpr uint32_t DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB = 0;
+    static constexpr uint32_t MIN_MIN_MOT_GLOBAL_MEMORY_MB = 0;
+    static constexpr uint32_t MAX_MIN_MOT_GLOBAL_MEMORY_MB = 512 * MEGA_BYTE;  // 512 TB
 
     /** @var Default maximum limit for MOT global memory (used to establish new ratio between local and global pools).
      */
     static constexpr const char* DEFAULT_MAX_MOT_LOCAL_MEMORY = "15%";
-    static constexpr uint32_t DEFAULT_MAX_MOT_LOCAL_MEMORY_MB = 2 * 1024;
+    static constexpr uint32_t DEFAULT_MAX_MOT_LOCAL_MEMORY_MB = 2 * KILO_BYTE;  // 2 GB
+    static constexpr uint32_t MIN_MAX_MOT_LOCAL_MEMORY_MB = 64;                 // 64 MB (about 8 normal sessions)
+    static constexpr uint32_t MAX_MAX_MOT_LOCAL_MEMORY_MB = 512 * KILO_BYTE;    // 512 GB (MANY very heavy sessions)
 
     /** @var Default minimum (pre-allocated) limit for MOT local memory. */
     static constexpr const char* DEFAULT_MIN_MOT_LOCAL_MEMORY = "0 GB";
-    static constexpr uint32_t DEFAULT_MIN_MOT_LOCAL_MEMORY_MB = 0;
+    static constexpr uint32_t DEFAULT_MIN_MOT_LOCAL_MEMORY_MB = 0;            // no pre-allocation
+    static constexpr uint32_t MIN_MIN_MOT_LOCAL_MEMORY_MB = 0;                // no pre-allocation
+    static constexpr uint32_t MAX_MIN_MOT_LOCAL_MEMORY_MB = 512 * KILO_BYTE;  // max pre-allocate 512 GB
 
     /** @var Default maximum for single MOT session small memory allocations. */
     static constexpr const char* DEFAULT_MAX_MOT_SESSION_MEMORY = "0 MB";
-    static constexpr uint32_t DEFAULT_MAX_MOT_SESSION_MEMORY_KB = 0;
+    static constexpr uint32_t DEFAULT_MAX_MOT_SESSION_MEMORY_KB = 0;  // no session-memory limit
+    static constexpr uint32_t MIN_MAX_MOT_SESSION_MEMORY_KB = 0;
+    static constexpr uint32_t MAX_MAX_MOT_SESSION_MEMORY_KB = 512 * MEGA_BYTE;  // limit single session to 512 GB
 
     /** @var Default minimum (pre-allocated) for single MOT session small memory allocations. */
     static constexpr const char* DEFAULT_MIN_MOT_SESSION_MEMORY = "0 MB";
-    static constexpr uint32_t DEFAULT_MIN_MOT_SESSION_MEMORY_KB = 0;
+    static constexpr uint32_t DEFAULT_MIN_MOT_SESSION_MEMORY_KB = 0;           // no session-memory pre-allocation
+    static constexpr uint32_t MIN_MIN_MOT_SESSION_MEMORY_KB = 0;               // no session-memory pre-allocation
+    static constexpr uint32_t MAX_MIN_MOT_SESSION_MEMORY_KB = 64 * KILO_BYTE;  // up to 64 MB pre-allocation
 
     /** @var Default physical or virtual memory reservation. */
     static constexpr MemReserveMode DEFAULT_RESERVE_MEMORY_MODE = MEM_RESERVE_VIRTUAL;
@@ -560,38 +617,54 @@ private:
 
     /** @var Default number of workers used to pre-allocate initial memory.  */
     static constexpr uint32_t DEFAULT_CHUNK_PREALLOC_WORKER_COUNT = 8;
+    static constexpr uint32_t MIN_CHUNK_PREALLOC_WORKER_COUNT = 1;
+    static constexpr uint32_t MAX_CHUNK_PREALLOC_WORKER_COUNT = 1024;
 
     /** @var Default chunk store high red mark in percents of maximum. */
-    static constexpr uint32_t DEFAULT_HIGH_RED_MARK_PERCENT = 90;
+    static constexpr uint32_t DEFAULT_HIGH_RED_MARK_PERCENT = 90;  // reject constructive ops from 90% memory usage
+    static constexpr uint32_t MIN_HIGH_RED_MARK_PERCENT = 50;      // reject constructive ops from 50% memory usage
+    static constexpr uint32_t MAX_HIGH_RED_MARK_PERCENT = 95;      // Don't allow disabling high red-mark
 
     /** @var The default size in megabytes of the session large buffer store. */
     static constexpr const char* DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE = " 0 MB";
     static constexpr uint32_t DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 0;
+    static constexpr uint32_t MIN_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 0;                // disabled
+    static constexpr uint32_t MAX_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 128 * KILO_BYTE;  // 128 GB
 
     /** @var The default largest object size in megabytes in the session large buffer store. */
     static constexpr const char* DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE = "0 MB";
-    static constexpr uint32_t DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 0;
+    static constexpr uint32_t DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 0;  // use calculation
+    static constexpr uint32_t MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 0;
+    static constexpr uint32_t MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 1024;  // 1 GB
 
     /** @var The default largest object size in megabytes that can be allocated form kernel for sessions. */
     static constexpr const char* DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE = "1 GB";
-    static constexpr uint32_t DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 1024;
+    static constexpr uint32_t DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 1024;       // 1 GB
+    static constexpr uint32_t MIN_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 8;              // 8 MB
+    static constexpr uint32_t MAX_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 8 * KILO_BYTE;  // 8 GB
 
-    // default GC configuration
+    /** ------------------ Default Garbage-Collection Configuration ------------ */
     /** @var Enable/disable garbage collection. */
     static constexpr bool DEFAULT_GC_ENABLE = true;
 
     /** @var The threshold in bytes for reclamation to be triggered (per-thread) */
     static constexpr const char* DEFAULT_GC_RECLAIM_THRESHOLD = "512 KB";
-    static constexpr uint32_t DEFAULT_GC_RECLAIM_THRESHOLD_BYTES = 512 * KILO_BYTE;
+    static constexpr uint32_t DEFAULT_GC_RECLAIM_THRESHOLD_BYTES = 512 * KILO_BYTE;  // 512 KB
+    static constexpr uint32_t MIN_GC_RECLAIM_THRESHOLD_BYTES = KILO_BYTE;            // 1 KB
+    static constexpr uint32_t MAX_GC_RECLAIM_THRESHOLD_BYTES = 64 * MEGA_BYTE;       // 64 MB
 
     /** @var The amount of objects reclaimed in each cleanup round of a limbo group. */
-    static constexpr uint32_t DEFAULT_GC_RECLAIM_BATCH_SIZE = 8000;
+    static constexpr uint32_t DEFAULT_GC_RECLAIM_BATCH_SIZE = 8 * KILO_BYTE;  // 8 KB entries
+    static constexpr uint32_t MIN_GC_RECLAIM_BATCH_SIZE = 128;                // 128 entries
+    static constexpr uint32_t MAX_GC_RECLAIM_BATCH_SIZE = MEGA_BYTE;          // 1 MB entries
 
     /** @var The high threshold in bytes for reclamation to be triggered (per-thread) */
     static constexpr const char* DEFAULT_GC_HIGH_RECLAIM_THRESHOLD = "8 MB";
-    static constexpr uint32_t DEFAULT_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 8 * MEGA_BYTE;
+    static constexpr uint32_t DEFAULT_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 8 * MEGA_BYTE;  // 8 MB
+    static constexpr uint32_t MIN_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 1 * MEGA_BYTE;      // 1 MB
+    static constexpr uint32_t MAX_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 64 * MEGA_BYTE;     // 64 MB
 
-    // default JIT configuration
+    /** ------------------ Default JIT Configuration ------------ */
     /** @var Default enable JIT compilation and execution. */
     static constexpr bool DEFAULT_ENABLE_MOT_CODEGEN = true;
 
@@ -603,24 +676,28 @@ private:
 
     /** @vart Default limit for the amount of JIT queries allowed per user session. */
     static constexpr uint32_t DEFAULT_MOT_CODEGEN_LIMIT = 100;
+    static constexpr uint32_t MIN_MOT_CODEGEN_LIMIT = 1;
+    static constexpr uint32_t MAX_MOT_CODEGEN_LIMIT = 1000;
 
-    // default storage configuration
+    /** ------------------ Default Storage Configuration ------------ */
     /** @var The default allow index on null-able column. */
-    static constexpr bool DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN = true;
+    static constexpr bool DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN = false;
 
     /** @var The default tree flavor for tree indexes. */
     static constexpr IndexTreeFlavor DEFAULT_INDEX_TREE_FLAVOR = IndexTreeFlavor::INDEX_TREE_FLAVOR_MASSTREE;
 
-    // default general configuration
+    /** ------------------ Default General Configuration ------------ */
     /** @var Default configuration monitor period in seconds. */
     static constexpr const char* DEFAULT_CFG_MONITOR_PERIOD = "5 seconds";
-    static constexpr uint64_t DEFAULT_CFG_MONITOR_PERIOD_SECONDS = 5;
+    static constexpr uint64_t DEFAULT_CFG_MONITOR_PERIOD_SECONDS = 5;  // 5 seconds
+    static constexpr uint64_t MIN_CFG_MONITOR_PERIOD_SECONDS = 1;      // 1 seconds
+    static constexpr uint64_t MAX_CFG_MONITOR_PERIOD_SECONDS = 300;    // 5 minutes
 
     /** @var The default value for consistency validation tests after benchmark running. */
     static constexpr bool DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION = false;
 
     /** @var The default total memory reference used for calculating memory percent value. */
-    static constexpr uint32_t DEFAULT_TOTAL_MEMORY_MB = 10 * 1024;
+    static constexpr uint32_t DEFAULT_TOTAL_MEMORY_MB = 10 * KILO_BYTE;  // 10 MB
 
     /** @brief Loads configuration from main configuration. */
     void LoadConfig();
@@ -632,26 +709,42 @@ private:
     static bool FindNumProcessors(uint16_t* maxCoresPerNode, CpuNodeMap* cpuNodeMapper, CpuMap* cpuOsMapper);
     static bool CheckHyperThreads();
 
-    static void UpdateConfigItem(bool& oldValue, bool newValue, const char* name);
-    static void UpdateConfigItem(std::string& oldValue, const char* newValue, const char* name);
+    static void UpdateBoolConfigItem(bool& oldValue, bool newValue, const char* name);
+    static void UpdateStringConfigItem(std::string& oldValue, const char* newValue, const char* name);
 
     template <typename T>
-    static void UpdateConfigItem(uint64_t& oldValue, T newValue, const char* name)
+    void UpdateIntConfigItem(
+        uint64_t& oldValue, T newValue, const char* name, uint64_t lowerBound = 0, uint64_t upperBound = UINT64_MAX)
     {
-        if (oldValue != newValue) {
+        if ((newValue > upperBound) || (lowerBound > 0 && newValue < lowerBound)) {
+            if (!m_suppressLog) {
+                MOT_LOG_WARN("Configuration of %s=%" PRIu64 " is out of bounds [%" PRIu64 ", %" PRIu64 "]: keeping "
+                             "default value %" PRIu64,
+                    name,
+                    (uint64_t)newValue,
+                    lowerBound,
+                    upperBound,
+                    oldValue);
+            }
+        } else if (oldValue != newValue) {
             MOT_LOG_TRACE("Configuration of %s changed: %" PRIu64 " --> %" PRIu64, name, oldValue, (uint64_t)newValue);
             oldValue = newValue;
         }
     }
 
     template <typename T>
-    static void UpdateConfigItem(
-        uint32_t& oldValue, T newValue, const char* name, uint32_t lowerBound = 0, uint32_t upperBound = UINT_MAX)
+    void UpdateIntConfigItem(
+        uint32_t& oldValue, T newValue, const char* name, uint32_t lowerBound = 0, uint32_t upperBound = UINT32_MAX)
     {
-        if (newValue > upperBound) {
-            MOT_LOG_WARN("Configuration of %s overflowed: keeping default value %u", name, oldValue);
-        } else if (lowerBound > 0 && newValue < lowerBound) {
-            MOT_LOG_WARN("Configuration of %s overflowed: keeping default value %u", name, oldValue);
+        if ((newValue > UINT32_MAX) || (newValue > upperBound) || (lowerBound > 0 && newValue < lowerBound)) {
+            if (!m_suppressLog) {
+                MOT_LOG_WARN("Configuration of %s=%" PRIu64 " is out of bounds [%u, %u]: keeping default value %u",
+                    name,
+                    (uint64_t)newValue,
+                    lowerBound,
+                    upperBound,
+                    oldValue);
+            }
         } else if (oldValue != newValue) {
             MOT_LOG_TRACE("Configuration of %s changed: %u --> %u", name, oldValue, (uint32_t)newValue);
             oldValue = newValue;
@@ -659,10 +752,18 @@ private:
     }
 
     template <typename T>
-    static void UpdateConfigItem(uint16_t& oldValue, T newValue, const char* name)
+    void UpdateIntConfigItem(
+        uint16_t& oldValue, T newValue, const char* name, uint16_t lowerBound = 0, uint16_t upperBound = UINT16_MAX)
     {
-        if (newValue > USHRT_MAX) {
-            MOT_LOG_WARN("Configuration of %s overflowed: keeping default value %" PRIu16, name, oldValue);
+        if ((newValue > UINT16_MAX) || (newValue > upperBound) || (lowerBound > 0 && newValue < lowerBound)) {
+            if (!m_suppressLog) {
+                MOT_LOG_WARN("Configuration of %s=%" PRIu64 " is out of bounds [%u, %u]: keeping default value %u",
+                    name,
+                    (uint64_t)newValue,
+                    (unsigned)lowerBound,
+                    (unsigned)upperBound,
+                    (unsigned)oldValue);
+            }
         } else if (oldValue != newValue) {
             MOT_LOG_TRACE("Configuration of %s changed: %" PRIu16 " --> %" PRIu16, name, oldValue, (uint16_t)newValue);
             oldValue = newValue;

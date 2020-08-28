@@ -917,7 +917,7 @@ RC TxnInsertAction::ExecuteOptimisticInsert(Row* row)
                     rc = RC_UNIQUE_VIOLATION;
                     goto end;
                 default:
-                    break;
+                    goto end;
             }
         } else if (res == true or pIndexInsertResult->IsCommited() == false) {
             // tag all the sentinels the insert metadata
@@ -934,7 +934,7 @@ RC TxnInsertAction::ExecuteOptimisticInsert(Row* row)
     }
 
 end:
-    if (rc != RC_OK) {
+    if ((rc != RC_OK) && (currentItem != EndCursor())) {
         // Clean current aborted row and clean secondary indexes that were not inserts
         // Clean first Object! - wither primary or secondary!
         // Return Local Row to pull for PI

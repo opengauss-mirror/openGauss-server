@@ -77,8 +77,8 @@ public:
      * @brief Creates the single main memory engine instance. Use this variant when you have no external configuration
      * loaders involved.
      * @param[opt] configFilePath The path to the configuration file of the main memory engine.
-     * @param[opt] argc Command line argument count.
-     * @param[opt] argv Command line argument array.
+     * @param[opt] argc Command line argument count (excluding program name first argument).
+     * @param[opt] argv Command line argument array (excluding program name first argument).
      * @return A reference to the single main memory engine instance, or null if initialization failed.
      */
     static MOTEngine* CreateInstance(const char* configFilePath = nullptr, int argc = 0, char* argv[] = nullptr);
@@ -103,8 +103,8 @@ public:
      * initialization takes place. In this case initialization has several steps: @ref CreateInstanceNoInit(), @ref
      * AddConfigLoader(), @ref AddConfigLoader(), ..., @ref LoadConfig(), @ref Initialize().
      * @param[opt] configFilePath The path to the configuration file of the main memory engine.
-     * @param[opt] argc Command line argument count.
-     * @param[opt] argv Command line argument array.
+     * @param[opt] argc Command line argument count (excluding program name first argument).
+     * @param[opt] argv Command line argument array (excluding program name first argument).
      * @return A reference to the single main memory engine instance if configuration loading
      * succeeded, otherwise nullptr.
      */

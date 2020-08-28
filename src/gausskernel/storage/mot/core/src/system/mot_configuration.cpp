@@ -35,24 +35,44 @@ IMPLEMENT_CLASS_LOGGER(MOTConfiguration, Configuration)
 MOTConfiguration MOTConfiguration::motGlobalConfiguration;
 
 // static member definitions
+// Memory scaling constants
+constexpr uint64_t MOTConfiguration::SCALE_BYTES;
+constexpr uint64_t MOTConfiguration::SCALE_KILO_BYTES;
+constexpr uint64_t MOTConfiguration::SCALE_MEGA_BYTES;
+// Time scaling constants
+constexpr uint64_t MOTConfiguration::SCALE_MICROS;
+constexpr uint64_t MOTConfiguration::SCALE_MILLIS;
+constexpr uint64_t MOTConfiguration::SCALE_SECONDS;
 // redo-log configuration members
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_REDO_LOG;
 constexpr LoggerType MOTConfiguration::DEFAULT_LOGGER_TYPE;
 constexpr RedoLogHandlerType MOTConfiguration::DEFAULT_REDO_LOG_HANDLER_TYPE;
 constexpr uint32_t MOTConfiguration::DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT;
+constexpr uint32_t MOTConfiguration::MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT;
+constexpr uint32_t MOTConfiguration::MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_GROUP_COMMIT;
 constexpr uint64_t MOTConfiguration::DEFAULT_GROUP_COMMIT_SIZE;
+constexpr uint64_t MOTConfiguration::MIN_GROUP_COMMIT_SIZE;
+constexpr uint64_t MOTConfiguration::MAX_GROUP_COMMIT_SIZE;
 constexpr const char* MOTConfiguration::DEFAULT_GROUP_COMMIT_TIMEOUT;
 constexpr uint64_t MOTConfiguration::DEFAULT_GROUP_COMMIT_TIMEOUT_USEC;
+constexpr uint64_t MOTConfiguration::MIN_GROUP_COMMIT_TIMEOUT_USEC;
+constexpr uint64_t MOTConfiguration::MAX_GROUP_COMMIT_TIMEOUT_USEC;
 // checkpoint configuration members
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_CHECKPOINT;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_INCREMENTAL_CHECKPOINT;
 constexpr const char* MOTConfiguration::DEFAULT_CHECKPOINT_DIR;
 constexpr const char* MOTConfiguration::DEFAULT_CHECKPOINT_SEGSIZE;
 constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_SEGSIZE_BYTES;
+constexpr uint32_t MOTConfiguration::MIN_CHECKPOINT_SEGSIZE_BYTES;
+constexpr uint32_t MOTConfiguration::MAX_CHECKPOINT_SEGSIZE_BYTES;
 constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_WORKERS;
+constexpr uint32_t MOTConfiguration::MIN_CHECKPOINT_WORKERS;
+constexpr uint32_t MOTConfiguration::MAX_CHECKPOINT_WORKERS;
 // recovery configuration members
 constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_RECOVERY_WORKERS;
+constexpr uint32_t MOTConfiguration::MIN_CHECKPOINT_RECOVERY_WORKERS;
+constexpr uint32_t MOTConfiguration::MAX_CHECKPOINT_RECOVERY_WORKERS;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_LOG_RECOVERY_STATS;
 // machine configuration members
 constexpr uint16_t MOTConfiguration::DEFAULT_NUMA_NODES;
@@ -63,6 +83,8 @@ constexpr uint16_t MOTConfiguration::DEFAULT_MAX_DATA_NODES;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_STATS;
 constexpr const char* MOTConfiguration::DEFAULT_STATS_PRINT_PERIOD;
 constexpr uint32_t MOTConfiguration::DEFAULT_STATS_PRINT_PERIOD_SECONDS;
+constexpr uint32_t MOTConfiguration::MIN_STATS_PRINT_PERIOD_SECONDS;
+constexpr uint32_t MOTConfiguration::MAX_STATS_PRINT_PERIOD_SECONDS;
 constexpr const char* MOTConfiguration::DEFAULT_FULL_STATS_PRINT_PERIOD;
 constexpr uint32_t MOTConfiguration::DEFAULT_FULL_STATS_PRINT_PERIOD_SECONDS;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_DB_SESSION_STAT_PRINT;
@@ -81,50 +103,86 @@ constexpr LogLevel MOTConfiguration::DEFAULT_CFG_STARTUP_LOG_LEVEL;
 // memory configuration members
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_NUMA;
 constexpr uint16_t MOTConfiguration::DEFAULT_MAX_THREADS;
+constexpr uint16_t MOTConfiguration::MIN_MAX_THREADS;
+constexpr uint16_t MOTConfiguration::MAX_MAX_THREADS;
 constexpr uint32_t MOTConfiguration::DEFAULT_MAX_CONNECTIONS;
+constexpr uint32_t MOTConfiguration::MIN_MAX_CONNECTIONS;
+constexpr uint32_t MOTConfiguration::MAX_MAX_CONNECTIONS;
 constexpr AffinityMode MOTConfiguration::DEFAULT_AFFINITY_MODE;
 constexpr bool MOTConfiguration::DEFAULT_LAZY_LOAD_CHUNK_DIRECTORY;
 constexpr const char* MOTConfiguration::DEFAULT_MAX_MOT_GLOBAL_MEMORY;
 constexpr uint32_t MOTConfiguration::DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB;
+constexpr uint32_t MOTConfiguration::MIN_MAX_MOT_GLOBAL_MEMORY_MB;
+constexpr uint32_t MOTConfiguration::MAX_MAX_MOT_GLOBAL_MEMORY_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MAX_MOT_LOCAL_MEMORY;
 constexpr uint32_t MOTConfiguration::DEFAULT_MAX_MOT_LOCAL_MEMORY_MB;
+constexpr uint32_t MOTConfiguration::MIN_MAX_MOT_LOCAL_MEMORY_MB;
+constexpr uint32_t MOTConfiguration::MAX_MAX_MOT_LOCAL_MEMORY_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MIN_MOT_GLOBAL_MEMORY;
 constexpr uint32_t MOTConfiguration::DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB;
+constexpr uint32_t MOTConfiguration::MIN_MIN_MOT_GLOBAL_MEMORY_MB;
+constexpr uint32_t MOTConfiguration::MAX_MIN_MOT_GLOBAL_MEMORY_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MIN_MOT_LOCAL_MEMORY;
 constexpr uint32_t MOTConfiguration::DEFAULT_MIN_MOT_LOCAL_MEMORY_MB;
+constexpr uint32_t MOTConfiguration::MIN_MIN_MOT_LOCAL_MEMORY_MB;
+constexpr uint32_t MOTConfiguration::MAX_MIN_MOT_LOCAL_MEMORY_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MAX_MOT_SESSION_MEMORY;
 constexpr uint32_t MOTConfiguration::DEFAULT_MAX_MOT_SESSION_MEMORY_KB;
+constexpr uint32_t MOTConfiguration::MIN_MAX_MOT_SESSION_MEMORY_KB;
+constexpr uint32_t MOTConfiguration::MAX_MAX_MOT_SESSION_MEMORY_KB;
 constexpr const char* MOTConfiguration::DEFAULT_MIN_MOT_SESSION_MEMORY;
 constexpr uint32_t MOTConfiguration::DEFAULT_MIN_MOT_SESSION_MEMORY_KB;
+constexpr uint32_t MOTConfiguration::MIN_MIN_MOT_SESSION_MEMORY_KB;
+constexpr uint32_t MOTConfiguration::MAX_MIN_MOT_SESSION_MEMORY_KB;
 constexpr MemReserveMode MOTConfiguration::DEFAULT_RESERVE_MEMORY_MODE;
 constexpr MemStorePolicy MOTConfiguration::DEFAULT_STORE_MEMORY_POLICY;
 constexpr MemAllocPolicy MOTConfiguration::DEFAULT_CHUNK_ALLOC_POLICY;
 constexpr uint32_t MOTConfiguration::DEFAULT_CHUNK_PREALLOC_WORKER_COUNT;
+constexpr uint32_t MOTConfiguration::MIN_CHUNK_PREALLOC_WORKER_COUNT;
+constexpr uint32_t MOTConfiguration::MAX_CHUNK_PREALLOC_WORKER_COUNT;
 constexpr uint32_t MOTConfiguration::DEFAULT_HIGH_RED_MARK_PERCENT;
+constexpr uint32_t MOTConfiguration::MIN_HIGH_RED_MARK_PERCENT;
+constexpr uint32_t MOTConfiguration::MAX_HIGH_RED_MARK_PERCENT;
 constexpr const char* MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE;
 constexpr uint32_t MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
+constexpr uint32_t MOTConfiguration::MIN_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
+constexpr uint32_t MOTConfiguration::MAX_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
 constexpr const char* MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE;
 constexpr uint32_t MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
+constexpr uint32_t MOTConfiguration::MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
+constexpr uint32_t MOTConfiguration::MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
 constexpr const char* MOTConfiguration::DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE;
 constexpr uint32_t MOTConfiguration::DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
+constexpr uint32_t MOTConfiguration::MIN_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
+constexpr uint32_t MOTConfiguration::MAX_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
 // GC configuration members
 constexpr bool MOTConfiguration::DEFAULT_GC_ENABLE;
 constexpr const char* MOTConfiguration::DEFAULT_GC_RECLAIM_THRESHOLD;
 constexpr uint32_t MOTConfiguration::DEFAULT_GC_RECLAIM_THRESHOLD_BYTES;
+constexpr uint32_t MOTConfiguration::MIN_GC_RECLAIM_THRESHOLD_BYTES;
+constexpr uint32_t MOTConfiguration::MAX_GC_RECLAIM_THRESHOLD_BYTES;
 constexpr uint32_t MOTConfiguration::DEFAULT_GC_RECLAIM_BATCH_SIZE;
+constexpr uint32_t MOTConfiguration::MIN_GC_RECLAIM_BATCH_SIZE;
+constexpr uint32_t MOTConfiguration::MAX_GC_RECLAIM_BATCH_SIZE;
 constexpr const char* MOTConfiguration::DEFAULT_GC_HIGH_RECLAIM_THRESHOLD;
 constexpr uint32_t MOTConfiguration::DEFAULT_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
+constexpr uint32_t MOTConfiguration::MIN_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
+constexpr uint32_t MOTConfiguration::MAX_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
 // JIT configuration members
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_MOT_CODEGEN;
 constexpr bool MOTConfiguration::DEFAULT_FORCE_MOT_PSEUDO_CODEGEN;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_MOT_CODEGEN_PRINT;
 constexpr uint32_t MOTConfiguration::DEFAULT_MOT_CODEGEN_LIMIT;
+constexpr uint32_t MOTConfiguration::MIN_MOT_CODEGEN_LIMIT;
+constexpr uint32_t MOTConfiguration::MAX_MOT_CODEGEN_LIMIT;
 // storage configuration
 constexpr bool MOTConfiguration::DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN;
 constexpr IndexTreeFlavor MOTConfiguration::DEFAULT_INDEX_TREE_FLAVOR;
 // general configuration members
 constexpr const char* MOTConfiguration::DEFAULT_CFG_MONITOR_PERIOD;
 constexpr uint64_t MOTConfiguration::DEFAULT_CFG_MONITOR_PERIOD_SECONDS;
+constexpr uint64_t MOTConfiguration::MIN_CFG_MONITOR_PERIOD_SECONDS;
+constexpr uint64_t MOTConfiguration::MAX_CFG_MONITOR_PERIOD_SECONDS;
 constexpr bool MOTConfiguration::DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION;
 constexpr uint32_t MOTConfiguration::DEFAULT_TOTAL_MEMORY_MB;
 
@@ -448,7 +506,8 @@ MOTConfiguration::MOTConfiguration()
       m_indexTreeFlavor(DEFAULT_INDEX_TREE_FLAVOR),
       m_configMonitorPeriodSeconds(DEFAULT_CFG_MONITOR_PERIOD_SECONDS),
       m_runInternalConsistencyValidation(DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION),
-      m_totalMemoryMb(DEFAULT_TOTAL_MEMORY_MB)
+      m_totalMemoryMb(DEFAULT_TOTAL_MEMORY_MB),
+      m_suppressLog(false)
 {}
 
 void MOTConfiguration::Initialize()
@@ -604,40 +663,37 @@ int MOTConfiguration::GetMappedCore(int logicId) const
     return -1;
 }
 
-#define UPDATE_CFG(var, cfgPath, defaultValue) \
-    UpdateConfigItem(var, cfg->GetConfigValue(cfgPath, defaultValue), cfgPath)
+#define UPDATE_BOOL_CFG(var, cfgPath, defaultValue) \
+    UpdateBoolConfigItem(var, cfg->GetConfigValue(cfgPath, defaultValue), cfgPath)
 
 #define UPDATE_USER_CFG(var, cfgPath, defaultValue) \
     UpdateUserConfigItem(var, cfg->GetUserConfigValue(cfgPath, defaultValue), cfgPath)
 
 #define UPDATE_STRING_CFG(var, cfgPath, defaultValue) \
-    UpdateConfigItem(var, cfg->GetStringConfigValue(cfgPath, defaultValue), cfgPath)
+    UpdateStringConfigItem(var, cfg->GetStringConfigValue(cfgPath, defaultValue), cfgPath)
 
-#define UPDATE_INT_CFG(var, cfgPath, defaultValue) \
-    UpdateConfigItem(var, cfg->GetIntegerConfigValue(cfgPath, defaultValue), cfgPath)
+#define UPDATE_INT_CFG(var, cfgPath, defaultValue, lowerBound, upperBound) \
+    UpdateIntConfigItem(var, cfg->GetIntegerConfigValue(cfgPath, defaultValue), cfgPath, lowerBound, upperBound)
 
-#define UPDATE_INT_CFG_BOUNDS(var, cfgPath, defaultValue, lowerBound, upperBound) \
-    UpdateConfigItem(var, cfg->GetIntegerConfigValue(cfgPath, defaultValue), cfgPath, lowerBound, upperBound)
-
-#define UPDATE_MEM_CFG(var, cfgPath, defaultValue, scale)                                                   \
+#define UPDATE_MEM_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound)                           \
     do {                                                                                                    \
         uint64_t memoryValueBytes =                                                                         \
             ParseMemoryValueBytes(cfg->GetStringConfigValue(cfgPath, defaultValue), (uint64_t)-1, cfgPath); \
-        UpdateConfigItem(var, (uint32_t)(memoryValueBytes / scale), cfgPath);                               \
+        UpdateIntConfigItem(var, (uint32_t)(memoryValueBytes / scale), cfgPath, lowerBound, upperBound);    \
     } while (0);
 
-#define UPDATE_ABS_MEM_CFG(var, cfgPath, defaultValue, scale)                                         \
-    do {                                                                                              \
-        uint64_t memoryValueBytes =                                                                   \
-            ParseMemoryUnit(cfg->GetStringConfigValue(cfgPath, defaultValue), (uint64_t)-1, cfgPath); \
-        UpdateConfigItem(var, (uint32_t)(memoryValueBytes / scale), cfgPath);                         \
+#define UPDATE_ABS_MEM_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound)                    \
+    do {                                                                                                 \
+        uint64_t memoryValueBytes =                                                                      \
+            ParseMemoryUnit(cfg->GetStringConfigValue(cfgPath, defaultValue), (uint64_t)-1, cfgPath);    \
+        UpdateIntConfigItem(var, (uint32_t)(memoryValueBytes / scale), cfgPath, lowerBound, upperBound); \
     } while (0);
 
-#define UPDATE_TIME_CFG(var, cfgPath, defaultValue, scale)                                                 \
+#define UPDATE_TIME_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound)                         \
     do {                                                                                                   \
         uint64_t timeValueMicros =                                                                         \
             ParseTimeValueMicros(cfg->GetStringConfigValue(cfgPath, defaultValue), (uint64_t)-1, cfgPath); \
-        UpdateConfigItem(var, (uint64_t)(timeValueMicros / scale), cfgPath);                               \
+        UpdateIntConfigItem(var, (uint64_t)(timeValueMicros / scale), cfgPath, lowerBound, upperBound);    \
     } while (0);
 
 void MOTConfiguration::LoadConfig()
@@ -646,48 +702,80 @@ void MOTConfiguration::LoadConfig()
     const LayeredConfigTree* cfg = ConfigManager::GetInstance().GetLayeredConfigTree();
 
     // logger configuration
-    UPDATE_CFG(m_enableRedoLog, "enable_redo_log", DEFAULT_ENABLE_REDO_LOG);
+    UPDATE_BOOL_CFG(m_enableRedoLog, "enable_redo_log", DEFAULT_ENABLE_REDO_LOG);
     UPDATE_USER_CFG(m_loggerType, "logger_type", DEFAULT_LOGGER_TYPE);
     UPDATE_USER_CFG(m_redoLogHandlerType, "redo_log_handler_type", DEFAULT_REDO_LOG_HANDLER_TYPE);
-    UPDATE_INT_CFG_BOUNDS(m_asyncRedoLogBufferArrayCount,
+    UPDATE_INT_CFG(m_asyncRedoLogBufferArrayCount,
         "async_log_buffer_count",
         DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
         MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
         MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT);
 
     // commit configuration
-    UPDATE_CFG(m_enableGroupCommit, "enable_group_commit", DEFAULT_ENABLE_GROUP_COMMIT);
-    UPDATE_INT_CFG(m_groupCommitSize, "group_commit_size", DEFAULT_GROUP_COMMIT_SIZE);
-    UPDATE_TIME_CFG(m_groupCommitTimeoutUSec, "group_commit_timeout", DEFAULT_GROUP_COMMIT_TIMEOUT, 1);
+    UPDATE_BOOL_CFG(m_enableGroupCommit, "enable_group_commit", DEFAULT_ENABLE_GROUP_COMMIT);
+    UPDATE_INT_CFG(m_groupCommitSize,
+        "group_commit_size",
+        DEFAULT_GROUP_COMMIT_SIZE,
+        MIN_GROUP_COMMIT_SIZE,
+        MAX_GROUP_COMMIT_SIZE);
+    UPDATE_TIME_CFG(m_groupCommitTimeoutUSec,
+        "group_commit_timeout",
+        DEFAULT_GROUP_COMMIT_TIMEOUT,
+        SCALE_MICROS,
+        MIN_GROUP_COMMIT_TIMEOUT_USEC,
+        MAX_GROUP_COMMIT_TIMEOUT_USEC);
 
     // Checkpoint configuration
-    UPDATE_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
+    UPDATE_BOOL_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
     UPDATE_STRING_CFG(m_checkpointDir, "checkpoint_dir", DEFAULT_CHECKPOINT_DIR);
-    UPDATE_MEM_CFG(m_checkpointSegThreshold, "checkpoint_segsize", DEFAULT_CHECKPOINT_SEGSIZE, 1);
-    UPDATE_INT_CFG(m_checkpointWorkers, "checkpoint_workers", DEFAULT_CHECKPOINT_WORKERS);
+    UPDATE_MEM_CFG(m_checkpointSegThreshold,
+        "checkpoint_segsize",
+        DEFAULT_CHECKPOINT_SEGSIZE,
+        SCALE_BYTES,
+        MIN_CHECKPOINT_SEGSIZE_BYTES,
+        MAX_CHECKPOINT_SEGSIZE_BYTES);
+    UPDATE_INT_CFG(m_checkpointWorkers,
+        "checkpoint_workers",
+        DEFAULT_CHECKPOINT_WORKERS,
+        MIN_CHECKPOINT_WORKERS,
+        MAX_CHECKPOINT_WORKERS);
 
     // Recovery configuration
-    UPDATE_INT_CFG(m_checkpointRecoveryWorkers, "checkpoint_recovery_workers", DEFAULT_CHECKPOINT_RECOVERY_WORKERS);
+    UPDATE_INT_CFG(m_checkpointRecoveryWorkers,
+        "checkpoint_recovery_workers",
+        DEFAULT_CHECKPOINT_RECOVERY_WORKERS,
+        MIN_CHECKPOINT_RECOVERY_WORKERS,
+        MAX_CHECKPOINT_RECOVERY_WORKERS);
 
     // Tx configuration - not configurable yet
-    UPDATE_CFG(m_abortBufferEnable, "tx_abort_buffers_enable", true);
-    UPDATE_CFG(m_preAbort, "tx_pre_abort", true);
+    UPDATE_BOOL_CFG(m_abortBufferEnable, "tx_abort_buffers_enable", true);
+    UPDATE_BOOL_CFG(m_preAbort, "tx_pre_abort", true);
     m_validationLock = TxnValidation::TXN_VALIDATION_NO_WAIT;
 
     // statistics configuration
-    UPDATE_CFG(m_enableStats, "enable_stats", DEFAULT_ENABLE_STATS);
-    UPDATE_TIME_CFG(m_statPrintPeriodSeconds, "print_stats_period", DEFAULT_STATS_PRINT_PERIOD, 1000000);
-    UPDATE_TIME_CFG(m_statPrintFullPeriodSeconds, "print_full_stats_period", DEFAULT_FULL_STATS_PRINT_PERIOD, 1000000);
-    UPDATE_CFG(m_enableLogRecoveryStats, "enable_log_recovery_stats", DEFAULT_ENABLE_LOG_RECOVERY_STATS);
-    UPDATE_CFG(m_enableDbSessionStatistics, "enable_db_session_stats", DEFAULT_ENABLE_DB_SESSION_STAT_PRINT);
-    UPDATE_CFG(m_enableNetworkStatistics, "enable_network_stats", DEFAULT_ENABLE_NETWORK_STAT_PRINT);
-    UPDATE_CFG(m_enableLogStatistics, "enable_log_stats", DEFAULT_ENABLE_LOG_STAT_PRINT);
-    UPDATE_CFG(m_enableMemoryStatistics, "enable_memory_stats", DEFAULT_ENABLE_MEMORY_STAT_PRINT);
-    UPDATE_CFG(
+    UPDATE_BOOL_CFG(m_enableStats, "enable_stats", DEFAULT_ENABLE_STATS);
+    UPDATE_TIME_CFG(m_statPrintPeriodSeconds,
+        "print_stats_period",
+        DEFAULT_STATS_PRINT_PERIOD,
+        SCALE_SECONDS,
+        MIN_STATS_PRINT_PERIOD_SECONDS,
+        MAX_STATS_PRINT_PERIOD_SECONDS);
+    UPDATE_TIME_CFG(m_statPrintFullPeriodSeconds,
+        "print_full_stats_period",
+        DEFAULT_FULL_STATS_PRINT_PERIOD,
+        SCALE_SECONDS,
+        MIN_STATS_PRINT_PERIOD_SECONDS,
+        MAX_STATS_PRINT_PERIOD_SECONDS);
+    UPDATE_BOOL_CFG(m_enableLogRecoveryStats, "enable_log_recovery_stats", DEFAULT_ENABLE_LOG_RECOVERY_STATS);
+    UPDATE_BOOL_CFG(m_enableDbSessionStatistics, "enable_db_session_stats", DEFAULT_ENABLE_DB_SESSION_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableNetworkStatistics, "enable_network_stats", DEFAULT_ENABLE_NETWORK_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableLogStatistics, "enable_log_stats", DEFAULT_ENABLE_LOG_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableMemoryStatistics, "enable_memory_stats", DEFAULT_ENABLE_MEMORY_STAT_PRINT);
+    UPDATE_BOOL_CFG(
         m_enableDetailedMemoryStatistics, "enable_detailed_memory_stats", DEFAULT_ENABLE_DETAILED_MEMORY_STAT_PRINT);
-    UPDATE_CFG(m_enableProcessStatistics, "enable_process_stats", DEFAULT_ENABLE_PROCESS_STAT_PRINT);
-    UPDATE_CFG(m_enableSystemStatistics, "enable_system_stats", DEFAULT_ENABLE_SYSTEM_STAT_PRINT);
-    UPDATE_CFG(m_enableJitStatistics, "enable_jit_stats", DEFAULT_ENABLE_JIT_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableProcessStatistics, "enable_process_stats", DEFAULT_ENABLE_PROCESS_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableSystemStatistics, "enable_system_stats", DEFAULT_ENABLE_SYSTEM_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableJitStatistics, "enable_jit_stats", DEFAULT_ENABLE_JIT_STAT_PRINT);
 
     // log configuration
     UPDATE_USER_CFG(m_logLevel, "log_level", DEFAULT_LOG_LEVEL);
@@ -697,56 +785,163 @@ void MOTConfiguration::LoadConfig()
     UPDATE_USER_CFG(m_cfgStartupLogLevel, "cfg_startup_log_level", DEFAULT_CFG_STARTUP_LOG_LEVEL);
 
     // memory configuration
-    UPDATE_CFG(m_enableNuma, "enable_numa", DEFAULT_ENABLE_NUMA);
-    UPDATE_INT_CFG(m_maxThreads, "max_threads", DEFAULT_MAX_THREADS);
-    UPDATE_INT_CFG(m_maxConnections, "max_connections", DEFAULT_MAX_CONNECTIONS);
+    UPDATE_BOOL_CFG(m_enableNuma, "enable_numa", DEFAULT_ENABLE_NUMA);
+    UPDATE_INT_CFG(m_maxThreads, "max_threads", DEFAULT_MAX_THREADS, MIN_MAX_THREADS, MAX_MAX_THREADS);
+    UPDATE_INT_CFG(
+        m_maxConnections, "max_connections", DEFAULT_MAX_CONNECTIONS, MIN_MAX_CONNECTIONS, MAX_MAX_CONNECTIONS);
     UPDATE_USER_CFG(m_sessionAffinityMode, "affinity_mode", DEFAULT_AFFINITY_MODE);
     // we save copies because main affinity mode may be overridden when thread pool is used
     if (IS_AFFINITY_ACTIVE(m_sessionAffinityMode)) {  // update only if active
         m_taskAffinityMode = m_sessionAffinityMode;
     }
-    UPDATE_CFG(m_lazyLoadChunkDirectory, "lazy_load_chunk_directory", DEFAULT_LAZY_LOAD_CHUNK_DIRECTORY);
-    UPDATE_MEM_CFG(m_globalMemoryMaxLimitMB, "max_mot_global_memory", DEFAULT_MAX_MOT_GLOBAL_MEMORY, MEGA_BYTE);
-    UPDATE_MEM_CFG(m_globalMemoryMinLimitMB, "min_mot_global_memory", DEFAULT_MIN_MOT_GLOBAL_MEMORY, MEGA_BYTE);
-    UPDATE_MEM_CFG(m_localMemoryMaxLimitMB, "max_mot_local_memory", DEFAULT_MAX_MOT_LOCAL_MEMORY, MEGA_BYTE);
-    UPDATE_MEM_CFG(m_localMemoryMinLimitMB, "min_mot_local_memory", DEFAULT_MIN_MOT_LOCAL_MEMORY, MEGA_BYTE);
-    UPDATE_ABS_MEM_CFG(m_sessionMemoryMaxLimitKB, "max_mot_session_memory", DEFAULT_MAX_MOT_SESSION_MEMORY, KILO_BYTE);
-    UPDATE_ABS_MEM_CFG(m_sessionMemoryMinLimitKB, "min_mot_session_memory", DEFAULT_MIN_MOT_SESSION_MEMORY, KILO_BYTE);
+    UPDATE_BOOL_CFG(m_lazyLoadChunkDirectory, "lazy_load_chunk_directory", DEFAULT_LAZY_LOAD_CHUNK_DIRECTORY);
+    UPDATE_MEM_CFG(m_globalMemoryMaxLimitMB,
+        "max_mot_global_memory",
+        DEFAULT_MAX_MOT_GLOBAL_MEMORY,
+        SCALE_MEGA_BYTES,
+        MIN_MAX_MOT_GLOBAL_MEMORY_MB,
+        MAX_MAX_MOT_GLOBAL_MEMORY_MB);
+    UPDATE_MEM_CFG(m_globalMemoryMinLimitMB,
+        "min_mot_global_memory",
+        DEFAULT_MIN_MOT_GLOBAL_MEMORY,
+        SCALE_MEGA_BYTES,
+        MIN_MIN_MOT_GLOBAL_MEMORY_MB,
+        MAX_MIN_MOT_GLOBAL_MEMORY_MB);
+    // validate that min <= max
+    if (m_globalMemoryMinLimitMB > m_globalMemoryMaxLimitMB) {
+        if (!m_suppressLog) {
+            MOT_LOG_WARN("Invalid global memory configuration: minimum (%u MB) is greater than maximum (%u MB), using "
+                         "defaults (%u MB, %u MB)",
+                m_globalMemoryMinLimitMB,
+                m_globalMemoryMaxLimitMB,
+                DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB,
+                DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB);
+        }
+        UpdateIntConfigItem(m_globalMemoryMaxLimitMB, DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB, "max_mot_global_memory");
+        UpdateIntConfigItem(m_globalMemoryMinLimitMB, DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB, "min_mot_global_memory");
+    }
+    UPDATE_MEM_CFG(m_localMemoryMaxLimitMB,
+        "max_mot_local_memory",
+        DEFAULT_MAX_MOT_LOCAL_MEMORY,
+        SCALE_MEGA_BYTES,
+        MIN_MAX_MOT_LOCAL_MEMORY_MB,
+        MAX_MAX_MOT_LOCAL_MEMORY_MB);
+    UPDATE_MEM_CFG(m_localMemoryMinLimitMB,
+        "min_mot_local_memory",
+        DEFAULT_MIN_MOT_LOCAL_MEMORY,
+        SCALE_MEGA_BYTES,
+        MIN_MIN_MOT_LOCAL_MEMORY_MB,
+        MAX_MIN_MOT_LOCAL_MEMORY_MB);
+    // validate that min <= max
+    if (m_localMemoryMinLimitMB > m_localMemoryMaxLimitMB) {
+        if (!m_suppressLog) {
+            MOT_LOG_WARN("Invalid local memory configuration: minimum (%u MB) is greater than maximum (%u MB), using "
+                         "defaults (%u MB, %u MB)",
+                m_localMemoryMinLimitMB,
+                m_localMemoryMaxLimitMB,
+                DEFAULT_MIN_MOT_LOCAL_MEMORY_MB,
+                DEFAULT_MAX_MOT_LOCAL_MEMORY_MB);
+        }
+        UpdateIntConfigItem(m_localMemoryMaxLimitMB, DEFAULT_MAX_MOT_LOCAL_MEMORY_MB, "max_mot_local_memory");
+        UpdateIntConfigItem(m_localMemoryMinLimitMB, DEFAULT_MIN_MOT_LOCAL_MEMORY_MB, "min_mot_local_memory");
+    }
+    UPDATE_ABS_MEM_CFG(m_sessionMemoryMaxLimitKB,
+        "max_mot_session_memory",
+        DEFAULT_MAX_MOT_SESSION_MEMORY,
+        SCALE_KILO_BYTES,
+        MIN_MAX_MOT_SESSION_MEMORY_KB,
+        MAX_MAX_MOT_SESSION_MEMORY_KB);
+    UPDATE_ABS_MEM_CFG(m_sessionMemoryMinLimitKB,
+        "min_mot_session_memory",
+        DEFAULT_MIN_MOT_SESSION_MEMORY,
+        SCALE_KILO_BYTES,
+        MIN_MIN_MOT_SESSION_MEMORY_KB,
+        MAX_MIN_MOT_SESSION_MEMORY_KB);
+    // validate that min <= max
+    if ((m_sessionMemoryMaxLimitKB > 0) && (m_sessionMemoryMinLimitKB > m_sessionMemoryMaxLimitKB)) {
+        if (!m_suppressLog) {
+            MOT_LOG_WARN("Invalid session memory configuration: minimum (%u KB) is greater than maximum (%u KB), using "
+                         "defaults (%u KB, %u KB)",
+                m_sessionMemoryMinLimitKB,
+                m_sessionMemoryMaxLimitKB,
+                DEFAULT_MIN_MOT_SESSION_MEMORY_KB,
+                DEFAULT_MAX_MOT_SESSION_MEMORY_KB);
+        }
+        UpdateIntConfigItem(m_sessionMemoryMaxLimitKB, DEFAULT_MAX_MOT_SESSION_MEMORY_KB, "max_mot_session_memory");
+        UpdateIntConfigItem(m_sessionMemoryMinLimitKB, DEFAULT_MIN_MOT_SESSION_MEMORY_KB, "min_mot_session_memory");
+    }
     UPDATE_USER_CFG(m_reserveMemoryMode, "reserve_memory_mode", DEFAULT_RESERVE_MEMORY_MODE);
     UPDATE_USER_CFG(m_storeMemoryPolicy, "store_memory_policy", DEFAULT_STORE_MEMORY_POLICY);
     UPDATE_USER_CFG(m_chunkAllocPolicy, "chunk_alloc_policy", DEFAULT_CHUNK_ALLOC_POLICY);
-    UPDATE_INT_CFG(m_chunkPreallocWorkerCount, "chunk_prealloc_worker_count", DEFAULT_CHUNK_PREALLOC_WORKER_COUNT);
-    UPDATE_INT_CFG(m_highRedMarkPercent, "high_red_mark_percent", DEFAULT_HIGH_RED_MARK_PERCENT);
+    UPDATE_INT_CFG(m_chunkPreallocWorkerCount,
+        "chunk_prealloc_worker_count",
+        DEFAULT_CHUNK_PREALLOC_WORKER_COUNT,
+        MIN_CHUNK_PREALLOC_WORKER_COUNT,
+        MAX_CHUNK_PREALLOC_WORKER_COUNT);
+    UPDATE_INT_CFG(m_highRedMarkPercent,
+        "high_red_mark_percent",
+        DEFAULT_HIGH_RED_MARK_PERCENT,
+        MIN_HIGH_RED_MARK_PERCENT,
+        MAX_HIGH_RED_MARK_PERCENT);
     UPDATE_ABS_MEM_CFG(m_sessionLargeBufferStoreSizeMB,
         "session_large_buffer_store_size",
         DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE,
-        MEGA_BYTE);
+        SCALE_MEGA_BYTES,
+        MIN_SESSION_LARGE_BUFFER_STORE_SIZE_MB,
+        MAX_SESSION_LARGE_BUFFER_STORE_SIZE_MB);
     UPDATE_ABS_MEM_CFG(m_sessionLargeBufferStoreMaxObjectSizeMB,
         "session_large_buffer_store_max_object_size",
         DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE,
-        MEGA_BYTE);
-    UPDATE_ABS_MEM_CFG(
-        m_sessionMaxHugeObjectSizeMB, "session_max_huge_object_size", DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE, MEGA_BYTE);
+        SCALE_MEGA_BYTES,
+        MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB,
+        MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB);
+    UPDATE_ABS_MEM_CFG(m_sessionMaxHugeObjectSizeMB,
+        "session_max_huge_object_size",
+        DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE,
+        SCALE_MEGA_BYTES,
+        MIN_SESSION_MAX_HUGE_OBJECT_SIZE_MB,
+        MAX_SESSION_MAX_HUGE_OBJECT_SIZE_MB);
 
     // GC configuration
-    UPDATE_CFG(m_gcEnable, "enable_gc", DEFAULT_GC_ENABLE);
-    UPDATE_MEM_CFG(m_gcReclaimThresholdBytes, "reclaim_threshold", DEFAULT_GC_RECLAIM_THRESHOLD, 1);
-    UPDATE_INT_CFG(m_gcReclaimBatchSize, "reclaim_batch_size", DEFAULT_GC_RECLAIM_BATCH_SIZE);
-    UPDATE_MEM_CFG(m_gcHighReclaimThresholdBytes, "high_reclaim_threshold", DEFAULT_GC_HIGH_RECLAIM_THRESHOLD, 1);
+    UPDATE_BOOL_CFG(m_gcEnable, "enable_gc", DEFAULT_GC_ENABLE);
+    UPDATE_ABS_MEM_CFG(m_gcReclaimThresholdBytes,
+        "reclaim_threshold",
+        DEFAULT_GC_RECLAIM_THRESHOLD,
+        SCALE_BYTES,
+        MIN_GC_RECLAIM_THRESHOLD_BYTES,
+        MAX_GC_RECLAIM_THRESHOLD_BYTES);
+    UPDATE_INT_CFG(m_gcReclaimBatchSize,
+        "reclaim_batch_size",
+        DEFAULT_GC_RECLAIM_BATCH_SIZE,
+        MIN_GC_RECLAIM_BATCH_SIZE,
+        MAX_GC_RECLAIM_BATCH_SIZE);
+    UPDATE_ABS_MEM_CFG(m_gcHighReclaimThresholdBytes,
+        "high_reclaim_threshold",
+        DEFAULT_GC_HIGH_RECLAIM_THRESHOLD,
+        SCALE_BYTES,
+        MIN_GC_HIGH_RECLAIM_THRESHOLD_BYTES,
+        MAX_GC_HIGH_RECLAIM_THRESHOLD_BYTES);
 
     // JIT configuration
-    UPDATE_CFG(m_enableCodegen, "enable_mot_codegen", DEFAULT_ENABLE_MOT_CODEGEN);
-    UPDATE_CFG(m_forcePseudoCodegen, "force_mot_pseudo_codegen", DEFAULT_FORCE_MOT_PSEUDO_CODEGEN);
-    UPDATE_CFG(m_enableCodegenPrint, "enable_mot_codegen_print", DEFAULT_ENABLE_MOT_CODEGEN_PRINT);
-    UPDATE_INT_CFG(m_codegenLimit, "mot_codegen_limit", DEFAULT_MOT_CODEGEN_LIMIT);
+    UPDATE_BOOL_CFG(m_enableCodegen, "enable_mot_codegen", DEFAULT_ENABLE_MOT_CODEGEN);
+    UPDATE_BOOL_CFG(m_forcePseudoCodegen, "force_mot_pseudo_codegen", DEFAULT_FORCE_MOT_PSEUDO_CODEGEN);
+    UPDATE_BOOL_CFG(m_enableCodegenPrint, "enable_mot_codegen_print", DEFAULT_ENABLE_MOT_CODEGEN_PRINT);
+    UPDATE_INT_CFG(
+        m_codegenLimit, "mot_codegen_limit", DEFAULT_MOT_CODEGEN_LIMIT, MIN_MOT_CODEGEN_LIMIT, MAX_MOT_CODEGEN_LIMIT);
 
     // storage configuration
-    UPDATE_CFG(m_allowIndexOnNullableColumn, "allow_index_on_nullable_column", DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN);
+    UPDATE_BOOL_CFG(
+        m_allowIndexOnNullableColumn, "allow_index_on_nullable_column", DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN);
     UPDATE_USER_CFG(m_indexTreeFlavor, "index_tree_flavor", DEFAULT_INDEX_TREE_FLAVOR);
 
     // general configuration
-    UPDATE_TIME_CFG(m_configMonitorPeriodSeconds, "config_update_period", DEFAULT_CFG_MONITOR_PERIOD, 1000000);
-    UPDATE_CFG(m_runInternalConsistencyValidation,
+    UPDATE_TIME_CFG(m_configMonitorPeriodSeconds,
+        "config_update_period",
+        DEFAULT_CFG_MONITOR_PERIOD,
+        SCALE_SECONDS,
+        MIN_CFG_MONITOR_PERIOD_SECONDS,
+        MAX_CFG_MONITOR_PERIOD_SECONDS);
+    UPDATE_BOOL_CFG(m_runInternalConsistencyValidation,
         "internal_consistency_validation",
         DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION);
 
@@ -781,9 +976,11 @@ void MOTConfiguration::UpdateComponentLogLevel()
             LogLevel componentLevel = componentCfg->GetUserConfigValue<LogLevel>("log_level", globalLogLevel);
             if (componentLevel != globalLogLevel) {
                 mot_string logLevelStr;
-                MOT_LOG_INFO("Updating the log level of component %s to: %s",
-                    componentName.c_str(),
-                    TypeFormatter<LogLevel>::ToString(componentLevel, logLevelStr));
+                if (!m_suppressLog) {
+                    MOT_LOG_INFO("Updating the log level of component %s to: %s",
+                        componentName.c_str(),
+                        TypeFormatter<LogLevel>::ToString(componentLevel, logLevelStr));
+                }
                 SetLogComponentLogLevel(componentName.c_str(), componentLevel);
             }
 
@@ -806,10 +1003,12 @@ void MOTConfiguration::UpdateComponentLogLevel()
                         componentCfg->GetUserConfigValue<LogLevel>(loggerName.c_str(), LogLevel::LL_INFO);
                     if (loggerLevel != LogLevel::LL_INFO) {
                         mot_string logLevelStr;
-                        MOT_LOG_INFO("Updating the log level of logger %s in component %s to: %s",
-                            loggerName.c_str(),
-                            componentName.c_str(),
-                            TypeFormatter<LogLevel>::ToString(loggerLevel, logLevelStr));
+                        if (!m_suppressLog) {
+                            MOT_LOG_INFO("Updating the log level of logger %s in component %s to: %s",
+                                loggerName.c_str(),
+                                componentName.c_str(),
+                                TypeFormatter<LogLevel>::ToString(loggerLevel, logLevelStr));
+                        }
                         SetLoggerLogLevel(componentName.c_str(), loggerName.c_str(), loggerLevel);
                     }
                 }
@@ -821,7 +1020,7 @@ void MOTConfiguration::UpdateComponentLogLevel()
     }
 }
 
-void MOTConfiguration::UpdateConfigItem(bool& oldValue, bool newValue, const char* name)
+void MOTConfiguration::UpdateBoolConfigItem(bool& oldValue, bool newValue, const char* name)
 {
     if (oldValue != newValue) {
         MOT_LOG_TRACE(
@@ -830,7 +1029,7 @@ void MOTConfiguration::UpdateConfigItem(bool& oldValue, bool newValue, const cha
     }
 }
 
-void MOTConfiguration::UpdateConfigItem(std::string& oldValue, const char* newValue, const char* name)
+void MOTConfiguration::UpdateStringConfigItem(std::string& oldValue, const char* newValue, const char* name)
 {
     if (oldValue != newValue) {
         MOT_LOG_TRACE("Configuration of %s changed: %s --> %s", name, oldValue.c_str(), newValue);
@@ -885,8 +1084,10 @@ uint64_t MOTConfiguration::ParseMemoryPercentTotal(const char* memoryValue, uint
     int percent = ParseMemoryPercent(memoryValue);
     if (percent >= 0) {
         memoryValueBytes = ((uint64_t)m_totalMemoryMb) * MEGA_BYTE * percent / 100;
-        MOT_LOG_INFO(
-            "Loaded %s: %d%% from total = %" PRIu64 " MB", cfgPath, percent, memoryValueBytes / 1024ul / 1024ul);
+        if (!m_suppressLog) {
+            MOT_LOG_INFO(
+                "Loaded %s: %d%% from total = %" PRIu64 " MB", cfgPath, percent, memoryValueBytes / 1024ul / 1024ul);
+        }
     } else {
         MOT_LOG_WARN("Invalid %s memory format: illegal percent specification", cfgPath);
     }
