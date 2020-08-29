@@ -823,8 +823,8 @@ static void entryGetItem(GinState* ginstate, GinScanEntry entry, ItemPointerData
             }
 
             entry->curItem = entry->list[entry->offset++];
-        } while (ginCompareItemPointers(&entry->curItem, &advancePast) <= 0);
-        /* XXX: shouldn't we apply the fuzzy search limit here? */
+        } while
+            (ginCompareItemPointers(&entry->curItem, &advancePast) <= 0 || (entry->reduceResult && dropItem(entry)));
     } else {
         /* A posting tree */
         do {
@@ -839,8 +839,12 @@ static void entryGetItem(GinState* ginstate, GinScanEntry entry, ItemPointerData
             }
 
             entry->curItem = entry->list[entry->offset++];
-        } while (
-            ginCompareItemPointers(&entry->curItem, &advancePast) <= 0 || (entry->reduceResult && dropItem(entry)));
+
+            if (ginCompareItemPointers(&entry->curItem, &advancePast) <= 0)
+                continue;
+
+            advancePast = entry->curItem;
+        } while (entry->reduceResult && dropItem(entry));
     }
 }
 
