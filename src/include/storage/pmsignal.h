@@ -43,6 +43,7 @@ typedef enum {
     PMSIGNAL_ROLLBACK_STANDBY_PROMOTE, /* roll back standby promoting */
     PMSIGNAL_START_PAGE_WRITER,        /* start a new page writer thread */
     PMSIGNAL_START_THREADPOOL_WORKER,  /* start thread pool woker */
+    PMSIGNAL_BACKGROUND_WORKER_CHANGE, /* background worker state change */
     NUM_PMSIGNALS                      /* Must be last value of enum! */
 } PMSignalReason;
 

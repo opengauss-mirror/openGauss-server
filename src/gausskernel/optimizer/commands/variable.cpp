@@ -686,11 +686,13 @@ bool check_mix_replication_param(bool* newval, void** extra, GucSource source)
 /*
  * SET CLIENT_ENCODING
  */
+void (*check_client_encoding_hook)(void);
 bool check_client_encoding(char** newval, void** extra, GucSource source)
 {
     int encoding;
     const char* canonical_name = NULL;
-
+	if (check_client_encoding_hook)
+		check_client_encoding_hook();
     /* Look up the encoding by name */
     encoding = pg_valid_client_encoding(*newval);
     if (encoding < 0) {

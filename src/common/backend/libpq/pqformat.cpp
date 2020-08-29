@@ -611,6 +611,34 @@ const char* pq_getmsgstring(StringInfo msg)
 }
 
 /* --------------------------------
+ *		pq_getmsgrawstring - get a null-terminated text string - NO conversion
+ *
+ *		Returns a pointer directly into the message buffer.
+ * --------------------------------
+ */
+const char *pq_getmsgrawstring(StringInfo msg)
+{
+    char *str;
+    int slen;
+
+    str = &msg->data[msg->cursor];
+
+	/*
+	 * It's safe to use strlen() here because a StringInfo is guaranteed to
+	 * have a trailing null byte.  But check we found a null inside the
+	 * message.
+	 */
+    slen = strlen(str);
+    if (msg->cursor + slen >= msg->len)
+        ereport(ERROR,
+            (errcode(ERRCODE_PROTOCOL_VIOLATION),
+			    errmsg("invalid string in message")));
+    msg->cursor += slen + 1;
+
+    return str;
+}
+
+/* --------------------------------
  *		pq_getmsgend	- verify message fully consumed
  * --------------------------------
  */

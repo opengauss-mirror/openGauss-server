@@ -203,7 +203,7 @@ static void get_query_result(TupleTableSlot* slot, DestReceiver* self);
  * @hdfs
  * Define different mesage type used for exec_simple_query
  */
-typedef enum { QUERY_MESSAGE = 0, HYBRID_MESSAGE } MessageType;
+//typedef enum { QUERY_MESSAGE = 0, HYBRID_MESSAGE } MessageType;
 
 /* ----------------------------------------------------------------
  *		decls for routines only used in this file
@@ -234,6 +234,8 @@ static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params
 extern void CancelAutoAnalyze();
 extern List* RevalidateCachedQuery(CachedPlanSource* plansource);
 static void InitRecursiveCTEGlobalVariables(const PlannedStmt* planstmt);
+
+THR_LOCAL bool needEnd = true;
 
 bool StreamThreadAmI()
 {
@@ -1874,7 +1876,7 @@ void exec_init_poolhandles(void)
  * hybridmesage, this parameter will be set to 1 to tell us the normal query string
  * followed by information string. query_string = normal querystring + message.
  */
-static void exec_simple_query(const char* query_string, MessageType messageType, StringInfo msg = NULL)
+void exec_simple_query(const char* query_string, MessageType messageType, StringInfo msg)
 {
     CommandDest dest = (CommandDest)t_thrd.postgres_cxt.whereToSendOutput;
     MemoryContext oldcontext;
@@ -2883,7 +2885,7 @@ static void exec_plan_with_params(StringInfo input_message)
  * If paramTypeNames is specified, paraTypes is filled with corresponding OIDs.
  * The caller is expected to allocate space for the paramTypes.
  */
-static void exec_parse_message(const char* query_string, /* string to execute */
+void exec_parse_message(const char* query_string,        /* string to execute */
     const char* stmt_name,                               /* name for prepared stmt */
     Oid* paramTypes,                                     /* parameter types */
     char** paramTypeNames,                               /* parameter type names */
@@ -3104,7 +3106,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         if (u_sess->attr.attr_common.log_parser_stats)
             ResetUsage();
 
-        query = parse_analyze_varparams(raw_parse_tree, query_string, &paramTypes, &numParams);
+        query = parse_analyze_varparams(raw_parse_tree, query_string, &paramTypes, &numParams, paramTypeNames);
 
         /* check cross engine queries  */
         StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -3766,7 +3768,7 @@ static void exec_get_ddl_params(StringInfo input_message)
  *
  * Process a "Bind" message to create a portal from a prepared statement
  */
-static void exec_bind_message(StringInfo input_message)
+void exec_bind_message(StringInfo input_message)
 {
     const char* portal_name = NULL;
     const char* stmt_name = NULL;
@@ -4336,7 +4338,7 @@ static void exec_bind_message(StringInfo input_message)
  *
  * Process an "Execute" message for a portal
  */
-static void exec_execute_message(const char* portal_name, long max_rows)
+void exec_execute_message(const char* portal_name, long max_rows)
 {
     CommandDest dest;
     DestReceiver* receiver = NULL;
@@ -4801,7 +4803,7 @@ static int errdetail_recovery_conflict(void)
  *
  * Process a "Describe" message for a prepared statement
  */
-static void exec_describe_statement_message(const char* stmt_name)
+void exec_describe_statement_message(const char* stmt_name)
 {
     CachedPlanSource* psrc = NULL;
     int i;

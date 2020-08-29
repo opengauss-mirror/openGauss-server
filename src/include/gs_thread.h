@@ -97,6 +97,7 @@ typedef enum knl_thread_role {
     COMM_RECEIVER,
     COMM_AUXILIARY,
     COMM_POOLER_CLEAN,
+    BACKGROUND_WORKER,
     // should be last valid thread.
     THREAD_ENTRY_BOUND,
 

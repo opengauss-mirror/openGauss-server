@@ -28,6 +28,8 @@
 #include "pgtime.h" /* for pg_time_t */
 #include "libpq/libpq-be.h"
 
+#define InvalidPid ((ThreadId)(-1))
+
 #define PG_BACKEND_VERSIONSTR "gaussdb " DEF_GS_VERSION "\n"
 
 /*****************************************************************************
@@ -129,6 +131,7 @@ extern bool InplaceUpgradePrecommit;
 
 extern THR_LOCAL PGDLLIMPORT bool IsUnderPostmaster;
 extern THR_LOCAL PGDLLIMPORT char my_exec_path[];
+extern THR_LOCAL PGDLLIMPORT bool IsBackgroundWorker;
 
 #define MAX_QUERY_DOP (64)
 #define MIN_QUERY_DOP -(MAX_QUERY_DOP)
@@ -232,7 +235,7 @@ extern bool InLocalUserIdChange(void);
 extern bool InSecurityRestrictedOperation(void);
 extern void GetUserIdAndContext(Oid* userid, bool* sec_def_context);
 extern void SetUserIdAndContext(Oid userid, bool sec_def_context);
-extern void InitializeSessionUserId(const char* rolename);
+extern void InitializeSessionUserId(const char* rolename, Oid role_id);
 extern void InitializeSessionUserIdStandalone(void);
 extern void SetSessionAuthorization(Oid userid, bool is_superuser);
 extern Oid GetCurrentRoleId(void);

@@ -51,6 +51,7 @@ THR_LOCAL object_access_hook_type object_access_hook = NULL;
  * These are initialized for the bootstrap/standalone case.
  */
 THR_LOCAL bool IsUnderPostmaster = false;
+THR_LOCAL bool IsBackgroundWorker = false;
 
 volatile ThreadId PostmasterPid = 0;
 bool IsPostmasterEnvironment = false;

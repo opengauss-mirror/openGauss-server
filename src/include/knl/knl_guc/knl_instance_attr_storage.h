@@ -68,6 +68,7 @@ typedef struct knl_instance_attr_storage {
     int max_replication_slots;
     int replication_type;
     int autovacuum_max_workers;
+    int max_background_workers;
     int64 autovacuum_freeze_max_age;
     int wal_level;
     /* User specified maximum number of recovery threads. */

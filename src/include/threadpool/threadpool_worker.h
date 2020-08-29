@@ -54,6 +54,7 @@ typedef struct Backend {
     bool is_autovacuum; /* is it an autovacuum process? */
     volatile bool dead_end; /* is it going to send an quit? */
     volatile int flag;
+    bool bgworker_notify; /* gets bgworker start/stop notifications */
     Dlelem elem; /* list link in BackendList */
 } Backend;
 

@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *
- * pl_exec.c		- Executor for the PL/pgSQL
+ * pl_exec.cpp		- Executor for the PL/pgSQL
  *			  procedural language
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -8,7 +8,7 @@
  *
  *
  * IDENTIFICATION
- *	  src/pl/plpgsql/src/pl_exec.c
+ *	  src/pl/plpgsql/src/pl_exec.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -33,6 +33,7 @@
 #include "pgstat.h"
 #include "optimizer/clauses.h"
 #include "storage/proc.h"
+#include "tcop/autonomous.h"
 #include "tcop/tcopprot.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -1412,6 +1413,20 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     bool savedIsStp = u_sess->SPI_cxt.is_stp;
     TransactionId oldTransactionId = InvalidTransactionId;
 
+    if (block->autonomous) {
+        if (estate->func->fn_is_trigger) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("Trigger doesnot support autonomous transaction")));
+        } else if (t_thrd.autonomous_cxt.isnested) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature : Autonomous transaction doesnot support nesting")));
+        } else {
+            estate->autonomous_session = AutonomousSessionStart();
+        }
+    }
+
     /*
      * First initialize all variables declared in this block
      */
@@ -1732,6 +1747,8 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     }
 
     estate->err_text = NULL;
+	if (block->autonomous)
+		AutonomousSessionEnd(estate->autonomous_session);
 
     /*
      * Handle the return code.
@@ -3664,6 +3681,7 @@ static void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* fu
     estate->rettupdesc = NULL;
     estate->exitlabel = NULL;
     estate->cur_error = NULL;
+    estate->autonomous_session = NULL;
 
     estate->tuple_store = NULL;
     estate->cursor_return_data = NULL;
@@ -3810,6 +3828,59 @@ static void exec_prepare_plan(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, int
     exec_simple_check_plan(expr);
 }
 
+static void build_symbol_table(PLpgSQL_execstate *estate,
+                               PLpgSQL_nsitem *ns_start,
+                               int *ret_nitems,
+                               const char ***ret_names,
+                               Oid **ret_types)
+{
+    PLpgSQL_nsitem *nsitem = NULL;
+    List *names = NIL;
+    List *types = NIL;
+    ListCell *lc1, *lc2;
+    int i, nitems;
+    const char **names_vector;
+    Oid *types_vector = NULL;
+
+    for (nsitem = ns_start; nsitem; nsitem = nsitem->prev) {
+        if (nsitem->itemtype == PLPGSQL_NSTYPE_VAR) {
+            PLpgSQL_datum *datum;
+            PLpgSQL_var *var;
+            Oid		typoid;
+            Value  *name;
+
+            if (strcmp(nsitem->name, "found") == 0)
+                continue;  // XXX
+            elog(LOG, "namespace item variable itemno %d, name %s",
+                nsitem->itemno, nsitem->name);
+            datum = estate->datums[nsitem->itemno];
+            Assert(datum->dtype == PLPGSQL_DTYPE_VAR);
+            var = (PLpgSQL_var *) datum;
+            name = makeString(nsitem->name);
+            typoid = var->datatype->typoid;
+            if (!list_member(names, name)) {
+                names = lappend(names, name);
+                types = lappend_oid(types, typoid);
+            }
+        }
+    }
+
+    Assert(list_length(names) == list_length(types));
+    nitems = list_length(names);
+    names_vector = (const char **)palloc(nitems * sizeof(char *));
+    types_vector = (Oid *)palloc(nitems * sizeof(Oid));
+    i = 0;
+    forboth(lc1, names, lc2, types) {
+        names_vector[i] = pstrdup(strVal(lfirst(lc1)));
+        types_vector[i] = lfirst_oid(lc2);
+        i++;
+    }
+
+    *ret_nitems = nitems;
+    *ret_names = names_vector;
+    *ret_types = types_vector;
+}
+
 /* ----------
  * exec_stmt_execsql			Execute an SQL statement (possibly with INTO).
  * ----------
@@ -3825,6 +3896,29 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
 
     if (!RecoveryInProgress()) {
         oldTransactionId = GetTopTransactionId();
+    }
+
+    if (estate->autonomous_session) {
+        int nparams = 0;
+        int i;
+        const char **param_names = NULL;
+        Oid *param_types = NULL;
+        AutonomousPreparedStatement *astmt = NULL;
+        Datum *values = NULL;
+        bool *nulls = NULL;
+        AutonomousResult *aresult = NULL;
+        t_thrd.autonomous_cxt.sqlstmt = stmt->sqlstmt;
+        build_symbol_table(estate, stmt->sqlstmt->ns, &nparams, &param_names, &param_types);
+        astmt = AutonomousSessionPrepare(estate->autonomous_session, stmt->sqlstmt->query, (int16)nparams, param_types, param_names);
+
+        values = (Datum *)palloc(nparams * sizeof(*values));
+        nulls = (bool *)palloc(nparams * sizeof(*nulls));
+        for (i = 0; i < nparams; i++) {
+            nulls[i] = true;
+        }
+        aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
+        exec_set_found(estate, (list_length(aresult->tuples) != 0));
+        return PLPGSQL_RC_OK;
     }
 
     /*
@@ -4239,6 +4333,12 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
     querystr = pstrdup(querystr);
 
     exec_eval_cleanup(estate);
+
+	if (estate->autonomous_session)
+	{
+		(void *)AutonomousSessionExecute(estate->autonomous_session, querystr);
+		return PLPGSQL_RC_OK;
+	}    
 
     if (stmt->params != NULL) {
         stmt->ppd = (void*)exec_eval_using_params(estate, stmt->params);
@@ -4984,6 +5084,36 @@ static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
  */
 static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt)
 {
+    if (estate->autonomous_session) {
+        if (t_thrd.autonomous_cxt.sqlstmt) {
+            int nparams = 0;
+            int i;
+            const char **param_names = NULL;
+            Oid *param_types = NULL;
+            AutonomousPreparedStatement *astmt = NULL;
+            Datum *values = NULL;
+            bool *nulls = NULL;
+            AutonomousResult *aresult = NULL;
+            ereport(LOG, (errmsg("query COMMIT")));
+            build_symbol_table(estate, t_thrd.autonomous_cxt.sqlstmt->ns, &nparams, &param_names, &param_types);
+            astmt = AutonomousSessionPrepare(estate->autonomous_session, "COMMIT", (int16)nparams, param_types, param_names);
+
+            values = (Datum *)palloc(nparams * sizeof(*values));
+            nulls = (bool *)palloc(nparams * sizeof(*nulls));
+            for (i = 0; i < nparams; i++)
+            {
+                nulls[i] = true;
+            }
+            aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
+            exec_set_found(estate, (list_length(aresult->tuples) != 0));
+            t_thrd.autonomous_cxt.sqlstmt = NULL;
+            return PLPGSQL_RC_OK;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Syntax error: In antonomous transaction, commit/rollback must match start transaction")));
+        }
+    }
+
     const char* PORTAL = "Portal";
     int subTransactionCount = u_sess->SPI_cxt.portal_stp_exception_counter;
 
@@ -5046,6 +5176,36 @@ static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt
  */
 static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* stmt)
 {
+    if (estate->autonomous_session) {
+        if (t_thrd.autonomous_cxt.sqlstmt) {
+            int nparams = 0;
+            int i;
+            const char **param_names = NULL;
+            Oid *param_types = NULL;
+            AutonomousPreparedStatement *astmt = NULL;
+            Datum *values = NULL;
+            bool *nulls = NULL;
+            AutonomousResult *aresult = NULL;
+            ereport(LOG, (errmsg("query ROLLBACK")));
+            build_symbol_table(estate, t_thrd.autonomous_cxt.sqlstmt->ns, &nparams, &param_names, &param_types);
+            astmt = AutonomousSessionPrepare(estate->autonomous_session, "ROLLBACK", (int16)nparams, param_types, param_names);
+
+            values = (Datum *)palloc(nparams * sizeof(*values));
+            nulls = (bool *)palloc(nparams * sizeof(*nulls));
+            for (i = 0; i < nparams; i++)
+            {
+                nulls[i] = true;
+            }
+            aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
+            exec_set_found(estate, (list_length(aresult->tuples) != 0));
+            t_thrd.autonomous_cxt.sqlstmt = NULL;
+            return PLPGSQL_RC_OK;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Syntax error: In antonomous transaction, commit/rollback must match start transaction")));
+           }
+    }
+
     const char* PORTAL = "Portal";
     int subTransactionCount = u_sess->SPI_cxt.portal_stp_exception_counter;
 

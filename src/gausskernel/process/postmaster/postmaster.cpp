@@ -110,6 +110,7 @@
 #include "job/job_scheduler.h"
 #include "job/job_worker.h"
 #include "postmaster/autovacuum.h"
+#include "postmaster/bgworker_internals.h"
 #include "postmaster/pagewriter.h"
 #include "postmaster/fork_process.h"
 #include "postmaster/pgarch.h"
@@ -311,6 +312,7 @@ static void reaper(SIGNAL_ARGS);
 static void sigusr1_handler(SIGNAL_ARGS);
 static void dummy_handler(SIGNAL_ARGS);
 static void CleanupBackend(ThreadId pid, int exitstatus);
+static bool CleanupBackgroundWorker(ThreadId pid, int exitstatus);
 static const char* GetProcName(ThreadId pid);
 static void LogChildExit(int lev, const char* procname, ThreadId pid, int exitstatus);
 static void PostmasterStateMachine(void);
@@ -366,6 +368,8 @@ static void check_and_reset_ha_listen_port(void);
 static void* cJSON_internal_malloc(size_t size);
 static bool NeedHeartbeat();
 static ServerMode GetHaShmemMode(void);
+static bool assign_backendlist_entry(RegisteredBgWorker *rw);
+static void maybe_start_bgworkers(void);
 
 bool PMstateIsRun(void);
 
@@ -380,6 +384,7 @@ bool PMstateIsRun(void);
 #define BACKEND_TYPE_TEMPBACKEND                                        \
     0x0010                      /* temp thread processing cancel signal \
                                    or stream connection */
+
 #define BACKEND_TYPE_ALL 0x001F /* OR of all the above */
 
 static int CountChildren(int target);
@@ -1019,6 +1024,7 @@ void SetShmemCxt(void)
     g_instance.shmem_cxt.MaxBackends = g_instance.shmem_cxt.MaxConnections + 
                                        g_instance.attr.attr_sql.job_queue_processes +
                                        g_instance.attr.attr_storage.autovacuum_max_workers + 
+                                       g_instance.attr.attr_storage.max_background_workers +
                                        AUXILIARY_BACKENDS + 
                                        AV_LAUNCHER_PROCS;
     g_instance.shmem_cxt.MaxReserveBackendId = g_instance.attr.attr_sql.job_queue_processes +
@@ -5464,6 +5470,14 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+        /* Was it one of our background workers? */
+        if (CleanupBackgroundWorker(pid, (int)exitstatus))
+        {
+            /* have it be restarted */
+            g_instance.bgworker_cxt.have_crashed_worker = true;
+            continue;
+        }
+        
         /*
          * Else do standard backend child cleanup.
          */
@@ -5567,6 +5581,101 @@ static const char* GetProcName(ThreadId pid)
 }
 
 /*
+ * Scan the bgworkers list and see if the given PID (which has just stopped
+ * or crashed) is in it.  Handle its shutdown if so, and return true.  If not a
+ * bgworker, return false.
+ *
+ * This is heavily based on CleanupBackend.  One important difference is that
+ * we don't know yet that the dying process is a bgworker, so we must be silent
+ * until we're sure it is.
+ */
+static bool CleanupBackgroundWorker(ThreadId pid,
+    int exitstatus) /* child's exit status */
+{
+    char namebuf[MAXPGPATH];
+    slist_mutable_iter iter;
+
+    slist_foreach_modify(iter, &BackgroundWorkerList) {
+        RegisteredBgWorker *rw;
+
+        rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
+
+        if (rw->rw_pid != pid) {
+            continue;
+        }
+
+#ifdef WIN32
+        /* see CleanupBackend */
+        if (exitstatus == ERROR_WAIT_NO_CHILDREN) {
+            exitstatus = 0;
+        }
+#endif
+
+        int rc = snprintf_s(namebuf, MAXPGPATH, MAXPGPATH - 1, _("background worker \"%s\""), rw->rw_worker.bgw_type);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        if (!EXIT_STATUS_0(exitstatus)) {
+            /* Record timestamp, so we know when to restart the worker. */
+            rw->rw_crashed_at = GetCurrentTimestamp();
+        } else {
+            /* Zero exit status means terminate */
+            rw->rw_crashed_at = 0;
+            rw->rw_terminate = true;
+        }
+
+        /*
+         * Additionally, for shared-memory-connected workers, just like a
+         * backend, any exit status other than 0 or 1 is considered a crash
+         * and causes a system-wide restart.
+         */
+        if ((rw->rw_worker.bgw_flags & BGWORKER_SHMEM_ACCESS) != 0) {
+            if (!EXIT_STATUS_0(exitstatus) && !EXIT_STATUS_1(exitstatus)) {
+                HandleChildCrash(pid, exitstatus, namebuf);
+                return true;
+            }
+        }
+
+        /*
+         * We must release the postmaster child slot whether this worker is
+         * connected to shared memory or not, but we only treat it as a crash
+         * if it is in fact connected.
+         */
+        if (!ReleasePostmasterChildSlot(rw->rw_child_slot) &&
+            (rw->rw_worker.bgw_flags & BGWORKER_SHMEM_ACCESS) != 0) {
+            HandleChildCrash(pid, exitstatus, namebuf);
+            return true;
+        }
+
+        /* Get it out of the BackendList and clear out remaining data */
+        DLRemove(&rw->rw_backend->elem);
+
+        /*
+         * It's possible that this background worker started some OTHER
+         * background worker and asked to be notified when that worker started
+         * or stopped.  If so, cancel any notifications destined for the
+         * now-dead backend.
+         */
+        if (rw->rw_backend->bgworker_notify) {
+            BackgroundWorkerStopNotifications(rw->rw_pid);
+        }
+
+        BackendArrayRemove(rw->rw_backend);
+
+        rw->rw_backend = NULL;
+        rw->rw_pid = 0;
+        rw->rw_child_slot = 0;
+        ReportBackgroundWorkerExit(&iter);  /* report child death */
+
+        LogChildExit(EXIT_STATUS_0(exitstatus) ? DEBUG1 : LOG,
+                     namebuf, pid, exitstatus);
+
+        return true;
+    }
+
+    return false;
+}
+
+/*
  * CleanupBackend -- cleanup after terminated backend.
  *
  * Remove all local state associated with backend.
@@ -5629,6 +5738,18 @@ static void CleanupBackend(ThreadId pid, int exitstatus) /* child's exit status.
                 BackendArrayRemove(bp);
             }
 
+			if (bp->bgworker_notify)
+			{
+				/*
+				 * This backend may have been slated to receive SIGUSR1 when
+				 * some background worker started or stopped.  Cancel those
+				 * notifications, as we don't want to signal PIDs that are not
+				 * PostgreSQL backends.  This gets skipped in the (probably
+				 * very common) case where the backend has never requested any
+				 * such notifications.
+				 */
+				BackgroundWorkerStopNotifications(bp->pid);
+			}
             DLRemove(curr);
             break;
         }
@@ -6881,6 +7002,16 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 
+    /* Process background worker state change. */
+    if (CheckPostmasterSignal(PMSIGNAL_BACKGROUND_WORKER_CHANGE))
+    {
+        BackgroundWorkerStateChange();
+        g_instance.bgworker_cxt.start_worker_needed = true;
+    }
+    if (g_instance.bgworker_cxt.start_worker_needed || g_instance.bgworker_cxt.have_crashed_worker) {
+        maybe_start_bgworkers();
+    }
+
     /*
      * RECOVERY_STARTED and BEGIN_HOT_STANDBY signals are ignored in
      * unexpected states. If the startup process quickly starts up, completes
@@ -7699,6 +7830,300 @@ int MaxLivePostmasterChildren(void)
     return 6 * g_instance.shmem_cxt.MaxBackends;
 }
 
+/*
+ * Start a new bgworker.
+ * Starting time conditions must have been checked already.
+ *
+ * Returns true on success, false on failure.
+ * In either case, update the RegisteredBgWorker's state appropriately.
+ *
+ * This code is heavily based on autovacuum.c, q.v.
+ */
+static bool do_start_bgworker(RegisteredBgWorker *rw)
+{
+    ThreadId worker_pid = InvalidPid;
+
+    Assert(rw->rw_pid == 0);
+
+    /*
+     * Allocate and assign the Backend element.  Note we must do this before
+     * forking, so that we can handle failures (out of memory or child-process
+     * slots) cleanly.
+     *
+     * Treat failure as though the worker had crashed.  That way, the
+     * postmaster will wait a bit before attempting to start it again; if we
+     * tried again right away, most likely we'd find ourselves hitting the
+     * same resource-exhaustion condition.
+     */
+    if (!assign_backendlist_entry(rw)) {
+        rw->rw_crashed_at = GetCurrentTimestamp();
+        return false;
+    }
+
+    ereport(DEBUG1,
+        (errmsg("starting background worker process \"%s\"",
+            rw->rw_worker.bgw_name)));
+
+    Backend* bn = rw->rw_backend;
+    void* bgWorkerShmAddr = GetBackgroundWorkerShmAddr(rw->rw_shmem_slot);
+    switch ((worker_pid = initialize_util_thread(BACKGROUND_WORKER, bgWorkerShmAddr))) {
+        case (ThreadId)-1:
+            /* in postmaster, fork failed ... */
+            ereport(LOG,
+                (errmsg("could not fork worker process: %m")));
+            /* undo what assign_backendlist_entry did */
+            (void)ReleasePostmasterChildSlot(rw->rw_child_slot);
+            bn->pid = 0;
+            rw->rw_child_slot = 0;
+            rw->rw_backend = NULL;
+            /* mark entry as crashed, so we'll try again later */
+            rw->rw_crashed_at = GetCurrentTimestamp();
+            break;
+
+        default:
+            /* in postmaster, fork successful ... */
+            rw->rw_pid = worker_pid;
+            bn->pid = rw->rw_pid;
+            ReportBackgroundWorkerPID(rw);
+            /* add new worker to lists of backends */
+            DLInitElem(&bn->elem, bn);
+            DLAddHead(g_instance.backend_list, &bn->elem);
+
+            return true;
+    }
+
+    return false;
+}
+
+/*
+ * Does the current postmaster state require starting a worker with the
+ * specified start_time?
+ */
+static bool
+bgworker_should_start_now(BgWorkerStartTime start_time)
+{
+    switch (pmState) {
+        case PM_NO_CHILDREN:
+        case PM_WAIT_DEAD_END:
+        case PM_SHUTDOWN_2:
+        case PM_SHUTDOWN:
+        case PM_WAIT_BACKENDS:
+        case PM_WAIT_READONLY:
+        case PM_WAIT_BACKUP:
+            break;
+
+        case PM_RUN:
+            if (start_time == BgWorkerStart_RecoveryFinished) {
+                return true;
+            }
+            /* fall through */
+        case PM_HOT_STANDBY:
+            if (start_time == BgWorkerStart_ConsistentState) {
+                return true;
+            }
+            /* fall through */
+        case PM_RECOVERY:
+        case PM_STARTUP:
+        case PM_INIT:
+            if (start_time == BgWorkerStart_PostmasterStart) {
+                return true;
+            }
+            /* fall through */
+    }
+
+    return false;
+}
+
+/*
+ * Allocate the Backend struct for a connected background worker, but don't
+ * add it to the list of backends just yet.
+ *
+ * On failure, return false without changing any worker state.
+ *
+ * Some info from the Backend is copied into the passed rw.
+ */
+static bool
+assign_backendlist_entry(RegisteredBgWorker *rw)
+{
+    Backend* bn = NULL;
+
+    /*
+     * Check that database state allows another connection.  Currently the
+     * only possible failure is CAC_TOOMANY, so we just log an error message
+     * based on that rather than checking the error code precisely.
+     */
+    if (canAcceptConnections(false) != CAC_OK)
+    {
+        ereport(LOG,
+                (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+                 errmsg("no slot available for new worker process")));
+        return false;
+    }
+
+    int slot = AssignPostmasterChildSlot();
+
+    bn = AssignFreeBackEnd(slot);
+
+    if (bn == NULL) {
+        ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+        return false;
+    }
+    
+    /*
+     * Compute the cancel key that will be assigned to this session. We
+     * probably don't need cancel keys for background workers, but we'd better
+     * have something random in the field to prevent unfriendly people from
+     * sending cancels to them.
+     */
+    GenerateCancelKey(false);
+    bn->cancel_key = t_thrd.proc_cxt.MyCancelKey;
+    bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+    bn->is_autovacuum = false;
+    bn->dead_end = false;
+    bn->bgworker_notify = false;
+    rw->rw_backend = bn;
+    rw->rw_child_slot = bn->child_slot;
+
+    return true;
+}
+
+/*
+ * If the time is right, start background worker(s).
+ *
+ * As a side effect, the bgworker control variables are set or reset
+ * depending on whether more workers may need to be started.
+ *
+ * We limit the number of workers started per call, to avoid consuming the
+ * postmaster's attention for too long when many such requests are pending.
+ * As long as start_worker_needed is true, ServerLoop will not block and will
+ * call this function again after dealing with any other issues.
+ */
+static void maybe_start_bgworkers(void)
+{
+#define MAX_BGWORKERS_TO_LAUNCH 100
+    int num_launched = 0;
+    TimestampTz now = 0;
+    slist_mutable_iter iter;
+
+    /*
+     * During crash recovery, we have no need to be called until the state
+     * transition out of recovery.
+     */
+    if (g_instance.fatal_error) {
+        g_instance.bgworker_cxt.start_worker_needed = false;
+        g_instance.bgworker_cxt.have_crashed_worker = false;
+        return;
+    }
+
+    /* Don't need to be called again unless we find a reason for it below */
+    g_instance.bgworker_cxt.start_worker_needed = false;
+    g_instance.bgworker_cxt.have_crashed_worker = false;
+
+    slist_foreach_modify(iter, &BackgroundWorkerList) {
+        RegisteredBgWorker *rw;
+
+        rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
+
+        /* ignore if already running */
+        if (rw->rw_pid != 0) {
+            continue;
+        }
+
+        /* if marked for death, clean up and remove from list */
+        if (rw->rw_terminate) {
+            ForgetBackgroundWorker(&iter);
+            continue;
+        }
+
+        /*
+         * If this worker has crashed previously, maybe it needs to be
+         * restarted (unless on registration it specified it doesn't want to
+         * be restarted at all).  Check how long ago did a crash last happen.
+         * If the last crash is too recent, don't start it right away; let it
+         * be restarted once enough time has passed.
+         */
+        if (rw->rw_crashed_at != 0) {
+            if (rw->rw_worker.bgw_restart_time == BGW_NEVER_RESTART) {
+                ThreadId notify_pid = rw->rw_worker.bgw_notify_pid;
+
+                ForgetBackgroundWorker(&iter);
+
+                /* Report worker is gone now. */
+                if (notify_pid != 0) {
+                    (void)gs_signal_send(notify_pid, SIGUSR1);
+                }
+
+                continue;
+            }
+
+            /* read system time only when needed */
+            if (now == 0) {
+                now = GetCurrentTimestamp();
+            }
+
+            if (!TimestampDifferenceExceeds(rw->rw_crashed_at, now,
+                                            rw->rw_worker.bgw_restart_time * 1000)) {
+                /* Set flag to remember that we have workers to start later */
+                g_instance.bgworker_cxt.have_crashed_worker = true;
+                continue;
+            }
+        }
+
+        if (bgworker_should_start_now(rw->rw_worker.bgw_start_time)) {
+            /* reset crash time before trying to start worker */
+            rw->rw_crashed_at = 0;
+
+            /*
+             * Try to start the worker.
+             *
+             * On failure, give up processing workers for now, but set
+             * start_worker_needed so we'll come back here on the next iteration
+             * of ServerLoop to try again.  (We don't want to wait, because
+             * there might be additional ready-to-run workers.)  We could set
+             * have_crashed_worker as well, since this worker is now marked
+             * crashed, but there's no need because the next run of this
+             * function will do that.
+             */
+            if (!do_start_bgworker(rw)) {
+                g_instance.bgworker_cxt.start_worker_needed = true;
+                return;
+            }
+
+            /*
+             * If we've launched as many workers as allowed, quit, but have
+             * ServerLoop call us again to look for additional ready-to-run
+             * workers.  There might not be any, but we'll find out the next
+             * time we run.
+             */
+            if (++num_launched >= MAX_BGWORKERS_TO_LAUNCH) {
+                g_instance.bgworker_cxt.start_worker_needed = true;
+                return;
+            }
+        }
+    }
+}
+
+/*
+ * When a backend asks to be notified about worker state changes, we
+ * set a flag in its backend entry.  The background worker machinery needs
+ * to know when such backends exit.
+ */
+bool
+PostmasterMarkPIDForWorkerNotify(ThreadId pid)
+{
+    int count = MaxLivePostmasterChildren();
+    for (int i = 0; i < count; ++i) {
+        Backend* bp = &g_instance.backend_array[i];
+        if (bp->pid == pid)
+        {
+            bp->bgworker_notify = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+
 #ifdef EXEC_BACKEND
 #ifndef WIN32
 #define write_inheritable_socket(dest, src) ((*(dest) = (src)))
@@ -7965,6 +8390,7 @@ Backend* AssignFreeBackEnd(int slot)
     bn->pid = 0;
     bn->cancel_key = 0;
     bn->dead_end = false;
+    bn->bgworker_notify = false;
     return bn;
 }
 
@@ -9952,7 +10378,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             commAuxiliaryMain();
             proc_exit(0);
         } break;
-	
+
 #ifdef ENABLE_MULTIPLE_NODES
         case COMM_POOLER_CLEAN: {
             InitProcessAndShareMemory();
@@ -9960,6 +10386,14 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             proc_exit(0);
         } break;
 #endif
+
+        case BACKGROUND_WORKER: {
+            IsBackgroundWorker = true;
+            InitProcessAndShareMemory();
+            StartBackgroundWorker(arg->payload);
+            proc_exit(0);
+        } break;
+
         default:
             ereport(PANIC, (errmsg("unsupport thread role type %d", arg->role)));
             break;
@@ -10011,7 +10445,8 @@ static GaussdbThreadEntry GaussdbThreadEntryGate[] = {GaussDbThreadMain<MASTER>,
     GaussDbThreadMain<COMM_RECEIVERFLOWER>,
     GaussDbThreadMain<COMM_RECEIVER>,
     GaussDbThreadMain<COMM_AUXILIARY>,
-    GaussDbThreadMain<COMM_POOLER_CLEAN>};
+    GaussDbThreadMain<COMM_POOLER_CLEAN>,
+    GaussDbThreadMain<BACKGROUND_WORKER>};
 
 const char* GaussdbThreadName[] = {"main",
     "worker",
@@ -10055,7 +10490,8 @@ const char* GaussdbThreadName[] = {"main",
     "communicator receiver flower",
     "communicator receiver loop",
     "communicator auxiliary",
-    "communicator pooler auto cleaner"};
+    "communicator pooler auto cleaner",
+    "background worker"};
 
 GaussdbThreadEntry GetThreadEntry(knl_thread_role role)
 {

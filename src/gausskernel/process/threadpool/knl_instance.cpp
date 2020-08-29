@@ -290,6 +290,7 @@ static void knl_g_wlm_init(knl_g_wlm_context* wlm_cxt)
 
 static void knl_g_shmem_init(knl_g_shmem_context* shmem_cxt)
 {
+    shmem_cxt->max_parallel_workers = 8;
     shmem_cxt->MaxBackends = 100;
     shmem_cxt->MaxReserveBackendId = (AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS);
     shmem_cxt->ThreadPoolGroupNum = 0;
@@ -314,6 +315,12 @@ static void knl_g_numa_init(knl_g_numa_context* numa_cxt)
     numa_cxt->maxLength = INIT_NUMA_ALLOC_COUNT;
     numa_cxt->numaAllocInfos = (NumaMemAllocInfo*)palloc0(numa_cxt->maxLength * sizeof(NumaMemAllocInfo));
     numa_cxt->allocIndex = 0;
+}
+
+static void knl_g_bgworker_init(knl_g_bgworker_context* bgworker_cxt)
+{
+    bgworker_cxt->start_worker_needed = true;
+    bgworker_cxt->have_crashed_worker = false;
 }
 
 void knl_instance_init()
@@ -363,6 +370,7 @@ void knl_instance_init()
     knl_g_dw_init(&g_instance.dw_cxt);
     knl_g_xlog_init(&g_instance.xlog_cxt);
     knl_g_numa_init(&g_instance.numa_cxt);
+    knl_g_bgworker_init(&g_instance.bgworker_cxt);
 
     MemoryContextSwitchTo(old_cxt);
 

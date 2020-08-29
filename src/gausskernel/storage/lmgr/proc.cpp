@@ -212,7 +212,9 @@ static void FiniNuma(int code, Datum arg)
  *	  So, now we grab enough semaphores to support the desired max number
  *	  of backends immediately at initialization --- if the sysadmin has set
  *	  MaxConnections or autovacuum_max_workers higher than his kernel will
- *	  support, he'll find out sooner rather than later.
+ *	  support, he'll find out sooner rather than later. (The number of
+ *	  background worker processes registered by loadable modules is also taken
+ *	  into consideration.)
  *
  *	  Another reason for creating semaphores here is that the semaphore
  *	  implementation typically requires us to create semaphores in the
@@ -240,6 +242,7 @@ void InitProcGlobal(void)
 #endif
     g_instance.proc_base->freeProcs = NULL;
     g_instance.proc_base->autovacFreeProcs = NULL;
+    g_instance.proc_base->bgworkerFreeProcs = NULL;
     g_instance.proc_base->pgjobfreeProcs = NULL;
     g_instance.proc_base->startupProc = NULL;
     g_instance.proc_base->startupProcPid = 0;
@@ -252,10 +255,10 @@ void InitProcGlobal(void)
 
     /*
      * Create and initialize all the PGPROC structures we'll need.  There are
-     * four separate consumers: (1) normal backends, (2) autovacuum workers
-     * and the autovacuum launcher, (3) auxiliary processes, and (4) prepared
-     * transactions.  Each PGPROC structure is dedicated to exactly one of
-     * these purposes, and they do not move between groups.
+     * five separate consumers: (1) normal backends, (2) autovacuum workers
+     * and the autovacuum launcher, (3) background workers, (4) auxiliary processes,
+     * and (5) prepared transactions.  Each PGPROC structure is dedicated to exactly
+     * one of these purposes, and they do not move between groups.
      */
     PGPROC *initProcs[MAX_NUMA_NODE] = {0};
 
@@ -331,7 +334,7 @@ void InitProcGlobal(void)
         procs[i]->nodeno = i % nNumaNodes;
 
         /*
-         * Newly created PGPROCs for normal backends or for autovacuum must be
+         * Newly created PGPROCs for normal backends, autovacuum and bgworkers must be
          * queued up on the appropriate free list.	Because there can only
          * ever be a small, fixed number of auxiliary processes, no free list
          * is used in that case; InitAuxiliaryProcess() instead uses a linear
@@ -347,13 +350,23 @@ void InitProcGlobal(void)
             /* PGPROC for pg_job backend, add to pgjobfreeProcs list,  1 for Job Schedule Lancher */
             procs[i]->links.next = (SHM_QUEUE *)g_instance.proc_base->pgjobfreeProcs;
             g_instance.proc_base->pgjobfreeProcs = procs[i];
-        } else if (i < g_instance.shmem_cxt.MaxBackends) {
+        } else if (i <  g_instance.shmem_cxt.MaxConnections + AUXILIARY_BACKENDS +
+                           g_instance.attr.attr_sql.job_queue_processes + 1 +
+                           g_instance.attr.attr_storage.autovacuum_max_workers +
+                           AV_LAUNCHER_PROCS) {
             /*
              * PGPROC for AV launcher/worker, add to autovacFreeProcs list
-             * list size is autovacuum_max_workers + AUTOVACUUM_LAUNCHERS
+             * list size is autovacuum_max_workers + AV_LAUNCHER_PROCS
              */
             procs[i]->links.next = (SHM_QUEUE *)g_instance.proc_base->autovacFreeProcs;
             g_instance.proc_base->autovacFreeProcs = procs[i];
+        } else if (i < g_instance.shmem_cxt.MaxBackends) {
+            /*
+             * PGPROC for bgworker, add to bgworkerFreeProcs list
+             * list size is max_background_workers
+             */
+            procs[i]->links.next = (SHM_QUEUE *)g_instance.proc_base->bgworkerFreeProcs;
+            g_instance.proc_base->bgworkerFreeProcs = procs[i];
         }
 
         /* Initialize myProcLocks[] shared memory queues. */
@@ -463,6 +476,8 @@ void InitProcess(void)
         t_thrd.proc = g_instance.proc_base->autovacFreeProcs;
     else if (IsJobSchedulerProcess() || IsJobWorkerProcess())
         t_thrd.proc = g_instance.proc_base->pgjobfreeProcs;
+    else if (IsBackgroundWorker)
+        t_thrd.proc = g_instance.proc_base->bgworkerFreeProcs;
     else {
 #ifndef __USE_NUMA
         t_thrd.proc = g_instance.proc_base->freeProcs;
@@ -478,6 +493,8 @@ void InitProcess(void)
             g_instance.proc_base->autovacFreeProcs = (PGPROC *)t_thrd.proc->links.next;
         else if (IsJobSchedulerProcess() || IsJobWorkerProcess())
             g_instance.proc_base->pgjobfreeProcs = (PGPROC *)t_thrd.proc->links.next;
+        else if (IsBackgroundWorker)
+            g_instance.proc_base->bgworkerFreeProcs = (PGPROC *)t_thrd.proc->links.next;
         else {
 #ifndef __USE_NUMA
             g_instance.proc_base->freeProcs = (PGPROC *)t_thrd.proc->links.next;
@@ -1036,6 +1053,11 @@ static void ProcKill(int code, Datum arg)
     } else if (IsJobSchedulerProcess() || IsJobWorkerProcess()) {
         t_thrd.proc->links.next = (SHM_QUEUE *)g_instance.proc_base->pgjobfreeProcs;
         g_instance.proc_base->pgjobfreeProcs = t_thrd.proc;
+    }
+    else if (IsBackgroundWorker)
+    {
+        t_thrd.proc->links.next = (SHM_QUEUE *)g_instance.proc_base->bgworkerFreeProcs;
+        g_instance.proc_base->bgworkerFreeProcs = t_thrd.proc;
     } else {
         t_thrd.proc->links.next = (SHM_QUEUE *)g_instance.proc_base->freeProcs;
         g_instance.proc_base->freeProcs = t_thrd.proc;

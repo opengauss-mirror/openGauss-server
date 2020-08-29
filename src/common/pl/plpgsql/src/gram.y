@@ -176,6 +176,7 @@ static	void			 check_labels(const char *start_label,
 static	PLpgSQL_expr	*read_cursor_args(PLpgSQL_var *cursor,
                                           int until, const char *expected);
 static	List			*read_raise_options(void);
+static  bool            last_pragma;
 
 %}
 
@@ -213,6 +214,7 @@ static	List			*read_raise_options(void);
             char *label;
             int  n_initvars;
             int  *initvarnos;
+            bool autonomous;
         }						declhdr;
         struct
         {
@@ -399,6 +401,7 @@ static	List			*read_raise_options(void);
 %token <keyword>	K_PG_EXCEPTION_CONTEXT
 %token <keyword>	K_PG_EXCEPTION_DETAIL
 %token <keyword>	K_PG_EXCEPTION_HINT
+%token <keyword>	K_PRAGMA
 %token <keyword>	K_PRIOR
 %token <keyword>	K_QUERY
 %token <keyword>	K_RAISE
@@ -477,6 +480,7 @@ pl_block		: decl_sect K_BEGIN proc_sect exception_sect K_END opt_label
                         newp->cmd_type	= PLPGSQL_STMT_BLOCK;
                         newp->lineno		= plpgsql_location_to_lineno(@2);
                         newp->label		= $1.label;
+                        newp->autonomous = $1.autonomous;
                         newp->n_initvars = $1.n_initvars;
                         newp->initvarnos = $1.initvarnos;
                         newp->body		= $3;
@@ -500,6 +504,7 @@ decl_sect		: opt_block_label
                         $$.label	  = $1;
                         $$.n_initvars = 0;
                         $$.initvarnos = NULL;
+                        $$.autonomous = false;
                     }
                 | opt_block_label decl_start
                     {
@@ -507,6 +512,7 @@ decl_sect		: opt_block_label
                         $$.label	  = $1;
                         $$.n_initvars = 0;
                         $$.initvarnos = NULL;
+                        $$.autonomous = false;
                     }
                 | opt_block_label decl_start decl_stmts
                     {
@@ -514,6 +520,8 @@ decl_sect		: opt_block_label
                         $$.label	  = $1;
                         /* Remember variables declared in decl_stmts */
                         $$.n_initvars = plpgsql_add_initdatums(&($$.initvarnos));
+                        $$.autonomous = last_pragma;
+                        last_pragma = false;
                     }
                 ;
 
@@ -521,6 +529,7 @@ decl_start		: K_DECLARE
                     {
                         /* Forget any variables created before block */
                         plpgsql_add_initdatums(NULL);
+                        last_pragma = false;
                         /*
                          * Disable scanner lookup of identifiers while
                          * we process the decl_stmts
@@ -720,6 +729,13 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                                      errmsg("build variable failed")));
                         pfree_ext($1.name);
                     }
+				| K_PRAGMA any_identifier ';'
+					{
+						if (pg_strcasecmp($2, "autonomous_transaction") == 0)
+							last_pragma = true;
+						else
+							elog(ERROR, "invalid pragma");
+					}
                 ;
 
 record_attr_list : record_attr

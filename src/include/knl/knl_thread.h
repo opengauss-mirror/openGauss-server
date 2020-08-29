@@ -69,6 +69,7 @@
 #include "openssl/ossl_typ.h"
 #include "workload/qnode.h"
 #include "tcop/dest.h"
+#include "postmaster/bgworker.h"
 
 #define MAX_PATH_LEN 1024
 
@@ -2659,6 +2660,13 @@ typedef struct knl_t_heartbeat_context {
     struct heartbeat_state* state;
 } knl_t_heartbeat_context;
 
+/* autonomous_transaction */
+struct PLpgSQL_expr;
+typedef struct knl_t_autonomous_context {
+    PLpgSQL_expr* sqlstmt;
+    bool isnested;
+} knl_t_autonomous_context;
+
 /* MOT thread attributes */
 #define MOT_MAX_ERROR_MESSAGE 256
 #define MOT_MAX_ERROR_FRAMES  32
@@ -2705,6 +2713,11 @@ typedef struct knl_t_mot_context {
     unsigned int mbindFlags;
 } knl_t_mot_context;
 
+typedef struct knl_t_bgworker_context {
+    BackgroundWorkerArray *background_worker_data;
+    BackgroundWorker *my_bgworker_entry;
+} knl_t_bgworker_context;
+
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
@@ -2728,6 +2741,7 @@ typedef struct knl_thrd_context {
     knl_t_arch_context arch;
     knl_t_async_context asy_cxt;
     knl_t_audit_context audit;
+    knl_t_autonomous_context autonomous_cxt;
     knl_t_autovacuum_context autovacuum_cxt;
     knl_t_basebackup_context basebackup_cxt;
     knl_t_bgwriter_context bgwriter_cxt;
@@ -2802,6 +2816,7 @@ typedef struct knl_thrd_context {
     knl_t_heartbeat_context heartbeat_cxt;
     knl_t_poolcleaner_context poolcleaner_cxt;
     knl_t_mot_context mot_cxt;
+    knl_t_bgworker_context bgworker_cxt;
 } knl_thrd_context;
 
 extern void knl_thread_mot_init();

@@ -198,6 +198,18 @@
 #define MAX_PASSWORD_ASSIGNED_CHARACTER 999
 /* max length of password */
 #define MAX_PASSWORD_LENGTH 999
+/*
+ * Precision with which REAL type guc values are to be printed for GUC
+ * serialization.
+ */
+static const int REALTYPE_PRECISION = 17;
+
+static const int TYPICAL_LEN_RANGE_OF_VALUE = 1000;
+static const int MAX_DISPLAY_LEN_OF_BOOL = 5;
+static const int TYPICAL_DISPLAY_LEN_OF_INT = 4;
+static const int MAX_DISPLAY_LEN_OF_INT = 11;
+static const int MAX_DISPLAY_LEN_OF_INT64 = 20;
+static const int LEN_OF_REAL_EXCEPT_PRECISION = 8;
 
 extern volatile int synchronous_commit;
 extern volatile bool most_available_sync;
@@ -459,6 +471,7 @@ static void assign_statistics_memory(int newval, void* extra);
 static void assign_history_memory(int newval, void* extra);
 static bool check_history_memory_limit(int* newval, void** extra, GucSource source);
 static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source);
+static bool check_max_worker_processes(int* newval, void** extra, GucSource source);
 static bool check_job_max_workers(int* newval, void** extra, GucSource source);
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source);
 static void assign_effective_io_concurrency(int newval, void* extra);
@@ -7081,6 +7094,23 @@ static void init_configure_names_int()
             0,
             MAX_BACKENDS,
             check_autovacuum_max_workers,
+            NULL,
+            NULL
+        },
+        {
+            /* see max_connections */
+            {
+                "max_background_workers",
+                PGC_POSTMASTER,
+                RESOURCES_ASYNCHRONOUS,
+                gettext_noop("Maximum number of concurrent background worker processes."),
+                NULL
+            },
+            &g_instance.attr.attr_storage.max_background_workers,
+            8,
+            0,
+            MAX_BACKENDS,
+            check_max_worker_processes,
             NULL,
             NULL
         },
@@ -17763,6 +17793,542 @@ ArrayType* GUCArrayReset(ArrayType* array)
     return newarray;
 }
 
+/* GUC serialization */
+static bool CanSkipGucvar(const struct config_generic* gconf);
+static Size EstimateVariableSize(const struct config_generic* gconf);
+static void DoSerialize(char** destptr, Size& maxbytes, const char* fmt, ...);
+static void DoSerializeBinary(char** destptr, Size& maxbytes, const char* val, Size valsize);
+static void SerializeVariable(char** destptr, Size& maxbytes, const struct config_generic* gconf);
+static void InitializeOneGUCOption(struct config_generic& gconf);
+static char* ReadGucstate(char** srcptr, const char* srcend);
+static void ReadGucstateBinary(char** srcptr, const char* srcend, char* dest, Size size);
+
+/*
+ * CanSkipGucvar:
+ * When serializing, determine whether to skip this GUC.  When restoring, the
+ * negation of this test determines whether to restore the compiled-in default
+ * value before processing serialized values.
+ *
+ * A PGC_S_DEFAULT setting on the serialize side will typically match new
+ * postmaster children, but that can be false when got_SIGHUP == true and the
+ * pending configuration change modifies this setting.  Nonetheless, we omit
+ * PGC_S_DEFAULT settings from serialization and make up for that by restoring
+ * defaults before applying serialized values.
+ *
+ * PGC_POSTMASTER variables always have the same value in every child of a
+ * particular postmaster.  Most PGC_INTERNAL variables are compile-time
+ * constants; a few, like server_encoding and lc_ctype, are handled specially
+ * outside the serialize/restore procedure.  Therefore, SerializeGUCState()
+ * never sends these, and RestoreGUCState() never changes them.
+ */
+static bool CanSkipGucvar(const struct config_generic* gconf)
+{
+    return gconf->context == PGC_POSTMASTER ||
+        gconf->context == PGC_INTERNAL || gconf->source == PGC_S_DEFAULT ||
+        strcmp(gconf->name, "role") == 0;
+}
+
+
+/*
+ * EstimateVariableSize:
+ * Estimate max size for dumping the given GUC variable.
+ */
+static Size EstimateVariableSize(const struct config_generic* gconf)
+{
+    Size size;
+    Size valsize = 0;
+
+    if (CanSkipGucvar(gconf)) {
+        return 0;
+    }
+
+    size = strlen(gconf->name) + 1;
+
+    /* Get the maximum display length of the GUC value. */
+    switch (gconf->vartype) {
+        case PGC_BOOL: {
+            valsize = MAX_DISPLAY_LEN_OF_BOOL;
+            break;
+        }
+
+        case PGC_INT: {
+            const struct config_int* conf = (const struct config_int*)gconf;
+
+            /*
+             * Instead of getting the exact display length, use max
+             * length.  Also reduce the max length for typical ranges of
+             * small values.  Maximum value is 2147483647, i.e. 10 chars.
+             * Include one byte for sign.
+             */
+            if (Abs(*conf->variable) < TYPICAL_LEN_RANGE_OF_VALUE) {
+                valsize = TYPICAL_DISPLAY_LEN_OF_INT;
+            } else {
+                valsize = MAX_DISPLAY_LEN_OF_INT;
+            }
+            break;
+        }
+
+        case PGC_INT64: {
+            const struct config_int* conf = (const struct config_int*)gconf;
+
+            if (Abs(*conf->variable) < TYPICAL_LEN_RANGE_OF_VALUE) {
+                valsize = TYPICAL_DISPLAY_LEN_OF_INT;
+            } else {
+                valsize = MAX_DISPLAY_LEN_OF_INT64; /* Maximum value is 9,223,372,036,854,775,807, i.e. 19 chars. */
+            }
+            break;
+        }
+
+        case PGC_REAL: {
+            /*
+             * We are going to print it with %.17g. Account for sign,
+             * decimal point, and e+nnn notation. E.g.
+             * -3.9932904234000002e+110
+             */
+            valsize = LEN_OF_REAL_EXCEPT_PRECISION + REALTYPE_PRECISION;
+            break;
+        }
+
+        case PGC_STRING: {
+            const struct config_string *conf = (const struct config_string*)gconf;
+            /*
+             * If the value is NULL, we transmit it as an empty string.
+             * Although this is not physically the same value, GUC
+             * generally treats a NULL the same as empty string.
+            */
+            if (*conf->variable) {
+                valsize = strlen(*conf->variable);
+            } else {
+                valsize = 0;
+            }
+            break;
+        }
+
+        case PGC_ENUM: {
+            struct config_enum* conf = (struct config_enum*) gconf;
+            valsize = strlen(config_enum_lookup_by_value(conf, *conf->variable));
+            break;
+        }
+        default:
+            break;
+    }
+
+    /* Allow space for terminating zero-byte */
+    size = add_size(size, valsize + 1);
+
+    if (gconf->sourcefile) {
+        size = add_size(size, strlen(gconf->sourcefile));
+    }
+
+    /* Allow space for terminating zero-byte */
+    size = add_size(size, 1);
+
+    /* Include line whenever we include file. */
+    if (gconf->sourcefile && gconf->sourcefile[0]) {
+        size = add_size(size, sizeof(gconf->sourceline));
+    }
+
+    size = add_size(size, sizeof(gconf->source));
+    size = add_size(size, sizeof(gconf->scontext));
+
+    return size;
+}
+
+/*
+ * EstimateGUCStateSpace:
+ * Returns the size needed to store the GUC state for the current process
+ */
+Size EstimateGUCStateSpace(void)
+{
+    Size size;
+    int	i;
+
+    /* Add space reqd for saving the data size of the guc state */
+    size = sizeof(Size);
+
+    /* Add up the space needed for each GUC variable */
+    for (i = 0; i < u_sess->num_guc_variables; i++) {
+        size = add_size(size, EstimateVariableSize(u_sess->guc_variables[i]));
+    }
+
+    return size;
+}
+
+/*
+ * DoSerialize:
+ * Copies the formatted string into the destination.  Moves ahead the
+ * destination pointer, and decrements the maxbytes by that many bytes. If
+ * maxbytes is not sufficient to copy the string, error out.
+ */
+static void DoSerialize(char** destptr, Size& maxbytes, const char* fmt, ...)
+{
+    va_list vargs;
+    int nRet;
+
+    if (maxbytes == 0) {
+        elog(ERROR, "not enough space to serialize GUC state");
+    }
+
+    va_start(vargs, fmt);
+    nRet = vsnprintf_s(*destptr, maxbytes, maxbytes - 1, fmt, vargs);
+    securec_check_ss(nRet, "\0", "\0");
+    va_end(vargs);
+
+    /*
+     * Cater to portability hazards in the vsnprintf() return value just like
+     * appendPQExpBufferVA() does.  Note that this requires an extra byte of
+     * slack at the end of the buffer.  Since serialize_variable() ends with a
+     * do_serialize_binary() rather than a do_serialize(), we'll always have
+     * that slack; estimate_variable_size() need not add a byte for it.
+     */
+    if (nRet < 0) {
+        /* Shouldn't happen. Better show errno description. */
+        elog(ERROR, "vsnprintf failed: %s with format string \"%s\"", strerror(nRet), fmt);
+    }
+    if (nRet >= static_cast<int>(maxbytes)) {
+        /* This shouldn't happen either, really. */
+        elog(ERROR, "not enough space to serialize GUC state");
+    }
+
+    /* Shift the destptr ahead of the null terminator */
+    *destptr += nRet + 1;
+    maxbytes -= static_cast<Size>(nRet) + 1;
+}
+
+/* Binary copy version of DoSerialize() */
+static void DoSerializeBinary(char** destptr, Size& maxbytes, const char* val, Size valsize)
+{
+    if (valsize > maxbytes) {
+        elog(ERROR, "not enough space to serialize GUC state");
+    }
+
+    errno_t rc = memcpy_s(*destptr, maxbytes, val, valsize);
+    securec_check(rc, "\0", "\0");
+    *destptr += valsize;
+    maxbytes -= valsize;
+}
+
+/*
+ * SerializeVariable:
+ * Dumps name, value and other information of a GUC variable into destptr.
+ */
+static void SerializeVariable(char** destptr, Size& maxbytes, const struct config_generic* gconf)
+{
+    if (CanSkipGucvar(gconf)) {
+        return;
+    }
+
+    DoSerialize(destptr, maxbytes, "%s", gconf->name);
+
+    switch (gconf->vartype) {
+        case PGC_BOOL: {
+            const struct config_bool *conf = (const struct config_bool*)gconf;
+            DoSerialize(destptr, maxbytes, (*conf->variable ? "true" : "false"));
+            break;
+        }
+
+        case PGC_INT: {
+            const struct config_int *conf = (const struct config_int*)gconf;
+            DoSerialize(destptr, maxbytes, "%d", *conf->variable);
+            break;
+        }
+
+        case PGC_INT64: {
+            const struct config_int64 *conf = (const struct config_int64*)gconf;
+            DoSerialize(destptr, maxbytes, "%ld", *conf->variable);
+            break;
+        }
+
+        case PGC_REAL: {
+            const struct config_real *conf = (const struct config_real*)gconf;
+            DoSerialize(destptr, maxbytes, "%.*e", REALTYPE_PRECISION, *conf->variable);
+            break;
+        }
+
+        case PGC_STRING:{
+            const struct config_string* conf = (const struct config_string*)gconf;
+            DoSerialize(destptr, maxbytes, "%s", *conf->variable ? *conf->variable : "");
+            break;
+        }
+
+        case PGC_ENUM:{
+            struct config_enum* conf = (struct config_enum*)gconf;
+            DoSerialize(destptr, maxbytes, "%s", config_enum_lookup_by_value(conf, *conf->variable));
+            break;
+        }
+        default:
+            break;
+    }
+
+    DoSerialize(destptr, maxbytes, "%s", (gconf->sourcefile ? gconf->sourcefile : ""));
+
+    if (gconf->sourcefile) {
+        DoSerializeBinary(destptr, maxbytes, reinterpret_cast<const char*>(&gconf->sourceline),
+                          sizeof(gconf->sourceline));
+    }
+
+    DoSerializeBinary(destptr, maxbytes, reinterpret_cast<const char*>(&gconf->source), sizeof(gconf->source));
+    DoSerializeBinary(destptr, maxbytes, reinterpret_cast<const char*>(&gconf->scontext), sizeof(gconf->scontext));
+}
+
+/*
+ * SerializeGUCState:
+ * Dumps the complete GUC state onto the memory location at startAddress.
+ */
+void SerializeGUCState(Size maxsize, char* startAddress)
+{
+    char *curptr;
+    Size actualSize;
+    Size bytesLeft;
+    int i;
+
+    /* Reserve space for saving the actual size of the guc state */
+    Assert(maxsize > sizeof(actualSize));
+    curptr = startAddress + sizeof(actualSize);
+    bytesLeft = maxsize - sizeof(actualSize);
+
+    for (i = 0; i < u_sess->num_guc_variables; i++) {
+        SerializeVariable(&curptr, bytesLeft, u_sess->guc_variables[i]);
+    }
+
+    /* Store actual size without assuming alignment of startAddress. */
+    actualSize = maxsize - bytesLeft - sizeof(actualSize);
+    errno_t rc = memcpy_s(startAddress, maxsize, &actualSize, sizeof(actualSize));
+    securec_check(rc, "\0", "\0");
+}
+
+/*
+ * Initialize one GUC option variable to its compiled-in default.
+ *
+ * Note: the reason for calling check_hooks is not that we think the boot_val
+ * might fail, but that the hooks might wish to compute an "extra" struct.
+ */
+static void InitializeOneGUCOption(struct config_generic& gconf)
+{
+    gconf.status = 0;
+    gconf.source = PGC_S_DEFAULT;
+    gconf.reset_source = PGC_S_DEFAULT;
+    gconf.scontext = PGC_INTERNAL;
+    gconf.reset_scontext = PGC_INTERNAL;
+    gconf.stack = NULL;
+    gconf.extra = NULL;
+    gconf.sourcefile = NULL;
+    gconf.sourceline = 0;
+
+    switch (gconf.vartype) {
+        case PGC_BOOL: {
+            struct config_bool *conf = (struct config_bool*)&gconf;
+            bool newval = conf->boot_val;
+            void* extra = NULL;
+
+            if (!call_bool_check_hook(conf, &newval, &extra, PGC_S_DEFAULT, LOG)) {
+                elog(FATAL, "failed to initialize %s to %d", conf->gen.name, static_cast<int>(newval));
+            }
+            if (conf->assign_hook) {
+                (*conf->assign_hook) (newval, extra);
+            }
+            *conf->variable = conf->reset_val = newval;
+            conf->gen.extra = conf->reset_extra = extra;
+            break;
+        }
+
+        case PGC_INT: {
+            struct config_int* conf = (struct config_int*)&gconf;
+            int newval = conf->boot_val;
+            void* extra = NULL;
+
+            Assert(newval >= conf->min);
+            Assert(newval <= conf->max);
+            if (!call_int_check_hook(conf, &newval, &extra, PGC_S_DEFAULT, LOG)) {
+                elog(FATAL, "failed to initialize %s to %d", conf->gen.name, newval);
+            }
+            if (conf->assign_hook) {
+                (*conf->assign_hook) (newval, extra);
+            }
+            *conf->variable = conf->reset_val = newval;
+            conf->gen.extra = conf->reset_extra = extra;
+            break;
+        }
+
+        case PGC_INT64: {
+            struct config_int64* conf = (struct config_int64*)&gconf;
+            int64 newval = conf->boot_val;
+            void* extra = NULL;
+
+            Assert(newval >= conf->min);
+            Assert(newval <= conf->max);
+            if (!call_int64_check_hook(conf, &newval, &extra, PGC_S_DEFAULT, LOG)) {
+                elog(FATAL, "failed to initialize %s to %ld", conf->gen.name, newval);
+            }
+            if (conf->assign_hook) {
+                (*conf->assign_hook) (newval, extra);
+            }
+            *conf->variable = conf->reset_val = newval;
+            conf->gen.extra = conf->reset_extra = extra;
+            break;
+        }
+
+        case PGC_REAL: {
+            struct config_real* conf = (struct config_real*)&gconf;
+            double newval = conf->boot_val;
+            void* extra = NULL;
+
+            Assert(newval >= conf->min);
+            Assert(newval <= conf->max);
+            if (!call_real_check_hook(conf, &newval, &extra, PGC_S_DEFAULT, LOG)) {
+                elog(FATAL, "failed to initialize %s to %g", conf->gen.name, newval);
+            }
+            if (conf->assign_hook) {
+                (*conf->assign_hook) (newval, extra);
+            }
+            *conf->variable = conf->reset_val = newval;
+            conf->gen.extra = conf->reset_extra = extra;
+            break;
+        }
+
+        case PGC_STRING: {
+            struct config_string* conf = (struct config_string*)&gconf;
+            char* newval;
+            void* extra = NULL;
+
+            /* non-NULL boot_val must always get strdup'd */
+            if (conf->boot_val != NULL) {
+                newval = guc_strdup(FATAL, conf->boot_val);
+            } else {
+                newval = NULL;
+            }
+
+            if (!call_string_check_hook(conf, &newval, &extra, PGC_S_DEFAULT, LOG)) {
+                elog(FATAL, "failed to initialize %s to \"%s\"", conf->gen.name, newval ? newval : "");
+            }
+            if (conf->assign_hook) {
+                (*conf->assign_hook) (newval, extra);
+            }
+            *conf->variable = conf->reset_val = newval;
+            conf->gen.extra = conf->reset_extra = extra;
+            break;
+        }
+
+        case PGC_ENUM: {
+            struct config_enum *conf = (struct config_enum*)&gconf;
+            int newval = conf->boot_val;
+            void* extra = NULL;
+
+            if (!call_enum_check_hook(conf, &newval, &extra, PGC_S_DEFAULT, LOG)) {
+                elog(FATAL, "failed to initialize %s to %d", conf->gen.name, newval);
+            }
+            if (conf->assign_hook) {
+                (*conf->assign_hook) (newval, extra);
+            }
+            *conf->variable = conf->reset_val = newval;
+            conf->gen.extra = conf->reset_extra = extra;
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+/*
+ * ReadGucstate:
+ * Actually it does not read anything, just returns the srcptr. But it does
+ * move the srcptr past the terminating zero byte, so that the caller is ready
+ * to read the next string.
+ */
+static char* ReadGucstate(char** srcptr, const char* srcend)
+{
+    char* retptr = *srcptr;
+    char* ptr;
+
+    if (*srcptr >= srcend) {
+        elog(ERROR, "incomplete GUC state");
+    }
+
+    /* The string variables are all null terminated */
+    for (ptr = *srcptr; ptr < srcend && *ptr != '\0'; ptr++) {}
+
+    if (ptr > srcend) {
+        elog(ERROR, "could not find null terminator in GUC state");
+    }
+
+    /* Set the new position to the byte following the terminating NUL */
+    *srcptr = ptr + 1;
+
+    return retptr;
+}
+
+/* Binary read version of ReadGucstate(). Copies into dest */
+static void ReadGucstateBinary(char** srcptr, const char* srcend, char* dest, Size size)
+{
+    if (*srcptr + size > srcend) {
+        elog(ERROR, "incomplete GUC state");
+    }
+
+    errno_t rc = memcpy_s(dest, size, *srcptr, size);
+    securec_check(rc, "\0", "\0");
+    *srcptr += size;
+}
+
+/*
+ * RestoreGUCState:
+ * Reads the GUC state at the specified address and updates the GUCs with the
+ * values read from the GUC state.
+ */
+void RestoreGUCState(char* gucstate)
+{
+    char* varname;
+    char* varvalue;
+    char* varsourcefile;
+    int varsourceline;
+    GucSource varsource;
+    GucContext varscontext;
+    char* srcptr = gucstate;
+    char* srcend;
+    Size len;
+    int i;
+
+    /* See comment at can_skip_gucvar(). */
+    for (i = 0; i < u_sess->num_guc_variables; i++) {
+        if (!CanSkipGucvar(u_sess->guc_variables[i])) {
+            InitializeOneGUCOption(*u_sess->guc_variables[i]);
+        }
+    }
+    /* First item is the length of the subsequent data */
+    errno_t rc = memcpy_s(&len, sizeof(len), gucstate, sizeof(len));
+    securec_check(rc, "\0", "\0");
+    srcptr += sizeof(len);
+    srcend = srcptr + len;
+
+    while (srcptr < srcend) {
+        int result;
+        varname = ReadGucstate(&srcptr, srcend);
+        varvalue = ReadGucstate(&srcptr, srcend);
+        varsourcefile = ReadGucstate(&srcptr, srcend);
+
+        if (varsourcefile[0]) {
+            ReadGucstateBinary(&srcptr, srcend,
+                               reinterpret_cast<char*>(&varsourceline), sizeof(varsourceline));
+        } else {
+            varsourceline = 0;
+        }
+        ReadGucstateBinary(&srcptr, srcend,
+                           reinterpret_cast<char*>(&varsource), sizeof(varsource));
+        ReadGucstateBinary(&srcptr, srcend,
+                           reinterpret_cast<char*>(&varscontext), sizeof(varscontext));
+
+        result = set_config_option(varname, varvalue, varscontext, varsource,
+                                   GUC_ACTION_SET, true, ERROR, true);
+        if (result <= 0) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("parameter \"%s\" could not be set", varname)));
+        }
+        if (varsourcefile[0]) {
+            set_config_sourcefile(varname, varsourcefile, varsourceline);
+        }
+    }
+}
+
 /*
  * Validate a proposed option setting for GUCArrayAdd/Delete/Reset.
  *
@@ -18762,6 +19328,7 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
     }
 #endif
     if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
+            g_instance.attr.attr_storage.max_background_workers +
             AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;
@@ -18772,6 +19339,7 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
 static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource source)
 {
     if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
+            g_instance.attr.attr_storage.max_background_workers +
             g_instance.attr.attr_network.MaxConnections + AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS > MAX_BACKENDS) {
         return false;
     }
@@ -18781,12 +19349,25 @@ static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource so
 static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source)
 {
     if (g_instance.attr.attr_network.MaxConnections + *newval + g_instance.attr.attr_sql.job_queue_processes +
+            g_instance.attr.attr_storage.max_background_workers +
             AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;
     }
     return true;
 }
+
+static bool check_max_worker_processes(int* newval, void** extra, GucSource source)
+{
+    if (g_instance.attr.attr_network.MaxConnections + g_instance.attr.attr_storage.autovacuum_max_workers +
+            g_instance.attr.attr_sql.job_queue_processes + *newval +
+            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
+        MAX_BACKENDS) {
+        return false;
+    }
+    return true;
+}
+
 
 /*
  * Description: Check wheth out of max backends after max job worker threads.
@@ -18798,6 +19379,7 @@ static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource so
 static bool check_job_max_workers(int* newval, void** extra, GucSource source)
 {
     if (g_instance.attr.attr_network.MaxConnections + g_instance.attr.attr_storage.autovacuum_max_workers + *newval +
+            g_instance.attr.attr_storage.max_background_workers +
             AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;

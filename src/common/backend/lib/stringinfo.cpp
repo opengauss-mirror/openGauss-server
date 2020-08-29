@@ -59,6 +59,7 @@ void initStringInfo(StringInfo str)
  */
 void resetStringInfo(StringInfo str)
 {
+
     str->data[0] = '\0';
     str->len = 0;
     str->cursor = 0;
