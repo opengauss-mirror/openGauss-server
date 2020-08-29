@@ -43,10 +43,11 @@
  * from the constraint to the things it depends on.
  */
 Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, char constraintType, bool isDeferrable,
-    bool isDeferred, bool isValidated, Oid relId, const int16* constraintKey, int constraintNKeys, Oid domainId,
-    Oid indexRelId, Oid foreignRelId, const int16* foreignKey, const Oid* pfEqOp, const Oid* ppEqOp, const Oid* ffEqOp,
-    int foreignNKeys, char foreignUpdateType, char foreignDeleteType, char foreignMatchType, const Oid* exclOp,
-    Node* conExpr, const char* conBin, const char* conSrc, bool conIsLocal, int conInhCount, bool conNoInherit,
+    bool isDeferred, bool isValidated, Oid relId, const int16* constraintKey, int constraintNKeys,
+    int constraintNTotalKeys, Oid domainId, Oid indexRelId, Oid foreignRelId, const int16* foreignKey,
+    const Oid* pfEqOp, const Oid* ppEqOp, const Oid* ffEqOp, int foreignNKeys, char foreignUpdateType,
+    char foreignDeleteType, char foreignMatchType, const Oid* exclOp, Node* conExpr, const char* conBin,
+    const char* conSrc, bool conIsLocal, int conInhCount, bool conNoInherit,
     InformationalConstraint* inforConstraint) /* @hdfs informatinal constaint */
 {
     Relation conDesc = NULL;
@@ -55,6 +56,7 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
     bool nulls[Natts_pg_constraint];
     Datum values[Natts_pg_constraint];
     ArrayType* conkeyArray = NULL;
+    ArrayType* conincludingArray = NULL;
     ArrayType* confkeyArray = NULL;
     ArrayType* conpfeqopArray = NULL;
     ArrayType* conppeqopArray = NULL;
@@ -79,8 +81,24 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
         for (i = 0; i < constraintNKeys; i++)
             conkey[i] = Int16GetDatum(constraintKey[i]);
         conkeyArray = construct_array(conkey, constraintNKeys, INT2OID, 2, true, 's');
-    } else
+    } else {
         conkeyArray = NULL;
+    }
+
+    // index attrs have key attrs and include attrs, the num of include attrs maybe 0
+    if (constraintNTotalKeys > constraintNKeys) {
+        int j = 0;
+        int constraintNIncludedKeys = constraintNTotalKeys - constraintNKeys;
+
+        Datum* conincluding = (Datum*)palloc(constraintNIncludedKeys * sizeof(Datum));
+        for (i = constraintNKeys; i < constraintNTotalKeys; i++) {
+            conincluding[j++] = Int16GetDatum(constraintKey[i]);
+        }
+        conincludingArray = construct_array(conincluding, constraintNIncludedKeys, INT2OID, 2, true, 's');
+        pfree_ext(conincluding);
+    } else {
+        conincludingArray = NULL;
+    }
 
     if (foreignNKeys > 0) {
         Datum* fkdatums = NULL;
@@ -151,6 +169,12 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
     else
         nulls[Anum_pg_constraint_conkey - 1] = true;
 
+    if (conincludingArray) {
+        values[Anum_pg_constraint_conincluding - 1] = PointerGetDatum(conincludingArray);
+    } else {
+        nulls[Anum_pg_constraint_conincluding - 1] = true;
+    }
+
     if (confkeyArray != NULL)
         values[Anum_pg_constraint_confkey - 1] = PointerGetDatum(confkeyArray);
     else
@@ -214,8 +238,8 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
 
         relobject.classId = RelationRelationId;
         relobject.objectId = relId;
-        if (constraintNKeys > 0) {
-            for (i = 0; i < constraintNKeys; i++) {
+        if (constraintNTotalKeys > 0) {
+            for (i = 0; i < constraintNTotalKeys; i++) {
                 relobject.objectSubId = constraintKey[i];
 
                 recordDependencyOn(&conobject, &relobject, DEPENDENCY_AUTO);

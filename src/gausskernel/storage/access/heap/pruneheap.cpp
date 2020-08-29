@@ -393,6 +393,11 @@ static int heap_prune_chain(
 
             if (HeapTupleSatisfiesVacuum(&tup, oldest_xmin, buffer) == HEAPTUPLE_DEAD &&
                 !HeapTupleHeaderIsHotUpdated(htup)) {
+
+                if (HeapKeepInvisbleTuple(&tup, RelationGetDescr(relation))) {
+                    return ndeleted;
+                }
+
                 heap_prune_record_unused(prstate, rootoffnum);
                 HeapTupleHeaderAdvanceLatestRemovedXid(&tup, &prstate->latestRemovedXid);
                 ndeleted++;
@@ -485,7 +490,9 @@ static int heap_prune_chain(
         }
         switch (HeapTupleSatisfiesVacuum(&tup, oldest_xmin, buffer)) {
             case HEAPTUPLE_DEAD:
-                tupdead = true;
+                if (!HeapKeepInvisbleTuple(&tup, RelationGetDescr(relation))) {
+                    tupdead = true;
+                }
                 break;
 
             case HEAPTUPLE_RECENTLY_DEAD:

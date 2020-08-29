@@ -16,6 +16,7 @@
 
 #include "access/tupdesc.h"
 #include "nodes/bitmapset.h"
+#include "utils/hsearch.h"
 
 typedef struct RelationData* Relation;
 typedef struct PartitionData* Partition;
@@ -51,11 +52,11 @@ extern void RelationClose(Relation relation);
  */
 extern List* PartitionGetPartIndexList(Partition part);
 extern List* RelationGetIndexList(Relation relation);
+extern List* RelationGetSpecificKindIndexList(Relation relation, bool isGlobal);
 extern List* RelationGetIndexInfoList(Relation relation);
 extern int RelationGetIndexNum(Relation relation);
 extern Oid RelationGetOidIndex(Relation relation);
 extern Oid RelationGetReplicaIndex(Relation relation);
-extern List* RelationGetIndexExpressions(Relation relation);
 extern List* RelationGetIndexExpressions(Relation relation);
 extern List* RelationGetDummyIndexExpressions(Relation relation);
 extern List* RelationGetIndexPredicate(Relation relation);
@@ -66,6 +67,13 @@ typedef enum IndexAttrBitmapKind {
     INDEX_ATTR_BITMAP_KEY,
     INDEX_ATTR_BITMAP_IDENTITY_KEY
 } IndexAttrBitmapKind;
+
+typedef enum PartitionMetadataStatus {
+    PART_METADATA_NOEXIST,   /* partition is not exists */
+    PART_METADATA_LIVE,      /* partition is live, normal use */
+    PART_METADATA_CREATING,  /* partition is being created */
+    PART_METADATA_INVISIBLE  /* partition is invisible, being droped */
+} PartStatus;
 
 extern Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind keyAttrs);
 
@@ -123,6 +131,7 @@ extern void RelationCacheInitFileRemove(void);
 
 extern TupleDesc BuildHardcodedDescriptor(int natts, const FormData_pg_attribute* attrs, bool hasoids);
 extern TupleDesc GetDefaultPgClassDesc(void);
+extern TupleDesc GetDefaultPgIndexDesc(void);
 
 extern bool CheckRelationInRedistribution(Oid rel_oid);
 

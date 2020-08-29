@@ -56,6 +56,8 @@ public:
 
     virtual bool EpqCheck(Datum* values, const bool* isnull) = 0;
 
+    virtual Relation getCurrentRel() = 0;
+
     virtual void setAttrNo() = 0;
 
     virtual TupleTableSlot* getTupleSlot() = 0;
@@ -98,6 +100,8 @@ public:
 
     bool EpqCheck(Datum* values, const bool* isnull);
 
+    Relation getCurrentRel();
+    
     Relation m_index; /* index relation */
 
     Oid m_reloid; /* relation oid of range table */

@@ -23,6 +23,7 @@
 #include "access/relscan.h"
 #include "access/transam.h"
 #include "catalog/index.h"
+#include "catalog/heap.h"
 #include "miscadmin.h"
 #include "storage/bufmgr.h"
 #include "utils/acl.h"
@@ -81,6 +82,14 @@ IndexScanDesc RelationGetIndexScan(Relation index_relation, int nkeys, int norde
     scan->xs_snapshot = SnapshotNow; /* may be set later */
     scan->numberOfKeys = nkeys;
     scan->numberOfOrderBys = norderbys;
+
+    /* Initializes global partition index scan's information */
+    scan->xs_want_ext_oid = RelationIsGlobalIndex(index_relation);
+    if (scan->xs_want_ext_oid) {
+        GPIScanInit(&scan->xs_gpi_scan);
+    } else {
+        scan->xs_gpi_scan = NULL;
+    }
 
     /*
      * We allocate key workspace here, but it won't get filled until amrescan.
@@ -150,7 +159,8 @@ void IndexScanEnd(IndexScanDesc scan)
  *
  * Construct a string describing the contents of an index entry, in the
  * form "(key_name, ...)=(key_value, ...)".  This is currently used
- * for building unique-constraint and exclusion-constraint error messages.
+ * for building unique-constraint and exclusion-constraint error messages,
+ * so only key columns of the index are checked and printed.
  *
  * Note that if the user does not have permissions to view all of the
  * columns involved then a NULL is returned.  Returning a partial key seems
@@ -166,13 +176,14 @@ char* BuildIndexValueDescription(Relation index_relation, Datum* values, const b
     StringInfoData buf;
     Form_pg_index idxrec;
     HeapTuple ht_idx;
-    int natts = index_relation->rd_rel->relnatts;
+    int indnkeyatts;
     int i;
     int keyno;
     Oid indexrelid;
     Oid indrelid;
     AclResult aclresult;
 
+    indnkeyatts = IndexRelationGetNumberOfKeyAttributes(index_relation);
     /*
      * if this relation is a construct from a partition ,we
      * should use the parent Oid of Relation
@@ -197,6 +208,7 @@ char* BuildIndexValueDescription(Relation index_relation, Datum* values, const b
 
     indrelid = idxrec->indrelid;
     Assert(indexrelid == idxrec->indexrelid);
+    int tuplekeyatts = GetIndexKeyAttsByTuple(NULL, ht_idx);
     /* Table-level SELECT is enough, if the user has it */
     aclresult = pg_class_aclcheck(indrelid, GetUserId(), ACL_SELECT);
     if (aclresult != ACLCHECK_OK) {
@@ -204,7 +216,7 @@ char* BuildIndexValueDescription(Relation index_relation, Datum* values, const b
          * No table-level access, so step through the columns in the
          * index and make sure the user has SELECT rights on all of them.
          */
-        for (keyno = 0; keyno < idxrec->indnatts; keyno++) {
+        for (keyno = 0; keyno < tuplekeyatts; keyno++) {
             AttrNumber attnum = idxrec->indkey.values[keyno];
             aclresult = pg_attribute_aclcheck(indrelid, attnum, GetUserId(), ACL_SELECT);
             if (aclresult != ACLCHECK_OK) {
@@ -220,7 +232,7 @@ char* BuildIndexValueDescription(Relation index_relation, Datum* values, const b
 
     appendStringInfo(&buf, "(%s)=(", pg_get_indexdef_columns(indexrelid, true));
 
-    for (i = 0; i < natts; i++) {
+    for (i = 0; i < indnkeyatts; i++) {
         char* val = NULL;
 
         if (isnull[i]) {
@@ -321,13 +333,13 @@ SysScanDesc systable_beginscan(
         for (i = 0; i < nkeys; i++) {
             int j;
 
-            for (j = 0; j < irel->rd_index->indnatts; j++) {
+            for (j = 0; j < IndexRelationGetNumberOfAttributes(irel); j++) {
                 if (key[i].sk_attno == irel->rd_index->indkey.values[j]) {
                     key[i].sk_attno = j + 1;
                     break;
                 }
             }
-            if (j == irel->rd_index->indnatts)
+            if (j == IndexRelationGetNumberOfAttributes(irel))
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("column is not in index")));
         }
 
@@ -474,13 +486,13 @@ SysScanDesc systable_beginscan_ordered(
     for (i = 0; i < nkeys; i++) {
         int j;
 
-        for (j = 0; j < index_relation->rd_index->indnatts; j++) {
+        for (j = 0; j < IndexRelationGetNumberOfAttributes(index_relation); j++) {
             if (key[i].sk_attno == index_relation->rd_index->indkey.values[j]) {
                 key[i].sk_attno = j + 1;
                 break;
             }
         }
-        if (j == index_relation->rd_index->indnatts)
+        if (j == IndexRelationGetNumberOfAttributes(index_relation))
             ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("column is not in index")));
     }
 
@@ -536,3 +548,144 @@ HeapTuple systable_getnext_back(SysScanDesc sysscan)
     return htup;
 }
 
+/* Use global-partition-index-scan access to partition tables */
+/* Create hash table for global partition index scan */
+static void GPIInitFakeRelTable(GPIScanDesc gpiScan, MemoryContext cxt)
+{
+    HASHCTL ctl;
+    errno_t errorno = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check_c(errorno, "\0", "\0");
+    ctl.keysize = sizeof(PartRelIdCacheKey);
+    ctl.entrysize = sizeof(PartRelIdCacheEnt);
+    ctl.hash = tag_hash;
+    ctl.hcxt = cxt;
+    gpiScan->fakeRelationTable = hash_create(
+        "GPI fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+}
+
+/* Lookup partition information from hash table use key for global partition index scan */
+static void GPILookupFakeRelCache(GPIScanDesc gpiScan, PartRelIdCacheKey fakeRelKey)
+{
+    HTAB* fakeRels = gpiScan->fakeRelationTable;
+    FakeRelationIdCacheLookup(fakeRels, fakeRelKey, gpiScan->fakePartRelation, gpiScan->partition);
+}
+
+/* Lookup partition information from hash table use key for global partition index scan */
+static void GPIInsertFakeRelCache(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode)
+{
+    Oid currPartOid = gpiScan->currPartOid;
+    Relation parentRel = gpiScan->parentRelation;
+    HTAB* fakeRels = gpiScan->fakeRelationTable;
+    Partition partition = NULL;
+
+    /* Save search fake relation in gpiScan->fakeRelation */
+    searchFakeReationForPartitionOid(
+        fakeRels, cxt, parentRel, currPartOid, gpiScan->fakePartRelation, partition, lmode);
+}
+
+/* destroy partition information from hash table */
+static void GPIDestroyFakeRelCache(GPIScanDesc gpiScan)
+{
+    FakeRelationCacheDestroy(gpiScan->fakeRelationTable);
+    gpiScan->fakeRelationTable = NULL;
+}
+
+/* Create and fill an GPIScanDesc */
+void GPIScanInit(GPIScanDesc* gpiScan)
+{
+    GPIScanDesc gpiInfo = (GPIScanDesc)palloc(sizeof(GPIScanDescData));
+
+    gpiInfo->currPartOid = InvalidOid;
+    gpiInfo->fakePartRelation = NULL;
+    gpiInfo->invisiblePartMap = NULL;
+    gpiInfo->parentRelation = NULL;
+    gpiInfo->fakeRelationTable = NULL;
+    gpiInfo->partition = NULL;
+
+    *gpiScan = gpiInfo;
+}
+
+/* Release fake-relation's hash table and GPIScanDesc */
+void GPIScanEnd(GPIScanDesc gpiScan)
+{
+    if (gpiScan == NULL) {
+        return;
+    }
+
+    if (gpiScan->fakeRelationTable != NULL) {
+        GPIDestroyFakeRelCache(gpiScan);
+    }
+
+    if (gpiScan->invisiblePartMap != NULL) {
+        bms_free_ext(gpiScan->invisiblePartMap);
+    }
+
+    pfree_ext(gpiScan);
+}
+
+/* Set global partition index work partition oid */
+void GPISetCurrPartOid(GPIScanDesc gpiScan, Oid partOid)
+{
+    if (gpiScan == NULL) {
+        ereport(ERROR, (errmsg("gpiScan is null, when set partition oid")));
+    }
+    gpiScan->currPartOid = partOid;
+}
+
+/* Get global partition index work partition oid */
+Oid GPIGetCurrPartOid(const GPIScanDesc gpiScan)
+{
+    if (gpiScan == NULL) {
+        ereport(ERROR, (errmsg("gpiScan is null, when get partition oid")));
+    }
+    return gpiScan->currPartOid;
+}
+
+/*
+ * This gpiScan is used to switch the fake-relation of a partition
+ * based on the partoid in the GPI when the GPI is used to scan data.
+ *
+ * Notes: return true means partition's fake-relation can use gpiScan->fakeRelationTable switch,
+ *        return false means current parition is invisible, shoud not switch.
+ */
+bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode)
+{
+    bool result = true;
+    PartStatus currStatus;
+    PartRelIdCacheKey fakeRelKey = {gpiScan->currPartOid, InvalidBktId};
+
+    Assert(OidIsValid(gpiScan->currPartOid));
+
+    if (!PointerIsValid(gpiScan->fakeRelationTable)) {
+        GPIInitFakeRelTable(gpiScan, cxt);
+    }
+
+    /* First check invisible partition oid's bitmapset */
+    if (bms_is_member(gpiScan->currPartOid, gpiScan->invisiblePartMap)) {
+        gpiScan->fakePartRelation = NULL;
+        gpiScan->partition = NULL;
+        return false;
+    }
+
+    /* Obtains information about the current partition from the hash table */
+    GPILookupFakeRelCache(gpiScan, fakeRelKey);
+
+    /* If the fakePartRelation field is empty, need get partition information from pg_partition */
+    if (!RelationIsValid(gpiScan->fakePartRelation)) {
+        Assert(gpiScan->partition == NULL);
+        /* Get current partition status in GPI */
+        currStatus = PartitionGetMetadataStatus(gpiScan->currPartOid, false);
+        /* Just save partition status if current partition metadata is invisible */
+        if (currStatus == PART_METADATA_INVISIBLE) {
+            /* If current partition metadata is invisible, add current partition oid into invisiblePartMap */
+            gpiScan->invisiblePartMap = bms_add_member(gpiScan->invisiblePartMap, gpiScan->currPartOid);
+            result = false;
+        } else {
+            /* If current partition metadata is invisible, add current partition oid into fakeRelationTable */
+            GPIInsertFakeRelCache(gpiScan, cxt, lmode);
+            result = true;
+        }
+    }
+
+    return result;
+}

@@ -2030,7 +2030,6 @@ static void do_autovacuum(void)
      * nothing worth vacuuming in the database.
      */
     DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
-    ;
     pgstat_vacuum_stat();
     DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Clean up dead statistics collector entries for current DB");
 

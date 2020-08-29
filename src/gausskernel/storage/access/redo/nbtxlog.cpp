@@ -392,7 +392,7 @@ void btree_xlog_delete_page_operator_parentpage(RedoBufferInfo* buffer, void* re
         Assert(info != XLOG_BTREE_DELETE_PAGE_HALF);
         itemid = PageGetItemId(page, poffset);
         itup = (IndexTuple)PageGetItem(page, itemid);
-        ItemPointerSet(&(itup->t_tid), xlrec->rightblk, P_HIKEY);
+        BTreeInnerTupleSetDownLink(itup, xlrec->rightblk);
         nextoffset = OffsetNumberNext(poffset);
         PageIndexTupleDelete(page, nextoffset);
     }

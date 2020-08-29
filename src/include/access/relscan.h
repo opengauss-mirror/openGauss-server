@@ -124,14 +124,16 @@ typedef HBktTblScanDescData* HBktTblScanDesc;
 typedef struct IndexScanDescData {
     AbsIdxScanDescData sd;
     /* scan parameters */
-    Relation heapRelation;  /* heap relation descriptor, or NULL */
-    Relation indexRelation; /* index relation descriptor */
-    Snapshot xs_snapshot;   /* snapshot to see */
-    int numberOfKeys;       /* number of index qualifier conditions */
-    int numberOfOrderBys;   /* number of ordering operators */
-    ScanKey keyData;        /* array of index qualifier descriptors */
-    ScanKey orderByData;    /* array of ordering op descriptors */
-    bool xs_want_itup;      /* caller requests index tuples */
+    Relation heapRelation;   /* heap relation descriptor, or NULL */
+    Relation indexRelation;  /* index relation descriptor */
+    GPIScanDesc xs_gpi_scan; /* global partition index scan use information */
+    Snapshot xs_snapshot;    /* snapshot to see */
+    int numberOfKeys;        /* number of index qualifier conditions */
+    int numberOfOrderBys;    /* number of ordering operators */
+    ScanKey keyData;         /* array of index qualifier descriptors */
+    ScanKey orderByData;     /* array of ordering op descriptors */
+    bool xs_want_itup;       /* caller requests index tuples */
+    bool xs_want_ext_oid;    /* global partition index need partition oid */
 
     /* signaling to index AM about killing index tuples */
     bool kill_prior_tuple;      /* last-returned tuple is dead */
@@ -161,6 +163,20 @@ typedef struct IndexScanDescData {
 } IndexScanDescData;
 
 #define SizeofIndexScanDescData (offsetof(IndexScanDescData, xs_ctbuf_hdr) + SizeofHeapTupleHeader)
+
+/* Get partition heap oid for bitmap index scan */
+#define IndexScanGetPartHeapOid(scan)                                                                           \
+    ((scan)->indexRelation != NULL                                                                              \
+            ? (RelationIsPartition((scan)->indexRelation) ? (scan)->indexRelation->rd_partHeapOid : InvalidOid) \
+            : InvalidOid)
+
+/*
+ * When the global partition index is used for index scanning,
+ * checks whether the partition table needs to be
+ * switched each time an indextuple is obtained.
+ */
+#define IndexScanNeedSwitchPartRel(scan) \
+    ((scan)->xs_want_ext_oid && GPIScanCheckPartOid((scan)->xs_gpi_scan, (scan)->heapRelation->rd_id))
 
 typedef struct HBktIdxScanDescData {
     AbsIdxScanDescData sd;

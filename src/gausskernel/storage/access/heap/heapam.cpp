@@ -161,7 +161,12 @@ static void initscan(HeapScanDesc scan, ScanKey key, bool is_rescan)
      * results for a non-MVCC snapshot, the caller must hold some higher-level
      * lock that ensures the interesting tuple(s) won't change.)
      */
-    nblocks = RelationGetNumberOfBlocks(scan->rs_rd);
+    if (RelationIsPartitioned(scan->rs_rd)) {
+        /*  partition table just set Initial Value, in BitmapHeapTblNext will update */
+        nblocks = InvalidBlockNumber;
+    } else {
+        nblocks = RelationGetNumberOfBlocks(scan->rs_rd);
+    }
     if (nblocks > 0 && is_range_scan_in_redis) {
         ItemPointerData start_ctid;
         ItemPointerData end_ctid;
@@ -1460,7 +1465,7 @@ Relation heap_open(Oid relationId, LOCKMODE lockmode, int2 bucketid)
     Relation r;
 
     r = relation_open(relationId, lockmode, bucketid);
-    if (r->rd_rel->relkind == RELKIND_INDEX) {
+    if (RelationIsIndex(r)) {
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is an index", RelationGetRelationName(r))));
     } else if (r->rd_rel->relkind == RELKIND_COMPOSITE_TYPE) {
         ereport(ERROR,
@@ -1482,7 +1487,7 @@ Relation heap_openrv(const RangeVar* relation, LOCKMODE lockmode)
     Relation r;
 
     r = relation_openrv(relation, lockmode);
-    if (r->rd_rel->relkind == RELKIND_INDEX) {
+    if (RelationIsIndex(r)) {
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is an index", RelationGetRelationName(r))));
     } else if (r->rd_rel->relkind == RELKIND_COMPOSITE_TYPE) {
         ereport(ERROR,
@@ -1509,7 +1514,7 @@ Relation heap_openrv_extended(
     if (r) {
         if (isSupportSynonym && detailInfo != NULL && detailInfo->len > 0) {
             /* If has some error detail infos, report it. */
-            if (r->rd_rel->relkind == RELKIND_INDEX) {
+            if (RelationIsIndex(r)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                                 errmsg("\"%s\" is an index", RelationGetRelationName(r)),
@@ -1521,7 +1526,7 @@ Relation heap_openrv_extended(
                                 errdetail("%s", detailInfo->data)));
             }
         } else {
-            if (r->rd_rel->relkind == RELKIND_INDEX) {
+            if (RelationIsIndex(r)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is an index", RelationGetRelationName(r))));
             }
@@ -1601,7 +1606,16 @@ static HeapScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot
      * the scan has a pointer to it.  Caller should be holding the rel open
      * anyway, so this is redundant in all normal scenarios...
      */
-    RelationIncrementReferenceCount(relation);
+    if (!RelationIsPartitioned(relation)) {
+        RelationIncrementReferenceCount(relation);
+    } else {
+        /*
+         * If the table is a partition table, the current scan must be used by
+         * bitmapscan to scan tuples using GPI. Therefore,
+         * the value of rs_rd in the scan is used to store partition-fake-relation.
+         */
+        Assert(is_bitmapscan);
+    }
 
     /*
      * allocate and initialize scan descriptor
@@ -1700,7 +1714,9 @@ void heap_endscan(HeapScanDesc scan)
     }
 
     /* decrement relation reference count and free scan descriptor storage */
-    RelationDecrementReferenceCount(scan->rs_rd);
+    if (!RelationIsPartitioned(scan->rs_rd)) {
+        RelationDecrementReferenceCount(scan->rs_rd);
+    }
 
     if (scan->rs_key != NULL) {
         pfree(scan->rs_key);
@@ -6315,7 +6331,6 @@ static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool ke
     TupleDesc desc = RelationGetDescr(relation);
     Oid replidindex;
     Relation idx_rel;
-    TupleDesc idx_desc;
     char relreplident;
     HeapTuple key_tuple = NULL;
     bool nulls[MaxHeapAttributeNumber];
@@ -6377,7 +6392,6 @@ static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool ke
     }
 
     idx_rel = RelationIdGetRelation(replidindex);
-    idx_desc = RelationGetDescr(idx_rel);
 
     /* deform tuple, so we have fast access to columns */
     heap_deform_tuple(tp, desc, values, nulls);
@@ -6390,7 +6404,7 @@ static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool ke
      * Now set all columns contained in the index to NOT NULL, they cannot
      * currently be NULL.
      */
-    for (natt = 0; natt < idx_desc->natts; natt++) {
+    for (natt = 0; natt < IndexRelationGetNumberOfKeyAttributes(idx_rel); natt++) {
         int attno = idx_rel->rd_index->indkey.values[natt];
 
         if (attno < 0) {

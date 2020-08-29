@@ -1,0 +1,657 @@
+--
+---- test partitioned index
+--
+set client_min_messages=error;
+drop table if exists global_part_indexonly_table;
+create table global_part_indexonly_table
+(
+        c1 int ,
+        c2 int ,
+        c3 int
+)
+partition by range (c1)
+(
+        partition global_part_indexonly_table_p0 values less than (10),
+        partition global_part_indexonly_table_p1 values less than (30),
+        partition global_part_indexonly_table_p2 values less than (maxvalue)
+);
+create index on global_part_indexonly_table(c1) local;
+insert into global_part_indexonly_table select generate_series(0,50), generate_series(0,50), generate_series(0,50);
+create index test_global_nonpartition_index on global_part_indexonly_table(c2,c3) global;
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+explain (costs false) select distinct(c2),c3 from global_part_indexonly_table order by c2,c3;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Unique
+   ->  Index Only Scan using test_global_nonpartition_index on global_part_indexonly_table
+(2 rows)
+
+select distinct(c2),c3 from global_part_indexonly_table order by c2,c3;
+ c2 | c3 
+----+----
+  0 |  0
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+ 11 | 11
+ 12 | 12
+ 13 | 13
+ 14 | 14
+ 15 | 15
+ 16 | 16
+ 17 | 17
+ 18 | 18
+ 19 | 19
+ 20 | 20
+ 21 | 21
+ 22 | 22
+ 23 | 23
+ 24 | 24
+ 25 | 25
+ 26 | 26
+ 27 | 27
+ 28 | 28
+ 29 | 29
+ 30 | 30
+ 31 | 31
+ 32 | 32
+ 33 | 33
+ 34 | 34
+ 35 | 35
+ 36 | 36
+ 37 | 37
+ 38 | 38
+ 39 | 39
+ 40 | 40
+ 41 | 41
+ 42 | 42
+ 43 | 43
+ 44 | 44
+ 45 | 45
+ 46 | 46
+ 47 | 47
+ 48 | 48
+ 49 | 49
+ 50 | 50
+(51 rows)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+drop table global_part_indexonly_table;
+create table global_part_indexonly_table
+(
+        c1 int ,
+        c2 int ,
+        c3 int
+)
+partition by range (c1)
+(
+        partition global_part_indexonly_table_p0 values less than (10),
+        partition global_part_indexonly_table_p1 values less than (30),
+        partition global_part_indexonly_table_p2 values less than (maxvalue)
+);
+create index on global_part_indexonly_table(c1) local;
+insert into global_part_indexonly_table select generate_series(0,50), generate_series(-50,50), generate_series(-20,30);
+create index test_global_nonpartition_index on global_part_indexonly_table(c2,c3) global;
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+explain (costs false) select distinct(c2),c3 from global_part_indexonly_table where c2+c3<-10 and c2+c3>-30 and c2=-19 order by c2,c3;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Unique
+   ->  Index Only Scan using test_global_nonpartition_index on global_part_indexonly_table
+         Index Cond: (c2 = (-19))
+         Filter: (((c2 + c3) < (-10)) AND ((c2 + c3) > (-30)))
+(4 rows)
+
+select distinct(c2),c3 from global_part_indexonly_table where c2+c3<-10 and c2+c3>-30 and c2=-19 order by c2,c3;
+ c2  | c3  
+-----+-----
+ -19 | -10
+ -19 |  -9
+ -19 |  -8
+ -19 |  -7
+ -19 |  -6
+ -19 |  -5
+ -19 |  -4
+ -19 |  -3
+ -19 |  -2
+ -19 |  -1
+ -19 |   0
+ -19 |   1
+ -19 |   2
+ -19 |   3
+ -19 |   4
+ -19 |   5
+ -19 |   6
+ -19 |   7
+ -19 |   8
+(19 rows)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+drop table global_part_indexonly_table;
+create table global_part_indexonly_table
+(
+        c1 int ,
+        c2 int ,
+        c3 int
+)
+partition by range (c1)
+(
+        partition global_part_indexonly_table_p0 values less than (10),
+        partition global_part_indexonly_table_p1 values less than (30),
+        partition global_part_indexonly_table_p2 values less than (maxvalue)
+);
+create index on global_part_indexonly_table(c1) local;
+insert into global_part_indexonly_table select generate_series(0,50), generate_series(-50,50), generate_series(-20,30);
+create index test_global_nonpartition_index on global_part_indexonly_table(c2,c3) global;
+update global_part_indexonly_table set c1=c1+5;
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+explain (costs false) select distinct(c2),c3 from global_part_indexonly_table where c2+c3<-10 and c2+c3>-30 and c2=-19 order by c2,c3; 
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Unique
+   ->  Index Only Scan using test_global_nonpartition_index on global_part_indexonly_table
+         Index Cond: (c2 = (-19))
+         Filter: (((c2 + c3) < (-10)) AND ((c2 + c3) > (-30)))
+(4 rows)
+
+select distinct(c2),c3 from global_part_indexonly_table where c2+c3<-10 and c2+c3>-30 and c2=-19 order by c2,c3; 
+ c2  | c3  
+-----+-----
+ -19 | -10
+ -19 |  -9
+ -19 |  -8
+ -19 |  -7
+ -19 |  -6
+ -19 |  -5
+ -19 |  -4
+ -19 |  -3
+ -19 |  -2
+ -19 |  -1
+ -19 |   0
+ -19 |   1
+ -19 |   2
+ -19 |   3
+ -19 |   4
+ -19 |   5
+ -19 |   6
+ -19 |   7
+ -19 |   8
+(19 rows)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+drop table global_part_indexonly_table;
+create table global_part_indexonly_table
+(
+        c1 int ,
+        c2 int ,
+        c3 int
+)
+partition by range (c1)
+(
+        partition global_part_indexonly_table_p0 values less than (10),
+        partition global_part_indexonly_table_p1 values less than (30),
+        partition global_part_indexonly_table_p2 values less than (maxvalue)
+);
+create index on global_part_indexonly_table(c1) local;
+insert into global_part_indexonly_table select generate_series(0,50), generate_series(-50,50), generate_series(-20,30);
+create index test_global_nonpartition_index on global_part_indexonly_table(c2,c3) global;
+update global_part_indexonly_table set c2=c2+35;
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+explain (costs false) select distinct(c2),c3 from global_part_indexonly_table where c2+c3<-10 and c2+c3>-30 and c2=-19 order by c2,c3;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Unique
+   ->  Index Only Scan using test_global_nonpartition_index on global_part_indexonly_table
+         Index Cond: (c2 = (-19))
+         Filter: (((c2 + c3) < (-10)) AND ((c2 + c3) > (-30)))
+(4 rows)
+
+select distinct(c2),c3 from global_part_indexonly_table where c2+c3<-10 and c2+c3>-30 and c2=-19 order by c2,c3;
+ c2 | c3 
+----+----
+(0 rows)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+drop table global_part_indexonly_table;
+drop table if exists gpi_J1_TBL;
+drop table if exists gpi_J2_TBL;
+CREATE TABLE gpi_J1_TBL (
+  i integer,
+  j integer,
+  t integer
+)
+partition by range (i)
+(
+        partition gpi_J1_TBL_p0 values less than (10),
+        partition gpi_J1_TBL_p1 values less than (30),
+        partition gpi_J1_TBL_p2 values less than (maxvalue)
+);
+CREATE TABLE gpi_J2_TBL (
+  i integer,
+  k integer,
+  t integer
+)
+partition by range (i)
+(
+        partition gpi_J2_TBL_p0 values less than (10000),
+        partition gpi_J2_TBL_p1 values less than (20000),
+        partition gpi_J2_TBL_p2 values less than (30000),
+        partition gpi_J2_TBL_p3 values less than (40000),
+        partition gpi_J2_TBL_p4 values less than (50000),
+        partition gpi_J2_TBL_p5 values less than (60000),
+        partition gpi_J2_TBL_p6 values less than (maxvalue)
+);
+create index gpi_J1_TBL_index on gpi_J1_TBL(i) local;
+create index gpi_J2_TBL_index on gpi_J2_TBL(i) local;
+INSERT INTO gpi_J1_TBL select generate_series(0,50),generate_series(-10,30),generate_series(-50,40);
+INSERT INTO gpi_J2_TBL select r,r,r from generate_series(0,90000) as r;
+create index gpi_J1_TBL_nonp_j_index on gpi_J1_TBL(j) global;
+create index gpi_J1_TBL_nonp_t_index on gpi_J1_TBL(t) global;
+create index gpi_J2_TBL_nonp_k_index on gpi_J2_TBL(k) global;
+create index gpi_J2_TBL_nonp_t_index on gpi_J2_TBL(t) global;
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+vacuum analyze gpi_J1_TBL;
+vacuum analyze gpi_J2_TBL;
+explain (costs false)  SELECT distinct(t1.b), t2.e
+  FROM gpi_J1_TBL t1 (a, b, c), gpi_J2_TBL t2 (d, e)
+  WHERE t1.b > t2.e and t1.b = 5
+  ORDER BY b, e;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Sort Key: t2.e
+   ->  HashAggregate
+         Group By Key: t1.b, t2.e
+         ->  Nested Loop
+               ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl t1
+                     Index Cond: (b = 5)
+               ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl t2
+                     Index Cond: (e < t1.b)
+(9 rows)
+
+SELECT distinct(t1.b), t2.e
+  FROM gpi_J1_TBL t1 (a, b, c), gpi_J2_TBL t2 (d, e)
+  WHERE t1.b > t2.e and t1.b = 5
+  ORDER BY b, e;
+ b | e 
+---+---
+ 5 | 0
+ 5 | 1
+ 5 | 2
+ 5 | 3
+ 5 | 4
+(5 rows)
+
+explain (costs false) SELECT distinct(j), k
+  FROM gpi_J1_TBL CROSS JOIN gpi_J2_TBL
+  WHERE j > k and j = 5
+  ORDER BY j, k;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Sort Key: gpi_j2_tbl.k
+   ->  HashAggregate
+         Group By Key: gpi_j1_tbl.j, gpi_j2_tbl.k
+         ->  Nested Loop
+               ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl
+                     Index Cond: (j = 5)
+               ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl
+                     Index Cond: (k < gpi_j1_tbl.j)
+(9 rows)
+
+SELECT distinct(j), k
+  FROM gpi_J1_TBL CROSS JOIN gpi_J2_TBL
+  WHERE j > k and j = 5
+  ORDER BY j, k;
+ j | k 
+---+---
+ 5 | 0
+ 5 | 1
+ 5 | 2
+ 5 | 3
+ 5 | 4
+(5 rows)
+
+explain (costs false) SELECT distinct(jj), kk
+  FROM (gpi_J1_TBL CROSS JOIN gpi_J2_TBL)
+  AS tx (ii, jj, tt, ii2, kk)
+  WHERE jj > kk and jj = 5
+  ORDER BY jj, kk;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Sort Key: gpi_j2_tbl.k
+   ->  HashAggregate
+         Group By Key: gpi_j1_tbl.j, gpi_j2_tbl.k
+         ->  Nested Loop
+               ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl
+                     Index Cond: (j = 5)
+               ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl
+                     Index Cond: (k < gpi_j1_tbl.j)
+(9 rows)
+
+SELECT distinct(jj), kk
+  FROM (gpi_J1_TBL CROSS JOIN gpi_J2_TBL)
+  AS tx (ii, jj, tt, ii2, kk)
+  WHERE jj > kk and jj = 5
+  ORDER BY jj, kk;
+ jj | kk 
+----+----
+  5 |  0
+  5 |  1
+  5 |  2
+  5 |  3
+  5 |  4
+(5 rows)
+
+explain (costs false) SELECT distinct(jj), kk
+  FROM (gpi_J1_TBL t1 (a, b, c) CROSS JOIN gpi_J2_TBL t2 (d, e))
+  AS tx (ii, jj, tt, ii2, kk)
+  WHERE jj > kk and jj = 5
+  ORDER BY jj, kk;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Sort Key: t2.e
+   ->  HashAggregate
+         Group By Key: t1.b, t2.e
+         ->  Nested Loop
+               ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl t1
+                     Index Cond: (b = 5)
+               ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl t2
+                     Index Cond: (e < t1.b)
+(9 rows)
+
+SELECT distinct(jj), kk
+  FROM (gpi_J1_TBL t1 (a, b, c) CROSS JOIN gpi_J2_TBL t2 (d, e))
+  AS tx (ii, jj, tt, ii2, kk)
+  WHERE jj > kk and jj = 5
+  ORDER BY jj, kk;
+ jj | kk 
+----+----
+  5 |  0
+  5 |  1
+  5 |  2
+  5 |  3
+  5 |  4
+(5 rows)
+
+explain (costs false) SELECT distinct(j),a.k,b.k
+  FROM gpi_J1_TBL CROSS JOIN gpi_J2_TBL a CROSS JOIN gpi_J2_TBL b
+  WHERE j > a.k and j = 5 and a.k>b.k
+  ORDER BY j,a.k,b.k;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Sort
+   Sort Key: a.k, b.k
+   ->  HashAggregate
+         Group By Key: gpi_j1_tbl.j, a.k, b.k
+         ->  Nested Loop
+               ->  Nested Loop
+                     ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl
+                           Index Cond: (j = 5)
+                     ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl a
+                           Index Cond: (k < gpi_j1_tbl.j)
+               ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl b
+                     Index Cond: (k < a.k)
+(12 rows)
+
+SELECT distinct(j),a.k,b.k
+  FROM gpi_J1_TBL CROSS JOIN gpi_J2_TBL a CROSS JOIN gpi_J2_TBL b
+  WHERE j > a.k and j = 5 and a.k>b.k
+  ORDER BY j,a.k,b.k;
+ j | k | k 
+---+---+---
+ 5 | 1 | 0
+ 5 | 2 | 0
+ 5 | 2 | 1
+ 5 | 3 | 0
+ 5 | 3 | 1
+ 5 | 3 | 2
+ 5 | 4 | 0
+ 5 | 4 | 1
+ 5 | 4 | 2
+ 5 | 4 | 3
+(10 rows)
+
+explain (costs false) SELECT distinct(t)
+  FROM gpi_J1_TBL INNER JOIN gpi_J2_TBL USING (t)
+  WHERE t>0 and t<5
+  ORDER BY t;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Unique
+   ->  Nested Loop
+         ->  Index Only Scan using gpi_j2_tbl_nonp_t_index on gpi_j2_tbl
+               Index Cond: ((t > 0) AND (t < 5))
+         ->  Index Only Scan using gpi_j1_tbl_nonp_t_index on gpi_j1_tbl
+               Index Cond: ((t = gpi_j2_tbl.t) AND (t > 0) AND (t < 5))
+(6 rows)
+
+SELECT distinct(t)
+  FROM gpi_J1_TBL INNER JOIN gpi_J2_TBL USING (t)
+  WHERE t>0 and t<5
+  ORDER BY t;
+ t 
+---
+ 1
+ 2
+ 3
+ 4
+(4 rows)
+
+explain (costs false) SELECT distinct(b)
+  FROM gpi_J1_TBL t1 (a, b, c) NATURAL JOIN gpi_J2_TBL t2 (e, b, d)
+  ORDER BY b;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Unique
+   ->  Merge Join
+         Merge Cond: (t2.b = t1.b)
+         ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl t2
+         ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl t1
+(5 rows)
+
+SELECT distinct(b)
+  FROM gpi_J1_TBL t1 (a, b, c) NATURAL JOIN gpi_J2_TBL t2 (e, b, d)
+  ORDER BY b;
+ b  
+----
+  0
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+ 10
+ 11
+ 12
+ 13
+ 14
+ 15
+ 16
+ 17
+ 18
+ 19
+ 20
+ 21
+ 22
+ 23
+ 24
+ 25
+ 26
+ 27
+ 28
+ 29
+ 30
+(31 rows)
+
+explain (costs false) SELECT distinct(j),k
+  FROM gpi_J1_TBL JOIN gpi_J2_TBL ON (gpi_J1_TBL.j = gpi_J2_TBL.k)
+  ORDER BY j,k;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Unique
+   ->  Merge Join
+         Merge Cond: (gpi_j2_tbl.k = gpi_j1_tbl.j)
+         ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl
+         ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl
+(5 rows)
+
+SELECT distinct(j),k
+  FROM gpi_J1_TBL JOIN gpi_J2_TBL ON (gpi_J1_TBL.j = gpi_J2_TBL.k)
+  ORDER BY j,k;
+ j  | k  
+----+----
+  0 |  0
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+ 11 | 11
+ 12 | 12
+ 13 | 13
+ 14 | 14
+ 15 | 15
+ 16 | 16
+ 17 | 17
+ 18 | 18
+ 19 | 19
+ 20 | 20
+ 21 | 21
+ 22 | 22
+ 23 | 23
+ 24 | 24
+ 25 | 25
+ 26 | 26
+ 27 | 27
+ 28 | 28
+ 29 | 29
+ 30 | 30
+(31 rows)
+
+explain (costs false) SELECT distinct(j),k
+  FROM gpi_J1_TBL LEFT OUTER JOIN gpi_J2_TBL ON (gpi_J1_TBL.j = gpi_J2_TBL.k)
+  ORDER BY j,k;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Unique
+   ->  Sort
+         Sort Key: gpi_j1_tbl.j, gpi_j2_tbl.k
+         ->  Merge Right Join
+               Merge Cond: (gpi_j2_tbl.k = gpi_j1_tbl.j)
+               ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl
+               ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl
+(7 rows)
+
+SELECT distinct(j),k
+  FROM gpi_J1_TBL LEFT OUTER JOIN gpi_J2_TBL ON (gpi_J1_TBL.j = gpi_J2_TBL.k)
+  ORDER BY j,k;
+  j  | k  
+-----+----
+ -10 |   
+  -9 |   
+  -8 |   
+  -7 |   
+  -6 |   
+  -5 |   
+  -4 |   
+  -3 |   
+  -2 |   
+  -1 |   
+   0 |  0
+   1 |  1
+   2 |  2
+   3 |  3
+   4 |  4
+   5 |  5
+   6 |  6
+   7 |  7
+   8 |  8
+   9 |  9
+  10 | 10
+  11 | 11
+  12 | 12
+  13 | 13
+  14 | 14
+  15 | 15
+  16 | 16
+  17 | 17
+  18 | 18
+  19 | 19
+  20 | 20
+  21 | 21
+  22 | 22
+  23 | 23
+  24 | 24
+  25 | 25
+  26 | 26
+  27 | 27
+  28 | 28
+  29 | 29
+  30 | 30
+(41 rows)
+
+explain (costs false) SELECT distinct(j),k
+  FROM gpi_J1_TBL RIGHT OUTER JOIN gpi_J2_TBL ON (gpi_J1_TBL.j = gpi_J2_TBL.k)
+  WHERE k>25 and k<35
+  ORDER BY j,k;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Sort Key: gpi_j1_tbl.j, gpi_j2_tbl.k
+   ->  HashAggregate
+         Group By Key: gpi_j1_tbl.j, gpi_j2_tbl.k
+         ->  Nested Loop Left Join
+               ->  Index Only Scan using gpi_j2_tbl_nonp_k_index on gpi_j2_tbl
+                     Index Cond: ((k > 25) AND (k < 35))
+               ->  Index Only Scan using gpi_j1_tbl_nonp_j_index on gpi_j1_tbl
+                     Index Cond: (j = gpi_j2_tbl.k)
+(9 rows)
+
+SELECT distinct(j),k
+  FROM gpi_J1_TBL RIGHT OUTER JOIN gpi_J2_TBL ON (gpi_J1_TBL.j = gpi_J2_TBL.k)
+  WHERE k>25 and k<35
+  ORDER BY j,k;
+ j  | k  
+----+----
+ 26 | 26
+ 27 | 27
+ 28 | 28
+ 29 | 29
+ 30 | 30
+    | 31
+    | 32
+    | 33
+    | 34
+(9 rows)
+
+drop table if exists gpi_J1_TBL;
+drop table if exists gpi_J2_TBL;
+set client_min_messages=notice;

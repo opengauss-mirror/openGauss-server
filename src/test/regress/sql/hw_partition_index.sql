@@ -173,9 +173,8 @@ create unique index on hw_partition_index_rp (c1) local
 );
 
 --fail wrong syntax
-create unique index on hw_partition_index_rp (c1);
-
---fail wrong syntax
+create unique index global_index on hw_partition_index_rp (c1);
+--fail
 drop table hw_partition_index_rp;
 
 --unique index , index para must contain partition key

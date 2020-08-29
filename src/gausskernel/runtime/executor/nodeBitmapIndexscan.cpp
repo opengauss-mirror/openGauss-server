@@ -92,6 +92,11 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
     } else {
         /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
         tbm = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
+
+        /* If bitmapscan uses global partition index, set tbm to global */
+        if (RelationIsGlobalIndex(node->biss_RelationDesc)) {
+            tbm_set_global(tbm, true);
+        }
     }
 
     if (hbkt_idx_need_switch_bkt(scandesc, node->ss.ps.hbktScanSlot.currSlot)) {

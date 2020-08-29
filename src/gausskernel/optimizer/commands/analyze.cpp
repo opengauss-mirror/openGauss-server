@@ -6339,7 +6339,7 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
 
             if (RelationIsColStore(onerel)) {
                 nblocks = estimate_psort_index_blocks(Irel[ind]->rd_att, totalindexrows);
-            } else if (RelationIsPartitioned(onerel)) {
+            } else if (RelationIsPartitioned(onerel) && !RelationIsGlobalIndex(Irel[ind])) {
                 ListCell* partCell = NULL;
                 Partition part = NULL;
                 Oid indexOid = InvalidOid;

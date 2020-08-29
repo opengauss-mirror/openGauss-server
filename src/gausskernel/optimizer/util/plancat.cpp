@@ -213,6 +213,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             Form_pg_index index;
             IndexOptInfo* info = NULL;
             int ncolumns;
+            int nkeycolumns;
             int i;
 
             /*
@@ -257,16 +258,22 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             info->reltablespace = RelationGetForm(indexRelation)->reltablespace;
             info->rel = rel;
             info->ncolumns = ncolumns = index->indnatts;
+            info->nkeycolumns = nkeycolumns = IndexRelationGetNumberOfKeyAttributes(indexRelation);
             info->indexkeys = (int*)palloc(sizeof(int) * ncolumns);
-            info->indexcollations = (Oid*)palloc(sizeof(Oid) * ncolumns);
-            info->opfamily = (Oid*)palloc(sizeof(Oid) * ncolumns);
-            info->opcintype = (Oid*)palloc(sizeof(Oid) * ncolumns);
+            info->indexcollations = (Oid*)palloc(sizeof(Oid) * nkeycolumns);
+            info->opfamily = (Oid*)palloc(sizeof(Oid) * nkeycolumns);
+            info->opcintype = (Oid*)palloc(sizeof(Oid) * nkeycolumns);
+
+            info->isGlobal = RelationIsGlobalIndex(indexRelation);
 
             for (i = 0; i < ncolumns; i++) {
                 info->indexkeys[i] = index->indkey.values[i];
-                info->indexcollations[i] = indexRelation->rd_indcollation[i];
+            }
+
+            for (i = 0; i < nkeycolumns; i++) {
                 info->opfamily[i] = indexRelation->rd_opfamily[i];
                 info->opcintype[i] = indexRelation->rd_opcintype[i];
+                info->indexcollations[i] = indexRelation->rd_indcollation[i];
             }
 
             info->relam = indexRelation->rd_rel->relam;
@@ -290,10 +297,10 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                 AssertEreport(indexRelation->rd_am->amcanorder, MOD_OPT, "amcanorder is NULL.");
 
                 info->sortopfamily = info->opfamily;
-                info->reverse_sort = (bool*)palloc(sizeof(bool) * ncolumns);
-                info->nulls_first = (bool*)palloc(sizeof(bool) * ncolumns);
+                info->reverse_sort = (bool*)palloc(sizeof(bool) * nkeycolumns);
+                info->nulls_first = (bool*)palloc(sizeof(bool) * nkeycolumns);
 
-                for (i = 0; i < ncolumns; i++) {
+                for (i = 0; i < nkeycolumns; i++) {
                     int16 opt = indexRelation->rd_indoption[i];
 
                     info->reverse_sort[i] = (opt & INDOPTION_DESC) != 0;
@@ -314,11 +321,11 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                  * of current or foreseeable amcanorder index types, it's not
                  * worth expending more effort on now.
                  */
-                info->sortopfamily = (Oid*)palloc(sizeof(Oid) * ncolumns);
-                info->reverse_sort = (bool*)palloc(sizeof(bool) * ncolumns);
-                info->nulls_first = (bool*)palloc(sizeof(bool) * ncolumns);
+                info->sortopfamily = (Oid*)palloc(sizeof(Oid) * nkeycolumns);
+                info->reverse_sort = (bool*)palloc(sizeof(bool) * nkeycolumns);
+                info->nulls_first = (bool*)palloc(sizeof(bool) * nkeycolumns);
 
-                for (i = 0; i < ncolumns; i++) {
+                for (i = 0; i < nkeycolumns; i++) {
                     int16 opt = indexRelation->rd_indoption[i];
                     Oid ltopr;
                     Oid btopfamily;
@@ -388,10 +395,10 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                     info->pages = indexRelation->rd_rel->relpages;
                 } else {
 #endif
-                    // non-partitioned index
-                    if (!RelationIsPartitioned(indexRelation)) {
+                    // non-partitioned index or global partition index
+                    if (!RelationIsPartitioned(indexRelation) || RelationIsGlobalIndex(indexRelation)) {
                         info->pages = RelationGetNumberOfBlocks(indexRelation);
-                    } else { // partitioned index                   
+                    } else {  // partitioned index
                         ListCell* cell = NULL;
                         BlockNumber partIndexPages = 0;
                         int partitionNum = getNumberOfPartitions(relation);
@@ -526,6 +533,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
 #endif
         /* fall through */
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
         case RELKIND_MATVIEW:
         /* fall through */
         case RELKIND_TOASTVALUE:
@@ -536,7 +544,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
              *	ESTIMATE_PARTITION_NUMBER non-zero-pages partitions
              *	multiply total number of partitions
              */
-            if (RelationIsPartitioned(rel) && !RelationIsColStore(rel)) {
+            if (RelationIsPartitioned(rel) && !RelationIsColStore(rel) && !RelationIsGlobalIndex(rel)) {
                 acquireSamplesForPartitionedRelation(rel, AccessShareLock, &curpages, sampledPartitionIds);
             } else if (RelationIsValuePartitioned(rel)) {
                 /*
@@ -1300,7 +1308,7 @@ bool has_unique_index(RelOptInfo* rel, AttrNumber attno)
          * Also, a multicolumn unique index doesn't allow us to conclude that
          * just the specified attr is unique.
          */
-        if (index->unique && index->ncolumns == 1 && index->indexkeys[0] == attno &&
+        if (index->unique && index->nkeycolumns == 1 && index->indexkeys[0] == attno &&
             (index->indpred == NIL || index->predOK))
             return true;
     }

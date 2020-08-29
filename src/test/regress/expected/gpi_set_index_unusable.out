@@ -1,0 +1,533 @@
+-- MERGE PARTITIONS
+set client_min_messages=error;
+drop table if exists test_merge_llt;
+create table test_merge_llt (a int, b int)
+partition by range (a)
+(
+partition test_merge_llt_p1 values less than (10),
+partition test_merge_llt_p2 values less than (20),
+partition test_merge_llt_p3 values less than (30),
+partition test_merge_llt_p4 values less than (maxvalue)
+);
+create index test_merge_llt_idx on test_merge_llt(a) global;
+create index test_merge_llt_idx_local on test_merge_llt(b) local;
+insert into test_merge_llt select generate_series(0,1000), generate_series(0,1000);
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_merge_llt') order by 2;
+      relname      | boundaries 
+-------------------+------------
+ test_merge_llt_p1 | {10}
+ test_merge_llt_p2 | {20}
+ test_merge_llt_p3 | {30}
+ test_merge_llt_p4 | {NULL}
+ test_merge_llt    | 
+(5 rows)
+
+vacuum analyze test_merge_llt;
+-- indexscan
+explain (costs false) select * from test_merge_llt where a=40;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ [Bypass]
+ Index Scan using test_merge_llt_idx on test_merge_llt
+   Index Cond: (a = 40)
+(3 rows)
+
+-- 1 rows
+select * from test_merge_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+alter table test_merge_llt merge partitions test_merge_llt_p1, test_merge_llt_p2 into partition test_merge_llt_px;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_merge_llt') order by 2;
+      relname      | boundaries 
+-------------------+------------
+ test_merge_llt_px | {20}
+ test_merge_llt_p3 | {30}
+ test_merge_llt_p4 | {NULL}
+ test_merge_llt    | 
+(4 rows)
+
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_merge_llt'::regclass ORDER BY c.relname;
+         relname          | indisusable 
+--------------------------+-------------
+ test_merge_llt_idx       | f
+ test_merge_llt_idx_local | t
+(2 rows)
+
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+-- seqscan
+explain (costs false) select * from test_merge_llt where a=40;
+                  QUERY PLAN                  
+----------------------------------------------
+ Partition Iterator
+   Iterations: 1
+   ->  Partitioned Seq Scan on test_merge_llt
+         Filter: (a = 40)
+         Selected Partitions:  3
+(5 rows)
+
+select * from test_merge_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+reindex index test_merge_llt_idx;
+-- indexscan
+explain (costs false) select * from test_merge_llt where a=40;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ [Bypass]
+ Index Scan using test_merge_llt_idx on test_merge_llt
+   Index Cond: (a = 40)
+(3 rows)
+
+select * from test_merge_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+drop table if exists test_merge_llt;
+-- End. Clean up
+---truncate partition table with index
+set client_min_messages=error;
+drop table if exists test_truncate_llt;
+create table test_truncate_llt (a int, b int)
+partition by range (a)
+(
+partition test_truncate_llt_p1 values less than (10),
+partition test_truncate_llt_p2 values less than (20),
+partition test_truncate_llt_p3 values less than (30),
+partition test_truncate_llt_p4 values less than (maxvalue)
+);
+create index test_truncate_llt_idx on test_truncate_llt(a) global;
+insert into test_truncate_llt select generate_series(0,1000), generate_series(0,1000);
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_truncate_llt') order by 2;
+       relname        | boundaries 
+----------------------+------------
+ test_truncate_llt_p1 | {10}
+ test_truncate_llt_p2 | {20}
+ test_truncate_llt_p3 | {30}
+ test_truncate_llt_p4 | {NULL}
+ test_truncate_llt    | 
+(5 rows)
+
+vacuum analyze test_truncate_llt;
+-- indexscan
+explain (costs false) select * from test_truncate_llt where a=40;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
+ Index Scan using test_truncate_llt_idx on test_truncate_llt
+   Index Cond: (a = 40)
+(3 rows)
+
+select * from test_truncate_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+alter table test_truncate_llt truncate partition test_truncate_llt_p3;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_truncate_llt') order by 2;
+       relname        | boundaries 
+----------------------+------------
+ test_truncate_llt_p1 | {10}
+ test_truncate_llt_p2 | {20}
+ test_truncate_llt_p3 | {30}
+ test_truncate_llt_p4 | {NULL}
+ test_truncate_llt    | 
+(5 rows)
+
+-- test_truncate_llt_idx unusable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_truncate_llt'::regclass ORDER BY c.relname;
+        relname        | indisusable 
+-----------------------+-------------
+ test_truncate_llt_idx | f
+(1 row)
+
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+-- seqscan
+explain (costs false) select * from test_truncate_llt where a = 40;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Partition Iterator
+   Iterations: 1
+   ->  Partitioned Seq Scan on test_truncate_llt
+         Filter: (a = 40)
+         Selected Partitions:  4
+(5 rows)
+
+select * from test_truncate_llt where a = 40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+alter index test_truncate_llt_idx rebuild;
+-- test_truncate_llt_idx usable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_truncate_llt'::regclass ORDER BY c.relname;
+        relname        | indisusable 
+-----------------------+-------------
+ test_truncate_llt_idx | t
+(1 row)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+-- indexscan
+explain (costs false) select * from test_truncate_llt where a=40;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
+ Index Scan using test_truncate_llt_idx on test_truncate_llt
+   Index Cond: (a = 40)
+(3 rows)
+
+select * from test_truncate_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+drop table if exists test_truncate_llt;
+-- End. Clean up
+--exchange partition
+set client_min_messages=error;
+drop table if exists test_exchange_llt;
+drop table if exists test_ord;
+create table test_exchange_llt (a int, b int)
+partition by range (a)
+(
+partition test_exchange_llt_p1 values less than (10),
+partition test_exchange_llt_p2 values less than (20),
+partition test_exchange_llt_p3 values less than (30),
+partition test_exchange_llt_p4 values less than (maxvalue)
+);
+create index test_exchange_llt_idx on test_exchange_llt(a) global;
+insert into test_exchange_llt select generate_series(0,1000), 100;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_exchange_llt') order by 2;
+       relname        | boundaries 
+----------------------+------------
+ test_exchange_llt_p1 | {10}
+ test_exchange_llt_p2 | {20}
+ test_exchange_llt_p3 | {30}
+ test_exchange_llt_p4 | {NULL}
+ test_exchange_llt    | 
+(5 rows)
+
+create table test_ord (a int, b int);
+insert into test_ord select 13, generate_series(0,1000);
+vacuum analyze test_exchange_llt;
+-- indexscan
+explain (costs false) select * from test_exchange_llt where a=40;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
+ Index Scan using test_exchange_llt_idx on test_exchange_llt
+   Index Cond: (a = 40)
+(3 rows)
+
+select * from test_exchange_llt where a=40;
+ a  |  b  
+----+-----
+ 40 | 100
+(1 row)
+
+-- exchange
+alter table test_exchange_llt exchange partition (test_exchange_llt_p2) with table test_ord with validation;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_exchange_llt') order by 2;
+       relname        | boundaries 
+----------------------+------------
+ test_exchange_llt_p1 | {10}
+ test_exchange_llt_p2 | {20}
+ test_exchange_llt_p3 | {30}
+ test_exchange_llt_p4 | {NULL}
+ test_exchange_llt    | 
+(5 rows)
+
+-- test_exchange_llt_idx unusable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_exchange_llt'::regclass ORDER BY c.relname;
+        relname        | indisusable 
+-----------------------+-------------
+ test_exchange_llt_idx | f
+(1 row)
+
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+--seqcan
+explain (costs false) select * from test_exchange_llt where a=40;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Partition Iterator
+   Iterations: 1
+   ->  Partitioned Seq Scan on test_exchange_llt
+         Filter: (a = 40)
+         Selected Partitions:  4
+(5 rows)
+
+select * from test_exchange_llt where a=40;
+ a  |  b  
+----+-----
+ 40 | 100
+(1 row)
+
+-- rebuild
+reindex table test_exchange_llt;
+-- test_exchange_llt_idx usable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_exchange_llt'::regclass ORDER BY c.relname;
+        relname        | indisusable 
+-----------------------+-------------
+ test_exchange_llt_idx | t
+(1 row)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+-- indexscan
+explain (costs false) select * from test_exchange_llt where a=40;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
+ Index Scan using test_exchange_llt_idx on test_exchange_llt
+   Index Cond: (a = 40)
+(3 rows)
+
+select * from test_exchange_llt where a=40;
+ a  |  b  
+----+-----
+ 40 | 100
+(1 row)
+
+drop table if exists test_exchange_llt;
+drop table if exists test_ord;
+-- End. Clean up
+--split partition
+set client_min_messages=error;
+drop table if exists test_split_llt;
+create table if not exists test_split_llt (a int, b int)
+partition by range(a)
+(
+partition test_split_llt_p1 values less than(10),
+partition test_split_llt_p2 values less than(20),
+partition test_split_llt_p3 values less than(30),
+partition test_split_llt_p4 values less than(maxvalue)
+);
+create index test_split_llt_idx1 on  test_split_llt(a) global;
+insert into test_split_llt select generate_series(0,1000), generate_series(0,1000);
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_split_llt') order by 2;
+      relname      | boundaries 
+-------------------+------------
+ test_split_llt_p1 | {10}
+ test_split_llt_p2 | {20}
+ test_split_llt_p3 | {30}
+ test_split_llt_p4 | {NULL}
+ test_split_llt    | 
+(5 rows)
+
+vacuum analyze test_split_llt;
+-- indexscan
+explain (costs false) select * from test_split_llt where a=40;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ [Bypass]
+ Index Scan using test_split_llt_idx1 on test_split_llt
+   Index Cond: (a = 40)
+(3 rows)
+
+select * from test_split_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+alter table test_split_llt
+        merge partitions test_split_llt_p1, test_split_llt_p2
+        into partition test_split_llt_p1_2;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_split_llt') order by 2;
+       relname       | boundaries 
+---------------------+------------
+ test_split_llt_p1_2 | {20}
+ test_split_llt_p3   | {30}
+ test_split_llt_p4   | {NULL}
+ test_split_llt      | 
+(4 rows)
+
+alter table test_split_llt
+        split partition test_split_llt_p1_2
+        into (partition test_split_llt_p1 values less than (10), partition test_split_llt_p2 values less than (20));
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_split_llt') order by 2;
+      relname      | boundaries 
+-------------------+------------
+ test_split_llt_p1 | {10}
+ test_split_llt_p2 | {20}
+ test_split_llt_p3 | {30}
+ test_split_llt_p4 | {NULL}
+ test_split_llt    | 
+(5 rows)
+
+-- test_split_llt_idx1 unusable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_split_llt'::regclass ORDER BY c.relname;
+       relname       | indisusable 
+---------------------+-------------
+ test_split_llt_idx1 | f
+(1 row)
+
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+--seqscan
+explain (costs false) select * from test_split_llt where a=40;
+                  QUERY PLAN                  
+----------------------------------------------
+ Partition Iterator
+   Iterations: 1
+   ->  Partitioned Seq Scan on test_split_llt
+         Filter: (a = 40)
+         Selected Partitions:  4
+(5 rows)
+
+select * from test_split_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+reindex database postgres;
+ERROR:  can only reindex the currently open database
+-- test_split_llt_idx1 unusable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_split_llt'::regclass ORDER BY c.relname;
+       relname       | indisusable 
+---------------------+-------------
+ test_split_llt_idx1 | f
+(1 row)
+
+--seqscan
+explain (costs false) select * from test_split_llt where a=40;
+                  QUERY PLAN                  
+----------------------------------------------
+ Partition Iterator
+   Iterations: 1
+   ->  Partitioned Seq Scan on test_split_llt
+         Filter: (a = 40)
+         Selected Partitions:  4
+(5 rows)
+
+select * from test_split_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+drop table if exists test_split_llt;
+-- End. Clean up
+--drop partition
+set client_min_messages=error;
+drop table if exists test_drop_llt;
+create table test_drop_llt (a int, b int)
+partition by range (a)
+(
+partition test_drop_llt_p1 values less than (10),
+partition test_drop_llt_p2 values less than (20),
+partition test_drop_llt_p3 values less than (30),
+partition test_drop_llt_p4 values less than (maxvalue)
+);
+create index test_drop_llt_idx on test_drop_llt(a) global;
+insert into test_drop_llt select generate_series(0,1000), generate_series(0,1000);
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_drop_llt') order by 2;
+     relname      | boundaries 
+------------------+------------
+ test_drop_llt_p1 | {10}
+ test_drop_llt_p2 | {20}
+ test_drop_llt_p3 | {30}
+ test_drop_llt_p4 | {NULL}
+ test_drop_llt    | 
+(5 rows)
+
+vacuum analyze test_drop_llt;
+--indexscan
+explain (costs false) select * from test_drop_llt where a=40;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ [Bypass]
+ Index Scan using test_drop_llt_idx on test_drop_llt
+   Index Cond: (a = 40)
+(3 rows)
+
+select * from test_drop_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+alter table test_drop_llt drop partition test_drop_llt_p1;
+select relname, boundaries from pg_partition where parentid in (select oid from pg_class where relname = 'test_drop_llt') order by 2;
+     relname      | boundaries 
+------------------+------------
+ test_drop_llt_p2 | {20}
+ test_drop_llt_p3 | {30}
+ test_drop_llt_p4 | {NULL}
+ test_drop_llt    | 
+(4 rows)
+
+-- test_drop_llt_idx unusable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_drop_llt'::regclass ORDER BY c.relname;
+      relname      | indisusable 
+-------------------+-------------
+ test_drop_llt_idx | f
+(1 row)
+
+set enable_bitmapscan=off;
+set enable_seqscan=off;
+--seqscan
+explain (costs false) select * from test_drop_llt where a=40;
+                 QUERY PLAN                  
+---------------------------------------------
+ Partition Iterator
+   Iterations: 1
+   ->  Partitioned Seq Scan on test_drop_llt
+         Filter: (a = 40)
+         Selected Partitions:  3
+(5 rows)
+
+select * from test_drop_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+vacuum full test_drop_llt;
+-- test_drop_llt_idx unusable
+select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_drop_llt'::regclass ORDER BY c.relname;
+      relname      | indisusable 
+-------------------+-------------
+ test_drop_llt_idx | f
+(1 row)
+
+--seqscan
+explain (costs false) select * from test_drop_llt where a=40;
+                 QUERY PLAN                  
+---------------------------------------------
+ Partition Iterator
+   Iterations: 1
+   ->  Partitioned Seq Scan on test_drop_llt
+         Filter: (a = 40)
+         Selected Partitions:  3
+(5 rows)
+
+select * from test_drop_llt where a=40;
+ a  | b  
+----+----
+ 40 | 40
+(1 row)
+
+set enable_bitmapscan=on;
+set enable_seqscan=on;
+drop table if exists test_drop_llt;
+-- End. Clean up

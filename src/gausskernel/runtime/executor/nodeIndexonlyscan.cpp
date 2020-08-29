@@ -97,6 +97,15 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
          * reading the TID; and (2) is satisfied by the acquisition of the
          * buffer content lock in order to insert the TID.
          */
+        if (IndexScanNeedSwitchPartRel(indexScan)) {
+            /*
+             * Change the heapRelation in indexScanDesc to Partition Relation of current index
+             */
+            if (!GPIGetNextPartRelation(indexScan->xs_gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+                continue;
+            }
+            indexScan->heapRelation = indexScan->xs_gpi_scan->fakePartRelation;
+        }
         if (!visibilitymap_test(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), &node->ioss_VMBuffer)) {
             /*
              * Rats, we have to visit the heap to check visibility.
@@ -286,16 +295,16 @@ void ExecReScanIndexOnlyScan(IndexOnlyScanState* node)
             if (!PointerIsValid(node->ss.partitions)) {
                 return;
             }
-                Assert(PointerIsValid(node->ioss_ScanDesc));
+            Assert(PointerIsValid(node->ioss_ScanDesc));
             abs_idx_endscan(node->ioss_ScanDesc);
 
-                /*  initialize to scan the next partition */
-                ExecInitNextIndexPartitionForIndexScanOnly(node);
+            /* initialize to scan the next partition */
+            ExecInitNextIndexPartitionForIndexScanOnly(node);
             ExecScanReScan(&node->ss);
-                /*
-                 * give up rescaning the index if there is no partition to scan
-                 */
-                return;
+            /*
+             * give up rescaning the index if there is no partition to scan
+             */
+            return;
         }
     }
 

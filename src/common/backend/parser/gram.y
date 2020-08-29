@@ -373,6 +373,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 				aggr_args old_aggr_definition old_aggr_list
 				oper_argtypes RuleActionList RuleActionMulti
 				opt_column_list columnList opt_name_list opt_analyze_column_define opt_multi_name_list
+				opt_include opt_c_include index_including_params
 				sort_clause opt_sort_clause sortby_list index_params
 				name_list from_clause from_list opt_array_bounds
 				qualified_name_list any_name any_name_list
@@ -651,7 +652,7 @@ static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yy
 
 	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P
 
-	IDENTIFIED IDENTITY_P IF_P IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P
+	IDENTIFIED IDENTITY_P IF_P IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P INCLUDE
 	INCLUDING INCREMENT INDEX INDEXES INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P INMEMORY
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER INTERNAL
 	INTERSECT INTERVAL INTO INVOKER IS ISNULL ISOLATION
@@ -4746,20 +4747,21 @@ ConstraintElem:
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *)n;
 				}
-			| UNIQUE '(' columnList ')' opt_definition OptConsTableSpace
+			| UNIQUE '(' columnList ')' opt_c_include opt_definition OptConsTableSpace
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_UNIQUE;
 					n->location = @1;
 					n->keys = $3;
-					n->options = $5;
+					n->including = $5;
+					n->options = $6;
 					n->indexname = NULL;
-					n->indexspace = $6;
-					processCASbits($7, @7, "UNIQUE",
+					n->indexspace = $7;
+					processCASbits($8, @8, "UNIQUE",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
-					n->inforConstraint = (InformationalConstraint *) $8; /* informational constraint info */
+					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
 					$$ = (Node *)n;
 				}
 			| UNIQUE ExistingIndex ConstraintAttributeSpec InformationalConstraintElem
@@ -4768,6 +4770,7 @@ ConstraintElem:
 					n->contype = CONSTR_UNIQUE;
 					n->location = @1;
 					n->keys = NIL;
+					n->including = NIL;
 					n->options = NIL;
 					n->indexname = $2;
 					n->indexspace = NULL;
@@ -4777,20 +4780,21 @@ ConstraintElem:
 					n->inforConstraint = (InformationalConstraint *) $4; /* informational constraint info */
 					$$ = (Node *)n;
 				}
-			| PRIMARY KEY '(' columnList ')' opt_definition OptConsTableSpace
+			| PRIMARY KEY '(' columnList ')' opt_c_include opt_definition OptConsTableSpace
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_PRIMARY;
 					n->location = @1;
 					n->keys = $4;
-					n->options = $6;
+					n->including = $6;
+					n->options = $7;
 					n->indexname = NULL;
-					n->indexspace = $7;
-					processCASbits($8, @8, "PRIMARY KEY",
+					n->indexspace = $8;
+					processCASbits($9, @9, "PRIMARY KEY",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
-					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
+					n->inforConstraint = (InformationalConstraint *) $10; /* informational constraint info */
 					$$ = (Node *)n;
 				}
 			| PRIMARY KEY ExistingIndex ConstraintAttributeSpec InformationalConstraintElem
@@ -4799,6 +4803,7 @@ ConstraintElem:
 					n->contype = CONSTR_PRIMARY;
 					n->location = @1;
 					n->keys = NIL;
+					n->including = NIL;
 					n->options = NIL;
 					n->indexname = $3;
 					n->indexspace = NULL;
@@ -4809,7 +4814,7 @@ ConstraintElem:
 					$$ = (Node *)n;
 				}
 			| EXCLUDE access_method_clause '(' ExclusionConstraintList ')'
-				opt_definition OptConsTableSpace ExclusionWhereClause
+				opt_c_include opt_definition OptConsTableSpace ExclusionWhereClause
 				ConstraintAttributeSpec
 				{
 					ereport(ERROR,
@@ -4820,11 +4825,12 @@ ConstraintElem:
 					n->location = @1;
 					n->access_method	= $2;
 					n->exclusions		= $4;
-					n->options			= $6;
+					n->including		= $6;
+					n->options			= $7;
 					n->indexname		= NULL;
-					n->indexspace		= $7;
-					n->where_clause		= $8;
-					processCASbits($9, @9, "EXCLUDE",
+					n->indexspace		= $8;
+					n->where_clause		= $9;
+					processCASbits($10, @10, "EXCLUDE",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					$$ = (Node *)n;
@@ -4884,6 +4890,10 @@ columnElem: ColId
 				{
 					$$ = (Node *) makeString($1);
 				}
+		;
+
+opt_c_include:	INCLUDE '(' columnList ')'			{ $$ = $3; }
+			 |		/* EMPTY */						{ $$ = NIL; }
 		;
 
 key_match:  MATCH FULL
@@ -8842,7 +8852,7 @@ defacl_privilege_target:
 
 IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 			ON qualified_name access_method_clause '(' index_params ')'
-			opt_reloptions OptPartitionElement where_clause
+			opt_include opt_reloptions OptPartitionElement where_clause
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
@@ -8852,15 +8862,17 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->relation = $7;
 					n->accessMethod = $8;
 					n->indexParams = $10;
-					n->options = $12;
-					n->tableSpace = $13;
-					n->whereClause = $14;
+					n->indexIncludingParams = $12;
+					n->options = $13;
+					n->tableSpace = $14;
+					n->whereClause = $15;
 					n->excludeOpNames = NIL;
 					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
 					n->oldNode = InvalidOid;
 					n->partClause = NULL;
 					n->isPartitioned = false;
+					n->isGlobal = false;
 					n->primary = false;
 					n->isconstraint = false;
 					n->deferrable = false;
@@ -8884,6 +8896,36 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->options = $14;
 					n->tableSpace = $15;
 					n->isPartitioned = true;
+					n->isGlobal = false;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
+					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
+					$$ = (Node *)n;
+
+				}
+				| CREATE opt_unique INDEX opt_concurrently opt_index_name
+					ON qualified_name access_method_clause '(' index_params ')'
+					GLOBAL opt_reloptions OptTableSpace
+				{
+
+					IndexStmt *n = makeNode(IndexStmt);
+					n->unique = $2;
+					n->concurrent = $4;
+                    n->schemaname = $5->schemaname;
+					n->idxname = $5->relname;
+					n->relation = $7;
+					n->accessMethod = $8;
+					n->indexParams = $10;
+					n->partClause  = NULL;
+					n->options = $13;
+					n->tableSpace = $14;
+					n->isPartitioned = true;
+					n->isGlobal = true;
 					n->excludeOpNames = NIL;
 					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
@@ -8983,6 +9025,15 @@ index_elem:	ColId opt_collate opt_class opt_asc_desc opt_nulls_order
 					$$->nulls_ordering = (SortByNulls)$7;
 				}
 		;
+
+opt_include:		INCLUDE '(' index_including_params ')'			{ $$ = $3; }
+			 |		/* EMPTY */						{ $$ = NIL; }
+		;
+
+index_including_params:	index_elem						{ $$ = list_make1($1); }
+			| index_including_params ',' index_elem		{ $$ = lappend($1, $3); }
+		;
+
 
 opt_collate: COLLATE any_name						{ $$ = $2; }
 			| /*EMPTY*/								{ $$ = NIL; }
@@ -17989,6 +18040,7 @@ unreserved_keyword:
 			| IMMEDIATE
 			| IMMUTABLE
 			| IMPLICIT_P
+			| INCLUDE
 			| INCLUDING
 			| INCREMENT
 			| INDEX

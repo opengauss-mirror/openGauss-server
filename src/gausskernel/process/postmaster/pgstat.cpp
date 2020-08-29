@@ -1825,7 +1825,7 @@ void pgstat_initstats(Relation rel)
 
     /* We only count stats for things that have storage */
     if (!(relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_INDEX || 
-            relkind == RELKIND_TOASTVALUE || relkind == RELKIND_SEQUENCE)) {
+            relkind == RELKIND_TOASTVALUE || relkind == RELKIND_SEQUENCE || relkind == RELKIND_GLOBAL_INDEX)) {
         rel->pgstat_info = NULL;
         return;
     }

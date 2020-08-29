@@ -259,6 +259,7 @@ extern int8 heaprel_get_compression_from_modes(int16 modes);
 
 extern void CheckGetServerIpAndPort(const char* Address, List** AddrList, bool IsCheck, int real_addr_max);
 extern void CheckFoldernameOrFilenamesOrCfgPtah(const char* OptStr, char* OptType);
+extern void CheckWaitCleanGpi(const char* value);
 
 extern void ForbidToSetOptionsForPSort(List* options);
 extern void ForbidOutUsersToSetInnerOptions(List* user_options);

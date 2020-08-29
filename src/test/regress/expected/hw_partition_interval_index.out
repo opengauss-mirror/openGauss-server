@@ -95,8 +95,7 @@ create unique index CONCURRENTLY on hw_partition_index_ip (logdate) local
 	partition sip2_index_local tablespace PG_DEFAULT,
 	partition sip3_index_local tablespace PG_DEFAULT
 );
-ERROR:  PGXC does not support concurrent INDEX yet
-DETAIL:  The feature is not currently supported
+ERROR:  cannot create concurrent partitioned indexes 
 -- Not enough index partition defined
 create unique index on hw_partition_index_ip (logdate) local
 (
@@ -113,9 +112,9 @@ create unique index on hw_partition_index_ip (logdate) local
 	partition sip4_index_local tablespace PG_DEFAULT
 );
 ERROR:  number of partitions of LOCAL index must equal that of the underlying table
-create unique index on hw_partition_index_ip (logdate);
-ERROR:  partitioned table does not support global index
---fail wrong syntax
+create unique index global_internal_index on hw_partition_index_ip (logdate);
+ERROR:  Global and local partition index should not be on same column
+--fail
 drop table hw_partition_index_ip;
 --unique index , index para must contain partition key
 create table hw_partition_index_ip

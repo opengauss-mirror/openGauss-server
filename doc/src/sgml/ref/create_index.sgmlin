@@ -17,7 +17,7 @@ CREATE [ UNIQUE ] INDEX [ [schema_name.] index_name ] ON table_name [ USING meth
     [ WHERE predicate ];
 CREATE [ UNIQUE ] INDEX [ [schema_name.] index_name ] ON table_name [ USING method ]
 ( {{ column_name | ( expression ) } [ COLLATE collation ] [ opclass ] [ ASC | DESC ] [ NULLS LAST ] }[, ...] )
-LOCAL [ ( { PARTITION index_partition_name [ TABLESPACE index_partition_tablespace ] } [, ...] ) ]
+[ LOCAL [ ( { PARTITION index_partition_name [ TABLESPACE index_partition_tablespace ] } [, ...] ) ] | GLOBAL ]
 [ WITH ( { storage_parameter = value } [, ...] ) ]
 [ TABLESPACE tablespace_name ];
 </synopsis>

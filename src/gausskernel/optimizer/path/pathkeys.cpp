@@ -391,8 +391,10 @@ Path* get_cheapest_fractional_path_for_pathkeys(List* paths, List* pathkeys, Rel
  * If 'scandir' is BackwardScanDirection, build pathkeys representing a
  * backwards scan of the index.
  *
- * The result is canonical, meaning that redundant pathkeys are removed;
- * it may therefore have fewer entries than there are index columns.
+ * We iterate only key columns of covering indexes, since non-key columns
+ * don't influence index ordering.  The result is canonical, meaning that
+ * redundant pathkeys are removed; it may therefore have fewer entries than
+ * there are key columns in the index.
  *
  * Another reason for stopping early is that we may be able to tell that
  * an index column's sort order is uninteresting for this query.  However,
@@ -416,6 +418,14 @@ List* build_index_pathkeys(PlannerInfo* root, IndexOptInfo* index, ScanDirection
         bool reverse_sort = false;
         bool nulls_first = false;
         PathKey* cpathkey = NULL;
+
+        /*
+         * INCLUDE columns are stored in index unordered, so they don't
+         * support ordered index scan.
+         */
+        if (i >= index->nkeycolumns) {
+            break;
+        }
 
         /* We assume we don't need to make a copy of the tlist item */
         indexkey = indextle->expr;

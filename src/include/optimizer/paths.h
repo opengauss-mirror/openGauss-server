@@ -32,6 +32,8 @@ extern void debug_print_rel(PlannerInfo* root, RelOptInfo* rel);
 extern void create_index_paths(PlannerInfo* root, RelOptInfo* rel);
 extern List* generate_bitmap_or_paths(
     PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses, bool restriction_only);
+extern List* GenerateBitmapOrPathsUseGPI(
+    PlannerInfo* root, RelOptInfo* rel, const List* clauses, List* other_clauses, bool restriction_only);
 extern bool relation_has_unique_index_for(
     PlannerInfo* root, RelOptInfo* rel, List* restrictlist, List* exprlist, List* oprlist);
 extern bool eclass_member_matches_indexcol(
@@ -42,6 +44,14 @@ extern void expand_indexqual_conditions(
 extern void check_partial_indexes(PlannerInfo* root, RelOptInfo* rel);
 extern Expr* adjust_rowcompare_for_index(
     RowCompareExpr* clause, IndexOptInfo* index, int indexcol, List** indexcolnos, bool* var_on_left_p);
+/*
+ * Check index path whether use global partition index to scan
+ */
+inline bool CheckIndexPathUseGPI(IndexPath* ipath)
+{
+    return ipath->indexinfo->isGlobal;
+}
+
 
 /*
  * orindxpath.c

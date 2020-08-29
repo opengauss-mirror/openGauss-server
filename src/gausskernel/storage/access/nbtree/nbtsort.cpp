@@ -407,6 +407,7 @@ static void _bt_sortaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumb
     if (!P_ISLEAF(opaque) && itup_off == P_FIRSTKEY) {
         trunctuple = *itup;
         trunctuple.t_info = sizeof(IndexTupleData);
+        BTreeTupleSetNAtts(&trunctuple, 0);
         itup = &trunctuple;
         itemsize = sizeof(IndexTupleData);
     }
@@ -506,6 +507,8 @@ void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup)
         ItemId ii;
         ItemId hii;
         IndexTuple oitup;
+        IndexTuple keytup;
+        BTPageOpaqueInternal opageop = (BTPageOpaqueInternal) PageGetSpecialPointer(opage);
 
         /* Create new page of same level */
         npage = _bt_blnewpage(state->btps_level);
@@ -532,7 +535,28 @@ void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup)
         *hii = *ii;
         ItemIdSetUnused(ii); /* redundant */
         ((PageHeader)opage)->pd_lower -= sizeof(ItemIdData);
+        int indnatts = IndexRelationGetNumberOfAttributes(wstate->index);
+        int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(wstate->index);
 
+        if (indnkeyatts != indnatts && P_ISLEAF(opageop)) {
+            /*
+             * We truncate included attributes of high key here.  Subsequent
+             * insertions assume that hikey is already truncated, and so they
+             * need not worry about it, when copying the high key into the
+             * parent page as a downlink.
+             *
+             * The code above have just rearranged item pointers, but it
+             * didn't save any space.  In order to save the space on page we
+             * have to truly shift index tuples on the page.  But that's not
+             * so bad for performance, because we operating pd_upper and don't
+             * have to shift much of tuples memory.  Shift of ItemId's is
+             * rather cheap, because they are small.
+             */
+            keytup = _bt_nonkey_truncate(wstate->index, oitup);
+            /* delete "wrong" high key, insert keytup as P_HIKEY. */
+            PageIndexTupleDelete(opage, P_HIKEY);
+            _bt_sortaddtup(opage, IndexTupleSize(keytup), keytup, P_HIKEY);
+        }
         /*
          * Link the old page into its parent, using its minimum key. If we
          * don't have a parent, we have to create one; this adds a new btree
@@ -542,7 +566,13 @@ void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup)
             state->btps_next = _bt_pagestate(wstate, state->btps_level + 1);
 
         Assert(state->btps_minkey != NULL);
-        ItemPointerSet(&(state->btps_minkey->t_tid), oblkno, P_HIKEY);
+        Assert(BTreeTupleGetNAtts(state->btps_minkey, wstate->index) ==
+               IndexRelationGetNumberOfKeyAttributes(wstate->index) ||
+               P_LEFTMOST(opageop));
+        Assert(BTreeTupleGetNAtts(state->btps_minkey, wstate->index) == 0 ||
+               !P_LEFTMOST(opageop));
+
+        BTreeInnerTupleSetDownLink(state->btps_minkey, oblkno);
         _bt_buildadd(wstate, state->btps_next, state->btps_minkey);
         pfree(state->btps_minkey);
         state->btps_minkey = NULL;
@@ -550,8 +580,11 @@ void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup)
         /*
          * Save a copy of the minimum key for the new page.  We have to copy
          * it off the old page, not the new one, in case we are not at leaf
-         * level.
+         * level.  Despite oitup is already initialized, it's important to get
+         * high key from the page, since we could have replaced it with
+         * truncated copy.	See comment above.
          */
+        oitup = (IndexTuple) PageGetItem(opage, PageGetItemId(opage, P_HIKEY));
         state->btps_minkey = CopyIndexTuple(oitup);
 
         /*
@@ -582,11 +615,15 @@ void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup)
      * If the new item is the first for its page, stash a copy for later. Note
      * this will only happen for the first item on a level; on later pages,
      * the first item for a page is copied from the prior page in the code
-     * above.
+     * above. Since the minimum key for an entire level is only used as a
+     * minus infinity downlink, and never as a high key, there is no need to
+     * truncate away non-key attributes at this point.
      */
     if (last_off == P_HIKEY) {
         Assert(state->btps_minkey == NULL);
         state->btps_minkey = CopyIndexTuple(itup);
+        /* _bt_sortaddtup() will perform full truncation later */
+        BTreeTupleSetNAtts(state->btps_minkey, 0);
     }
 
     /*
@@ -634,7 +671,11 @@ void _bt_uppershutdown(BTWriteState* wstate, BTPageState* state)
             rootlevel = s->btps_level;
         } else {
             Assert(s->btps_minkey != NULL);
-            ItemPointerSet(&(s->btps_minkey->t_tid), blkno, P_HIKEY);
+            Assert(BTreeTupleGetNAtts(s->btps_minkey, wstate->index) ==
+                   IndexRelationGetNumberOfKeyAttributes(wstate->index) ||
+                   P_LEFTMOST(opaque));
+            Assert(BTreeTupleGetNAtts(s->btps_minkey, wstate->index) == 0 || !P_LEFTMOST(opaque));
+            BTreeInnerTupleSetDownLink(s->btps_minkey, blkno);
             _bt_buildadd(wstate, s->btps_next, s->btps_minkey);
             pfree(s->btps_minkey);
             s->btps_minkey = NULL;
@@ -683,7 +724,7 @@ static void _bt_load(BTWriteState* wstate, BTSpool* btspool, BTSpool* btspool2)
     bool should_free2 = false;
     bool load1 = false;
     TupleDesc tupdes = RelationGetDescr(wstate->index);
-    int keysz = RelationGetNumberOfAttributes(wstate->index);
+    int keysz = IndexRelationGetNumberOfKeyAttributes(wstate->index);
     ScanKey indexScanKey = NULL;
 
     if (merge) {

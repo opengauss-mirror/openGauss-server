@@ -40,7 +40,7 @@ typedef struct IndexTupleData {
      *
      * 15th (high) bit: has nulls
      * 14th bit: has var-width attributes
-     * 13th bit: unused
+     * 13th bit: AM-defined meaning
      * 12-0 bit: size of tuple
      * ---------------
      */
@@ -61,7 +61,7 @@ typedef IndexAttributeBitMapData* IndexAttributeBitMap;
  * t_info manipulation macros
  */
 #define INDEX_SIZE_MASK 0x1FFF
-/* bit 0x2000 is not used at present */
+#define INDEX_AM_RESERVED_BIT 0x2000 /* reserved for index-AM specific usage */
 #define INDEX_VAR_MASK 0x4000
 #define INDEX_NULL_MASK 0x8000
 
@@ -113,6 +113,7 @@ typedef IndexAttributeBitMapData* IndexAttributeBitMap;
 extern IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const bool* isnull);
 extern Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc);
 extern void index_deform_tuple(IndexTuple tup, TupleDesc tuple_descriptor, Datum* values, bool* isnull);
+extern IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, int new_indnatts);
 extern IndexTuple CopyIndexTuple(IndexTuple source);
 
 #endif /* ITUP_H */

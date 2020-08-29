@@ -1180,7 +1180,7 @@ static void doDeletion(const ObjectAddress* object, int flags)
             bool isTmpSequence = false;
             bool isTmpTable = false;
 
-            if (relKind == RELKIND_INDEX) {
+            if (relKind == RELKIND_INDEX || relKind == RELKIND_GLOBAL_INDEX) {
                 bool concurrent = (((uint32)flags & PERFORM_DELETION_CONCURRENTLY) == PERFORM_DELETION_CONCURRENTLY);
 
                 Assert(object->objectSubId == 0);
@@ -3023,6 +3023,7 @@ static void getRelationDescription(StringInfo buffer, Oid relid)
             appendStringInfo(buffer, _("table %s"), relname);
             break;
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
             appendStringInfo(buffer, _("index %s"), relname);
             break;
         case RELKIND_SEQUENCE:

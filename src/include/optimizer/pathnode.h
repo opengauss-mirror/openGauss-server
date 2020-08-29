@@ -57,6 +57,8 @@ extern IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List
     List* indexorderbys, List* indexorderbycols, List* pathkeys, ScanDirection indexscandir, bool indexonly,
     Relids required_outer, double loop_count);
 extern Path* build_seqScanPath_by_indexScanPath(PlannerInfo* root, Path* index_path);
+extern bool CheckBitmapQualIsGlobalIndex(Path* bitmapqual);
+extern bool CheckBitmapHeapPathContainGlobalOrLocal(Path* bitmapqual);
 extern bool check_bitmap_heap_path_index_unusable(Path* bitmapqual, RelOptInfo* baserel);
 extern bool is_partitionIndex_Subpath(Path* subpath);
 extern bool is_pwj_path(Path* pwjpath);

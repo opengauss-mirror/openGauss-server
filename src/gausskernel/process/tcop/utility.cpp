@@ -2916,7 +2916,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                         rel_id = RangeVarGetRelid(rel, lockmode, ((DropStmt*)parse_tree)->missing_ok);
                         if (OidIsValid(rel_id)) {
                             Oid check_id = rel_id;
-                            if (get_rel_relkind(rel_id) == RELKIND_INDEX) {
+                            char relkind = get_rel_relkind(rel_id);
+                            if (relkind == RELKIND_INDEX || relkind == RELKIND_GLOBAL_INDEX) {
                                 check_id = IndexGetRelation(rel_id, false);
                             }
                             Oid group_oid = get_pgxc_class_groupoid(check_id);
@@ -10696,7 +10697,7 @@ ExecNodes* RelidGetExecNodes(Oid rel_id, bool isutility)
 
             /* Binding group_oid for none system table */
             group_oid = get_pgxc_class_groupoid(rel_id);
-        } else if (relkind == RELKIND_INDEX) {
+        } else if (relkind == RELKIND_INDEX || relkind == RELKIND_GLOBAL_INDEX) {
             /*
              * For index, there is enry in pgxc_class, so we first get index's
              * base rel_id and then fetch group list from pgxc_class

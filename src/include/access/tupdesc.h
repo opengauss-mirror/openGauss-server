@@ -106,6 +106,9 @@ typedef struct tupleDesc {
     int tdrefcount;             /* reference count, or -1 if not counting */
 } * TupleDesc;
 
+/* Accessor for the i'th attribute of tupdesc. */
+#define TupleDescAttr(tupdesc, i) ((tupdesc)->attrs[(i)])
+
 extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid);
 
 extern TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs);
@@ -148,8 +151,5 @@ extern TupleDesc BuildDescFromLists(List* names, List* types, List* typmods, Lis
 extern bool tupledesc_have_pck(TupleConstr* constr);
 
 extern void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source);
-
-/* Accessor for the i'th attribute of tupdesc. */
-#define TupleDescAttr(tupdesc, i) (&(tupdesc)->attrs[(i)])
 
 #endif /* TUPDESC_H */

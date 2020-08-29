@@ -664,6 +664,7 @@ typedef struct IndexOptInfo {
 
     /* index descriptor information */
     int ncolumns;         /* number of columns in index */
+    int nkeycolumns;      /* number of key columns in index */
     int* indexkeys;       /* column numbers of index's keys, or 0 */
     Oid* indexcollations; /* OIDs of collations of index columns */
     Oid* opfamily;        /* OIDs of operator families for columns */
@@ -680,6 +681,7 @@ typedef struct IndexOptInfo {
 
     List* indextlist; /* targetlist representing index columns */
 
+    bool isGlobal;       /* true if index is global partition index */
     bool predOK;         /* true if predicate matches query */
     bool unique;         /* true if a unique index */
     bool immediate;      /* is uniqueness enforced immediately? */

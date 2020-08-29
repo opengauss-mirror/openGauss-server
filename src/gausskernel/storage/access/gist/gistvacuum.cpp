@@ -186,7 +186,7 @@ Datum gistbulkdelete(PG_FUNCTION_ARGS)
                 iid = PageGetItemId(page, i);
                 idxtuple = (IndexTuple)PageGetItem(page, iid);
 
-                if (callback(&(idxtuple->t_tid), callback_state)) {
+                if (callback(&(idxtuple->t_tid), callback_state, InvalidOid)) {
                     todelete[ntodelete] = i - ntodelete;
                     ntodelete++;
                     stats->tuples_removed += 1;

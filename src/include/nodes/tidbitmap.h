@@ -36,6 +36,7 @@ typedef struct TBMIterator TBMIterator;
 /* Result structure for tbm_iterate */
 typedef struct {
     BlockNumber blockno; /* page number containing tuples */
+    Oid partitionOid;
     int ntuples;         /* -1 indicates lossy result */
     bool recheck;        /* should the tuples be rechecked? */
     /* Note: recheck is always true if ntuples < 0 */
@@ -46,7 +47,8 @@ typedef struct {
 extern TIDBitmap* tbm_create(long maxbytes);
 extern void tbm_free(TIDBitmap* tbm);
 
-extern void tbm_add_tuples(TIDBitmap* tbm, const ItemPointer tids, int ntids, bool recheck);
+extern void tbm_add_tuples(
+    TIDBitmap* tbm, const ItemPointer tids, int ntids, bool recheck, Oid partitionOid = InvalidOid);
 extern void tbm_add_page(TIDBitmap* tbm, BlockNumber pageno);
 
 extern void tbm_union(TIDBitmap* a, const TIDBitmap* b);
@@ -57,5 +59,6 @@ extern bool tbm_is_empty(const TIDBitmap* tbm);
 extern TBMIterator* tbm_begin_iterate(TIDBitmap* tbm);
 extern TBMIterateResult* tbm_iterate(TBMIterator* iterator);
 extern void tbm_end_iterate(TBMIterator* iterator);
-
+extern bool tbm_is_global(const TIDBitmap* tbm);
+extern void tbm_set_global(TIDBitmap* tbm, bool isGlobal);
 #endif /* TIDBITMAP_H */

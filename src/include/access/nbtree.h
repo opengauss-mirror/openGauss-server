@@ -135,29 +135,6 @@ typedef struct BTMetaPageData {
 #define BTREE_NONLEAF_FILLFACTOR 70
 
 /*
- *	Test whether two btree entries are "the same".
- *
- *	Old comments:
- *	In addition, we must guarantee that all tuples in the index are unique,
- *	in order to satisfy some assumptions in Lehman and Yao.  The way that we
- *	do this is by generating a new OID for every insertion that we do in the
- *	tree.  This adds eight bytes to the size of btree index tuples.  Note
- *	that we do not use the OID as part of a composite key; the OID only
- *	serves as a unique identifier for a given index tuple (logical position
- *	within a page).
- *
- *	New comments:
- *	actually, we must guarantee that all tuples in A LEVEL
- *	are unique, not in ALL INDEX. So, we can use the t_tid
- *	as unique identifier for a given index tuple (logical position
- *	within a level). - vadim 04/09/97
- */
-#define BTTidSame(i1, i2)                                                                        \
-    ((i1).ip_blkid.bi_hi == (i2).ip_blkid.bi_hi && (i1).ip_blkid.bi_lo == (i2).ip_blkid.bi_lo && \
-        (i1).ip_posid == (i2).ip_posid)
-#define BTEntrySame(i1, i2) BTTidSame((i1)->t_tid, (i2)->t_tid)
-
-/*
  *	In general, the btree code tries to localize its knowledge about
  *	page layout to a couple of routines.  However, we need a special
  *	value to indicate "no page number" in those places where we expect
@@ -266,10 +243,11 @@ typedef struct xl_btree_insert {
  * Note: the four XLOG_BTREE_SPLIT xl_info codes all use this data record.
  * The _L and _R variants indicate whether the inserted tuple went into the
  * left or right split page (and thus, whether newitemoff and the new item
- * are stored or not).	The _ROOT variants indicate that we are splitting
- * the root page, and thus that a newroot record rather than an insert or
- * split record should follow.	Note that a split record never carries a
- * metapage update --- we'll do that in the parent-level update.
+ * are stored or not).  The _HIGHKEY variants indicate that we've logged
+ * explicitly left page high key value, otherwise redo should use right page
+ * leftmost key as a left page high key.  _HIGHKEY is specified for internal
+ * pages where right page leftmost key is suppressed, and for leaf pages
+ * of covering indexes where high key have non-key attributes truncated.
  *
  * Backup Blk 0: original page / new left page
  *
@@ -393,6 +371,74 @@ typedef struct xl_btree_newroot {
 #define SizeOfBtreeNewroot (offsetof(xl_btree_newroot, level) + sizeof(uint32))
 
 /*
+ * INCLUDE B-Tree indexes have non-key attributes.  These are extra
+ * attributes that may be returned by index-only scans, but do not influence
+ * the order of items in the index (formally, non-key attributes are not
+ * considered to be part of the key space).  Non-key attributes are only
+ * present in leaf index tuples whose item pointers actually point to heap
+ * tuples.  All other types of index tuples (collectively, "pivot" tuples)
+ * only have key attributes, since pivot tuples only ever need to represent
+ * how the key space is separated.  In general, any B-Tree index that has
+ * more than one level (i.e. any index that does not just consist of a
+ * metapage and a single leaf root page) must have some number of pivot
+ * tuples, since pivot tuples are used for traversing the tree.
+ *
+ * We store the number of attributes present inside pivot tuples by abusing
+ * their item pointer offset field, since pivot tuples never need to store a
+ * real offset (downlinks only need to store a block number).  The offset
+ * field only stores the number of attributes when the INDEX_ALT_TID_MASK
+ * bit is set (we never assume that pivot tuples must explicitly store the
+ * number of attributes, and currently do not bother storing the number of
+ * attributes unless indnkeyatts actually differs from indnatts).
+ * INDEX_ALT_TID_MASK is only used for pivot tuples at present, though it's
+ * possible that it will be used within non-pivot tuples in the future.  Do
+ * not assume that a tuple with INDEX_ALT_TID_MASK set must be a pivot
+ * tuple.
+ *
+ * The 12 least significant offset bits are used to represent the number of
+ * attributes in INDEX_ALT_TID_MASK tuples, leaving 4 bits that are reserved
+ * for future use (BT_RESERVED_OFFSET_MASK bits). BT_N_KEYS_OFFSET_MASK should
+ * be large enough to store any number <= INDEX_MAX_KEYS.
+ */
+#define INDEX_ALT_TID_MASK INDEX_AM_RESERVED_BIT
+#define BT_RESERVED_OFFSET_MASK 0xF000
+#define BT_N_KEYS_OFFSET_MASK 0x0FFF
+
+/* Get/set downlink block number */
+#define BTreeInnerTupleGetDownLink(itup) ItemPointerGetBlockNumberNoCheck(&((itup)->t_tid))
+#define BTreeInnerTupleSetDownLink(itup, blkno) ItemPointerSetBlockNumber(&((itup)->t_tid), (blkno))
+
+/*
+ * Get/set leaf page highkey's link. During the second phase of deletion, the
+ * target leaf page's high key may point to an ancestor page (at all other
+ * times, the leaf level high key's link is not used).  See the nbtree README
+ * for full details.
+ */
+#define BTreeTupleGetTopParent(itup) ItemPointerGetBlockNumberNoCheck(&((itup)->t_tid))
+#define BTreeTupleSetTopParent(itup, blkno)                   \
+    do {                                                      \
+        ItemPointerSetBlockNumber(&((itup)->t_tid), (blkno)); \
+        BTreeTupleSetNAtts((itup), 0);                        \
+    } while (0)
+
+/*
+ * Get/set number of attributes within B-tree index tuple. Asserts should be
+ * removed when BT_RESERVED_OFFSET_MASK bits will be used.
+ */
+#define BTreeTupleGetNAtts(itup, rel)                                                                           \
+    ((itup)->t_info & INDEX_ALT_TID_MASK                                                                        \
+            ? (AssertMacro((ItemPointerGetOffsetNumberNoCheck(&(itup)->t_tid) & BT_RESERVED_OFFSET_MASK) == 0), \
+                  ItemPointerGetOffsetNumberNoCheck(&(itup)->t_tid) & BT_N_KEYS_OFFSET_MASK)                    \
+            : IndexRelationGetNumberOfAttributes(rel))
+
+#define BTreeTupleSetNAtts(itup, n)                                                 \
+    do {                                                                            \
+        (itup)->t_info |= INDEX_ALT_TID_MASK;                                       \
+        Assert(((n) & BT_RESERVED_OFFSET_MASK) == 0);                               \
+        ItemPointerSetOffsetNumber(&(itup)->t_tid, (n) & BT_N_KEYS_OFFSET_MASK);    \
+    } while (0)
+
+/*
  *	Operator strategy numbers for B-tree have been moved to access/skey.h,
  *	because many places need to use them in ScanKeyInit() calls.
  *
@@ -437,7 +483,7 @@ typedef struct xl_btree_newroot {
 typedef struct BTStackData {
     BlockNumber bts_blkno;
     OffsetNumber bts_offset;
-    IndexTupleData bts_btentry;
+    BlockNumber bts_btentry;
     struct BTStackData* bts_parent;
 } BTStackData;
 
@@ -473,6 +519,7 @@ typedef struct BTScanPosItem { /* what we remember about each match */
     ItemPointerData heapTid;   /* TID of referenced heap item */
     OffsetNumber indexOffset;  /* index item's location within page */
     LocationIndex tupleOffset; /* IndexTuple's offset in workspace, if any */
+    Oid partitionOid;          /* partition table oid in workspace, if any */
 } BTScanPosItem;
 
 typedef struct BTScanPosData {
@@ -675,6 +722,7 @@ extern bool _bt_first(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_next(IndexScanDesc scan, ScanDirection dir);
 extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost);
 extern bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir);
+extern bool _bt_check_natts(const Relation index, Page page, OffsetNumber offnum);
 
 /*
  * prototypes for functions in nbtutils.c
@@ -699,6 +747,7 @@ extern void _bt_end_vacuum_callback(int code, Datum arg);
 extern Size BTreeShmemSize(void);
 extern void BTreeShmemInit(void);
 extern void _bt_finish_split(Relation rel, Buffer lbuf, BTStack stack);
+extern IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup);
 
 /*
  * prototypes for functions in nbtsort.c

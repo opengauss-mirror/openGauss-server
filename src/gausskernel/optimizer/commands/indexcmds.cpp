@@ -90,6 +90,11 @@ static void buildConstraintNameForInfoCnstrnt(
     const IndexStmt* stmt, Relation rel, char** indexRelationName, Oid namespaceId, const List* indexColNames);
 static Oid buildInformationalConstraint(
     IndexStmt* stmt, Oid indexRelationId, const char* indexRelationName, Relation rel, IndexInfo* indexInfo, Oid namespaceId);
+static bool CheckGlobalIndexCompatible(Oid relOid, bool isGlobal, const IndexInfo* indexInfo, Oid methodOid);
+static bool CheckIndexMethodConsistency(HeapTuple indexTuple, Relation indexRelation, Oid currMethodOid);
+static bool CheckSimpleAttrsConsistency(HeapTuple tarTuple, const int16* currAttrsArray, int currKeyNum);
+static int AttrComparator(const void* a, const void* b);
+static void AddIndexColumnForGpi(IndexStmt* stmt);
 
 /*
  * CheckIndexCompatible
@@ -115,7 +120,9 @@ static Oid buildInformationalConstraint(
  * indexes.  We ackowledge this when all operator classes, collations and
  * exclusion operators match.  Though we could further permit intra-opfamily
  * changes for btree and hash indexes, that adds subtle complexity with no
- * concrete benefit for core types.
+ *  concrete benefit for core types. Note, that INCLUDE columns aren't
+ * checked by this function, for them it's enough that table rewrite is
+ * skipped.
 
  * When a comparison or exclusion operator has a polymorphic input type, the
  * actual input types must also match.	This defends against the possibility
@@ -180,9 +187,13 @@ bool CheckIndexCompatible(Oid oldId, char* accessMethodName, List* attributeList
      * the new index, so we can test whether it's compatible with the existing
      * one.  Note that ComputeIndexAttrs might fail here, but that's OK:
      * DefineIndex would have called this function with the same arguments
-     * later on, and it would have failed then anyway.
+     * later on, and it would have failed then anyway. Our attributeList
+     * contains only key attributes, thus we're filling ii_NumIndexAttrs and
+     * ii_NumIndexKeyAttrs with same value.
      */
     indexInfo = makeNode(IndexInfo);
+    indexInfo->ii_NumIndexAttrs = numberOfAttributes;
+    indexInfo->ii_NumIndexKeyAttrs = numberOfAttributes;
     indexInfo->ii_Expressions = NIL;
     indexInfo->ii_ExpressionsState = NIL;
     indexInfo->ii_PredicateState = NIL;
@@ -222,7 +233,7 @@ bool CheckIndexCompatible(Oid oldId, char* accessMethodName, List* attributeList
     }
 
     /* Any change in operator class or collation breaks compatibility. */
-    old_natts = indexForm->indnatts;
+    old_natts = GetIndexKeyAttsByTuple(NULL, tuple);
     Assert(old_natts == numberOfAttributes);
 
     d = SysCacheGetAttr(INDEXRELID, tuple, Anum_pg_index_indcollation, &isnull);
@@ -310,6 +321,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     Oid relfilenode = InvalidOid;
     bool dfsTablespace = false;
     List* indexColNames = NIL;
+    List* allIndexParams = NIL;
     List *filenodeList = NIL;
     Relation rel;
     Relation indexRelation;
@@ -321,6 +333,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     int16* coloptions = NULL;
     IndexInfo* indexInfo = NULL;
     int numberOfAttributes = 0;
+    int numberOfKeyAttributes;
     VirtualTransactionId* old_lockholders = NULL;
     VirtualTransactionId* old_snapshots = NULL;
     int n_old_snapshots = 0;
@@ -351,16 +364,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 
     /*
-     * count attributes in index
-     */
-    numberOfAttributes = list_length(stmt->indexParams);
-    if (numberOfAttributes <= 0)
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("must specify at least one column")));
-    if (numberOfAttributes > INDEX_MAX_KEYS)
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("cannot use more than %d columns in an index", INDEX_MAX_KEYS)));
-
-    /*
      * Open heap relation, acquire a suitable lock on it, remember its OID
      *
      * Only SELECT ... FOR UPDATE/SHARE are allowed while doing a standard
@@ -388,6 +391,12 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
+    /* default partition index is set to Global index */
+    if (RELATION_IS_PARTITIONED(rel) && !stmt->isPartitioned) {
+        stmt->isPartitioned = true;
+        stmt->isGlobal = true;
+    }
+
     /*
      * normal table does not support local partitioned index
      */
@@ -404,7 +413,16 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Partition table does not support to set deferrable.")));
+        } else if (stmt->isGlobal && stmt->whereClause != NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Global partition index does not support WHERE clause.")));
         }
+    }
+
+    if (list_length(stmt->indexIncludingParams) > 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("create index does not support have include parameter")));
     }
 
     /*
@@ -415,10 +433,50 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot create concurrent partitioned indexes ")));
     }
 
-    /* partitioned table only support local partitioned index */
-    if (RELATION_IS_PARTITIONED(rel) && !stmt->isPartitioned) {
-        ereport(
-            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("partitioned table does not support global index")));
+    /* Add special index columns tableoid to global partition index */
+    if (stmt->isGlobal) {
+        AddIndexColumnForGpi(stmt);
+    }
+
+    if (list_intersection(stmt->indexParams, stmt->indexIncludingParams) != NIL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("included columns must not intersect with key columns")));
+    }
+
+    if (list_length(stmt->indexParams) <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("must specify at least one column")));
+    }
+    if (list_length(stmt->indexParams) > INDEX_MAX_KEYS) {
+        ereport(ERROR,
+            (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("cannot use more than %d columns in an index", INDEX_MAX_KEYS)));
+    }
+
+    /*
+     * count key attributes in index
+     */
+    numberOfKeyAttributes = list_length(stmt->indexParams);
+
+    /*
+     * Calculate the new list of index columns including both key columns and
+     * INCLUDE columns.  Later we can determine which of these are key columns,
+     * and which are just part of the INCLUDE list by checking the list
+     * position.  A list item in a position less than ii_NumIndexKeyAttrs is
+     * part of the key columns, and anything equal to and over is part of the
+     * INCLUDE columns.
+     */
+    allIndexParams = list_concat(list_copy(stmt->indexParams), list_copy(stmt->indexIncludingParams));
+    /*
+     * count attributes in index
+     */
+    numberOfAttributes = list_length(allIndexParams);
+    if (numberOfAttributes <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("must specify at least one column")));
+    }
+
+    if (numberOfAttributes > INDEX_MAX_KEYS) {
+        ereport(ERROR,
+            (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("cannot use more than %d columns in an index", INDEX_MAX_KEYS)));
     }
 
     indexRelationName = stmt->idxname;
@@ -466,7 +524,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 
     /* Check permissions except when using database's default */
-    if (stmt->isPartitioned) {
+    if (stmt->isPartitioned && !stmt->isGlobal) { // LOCAL partition index check
         ListCell* cell = NULL;
 
         partitionTableList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relationId);
@@ -513,7 +571,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 
     /*
-     * partitioned index  need check every index partition tablespace
+     * partitioned index need check every index partition tablespace
      */
     if (!stmt->isPartitioned && OidIsValid(tablespaceId) && tablespaceId != u_sess->proc_cxt.MyDatabaseTableSpace) {
         AclResult aclresult;
@@ -527,27 +585,39 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         AclResult aclresult;
         ListCell* tspcell = NULL;
 
-        foreach (tspcell, partitiontspList) {
-            tablespaceOid = lfirst_oid(tspcell);
-            if (OidIsValid(tablespaceOid) && tablespaceOid != u_sess->proc_cxt.MyDatabaseTableSpace) {
-                aclresult = pg_tablespace_aclcheck(tablespaceOid, GetUserId(), ACL_CREATE);
-                if (aclresult != ACLCHECK_OK) {
-                    aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceOid));
+        if (!stmt->isGlobal) {  // LOCAL partition index check
+            foreach (tspcell, partitiontspList) {
+                tablespaceOid = lfirst_oid(tspcell);
+                if (OidIsValid(tablespaceOid) && tablespaceOid != u_sess->proc_cxt.MyDatabaseTableSpace) {
+                    aclresult = pg_tablespace_aclcheck(tablespaceOid, GetUserId(), ACL_CREATE);
+                    if (aclresult != ACLCHECK_OK) {
+                        aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceOid));
+                    }
+                }
+                /* In all cases disallow placing user relations in pg_global */
+                if (tablespaceOid == GLOBALTABLESPACE_OID) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("only shared relations can be placed in pg_global tablespace")));
                 }
             }
-            /* In all cases disallow placing user relations in pg_global */
-            if (tablespaceOid == GLOBALTABLESPACE_OID) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("only shared relations can be placed in pg_global tablespace")));
+        } else {
+            if (OidIsValid(tablespaceId) && tablespaceId != u_sess->proc_cxt.MyDatabaseTableSpace) {
+                AclResult aclresult;
+
+                aclresult = pg_tablespace_aclcheck(tablespaceId, GetUserId(), ACL_CREATE);
+                if (aclresult != ACLCHECK_OK) {
+                    aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceId));
+                }
             }
         }
 
         /*
          * check unique , if it is a unique/exclusion index,
-         * index column must include the partition key
+         * index column must include the partition key.
+         * For global partition index, we cancel this check.
          */
-        if (stmt->unique) {
+        if (stmt->unique && !stmt->isGlobal) {
             int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
             int j = 0;
 
@@ -586,7 +656,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     /*
      * Choose the index column names.
      */
-    indexColNames = ChooseIndexColumnNames(stmt->indexParams);
+    indexColNames = ChooseIndexColumnNames(allIndexParams);
 
     /*
      * Select name for index if caller didn't specify
@@ -630,6 +700,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("access method \"%s\" does not support unique indexes", accessMethodName)));
+
     if (numberOfAttributes > 1 && !accessMethodForm->amcanmulticol)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -663,6 +734,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      */
     indexInfo = makeNode(IndexInfo);
     indexInfo->ii_NumIndexAttrs = numberOfAttributes;
+    indexInfo->ii_NumIndexKeyAttrs = numberOfKeyAttributes;
     indexInfo->ii_Expressions = NIL; /* for now */
     indexInfo->ii_ExpressionsState = NIL;
     indexInfo->ii_Predicate = make_ands_implicit((Expr*)stmt->whereClause);
@@ -686,7 +758,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         collationObjectId,
         classObjectId,
         coloptions,
-        stmt->indexParams,
+        allIndexParams,
         stmt->excludeOpNames,
         relationId,
         accessMethodName,
@@ -698,6 +770,16 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         if (PointerIsValid(indexInfo->ii_ExclusionOps)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Partitioned table does not support EXCLUDE index")));
+        }
+        if (stmt->isGlobal && PointerIsValid(indexInfo->ii_Expressions)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Global partition index does not support EXPRESSION index")));
+        }
+        if (!CheckGlobalIndexCompatible(relationId, stmt->isGlobal, indexInfo, accessMethodId)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Global and local partition index should not be on same column")));
         }
     }
 
@@ -793,8 +875,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 
     IndexCreateExtraArgs extra;
-    extra.existingPSortOid = stmt->oldPSortOid;
-    extra.isPartitionedIndex = stmt->isPartitioned;
+    SetIndexCreateExtraArgs(&extra, stmt->oldPSortOid, stmt->isPartitioned, stmt->isGlobal);
 
     if (stmt->internal_flag) {
         if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
@@ -879,8 +960,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     if (stmt->idxcomment != NULL)
         CreateComments(indexRelationId, RelationRelationId, 0, stmt->idxcomment);
 
-    /* create the index partition */
-    if (stmt->isPartitioned) {
+    /* create the LOCAL index partition */
+    if (stmt->isPartitioned && !stmt->isGlobal) {
         Relation partitionedIndex = index_open(indexRelationId, AccessExclusiveLock);
 
         if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
@@ -1108,7 +1189,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexInfo->ii_BrokenHotChain = false;
 
     /* Now build the index */
-    index_build(rel, NULL, indexRelation, NULL, indexInfo, stmt->primary, false, false);
+    index_build(rel, NULL, indexRelation, NULL, indexInfo, stmt->primary, false, INDEX_CREATE_NONE_PARTITION);
 
     /* Close both the relations, but keep the locks */
     heap_close(rel, NoLock);
@@ -1397,15 +1478,14 @@ static void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collatio
     ListCell* nextExclOp = NULL;
     ListCell* lc = NULL;
     int attn;
+    int nkeycols = indexInfo->ii_NumIndexKeyAttrs;
 
     /* Allocate space for exclusion operator info, if needed */
     if (exclusionOpNames != NULL) {
-        int ncols = list_length(attList);
-
-        Assert(list_length(exclusionOpNames) == ncols);
-        indexInfo->ii_ExclusionOps = (Oid*)palloc(sizeof(Oid) * ncols);
-        indexInfo->ii_ExclusionProcs = (Oid*)palloc(sizeof(Oid) * ncols);
-        indexInfo->ii_ExclusionStrats = (uint16*)palloc(sizeof(uint16) * ncols);
+        Assert(list_length(exclusionOpNames) == nkeycols);
+        indexInfo->ii_ExclusionOps = (Oid*)palloc(sizeof(Oid) * nkeycols);
+        indexInfo->ii_ExclusionProcs = (Oid*)palloc(sizeof(Oid) * nkeycols);
+        indexInfo->ii_ExclusionStrats = (uint16*)palloc(sizeof(uint16) * nkeycols);
         nextExclOp = list_head(exclusionOpNames);
     } else
         nextExclOp = NULL;
@@ -1449,6 +1529,11 @@ static void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collatio
             Node* expr = attribute->expr;
 
             Assert(expr != NULL);
+            if (attn >= nkeycols) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("expressions are not supported in included columns")));
+            }
             atttype = exprType(expr);
             attcollation = exprCollation(expr);
 
@@ -1495,6 +1580,37 @@ static void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collatio
         }
 
         typeOidP[attn] = atttype;
+
+       /*
+        * Included columns have no collation, no opclass and no ordering options.
+        */
+       if (attn >= nkeycols) {
+            if (attribute->collation) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                         errmsg("including column does not support a collation")));
+            }
+            if (attribute->opclass) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                         errmsg("including column does not support an operator class")));
+            }
+            if (attribute->ordering != SORTBY_DEFAULT) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                         errmsg("including column does not support ASC/DESC options")));
+            }
+            if (attribute->nulls_ordering != SORTBY_NULLS_DEFAULT) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                         errmsg("including column does not support NULLS FIRST/LAST options")));
+            }
+            classOidP[attn] = InvalidOid;
+            colOptionP[attn] = 0;
+            collationOidP[attn] = InvalidOid;
+            attn++;
+            continue;
+        }
 
         /*
          * Apply collation override if any
@@ -2200,7 +2316,7 @@ void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid, const ch
     if (!relkind) {
         return;
     }
-    if (relkind != RELKIND_INDEX)
+    if (relkind != RELKIND_INDEX && relkind != RELKIND_GLOBAL_INDEX)
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not an index", partitionName)));
     if (0 != memcmp(partitionName, getPartitionName(partId, false), strlen(partitionName)))
         ereport(ERROR,
@@ -2267,8 +2383,13 @@ static void RangeVarCallbackForReindexIndex(
     if (!relkind) {
         return;
     }
-    if (relkind != RELKIND_INDEX)
+    if (relkind != RELKIND_INDEX && relkind != RELKIND_GLOBAL_INDEX)
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not an index", relation->relname)));
+
+    if (target_is_partition && relkind == RELKIND_GLOBAL_INDEX) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot reindex global index with partition name")));
+    }
 
     /* Check permissions */
     if (!pg_class_ownercheck(relId, GetUserId()))
@@ -2586,7 +2707,7 @@ void addIndexForPartition(Relation partitionedRelation, Oid partOid)
     }
 
     /* get oid list of indexRel */
-    indelist = RelationGetIndexList(partitionedRelation);
+    indelist = RelationGetSpecificKindIndexList(partitionedRelation, false);
     if (!PointerIsValid(indelist)) {
         return;
     }
@@ -2887,6 +3008,7 @@ static Oid buildInformationalConstraint(
         true,
         RelationGetRelid(rel),
         indexInfo->ii_KeyAttrNumbers,
+        indexInfo->ii_NumIndexKeyAttrs,
         indexInfo->ii_NumIndexAttrs,
         InvalidOid,      /* no domain */
         indexRelationId, /* InvalidOid */
@@ -2910,4 +3032,127 @@ static Oid buildInformationalConstraint(
 
     heap_close(rel, NoLock);
     return InvalidOid;
+}
+
+/*
+ * Index constraint: Local partition index could not be on same column with global partition index
+ * This function check all exist index on table of 'relOid', compare index attr column with new index of 'indexInfo',
+ * return true indicate new index is compatible with all existing index, otherwise, return false.
+ */
+static bool CheckGlobalIndexCompatible(Oid relOid, bool isGlobal, const IndexInfo* indexInfo, Oid currMethodOid)
+{
+    ScanKeyData skey[1];
+    SysScanDesc sysScan;
+    HeapTuple tarTuple;
+    Relation indexRelation;
+    bool ret = true;
+    errno_t rc;
+    bool isNull = false;
+    char currIdxKind = isGlobal ? RELKIND_GLOBAL_INDEX : RELKIND_INDEX;
+    int currSize = sizeof(AttrNumber) * indexInfo->ii_NumIndexKeyAttrs;
+    int currKeyNum = indexInfo->ii_NumIndexKeyAttrs;
+
+    ScanKeyInit(&skey[0], Anum_pg_index_indrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relOid));
+    indexRelation = heap_open(IndexRelationId, AccessShareLock);
+    sysScan = systable_beginscan(indexRelation, IndexIndrelidIndexId, true, SnapshotNow, 1, skey);
+
+    AttrNumber* currAttrsArray = (AttrNumber*)palloc0(currSize);
+    rc = memcpy_s(currAttrsArray, currSize, indexInfo->ii_KeyAttrNumbers, currSize);
+    securec_check(rc, "\0", "\0");
+    qsort(currAttrsArray, currKeyNum, sizeof(AttrNumber), AttrComparator);
+
+    while (HeapTupleIsValid(tarTuple = systable_getnext(sysScan))) {
+        Form_pg_index indexTuple = (Form_pg_index)GETSTRUCT(tarTuple);
+        char tarIdxKind = get_rel_relkind(indexTuple->indexrelid);
+        /* only check index of different type(local and global) */
+        if (currIdxKind != tarIdxKind) {
+            if (!CheckIndexMethodConsistency(tarTuple, indexRelation, currMethodOid)) {
+                ret = false;
+                break;
+            }
+
+            heap_getattr(tarTuple, Anum_pg_index_indexprs, RelationGetDescr(indexRelation), &isNull);
+            /* 
+             * check expressions: This condition looks confused, here we judge whether tow index has expressions,
+             * like XOR operation. if two indexes both have expression or not, we continue to 
+             * check next condition, otherwise, two index could be treated as compatible.
+             */
+            if ((indexInfo->ii_Expressions != NIL) != (!isNull)) {
+                continue;
+            }
+            if (!CheckSimpleAttrsConsistency(tarTuple, currAttrsArray, currKeyNum)) {
+                ret = false;
+                break;
+            }
+        }
+    }
+    systable_endscan(sysScan);
+    heap_close(indexRelation, AccessShareLock);
+    pfree(currAttrsArray);
+    return ret;
+}
+
+/*
+ * check consistency of two index, we use first attrs opclass as key to search index method
+ */
+static bool CheckIndexMethodConsistency(HeapTuple indexTuple, Relation indexRelation, Oid currMethodOid)
+{
+    bool isNull = false;
+    bool ret = true;
+    oidvector* opClass = 
+        (oidvector*)DatumGetPointer(heap_getattr(indexTuple, Anum_pg_index_indclass, RelationGetDescr(indexRelation), &isNull));
+    Assert(!isNull);
+    Oid opClassOid = opClass->values[0];
+    HeapTuple opClassTuple = SearchSysCache1(CLAOID, ObjectIdGetDatum(opClassOid));
+    if (!HeapTupleIsValid(opClassTuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Operator class does not exist for index compatible check.")));
+    }
+    Oid tarMethodOid = ((Form_pg_opclass)GETSTRUCT(opClassTuple))->opcmethod;
+    if (tarMethodOid != currMethodOid) {
+        ret = false;
+    }
+    ReleaseSysCache(opClassTuple);
+    return ret;
+}
+
+/*
+ * check column consistency: if run here, then compare two indexes' simple index col,
+ * if index col array is totally same, it means not compatible situation.
+ */
+static bool CheckSimpleAttrsConsistency(HeapTuple tarTuple, const int16* currAttrsArray, int currKeyNum)
+{
+    Form_pg_index indexTuple = (Form_pg_index)GETSTRUCT(tarTuple);
+    int tarKeyNum = GetIndexKeyAttsByTuple(NULL, tarTuple);
+    bool ret = true;
+    int i;
+    if (tarKeyNum == currKeyNum) {
+        qsort(indexTuple->indkey.values, currKeyNum, sizeof(int16), AttrComparator);
+        for (i = 0; i < currKeyNum; i++) {
+            if (indexTuple->indkey.values[i] != currAttrsArray[i]) {
+                break;
+            }
+        }
+        if (i == currKeyNum) {  // attrs of two index is totally same, which indicates not compatible.
+            ret = false;
+        }
+    }
+    return ret;
+}
+
+static int AttrComparator(const void* a, const void* b)
+{
+    return *(AttrNumber*)a - *(AttrNumber*)b;
+}
+
+/* Set the internal index column partoid for global partition index */
+static void AddIndexColumnForGpi(IndexStmt* stmt)
+{
+    IndexElem* iparam = makeNode(IndexElem);
+    iparam->name = pstrdup("tableoid");
+    iparam->expr = NULL;
+    iparam->indexcolname = NULL;
+    iparam->collation = NIL;
+    iparam->opclass = NIL;
+    stmt->indexIncludingParams = lappend(stmt->indexIncludingParams, iparam);
 }

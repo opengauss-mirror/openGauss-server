@@ -20,6 +20,7 @@
 #include "access/heapam.h"
 #include "access/itup.h"
 #include "access/tuptoaster.h"
+#include "utils/rel.h"
 
 /* ----------------------------------------------------------------
  *				  index_ tuple interface routines
@@ -386,4 +387,32 @@ IndexTuple CopyIndexTuple(IndexTuple source)
     rc = memcpy_s(result, size, source, size);
     securec_check(rc, "\0", "\0");
     return result;
+}
+
+/*
+ * Truncate tailing attributes from given index tuple leaving it with
+ * new_indnatts number of attributes.
+ */
+IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, int new_indnatts)
+{
+    TupleDesc itupdesc = CreateTupleDescCopyConstr(tupleDescriptor);
+    Datum values[INDEX_MAX_KEYS];
+    bool isnull[INDEX_MAX_KEYS];
+    IndexTuple newitup;
+    int indnatts = tupleDescriptor->natts;
+
+    Assert(indnatts <= INDEX_MAX_KEYS);
+    Assert(new_indnatts > 0);
+    Assert(new_indnatts < indnatts);
+
+    index_deform_tuple(olditup, tupleDescriptor, values, isnull);
+
+    /* form new tuple that will contain only key attributes */
+    itupdesc->natts = new_indnatts;
+    newitup = index_form_tuple(itupdesc, values, isnull);
+    newitup->t_tid = olditup->t_tid;
+
+    FreeTupleDesc(itupdesc);
+    Assert(IndexTupleSize(newitup) <= IndexTupleSize(olditup));
+    return newitup;
 }

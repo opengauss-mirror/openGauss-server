@@ -1405,6 +1405,10 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
 
 
     while ((oldtup = m_scan->getTuple()) != NULL) {
+        if (RelationIsPartitioned(m_scan->m_rel)) {
+            rel = m_scan->getCurrentRel();
+        }
+
         CHECK_FOR_INTERRUPTS();
         HTSU_Result result;
         ItemPointerData update_ctid;
@@ -1589,6 +1593,10 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
     m_tupDesc = RelationGetDescr(rel);
 
     while ((oldtup = m_scan->getTuple()) != NULL) {
+        if (RelationIsPartitioned(m_scan->m_rel)) {
+            rel = m_scan->getCurrentRel();
+        }
+
         HTSU_Result result;
         ItemPointerData update_ctid;
         TransactionId update_xmax;
@@ -1806,6 +1814,10 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
     }
 
     while (nprocessed < (unsigned long)get_rows && (tuple = m_scan->getTuple()) != NULL) {
+        if (RelationIsPartitioned(m_scan->m_rel)) {
+            rel = m_scan->getCurrentRel();
+        }
+
         CHECK_FOR_INTERRUPTS();
         heap_deform_tuple(tuple, RelationGetDescr(rel), m_values, m_isnull);
 

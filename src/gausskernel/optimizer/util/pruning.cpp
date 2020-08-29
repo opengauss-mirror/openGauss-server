@@ -139,6 +139,13 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
     heapRelOid = IndexGetRelation(indexOid, false);
     heapRel = relation_open(heapRelOid, NoLock);
     indexRel = relation_open(indexOid, NoLock);
+    if (RelationIsGlobalIndex(indexRel)) {
+        partitionIndexUnusable = indexRel->rd_index->indisusable;
+        relation_close(heapRel, NoLock);
+        relation_close(indexRel, NoLock);
+        return partitionIndexUnusable;
+    }
+
     if (!RelationIsPartitioned(heapRel) || !RelationIsPartitioned(indexRel) ||
         (heapRel->partMap->type != PART_TYPE_RANGE && heapRel->partMap->type != PART_TYPE_INTERVAL)) {
         ereport(ERROR,
@@ -226,6 +233,14 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
 
     heapRel = relation_open(heapRelOid, NoLock);
     indexRel = relation_open(indexOid, NoLock);
+    /* Global partition index Just return FULL or NONE */
+    if (RelationIsGlobalIndex(indexRel)) {
+        ret = indexRel->rd_index->indisusable ? INDEXES_FULL_USABLE : INDEXES_NONE_USABLE;
+        relation_close(heapRel, NoLock);
+        relation_close(indexRel, NoLock);
+        return ret;
+    }
+
     if (!RelationIsPartitioned(heapRel) || !RelationIsPartitioned(indexRel)) {
         ereport(ERROR,
             (errmodule(MOD_OPT),

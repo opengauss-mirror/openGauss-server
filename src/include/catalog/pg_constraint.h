@@ -142,6 +142,12 @@ CATALOG(pg_constraint,2606) BKI_SCHEMA_MACRO
      * If a check constraint, source-text representation of expression
      */
     text        consrc;
+
+    /*
+     * Columns of conrelid that the constraint does not apply to, but included
+     * into the same index with key columns.
+     */
+    int2        conincluding[1];
 #endif
 } FormData_pg_constraint;
 
@@ -156,7 +162,7 @@ typedef FormData_pg_constraint *Form_pg_constraint;
  *        compiler constants for pg_constraint
  * ----------------
  */
-#define Natts_pg_constraint                    26
+#define Natts_pg_constraint                    27
 #define Anum_pg_constraint_conname             1
 #define Anum_pg_constraint_connamespace        2
 #define Anum_pg_constraint_contype             3
@@ -183,6 +189,7 @@ typedef FormData_pg_constraint *Form_pg_constraint;
 #define Anum_pg_constraint_conexclop           24
 #define Anum_pg_constraint_conbin              25
 #define Anum_pg_constraint_consrc              26
+#define Anum_pg_constraint_conincluding        27
 
 
 /* Valid values for contype */
@@ -224,6 +231,7 @@ extern Oid CreateConstraintEntry(const char *constraintName,
                                  Oid relId,
                                  const int16 *constraintKey,
                                  int constraintNKeys,
+                                 int constraintNTotalKeys,
                                  Oid domainId,
                                  Oid indexRelId,
                                  Oid foreignRelId,

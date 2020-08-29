@@ -83,5 +83,20 @@ void releaseDummyRelation(Relation* relation);
 
 extern void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid);
 
+/*
+ * Routines for global partition index open partition
+ */
+extern PartStatus PartitionGetMetadataStatus(Oid partOid, bool vacuumFlag);
+extern Datum SetWaitCleanGpiRelOptions(Datum oldOptions, bool enable);
+extern void PartitionedSetWaitCleanGpi(const char* parentName, Oid parentPartOid, bool enable, bool inplace);
+extern void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace);
+extern bool PartitionInvisibleMetadataKeep(Datum datumRelOptions);
+extern void PartitionedSetEnabledClean(Oid parentOid);
+extern void PartitionSetEnabledClean(
+    Oid parentOid, const Bitmapset* cleanedParts, const Bitmapset* invisibleParts, bool updatePartitioned);
+extern void PartitionSetAllEnabledClean(Oid parentOid);
+extern void PartitionGetAllInvisibleParts(Oid parentOid, Bitmapset** invisibleParts);
+extern bool PartitionMetadataDisabledClean(Relation pgPartition);
+
 #endif /* RELCACHE_H */
 

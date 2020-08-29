@@ -1583,6 +1583,90 @@ Path* create_tsstorescan_path(PlannerInfo *root, RelOptInfo *rel, int dop)
 }
 
 /*
+ * Check whether the bitmap heap path just use global partition index.
+ */
+bool CheckBitmapQualIsGlobalIndex(Path* bitmapqual)
+{
+    bool bitmapqualIsGlobal = true;
+    if (IsA(bitmapqual, IndexPath)) {
+        IndexPath* ipath = (IndexPath*)bitmapqual;
+        bitmapqualIsGlobal = ipath->indexinfo->isGlobal;
+    } else if (IsA(bitmapqual, BitmapAndPath)) {
+        BitmapAndPath* apath = (BitmapAndPath*)bitmapqual;
+        ListCell* l = NULL;
+        bool allIsGlobal = true;
+
+        foreach (l, apath->bitmapquals) {
+            if (CheckBitmapQualIsGlobalIndex((Path*)lfirst(l)) != allIsGlobal) {
+                bitmapqualIsGlobal = !allIsGlobal;
+                break;
+            }
+        }
+    } else if (IsA(bitmapqual, BitmapOrPath)) {
+        BitmapOrPath* opath = (BitmapOrPath*)bitmapqual;
+        ListCell* l = NULL;
+        bool allIsGlobal = true;
+
+        foreach (l, opath->bitmapquals) {
+            if (CheckBitmapQualIsGlobalIndex((Path*)lfirst(l)) != allIsGlobal) {
+                bitmapqualIsGlobal = !allIsGlobal;
+                break;
+            }
+        }
+    } else {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized node type: %d", nodeTag(bitmapqual))));
+    }
+
+    return bitmapqualIsGlobal;
+}
+
+/*
+ * Check whether have global partition index or local partition index in bitmap heap path,
+ * Contains at least one, return true.
+ */
+bool CheckBitmapHeapPathContainGlobalOrLocal(Path* bitmapqual)
+{
+    bool containGlobalOrLocal = false;
+    if (IsA(bitmapqual, BitmapAndPath)) {
+        BitmapAndPath* apath = (BitmapAndPath*)bitmapqual;
+        ListCell* l = NULL;
+
+        foreach (l, apath->bitmapquals) {
+            containGlobalOrLocal = CheckBitmapHeapPathContainGlobalOrLocal((Path*)lfirst(l));
+            if (containGlobalOrLocal)
+                break;
+        }
+    } else if (IsA(bitmapqual, BitmapOrPath)) {
+        BitmapOrPath* opath = (BitmapOrPath*)bitmapqual;
+        ListCell* head = list_head(opath->bitmapquals);
+        ListCell* l = NULL;
+        bool allIsGlobal = CheckBitmapQualIsGlobalIndex((Path*)lfirst(head));
+
+        foreach (l, opath->bitmapquals) {
+            if (l == head) {
+                continue;
+            }
+            if (CheckBitmapQualIsGlobalIndex((Path*)lfirst(l)) != allIsGlobal) {
+                containGlobalOrLocal = true;
+                break;
+            }
+        }
+    } else if (IsA(bitmapqual, IndexPath)) {
+        containGlobalOrLocal = false;
+    } else {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized node type: %d", nodeTag(bitmapqual))));
+    }
+
+    return containGlobalOrLocal;
+}
+
+/*
  * Support partiton index unusable.
  * Check if the index in bitmap heap path is unusable. Contains at least one, return false.
  */

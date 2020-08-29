@@ -41,7 +41,6 @@
 #include "gstrace/executer_gstrace.h"
 
 static TupleTableSlot* IndexNext(IndexScanState* node);
-
 static void ExecInitNextPartitionForIndexScan(IndexScanState* node);
 
 /* ----------------------------------------------------------------
@@ -818,7 +817,9 @@ void ExecIndexBuildScanKeys(PlanState* plan_state, Relation index, List* quals, 
         Expr* leftop = NULL;  /* expr on lhs of operator */
         Expr* rightop = NULL; /* expr on rhs ... */
         AttrNumber varattno;  /* att number used in scan */
+        int indnkeyatts;
 
+        indnkeyatts = IndexRelationGetNumberOfKeyAttributes(index);
         if (IsA(clause, OpExpr)) {
             /* indexkey op const or indexkey op expression */
             uint32 flags = 0;
@@ -839,7 +840,7 @@ void ExecIndexBuildScanKeys(PlanState* plan_state, Relation index, List* quals, 
                     (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("indexqual for OpExpr doesn't have key on left side")));
 
             varattno = ((Var*)leftop)->varattno;
-            if (varattno < 1 || varattno > index->rd_index->indnatts)
+            if (varattno < 1 || varattno > indnkeyatts)
                 ereport(ERROR,
                     (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("bogus index qualification for OpExpr, attribute number is %d.", varattno)));
@@ -1050,7 +1051,7 @@ void ExecIndexBuildScanKeys(PlanState* plan_state, Relation index, List* quals, 
                         errmsg("indexqual for ScalarArray doesn't have key on left side")));
 
             varattno = ((Var*)leftop)->varattno;
-            if (varattno < 1 || varattno > index->rd_index->indnatts)
+            if (varattno < 1 || varattno > indnkeyatts)
                 ereport(ERROR,
                     (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("bogus index qualification for ScalarArray, attribute number is %d.", varattno)));

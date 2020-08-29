@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * nbtinsert.cpp
- *	  Item insertion in Lehman and Yao btrees for Postgres.
+ *    Item insertion in Lehman and Yao btrees for Postgres.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -22,6 +22,7 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/nbtree.h"
+#include "access/genam.h"
 
 #include "miscadmin.h"
 #include "storage/lmgr.h"
@@ -51,7 +52,7 @@ typedef struct {
 
 static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf);
 static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
-    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique);
+    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiDesc);
 static void _bt_findinsertloc(Relation rel, Buffer* bufptr, OffsetNumber* offsetptr, int keysz, ScanKey scankey,
     IndexTuple newtup, BTStack stack, Relation heapRel);
 static void _bt_insertonpg(
@@ -63,7 +64,7 @@ static OffsetNumber _bt_findsplitloc(
 static void _bt_checksplitloc(FindSplitData* state, OffsetNumber firstoldonright, bool newitemonleft,
     int dataitemstoleft, Size firstoldonrightsz);
 static bool _bt_pgaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumber itup_off);
-static bool _bt_isequal(TupleDesc itupdesc, Page page, OffsetNumber offnum, int keysz, ScanKey scankey);
+static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey);
 static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel);
 static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
 
@@ -88,18 +89,26 @@ static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack sta
 bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel)
 {
     bool is_unique = false;
-    int natts = rel->rd_rel->relnatts;
+    int indnkeyatts;
     ScanKey itup_scankey;
     BTStack stack;
     Buffer buf;
     OffsetNumber offset;
 
+    indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
+    Assert(indnkeyatts != 0);
     /* we need an insertion scan key to do our search, so build one */
     itup_scankey = _bt_mkscankey(rel, itup);
+    GPIScanDesc gpiScan = NULL;
+
+    if (RelationIsGlobalIndex(rel)) {
+        GPIScanInit(&gpiScan);
+        gpiScan->parentRelation = relation_open(heapRel->parentId, AccessShareLock);
+    }
 
 top:
     /* find the first page containing this key */
-    stack = _bt_search(rel, natts, itup_scankey, false, &buf, BT_WRITE);
+    stack = _bt_search(rel, indnkeyatts, itup_scankey, false, &buf, BT_WRITE);
 
     offset = InvalidOffsetNumber;
 
@@ -114,7 +123,7 @@ top:
      * move right in the tree.	See Lehman and Yao for an excruciatingly
      * precise description.
      */
-    buf = _bt_moveright(rel, buf, natts, itup_scankey, false, true, stack, BT_WRITE);
+    buf = _bt_moveright(rel, buf, indnkeyatts, itup_scankey, false, true, stack, BT_WRITE);
 
     /*
      * If we're not allowing duplicates, make sure the key isn't already in
@@ -140,8 +149,8 @@ top:
     if (checkUnique != UNIQUE_CHECK_NO) {
         TransactionId xwait;
 
-        offset = _bt_binsrch(rel, buf, natts, itup_scankey, false);
-        xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey, checkUnique, &is_unique);
+        offset = _bt_binsrch(rel, buf, indnkeyatts, itup_scankey, false);
+        xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey, checkUnique, &is_unique, gpiScan);
 
         if (TransactionIdIsValid(xwait)) {
             /* Have to wait for the other guy ... */
@@ -152,7 +161,7 @@ top:
             goto top;
         }
     }
-
+    
     if (checkUnique != UNIQUE_CHECK_EXISTING) {
         /*
          * The only conflict predicate locking cares about for indexes is when
@@ -160,19 +169,25 @@ top:
          * actual location of the insert is hard to predict because of the
          * random search used to prevent O(N^2) performance when there are
          * many duplicate entries, we can just use the "first valid" page.
+         * This reasoning also applies to INCLUDE indexes, whose extra
+         * attributes are not considered part of the key space.
          */
         CheckForSerializableConflictIn(rel, NULL, buf);
         /* do the insertion */
-        _bt_findinsertloc(rel, &buf, &offset, natts, itup_scankey, itup, stack, heapRel);
+        _bt_findinsertloc(rel, &buf, &offset, indnkeyatts, itup_scankey, itup, stack, heapRel);
         _bt_insertonpg(rel, buf, InvalidBuffer, stack, itup, offset, false);
     } else {
         /* just release the buffer */
         _bt_relbuf(rel, buf);
     }
-
     /* be tidy */
     _bt_freestack(stack);
     _bt_freeskey(itup_scankey);
+
+    if (gpiScan != NULL) { // means rel switch happened
+        relation_close(gpiScan->parentRelation, AccessShareLock);
+        GPIScanEnd(gpiScan);
+    }
 
     return is_unique;
 }
@@ -194,17 +209,16 @@ top:
  * core code must redo the uniqueness check later.
  */
 static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
-    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique)
+    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan)
 {
-    TupleDesc itupdesc = RelationGetDescr(rel);
-    int natts = rel->rd_rel->relnatts;
+    int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
     SnapshotData SnapshotDirty;
     OffsetNumber maxoff;
     Page page;
     BTPageOpaqueInternal opaque;
     Buffer nbuf = InvalidBuffer;
     bool found = false;
-
+    Relation tarRel = heapRel;
     /* Assume unique until we find a duplicate */
     *is_unique = true;
 
@@ -252,21 +266,52 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                  * in real comparison, but only for ordering/finding items on
                  * pages. - vadim 03/24/97
                  */
-                if (!_bt_isequal(itupdesc, page, offset, natts, itup_scankey))
+                if (!_bt_isequal(rel, page, offset, indnkeyatts, itup_scankey))
                     break; /* we're past all the equal tuples */
 
                 /* okay, we gotta fetch the heap tuple ... */
                 curitup = (IndexTuple)PageGetItem(page, curitemid);
                 htid = curitup->t_tid;
+                Oid curPartOid = InvalidOid;
+                Datum datum;
+                bool isNull = false;
+                if (RelationIsGlobalIndex(rel)) {
+                    datum =
+                        index_getattr(curitup, IndexRelationGetNumberOfAttributes(rel), RelationGetDescr(rel), &isNull);
+                    curPartOid = DatumGetUInt32(datum);
+                    Assert(isNull == false);
+                    if (curPartOid != gpiScan->currPartOid) {
+                        GPISetCurrPartOid(gpiScan, curPartOid);
+                        if (!GPIGetNextPartRelation(gpiScan, CurrentMemoryContext, AccessShareLock)) {
+                            ItemIdMarkDead(curitemid);
+                            opaque->btpo_flags |= BTP_HAS_GARBAGE;
+                            if (nbuf != InvalidBuffer) {
+                                MarkBufferDirtyHint(nbuf, true);
+                            } else {
+                                MarkBufferDirtyHint(buf, true);
+                            }
+                            goto next;
+                        } else {
+                            tarRel = gpiScan->fakePartRelation;
+                        }
+                    }
+                }
 
                 /*
                  * If we are doing a recheck, we expect to find the tuple we
                  * are rechecking.	It's not a duplicate, but we have to keep
-                 * scanning.
+                 * scanning. For global partition index, part oid in index tuple
+                 * is supposed to be same as heapRel oid, add check in case
+                 * abnormal condition.
                  */
                 if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0) {
+                    if (RelationIsGlobalIndex(rel) && curPartOid != heapRel->rd_id) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("failed to re-find tuple within GPI \"%s\"", RelationGetRelationName(rel))));
+                    }
                     found = true;
-                } else if (heap_hot_search(&htid, heapRel, &SnapshotDirty, &all_dead)) {
+                } else if (heap_hot_search(&htid, tarRel, &SnapshotDirty, &all_dead)) {
                     /*
                      * We check the whole HOT-chain to see if there is any tuple
                      * that satisfies SnapshotDirty.  This is necessary because we
@@ -366,6 +411,7 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                      * everyone, so we may as well mark the index entry
                      * killed.
                      */
+                    /* okay, we gotta fetch the heap tuple ... */
                     ItemIdMarkDead(curitemid);
                     opaque->btpo_flags |= BTP_HAS_GARBAGE;
 
@@ -381,6 +427,7 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
             }
         }
 
+next:
         /*
          * Advance to next tuple to continue checking.
          */
@@ -390,7 +437,7 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
             /* If scankey == hikey we gotta check the next page too */
             if (P_RIGHTMOST(opaque))
                 break;
-            if (!_bt_isequal(itupdesc, page, P_HIKEY, natts, itup_scankey))
+            if (!_bt_isequal(rel, page, P_HIKEY, indnkeyatts, itup_scankey))
                 break;
             /* Advance to next non-dead page --- there must be one */
             for (;;) {
@@ -520,7 +567,6 @@ static void _bt_findinsertloc(Relation rel, Buffer* bufptr, OffsetNumber* offset
          */
         if (P_ISLEAF(lpageop) && P_HAS_GARBAGE(lpageop)) {
             _bt_vacuum_one_page(rel, buf, heapRel);
-
             /*
              * remember that we vacuumed this page, because that makes the
              * hint supplied by the caller invalid
@@ -842,6 +888,9 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
     bool isroot = false;
     bool isleaf = false;
     errno_t rc;
+    IndexTuple lefthikey;
+    int indnatts = IndexRelationGetNumberOfAttributes(rel);
+    int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
 
     /* Acquire a new page to split into */
     rbuf = _bt_getbuf(rel, P_NEW, BT_WRITE);
@@ -909,6 +958,7 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
         itemid = PageGetItemId(origpage, P_HIKEY);
         itemsz = ItemIdGetLength(itemid);
         item = (IndexTuple)PageGetItem(origpage, itemid);
+        Assert(BTreeTupleGetNAtts(item, rel) == indnkeyatts);
         if (PageAddItem(rightpage, (Item)item, itemsz, rightoff, false, false) == InvalidOffsetNumber) {
             rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
             securec_check(rc, "", "");
@@ -937,7 +987,23 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
         itemsz = ItemIdGetLength(itemid);
         item = (IndexTuple)PageGetItem(origpage, itemid);
     }
-    if (PageAddItem(leftpage, (Item)item, itemsz, leftoff, false, false) == InvalidOffsetNumber) {
+
+    /*
+     * We must truncate included attributes of the "high key" item, before
+     * insert it onto the leaf page.  It's the only point in insertion
+     * process, where we perform truncation.  All other functions work with
+     * this high key and do not change it.
+     */
+    if (indnatts != indnkeyatts && isleaf) {
+        lefthikey = _bt_nonkey_truncate(rel, item);
+        itemsz = IndexTupleSize(lefthikey);
+        itemsz = MAXALIGN(itemsz);
+    } else {
+        lefthikey = item;
+    }
+
+    Assert(BTreeTupleGetNAtts(lefthikey, rel) == indnkeyatts);
+    if (PageAddItem(leftpage, (Item)lefthikey, itemsz, leftoff, false, false) == InvalidOffsetNumber) {
         rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
         securec_check(rc, "", "");
         ereport(ERROR,
@@ -947,6 +1013,11 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
                     RelationGetRelationName(rel))));
     }
     leftoff = OffsetNumberNext(leftoff);
+
+    /* be tidy */
+    if (lefthikey != item) {
+        pfree(lefthikey);
+    }
 
     /*
      * Now transfer all the data items to the appropriate page.
@@ -1179,10 +1250,11 @@ static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firs
             (char*)rightpage + ((PageHeader)rightpage)->pd_upper,
             ((PageHeader)rightpage)->pd_special - ((PageHeader)rightpage)->pd_upper);
 
-        if (isroot)
+        if (isroot) {
             xlinfo = newitemonleft ? XLOG_BTREE_SPLIT_L_ROOT : XLOG_BTREE_SPLIT_R_ROOT;
-        else
+        } else {
             xlinfo = newitemonleft ? XLOG_BTREE_SPLIT_L : XLOG_BTREE_SPLIT_R;
+        }
 
         recptr = XLogInsert(RM_BTREE_ID, xlinfo);
 
@@ -1386,7 +1458,12 @@ static void _bt_checksplitloc(FindSplitData* state, OffsetNumber firstoldonright
 
     /*
      * The first item on the right page becomes the high key of the left page;
-     * therefore it counts against left space as well as right space.
+     * therefore it counts against left space as well as right space. When
+     * index has included attribues, then those attributes of left page high
+     * key will be truncate leaving that page with slightly more free space.
+     * However, that shouldn't affect our ability to find valid split
+     * location, because anyway split location should exists even without high
+     * key truncation.
      */
     leftfree -= firstrightitemsz;
 
@@ -1497,19 +1574,19 @@ static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack sta
             stack = &fakestack;
             stack->bts_blkno = BufferGetBlockNumber(pbuf);
             stack->bts_offset = InvalidOffsetNumber;
-            /* bts_btentry will be initialized below */
+            stack->bts_btentry = InvalidBlockNumber;
             stack->bts_parent = NULL;
             _bt_relbuf(rel, pbuf);
         }
 
-        /* get high key from left page == lowest key on new right page */
+        /* get high key from left page == lower bound for new right page */
         ritem = (IndexTuple)PageGetItem(page, PageGetItemId(page, P_HIKEY));
 
         /* form an index tuple that points at the new right page
          * assure that memory is properly allocated, prevent from missing log of insert parent */
         START_CRIT_SECTION();
         new_item = CopyIndexTuple(ritem);
-        ItemPointerSet(&(new_item->t_tid), rbknum, P_HIKEY);
+        BTreeInnerTupleSetDownLink(new_item, rbknum);
         END_CRIT_SECTION();
 
         /*
@@ -1519,7 +1596,7 @@ static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack sta
          * want to find parent pointing to where we are, right ? - vadim
          * 05/27/97
          */
-        ItemPointerSet(&(stack->bts_btentry.t_tid), bknum, P_HIKEY);
+        stack->bts_btentry = bknum;
         pbuf = _bt_getstackbuf(rel, stack, BT_WRITE);
 
         /* Now we can unlock the right child. The left child will be unlocked
@@ -1663,7 +1740,7 @@ Buffer _bt_getstackbuf(Relation rel, BTStack stack, int access)
             for (offnum = start; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
                 itemid = PageGetItemId(page, offnum);
                 item = (IndexTuple)PageGetItem(page, itemid);
-                if (BTEntrySame(item, &stack->bts_btentry)) {
+                if (BTreeInnerTupleGetDownLink(item) == stack->bts_btentry) {
                     /* Return accurate pointer to where link is now */
                     stack->bts_blkno = blkno;
                     stack->bts_offset = offnum;
@@ -1675,7 +1752,7 @@ Buffer _bt_getstackbuf(Relation rel, BTStack stack, int access)
             for (offnum = OffsetNumberPrev(start); offnum >= minoff; offnum = OffsetNumberPrev(offnum)) {
                 itemid = PageGetItemId(page, offnum);
                 item = (IndexTuple)PageGetItem(page, itemid);
-                if (BTEntrySame(item, &stack->bts_btentry)) {
+                if (BTreeInnerTupleGetDownLink(item) == stack->bts_btentry) {
                     /* Return accurate pointer to where link is now */
                     stack->bts_blkno = blkno;
                     stack->bts_offset = offnum;
@@ -1779,7 +1856,8 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
     left_item_sz = sizeof(IndexTupleData);
     left_item = (IndexTuple)palloc(left_item_sz);
     left_item->t_info = (unsigned short)left_item_sz;
-    ItemPointerSet(&(left_item->t_tid), lbkno, P_HIKEY);
+    BTreeInnerTupleSetDownLink(left_item, lbkno);
+    BTreeTupleSetNAtts(left_item, 0);
 
     /*
      * Create downlink item for right page.  The key for it is obtained from
@@ -1789,7 +1867,7 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
     right_item_sz = ItemIdGetLength(itemid);
     item = (IndexTuple)PageGetItem(lpage, itemid);
     right_item = CopyIndexTuple(item);
-    ItemPointerSet(&(right_item->t_tid), rbkno, P_HIKEY);
+    BTreeInnerTupleSetDownLink(right_item, rbkno);
 
     /* set btree special data */
     rootopaque = (BTPageOpaqueInternal)PageGetSpecialPointer(rootpage);
@@ -1908,6 +1986,7 @@ static bool _bt_pgaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumber
     if (!P_ISLEAF(opaque) && itup_off == P_FIRSTDATAKEY(opaque)) {
         trunctuple = *itup;
         trunctuple.t_info = sizeof(IndexTupleData);
+        BTreeTupleSetNAtts(&trunctuple, 0);
         itup = &trunctuple;
         itemsize = sizeof(IndexTupleData);
     }
@@ -1924,8 +2003,9 @@ static bool _bt_pgaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumber
  * This is very similar to _bt_compare, except for NULL handling.
  * Rule is simple: NOT_NULL not equal NULL, NULL not equal NULL too.
  */
-static bool _bt_isequal(TupleDesc itupdesc, Page page, OffsetNumber offnum, int keysz, ScanKey scankey)
+static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey)
 {
+    TupleDesc itupdesc = RelationGetDescr(idxrel);
     IndexTuple itup;
     int i;
 
@@ -1933,7 +2013,12 @@ static bool _bt_isequal(TupleDesc itupdesc, Page page, OffsetNumber offnum, int 
     Assert(P_ISLEAF((BTPageOpaqueInternal)PageGetSpecialPointer(page)));
 
     itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
-
+    /*
+     * Index tuple shouldn't be truncated.	Despite we technically could
+     * compare truncated tuple as well, this function should be only called
+     * for regular non-truncated leaf tuples and P_HIKEY tuple on
+     * rightmost leaf page.
+     */
     for (i = 1; i <= keysz; i++) {
         AttrNumber attno;
         Datum datum;
@@ -1996,4 +2081,3 @@ static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel)
      * the page.
      */
 }
-

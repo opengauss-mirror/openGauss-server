@@ -1582,6 +1582,7 @@ void InitResultRelInfo(ResultRelInfo *resultRelInfo, Relation resultRelationDesc
     resultRelInfo->ri_RangeTableIndex = resultRelationIndex;
     resultRelInfo->ri_RelationDesc = resultRelationDesc;
     resultRelInfo->ri_NumIndices = 0;
+    resultRelInfo->ri_ContainGPI = false;
     resultRelInfo->ri_IndexRelationDescs = NULL;
     resultRelInfo->ri_IndexRelationInfo = NULL;
     /* make a copy so as not to depend on relcache info not changing... */

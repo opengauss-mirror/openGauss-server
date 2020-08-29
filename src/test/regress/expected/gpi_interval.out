@@ -1,0 +1,492 @@
+--
+---- test interval partitioned global index
+--
+--drop table and index
+drop index if exists ip_index_global;
+NOTICE:  index "ip_index_global" does not exist, skipping
+drop index if exists ip_index_local;
+NOTICE:  index "ip_index_local" does not exist, skipping
+drop table if exists gpi_partition_global_index_interval;
+NOTICE:  table "gpi_partition_global_index_interval" does not exist, skipping
+drop index if exists index_interval_partition_table_001;
+NOTICE:  index "index_interval_partition_table_001" does not exist, skipping
+drop table if exists interval_partition_table_001;
+NOTICE:  table "interval_partition_table_001" does not exist, skipping
+drop table if exists interval_partition_table_002;
+NOTICE:  table "interval_partition_table_002" does not exist, skipping
+drop table if exists interval_partition_table_003;
+NOTICE:  table "interval_partition_table_003" does not exist, skipping
+drop table if exists interval_partition_table_004;
+NOTICE:  table "interval_partition_table_004" does not exist, skipping
+create table gpi_partition_global_index_interval
+(
+    c1 int,
+    c2 int,
+    logdate date not null
+)
+partition by range (logdate)
+INTERVAL ('1 month') 
+(
+    PARTITION gpi_partition_global_index_interval_p0 VALUES LESS THAN ('2020-03-01'),
+    PARTITION gpi_partition_global_index_interval_p1 VALUES LESS THAN ('2020-04-01'),
+    PARTITION gpi_partition_global_index_interval_p2 VALUES LESS THAN ('2020-05-01')
+);
+--succeed
+--to select all index object
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.reltoastrelid, part.partkey, part.interval, part.boundaries
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_partition_global_index_interval' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
+ relname | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries 
+---------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------
+(0 rows)
+
+select count(*) from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_partition_global_index_interval' and ind.indrelid = class.oid and part.parentid = ind.indrelid;
+ count 
+-------
+     0
+(1 row)
+
+create index ip_index_global on gpi_partition_global_index_interval(c1) global;
+--succeed
+--to select all index object
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.reltoastrelid, part.partkey, part.interval, part.boundaries
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_partition_global_index_interval' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
+                relname                 | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey |  interval   |  boundaries  
+----------------------------------------+----------+----------+-------------+--------------+---------------+---------------+---------+-------------+--------------
+ gpi_partition_global_index_interval    | r        |        0 |           0 | i            |             0 |             0 | 3       | {"1 month"} | 
+ gpi_partition_global_index_interval_p0 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-03-01}
+ gpi_partition_global_index_interval_p1 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-04-01}
+ gpi_partition_global_index_interval_p2 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-05-01}
+(4 rows)
+
+select count(*) from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_partition_global_index_interval' and ind.indrelid = class.oid and part.parentid = ind.indrelid;
+ count 
+-------
+     4
+(1 row)
+
+create index ip_index_local on gpi_partition_global_index_interval(c2) local;
+--succeed
+--to select all index object
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.reltoastrelid, part.partkey, part.interval, part.boundaries
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_partition_global_index_interval' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
+                relname                 | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey |  interval   |  boundaries  
+----------------------------------------+----------+----------+-------------+--------------+---------------+---------------+---------+-------------+--------------
+ gpi_partition_global_index_interval    | r        |        0 |           0 | i            |             0 |             0 | 3       | {"1 month"} | 
+ gpi_partition_global_index_interval    | r        |        0 |           0 | i            |             0 |             0 | 3       | {"1 month"} | 
+ gpi_partition_global_index_interval_p0 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-03-01}
+ gpi_partition_global_index_interval_p0 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-03-01}
+ gpi_partition_global_index_interval_p1 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-04-01}
+ gpi_partition_global_index_interval_p1 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-04-01}
+ gpi_partition_global_index_interval_p2 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-05-01}
+ gpi_partition_global_index_interval_p2 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-05-01}
+(8 rows)
+
+select count(*) from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_partition_global_index_interval' and ind.indrelid = class.oid and part.parentid = ind.indrelid;
+ count 
+-------
+     8
+(1 row)
+
+--insert into table 
+insert into gpi_partition_global_index_interval values(7,2,'2020-03-01');
+insert into gpi_partition_global_index_interval values(3,1,'2020-04-01');
+insert into gpi_partition_global_index_interval values(5,3,'2020-05-01');
+insert into gpi_partition_global_index_interval values(7,5,'2020-06-01');
+insert into gpi_partition_global_index_interval values(1,4,'2020-07-01');
+--succeed
+explain (costs off, nodes off) select * from gpi_partition_global_index_interval where c1 = 7 order by 1, 2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: c2
+   ->  Bitmap Heap Scan on gpi_partition_global_index_interval
+         Recheck Cond: (c1 = 7)
+         ->  Bitmap Index Scan on ip_index_global
+               Index Cond: (c1 = 7)
+(6 rows)
+
+select * from gpi_partition_global_index_interval where c1 = 7 order by 1, 2;
+ c1 | c2 |         logdate          
+----+----+--------------------------
+  7 |  2 | Sun Mar 01 00:00:00 2020
+  7 |  5 | Mon Jun 01 00:00:00 2020
+(2 rows)
+
+--to select all index object
+select part.relname, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible, part.reltoastrelid, part.partkey, part.interval, part.boundaries
+from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_partition_global_index_interval' and ind.indrelid = class.oid and part.parentid = ind.indrelid
+order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
+                relname                 | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey |  interval   |          boundaries          
+----------------------------------------+----------+----------+-------------+--------------+---------------+---------------+---------+-------------+------------------------------
+ gpi_partition_global_index_interval    | r        |        0 |           0 | i            |             0 |             0 | 3       | {"1 month"} | 
+ gpi_partition_global_index_interval    | r        |        0 |           0 | i            |             0 |             0 | 3       | {"1 month"} | 
+ gpi_partition_global_index_interval_p0 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-03-01}
+ gpi_partition_global_index_interval_p0 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-03-01}
+ gpi_partition_global_index_interval_p1 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-04-01}
+ gpi_partition_global_index_interval_p1 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-04-01}
+ gpi_partition_global_index_interval_p2 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-05-01}
+ gpi_partition_global_index_interval_p2 | p        |        0 |           0 | r            |             0 |             0 |         |             | {2020-05-01}
+ sys_p1                                 | p        |        0 |           0 | i            |             0 |             0 |         |             | {"Mon Jun 01 00:00:00 2020"}
+ sys_p1                                 | p        |        0 |           0 | i            |             0 |             0 |         |             | {"Mon Jun 01 00:00:00 2020"}
+ sys_p2                                 | p        |        0 |           0 | i            |             0 |             0 |         |             | {"Wed Jul 01 00:00:00 2020"}
+ sys_p2                                 | p        |        0 |           0 | i            |             0 |             0 |         |             | {"Wed Jul 01 00:00:00 2020"}
+ sys_p3                                 | p        |        0 |           0 | i            |             0 |             0 |         |             | {"Sat Aug 01 00:00:00 2020"}
+ sys_p3                                 | p        |        0 |           0 | i            |             0 |             0 |         |             | {"Sat Aug 01 00:00:00 2020"}
+(14 rows)
+
+select count(*) from pg_class class, pg_partition part, pg_index ind where class.relname = 'gpi_partition_global_index_interval' and ind.indrelid = class.oid and part.parentid = ind.indrelid;
+ count 
+-------
+    14
+(1 row)
+
+--
+---- test input for unique index
+--
+create table interval_partition_table_001
+(
+    c1 int,
+    logdate date not null
+)
+partition by range (logdate)
+INTERVAL ('1 month') 
+(
+    PARTITION interval_partition_table_001_p0 VALUES LESS THAN ('2020-03-01'),
+    PARTITION interval_partition_table_001_p1 VALUES LESS THAN ('2020-04-01'),
+    PARTITION interval_partition_table_001_p2 VALUES LESS THAN ('2020-05-01')
+);
+create unique index index_interval_partition_table_001 on interval_partition_table_001(logdate) global;
+--fail: unique index
+insert into interval_partition_table_001 values(10, '2020-06-01');
+insert into interval_partition_table_001 values(10, '2020-06-01');
+ERROR:  duplicate key value violates unique constraint "index_interval_partition_table_001"
+DETAIL:  Key (logdate)=(Mon Jun 01 00:00:00 2020) already exists.
+--
+---- test with primary key
+--
+create table interval_partition_table_002
+(
+	c1 int,
+	c2 int,
+	logdate date not null,
+	CONSTRAINT interval_partition_table_CONSTRAINT PRIMARY KEY(c2,logdate)
+)
+partition by range (logdate)
+INTERVAL ('1 month')
+(
+	PARTITION interval_partition_table_002_p0 VALUES LESS THAN ('2020-03-01'),
+	PARTITION interval_partition_table_002_p1 VALUES LESS THAN ('2020-04-01'),
+	PARTITION interval_partition_table_002_p2 VALUES LESS THAN ('2020-05-01')
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_partition_table_constraint" for table "interval_partition_table_002"
+insert into interval_partition_table_002 values(10, 10, '2020-06-01');
+insert into interval_partition_table_002 values(10, 10, '2020-06-01');
+ERROR:  duplicate key value violates unique constraint "interval_partition_table_constraint"
+DETAIL:  Key (c2, logdate)=(10, Mon Jun 01 00:00:00 2020) already exists.
+analyze interval_partition_table_002;
+--
+---- test with btree index
+--
+create table interval_partition_table_003
+(
+    c1 int,
+    c2 int,
+    logdate date not null,
+    PRIMARY KEY(c2,logdate)
+)
+partition by range (logdate)
+INTERVAL ('1 month')
+(
+    PARTITION interval_partition_table_003_p0 VALUES LESS THAN ('2020-03-01'),
+    PARTITION interval_partition_table_003_p1 VALUES LESS THAN ('2020-04-01'),
+    PARTITION interval_partition_table_003_p2 VALUES LESS THAN ('2020-05-01')
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_partition_table_003_pkey" for table "interval_partition_table_003"
+create index interval_partition_table_003_1 ON interval_partition_table_003 USING BTREE (logdate) global;
+create index interval_partition_table_003_2 ON interval_partition_table_003 USING BTREE (c2) global;
+create index interval_partition_table_003_3 ON interval_partition_table_003 USING BTREE (c1) global;
+select relname from pg_class where relname like '%interval_partition_table_003%' order by 1;
+              relname              
+-----------------------------------
+ interval_partition_table_003
+ interval_partition_table_003_1
+ interval_partition_table_003_2
+ interval_partition_table_003_3
+ interval_partition_table_003_pkey
+(5 rows)
+
+select relname, parttype, partstrategy, boundaries from pg_partition
+where parentid = (select oid from pg_class where relname = 'interval_partition_table_003')
+order by relname;
+             relname             | parttype | partstrategy |  boundaries  
+---------------------------------+----------+--------------+--------------
+ interval_partition_table_003    | r        | i            | 
+ interval_partition_table_003_p0 | p        | r            | {2020-03-01}
+ interval_partition_table_003_p1 | p        | r            | {2020-04-01}
+ interval_partition_table_003_p2 | p        | r            | {2020-05-01}
+(4 rows)
+
+insert into interval_partition_table_003 values(1,2,'2020-03-01');
+insert into interval_partition_table_003 values(1,2,'2020-04-01');
+insert into interval_partition_table_003 values(1,2,'2020-05-01');
+insert into interval_partition_table_003 values(1,2,'2020-06-01');
+insert into interval_partition_table_003 values(1,2,'2020-07-01');
+alter table interval_partition_table_003 drop column C2;
+insert into interval_partition_table_003 values(1,2,'2020-07-01');
+ERROR:  INSERT has more expressions than target columns
+LINE 1: ...sert into interval_partition_table_003 values(1,2,'2020-07-0...
+                                                             ^
+insert into interval_partition_table_003 values(1,'2020-07-01');
+select relname from pg_class where relname like '%interval_partition_table_003%' order by 1;
+            relname             
+--------------------------------
+ interval_partition_table_003
+ interval_partition_table_003_1
+ interval_partition_table_003_3
+(3 rows)
+
+select relname, parttype, partstrategy, boundaries from pg_partition
+where parentid = (select oid from pg_class where relname = 'interval_partition_table_003')
+order by relname;
+             relname             | parttype | partstrategy |          boundaries          
+---------------------------------+----------+--------------+------------------------------
+ interval_partition_table_003    | r        | i            | 
+ interval_partition_table_003_p0 | p        | r            | {2020-03-01}
+ interval_partition_table_003_p1 | p        | r            | {2020-04-01}
+ interval_partition_table_003_p2 | p        | r            | {2020-05-01}
+ sys_p1                          | p        | i            | {"Mon Jun 01 00:00:00 2020"}
+ sys_p2                          | p        | i            | {"Wed Jul 01 00:00:00 2020"}
+ sys_p3                          | p        | i            | {"Sat Aug 01 00:00:00 2020"}
+(7 rows)
+
+--
+---- test partition BTREE index
+--
+create table interval_partition_table_004
+(
+	c1 int,
+	c2 int,
+	logdate date not null,
+	PRIMARY KEY(c2,logdate)
+)
+partition by range (logdate)
+INTERVAL ('1 month')
+(
+	PARTITION interval_partition_table_004_p0 VALUES LESS THAN ('2020-03-01'),
+	PARTITION interval_partition_table_004_p1 VALUES LESS THAN ('2020-04-01'),
+	PARTITION interval_partition_table_004_p2 VALUES LESS THAN ('2020-05-01')
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_partition_table_004_pkey" for table "interval_partition_table_004"
+-- expression index
+CREATE INDEX interval_partition_table_004_index_01 on interval_partition_table_004 using btree(c2) global;
+CREATE INDEX interval_partition_table_004_index_02 on interval_partition_table_004 using btree(logdate) global;
+CREATE INDEX interval_partition_table_004_index_03 on interval_partition_table_004 using btree(c1) global;
+cluster interval_partition_table_004 using interval_partition_table_004_index_01;
+insert into interval_partition_table_004 values(7,1,'2020-03-01');
+insert into interval_partition_table_004 values(3,2,'2020-04-01');
+insert into interval_partition_table_004 values(5,3,'2020-05-01');
+insert into interval_partition_table_004 values(7,4,'2020-06-01');
+insert into interval_partition_table_004 values(1,5,'2020-07-01');
+insert into interval_partition_table_004 values(7,2,'2020-03-01');
+insert into interval_partition_table_004 values(3,3,'2020-04-01');
+insert into interval_partition_table_004 values(5,4,'2020-05-01');
+insert into interval_partition_table_004 values(7,5,'2020-06-01');
+insert into interval_partition_table_004 values(1,1,'2020-07-01');
+insert into interval_partition_table_004 values(7,3,'2020-03-01');
+insert into interval_partition_table_004 values(3,4,'2020-04-01');
+insert into interval_partition_table_004 values(5,5,'2020-05-01');
+insert into interval_partition_table_004 values(7,1,'2020-06-01');
+insert into interval_partition_table_004 values(1,2,'2020-07-01');
+insert into interval_partition_table_004 values(7,4,'2020-03-01');
+insert into interval_partition_table_004 values(3,5,'2020-04-01');
+insert into interval_partition_table_004 values(5,1,'2020-05-01');
+insert into interval_partition_table_004 values(7,2,'2020-06-01');
+insert into interval_partition_table_004 values(1,3,'2020-07-01');
+explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on interval_partition_table_004
+         Recheck Cond: (c1 = 7)
+         ->  Bitmap Index Scan on interval_partition_table_004_index_03
+               Index Cond: (c1 = 7)
+(5 rows)
+
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+ count 
+-------
+     8
+(1 row)
+
+delete from interval_partition_table_004 where c1 = 1;
+explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on interval_partition_table_004
+         Recheck Cond: (c1 = 7)
+         ->  Bitmap Index Scan on interval_partition_table_004_index_03
+               Index Cond: (c1 = 7)
+(5 rows)
+
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+ count 
+-------
+     8
+(1 row)
+
+update interval_partition_table_004 set c1 = 100 where c1 = 7;
+explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 100;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on interval_partition_table_004
+         Recheck Cond: (c1 = 100)
+         ->  Bitmap Index Scan on interval_partition_table_004_index_03
+               Index Cond: (c1 = 100)
+(5 rows)
+
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 100;
+ count 
+-------
+     8
+(1 row)
+
+update interval_partition_table_004 set c1 = 7 where c1 = 100;
+reindex table interval_partition_table_004;
+cluster;
+reindex table interval_partition_table_004;
+cluster;
+explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on interval_partition_table_004
+         Recheck Cond: (c1 = 7)
+         ->  Bitmap Index Scan on interval_partition_table_004_index_03
+               Index Cond: (c1 = 7)
+(5 rows)
+
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+ count 
+-------
+     8
+(1 row)
+
+start transaction;
+insert into interval_partition_table_004 values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('2000-01-01', 'YYYY-MM-DD'),TO_DATE('2019-12-01', 'YYYY-MM-DD'),'1 day'));
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+ count 
+-------
+  1463
+(1 row)
+
+commit;
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+ count 
+-------
+  1463
+(1 row)
+
+delete from interval_partition_table_004;
+\parallel on
+insert into interval_partition_table_004 values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('1990-01-01', 'YYYY-MM-DD'),TO_DATE('2020-12-01', 'YYYY-MM-DD'),'1 day'));
+select true from (SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7) where count = 0 or count = 11293;
+select true from (SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7) where count = 0 or count = 11293;
+select true from (SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7) where count = 0 or count = 11293;
+select true from (SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7) where count = 0 or count = 11293;
+select true from (SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7) where count = 0 or count = 11293;
+\parallel off
+ bool 
+------
+ t
+(1 row)
+
+ bool 
+------
+ t
+(1 row)
+
+ bool 
+------
+ t
+(1 row)
+
+ bool 
+------
+ t
+(1 row)
+
+ bool 
+------
+ t
+(1 row)
+
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 = 7;
+ count 
+-------
+ 11293
+(1 row)
+
+\parallel on
+DELETE from interval_partition_table_004 where c1 = 1;
+VACUUM analyze interval_partition_table_004;
+DELETE from interval_partition_table_004 where c1 = 2;
+VACUUM interval_partition_table_004;
+DELETE from interval_partition_table_004 where c1 = 3;
+ANALYZE interval_partition_table_004;
+DELETE from interval_partition_table_004 where c1 = 4;
+VACUUM analyze interval_partition_table_004;
+DELETE from interval_partition_table_004 where c1 = 5;
+VACUUM interval_partition_table_004;
+DELETE from interval_partition_table_004 where c1 = 6;
+ANALYZE interval_partition_table_004;
+\parallel off
+explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Aggregate
+   ->  Partition Iterator
+         Iterations: 11
+         ->  Partitioned Seq Scan on interval_partition_table_004
+               Filter: (c1 <= 7)
+               Selected Partitions:  1..11
+(6 rows)
+
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+ count 
+-------
+ 11293
+(1 row)
+
+VACUUM full interval_partition_table_004;
+set enable_seqscan = off;
+explain (costs off, nodes off) SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on interval_partition_table_004
+         Recheck Cond: (c1 <= 7)
+         ->  Bitmap Index Scan on interval_partition_table_004_index_03
+               Index Cond: (c1 <= 7)
+(5 rows)
+
+SELECT COUNT(*) FROM interval_partition_table_004 where c1 <= 7;
+ count 
+-------
+ 11293
+(1 row)
+
+reset enable_seqscan;
+--drop table and index
+drop index if exists ip_index_global;
+drop index if exists ip_index_local;
+drop table if exists gpi_partition_global_index_interval;
+drop index if exists index_interval_partition_table_001;
+drop table if exists interval_partition_table_001;
+drop table if exists interval_partition_table_002;
+drop table if exists interval_partition_table_003;
+drop table if exists interval_partition_table_004;

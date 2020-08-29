@@ -812,14 +812,14 @@ Tuplesortstate* tuplesort_begin_cluster(
     if (u_sess->attr.attr_common.trace_sort) {
         elog(LOG,
             "begin tuple sort: nkeys = %d, workMem = %d, randomAccess = %c, maxMem = %d",
-            RelationGetNumberOfAttributes(indexRel),
+            IndexRelationGetNumberOfKeyAttributes(indexRel),
             workMem,
             randomAccess ? 't' : 'f',
             maxMem);
     }
 #endif
 
-    state->nKeys = RelationGetNumberOfAttributes(indexRel);
+    state->nKeys = IndexRelationGetNumberOfKeyAttributes(indexRel);
 
     TRACE_POSTGRESQL_SORT_START(CLUSTER_SORT,
         false, /* no unique check */
@@ -881,7 +881,7 @@ Tuplesortstate* tuplesort_begin_index_btree(
     }
 #endif
 
-    state->nKeys = RelationGetNumberOfAttributes(indexRel);
+    state->nKeys = IndexRelationGetNumberOfKeyAttributes(indexRel);
 
     TRACE_POSTGRESQL_SORT_START(INDEX_SORT, enforceUnique, state->nKeys, workMem, randomAccess);
 
@@ -3613,6 +3613,20 @@ static int comparetup_index_btree(const SortTuple* a, const SortTuple* b, Tuples
 
         if (pos1 != pos2)
             return (pos1 < pos2) ? -1 : 1;
+    }
+
+    if (RelationIsGlobalIndex(state->indexRel)) {
+        bool isnull1 = false;
+        bool isnull2 = false;
+        AttrNumber partitionOidAttr = IndexRelationGetNumberOfAttributes(state->indexRel);
+        Oid partOid1 = DatumGetUInt32(index_getattr(tuple1, partitionOidAttr, tupDes, &isnull1));
+        Assert(!isnull1);
+        Oid partOid2 = DatumGetUInt32(index_getattr(tuple2, partitionOidAttr, tupDes, &isnull2));
+        Assert(!isnull2);
+
+        if (partOid1 != partOid2) {
+            return (partOid1 < partOid2) ? -1 : 1;
+        }
     }
 
     return 0;

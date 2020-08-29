@@ -776,7 +776,11 @@ void _bt_delitems_delete(const Relation rel, Buffer buf, OffsetNumber* itemnos, 
         XLogRecPtr recptr;
         xl_btree_delete xlrec_delete;
 
-        RelFileNodeRelCopy(xlrec_delete.hnode, heapRel->rd_node);
+        if (RelationIsValid(heapRel)) {
+            RelFileNodeRelCopy(xlrec_delete.hnode, heapRel->rd_node);
+        } else {
+            xlrec_delete.hnode = {InvalidOid, InvalidOid, InvalidOid};
+        }
 
         xlrec_delete.nitems = nitems;
 
@@ -790,9 +794,11 @@ void _bt_delitems_delete(const Relation rel, Buffer buf, OffsetNumber* itemnos, 
          * server.
          */
         XLogRegisterData((char*)itemnos, nitems * sizeof(OffsetNumber));
-
-        recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_DELETE, false, heapRel->rd_node.bucketNode);
-
+        if (RelationIsValid(heapRel)) {
+            recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_DELETE, false, heapRel->rd_node.bucketNode);
+        } else {
+            recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_DELETE, false, InvalidBktId);
+        }
         PageSetLSN(page, recptr);
     }
 
@@ -833,7 +839,7 @@ static bool _bt_parent_deletion_safe(Relation rel, BlockNumber target, BTStack s
         return true;
 
     /* Locate the parent's downlink (updating the stack entry if needed) */
-    ItemPointerSet(&(stack->bts_btentry.t_tid), target, P_HIKEY);
+    stack->bts_btentry = target;
     pbuf = _bt_getstackbuf(rel, stack, BT_READ);
     if (pbuf == InvalidBuffer)
         ereport(ERROR,
@@ -973,7 +979,7 @@ int _bt_pagedel(Relation rel, Buffer buf, BTStack stack)
             /* we need an insertion scan key to do our search, so build one */
             itup_scankey = _bt_mkscankey(rel, targetkey);
             /* find the leftmost leaf page containing this key */
-            stack = _bt_search(rel, rel->rd_rel->relnatts, itup_scankey, false, &lbuf, BT_READ);
+            stack = _bt_search(rel, IndexRelationGetNumberOfKeyAttributes(rel), itup_scankey, false, &lbuf, BT_READ);
             /* don't need a pin on that either */
             _bt_relbuf(rel, lbuf);
 
@@ -1107,7 +1113,7 @@ int _bt_pagedel(Relation rel, Buffer buf, BTStack stack)
      * Next find and write-lock the current parent of the target page. This is
      * essentially the same as the corresponding step of splitting.
      */
-    ItemPointerSet(&(stack->bts_btentry.t_tid), target, P_HIKEY);
+    stack->bts_btentry = target;
     pbuf = _bt_getstackbuf(rel, stack, BT_WRITE);
     if (pbuf == InvalidBuffer)
         ereport(ERROR,
@@ -1195,7 +1201,7 @@ int _bt_pagedel(Relation rel, Buffer buf, BTStack stack)
 #ifdef USE_ASSERT_CHECKING
     itemid = PageGetItemId(page, poffset);
     itup = (IndexTuple)PageGetItem(page, itemid);
-    Assert(ItemPointerGetBlockNumber(&(itup->t_tid)) == target);
+    Assert(BTreeInnerTupleGetDownLink(itup) == target);
 #endif
 
     if (!parent_half_dead) {
@@ -1204,13 +1210,13 @@ int _bt_pagedel(Relation rel, Buffer buf, BTStack stack)
         nextoffset = OffsetNumberNext(poffset);
         itemid = PageGetItemId(page, nextoffset);
         itup = (IndexTuple)PageGetItem(page, itemid);
-        if (ItemPointerGetBlockNumber(&(itup->t_tid)) != rightsib)
+        if (BTreeInnerTupleGetDownLink(itup) != rightsib)
             ereport(ERROR,
                 (errcode(ERRCODE_INDEX_CORRUPTED),
                     errmsg("right sibling %u of block %u is not next child %u of block %u in index \"%s\"",
                         rightsib,
                         target,
-                        ItemPointerGetBlockNumber(&(itup->t_tid)),
+                        BTreeInnerTupleGetDownLink(itup),
                         parent,
                         RelationGetRelationName(rel))));
     }
@@ -1236,7 +1242,7 @@ int _bt_pagedel(Relation rel, Buffer buf, BTStack stack)
 
         itemid = PageGetItemId(page, poffset);
         itup = (IndexTuple)PageGetItem(page, itemid);
-        ItemPointerSet(&(itup->t_tid), rightsib, P_HIKEY);
+        BTreeInnerTupleSetDownLink(itup, rightsib);
 
         nextoffset = OffsetNumberNext(poffset);
         PageIndexTupleDelete(page, nextoffset);

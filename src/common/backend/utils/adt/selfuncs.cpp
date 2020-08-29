@@ -4734,7 +4734,7 @@ void examine_variable(PlannerInfo* root, Node* node, int var_relid, VariableStat
                          * Found a match ... is it a unique index? Tests here
                          * should match has_unique_index().
                          */
-                        if (index->unique && index->ncolumns == 1 && (index->indpred == NIL || index->predOK))
+                        if (index->unique && index->nkeycolumns == 1 && (index->indpred == NIL || index->predOK))
                             var_data->isunique = true;
 
                         /*
@@ -6815,7 +6815,7 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
      * clauselist_selectivity calculations.  However, a ScalarArrayOp or
      * NullTest invalidates that theory, even though it sets eq_qual_here.
      */
-    if (index->unique && index_col == index->ncolumns - 1 && eq_qual_here && !found_saop && !found_is_null_op)
+    if (index->unique && index_col == index->nkeycolumns - 1 && eq_qual_here && !found_saop && !found_is_null_op)
         num_index_tuples = 1.0;
     else {
         List* selectivity_quals = NIL;
@@ -6950,7 +6950,7 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
                 var_correlation = -var_correlation;
             }
 
-            if (index->ncolumns > 1) {
+            if (index->nkeycolumns > 1) {
                 *index_correlation = var_correlation * 0.75;
             } else {
                 *index_correlation = var_correlation;

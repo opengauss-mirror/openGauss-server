@@ -58,6 +58,12 @@ static void bitgetpage(HeapScanDesc scan, TBMIterateResult* tbmres);
 static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, EState* estate);
 static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node);
 
+/* This struct is used for partition switch while prefetch pages */
+typedef struct PrefetchNode {
+    BlockNumber blockNum;
+    Oid partOid;
+} PrefetchNode;
+
 void BitmapHeapFree(BitmapHeapScanState* node)
 {
     if (node->tbmiterator != NULL) {
@@ -176,6 +182,18 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
                 break;
             }
 
+            /* Check whether switch partition-fake-rel, use rd_rel save */
+            if (BitmapNodeNeedSwitchPartRel(node)) {
+                GPISetCurrPartOid(node->gpi_scan, node->tbmres->partitionOid);
+                if (!GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+                    /* If the current partition is invalid, the next page is directly processed */
+                    tbmres = NULL;
+                    continue;
+                }
+                scan->rs_rd = node->gpi_scan->fakePartRelation;
+                scan->rs_nblocks = RelationGetNumberOfBlocks(scan->rs_rd);
+            }
+
 #ifdef USE_PREFETCH
             if (node->prefetch_pages > 0) {
                 /* The main iterator has closed the distance by one page */
@@ -281,11 +299,17 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
             {
                 BlockNumber* blockList = NULL;
                 BlockNumber* blockListPtr = NULL;
+                PrefetchNode* prefetchNode = NULL;
+                PrefetchNode* prefetchNodePtr = NULL;
                 int prefetchNow = 0;
                 int prefetchWindow = node->prefetch_target - node->prefetch_pages;
 
                 /* We expect to prefetch at most prefetchWindow pages */
                 if (prefetchWindow > 0) {
+                    if (tbm_is_global(tbm)) {
+                        prefetchNode = (PrefetchNode*)malloc(sizeof(PrefetchNode) * prefetchWindow);
+                        prefetchNodePtr = prefetchNode;
+                    }
                     blockList = (BlockNumber*)palloc(sizeof(BlockNumber) * prefetchWindow);
                     blockListPtr = blockList;
                 }
@@ -299,7 +323,12 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
                         break;
                     }
                     node->prefetch_pages++;
-
+                    /* we use PrefetchNode here to store relations between blockno and partition Oid */
+                    if (tbm_is_global(tbm)) {
+                        prefetchNodePtr->blockNum = tbmpre->blockno;
+                        prefetchNodePtr->partOid = tbmpre->partitionOid;
+                        prefetchNodePtr++;
+                    }
                     /* For Async Direct I/O we accumulate a list and send it */
                     *blockListPtr++ = tbmpre->blockno;
                     prefetchNow++;
@@ -307,17 +336,51 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
 
                 /* Send the list we generated and free it */
                 if (prefetchNow) {
-                    PageListPrefetch(scan->rs_rd, MAIN_FORKNUM, blockList, prefetchNow, 0, 0);
+                    if (tbm_is_global(tbm)) {
+                        /*
+                         * we must save part Oid before switch relation, and recover it after prefetch.
+                         * The reason for this is to assure correctness while getting a new tbmres.
+                         */
+                        Oid oldOid = GPIGetCurrPartOid(node->gpi_scan);
+                        int blkCount = 0;
+                        Oid prevOid = prefetchNode[0].partOid;
+                        for (int i = 0; i < prefetchNow; i++) {
+                            if (prefetchNode[i].partOid == prevOid) {
+                                blockList[blkCount++] = prefetchNode[i].blockNum;
+                            } else {
+                                GPISetCurrPartOid(node->gpi_scan, prevOid);
+                                if (GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+                                    PageListPrefetch(
+                                        node->gpi_scan->fakePartRelation, MAIN_FORKNUM, blockList, blkCount, 0, 0);
+                                }
+                                blkCount = 0;
+                                prevOid = prefetchNode[i].partOid;
+                                blockList[blkCount++] = prefetchNode[i].blockNum;
+                            }
+                        }
+                        GPISetCurrPartOid(node->gpi_scan, prevOid);
+                        if (GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+                            PageListPrefetch(node->gpi_scan->fakePartRelation, MAIN_FORKNUM, blockList, blkCount, 0, 0);
+                        }
+                        /* recover old oid after prefetch switch */
+                        GPISetCurrPartOid(node->gpi_scan, oldOid);
+                    } else {
+                        PageListPrefetch(scan->rs_rd, MAIN_FORKNUM, blockList, prefetchNow, 0, 0);
+                    }
                 }
                 if (prefetchWindow > 0) {
                     pfree_ext(blockList);
+                    if (tbm_is_global(tbm)) {
+                        pfree_ext(prefetchNode);
+                    }
                 }
             }
             ADIO_ELSE()
             {
+                Oid oldOid = GPIGetCurrPartOid(node->gpi_scan);
                 while (node->prefetch_pages < node->prefetch_target) {
                     TBMIterateResult* tbmpre = tbm_iterate(prefetch_iterator);
-
+                    Relation prefetchRel = scan->rs_rd;
                     if (tbmpre == NULL) {
                         /* No more pages to prefetch */
                         tbm_end_iterate(prefetch_iterator);
@@ -325,10 +388,21 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
                         break;
                     }
                     node->prefetch_pages++;
-
+                    if (tbm_is_global(node->tbm) && GPIScanCheckPartOid(node->gpi_scan, tbmpre->partitionOid)) {
+                        GPISetCurrPartOid(node->gpi_scan, tbmpre->partitionOid);
+                        if (!GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+                            /* If the current partition is invalid, the next page is directly processed */
+                            tbmpre = NULL;
+                            continue;
+                        } else {
+                            prefetchRel = node->gpi_scan->fakePartRelation;
+                        }
+                    }
                     /* For posix_fadvise() we just send the one request */
-                    PrefetchBuffer(scan->rs_rd, MAIN_FORKNUM, tbmpre->blockno);
+                    PrefetchBuffer(prefetchRel, MAIN_FORKNUM, tbmpre->blockno);
                 }
+                /* recover old oid after prefetch switch */
+                GPISetCurrPartOid(node->gpi_scan, oldOid);
             }
             ADIO_END();
         }
@@ -542,9 +616,9 @@ void ExecReScanBitmapHeapScan(BitmapHeapScanState* node)
          */
         abs_tbl_endscan(node->ss.ss_currentScanDesc);
 
-            /* switch to next partition for scan */
-            ExecInitNextPartitionForBitmapHeapScan(node);
-        } else {
+        /* switch to next partition for scan */
+        ExecInitNextPartitionForBitmapHeapScan(node);
+    } else {
         /* rescan to release any page pin */
         abs_tbl_rescan(node->ss.ss_currentScanDesc, NULL);
     }
@@ -598,20 +672,26 @@ void ExecEndBitmapHeapScan(BitmapHeapScanState* node)
     if (node->ss.ss_currentScanDesc != NULL) {
         abs_tbl_endscan(node->ss.ss_currentScanDesc);
     }
+
+    if (node->gpi_scan != NULL) {
+        GPIScanEnd(node->gpi_scan);
+    }
+
     /* close heap scan */
     if (node->ss.isPartTbl && PointerIsValid(node->ss.partitions)) {
         /* close table partition */
 
-            Assert(node->ss.ss_currentPartition);
-            releaseDummyRelation(&(node->ss.ss_currentPartition));
+        Assert(node->ss.ss_currentPartition);
+        releaseDummyRelation(&(node->ss.ss_currentPartition));
 
-            releasePartitionList(node->ss.ss_currentRelation, &(node->ss.partitions), NoLock);
+        releasePartitionList(node->ss.ss_currentRelation, &(node->ss.partitions), NoLock);
     }
 
     /*
      * close the heap relation.
      */
     ExecCloseScanRelation(relation);
+
 }
 static inline void InitBitmapHeapScanNextMtd(BitmapHeapScanState* bmstate)
 {
@@ -659,6 +739,9 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     scanstate->ss.currentSlot = 0;
     scanstate->ss.partScanDirection = node->scan.partScanDirection;
 
+    /* initilize Global partition index scan information */
+    GPIScanInit(&scanstate->gpi_scan);
+
     /*
      * Miscellaneous initialization
      *
@@ -687,6 +770,7 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     currentRelation = ExecOpenScanRelation(estate, node->scan.scanrelid);
 
     scanstate->ss.ss_currentRelation = currentRelation;
+    scanstate->gpi_scan->parentRelation = currentRelation;
 
     InitBitmapHeapScanNextMtd(scanstate);
     /*

@@ -182,6 +182,7 @@ void createDfsDescTable(Relation rel, Datum relOptions)
      */
     IndexInfo* indexInfo = makeNode(IndexInfo);
     indexInfo->ii_NumIndexAttrs = DfsDescIndexMaxAttrNum;
+    indexInfo->ii_NumIndexKeyAttrs = DfsDescIndexMaxAttrNum;
     indexInfo->ii_KeyAttrNumbers[0] = Anum_pg_dfsdesc_duid;
     indexInfo->ii_Expressions = NIL;
     indexInfo->ii_ExpressionsState = NIL;
@@ -201,8 +202,7 @@ void createDfsDescTable(Relation rel, Datum relOptions)
     colOptions[0] = 0;
 
     IndexCreateExtraArgs extra;
-    extra.existingPSortOid = InvalidOid;
-    extra.isPartitionedIndex = false;
+    SetIndexCreateExtraArgs(&extra, InvalidOid, false, false);
 
     if (u_sess->proc_cxt.IsBinaryUpgrade) {
         u_sess->upg_cxt.binary_upgrade_next_index_pg_class_oid = bupgrade_get_next_cudesc_index_oid();

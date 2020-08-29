@@ -117,9 +117,8 @@ create unique index on hw_partition_index_ip (logdate) local
 	partition sip4_index_local tablespace PG_DEFAULT
 );
 
-create unique index on hw_partition_index_ip (logdate);
---fail wrong syntax
-
+create unique index global_internal_index on hw_partition_index_ip (logdate);
+--fail
 drop table hw_partition_index_ip;
 
 --unique index , index para must contain partition key

@@ -1667,6 +1667,7 @@ Datum pg_relation_filenode(PG_FUNCTION_ARGS)
         case RELKIND_RELATION:
         case RELKIND_MATVIEW:
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
         case RELKIND_SEQUENCE:
         case RELKIND_TOASTVALUE:
             /* okay, these have storage */
@@ -1786,6 +1787,7 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
         case RELKIND_RELATION:
         case RELKIND_MATVIEW:
         case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
         case RELKIND_SEQUENCE:
         case RELKIND_TOASTVALUE:
             /* okay, these have storage */
@@ -2057,7 +2059,7 @@ static bool IsIndexRelationbyOid(Oid rel_oid)
     Relation rel;
     bool result = false;
     rel = relation_open(rel_oid, AccessShareLock);
-    result = (rel->rd_rel->relkind == RELKIND_INDEX);
+    result = RelationIsIndex(rel);
     relation_close(rel, AccessShareLock);
     return result;
 }
@@ -2171,7 +2173,7 @@ static int64 pgxc_exec_sizefunc(Oid rel_oid, char* funcname, char* extra_arg)
     if (!is_part_toast) {
         Oid tab_rel_oid = InvalidOid;
 
-        if (rel->rd_rel->relkind == RELKIND_INDEX) {
+        if (RelationIsIndex(rel)) {
             tab_rel_oid = rel->rd_index->indrelid;
         } else {
             tab_rel_oid = RelationGetRelid(rel);

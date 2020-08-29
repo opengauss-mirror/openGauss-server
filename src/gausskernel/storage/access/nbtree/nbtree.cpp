@@ -64,7 +64,7 @@ Datum btbuild(PG_FUNCTION_ARGS)
     Relation index = (Relation)PG_GETARG_POINTER(1);
     IndexInfo* indexInfo = (IndexInfo*)PG_GETARG_POINTER(2);
     IndexBuildResult* result = NULL;
-    double reltuples;
+    double reltuples = 0;
     BTBuildState buildstate;
 
     buildstate.isUnique = indexInfo->ii_Unique;
@@ -97,7 +97,12 @@ Datum btbuild(PG_FUNCTION_ARGS)
     buildstate.spool = _bt_spoolinit(index, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
 
     /* do the heap scan */
-    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, btbuildCallback, (void*)&buildstate);
+    double* allPartTuples = NULL;
+    if (RelationIsGlobalIndex(index)) {
+        allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, btbuildCallback, (void*)&buildstate);
+    } else {
+        reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, btbuildCallback, (void*)&buildstate);
+    }
 
     /* okay, all heap tuples are indexed */
     if (buildstate.spool2 && !buildstate.haveDead) {
@@ -129,6 +134,7 @@ Datum btbuild(PG_FUNCTION_ARGS)
 
     result->heap_tuples = reltuples;
     result->index_tuples = buildstate.indtuples;
+    result->all_part_tuples = allPartTuples;
 
     PG_RETURN_POINTER(result);
 }
@@ -296,7 +302,8 @@ Datum btgetbitmap(PG_FUNCTION_ARGS)
         if (_bt_first(scan, ForwardScanDirection)) {
             /* Save tuple ID, and continue scanning */
             heapTid = &scan->xs_ctup.t_self;
-            tbm_add_tuples(tbm, heapTid, 1, false);
+            Oid currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
+            tbm_add_tuples(tbm, heapTid, 1, false, currPartOid);
             ntids++;
 
             for (;;) {
@@ -313,7 +320,8 @@ Datum btgetbitmap(PG_FUNCTION_ARGS)
 
                 /* Save tuple ID, and continue scanning */
                 heapTid = &so->currPos.items[so->currPos.itemIndex].heapTid;
-                tbm_add_tuples(tbm, heapTid, 1, false);
+                currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
+                tbm_add_tuples(tbm, heapTid, 1, false, currPartOid);
                 ntids++;
             }
         }
@@ -931,6 +939,8 @@ restart:
         minoff = P_FIRSTDATAKEY(opaque);
         maxoff = PageGetMaxOffsetNumber(page);
         if (callback) {
+            AttrNumber partitionOidAttr = IndexRelationGetNumberOfAttributes(rel);
+            TupleDesc tupdesc = RelationGetDescr(rel);
             for (offnum = minoff; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
                 IndexTuple itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
                 ItemPointer htup = &(itup->t_tid);
@@ -956,7 +966,13 @@ restart:
                  * applies to *any* type of index that marks index tuples as
                  * killed.
                  */
-                if (callback(htup, callback_state)) {
+                Oid partOid = InvalidOid;
+                if (RelationIsGlobalIndex(rel)) {
+                    bool isnull = false;
+                    partOid = DatumGetUInt32(index_getattr(itup, partitionOidAttr, tupdesc, &isnull));
+                    Assert(!isnull);
+                }
+                if (callback(htup, callback_state, partOid)) {
                     deletable[ndeletable++] = offnum;
                 }
             }

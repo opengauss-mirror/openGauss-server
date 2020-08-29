@@ -33,7 +33,7 @@ CATALOG(pg_partition,9016) BKI_ROWTYPE_OID(3790) BKI_SCHEMA_MACRO
 {
     NameData        relname;
     char            parttype;
-    Oid             parentid;    
+    Oid             parentid;
     int4            rangenum;
     int4            intervalnum;
     char            partstrategy;

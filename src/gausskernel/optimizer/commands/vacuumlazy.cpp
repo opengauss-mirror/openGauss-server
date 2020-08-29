@@ -67,6 +67,7 @@
 #include "utils/timestamp.h"
 #include "utils/tqual.h"
 #include "utils/syscache.h"
+#include "utils/partcache.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/commands_gstrace.h"
 
@@ -112,6 +113,7 @@ typedef struct LVRelStats {
     BlockNumber* new_idx_pages;
     double* new_idx_tuples;
     bool* idx_estimated;
+    Oid currVacuumPartOid;    /* current lazy vacuum partition oid */
 } LVRelStats;
 
 typedef struct ValPrefetchList {
@@ -147,7 +149,7 @@ static IndexBulkDeleteResult* lazy_cleanup_index(
 static int lazy_vacuum_page(Relation onerel, BlockNumber blkno, Buffer buffer, int tupindex, LVRelStats* vacrelstats);
 static void lazy_space_alloc(LVRelStats* vacrelstats, BlockNumber relblocks);
 static void lazy_record_dead_tuple(LVRelStats* vacrelstats, ItemPointer itemptr);
-static bool lazy_tid_reaped(ItemPointer itemptr, void* state);
+static bool lazy_tid_reaped(ItemPointer itemptr, void* state, Oid partOid = InvalidOid);
 static int vac_cmp_itemptr(const void* left, const void* right);
 
 /*
@@ -164,6 +166,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
     LVRelStats* vacrelstats = NULL;
     Relation* Irel = NULL;
     int nindexes;
+    int nindexesGlobal;
     PGRUsage ru0;
     TimestampTz starttime = 0;
     long secs;
@@ -370,9 +373,11 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         Assert(vacstmt->onepart != NULL);
         vacrelstats->old_rel_pages = vacstmt->onepart->pd_part->relpages;
         vacrelstats->old_rel_tuples = vacstmt->onepart->pd_part->reltuples;
+        vacrelstats->currVacuumPartOid = RelationGetRelid(onerel);
     } else {
         vacrelstats->old_rel_pages = onerel->rd_rel->relpages;
         vacrelstats->old_rel_tuples = onerel->rd_rel->reltuples;
+        vacrelstats->currVacuumPartOid = InvalidOid;
     }
     vacrelstats->num_index_scans = 0;
     vacrelstats->pages_removed = 0;
@@ -380,7 +385,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
 
     /* Open all indexes of the relation */
     if (RelationIsPartition(onerel)) {
-        vac_open_part_indexes(vacstmt, RowExclusiveLock, &nindexes, &Irel, &indexrel, &indexpart);
+        vac_open_part_indexes(vacstmt, RowExclusiveLock, &nindexes, &nindexesGlobal, &Irel, &indexrel, &indexpart);
     } else {
         vac_open_indexes(onerel, RowExclusiveLock, &nindexes, &Irel);
     }
@@ -443,7 +448,8 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         vac_update_pgclass_partitioned_table(
             vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex, new_frozen_xid);
 
-        for (int idx = 0; idx < nindexes; idx++) {
+        // update stats of local partition indexes
+        for (int idx = 0; idx < nindexes - nindexesGlobal; idx++) {
             if (vacrelstats->idx_estimated[idx]) {
                 continue;
             }
@@ -456,6 +462,24 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
 
             vac_update_pgclass_partitioned_table(indexrel[idx], false, InvalidTransactionId);
         }
+
+        // update stats of global partition indexes
+        Assert((nindexes - nindexesGlobal) >= 0);
+        Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
+        for (int idx = nindexes - nindexesGlobal; idx < nindexes; idx++) {
+            if (vacrelstats->idx_estimated[idx]) {
+                continue;
+            }
+
+            vac_update_relstats(Irel[idx],
+                classRel,
+                vacrelstats->new_idx_pages[idx],
+                vacrelstats->new_idx_tuples[idx],
+                0,
+                false,
+                InvalidTransactionId);
+        }
+        heap_close(classRel, RowExclusiveLock);
     } else {
         Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
         vac_update_relstats(
@@ -480,7 +504,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
 
     /* Done with indexes */
     if (RelationIsPartition(onerel)) {
-        vac_close_part_indexes(nindexes, Irel, indexrel, indexpart, NoLock);
+        vac_close_part_indexes(nindexes, nindexesGlobal, Irel, indexrel, indexpart, NoLock);
     } else {
         vac_close_indexes(nindexes, Irel, NoLock);
     }
@@ -1154,7 +1178,8 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                      * cheaper to get rid of it in the next pruning pass than
                      * to treat it like an indexed tuple.
                      */
-                    if (HeapTupleIsHotUpdated(&tuple) || HeapTupleIsHeapOnly(&tuple))
+                    if (HeapTupleIsHotUpdated(&tuple) || HeapTupleIsHeapOnly(&tuple) ||
+                        HeapKeepInvisbleTuple(&tuple, RelationGetDescr(onerel)))
                         nkeep += 1;
                     else
                         tupgone = true; /* we can delete the tuple */
@@ -1682,17 +1707,20 @@ static void lazy_record_dead_tuple(LVRelStats* vacrelstats, ItemPointer itemptr)
 }
 
 /*
- *	lazy_tid_reaped() -- is a particular tid deletable?
- *
- *		This has the right signature to be an IndexBulkDeleteCallback.
- *
- *		Assumes dead_tuples array is in sorted order.
+ * lazy_tid_reaped() -- is a particular tid deletable?
+ *      This has the right signature to be an IndexBulkDeleteCallback.
+ *      Assumes dead_tuples array is in sorted order.
+ *      inputparam partOid is valid only when index is global partition index
  */
-static bool lazy_tid_reaped(ItemPointer itemptr, void* state)
+static bool lazy_tid_reaped(ItemPointer itemptr, void* state, Oid partOid)
 {
     LVRelStats* vacrelstats = (LVRelStats*)state;
     ItemPointer res;
 
+    // global partition index tuple need to check the tuple's partOid is same to current partition
+    if (partOid != InvalidOid && vacrelstats->currVacuumPartOid != partOid) {
+        return false;
+    }
     res = (ItemPointer)bsearch((void*)itemptr,
         (void*)vacrelstats->dead_tuples,
         vacrelstats->num_dead_tuples,
