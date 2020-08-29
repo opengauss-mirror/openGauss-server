@@ -101,6 +101,7 @@
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/guc.h"
+#include "utils/pg_lsn.h"
 #include "utils/ps_status.h"
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
@@ -6987,6 +6988,27 @@ static void readRecoveryCommandFile(void)
             }
 
             ereport(DEBUG2, (errmsg_internal("recovery_target_name = '%s'", t_thrd.xlog_cxt.recoveryTargetName)));
+        } else if (strcmp(item->name, "recovery_target_lsn") == 0) {
+            /*
+             * if recovery_target_xid or recovery_target_name or recovery_target_time
+             * specified, then this overrides recovery_target_lsn
+             */
+            if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_XID ||
+                t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_NAME ||
+                t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME) {
+                continue;
+            }
+            t_thrd.xlog_cxt.recoveryTarget = RECOVERY_TARGET_LSN;
+
+            /*
+             * Convert the LSN string given by the user to XLogRecPtr form.
+             */
+            t_thrd.xlog_cxt.recoveryTargetLSN = DatumGetLSN(DirectFunctionCall3(
+                pg_lsn_in, CStringGetDatum(item->value), ObjectIdGetDatum(InvalidOid), Int32GetDatum(-1)));
+            ereport(DEBUG2,
+                (errmsg_internal("recovery_target_lsn = '%X/%X'",
+                    (uint32)(t_thrd.xlog_cxt.recoveryTargetLSN >> 32),
+                    (uint32)t_thrd.xlog_cxt.recoveryTargetLSN)));
         } else if (strcmp(item->name, "recovery_target_inclusive") == 0) {
             // does nothing if a recovery_target is not also set
             if (!parse_bool(item->value, &t_thrd.xlog_cxt.recoveryTargetInclusive)) {
@@ -7362,6 +7384,32 @@ static bool recoveryStopsHere(XLogReaderState* record, bool* includeThis)
         return false;
     }
 
+    /* Check if target LSN has been reached */
+    if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_LSN &&
+        record->ReadRecPtr >= t_thrd.xlog_cxt.recoveryTargetLSN) {
+        *includeThis = t_thrd.xlog_cxt.recoveryTargetInclusive;
+
+        t_thrd.xlog_cxt.recoveryStopAfter = *includeThis;
+        t_thrd.xlog_cxt.recoveryStopXid = InvalidTransactionId;
+        t_thrd.xlog_cxt.recoveryStopLSN = record->ReadRecPtr;
+        t_thrd.xlog_cxt.recoveryStopTime = 0;
+        t_thrd.xlog_cxt.recoveryStopName[0] = '\0';
+
+        if (t_thrd.xlog_cxt.recoveryStopAfter) {
+            ereport(LOG,
+                (errmsg("recovery stopping after WAL location (LSN) \"%X/%X\"",
+                    (uint32)(t_thrd.xlog_cxt.recoveryStopLSN >> 32),
+                    (uint32)t_thrd.xlog_cxt.recoveryStopLSN)));
+        } else {
+            ereport(LOG,
+                (errmsg("recovery stopping before WAL location (LSN) \"%X/%X\"",
+                    (uint32)(t_thrd.xlog_cxt.recoveryStopLSN >> 32),
+                    (uint32)t_thrd.xlog_cxt.recoveryStopLSN)));
+        }
+
+        return true;
+    }
+
     /* Do we have a PITR target at all? */
     if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_UNSET) {
         // Save timestamp of latest transaction commit/abort if this is a
@@ -7442,6 +7490,7 @@ static bool recoveryStopsHere(XLogReaderState* record, bool* includeThis)
         t_thrd.xlog_cxt.recoveryStopXid = XLogRecGetXid(record);
         t_thrd.xlog_cxt.recoveryStopTime = recordXtime;
         t_thrd.xlog_cxt.recoveryStopAfter = *includeThis;
+        t_thrd.xlog_cxt.recoveryStopLSN = InvalidXLogRecPtr;
 
         if (record_info == XLOG_XACT_COMMIT_COMPACT || record_info == XLOG_XACT_COMMIT) {
             if (t_thrd.xlog_cxt.recoveryStopAfter)
@@ -8034,6 +8083,11 @@ void StartupXLOG(void)
 #endif
         else if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_NAME) {
             ereport(LOG, (errmsg("starting point-in-time recovery to \"%s\"", t_thrd.xlog_cxt.recoveryTargetName)));
+        } else if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_LSN) {
+            ereport(LOG,
+                (errmsg("starting point-in-time recovery to WAL location (LSN) \"%X/%X\"",
+                    (uint32)(t_thrd.xlog_cxt.recoveryTargetLSN >> 32),
+                    (uint32)t_thrd.xlog_cxt.recoveryTargetLSN)));
         } else {
             ereport(LOG, (errmsg("starting archive recovery")));
         }

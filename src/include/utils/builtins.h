@@ -1502,6 +1502,10 @@ extern void encryptBlockOrCUData(
 extern void decryptBlockOrCUData(
     const char* cipherText, const size_t cipherLength, char* plainText, size_t* plainLength);
 extern bool isEncryptedCluster();
+
+/* pg_lsn.cpp */
+extern Datum pg_lsn_in(PG_FUNCTION_ARGS);
+
 // template function implementation
 //
 /* tsdb */
