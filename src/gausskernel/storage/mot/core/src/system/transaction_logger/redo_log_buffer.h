@@ -336,7 +336,7 @@ public:
     }
 
 private:
-    /** @var Next write offset. */
+    /** @var Buffer size. */
     uint32_t m_bufferSize;
 
     /** @var Next write offset. */
