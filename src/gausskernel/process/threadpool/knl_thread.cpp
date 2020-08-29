@@ -1381,6 +1381,12 @@ static void knl_t_heartbeat_init(knl_t_heartbeat_context* heartbeat_cxt)
     heartbeat_cxt->state = NULL;
 }
 
+static void knl_t_autonomous_init(knl_t_autonomous_context* autonomous_cxt)
+{
+    autonomous_cxt->isnested = false;
+    autonomous_cxt->sqlstmt = NULL;
+}
+
 static void knl_t_mot_init(knl_t_mot_context* mot_cxt)
 {
     mot_cxt->last_error_code = 0;
@@ -1498,6 +1504,7 @@ void knl_thread_init(knl_thread_role role)
     knl_t_heartbeat_init(&t_thrd.heartbeat_cxt);
     knl_t_poolcleaner_init(&t_thrd.poolcleaner_cxt);
     knl_t_mot_init(&t_thrd.mot_cxt);
+    knl_t_autonomous_init(&t_thrd.autonomous_cxt);
 }
 
 void knl_thread_set_name(const char* name)

@@ -198,7 +198,6 @@ static int check_line_validity_in_for_query(PLpgSQL_stmt_forq* stmt, int, int);
 static void bind_cursor_with_portal(Portal portal, PLpgSQL_execstate *estate, int varno);
 static char* transform_anonymous_block(char* query);
 static bool need_recompile_plan(SPIPlanPtr plan);
-static THR_LOCAL PLpgSQL_expr* sqlstmt = NULL;
 
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
@@ -1420,6 +1419,9 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Un-support feature"),
                     errdetail("Trigger doesnot support autonomous transaction")));
+        } else if (t_thrd.autonomous_cxt.isnested) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature : Autonomous transaction doesnot support nesting")));
         } else {
             estate->autonomous_session = AutonomousSessionStart();
         }
@@ -3905,7 +3907,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
         Datum *values = NULL;
         bool *nulls = NULL;
         AutonomousResult *aresult = NULL;
-        sqlstmt = stmt->sqlstmt;
+        t_thrd.autonomous_cxt.sqlstmt = stmt->sqlstmt;
         build_symbol_table(estate, stmt->sqlstmt->ns, &nparams, &param_names, &param_types);
         astmt = AutonomousSessionPrepare(estate->autonomous_session, stmt->sqlstmt->query, (int16)nparams, param_types, param_names);
 
@@ -5083,7 +5085,7 @@ static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
 static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt)
 {
     if (estate->autonomous_session) {
-        if (sqlstmt) {
+        if (t_thrd.autonomous_cxt.sqlstmt) {
             int nparams = 0;
             int i;
             const char **param_names = NULL;
@@ -5093,7 +5095,7 @@ static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt
             bool *nulls = NULL;
             AutonomousResult *aresult = NULL;
             ereport(LOG, (errmsg("query COMMIT")));
-            build_symbol_table(estate, sqlstmt->ns, &nparams, &param_names, &param_types);
+            build_symbol_table(estate, t_thrd.autonomous_cxt.sqlstmt->ns, &nparams, &param_names, &param_types);
             astmt = AutonomousSessionPrepare(estate->autonomous_session, "COMMIT", (int16)nparams, param_types, param_names);
 
             values = (Datum *)palloc(nparams * sizeof(*values));
@@ -5104,12 +5106,11 @@ static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt
             }
             aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
             exec_set_found(estate, (list_length(aresult->tuples) != 0));
-            sqlstmt = NULL;
+            t_thrd.autonomous_cxt.sqlstmt = NULL;
             return PLPGSQL_RC_OK;
         } else {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("syntax error"),
-                errdetail("In antonomous transaction, commit/rollback must match start transaction")));
+                errmsg("Syntax error: In antonomous transaction, commit/rollback must match start transaction")));
         }
     }
 
@@ -5176,7 +5177,7 @@ static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt
 static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* stmt)
 {
     if (estate->autonomous_session) {
-        if (sqlstmt) {
+        if (t_thrd.autonomous_cxt.sqlstmt) {
             int nparams = 0;
             int i;
             const char **param_names = NULL;
@@ -5186,7 +5187,7 @@ static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* 
             bool *nulls = NULL;
             AutonomousResult *aresult = NULL;
             ereport(LOG, (errmsg("query ROLLBACK")));
-            build_symbol_table(estate, sqlstmt->ns, &nparams, &param_names, &param_types);
+            build_symbol_table(estate, t_thrd.autonomous_cxt.sqlstmt->ns, &nparams, &param_names, &param_types);
             astmt = AutonomousSessionPrepare(estate->autonomous_session, "ROLLBACK", (int16)nparams, param_types, param_names);
 
             values = (Datum *)palloc(nparams * sizeof(*values));
@@ -5197,13 +5198,12 @@ static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* 
             }
             aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
             exec_set_found(estate, (list_length(aresult->tuples) != 0));
-            sqlstmt = NULL;
+            t_thrd.autonomous_cxt.sqlstmt = NULL;
             return PLPGSQL_RC_OK;
         } else {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("syntax error"),
-                errdetail("In antonomous transaction, commit/rollback must match start transaction")));
-        }
+                errmsg("Syntax error: In antonomous transaction, commit/rollback must match start transaction")));
+           }
     }
 
     const char* PORTAL = "Portal";

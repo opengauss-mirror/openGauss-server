@@ -65,6 +65,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
+#include "utils/ps_status.h"
 
 /* Table-of-contents constants for our dynamic shared memory segment. */
 #define AUTONOMOUS_MAGIC                0x50674267
@@ -524,6 +525,8 @@ void autonomous_worker_main(Datum main_arg)
     (void)gspqsignal(SIGTERM, die);
     BackgroundWorkerUnblockSignals();
 
+    t_thrd.autonomous_cxt.isnested = true;
+
     /* Set up a memory context and resource owner. */
     Assert(t_thrd.utils_cxt.CurrentResourceOwner == NULL);
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "autonomous");
@@ -533,7 +536,6 @@ void autonomous_worker_main(Datum main_arg)
                                                  ALLOCSET_DEFAULT_INITSIZE,
                                                  ALLOCSET_DEFAULT_MAXSIZE);
 
-    initStringInfo(&(*t_thrd.postgres_cxt.row_description_buf));
     seg = (char *)DatumGetPointer(main_arg);
     if (seg == NULL)
         ereport(ERROR,
@@ -586,9 +588,19 @@ void autonomous_worker_main(Datum main_arg)
         (void)MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
         MemoryContextResetAndDeleteChildren(t_thrd.mem_cxt.msg_mem_cxt);
 
-        ProcessCompletedNotifies();
-        pgstat_report_stat(false);
-        pgstat_report_activity(STATE_IDLE, NULL);
+        if (IsAbortedTransactionBlockState()) {
+            set_ps_display("idle in transaction (aborted)", false);
+            pgstat_report_activity(STATE_IDLEINTRANSACTION_ABORTED, NULL);
+        } else if (IsTransactionOrTransactionBlock()) {
+            set_ps_display("idle in transaction", false);
+            pgstat_report_activity(STATE_IDLEINTRANSACTION, NULL);
+        } else {
+            ProcessCompletedNotifies();
+            pgstat_report_stat(false);
+
+            set_ps_display("idle", false);
+            pgstat_report_activity(STATE_IDLE, NULL);
+        }
 
         shm_mq_receive_stringinfo(command_qh, &msg);
         ereport(LOG, (errmsg("bgworker receive msg %s", msg.data)));

@@ -224,6 +224,13 @@ void pq_parse_errornotice(StringInfo msg, ErrorData *edata)
             case PG_DIAG_SEVERITY:
                 /* ignore, trusting we'll get a nonlocalized version */
                 break;
+            case PG_DIAG_INTERNEL_ERRCODE:
+                /* ignore */
+                break;
+            case PG_DIAG_MODULE_ID:
+                /* It is always MOD_MAX */
+                edata->mod_id = MOD_MAX;
+                break;
             case PG_DIAG_SQLSTATE:
                 if (strlen(value) != 5) {
                     elog(ERROR, "invalid SQLSTATE: \"%s\"", value);
