@@ -405,6 +405,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->recoveryTargetTime = 0;
     xlog_cxt->recoveryTargetBarrierId = NULL;
     xlog_cxt->recoveryTargetName = NULL;
+    xlog_cxt->recoveryTargetLSN = InvalidXLogRecPtr;
     xlog_cxt->StandbyModeRequested = false;
     xlog_cxt->PrimaryConnInfo = NULL;
     xlog_cxt->TriggerFile = NULL;
@@ -412,6 +413,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->recoveryTriggered = false;
     xlog_cxt->recoveryStopXid = InvalidTransactionId;
     xlog_cxt->recoveryStopTime = 0;
+    xlog_cxt->recoveryStopLSN = InvalidXLogRecPtr;
     rc = memset_s(xlog_cxt->recoveryStopName, MAXFNAMELEN * sizeof(char), 0, MAXFNAMELEN * sizeof(char));
     securec_check(rc, "\0", "\0");
     xlog_cxt->recoveryStopAfter = false;

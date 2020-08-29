@@ -453,6 +453,7 @@ typedef struct knl_t_xlog_context {
     TimestampTz recoveryTargetTime;
     char* recoveryTargetBarrierId;
     char* recoveryTargetName;
+    XLogRecPtr recoveryTargetLSN;
 
     /* options taken from recovery.conf for XLOG streaming */
     bool StandbyModeRequested;
@@ -468,6 +469,7 @@ typedef struct knl_t_xlog_context {
     /* if recoveryStopsHere returns true, it saves actual stop xid/time/name here */
     TransactionId recoveryStopXid;
     TimestampTz recoveryStopTime;
+    XLogRecPtr recoveryStopLSN;
     char recoveryStopName[MAXFNAMELEN];
     bool recoveryStopAfter;
 

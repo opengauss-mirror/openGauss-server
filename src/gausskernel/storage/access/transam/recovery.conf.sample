@@ -79,6 +79,8 @@
 #
 #recovery_target_xid = ''
 #
+#recovery_target_lsn = ''	# e.g. '0/FFFFFFF'
+#
 #recovery_target_barrier = ''
 #
 #recovery_target_inclusive = true
