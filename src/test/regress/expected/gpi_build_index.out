@@ -249,7 +249,7 @@ create table gpi_multi_cols(a0 int,a1 int,a2 int,a3 int,a4 int,a5 int,a6 int,a7 
 create index gpi_multi_cols_index on gpi_multi_cols(a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30) global;
 --failed
 create index gpi_multi_cols_index on gpi_multi_cols(a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30, a31) global;
-ERROR:  cannot use more than 32 columns in an index
+ERROR:  cannot use more than 31 columns in an global partition index
 --success
 create index gpi_multi_cols_index_local on gpi_multi_cols(a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30, a31) local;
 insert into gpi_multi_cols select r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r from generate_series(1,3000) as r;

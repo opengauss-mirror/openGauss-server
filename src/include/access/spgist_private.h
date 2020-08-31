@@ -136,8 +136,9 @@ typedef struct SpGistScanOpaqueData {
     List* scanStack; /* List of ScanStackEntrys */
 
     /* These fields are only used in amgetbitmap scans: */
-    TIDBitmap* tbm; /* bitmap being filled */
-    int64 ntids;    /* number of TIDs passed to bitmap */
+    TIDBitmap* tbm;  /* bitmap being filled */
+    int64 ntids;     /* number of TIDs passed to bitmap */
+    Oid partHeapOid; /* partition oid passed to bitmap */
 
     /* These fields are only used in amgettuple scans: */
     bool want_itup;                                  /* are we reconstructing tuples? */

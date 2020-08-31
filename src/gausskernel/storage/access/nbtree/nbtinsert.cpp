@@ -411,7 +411,6 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                      * everyone, so we may as well mark the index entry
                      * killed.
                      */
-                    /* okay, we gotta fetch the heap tuple ... */
                     ItemIdMarkDead(curitemid);
                     opaque->btpo_flags |= BTP_HAS_GARBAGE;
 

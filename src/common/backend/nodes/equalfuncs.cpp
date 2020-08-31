@@ -1268,6 +1268,7 @@ static bool _equalIndexStmt(const IndexStmt* a, const IndexStmt* b)
     COMPARE_SCALAR_FIELD(oldNode);
     COMPARE_NODE_FIELD(partClause);
     COMPARE_SCALAR_FIELD(isPartitioned);
+    COMPARE_SCALAR_FIELD(isGlobal);
     COMPARE_SCALAR_FIELD(unique);
     COMPARE_SCALAR_FIELD(primary);
     COMPARE_SCALAR_FIELD(isconstraint);

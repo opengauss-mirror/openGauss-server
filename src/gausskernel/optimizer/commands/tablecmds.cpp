@@ -8904,7 +8904,7 @@ static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt,
     if (OidIsValid(stmt->oldNode)) {
         Relation irel = index_open(new_index, NoLock);
 
-        if (!stmt->isPartitioned) {
+        if (!stmt->isPartitioned || stmt->isGlobal) {
             RelationPreserveStorage(irel->rd_node, true);
         } else {
             List* partOids = NIL;
@@ -11316,7 +11316,7 @@ static void ATCutOffPSortDependency(List* oldIndexPassList, LOCKMODE lockmode)
 
         // if the index is a partition table, handle all the
         // psort info for each partition.
-        if (istmt->isPartitioned) {
+        if (istmt->isPartitioned && !istmt->isGlobal) {
             Relation hrel = relation_openrv(istmt->relation, lockmode);
             Relation irel = index_open(istmt->indexOid, lockmode);
             List* partHeapOids = relationGetPartitionOidList(hrel);
@@ -11492,7 +11492,7 @@ static void ATPostAlterTypeParse(
                 AlterTableCmd* newcmd = NULL;
 
                 if (!rewrite) {
-                    if (!stmt->isPartitioned) {
+                    if (!stmt->isPartitioned || stmt->isGlobal) {
                         TryReuseIndex(oldId, stmt);
                     } else {
                         tryReusePartedIndex(oldId, stmt, rel);
