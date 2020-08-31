@@ -67,18 +67,10 @@ extern const char* check_client_env(const char* input_env_value);
     do {                                                                                                \
         int rc = 0;                                                                                     \
         const char* unixSocketDir = NULL;                                                               \
-        const char* pghost = gs_getenv_r("PGHOST");                                                     \
-        if (check_client_env(pghost) == NULL) {                                                         \
-            pghost = NULL;                                                                              \
-        }                                                                                               \
         if (sockdir != NULL && (*sockdir) != '\0') {                                                    \
             unixSocketDir = sockdir;                                                                    \
         } else {                                                                                        \
-            if (pghost != NULL && (*pghost) != '\0') {                                                  \
-                unixSocketDir = pghost;                                                                 \
-            } else {                                                                                    \
-                unixSocketDir = DEFAULT_PGSOCKET_DIR;                                                   \
-            }                                                                                           \
+            unixSocketDir = DEFAULT_PGSOCKET_DIR;                                                       \
         }                                                                                               \
         rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/.s.PGSQL.%d", unixSocketDir, (port)); \
         securec_check_ss_c(rc, "\0", "\0");                                                             \

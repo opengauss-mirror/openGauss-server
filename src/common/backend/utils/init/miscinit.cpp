@@ -1219,19 +1219,10 @@ static void CreateLockFile(const char* file_name, bool am_post_master, bool is_d
      * the datadir lockfile later.
      */
     char* unix_socket_dir = NULL;
-    char* pg_host = gs_getenv_r("PGHOST");
-    if (pg_host != NULL) {
-        check_backend_env(pg_host);
-    }
-
     if (*g_instance.attr.attr_network.UnixSocketDir != '\0') {
         unix_socket_dir = g_instance.attr.attr_network.UnixSocketDir;
     } else {
-        if (pg_host != NULL && *(pg_host) != '\0') {
-            unix_socket_dir = pg_host;
-        } else {
-            unix_socket_dir = DEFAULT_PGSOCKET_DIR;
-        }
+        unix_socket_dir = DEFAULT_PGSOCKET_DIR;
     }
 
     int rc = snprintf_s(buffer,
