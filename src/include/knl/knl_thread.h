@@ -2665,6 +2665,7 @@ struct PLpgSQL_expr;
 typedef struct knl_t_autonomous_context {
     PLpgSQL_expr* sqlstmt;
     bool isnested;
+    BackgroundWorkerHandle* handle;
 } knl_t_autonomous_context;
 
 /* MOT thread attributes */
@@ -2736,6 +2737,7 @@ typedef struct knl_t_msqueue_context {
     CommandDest save_whereToSendOutput;
     ProtocolVersion save_FrontendProtocol;
     const PQcommMethods *PqCommMethods;
+    bool is_changed;
 } knl_t_msqueue_context;
 
 /* thread context. */

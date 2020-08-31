@@ -55,6 +55,7 @@ void pq_redirect_to_shm_mq(shm_mq_handle *mqh)
 	t_thrd.msqueue_cxt.pq_mq_handle = mqh;
 	t_thrd.postgres_cxt.whereToSendOutput = static_cast<int>(DestRemote);
 	FrontendProtocol = PG_PROTOCOL_LATEST;
+    t_thrd.msqueue_cxt.is_changed = true;
 }
 
 void pq_stop_redirect_to_shm_mq(void)
@@ -64,6 +65,7 @@ void pq_stop_redirect_to_shm_mq(void)
     FrontendProtocol = t_thrd.msqueue_cxt.save_FrontendProtocol;
     t_thrd.msqueue_cxt.pq_mq = NULL;
     t_thrd.msqueue_cxt.pq_mq_handle = NULL;
+    t_thrd.msqueue_cxt.is_changed = false;
 }
 
 /*

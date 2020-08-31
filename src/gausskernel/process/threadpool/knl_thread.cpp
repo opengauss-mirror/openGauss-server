@@ -1387,6 +1387,7 @@ static void knl_t_heartbeat_init(knl_t_heartbeat_context* heartbeat_cxt)
 static void knl_t_autonomous_init(knl_t_autonomous_context* autonomous_cxt)
 {
     autonomous_cxt->isnested = false;
+    autonomous_cxt->handle = NULL;
     autonomous_cxt->sqlstmt = NULL;
 }
 
@@ -1432,7 +1433,7 @@ void knl_t_msqueue_init(knl_t_msqueue_context* msqueue_cxt)
     msqueue_cxt->save_PqCommMethods = NULL;
     msqueue_cxt->save_whereToSendOutput = DestDebug;
     msqueue_cxt->save_FrontendProtocol = PG_PROTOCOL_LATEST;
-    //msqueue_cxt->PqCommMethods = NULL;
+    msqueue_cxt->is_changed = false;
     PqCommMethods_init();
 }
 

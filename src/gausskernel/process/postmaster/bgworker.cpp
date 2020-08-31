@@ -638,8 +638,9 @@ static void bgworker_quickdie(SIGNAL_ARGS)
  */
 static void bgworker_die(SIGNAL_ARGS)
 {
-    (void)PG_SETMASK(&t_thrd.libpq_cxt.BlockSig);
+    (void)gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 
+    t_thrd.postgres_cxt.whereToSendOutput = DestNone;
     ereport(FATAL,
         (errcode(ERRCODE_ADMIN_SHUTDOWN),
             errmsg("terminating background worker \"%s\" due to administrator command",
@@ -733,6 +734,14 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
+
+    (void)gs_signal_unblock_sigusr2();
+    if (IsUnderPostmaster) {
+        /* We allow SIGQUIT (quickdie) at all times */
+        (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
+    }
+
+    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL); /* block everything except SIGQUIT */
 
     /*
      * If an exception is encountered, processing resumes here.
@@ -1298,12 +1307,12 @@ void BackgroundWorkerInitializeConnectionByOid(Oid dboid, Oid useroid, uint32 fl
  */
 void BackgroundWorkerBlockSignals(void)
 {
-    (void)PG_SETMASK(&t_thrd.libpq_cxt.BlockSig);
+    (void)gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 }
 
 void BackgroundWorkerUnblockSignals(void)
 {
-    (void)PG_SETMASK(&t_thrd.libpq_cxt.UnBlockSig);
+    (void)gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 }
 
 
