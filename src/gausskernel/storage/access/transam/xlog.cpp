@@ -7470,7 +7470,7 @@ static bool recoveryStopsHere(XLogReaderState* record, bool* includeThis)
 
         // Ignore recoveryTargetInclusive because this is not a transaction record
         *includeThis = false;
-    } else {
+    } else if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME) {
         /*
          * There can be many transactions that share the same commit time, so
          * we stop after the last one, if we are inclusive, or stop at the
