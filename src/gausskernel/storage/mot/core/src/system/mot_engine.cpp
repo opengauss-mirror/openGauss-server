@@ -941,7 +941,7 @@ uint64_t MOTEngine::GetCurrentMemoryConsumptionBytes()
 
 uint64_t MOTEngine::GetHardMemoryLimitBytes()
 {
-    return ((uint64_t)g_memGlobalCfg.m_maxGlobalMemoryMb * MEGA_BYTE);
+    return g_memGlobalCfg.m_maxGlobalMemoryMb * MEGA_BYTE;
 }
 
 bool MOTEngine::CheckPolicies()

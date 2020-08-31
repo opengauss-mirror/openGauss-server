@@ -63,9 +63,9 @@ constexpr bool MOTConfiguration::DEFAULT_ENABLE_CHECKPOINT;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_INCREMENTAL_CHECKPOINT;
 constexpr const char* MOTConfiguration::DEFAULT_CHECKPOINT_DIR;
 constexpr const char* MOTConfiguration::DEFAULT_CHECKPOINT_SEGSIZE;
-constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_SEGSIZE_BYTES;
-constexpr uint32_t MOTConfiguration::MIN_CHECKPOINT_SEGSIZE_BYTES;
-constexpr uint32_t MOTConfiguration::MAX_CHECKPOINT_SEGSIZE_BYTES;
+constexpr uint64_t MOTConfiguration::DEFAULT_CHECKPOINT_SEGSIZE_BYTES;
+constexpr uint64_t MOTConfiguration::MIN_CHECKPOINT_SEGSIZE_BYTES;
+constexpr uint64_t MOTConfiguration::MAX_CHECKPOINT_SEGSIZE_BYTES;
 constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_WORKERS;
 constexpr uint32_t MOTConfiguration::MIN_CHECKPOINT_WORKERS;
 constexpr uint32_t MOTConfiguration::MAX_CHECKPOINT_WORKERS;
@@ -82,11 +82,11 @@ constexpr uint16_t MOTConfiguration::DEFAULT_MAX_DATA_NODES;
 // statistics configuration members
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_STATS;
 constexpr const char* MOTConfiguration::DEFAULT_STATS_PRINT_PERIOD;
-constexpr uint32_t MOTConfiguration::DEFAULT_STATS_PRINT_PERIOD_SECONDS;
-constexpr uint32_t MOTConfiguration::MIN_STATS_PRINT_PERIOD_SECONDS;
-constexpr uint32_t MOTConfiguration::MAX_STATS_PRINT_PERIOD_SECONDS;
+constexpr uint64_t MOTConfiguration::DEFAULT_STATS_PRINT_PERIOD_SECONDS;
+constexpr uint64_t MOTConfiguration::MIN_STATS_PRINT_PERIOD_SECONDS;
+constexpr uint64_t MOTConfiguration::MAX_STATS_PRINT_PERIOD_SECONDS;
 constexpr const char* MOTConfiguration::DEFAULT_FULL_STATS_PRINT_PERIOD;
-constexpr uint32_t MOTConfiguration::DEFAULT_FULL_STATS_PRINT_PERIOD_SECONDS;
+constexpr uint64_t MOTConfiguration::DEFAULT_FULL_STATS_PRINT_PERIOD_SECONDS;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_DB_SESSION_STAT_PRINT;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_NETWORK_STAT_PRINT;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_LOG_STAT_PRINT;
@@ -111,29 +111,29 @@ constexpr uint32_t MOTConfiguration::MAX_MAX_CONNECTIONS;
 constexpr AffinityMode MOTConfiguration::DEFAULT_AFFINITY_MODE;
 constexpr bool MOTConfiguration::DEFAULT_LAZY_LOAD_CHUNK_DIRECTORY;
 constexpr const char* MOTConfiguration::DEFAULT_MAX_MOT_GLOBAL_MEMORY;
-constexpr uint32_t MOTConfiguration::DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB;
-constexpr uint32_t MOTConfiguration::MIN_MAX_MOT_GLOBAL_MEMORY_MB;
-constexpr uint32_t MOTConfiguration::MAX_MAX_MOT_GLOBAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MIN_MAX_MOT_GLOBAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MAX_MAX_MOT_GLOBAL_MEMORY_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MAX_MOT_LOCAL_MEMORY;
-constexpr uint32_t MOTConfiguration::DEFAULT_MAX_MOT_LOCAL_MEMORY_MB;
-constexpr uint32_t MOTConfiguration::MIN_MAX_MOT_LOCAL_MEMORY_MB;
-constexpr uint32_t MOTConfiguration::MAX_MAX_MOT_LOCAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::DEFAULT_MAX_MOT_LOCAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MIN_MAX_MOT_LOCAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MAX_MAX_MOT_LOCAL_MEMORY_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MIN_MOT_GLOBAL_MEMORY;
-constexpr uint32_t MOTConfiguration::DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB;
-constexpr uint32_t MOTConfiguration::MIN_MIN_MOT_GLOBAL_MEMORY_MB;
-constexpr uint32_t MOTConfiguration::MAX_MIN_MOT_GLOBAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MIN_MIN_MOT_GLOBAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MAX_MIN_MOT_GLOBAL_MEMORY_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MIN_MOT_LOCAL_MEMORY;
-constexpr uint32_t MOTConfiguration::DEFAULT_MIN_MOT_LOCAL_MEMORY_MB;
-constexpr uint32_t MOTConfiguration::MIN_MIN_MOT_LOCAL_MEMORY_MB;
-constexpr uint32_t MOTConfiguration::MAX_MIN_MOT_LOCAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::DEFAULT_MIN_MOT_LOCAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MIN_MIN_MOT_LOCAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MAX_MIN_MOT_LOCAL_MEMORY_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MAX_MOT_SESSION_MEMORY;
-constexpr uint32_t MOTConfiguration::DEFAULT_MAX_MOT_SESSION_MEMORY_KB;
-constexpr uint32_t MOTConfiguration::MIN_MAX_MOT_SESSION_MEMORY_KB;
-constexpr uint32_t MOTConfiguration::MAX_MAX_MOT_SESSION_MEMORY_KB;
+constexpr uint64_t MOTConfiguration::DEFAULT_MAX_MOT_SESSION_MEMORY_KB;
+constexpr uint64_t MOTConfiguration::MIN_MAX_MOT_SESSION_MEMORY_KB;
+constexpr uint64_t MOTConfiguration::MAX_MAX_MOT_SESSION_MEMORY_KB;
 constexpr const char* MOTConfiguration::DEFAULT_MIN_MOT_SESSION_MEMORY;
-constexpr uint32_t MOTConfiguration::DEFAULT_MIN_MOT_SESSION_MEMORY_KB;
-constexpr uint32_t MOTConfiguration::MIN_MIN_MOT_SESSION_MEMORY_KB;
-constexpr uint32_t MOTConfiguration::MAX_MIN_MOT_SESSION_MEMORY_KB;
+constexpr uint64_t MOTConfiguration::DEFAULT_MIN_MOT_SESSION_MEMORY_KB;
+constexpr uint64_t MOTConfiguration::MIN_MIN_MOT_SESSION_MEMORY_KB;
+constexpr uint64_t MOTConfiguration::MAX_MIN_MOT_SESSION_MEMORY_KB;
 constexpr MemReserveMode MOTConfiguration::DEFAULT_RESERVE_MEMORY_MODE;
 constexpr MemStorePolicy MOTConfiguration::DEFAULT_STORE_MEMORY_POLICY;
 constexpr MemAllocPolicy MOTConfiguration::DEFAULT_CHUNK_ALLOC_POLICY;
@@ -144,30 +144,30 @@ constexpr uint32_t MOTConfiguration::DEFAULT_HIGH_RED_MARK_PERCENT;
 constexpr uint32_t MOTConfiguration::MIN_HIGH_RED_MARK_PERCENT;
 constexpr uint32_t MOTConfiguration::MAX_HIGH_RED_MARK_PERCENT;
 constexpr const char* MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE;
-constexpr uint32_t MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
-constexpr uint32_t MOTConfiguration::MIN_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
-constexpr uint32_t MOTConfiguration::MAX_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
+constexpr uint64_t MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
+constexpr uint64_t MOTConfiguration::MIN_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
+constexpr uint64_t MOTConfiguration::MAX_SESSION_LARGE_BUFFER_STORE_SIZE_MB;
 constexpr const char* MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE;
-constexpr uint32_t MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
-constexpr uint32_t MOTConfiguration::MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
-constexpr uint32_t MOTConfiguration::MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
+constexpr uint64_t MOTConfiguration::DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
+constexpr uint64_t MOTConfiguration::MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
+constexpr uint64_t MOTConfiguration::MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB;
 constexpr const char* MOTConfiguration::DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE;
-constexpr uint32_t MOTConfiguration::DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
-constexpr uint32_t MOTConfiguration::MIN_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
-constexpr uint32_t MOTConfiguration::MAX_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
+constexpr uint64_t MOTConfiguration::DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
+constexpr uint64_t MOTConfiguration::MIN_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
+constexpr uint64_t MOTConfiguration::MAX_SESSION_MAX_HUGE_OBJECT_SIZE_MB;
 // GC configuration members
 constexpr bool MOTConfiguration::DEFAULT_GC_ENABLE;
 constexpr const char* MOTConfiguration::DEFAULT_GC_RECLAIM_THRESHOLD;
-constexpr uint32_t MOTConfiguration::DEFAULT_GC_RECLAIM_THRESHOLD_BYTES;
-constexpr uint32_t MOTConfiguration::MIN_GC_RECLAIM_THRESHOLD_BYTES;
-constexpr uint32_t MOTConfiguration::MAX_GC_RECLAIM_THRESHOLD_BYTES;
+constexpr uint64_t MOTConfiguration::DEFAULT_GC_RECLAIM_THRESHOLD_BYTES;
+constexpr uint64_t MOTConfiguration::MIN_GC_RECLAIM_THRESHOLD_BYTES;
+constexpr uint64_t MOTConfiguration::MAX_GC_RECLAIM_THRESHOLD_BYTES;
 constexpr uint32_t MOTConfiguration::DEFAULT_GC_RECLAIM_BATCH_SIZE;
 constexpr uint32_t MOTConfiguration::MIN_GC_RECLAIM_BATCH_SIZE;
 constexpr uint32_t MOTConfiguration::MAX_GC_RECLAIM_BATCH_SIZE;
 constexpr const char* MOTConfiguration::DEFAULT_GC_HIGH_RECLAIM_THRESHOLD;
-constexpr uint32_t MOTConfiguration::DEFAULT_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
-constexpr uint32_t MOTConfiguration::MIN_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
-constexpr uint32_t MOTConfiguration::MAX_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
+constexpr uint64_t MOTConfiguration::DEFAULT_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
+constexpr uint64_t MOTConfiguration::MIN_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
+constexpr uint64_t MOTConfiguration::MAX_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
 // JIT configuration members
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_MOT_CODEGEN;
 constexpr bool MOTConfiguration::DEFAULT_FORCE_MOT_PSEUDO_CODEGEN;
@@ -184,7 +184,7 @@ constexpr uint64_t MOTConfiguration::DEFAULT_CFG_MONITOR_PERIOD_SECONDS;
 constexpr uint64_t MOTConfiguration::MIN_CFG_MONITOR_PERIOD_SECONDS;
 constexpr uint64_t MOTConfiguration::MAX_CFG_MONITOR_PERIOD_SECONDS;
 constexpr bool MOTConfiguration::DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION;
-constexpr uint32_t MOTConfiguration::DEFAULT_TOTAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::DEFAULT_TOTAL_MEMORY_MB;
 
 static constexpr unsigned int MAX_NUMA_NODES = 16u;
 #define IS_HYPER_THREAD_CMD "lscpu | grep \"Thread(s) per core:\" |  awk '{print $4}'"
@@ -552,15 +552,15 @@ bool MOTConfiguration::SetFlag(const std::string& name, const std::string& value
     } else if (ParseBool(name, "enable_checkpoint", value, &m_enableCheckpoint)) {
     } else if (ParseBool(name, "enable_incremental_checkpoint", value, &m_enableIncrementalCheckpoint)) {
     } else if (ParseString(name, "checkpoint_dir", value, &m_checkpointDir)) {
-    } else if (ParseUint32(name, "checkpoint_segsize", value, &m_checkpointSegThreshold)) {
+    } else if (ParseUint64(name, "checkpoint_segsize", value, &m_checkpointSegThreshold)) {
     } else if (ParseUint32(name, "checkpoint_workers", value, &m_checkpointWorkers)) {
     } else if (ParseUint32(name, "checkpoint_recovery_workers", value, &m_checkpointRecoveryWorkers)) {
     } else if (ParseBool(name, "abort_buffer_enable", value, &m_abortBufferEnable)) {
     } else if (ParseBool(name, "pre_abort", value, &m_preAbort)) {
     } else if (ParseValidation(name, "validation_lock", value, &m_validationLock)) {
     } else if (ParseBool(name, "enable_stats", value, &m_enableStats)) {
-    } else if (ParseUint32(name, "stats_period_seconds", value, &m_statPrintPeriodSeconds)) {
-    } else if (ParseUint32(name, "full_stats_period_seconds", value, &m_statPrintFullPeriodSeconds)) {
+    } else if (ParseUint64(name, "stats_period_seconds", value, &m_statPrintPeriodSeconds)) {
+    } else if (ParseUint64(name, "full_stats_period_seconds", value, &m_statPrintFullPeriodSeconds)) {
     } else if (ParseBool(name, "enable_log_recovery_stats", value, &m_enableLogRecoveryStats)) {
     } else if (ParseBool(name, "enable_db_session_stats", value, &m_enableDbSessionStatistics)) {
     } else if (ParseBool(name, "enable_network_stats", value, &m_enableNetworkStatistics)) {
@@ -579,23 +579,23 @@ bool MOTConfiguration::SetFlag(const std::string& name, const std::string& value
     } else if (ParseUint32(name, "max_connections", value, &m_maxConnections)) {
     } else if (ParseAffinity(name, "affinity_mode", value, &m_sessionAffinityMode)) {
     } else if (ParseBool(name, "lazy_load_chunk_directory", value, &m_lazyLoadChunkDirectory)) {
-    } else if (ParseUint32(name, "max_mot_global_memory_mb", value, &m_globalMemoryMaxLimitMB)) {
-    } else if (ParseUint32(name, "min_mot_global_memory_mb", value, &m_globalMemoryMinLimitMB)) {
-    } else if (ParseUint32(name, "max_mot_local_memory_mb", value, &m_localMemoryMaxLimitMB)) {
-    } else if (ParseUint32(name, "min_mot_local_memory_mb", value, &m_localMemoryMinLimitMB)) {
-    } else if (ParseUint32(name, "max_mot_session_memory_kb", value, &m_sessionMemoryMaxLimitKB)) {
-    } else if (ParseUint32(name, "min_mot_session_memory_kb", value, &m_sessionMemoryMinLimitKB)) {
+    } else if (ParseUint64(name, "max_mot_global_memory_mb", value, &m_globalMemoryMaxLimitMB)) {
+    } else if (ParseUint64(name, "min_mot_global_memory_mb", value, &m_globalMemoryMinLimitMB)) {
+    } else if (ParseUint64(name, "max_mot_local_memory_mb", value, &m_localMemoryMaxLimitMB)) {
+    } else if (ParseUint64(name, "min_mot_local_memory_mb", value, &m_localMemoryMinLimitMB)) {
+    } else if (ParseUint64(name, "max_mot_session_memory_kb", value, &m_sessionMemoryMaxLimitKB)) {
+    } else if (ParseUint64(name, "min_mot_session_memory_kb", value, &m_sessionMemoryMinLimitKB)) {
     } else if (ParseMemoryReserveMode(name, "reserve_memory_mode", value, &m_reserveMemoryMode)) {
     } else if (ParseMemoryStorePolicy(name, "store_memory_policy", value, &m_storeMemoryPolicy)) {
     } else if (ParseChunkAllocPolicy(name, "chunk_alloc_policy", value, &m_chunkAllocPolicy)) {
     } else if (ParseUint32(name, "chunk_prealloc_worker_count", value, &m_chunkPreallocWorkerCount)) {
     } else if (ParseUint32(name, "high_red_mark_percent", value, &m_highRedMarkPercent)) {
-    } else if (ParseUint32(name, "session_large_buffer_store_size_mb", value, &m_sessionLargeBufferStoreSizeMB)) {
-    } else if (ParseUint32(name,
+    } else if (ParseUint64(name, "session_large_buffer_store_size_mb", value, &m_sessionLargeBufferStoreSizeMB)) {
+    } else if (ParseUint64(name,
                    "session_large_buffer_store_max_object_size_mb",
                    value,
                    &m_sessionLargeBufferStoreMaxObjectSizeMB)) {
-    } else if (ParseUint32(name, "session_max_huge_object_size_mb", value, &m_sessionMaxHugeObjectSizeMB)) {
+    } else if (ParseUint64(name, "session_max_huge_object_size_mb", value, &m_sessionMaxHugeObjectSizeMB)) {
     } else if (ParseBool(name, "enable_mot_codegen", value, &m_enableCodegen)) {
     } else if (ParseBool(name, "force_mot_pseudo_codegen", value, &m_forcePseudoCodegen)) {
     } else if (ParseBool(name, "enable_mot_codegen_print", value, &m_enableCodegenPrint)) {
@@ -675,26 +675,14 @@ int MOTConfiguration::GetMappedCore(int logicId) const
 #define UPDATE_INT_CFG(var, cfgPath, defaultValue, lowerBound, upperBound) \
     UpdateIntConfigItem(var, cfg->GetIntegerConfigValue(cfgPath, defaultValue), cfgPath, lowerBound, upperBound)
 
-#define UPDATE_MEM_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound)                           \
-    do {                                                                                                    \
-        uint64_t memoryValueBytes =                                                                         \
-            ParseMemoryValueBytes(cfg->GetStringConfigValue(cfgPath, defaultValue), (uint64_t)-1, cfgPath); \
-        UpdateIntConfigItem(var, (uint32_t)(memoryValueBytes / scale), cfgPath, lowerBound, upperBound);    \
-    } while (0);
+#define UPDATE_MEM_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound) \
+    UpdateMemConfigItem(var, cfgPath, defaultValue, scale, lowerBound, upperBound, true)
 
-#define UPDATE_ABS_MEM_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound)                    \
-    do {                                                                                                 \
-        uint64_t memoryValueBytes =                                                                      \
-            ParseMemoryUnit(cfg->GetStringConfigValue(cfgPath, defaultValue), (uint64_t)-1, cfgPath);    \
-        UpdateIntConfigItem(var, (uint32_t)(memoryValueBytes / scale), cfgPath, lowerBound, upperBound); \
-    } while (0);
+#define UPDATE_ABS_MEM_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound) \
+    UpdateMemConfigItem(var, cfgPath, defaultValue, scale, lowerBound, upperBound, false)
 
-#define UPDATE_TIME_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound)                         \
-    do {                                                                                                   \
-        uint64_t timeValueMicros =                                                                         \
-            ParseTimeValueMicros(cfg->GetStringConfigValue(cfgPath, defaultValue), (uint64_t)-1, cfgPath); \
-        UpdateIntConfigItem(var, (uint64_t)(timeValueMicros / scale), cfgPath, lowerBound, upperBound);    \
-    } while (0);
+#define UPDATE_TIME_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound) \
+    UpdateTimeConfigItem(var, cfgPath, defaultValue, scale, lowerBound, upperBound)
 
 void MOTConfiguration::LoadConfig()
 {
@@ -728,7 +716,7 @@ void MOTConfiguration::LoadConfig()
     // Checkpoint configuration
     UPDATE_BOOL_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
     UPDATE_STRING_CFG(m_checkpointDir, "checkpoint_dir", DEFAULT_CHECKPOINT_DIR);
-    UPDATE_MEM_CFG(m_checkpointSegThreshold,
+    UPDATE_ABS_MEM_CFG(m_checkpointSegThreshold,
         "checkpoint_segsize",
         DEFAULT_CHECKPOINT_SEGSIZE,
         SCALE_BYTES,
@@ -810,15 +798,24 @@ void MOTConfiguration::LoadConfig()
     // validate that min <= max
     if (m_globalMemoryMinLimitMB > m_globalMemoryMaxLimitMB) {
         if (!m_suppressLog) {
-            MOT_LOG_WARN("Invalid global memory configuration: minimum (%u MB) is greater than maximum (%u MB), using "
-                         "defaults (%u MB, %u MB)",
+            MOT_LOG_WARN("Invalid global memory configuration: minimum (%" PRIu64
+                         " MB) is greater than maximum (%" PRIu64 " MB), using defaults (%" PRIu64 " MB, %" PRIu64
+                         " MB)",
                 m_globalMemoryMinLimitMB,
                 m_globalMemoryMaxLimitMB,
                 DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB,
                 DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB);
         }
-        UpdateIntConfigItem(m_globalMemoryMaxLimitMB, DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB, "max_mot_global_memory");
-        UpdateIntConfigItem(m_globalMemoryMinLimitMB, DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB, "min_mot_global_memory");
+        UpdateIntConfigItem(m_globalMemoryMaxLimitMB,
+            DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB,
+            "max_mot_global_memory",
+            MIN_MAX_MOT_GLOBAL_MEMORY_MB,
+            MAX_MAX_MOT_GLOBAL_MEMORY_MB);
+        UpdateIntConfigItem(m_globalMemoryMinLimitMB,
+            DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB,
+            "min_mot_global_memory",
+            MIN_MIN_MOT_GLOBAL_MEMORY_MB,
+            MAX_MIN_MOT_GLOBAL_MEMORY_MB);
     }
     UPDATE_MEM_CFG(m_localMemoryMaxLimitMB,
         "max_mot_local_memory",
@@ -835,15 +832,24 @@ void MOTConfiguration::LoadConfig()
     // validate that min <= max
     if (m_localMemoryMinLimitMB > m_localMemoryMaxLimitMB) {
         if (!m_suppressLog) {
-            MOT_LOG_WARN("Invalid local memory configuration: minimum (%u MB) is greater than maximum (%u MB), using "
-                         "defaults (%u MB, %u MB)",
+            MOT_LOG_WARN("Invalid local memory configuration: minimum (%" PRIu64
+                         " MB) is greater than maximum (%" PRIu64 " MB), using defaults (%" PRIu64 " MB, %" PRIu64
+                         " MB)",
                 m_localMemoryMinLimitMB,
                 m_localMemoryMaxLimitMB,
                 DEFAULT_MIN_MOT_LOCAL_MEMORY_MB,
                 DEFAULT_MAX_MOT_LOCAL_MEMORY_MB);
         }
-        UpdateIntConfigItem(m_localMemoryMaxLimitMB, DEFAULT_MAX_MOT_LOCAL_MEMORY_MB, "max_mot_local_memory");
-        UpdateIntConfigItem(m_localMemoryMinLimitMB, DEFAULT_MIN_MOT_LOCAL_MEMORY_MB, "min_mot_local_memory");
+        UpdateIntConfigItem(m_localMemoryMaxLimitMB,
+            DEFAULT_MAX_MOT_LOCAL_MEMORY_MB,
+            "max_mot_local_memory",
+            MIN_MAX_MOT_LOCAL_MEMORY_MB,
+            MAX_MAX_MOT_LOCAL_MEMORY_MB);
+        UpdateIntConfigItem(m_localMemoryMinLimitMB,
+            DEFAULT_MIN_MOT_LOCAL_MEMORY_MB,
+            "min_mot_local_memory",
+            MIN_MIN_MOT_LOCAL_MEMORY_MB,
+            MAX_MIN_MOT_LOCAL_MEMORY_MB);
     }
     UPDATE_ABS_MEM_CFG(m_sessionMemoryMaxLimitKB,
         "max_mot_session_memory",
@@ -860,15 +866,24 @@ void MOTConfiguration::LoadConfig()
     // validate that min <= max
     if ((m_sessionMemoryMaxLimitKB > 0) && (m_sessionMemoryMinLimitKB > m_sessionMemoryMaxLimitKB)) {
         if (!m_suppressLog) {
-            MOT_LOG_WARN("Invalid session memory configuration: minimum (%u KB) is greater than maximum (%u KB), using "
-                         "defaults (%u KB, %u KB)",
+            MOT_LOG_WARN("Invalid session memory configuration: minimum (%" PRIu64
+                         " KB) is greater than maximum (%" PRIu64 " KB), using defaults (%" PRIu64 " KB, %" PRIu64
+                         " KB)",
                 m_sessionMemoryMinLimitKB,
                 m_sessionMemoryMaxLimitKB,
                 DEFAULT_MIN_MOT_SESSION_MEMORY_KB,
                 DEFAULT_MAX_MOT_SESSION_MEMORY_KB);
         }
-        UpdateIntConfigItem(m_sessionMemoryMaxLimitKB, DEFAULT_MAX_MOT_SESSION_MEMORY_KB, "max_mot_session_memory");
-        UpdateIntConfigItem(m_sessionMemoryMinLimitKB, DEFAULT_MIN_MOT_SESSION_MEMORY_KB, "min_mot_session_memory");
+        UpdateIntConfigItem(m_sessionMemoryMaxLimitKB,
+            DEFAULT_MAX_MOT_SESSION_MEMORY_KB,
+            "max_mot_session_memory",
+            MIN_MAX_MOT_SESSION_MEMORY_KB,
+            MAX_MAX_MOT_SESSION_MEMORY_KB);
+        UpdateIntConfigItem(m_sessionMemoryMinLimitKB,
+            DEFAULT_MIN_MOT_SESSION_MEMORY_KB,
+            "min_mot_session_memory",
+            MIN_MIN_MOT_SESSION_MEMORY_KB,
+            MAX_MIN_MOT_SESSION_MEMORY_KB);
     }
     UPDATE_USER_CFG(m_reserveMemoryMode, "reserve_memory_mode", DEFAULT_RESERVE_MEMORY_MODE);
     UPDATE_USER_CFG(m_storeMemoryPolicy, "store_memory_policy", DEFAULT_STORE_MEMORY_POLICY);
@@ -949,6 +964,101 @@ void MOTConfiguration::LoadConfig()
     UpdateComponentLogLevel();
 
     MOT_LOG_TRACE("Main configuration loaded");
+}
+
+void MOTConfiguration::UpdateMemConfigItem(uint64_t& oldValue, const char* name, const char* defaultStrValue,
+    uint64_t scale, uint64_t lowerBound, uint64_t upperBound, bool allowPercentage)
+{
+    // we prepare first a default value from the string default value
+    uint64_t defaultValueBytes = allowPercentage ? ParseMemoryValueBytes(defaultStrValue, (uint64_t)-1, name)
+                                                 : ParseMemoryUnit(defaultStrValue, (uint64_t)-1, name);
+    MOT_LOG_TRACE(
+        "Converted memory default string value %s to byte value: %" PRIu64, defaultStrValue, defaultValueBytes);
+
+    // now we carefully examine the configuration item type
+    const LayeredConfigTree* cfg = ConfigManager::GetInstance().GetLayeredConfigTree();
+    const ConfigItem* cfgItem = cfg->GetConfigItem(name);
+    if (cfgItem == nullptr) {
+        // just keep default
+        MOT_LOG_TRACE("Configuration item %s not found, keeping default %" PRIu64 ".", name, defaultValueBytes);
+    } else if (cfgItem->GetClass() != ConfigItemClass::CONFIG_ITEM_VALUE) {
+        MOT_LOG_ERROR("Invalid configuration for %s: expected value item, got %s item. Keeping default value %" PRIu64
+                      ".",
+            name,
+            ConfigItemClassToString(cfgItem->GetClass()),
+            defaultValueBytes);
+        UpdateIntConfigItem(oldValue, defaultValueBytes / scale, name, lowerBound, upperBound);
+    } else {
+        // now we carefully examine the value type
+        ConfigValue* cfgValue = (ConfigValue*)cfgItem;
+        if (cfgValue->IsIntegral()) {
+            // only a number was specified, so it is interpreted as bytes
+            uint64_t memoryValueBytes = cfg->GetIntegerConfigValue<uint64_t>(name, defaultValueBytes);
+            UpdateIntConfigItem(oldValue, memoryValueBytes / scale, name, lowerBound, upperBound);
+            MOT_LOG_TRACE("Loading integral memory value %s as bytes: %" PRIu64, name, memoryValueBytes);
+        } else if (cfgValue->GetConfigValueType() == ConfigValueType::CONFIG_VALUE_STRING) {
+            // value was parsed as string, meaning we have units or percentage specifier
+            const char* strValue = cfg->GetStringConfigValue(name, defaultStrValue);
+            if ((strValue != nullptr) && (strValue[0] != 0)) {
+                uint64_t memoryValueBytes = allowPercentage ? ParseMemoryValueBytes(strValue, (uint64_t)-1, name)
+                                                            : ParseMemoryUnit(strValue, (uint64_t)-1, name);
+                UpdateIntConfigItem(oldValue, memoryValueBytes / scale, name, lowerBound, upperBound);
+            }
+        } else {
+            // unexpected value type
+            MOT_LOG_WARN("Unexpected configuration item %s value type: %s. Keeping default value: %" PRIu64 ".",
+                name,
+                ConfigValueTypeToString(cfgValue->GetConfigValueType()),
+                defaultValueBytes);
+            UpdateIntConfigItem(oldValue, defaultValueBytes / scale, name, lowerBound, upperBound);
+        }
+    }
+}
+
+void MOTConfiguration::UpdateTimeConfigItem(uint64_t& oldValue, const char* name, const char* defaultStrValue,
+    uint64_t scale, uint64_t lowerBound, uint64_t upperBound)
+{
+    // we prepare first a default value from the string default value
+    uint64_t defaultValueUSecs = ParseTimeValueMicros(defaultStrValue, (uint64_t)-1, name);
+    MOT_LOG_TRACE("Converted time default string value %s to usec value: %" PRIu64, defaultStrValue, defaultValueUSecs);
+
+    // now we carefully examine the configuration item type
+    const LayeredConfigTree* cfg = ConfigManager::GetInstance().GetLayeredConfigTree();
+    const ConfigItem* cfgItem = cfg->GetConfigItem(name);
+    if (cfgItem == nullptr) {
+        // just keep default
+        MOT_LOG_TRACE("Configuration item %s not found, keeping default %" PRIu64 ".", name, defaultValueUSecs);
+    } else if (cfgItem->GetClass() != ConfigItemClass::CONFIG_ITEM_VALUE) {
+        MOT_LOG_ERROR("Invalid configuration for %s: expected value item, got %s item. Keeping default value %" PRIu64
+                      ".",
+            name,
+            ConfigItemClassToString(cfgItem->GetClass()),
+            defaultValueUSecs);
+        UpdateIntConfigItem(oldValue, defaultValueUSecs / scale, name, lowerBound, upperBound);
+    } else {
+        // now we carefully examine the value type
+        ConfigValue* cfgValue = (ConfigValue*)cfgItem;
+        if (cfgValue->IsIntegral()) {
+            // only a number was specified, so it is interpreted as micro-seconds
+            uint64_t timeValueUSecs = cfg->GetIntegerConfigValue<uint64_t>(name, defaultValueUSecs);
+            UpdateIntConfigItem(oldValue, timeValueUSecs / scale, name, lowerBound, upperBound);
+            MOT_LOG_TRACE("Loading integral time value %s as micro-seconds: %" PRIu64, name, timeValueUSecs);
+        } else if (cfgValue->GetConfigValueType() == ConfigValueType::CONFIG_VALUE_STRING) {
+            // value was parsed as string, meaning we have units
+            const char* strValue = cfg->GetStringConfigValue(name, defaultStrValue);
+            if ((strValue != nullptr) && (strValue[0] != 0)) {
+                uint64_t timeValueUSecs = ParseTimeValueMicros(strValue, (uint64_t)-1, name);
+                UpdateIntConfigItem(oldValue, timeValueUSecs / scale, name, lowerBound, upperBound);
+            }
+        } else {
+            // unexpected value type
+            MOT_LOG_WARN("Unexpected configuration item %s value type: %s. Keeping default value: %" PRIu64 ".",
+                name,
+                ConfigValueTypeToString(cfgValue->GetConfigValueType()),
+                defaultValueUSecs);
+            UpdateIntConfigItem(oldValue, defaultValueUSecs / scale, name, lowerBound, upperBound);
+        }
+    }
 }
 
 void MOTConfiguration::UpdateComponentLogLevel()
@@ -1083,7 +1193,7 @@ uint64_t MOTConfiguration::ParseMemoryPercentTotal(const char* memoryValue, uint
     // we expect to parse a number between 0-100, and then followed by "%"
     int percent = ParseMemoryPercent(memoryValue);
     if (percent >= 0) {
-        memoryValueBytes = ((uint64_t)m_totalMemoryMb) * MEGA_BYTE * percent / 100;
+        memoryValueBytes = m_totalMemoryMb * MEGA_BYTE * percent / 100;
         if (!m_suppressLog) {
             MOT_LOG_INFO(
                 "Loaded %s: %d%% from total = %" PRIu64 " MB", cfgPath, percent, memoryValueBytes / 1024ul / 1024ul);
@@ -1102,7 +1212,8 @@ uint64_t MOTConfiguration::ParseMemoryUnit(const char* memoryValue, uint64_t def
     if (endptr == memoryValue) {
         MOT_LOG_WARN("Invalid %s memory value format: %s (expecting value digits)", cfgPath, memoryValue);
     } else if (*endptr == 0) {
-        MOT_LOG_WARN("Invalid %s memory value format: %s (expecting unit type after value)", cfgPath, memoryValue);
+        MOT_LOG_TRACE("Missing %s memory value units: bytes assumed", cfgPath, memoryValue);
+        memoryValueBytes = value;
     } else {
         // get unit type and convert to mega-bytes
         mot_string suffix(endptr);
@@ -1146,26 +1257,32 @@ uint64_t MOTConfiguration::ParseTimeValueMicros(const char* timeValue, uint64_t 
         // get unit type and convert to mega-bytes
         mot_string suffix(endptr);
         suffix.trim();
-        if ((suffix.compare_no_case("d") == 0) || (suffix.compare_no_case("days") == 0)) {
+        if ((suffix.compare_no_case("d") == 0) || (suffix.compare_no_case("days") == 0) ||
+            (suffix.compare_no_case("day") == 0)) {
             MOT_LOG_TRACE("Loaded %s: %u days", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 24ull * 60ull * 60ull * 1000ull * 1000ull;
-        } else if ((suffix.compare_no_case("h") == 0) || (suffix.compare_no_case("hours") == 0)) {
+        } else if ((suffix.compare_no_case("h") == 0) || (suffix.compare_no_case("hours") == 0) ||
+                   (suffix.compare_no_case("hour") == 0)) {
             MOT_LOG_TRACE("Loaded %s: %u hours", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 60ull * 60ull * 1000ull * 1000ull;
         } else if ((suffix.compare_no_case("m") == 0) || (suffix.compare_no_case("mins") == 0) ||
-                   (suffix.compare_no_case("minutes") == 0)) {
+                   (suffix.compare_no_case("minutes") == 0) || (suffix.compare_no_case("min") == 0) ||
+                   (suffix.compare_no_case("minute") == 0)) {
             MOT_LOG_TRACE("Loaded %s: %u minutes", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 60ull * 1000ull * 1000ull;
         } else if ((suffix.compare_no_case("s") == 0) || (suffix.compare_no_case("secs") == 0) ||
-                   (suffix.compare_no_case("seconds") == 0)) {
+                   (suffix.compare_no_case("seconds") == 0) || (suffix.compare_no_case("sec") == 0) ||
+                   (suffix.compare_no_case("second") == 0)) {
             MOT_LOG_TRACE("Loaded %s: %u seconds", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 1000ull * 1000ull;
         } else if ((suffix.compare_no_case("ms") == 0) || (suffix.compare_no_case("millis") == 0) ||
-                   (suffix.compare_no_case("milliseocnds") == 0)) {
+                   (suffix.compare_no_case("milliseconds") == 0) || (suffix.compare_no_case("milli") == 0) ||
+                   (suffix.compare_no_case("millisecond") == 0)) {
             MOT_LOG_TRACE("Loaded %s: %u milli-seconds", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 1000ull;
         } else if ((suffix.compare_no_case("us") == 0) || (suffix.compare_no_case("micros") == 0) ||
-                   (suffix.compare_no_case("microseocnds") == 0)) {
+                   (suffix.compare_no_case("microseconds") == 0) || (suffix.compare_no_case("micro") == 0) ||
+                   (suffix.compare_no_case("microsecond") == 0)) {
             MOT_LOG_TRACE("Loaded %s: %u micro-seconds", cfgPath, value);
             timeValueMicors = ((uint64_t)value);
         } else {

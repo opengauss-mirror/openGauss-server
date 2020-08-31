@@ -107,9 +107,9 @@ public:
     }
 
     /** @brief Configures the total memory used as reference for computing memory percentage values. */
-    inline void SetTotalMemoryMb(uint32_t totalMemoryMb)
+    inline void SetTotalMemoryMb(uint64_t totalMemoryMb)
     {
-        MOT_LOG_INFO("Configuring total memory for relative memory values to: %u MB", totalMemoryMb);
+        MOT_LOG_INFO("Configuring total memory for relative memory values to: %" PRIu64 " MB", totalMemoryMb);
         m_totalMemoryMb = totalMemoryMb;
     }
 
@@ -167,7 +167,7 @@ public:
     std::string m_checkpointDir;
 
     /** @var checkpoint segments size in bytes. */
-    uint32_t m_checkpointSegThreshold;
+    uint64_t m_checkpointSegThreshold;
 
     /** @var number of worker threads to spawn to perform checkpoint. */
     uint32_t m_checkpointWorkers;
@@ -209,10 +209,10 @@ public:
     bool m_enableStats;
 
     /** Statistics printing period seconds. */
-    uint32_t m_statPrintPeriodSeconds;
+    uint64_t m_statPrintPeriodSeconds;
 
     /** Full statistics printing period in seconds. */
-    uint32_t m_statPrintFullPeriodSeconds;
+    uint64_t m_statPrintFullPeriodSeconds;
 
     /** @var Enable statistics gathering and printing during redo log recovery. */
     bool m_enableLogRecoveryStats;
@@ -278,22 +278,22 @@ public:
     bool m_lazyLoadChunkDirectory;
 
     /** @var Maximum global memory limit in megabytes. */
-    uint32_t m_globalMemoryMaxLimitMB;
+    uint64_t m_globalMemoryMaxLimitMB;
 
     /** @var Minimum global memory limit in megabytes (implies pre-allocation and minimum reservation). */
-    uint32_t m_globalMemoryMinLimitMB;
+    uint64_t m_globalMemoryMinLimitMB;
 
     /** @var Maximum local (per-node) memory limit in megabytes. */
-    uint32_t m_localMemoryMaxLimitMB;
+    uint64_t m_localMemoryMaxLimitMB;
 
     /** @var Minimum local (per-node) memory limit in megabytes (implies pre-allocation and minimum reservation). */
-    uint32_t m_localMemoryMinLimitMB;
+    uint64_t m_localMemoryMinLimitMB;
 
     /** @var Maximum for single MOT session small memory allocations. */
-    uint32_t m_sessionMemoryMaxLimitKB;
+    uint64_t m_sessionMemoryMaxLimitKB;
 
     /** @var Minimum (pre-allocated) for single MOT session small memory allocations. */
-    uint32_t m_sessionMemoryMinLimitKB;
+    uint64_t m_sessionMemoryMinLimitKB;
 
     /* @var Specifies whether to reserve physical memory on startup (or just virtual). */
     MemReserveMode m_reserveMemoryMode;
@@ -311,13 +311,13 @@ public:
     uint32_t m_highRedMarkPercent;
 
     /** @var The size in megabytes of the session large buffer store. */
-    uint32_t m_sessionLargeBufferStoreSizeMB;
+    uint64_t m_sessionLargeBufferStoreSizeMB;
 
     /** @var The largest object size in megabytes in the session large buffer store. */
-    uint32_t m_sessionLargeBufferStoreMaxObjectSizeMB;
+    uint64_t m_sessionLargeBufferStoreMaxObjectSizeMB;
 
     /** @var The largest single huge object size that can be allocated by any session directly from kernel. */
-    uint32_t m_sessionMaxHugeObjectSizeMB;
+    uint64_t m_sessionMaxHugeObjectSizeMB;
 
     /**********************************************************************/
     // Garbage Collection configuration
@@ -326,13 +326,13 @@ public:
     bool m_gcEnable;
 
     /** @var The threshold in bytes for reclamation to be triggered (per-thread). */
-    uint32_t m_gcReclaimThresholdBytes;
+    uint64_t m_gcReclaimThresholdBytes;
 
     /** @var The amount of objects reclaimed in each cleanup round of a limbo group. */
     uint32_t m_gcReclaimBatchSize;
 
     /** @var The high threshold in bytes for reclamation to be triggered (per-thread). */
-    uint32_t m_gcHighReclaimThresholdBytes;
+    uint64_t m_gcHighReclaimThresholdBytes;
 
     /**********************************************************************/
     // JIT configuration
@@ -411,7 +411,7 @@ private:
     bool m_isSystemHyperThreaded = false;
 
     /** @var The total memory value to be used when loading memory percent values. By default uses system total. */
-    uint32_t m_totalMemoryMb;
+    uint64_t m_totalMemoryMb;
 
     /** @var Controls suppressing of log messages during configuration loading. */
     bool m_suppressLog;
@@ -467,9 +467,9 @@ private:
 
     /**  @var Default checkpoint segments size */
     static constexpr const char* DEFAULT_CHECKPOINT_SEGSIZE = "16 MB";
-    static constexpr uint32_t DEFAULT_CHECKPOINT_SEGSIZE_BYTES = 16 * MEGA_BYTE;
-    static constexpr uint32_t MIN_CHECKPOINT_SEGSIZE_BYTES = 16 * MEGA_BYTE;
-    static constexpr uint32_t MAX_CHECKPOINT_SEGSIZE_BYTES = 512 * MEGA_BYTE;
+    static constexpr uint64_t DEFAULT_CHECKPOINT_SEGSIZE_BYTES = 16 * MEGA_BYTE;
+    static constexpr uint64_t MIN_CHECKPOINT_SEGSIZE_BYTES = 16 * MEGA_BYTE;
+    static constexpr uint64_t MAX_CHECKPOINT_SEGSIZE_BYTES = 512 * MEGA_BYTE;
 
     /** @var Default number of worker threads to spawn */
     static constexpr uint32_t DEFAULT_CHECKPOINT_WORKERS = 3;
@@ -504,13 +504,13 @@ private:
 
     /** @var Default statistics printing period in seconds. */
     static constexpr const char* DEFAULT_STATS_PRINT_PERIOD = "1 minutes";
-    static constexpr uint32_t DEFAULT_STATS_PRINT_PERIOD_SECONDS = 60;
-    static constexpr uint32_t MIN_STATS_PRINT_PERIOD_SECONDS = 1;
-    static constexpr uint32_t MAX_STATS_PRINT_PERIOD_SECONDS = 86400;  // 1 day
+    static constexpr uint64_t DEFAULT_STATS_PRINT_PERIOD_SECONDS = 60;
+    static constexpr uint64_t MIN_STATS_PRINT_PERIOD_SECONDS = 1;
+    static constexpr uint64_t MAX_STATS_PRINT_PERIOD_SECONDS = 86400;  // 1 day
 
     /** @var Default full statistics printing period in seconds. */
     static constexpr const char* DEFAULT_FULL_STATS_PRINT_PERIOD = "5 minutes";
-    static constexpr uint32_t DEFAULT_FULL_STATS_PRINT_PERIOD_SECONDS = 300;
+    static constexpr uint64_t DEFAULT_FULL_STATS_PRINT_PERIOD_SECONDS = 300;
 
     /** @var Default enable DB session statistics printing. */
     static constexpr bool DEFAULT_ENABLE_DB_SESSION_STAT_PRINT = false;
@@ -571,40 +571,40 @@ private:
 
     /** @var Default maximum limit for MOT global memory. */
     static constexpr const char* DEFAULT_MAX_MOT_GLOBAL_MEMORY = "80%";
-    static constexpr uint32_t DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB = 8 * KILO_BYTE;  // 8 GB
-    static constexpr uint32_t MIN_MAX_MOT_GLOBAL_MEMORY_MB = 128;                // 128 MB
-    static constexpr uint32_t MAX_MAX_MOT_GLOBAL_MEMORY_MB = 512 * MEGA_BYTE;    // 512 TB
+    static constexpr uint64_t DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB = 8 * KILO_BYTE;  // 8 GB
+    static constexpr uint64_t MIN_MAX_MOT_GLOBAL_MEMORY_MB = 128;                // 128 MB
+    static constexpr uint64_t MAX_MAX_MOT_GLOBAL_MEMORY_MB = 512 * MEGA_BYTE;    // 512 TB
 
     /** @var Default minimum (pre-allocated) limit for MOT global memory. */
-    static constexpr const char* DEFAULT_MIN_MOT_GLOBAL_MEMORY = "0 GB";
-    static constexpr uint32_t DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB = 0;
-    static constexpr uint32_t MIN_MIN_MOT_GLOBAL_MEMORY_MB = 0;
-    static constexpr uint32_t MAX_MIN_MOT_GLOBAL_MEMORY_MB = 512 * MEGA_BYTE;  // 512 TB
+    static constexpr const char* DEFAULT_MIN_MOT_GLOBAL_MEMORY = "0";
+    static constexpr uint64_t DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB = 0;
+    static constexpr uint64_t MIN_MIN_MOT_GLOBAL_MEMORY_MB = 0;
+    static constexpr uint64_t MAX_MIN_MOT_GLOBAL_MEMORY_MB = 512 * MEGA_BYTE;  // 512 TB
 
     /** @var Default maximum limit for MOT global memory (used to establish new ratio between local and global pools).
      */
     static constexpr const char* DEFAULT_MAX_MOT_LOCAL_MEMORY = "15%";
-    static constexpr uint32_t DEFAULT_MAX_MOT_LOCAL_MEMORY_MB = 2 * KILO_BYTE;  // 2 GB
-    static constexpr uint32_t MIN_MAX_MOT_LOCAL_MEMORY_MB = 64;                 // 64 MB (about 8 normal sessions)
-    static constexpr uint32_t MAX_MAX_MOT_LOCAL_MEMORY_MB = 512 * KILO_BYTE;    // 512 GB (MANY very heavy sessions)
+    static constexpr uint64_t DEFAULT_MAX_MOT_LOCAL_MEMORY_MB = 2 * KILO_BYTE;  // 2 GB
+    static constexpr uint64_t MIN_MAX_MOT_LOCAL_MEMORY_MB = 64;                 // 64 MB (about 8 normal sessions)
+    static constexpr uint64_t MAX_MAX_MOT_LOCAL_MEMORY_MB = 512 * KILO_BYTE;    // 512 GB (MANY very heavy sessions)
 
     /** @var Default minimum (pre-allocated) limit for MOT local memory. */
-    static constexpr const char* DEFAULT_MIN_MOT_LOCAL_MEMORY = "0 GB";
-    static constexpr uint32_t DEFAULT_MIN_MOT_LOCAL_MEMORY_MB = 0;            // no pre-allocation
-    static constexpr uint32_t MIN_MIN_MOT_LOCAL_MEMORY_MB = 0;                // no pre-allocation
-    static constexpr uint32_t MAX_MIN_MOT_LOCAL_MEMORY_MB = 512 * KILO_BYTE;  // max pre-allocate 512 GB
+    static constexpr const char* DEFAULT_MIN_MOT_LOCAL_MEMORY = "0";
+    static constexpr uint64_t DEFAULT_MIN_MOT_LOCAL_MEMORY_MB = 0;            // no pre-allocation
+    static constexpr uint64_t MIN_MIN_MOT_LOCAL_MEMORY_MB = 0;                // no pre-allocation
+    static constexpr uint64_t MAX_MIN_MOT_LOCAL_MEMORY_MB = 512 * KILO_BYTE;  // max pre-allocate 512 GB
 
     /** @var Default maximum for single MOT session small memory allocations. */
-    static constexpr const char* DEFAULT_MAX_MOT_SESSION_MEMORY = "0 MB";
-    static constexpr uint32_t DEFAULT_MAX_MOT_SESSION_MEMORY_KB = 0;  // no session-memory limit
-    static constexpr uint32_t MIN_MAX_MOT_SESSION_MEMORY_KB = 0;
-    static constexpr uint32_t MAX_MAX_MOT_SESSION_MEMORY_KB = 512 * MEGA_BYTE;  // limit single session to 512 GB
+    static constexpr const char* DEFAULT_MAX_MOT_SESSION_MEMORY = "0";
+    static constexpr uint64_t DEFAULT_MAX_MOT_SESSION_MEMORY_KB = 0;  // no session-memory limit
+    static constexpr uint64_t MIN_MAX_MOT_SESSION_MEMORY_KB = 0;
+    static constexpr uint64_t MAX_MAX_MOT_SESSION_MEMORY_KB = 512 * MEGA_BYTE;  // limit single session to 512 GB
 
     /** @var Default minimum (pre-allocated) for single MOT session small memory allocations. */
-    static constexpr const char* DEFAULT_MIN_MOT_SESSION_MEMORY = "0 MB";
-    static constexpr uint32_t DEFAULT_MIN_MOT_SESSION_MEMORY_KB = 0;           // no session-memory pre-allocation
-    static constexpr uint32_t MIN_MIN_MOT_SESSION_MEMORY_KB = 0;               // no session-memory pre-allocation
-    static constexpr uint32_t MAX_MIN_MOT_SESSION_MEMORY_KB = 64 * KILO_BYTE;  // up to 64 MB pre-allocation
+    static constexpr const char* DEFAULT_MIN_MOT_SESSION_MEMORY = "0";
+    static constexpr uint64_t DEFAULT_MIN_MOT_SESSION_MEMORY_KB = 0;           // no session-memory pre-allocation
+    static constexpr uint64_t MIN_MIN_MOT_SESSION_MEMORY_KB = 0;               // no session-memory pre-allocation
+    static constexpr uint64_t MAX_MIN_MOT_SESSION_MEMORY_KB = 64 * KILO_BYTE;  // up to 64 MB pre-allocation
 
     /** @var Default physical or virtual memory reservation. */
     static constexpr MemReserveMode DEFAULT_RESERVE_MEMORY_MODE = MEM_RESERVE_VIRTUAL;
@@ -626,22 +626,22 @@ private:
     static constexpr uint32_t MAX_HIGH_RED_MARK_PERCENT = 95;      // Don't allow disabling high red-mark
 
     /** @var The default size in megabytes of the session large buffer store. */
-    static constexpr const char* DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE = " 0 MB";
-    static constexpr uint32_t DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 0;
-    static constexpr uint32_t MIN_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 0;                // disabled
-    static constexpr uint32_t MAX_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 128 * KILO_BYTE;  // 128 GB
+    static constexpr const char* DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE = "0";
+    static constexpr uint64_t DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 0;
+    static constexpr uint64_t MIN_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 0;                // disabled
+    static constexpr uint64_t MAX_SESSION_LARGE_BUFFER_STORE_SIZE_MB = 128 * KILO_BYTE;  // 128 GB
 
     /** @var The default largest object size in megabytes in the session large buffer store. */
-    static constexpr const char* DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE = "0 MB";
-    static constexpr uint32_t DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 0;  // use calculation
-    static constexpr uint32_t MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 0;
-    static constexpr uint32_t MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 1024;  // 1 GB
+    static constexpr const char* DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE = "0";
+    static constexpr uint64_t DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 0;  // use calculation
+    static constexpr uint64_t MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 0;
+    static constexpr uint64_t MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB = 1024;  // 1 GB
 
     /** @var The default largest object size in megabytes that can be allocated form kernel for sessions. */
     static constexpr const char* DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE = "1 GB";
-    static constexpr uint32_t DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 1024;       // 1 GB
-    static constexpr uint32_t MIN_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 8;              // 8 MB
-    static constexpr uint32_t MAX_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 8 * KILO_BYTE;  // 8 GB
+    static constexpr uint64_t DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 1024;       // 1 GB
+    static constexpr uint64_t MIN_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 8;              // 8 MB
+    static constexpr uint64_t MAX_SESSION_MAX_HUGE_OBJECT_SIZE_MB = 8 * KILO_BYTE;  // 8 GB
 
     /** ------------------ Default Garbage-Collection Configuration ------------ */
     /** @var Enable/disable garbage collection. */
@@ -649,9 +649,9 @@ private:
 
     /** @var The threshold in bytes for reclamation to be triggered (per-thread) */
     static constexpr const char* DEFAULT_GC_RECLAIM_THRESHOLD = "512 KB";
-    static constexpr uint32_t DEFAULT_GC_RECLAIM_THRESHOLD_BYTES = 512 * KILO_BYTE;  // 512 KB
-    static constexpr uint32_t MIN_GC_RECLAIM_THRESHOLD_BYTES = KILO_BYTE;            // 1 KB
-    static constexpr uint32_t MAX_GC_RECLAIM_THRESHOLD_BYTES = 64 * MEGA_BYTE;       // 64 MB
+    static constexpr uint64_t DEFAULT_GC_RECLAIM_THRESHOLD_BYTES = 512 * KILO_BYTE;  // 512 KB
+    static constexpr uint64_t MIN_GC_RECLAIM_THRESHOLD_BYTES = KILO_BYTE;            // 1 KB
+    static constexpr uint64_t MAX_GC_RECLAIM_THRESHOLD_BYTES = 64 * MEGA_BYTE;       // 64 MB
 
     /** @var The amount of objects reclaimed in each cleanup round of a limbo group. */
     static constexpr uint32_t DEFAULT_GC_RECLAIM_BATCH_SIZE = 8 * KILO_BYTE;  // 8 KB entries
@@ -660,9 +660,9 @@ private:
 
     /** @var The high threshold in bytes for reclamation to be triggered (per-thread) */
     static constexpr const char* DEFAULT_GC_HIGH_RECLAIM_THRESHOLD = "8 MB";
-    static constexpr uint32_t DEFAULT_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 8 * MEGA_BYTE;  // 8 MB
-    static constexpr uint32_t MIN_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 1 * MEGA_BYTE;      // 1 MB
-    static constexpr uint32_t MAX_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 64 * MEGA_BYTE;     // 64 MB
+    static constexpr uint64_t DEFAULT_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 8 * MEGA_BYTE;  // 8 MB
+    static constexpr uint64_t MIN_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 1 * MEGA_BYTE;      // 1 MB
+    static constexpr uint64_t MAX_GC_HIGH_RECLAIM_THRESHOLD_BYTES = 64 * MEGA_BYTE;     // 64 MB
 
     /** ------------------ Default JIT Configuration ------------ */
     /** @var Default enable JIT compilation and execution. */
@@ -697,7 +697,7 @@ private:
     static constexpr bool DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION = false;
 
     /** @var The default total memory reference used for calculating memory percent value. */
-    static constexpr uint32_t DEFAULT_TOTAL_MEMORY_MB = 10 * KILO_BYTE;  // 10 MB
+    static constexpr uint64_t DEFAULT_TOTAL_MEMORY_MB = 10 * KILO_BYTE;  // 10 MB
 
     /** @brief Loads configuration from main configuration. */
     void LoadConfig();
@@ -713,8 +713,7 @@ private:
     static void UpdateStringConfigItem(std::string& oldValue, const char* newValue, const char* name);
 
     template <typename T>
-    void UpdateIntConfigItem(
-        uint64_t& oldValue, T newValue, const char* name, uint64_t lowerBound = 0, uint64_t upperBound = UINT64_MAX)
+    void UpdateIntConfigItem(uint64_t& oldValue, T newValue, const char* name, uint64_t lowerBound, uint64_t upperBound)
     {
         if ((newValue > upperBound) || (lowerBound > 0 && newValue < lowerBound)) {
             if (!m_suppressLog) {
@@ -733,8 +732,7 @@ private:
     }
 
     template <typename T>
-    void UpdateIntConfigItem(
-        uint32_t& oldValue, T newValue, const char* name, uint32_t lowerBound = 0, uint32_t upperBound = UINT32_MAX)
+    void UpdateIntConfigItem(uint32_t& oldValue, T newValue, const char* name, uint32_t lowerBound, uint32_t upperBound)
     {
         if ((newValue > UINT32_MAX) || (newValue > upperBound) || (lowerBound > 0 && newValue < lowerBound)) {
             if (!m_suppressLog) {
@@ -752,8 +750,7 @@ private:
     }
 
     template <typename T>
-    void UpdateIntConfigItem(
-        uint16_t& oldValue, T newValue, const char* name, uint16_t lowerBound = 0, uint16_t upperBound = UINT16_MAX)
+    void UpdateIntConfigItem(uint16_t& oldValue, T newValue, const char* name, uint16_t lowerBound, uint16_t upperBound)
     {
         if ((newValue > UINT16_MAX) || (newValue > upperBound) || (lowerBound > 0 && newValue < lowerBound)) {
             if (!m_suppressLog) {
@@ -783,6 +780,12 @@ private:
             oldValue = newValue;
         }
     }
+
+    void UpdateMemConfigItem(uint64_t& oldValue, const char* name, const char* strDefaultValue, uint64_t scale,
+        uint64_t lowerBound, uint64_t upperBound, bool allowPercentage);
+
+    void UpdateTimeConfigItem(uint64_t& oldValue, const char* name, const char* strDefaultValue, uint64_t scale,
+        uint64_t lowerBound, uint64_t upperBound);
 
     void UpdateComponentLogLevel();
 

@@ -318,9 +318,9 @@ static int MemRawChunkStoreInitGlobal(MemReserveMode reserveMode, MemStorePolicy
 {
     int result = 0;
     MOT_LOG_TRACE("Initializing global chunk pools");
-    uint32_t chunkReserveCount = g_memGlobalCfg.m_minGlobalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
-    uint32_t highBlackMark = g_memGlobalCfg.m_maxGlobalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
-    uint32_t highRedMark = highBlackMark * g_memGlobalCfg.m_highRedMarkPercent / 100;
+    uint64_t chunkReserveCount = g_memGlobalCfg.m_minGlobalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
+    uint64_t highBlackMark = g_memGlobalCfg.m_maxGlobalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
+    uint64_t highRedMark = highBlackMark * g_memGlobalCfg.m_highRedMarkPercent / 100;
 
     globalChunkPools = (MemRawChunkPool**)calloc(g_memGlobalCfg.m_nodeCount, sizeof(MemRawChunkPool*));
     if (globalChunkPools == NULL) {
@@ -334,8 +334,8 @@ static int MemRawChunkStoreInitGlobal(MemReserveMode reserveMode, MemStorePolicy
             reserveMode,
             storePolicy,
             chunkReserveCount,
-            highBlackMark,
-            highRedMark,
+            (uint32_t)highBlackMark,
+            (uint32_t)highRedMark,
             MEM_ALLOC_GLOBAL);
     }
 
@@ -365,9 +365,9 @@ static int MemRawChunkStoreInitLocal(MemReserveMode reserveMode, MemStorePolicy 
 {
     int result = 0;
     MOT_LOG_TRACE("Initializing local chunk pools");
-    uint32_t chunkReserveCount = g_memGlobalCfg.m_minLocalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
-    uint32_t highBlackMark = g_memGlobalCfg.m_maxLocalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
-    uint32_t highRedMark = highBlackMark;  // no emergency state for local pools
+    uint64_t chunkReserveCount = g_memGlobalCfg.m_minLocalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
+    uint64_t highBlackMark = g_memGlobalCfg.m_maxLocalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
+    uint64_t highRedMark = highBlackMark;  // no emergency state for local pools
 
     localChunkPools = (MemRawChunkPool**)calloc(g_memGlobalCfg.m_nodeCount, sizeof(MemRawChunkPool*));
     if (localChunkPools == NULL) {
@@ -377,8 +377,13 @@ static int MemRawChunkStoreInitLocal(MemReserveMode reserveMode, MemStorePolicy 
             (unsigned)(g_memGlobalCfg.m_nodeCount * sizeof(MemRawChunkPool*)));
         result = MOT_ERROR_OOM;
     } else {
-        result = InitChunkPools(
-            localChunkPools, reserveMode, storePolicy, chunkReserveCount, highBlackMark, highRedMark, MEM_ALLOC_LOCAL);
+        result = InitChunkPools(localChunkPools,
+            reserveMode,
+            storePolicy,
+            chunkReserveCount,
+            (uint32_t)highBlackMark,
+            (uint32_t)highRedMark,
+            MEM_ALLOC_LOCAL);
     }
 
     if (result != 0) {

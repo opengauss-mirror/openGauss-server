@@ -112,8 +112,8 @@ GcManager* GcManager::Make(int purpose, int threadId, int rcuMaxFreeCount)
         } else {
             MOTConfiguration& cfg = GetGlobalConfiguration();
             gc->m_isGcEnabled = cfg.m_gcEnable;
-            gc->m_limboSizeLimit = cfg.m_gcReclaimThresholdBytes;
-            gc->m_limboSizeLimitHigh = cfg.m_gcHighReclaimThresholdBytes;
+            gc->m_limboSizeLimit = (uint32_t)cfg.m_gcReclaimThresholdBytes;
+            gc->m_limboSizeLimitHigh = (uint32_t)cfg.m_gcHighReclaimThresholdBytes;
             gc->m_rcuFreeCount = cfg.m_gcReclaimBatchSize;
             if (threadId == 0) {
                 MOT_LOG_INFO(

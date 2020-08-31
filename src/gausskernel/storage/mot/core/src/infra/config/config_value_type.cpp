@@ -90,4 +90,16 @@ extern const char* ConfigValueTypeToString(ConfigValueType valueType)
     }
     return CONFIG_VALUE_UNDEFINED_STR;
 }
+
+extern bool IsConfigValueIntegral(ConfigValueType valueType)
+{
+    bool result = false;
+    if ((valueType == ConfigValueType::CONFIG_VALUE_INT64) || (valueType == ConfigValueType::CONFIG_VALUE_INT32) ||
+        (valueType == ConfigValueType::CONFIG_VALUE_INT16) || (valueType == ConfigValueType::CONFIG_VALUE_INT8) ||
+        (valueType == ConfigValueType::CONFIG_VALUE_UINT64) || (valueType == ConfigValueType::CONFIG_VALUE_UINT32) ||
+        (valueType == ConfigValueType::CONFIG_VALUE_UINT16) || (valueType == ConfigValueType::CONFIG_VALUE_UINT8)) {
+        result = true;
+    }
+    return result;
+}
 }  // namespace MOT

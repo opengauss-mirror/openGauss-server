@@ -92,13 +92,13 @@ public:
      * @param fullPathName The full path name of the configuration array.
      * @return The configuration array, or null pointer if none was found by this name.
      */
-    inline const ConfigArray* getConfigArray(const char* fullPathName) const
+    inline const ConfigArray* GetConfigArray(const char* fullPathName) const
     {
         return GetQualifiedConfigItem<ConfigArray>(fullPathName);
     }
 
     /**
-     * @brief Retrieves a typed configuration value.
+     * @brief Retrieves a typed configuration value. For string types use @ref GetStringConfigValue().
      * @param fullPathName The full path name of the configuration value.
      * @param defaultValue The default value to return if not found.
      * @return The configuration value, or null pointer if none was found by this name.
@@ -106,14 +106,10 @@ public:
     template <typename T>
     inline const T& GetConfigValue(const char* fullPathName, const T& defaultValue) const
     {
-        const TypedConfigValue<T>* configValue = GetQualifiedConfigItem<TypedConfigValue<T>>(fullPathName);
+        const TypedConfigValue<T>* configValue = (const TypedConfigValue<T>*)GetQualifiedConfigValue<T>(fullPathName);
         if (configValue != nullptr) {
-            if (configValue->GetConfigValueType() != ConfigValueTypeMapper<T>::CONFIG_VALUE_TYPE) {
-                MOT_LOG_ERROR("Unexpected item value type: %s (%s instead of %s %d)",
-                    fullPathName,
-                    ConfigValueTypeToString(configValue->GetConfigValueType()),
-                    ConfigValueTypeToString(ConfigValueTypeMapper<T>::CONFIG_VALUE_TYPE),
-                    (int)ConfigValueTypeMapper<T>::CONFIG_VALUE_TYPE);
+            if (!configValue->IsValid()) {
+                MOT_LOG_ERROR("Configuration value of %s is invalid (OOM in string allocation?)", fullPathName);
             } else {
                 return configValue->GetValue();
             }
@@ -131,9 +127,14 @@ public:
     inline const char* GetStringConfigValue(const char* fullPathName, const char* defaultValue) const
     {
         const char* result = defaultValue;
-        const StringConfigValue* configValue = GetQualifiedConfigItem<StringConfigValue>(fullPathName);
+        const StringConfigValue* configValue =
+            (const StringConfigValue*)GetQualifiedConfigValue<mot_string>(fullPathName);
         if (configValue != nullptr) {
-            result = configValue->GetValue().c_str();
+            if (!configValue->IsValid()) {
+                MOT_LOG_ERROR("Configuration value of %s is invalid (OOM in string allocation?)", fullPathName);
+            } else {
+                result = configValue->GetValue().c_str();
+            }
         }
         return result;
     }
@@ -149,9 +150,16 @@ public:
     inline T GetUserConfigValue(const char* fullPathName, const T& defaultValue) const
     {
         T result = defaultValue;
-        const StringConfigValue* configValue = GetQualifiedConfigItem<StringConfigValue>(fullPathName);
+        const StringConfigValue* configValue =
+            (const StringConfigValue*)GetQualifiedConfigValue<mot_string>(fullPathName);
         if (configValue != nullptr) {
-            if (!TypeFormatter<T>::FromString(configValue->GetValue().c_str(), result)) {
+            if (!configValue->IsValid()) {
+                MOT_LOG_ERROR("Configuration value of %s is invalid (OOM in string allocation?)", fullPathName);
+            } else if (!TypeFormatter<T>::FromString(configValue->GetValue().c_str(), result)) {
+                mot_string stringValue;
+                MOT_LOG_WARN("Failed to convert string configuration item %s to user type. Using default %s.",
+                    fullPathName,
+                    TypeFormatter<T>::ToString(defaultValue, stringValue));
                 result = defaultValue;
             }
         }
@@ -168,7 +176,7 @@ public:
     inline const T GetIntegerConfigValue(const char* fullPathName, const T& defaultValue) const
     {
         const ConfigValue* configValue = GetQualifiedConfigItem<ConfigValue>(fullPathName);
-        if (configValue) {
+        if (configValue != nullptr) {
             switch (configValue->GetConfigValueType()) {
                 case ConfigValueType::CONFIG_VALUE_INT64:
                     return SafeCast<T, int64_t>((TypedConfigValue<int64_t>*)configValue, defaultValue);
@@ -231,6 +239,38 @@ private:
                 (int)ConfigItemClassMapper<T>::CONFIG_ITEM_CLASS);
         } else {
             result = static_cast<const T*>(item);
+        }
+        return result;
+    }
+
+    /**
+     * @brief Retrieves a qualified configuration value. Value type is checked according to the template type.
+     * @param fullPathName The full path name of the configuration array.
+     * @return The configuration value, or null pointer if none was found by this name, or type does not match.
+     */
+    template <typename T>
+    inline const ConfigValue* GetQualifiedConfigValue(const char* fullPathName) const
+    {
+        const ConfigValue* result = nullptr;
+        const ConfigItem* configItem = GetConfigItem(fullPathName);
+        if (configItem == nullptr) {
+            MOT_LOG_TRACE("Cannot find configuration item: %s", fullPathName);
+        } else if (configItem->GetClass() != ConfigItemClass::CONFIG_ITEM_VALUE) {
+            MOT_LOG_ERROR("Unexpected item class: %s (%s instead of %s)",
+                fullPathName,
+                ConfigItemClassToString(configItem->GetClass()),
+                ConfigItemClassToString(ConfigItemClass::CONFIG_ITEM_VALUE));
+        } else {
+            ConfigValue* configValue = (ConfigValue*)configItem;
+            if (configValue->GetConfigValueType() != ConfigValueTypeMapper<T>::CONFIG_VALUE_TYPE) {
+                MOT_LOG_ERROR("Unexpected item value type: %s (%s instead of %s %d)",
+                    fullPathName,
+                    ConfigValueTypeToString(configValue->GetConfigValueType()),
+                    ConfigValueTypeToString(ConfigValueTypeMapper<T>::CONFIG_VALUE_TYPE),
+                    (int)ConfigValueTypeMapper<T>::CONFIG_VALUE_TYPE);
+            } else {
+                result = configValue;
+            }
         }
         return result;
     }

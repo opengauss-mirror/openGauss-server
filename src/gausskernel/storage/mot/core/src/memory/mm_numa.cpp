@@ -92,9 +92,10 @@ extern void MemNumaInit()
     erc = memset_s(peakLocalMemoryBytes, sizeof(peakLocalMemoryBytes), 0, sizeof(peakLocalMemoryBytes));
     securec_check(erc, "\0", "\0");
 
-    maxGlobalMemoryBytes = ((uint64_t)g_memGlobalCfg.m_maxGlobalMemoryMb) * MEGABYTE;
-    maxLocalMemoryBytes = ((uint64_t)g_memGlobalCfg.m_maxLocalMemoryMb) * MEGABYTE;
-    MOT_LOG_TRACE("Initialized global limit to %u MB (%" PRIu64 " bytes), and local limit to %u MB (%" PRIu64 " bytes)",
+    maxGlobalMemoryBytes = g_memGlobalCfg.m_maxGlobalMemoryMb * MEGABYTE;
+    maxLocalMemoryBytes = g_memGlobalCfg.m_maxLocalMemoryMb * MEGABYTE;
+    MOT_LOG_TRACE("Initialized global limit to %" PRIu64 " MB (%" PRIu64 " bytes), and local limit to %" PRIu64
+                  " MB (%" PRIu64 " bytes)",
         g_memGlobalCfg.m_maxGlobalMemoryMb,
         maxGlobalMemoryBytes,
         g_memGlobalCfg.m_maxLocalMemoryMb,

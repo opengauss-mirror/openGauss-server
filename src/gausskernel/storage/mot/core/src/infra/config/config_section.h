@@ -86,11 +86,13 @@ public:
 
     /**
      * @brief Builds the section by adding a sub-item.
-     * @param config_item The direct configuration item to add as a child of this section. It could be
-     * another section or a terminal value.
+     * @param config_item The direct configuration item to add as a child of this section. It could be another section
+     * or a terminal value.
+     * @param[opt] replaceIfExists Specifies whether to replace an existing item if it already exists by the given name.
+     * This is relevant only for configuration values, not for configuration sections or arrays.
      * @return True if the item added or false if a configuration item by that name already exists.
      */
-    bool AddConfigItem(ConfigItem* config_item);
+    bool AddConfigItem(ConfigItem* configItem, bool replaceIfExists = false);
 
     /**
      * @brief Merges the given section into this section.
@@ -225,7 +227,7 @@ public:
      * @return The typed sub-value, or null pointer if not found.
      */
     template <typename T>
-    inline TypedConfigValue<T>* MmodifyConfigValue(const char* name)
+    inline TypedConfigValue<T>* ModifyConfigValue(const char* name)
     {
         TypedConfigValue<T>* result = nullptr;
         ConfigValueMap::iterator itr = m_valueMap.find(name);
@@ -286,9 +288,10 @@ private:
     /**
      * @brief Builds the section by adding a sub-value.
      * @param configValue The direct configuration sub-value to add as a child of this section.
+     * @param replaceIfExists Specifies whether to replace an existing item if it already exists by the given name.
      * @return True if the item added or false if a configuration item by that name already exists.
      */
-    bool AddConfigValue(ConfigValue* configValue);
+    bool AddConfigValue(ConfigValue* configValue, bool replaceIfExists);
 
     /**
      * @brief Builds the section by adding a sub-array.

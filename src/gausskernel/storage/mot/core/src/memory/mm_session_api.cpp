@@ -61,7 +61,7 @@ extern int MemSessionApiInit()
 {
     int result = 0;
     MOT_LOG_TRACE("Initializing session API");
-    memSessionHugeBufferMaxObjectSizeBytes = ((uint64_t)g_memGlobalCfg.m_sessionMaxHugeObjectSizeMb) * MEGA_BYTE;
+    memSessionHugeBufferMaxObjectSizeBytes = g_memGlobalCfg.m_sessionMaxHugeObjectSizeMb * MEGA_BYTE;
 
     int rc = pthread_mutex_init(&g_sessionLock, nullptr);
     if (rc != 0) {

@@ -229,7 +229,7 @@ public:
      * @param defaultValue
      * @return
      */
-    inline const char* getStringConfigValue(const char* fullPathName, const char* defaultValue) const
+    inline const char* GetStringConfigValue(const char* fullPathName, const char* defaultValue) const
     {
         const char* result = defaultValue;
         const StringConfigValue* configValue = GetQualifiedConfigItem<StringConfigValue>(fullPathName);
