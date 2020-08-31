@@ -631,7 +631,7 @@ else ifeq ($(PLAT_FORM_STR), kylin_aarch64)
 else ifeq ($(PLAT_FORM_STR), neokylin_aarch64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else
-	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.5.0' '$(DESTDIR)$(libdir)/libcurl.so.4.5.0'
+	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 endif
 
 	rm -rf '$(DESTDIR)$(libdir)/../temp'
