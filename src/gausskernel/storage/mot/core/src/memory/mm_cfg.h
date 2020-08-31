@@ -42,12 +42,12 @@ struct MemCfg {
     uint32_t m_lazyLoadChunkDirectory;
 
     // memory limits
-    uint32_t m_maxGlobalMemoryMb;
-    uint32_t m_minGlobalMemoryMb;
-    uint32_t m_maxLocalMemoryMb;
-    uint32_t m_minLocalMemoryMb;
-    uint32_t m_maxSessionMemoryKb;
-    uint32_t m_minSessionMemoryKb;
+    uint64_t m_maxGlobalMemoryMb;
+    uint64_t m_minGlobalMemoryMb;
+    uint64_t m_maxLocalMemoryMb;
+    uint64_t m_minLocalMemoryMb;
+    uint64_t m_maxSessionMemoryKb;
+    uint64_t m_minSessionMemoryKb;
     MemReserveMode m_reserveMemoryMode;
     MemStorePolicy m_storeMemoryPolicy;
 
@@ -57,9 +57,9 @@ struct MemCfg {
     uint32_t m_highRedMarkPercent;
 
     // session large buffer store
-    uint32_t m_sessionLargeBufferStoreSizeMb;
-    uint32_t m_sessionLargeBufferStoreMaxObjectSizeMb;
-    uint32_t m_sessionMaxHugeObjectSizeMb;
+    uint64_t m_sessionLargeBufferStoreSizeMb;
+    uint64_t m_sessionLargeBufferStoreMaxObjectSizeMb;
+    uint64_t m_sessionMaxHugeObjectSizeMb;
 };
 
 /**
@@ -95,13 +95,13 @@ extern void MemCfgToString(int indent, const char* name, StringBuffer* stringBuf
  * @brief Retrieves the total system memory in megabytes.
  * @return The total system memory in megabytes, or zero if failed.
  */
-extern uint32_t GetTotalSystemMemoryMb();
+extern uint64_t GetTotalSystemMemoryMb();
 
 /**
  * @brief Retrieves the available system memory in mega-bytes.
  * @return The available system memory in megabytes, or zero if failed.
  */
-extern uint32_t GetAvailableSystemMemoryMb();
+extern uint64_t GetAvailableSystemMemoryMb();
 }  // namespace MOT
 
 /**

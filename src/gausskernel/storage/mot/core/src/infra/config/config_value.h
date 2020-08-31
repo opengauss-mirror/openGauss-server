@@ -37,7 +37,9 @@ protected:
      * @param valueType The value type of this configuration value.
      */
     explicit ConfigValue(ConfigValueType valueType)
-        : ConfigItem(ConfigItemClass::CONFIG_ITEM_VALUE), m_valueType(valueType)
+        : ConfigItem(ConfigItemClass::CONFIG_ITEM_VALUE),
+          m_valueType(valueType),
+          m_isIntegral(IsConfigValueIntegral(valueType))
     {}
 
 public:
@@ -54,9 +56,18 @@ public:
         return m_valueType;
     }
 
+    /** @brief Queries whether the value type is integral. */
+    inline bool IsIntegral() const
+    {
+        return m_isIntegral;
+    }
+
 private:
     /** @var The configuration value type. */
     ConfigValueType m_valueType;
+
+    /** @var Specifies whether this is an integral value type. */
+    bool m_isIntegral;
 };
 
 // specialization

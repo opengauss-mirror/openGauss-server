@@ -326,12 +326,12 @@ private:
 
         // get max/min global memory and large allocation store for sessions from configuration
         MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
-        uint32_t globalMemoryMb = motCfg.m_globalMemoryMaxLimitMB;
-        uint32_t localMemoryMb = motCfg.m_localMemoryMaxLimitMB;
-        uint32_t sessionLargeStoreMb = motCfg.m_sessionLargeBufferStoreSizeMB;
+        uint64_t globalMemoryMb = motCfg.m_globalMemoryMaxLimitMB;
+        uint64_t localMemoryMb = motCfg.m_localMemoryMaxLimitMB;
+        uint64_t sessionLargeStoreMb = motCfg.m_sessionLargeBufferStoreSizeMB;
 
         // compare the sum with max_process_memory and system total
-        uint32_t maxReserveMemoryMb = globalMemoryMb + localMemoryMb + sessionLargeStoreMb;
+        uint64_t maxReserveMemoryMb = globalMemoryMb + localMemoryMb + sessionLargeStoreMb;
 
         // if the total memory is less than the required minimum, then issue a warning, fix it and return
         if (maxReserveMemoryMb < MOT_MIN_MEMORY_USAGE_MB) {
@@ -342,24 +342,25 @@ private:
         }
 
         // get system total
-        uint32_t systemTotalMemoryMb = MOT::GetTotalSystemMemoryMb();
+        uint64_t systemTotalMemoryMb = MOT::GetTotalSystemMemoryMb();
         if (systemTotalMemoryMb == 0) {
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Load Configuration", "Cannot retrieve total system memory");
             return false;
         }
 
         // get envelope limit
-        uint32_t processTotalMemoryMb = g_instance.attr.attr_memory.max_process_memory / KILO_BYTE;
+        uint64_t processTotalMemoryMb = g_instance.attr.attr_memory.max_process_memory / KILO_BYTE;
 
         // compute the real limit
-        uint32_t upperLimitMb = min(systemTotalMemoryMb, processTotalMemoryMb);
+        uint64_t upperLimitMb = min(systemTotalMemoryMb, processTotalMemoryMb);
 
         // get dynamic gap we need to preserve between MOT and envelope
-        uint32_t dynamicGapMb = MIN_DYNAMIC_PROCESS_MEMORY / KILO_BYTE;
+        uint64_t dynamicGapMb = MIN_DYNAMIC_PROCESS_MEMORY / KILO_BYTE;
 
-        MOT_LOG_TRACE("Checking for memory limits: globalMemoryMb=%u, localMemoryMb=%u, sessionLargeStoreMb=%u, "
-                      "systemTotalMemoryMb=%u, processTotalMemoryMb=%u, upperLimitMb=%u, dynamicGapMb=%u, "
-                      "max_process_memory=%u",
+        MOT_LOG_TRACE("Checking for memory limits: globalMemoryMb=%" PRIu64 ", localMemoryMb=%" PRIu64
+                      ", sessionLargeStoreMb=%" PRIu64 ", systemTotalMemoryMb=%" PRIu64
+                      ", processTotalMemoryMb=%" PRIu64 ", upperLimitMb=%" PRIu64 ", dynamicGapMb=%" PRIu64
+                      ", max_process_memory=%u",
             globalMemoryMb,
             localMemoryMb,
             sessionLargeStoreMb,
@@ -372,11 +373,12 @@ private:
         // we check that a 2GB gap is preserved
         if (upperLimitMb < maxReserveMemoryMb + dynamicGapMb) {
             // memory restriction conflict, issue warning and adjust values
-            MOT_LOG_TRACE(
-                "MOT engine maximum memory definitions (global: %u MB, local: %u MB, session large store: %u MB, "
-                "total: "
-                "%u MB) breach GaussDB maximum process memory restriction (%u MB) and/or total system memory (%u MB). "
-                "MOT values shall be adjusted accordingly to preserve required gap (%u MB).",
+            MOT_LOG_TRACE("MOT engine maximum memory definitions (global: %" PRIu64 " MB, local: %" PRIu64
+                          " MB, session large "
+                          "store: %" PRIu64 " MB, total: %" PRIu64
+                          " MB) breach GaussDB maximum process memory restriction (%" PRIu64
+                          " MB) and/or total system memory (%" PRIu64 " MB). "
+                          "MOT values shall be adjusted accordingly to preserve required gap (%" PRIu64 " MB).",
                 globalMemoryMb,
                 localMemoryMb,
                 sessionLargeStoreMb,
@@ -386,7 +388,7 @@ private:
                 dynamicGapMb);
 
             // compute new total memory limit for MOT
-            uint32_t newTotalMemoryMb = 0;
+            uint64_t newTotalMemoryMb = 0;
             if (upperLimitMb < dynamicGapMb) {
                 // this can happen only if system memory is less than 2GB, we still allow minor breach
                 MOT_LOG_WARN("Using minimal memory limits in MOT Engine due to system total memory restrictions");
@@ -411,20 +413,20 @@ private:
         return result;
     }
 
-    bool ConfigureMemoryLimits(uint32_t newTotalMemoryMb, uint32_t currentTotalMemoryMb, uint32_t currentGlobalMemoryMb,
-        uint32_t currentLocalMemoryMb)
+    bool ConfigureMemoryLimits(uint64_t newTotalMemoryMb, uint64_t currentTotalMemoryMb, uint64_t currentGlobalMemoryMb,
+        uint64_t currentLocalMemoryMb)
     {
-        uint32_t newGlobalMemoryMb = 0;
-        uint32_t newLocalMemoryMb = 0;
-        uint32_t newSessionLargeStoreMemoryMb = 0;
+        uint64_t newGlobalMemoryMb = 0;
+        uint64_t newLocalMemoryMb = 0;
+        uint64_t newSessionLargeStoreMemoryMb = 0;
 
         // compute new configuration values
         if (currentTotalMemoryMb > 0) {
             // we preserve the existing ratio between global and local memory, but reduce the total sum as required
             double ratio = ((double)newTotalMemoryMb) / ((double)currentTotalMemoryMb);
-            newGlobalMemoryMb = (uint32_t)(currentGlobalMemoryMb * ratio);
+            newGlobalMemoryMb = (uint64_t)(currentGlobalMemoryMb * ratio);
             if (MOT::GetGlobalConfiguration().m_sessionLargeBufferStoreSizeMB > 0) {
-                newLocalMemoryMb = (uint32_t)(currentLocalMemoryMb * ratio);
+                newLocalMemoryMb = (uint64_t)(currentLocalMemoryMb * ratio);
                 newSessionLargeStoreMemoryMb = newTotalMemoryMb - newGlobalMemoryMb - newLocalMemoryMb;
             } else {
                 // if the user configured zero for the session large store, then we want to keep it this way
@@ -433,13 +435,13 @@ private:
             }
         } else {
             // when current total memory is zero we split the new total between global and local in ratio of 4:1
-            newGlobalMemoryMb = (uint32_t)(newTotalMemoryMb * 0.8f);  // 80% to global memory
+            newGlobalMemoryMb = (uint64_t)(newTotalMemoryMb * 0.8f);  // 80% to global memory
             newLocalMemoryMb = newTotalMemoryMb - newGlobalMemoryMb;  // 20% to local memory
             //  session large store remains zero!
         }
 
-        MOT_LOG_WARN(
-            "Adjusting MOT memory limits: global = %u MB, local = %u MB, session large store = %u MB, total = %u MB",
+        MOT_LOG_WARN("Adjusting MOT memory limits: global = %" PRIu64 " MB, local = %" PRIu64
+                     " MB, session large store = %" PRIu64 " MB, total = %" PRIu64 " MB",
             newGlobalMemoryMb,
             newLocalMemoryMb,
             newSessionLargeStoreMemoryMb,
@@ -447,14 +449,14 @@ private:
 
         // stream into MOT new definitions
         MOT::mot_string memCfg;
-        memCfg.format("%u MB", newGlobalMemoryMb);
+        memCfg.format("%" PRIu64 " MB", newGlobalMemoryMb);
         bool result = AddExtStringConfigItem("", "max_mot_global_memory", memCfg.c_str());
         if (result) {
-            memCfg.format("%u MB", newLocalMemoryMb);
+            memCfg.format("%" PRIu64 " MB", newLocalMemoryMb);
             result = AddExtStringConfigItem("", "max_mot_local_memory", memCfg.c_str());
         }
         if (result) {
-            memCfg.format("%u MB", newSessionLargeStoreMemoryMb);
+            memCfg.format("%" PRIu64 " MB", newSessionLargeStoreMemoryMb);
             result = AddExtStringConfigItem("", "session_large_buffer_store_size", memCfg.c_str());
         }
 
@@ -740,9 +742,9 @@ void MOTAdaptor::Init()
     }
 
     // check max process memory here - we do it anyway to protect ourselves from miscalculations
-    uint32_t globalMemoryKb = MOT::g_memGlobalCfg.m_maxGlobalMemoryMb * KILO_BYTE;
-    uint32_t localMemoryKb = MOT::g_memGlobalCfg.m_maxLocalMemoryMb * KILO_BYTE;
-    uint32_t maxReserveMemoryKb = globalMemoryKb + localMemoryKb;
+    uint64_t globalMemoryKb = MOT::g_memGlobalCfg.m_maxGlobalMemoryMb * KILO_BYTE;
+    uint64_t localMemoryKb = MOT::g_memGlobalCfg.m_maxLocalMemoryMb * KILO_BYTE;
+    uint64_t maxReserveMemoryKb = globalMemoryKb + localMemoryKb;
 
     if ((g_instance.attr.attr_memory.max_process_memory < (int32)maxReserveMemoryKb) ||
         ((g_instance.attr.attr_memory.max_process_memory - maxReserveMemoryKb) < MIN_DYNAMIC_PROCESS_MEMORY)) {
@@ -757,8 +759,8 @@ void MOTAdaptor::Init()
             MOT::MOTEngine::DestroyInstance();
             elog(FATAL,
                 "The value of pre-reserved memory for MOT engine is not reasonable: "
-                "Request for a maximum of %u KB global memory, and %u KB session memory (total of %u KB) "
-                "is invalid since max_process_memory is %u KB",
+                "Request for a maximum of %" PRIu64 " KB global memory, and %" PRIu64
+                " KB session memory (total of %" PRIu64 " KB) is invalid since max_process_memory is %u KB",
                 globalMemoryKb,
                 localMemoryKb,
                 maxReserveMemoryKb,

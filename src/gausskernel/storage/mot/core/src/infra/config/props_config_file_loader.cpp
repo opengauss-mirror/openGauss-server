@@ -148,7 +148,7 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
                                 configFilePath,
                                 reader.GetLineNumber(),
                                 line.c_str());
-                        } else if (!currentSection->AddConfigItem(configItem)) {
+                        } else if (!currentSection->AddConfigItem(configItem, true)) {
                             REPORT_PARSE_ERROR(MOT_ERROR_OOM, "Failed to add configuration item to parent section");
                         }
                     } else {

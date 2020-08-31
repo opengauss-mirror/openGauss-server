@@ -130,7 +130,7 @@ bool ConfigSection::GetConfigValueNames(mot_string_list& valueNames) const
     return true;
 }
 
-bool ConfigSection::AddConfigItem(ConfigItem* configItem)
+bool ConfigSection::AddConfigItem(ConfigItem* configItem, bool replaceIfExists /* = false */)
 {
     bool result = false;
     switch (configItem->GetClass()) {
@@ -139,7 +139,7 @@ bool ConfigSection::AddConfigItem(ConfigItem* configItem)
             break;
 
         case ConfigItemClass::CONFIG_ITEM_VALUE:
-            result = AddConfigValue(static_cast<ConfigValue*>(configItem));
+            result = AddConfigValue(static_cast<ConfigValue*>(configItem), replaceIfExists);
             break;
 
         case ConfigItemClass::CONFIG_ITEM_ARRAY:
@@ -271,15 +271,22 @@ bool ConfigSection::AddConfigSection(ConfigSection* configSection)
     return (pairis.second == INSERT_SUCCESS);
 }
 
-bool ConfigSection::AddConfigValue(ConfigValue* configValue)
+bool ConfigSection::AddConfigValue(ConfigValue* configValue, bool replaceIfExists)
 {
     ConfigValueMap::pairis pairis = m_valueMap.insert(ConfigValueMap::value_type(configValue->GetName(), configValue));
     if (pairis.second == INSERT_EXISTS) {
-        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-            "Load Configuration",
-            "Cannot add configuration value %s to section %s: value already exists",
-            configValue->GetName(),
-            GetName());
+        if (replaceIfExists) {
+            ConfigValue* prevValue = pairis.first->second;
+            pairis.first->second = configValue;
+            delete prevValue;
+            pairis.second = INSERT_SUCCESS;
+        } else {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                "Load Configuration",
+                "Cannot add configuration value %s to section %s: value already exists",
+                configValue->GetName(),
+                GetName());
+        }
     } else if (pairis.second == INSERT_FAILED) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
             "Load Configuration",

@@ -63,7 +63,7 @@ enum class ConfigValueType : uint32_t {
     /** @var The configuration value is of type bool. */
     CONFIG_VALUE_BOOL,
 
-    /** @var The configuration value is of type std::string. */
+    /** @var The configuration value is of type MOT::mot_string. */
     CONFIG_VALUE_STRING,
 
     /** @var The configuration value is undefined (parse error). */
@@ -83,6 +83,9 @@ extern ConfigValueType ConfigValueTypeFromString(const char* valueTypeStr);
  * @return The resulting configuration value type string.
  */
 extern const char* ConfigValueTypeToString(ConfigValueType valueType);
+
+/** @brief Queries whether a value type is an integral type. */
+extern bool IsConfigValueIntegral(ConfigValueType valueType);
 }  // namespace MOT
 
 #endif /* CONFIG_VALUE_TYPE_H */

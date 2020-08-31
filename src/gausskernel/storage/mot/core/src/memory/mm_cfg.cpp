@@ -41,8 +41,8 @@ DECLARE_LOGGER(MemCfg, Memory)
 MemCfg g_memGlobalCfg;
 static int memCfgInitOnce = 0;  // initialize only once
 
-static uint32_t totalMemoryMb = 0;
-static uint32_t availableMemoryMb = 0;
+static uint64_t totalMemoryMb = 0;
+static uint64_t availableMemoryMb = 0;
 static int InitTotalAvailMemory();
 static int ValidateCfg();
 
@@ -78,13 +78,13 @@ extern int MemCfgInit()
     g_memGlobalCfg.m_minSessionMemoryKb = motCfg.m_sessionMemoryMinLimitKB;
     g_memGlobalCfg.m_reserveMemoryMode = motCfg.m_reserveMemoryMode;
     g_memGlobalCfg.m_storeMemoryPolicy = motCfg.m_storeMemoryPolicy;
-    MOT_LOG_INFO("Global Memory Limit is configured to: %u MB --> %u MB",
+    MOT_LOG_INFO("Global Memory Limit is configured to: %" PRIu64 " MB --> %" PRIu64 " MB",
         g_memGlobalCfg.m_minGlobalMemoryMb,
         g_memGlobalCfg.m_maxGlobalMemoryMb);
-    MOT_LOG_INFO("Local Memory Limit is configured to: %u MB --> %u MB",
+    MOT_LOG_INFO("Local Memory Limit is configured to: %" PRIu64 " MB --> %" PRIu64 " MB",
         g_memGlobalCfg.m_minLocalMemoryMb,
         g_memGlobalCfg.m_maxLocalMemoryMb);
-    MOT_LOG_INFO("Session Memory Limit is configured to: %u KB --> %u KB (maximum %u sessions)",
+    MOT_LOG_INFO("Session Memory Limit is configured to: %" PRIu64 " KB --> %" PRIu64 " KB (maximum %u sessions)",
         g_memGlobalCfg.m_minSessionMemoryKb,
         g_memGlobalCfg.m_maxSessionMemoryKb,
         g_memGlobalCfg.m_maxConnectionCount);
@@ -153,12 +153,18 @@ extern void MemCfgToString(int indent, const char* name, StringBuffer* stringBuf
         indent,
         "",
         g_memGlobalCfg.m_lazyLoadChunkDirectory ? "Yes" : "No");
-    StringBufferAppend(stringBuffer, "%*sMax Global Memory MB: %u\n", indent, "", g_memGlobalCfg.m_maxGlobalMemoryMb);
-    StringBufferAppend(stringBuffer, "%*sMin Global Memory MB: %u\n", indent, "", g_memGlobalCfg.m_minGlobalMemoryMb);
-    StringBufferAppend(stringBuffer, "%*sMax Local Memory MB: %u\n", indent, "", g_memGlobalCfg.m_maxLocalMemoryMb);
-    StringBufferAppend(stringBuffer, "%*sMin Local Memory MB: %u\n", indent, "", g_memGlobalCfg.m_minLocalMemoryMb);
-    StringBufferAppend(stringBuffer, "%*sMax Session Memory KB: %u\n", indent, "", g_memGlobalCfg.m_maxSessionMemoryKb);
-    StringBufferAppend(stringBuffer, "%*sMin Session Memory KB: %u\n", indent, "", g_memGlobalCfg.m_minSessionMemoryKb);
+    StringBufferAppend(
+        stringBuffer, "%*sMax Global Memory MB: %" PRIu64 "\n", indent, "", g_memGlobalCfg.m_maxGlobalMemoryMb);
+    StringBufferAppend(
+        stringBuffer, "%*sMin Global Memory MB: %" PRIu64 "\n", indent, "", g_memGlobalCfg.m_minGlobalMemoryMb);
+    StringBufferAppend(
+        stringBuffer, "%*sMax Local Memory MB: %" PRIu64 "\n", indent, "", g_memGlobalCfg.m_maxLocalMemoryMb);
+    StringBufferAppend(
+        stringBuffer, "%*sMin Local Memory MB: %" PRIu64 "\n", indent, "", g_memGlobalCfg.m_minLocalMemoryMb);
+    StringBufferAppend(
+        stringBuffer, "%*sMax Session Memory KB: %" PRIu64 "\n", indent, "", g_memGlobalCfg.m_maxSessionMemoryKb);
+    StringBufferAppend(
+        stringBuffer, "%*sMin Session Memory KB: %" PRIu64 "\n", indent, "", g_memGlobalCfg.m_minSessionMemoryKb);
     StringBufferAppend(stringBuffer,
         "%*sReserve Memory Mode: %s\n",
         indent,
@@ -182,25 +188,25 @@ extern void MemCfgToString(int indent, const char* name, StringBuffer* stringBuf
         g_memGlobalCfg.m_chunkPreallocWorkerCount);
     StringBufferAppend(stringBuffer, "%*sHigh Red Mark: %u%%\n", indent, "", g_memGlobalCfg.m_highRedMarkPercent);
     StringBufferAppend(stringBuffer,
-        "%*sSession Large Buffer Store Size MB: %u\n",
+        "%*sSession Large Buffer Store Size MB: %" PRIu64 "\n",
         indent,
         "",
         g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb);
     StringBufferAppend(stringBuffer,
-        "%*sSession Large Buffer Store Max Object Size MB: %u\n",
+        "%*sSession Large Buffer Store Max Object Size MB: %" PRIu64 "\n",
         indent,
         "",
         g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb);
     StringBufferAppend(stringBuffer,
-        "%*sSession Max Huge Object Size MB: %u\n",
+        "%*sSession Max Huge Object Size MB: %" PRIu64 "\n",
         indent,
         "",
         g_memGlobalCfg.m_sessionMaxHugeObjectSizeMb);
 }
 
-extern uint32_t GetTotalSystemMemoryMb()
+extern uint64_t GetTotalSystemMemoryMb()
 {
-    uint32_t result = 0;
+    uint64_t result = 0;
     int res = InitTotalAvailMemory();
     if (res != 0) {
         MOT_REPORT_PANIC(res, "MM Layer Configuration Load", "Failed to load MM Layer configuration");
@@ -210,9 +216,9 @@ extern uint32_t GetTotalSystemMemoryMb()
     return result;
 }
 
-extern uint32_t GetAvailableSystemMemoryMb()
+extern uint64_t GetAvailableSystemMemoryMb()
 {
-    uint32_t result = (uint32_t)-1;
+    uint64_t result = (uint64_t)-1;
     int res = InitTotalAvailMemory();
     if (res != 0) {
         MOT_REPORT_PANIC(res, "MM Layer Configuration Load", "Failed to load MM Layer configuration");
@@ -230,8 +236,8 @@ static int InitTotalAvailMemory()
         if (sysinfo(&si) == 0) {
             totalMemoryMb = si.totalram * si.mem_unit / MEGA_BYTE;
             availableMemoryMb = si.freeram * si.mem_unit / MEGA_BYTE;
-            MOT_LOG_TRACE("Total system memory: %u MB", totalMemoryMb);
-            MOT_LOG_TRACE("Available system memory: %u MB", availableMemoryMb);
+            MOT_LOG_TRACE("Total system memory: %" PRIu64 " MB", totalMemoryMb);
+            MOT_LOG_TRACE("Available system memory: %" PRIu64 " MB", availableMemoryMb);
         } else {
             MOT_REPORT_SYSTEM_PANIC(
                 sysinfo, "MM Layer Configuration Load", "Failed to retrieve total/available system memory");
@@ -280,7 +286,8 @@ static int ValidateCfg()
     if (g_memGlobalCfg.m_minGlobalMemoryMb > g_memGlobalCfg.m_maxGlobalMemoryMb) {
         MOT_REPORT_PANIC(MOT_ERROR_INVALID_CFG,
             "MM Layer Configuration Validation",
-            "Invalid memory configuration: Global memory pre-allocation %u MB exceeds the maximum limit %u MB",
+            "Invalid memory configuration: Global memory pre-allocation %" PRIu64
+            " MB exceeds the maximum limit %" PRIu64 " MB",
             g_memGlobalCfg.m_minGlobalMemoryMb,
             g_memGlobalCfg.m_maxGlobalMemoryMb);
         return MOT_ERROR_INVALID_CFG;
@@ -289,7 +296,8 @@ static int ValidateCfg()
     if (g_memGlobalCfg.m_minLocalMemoryMb > g_memGlobalCfg.m_maxLocalMemoryMb) {
         MOT_REPORT_PANIC(MOT_ERROR_INVALID_CFG,
             "MM Layer Configuration Validation",
-            "Invalid memory configuration: Local memory pre-allocation %u MB exceeds the maximum limit %u MB",
+            "Invalid memory configuration: Local memory pre-allocation %" PRIu64
+            " MB exceeds the maximum limit %" PRIu64 " MB",
             g_memGlobalCfg.m_minLocalMemoryMb,
             g_memGlobalCfg.m_maxLocalMemoryMb);
         return MOT_ERROR_INVALID_CFG;
@@ -299,7 +307,8 @@ static int ValidateCfg()
     if (g_memGlobalCfg.m_maxGlobalMemoryMb > totalMemoryMb) {
         MOT_REPORT_PANIC(MOT_ERROR_INVALID_CFG,
             "MM Layer Configuration Validation",
-            "Invalid memory configuration: Global maximum memory limit %u MB exceeds machine capability %u MB",
+            "Invalid memory configuration: Global maximum memory limit %" PRIu64
+            " MB exceeds machine capability %" PRIu64 " MB",
             g_memGlobalCfg.m_maxGlobalMemoryMb,
             totalMemoryMb);
         return MOT_ERROR_INVALID_CFG;
