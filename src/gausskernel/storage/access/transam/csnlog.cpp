@@ -413,27 +413,6 @@ static CommitSeqNo InternalGetCommitSeqNo(TransactionId xid)
     int slotno;
     CommitSeqNo csn;
 
-    /* Can't ask about stuff that might not be around anymore */
-    TransactionId currGlobalXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
-
-#ifdef ENABLE_MULTIPLE_NODES
-    if (TransactionIdPrecedes(xid, currGlobalXmin))
-#else
-    if (TransactionIdPrecedes(xid, currGlobalXmin) && !RecoveryInProgress())
-#endif
-    {
-        ereport(WARNING,
-            (errcode(ERRCODE_SNAPSHOT_INVALID),
-                (errmsg("Snapshot too old when read CSN, this is a safe error"
-                        "if there is breakdown in gtm of CN log"),
-                    errdetail("current xid %lu is lower than "
-                              "recentGlobalXmin: %lu",
-                        xid,
-                        currGlobalXmin),
-                    errhint("This is a safe error report, will not impact "
-                            "data consistency, retry your query if needed."))));
-    }
-
     if (!TransactionIdIsNormal(xid)) {
         if (xid == InvalidTransactionId)
             return COMMITSEQNO_ABORTED;
