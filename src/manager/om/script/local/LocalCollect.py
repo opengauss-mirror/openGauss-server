@@ -166,7 +166,7 @@ def sendLogFiles():
         cmd = "%s && (if [ -f '%s'/'%s' ];then rm -rf '%s'/'%s';fi)" % \
               (cmd, g_tmpdir, tarName, g_tmpdir, tarName)
         (status, output) = DefaultValue.retryGetstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             g_logger.logExit("Failed to delete %s." % "%s and %s" % (
             g_resultdir, tarName) + " Error:\n%s" % output)
         g_logger.logExit("All collection tasks failed")
@@ -174,16 +174,16 @@ def sendLogFiles():
     cmd = "cd '%s' && tar -zcf '%s' '%s' && chmod %s '%s'" % \
           (g_tmpdir, tarName, HOSTNAME, DefaultValue.FILE_MODE, tarName)
     (status, output) = DefaultValue.retryGetstatusoutput(cmd)
-    if (status != 0):
+    if status != 0:
         g_logger.logExit("Failed to compress %s." % ("directory %s/%s" % \
                                                      (g_tmpdir,
                                                       HOSTNAME))
                          + " Error: \n%s" % output)
 
-    if (g_opts.nodeName != ""):
+    if g_opts.nodeName != "":
         # send  backup file which is compressed  to the node that is
         # currently performing the backup
-        if (g_opts.nodeName == DefaultValue.GetHostIpOrName()):
+        if g_opts.nodeName == DefaultValue.GetHostIpOrName():
             if int(g_opts.speedLimitFlag) == 1:
                 cmd = "rsync --bwlimit=%d '%s'/'%s' '%s'/" % \
                       (g_opts.speedLimitKBs, g_tmpdir, tarName,
@@ -198,7 +198,7 @@ def sendLogFiles():
                   g_opts.speedLimitKBs * 8, g_opts.nodeName, g_tmpdir, tarName,
                   g_opts.outputDir)
         (status, output) = DefaultValue.retryGetstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             g_logger.logExit(
                 "Failed to copy %s." % tarName + " Error:\n%s" % output)
 
@@ -208,7 +208,7 @@ def sendLogFiles():
     cmd = "%s && (if [ -f '%s'/'%s' ];then rm -rf '%s'/'%s';fi)" % \
           (cmd, g_tmpdir, tarName, g_tmpdir, tarName)
     (status, output) = DefaultValue.retryGetstatusoutput(cmd)
-    if (status != 0):
+    if status != 0:
         g_logger.logExit("Failed to delete %s. %s" % (
         "%s and %s" % (g_resultdir, tarName), " Error:\n%s" % output))
 
@@ -219,7 +219,7 @@ def checkParameterEmpty(parameter, parameterName):
     input  : parameter, parameterName
     output : NA
     """
-    if (parameter == ""):
+    if parameter == "":
         GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50001"]
                                % parameterName)
 
@@ -239,7 +239,7 @@ def parseCommandLine():
     except getopt.GetoptError as e:
         # Error exit if an illegal parameter exists
         GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50000"] % str(e))
-    if (len(args) > 0):
+    if len(args) > 0:
         # Error exit if an illegal parameter exists
         GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50000"] %
                                str(args[0]))
@@ -253,7 +253,7 @@ def parseCommandLine():
     parameter_keys = parameter_map.keys()
 
     for key, value in opts:
-        if (key in parameter_keys):
+        if key in parameter_keys:
             if key == "-C":
                 value = value.replace("#", "\"")
             parameter_map[key] = value.strip()
@@ -278,18 +278,18 @@ def parseCommandLine():
     checkParameterEmpty(g_opts.user, "U")
     DefaultValue.checkUser(g_opts.user, False)
     # check log file
-    if (g_opts.logFile == ""):
+    if g_opts.logFile == "":
         g_opts.logFile = DefaultValue.getOMLogPath(DefaultValue.LOCAL_LOG_FILE,
                                                    g_opts.user, "", "")
-    if (not os.path.isabs(g_opts.logFile)):
+    if not os.path.isabs(g_opts.logFile):
         GaussLog.exitWithError(ErrorCode.GAUSS_502["GAUSS_50213"] % "log")
-    if (int(g_opts.speedLimitKBs) < 0):
+    if int(g_opts.speedLimitKBs) < 0:
         GaussLog.exitWithError(ErrorCode.GAUSS_526["GAUSS_53032"])
 
     g_opts.speedLimitKBs = int(g_opts.speedLimitKBs)
 
     # 1048576 KB/s = 1GB/s, which means unlimited.
-    if (g_opts.speedLimitKBs == 0):
+    if g_opts.speedLimitKBs == 0:
         g_opts.speedLimitKBs = 1048576
 
 
@@ -370,7 +370,7 @@ def create_temp_result_folder():
            DefaultValue.KEY_DIRECTORY_MODE, g_resultdir)
     g_logger.debug("Command for creating output directory: %s" % cmd)
     (status, output) = DefaultValue.retryGetstatusoutput(cmd)
-    if (status != 0):
+    if status != 0:
         g_logger.logExit("Failed to create the %s directory." % \
                          ("%s/logfiles and %s/configfiles" % (
                          g_resultdir, g_resultdir)) + " Error:\n%s" % output)
@@ -460,7 +460,7 @@ def basic_info_check():
     # file
     for cmd in cmds:
         (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             g_logger.debug(
                 ("Failed to collect basic information. Error:\n%s." % output) +
                 ("The cmd is %s " % cmd))
@@ -496,7 +496,7 @@ def system_check():
         cmd = cmd.replace("\n", " ")
         if "echo" in cmd:
             continue
-        if (status != 0):
+        if status != 0:
             if "Permission denied" in output:
                 output = "can not print info to file: Permission denied"
             g_jobInfo.failedTask[cmd] = replaceInvalidStr(output)
@@ -682,17 +682,17 @@ def matchFile(begin_t, end_t, fileTime):
     and the end time.
     """
     # both of begin_time and end_time
-    if (begin_t and end_t):
+    if begin_t and end_t:
         for t in fileTime:
-            if (compareTime(t, begin_t) and compareTime(end_t, t)):
+            if compareTime(t, begin_t) and compareTime(end_t, t):
                 return True
     # only begin_time
-    elif (begin_t and (not end_t)):
+    elif begin_t and (not end_t):
         for t in fileTime:
             if compareTime(t, begin_t):
                 return True
     # only end_time
-    elif ((not begin_t) and end_t):
+    elif (not begin_t) and end_t:
         for t in fileTime:
             if compareTime(end_t, t):
                 return True
@@ -858,7 +858,7 @@ def log_copy_for_zenith():
         g_logger.log(json.dumps(g_jobInfo.__dict__))
         raise Exception("")
 
-    if (g_opts.key):
+    if g_opts.key:
         # Look for keyword matching in the dir and write to the specified file
         cmd = "echo \"\"  > %s/logfiles/%s; for f in `find %s -type f`;" \
               " do grep -ai '%s' $f >> %s/logfiles/%s; done" % (
@@ -896,7 +896,7 @@ def log_copy():
     deleteCmd = "cd $GAUSSLOG && if [ -d tmp_gs_collector ];" \
                 "then rm -rf tmp_gs_collector; fi"
 
-    if (g_opts.key is not None and g_opts.key != ""):
+    if g_opts.key is not None and g_opts.key != "":
         g_logger.debug(
             "Keyword for collecting log in base64 encode [%s]." % g_opts.key)
         g_opts.key = base64.b64decode(g_opts.key)
@@ -907,7 +907,7 @@ def log_copy():
         "Speed limit to copy log files is %d KB/s." % g_opts.speedLimitKBs)
 
     # Filter the log files, if has keyword, do not collect prf file
-    if (g_opts.key is not None and g_opts.key != ""):
+    if g_opts.key is not None and g_opts.key != "":
         cmd = "cd $GAUSSLOG && if [ -d tmp_gs_collector ];" \
               "then rm -rf tmp_gs_collector; " \
               "fi && (find . -type f -iname '*.log' -print)" \
@@ -1010,7 +1010,7 @@ def log_copy():
                       (DefaultValue.DIRECTORY_MODE, zipdir,
                        zipFileName, zipdir)
                 (status, output) = subprocess.getstatusoutput(cmd)
-                if (status != 0):
+                if status != 0:
                     g_jobInfo.failedTask[
                         "find log zip files"] = replaceInvalidStr(output)
                     g_logger.log(json.dumps(g_jobInfo.__dict__))
@@ -1022,15 +1022,15 @@ def log_copy():
         g_logger.debug("There is no zip files.")
 
     # Filter keywords
-    if (g_opts.key is not None and g_opts.key != ""):
-        if (len(logs) != 0):
+    if g_opts.key is not None and g_opts.key != "":
+        if len(logs) != 0:
             g_opts.key = g_opts.key.replace('$', '\$')
             g_opts.key = g_opts.key.replace('\"', '\\\"')
             cmd = "cd $GAUSSLOG/tmp_gs_collector && "
             cmd = "%s grep \"%s\" -r * > %s/logfiles/%s" % (
             cmd, g_opts.key, g_resultdir, keyword_result)
             (status, output) = subprocess.getstatusoutput(cmd)
-            if (status != 0 and output != ""):
+            if status != 0 and output != "":
                 cmd = "rm -rf $GAUSSLOG/tmp_gs_collector"
                 (status1, output1) = DefaultValue.retryGetstatusoutput(cmd)
                 g_jobInfo.failedTask[
@@ -1050,7 +1050,7 @@ def log_copy():
             cmd = "touch %s/logfiles/%s && " % (g_resultdir, keyword_result)
             cmd = "%s rm -rf $GAUSSLOG/tmp_gs_collector" % cmd
             (status, output) = DefaultValue.retryGetstatusoutput(cmd)
-            if (status != 0):
+            if status != 0:
                 g_jobInfo.failedTask["touch keyword file"] = replaceInvalidStr(
                     output)
                 g_logger.log(json.dumps(g_jobInfo.__dict__))
@@ -1071,7 +1071,7 @@ def log_copy():
               "&& rm -rf $GAUSSLOG/'%s'" % \
               (cmd, logfiletar)
         (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             g_jobInfo.failedTask[
                 "copy result file and delete tmp file"] = replaceInvalidStr(
                 output)
@@ -1136,7 +1136,7 @@ def xlog_copy():
                       (g_resultdir, g_current_time, g_current_time,
                        g_current_time)
                 (status, output) = subprocess.getstatusoutput(cmd)
-                if (status != 0):
+                if status != 0:
                     g_logger.debug(
                         "Failed to collect xlog. Command %s \n, Error %s \n",
                         (cmd, output))
@@ -1236,7 +1236,7 @@ def parallel_xlog(Inst):
     cmd = getXlogCmd(Inst)
     if len(cmd) > 1:
         (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             g_logger.debug(
                 "Failed to collect xlog files. Command: %s.\n Error: %s\n" % (
                 cmd, output))
@@ -1383,17 +1383,9 @@ def conf_gstack(jobName):
     try:
         # Gets all instances of the cluster
         Instances = []
-        for Inst in g_localnodeinfo.gtms:
-            if "gtm" in ",".join(g_opts.content).lower():
-                Instances.append(Inst)
-        for Inst in g_localnodeinfo.coordinators:
-            if "cn" in ",".join(g_opts.content).lower():
-                Instances.append(Inst)
         for Inst in g_localnodeinfo.datanodes:
             if "dn" in ",".join(g_opts.content).lower():
                 Instances.append(Inst)
-        for Inst in g_localnodeinfo.gtses:
-            Instances.append(Inst)
         # parallel copy configuration files, and get gstack
         if Instances:
             pool = ThreadPool(DefaultValue.getCpuSet())
@@ -1447,7 +1439,7 @@ def plan_simulator_check():
                   "-p %d -D %s/planSimulatorfiles/%s" % \
                   (cmd, db, cnInst.port, g_resultdir, db)
             (status, output) = subprocess.getstatusoutput(cmd)
-            if (status != 0):
+            if status != 0:
                 g_logger.debug(
                     "Failed to Collect plan simulator. "
                     "Command %s.\n Error: %s.\n" % (
@@ -1470,7 +1462,7 @@ def getBakConfCmd(Inst):
     """
     cmd = ""
     pidfile = ""
-    if (Inst.instanceRole == DefaultValue.INSTANCE_ROLE_GTM):
+    if Inst.instanceRole == DefaultValue.INSTANCE_ROLE_GTM:
         if g_need_gstack == 0:
             cmd = "mkdir -p -m %s '%s/configfiles/config_%s/gtm_%s'" % \
                   (
@@ -1508,7 +1500,7 @@ def getBakConfCmd(Inst):
                     "collect gtm_%s process stack info" % Inst.instanceId] = \
                 ErrorCode.GAUSS_535["GAUSS_53511"] % 'GTM'
 
-    elif (Inst.instanceRole == DefaultValue.INSTANCE_ROLE_COODINATOR):
+    elif Inst.instanceRole == DefaultValue.INSTANCE_ROLE_COODINATOR:
         if g_need_gstack == 0:
             cmd = "mkdir -p -m %s '%s/configfiles/config_%s/cn_%s'" % \
                   (
@@ -1542,7 +1534,7 @@ def getBakConfCmd(Inst):
                     "collect cn_%s process stack info" % Inst.instanceId] = \
                 ErrorCode.GAUSS_535["GAUSS_53511"] % 'CN'
 
-    elif (Inst.instanceRole == DefaultValue.INSTANCE_ROLE_DATANODE):
+    elif Inst.instanceRole == DefaultValue.INSTANCE_ROLE_DATANODE:
         if g_need_gstack == 0:
             cmd = "mkdir -p -m %s '%s/configfiles/config_%s/dn_%s'" % \
                   (
@@ -1584,7 +1576,7 @@ def parallel_conf_gstack(Inst):
     """
     (cmd, pidfile) = getBakConfCmd(Inst)
     (status, output) = subprocess.getstatusoutput(cmd)
-    if (status != 0):
+    if status != 0:
         if "command not found" in output:
             g_jobInfo.failedTask["collect process stack info"] = \
             ErrorCode.GAUSS_535["GAUSS_53512"]
@@ -1625,7 +1617,7 @@ def parseConfig():
     input : NA
     output: NA
     """
-    if (g_opts.config != ""):
+    if g_opts.config != "":
         d = json.loads(g_opts.config)
         g_opts.content = d['Content'].split(",")
 
@@ -1645,24 +1637,24 @@ def main():
         elif g_opts.action == "create_dir":
             create_temp_result_folder()
         # Get system information
-        elif (g_opts.action == "system_check"):
+        elif g_opts.action == "system_check":
             system_check()
         # Gets the database information
-        elif (g_opts.action == "database_check"):
+        elif g_opts.action == "database_check":
             database_check()
         # Make a copy of the log file
-        elif (g_opts.action == "log_copy"):
+        elif g_opts.action == "log_copy":
             log_copy()
         # Copy configuration files, and get g stack
-        elif (g_opts.action == "Config"):
+        elif g_opts.action == "Config":
             conf_gstack("Config")
-        elif (g_opts.action == "Gstack"):
+        elif g_opts.action == "Gstack":
             global g_need_gstack
             g_need_gstack = 1
             conf_gstack("Gstack")
             g_need_gstack = 0
         # Send all log files we collected to the command node.
-        elif (g_opts.action == "copy_file"):
+        elif g_opts.action == "copy_file":
             sendLogFiles()
         elif g_opts.action == "xlog_copy":
             xlog_copy()

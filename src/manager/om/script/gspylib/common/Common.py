@@ -775,11 +775,11 @@ class DefaultValue():
             netWorkNum = ""
             netWorkInfo = psutil.net_if_addrs()
             for nic_num in netWorkInfo.keys():
-                netInfo = netWorkInfo[nic_num][0]
-                if (netInfo.address == ipAddress):
-                    netWorkNum = nic_num
-                    break
-            if (netWorkNum == ""):
+                for netInfo in netWorkInfo[nic_num]:
+                    if netInfo.address == ipAddress:
+                        netWorkNum = nic_num
+                        break
+            if netWorkNum == "":
                 raise Exception(ErrorCode.GAUSS_506["GAUSS_50604"] % ipAddress)
             return netWorkNum
         except Exception as e:

@@ -82,24 +82,28 @@ class Kernel(BaseComponent):
             cmd += " -o \'--securitymode\'"
         self.logger.debug("start cmd = %s" % cmd)
         (status, output) = subprocess.getstatusoutput(cmd)
-        if status != 0:
+        if status != 0 or re.search("start failed", output):
             raise Exception(ErrorCode.GAUSS_516["GAUSS_51607"] % "instance"
                             + " Error: Please check the gs_ctl log for "
-                              "failure details.")
+                              "failure details." + "\n" + output)
+        if re.search("another server might be running", output):
+            self.logger.log(output)
 
     def stop(self, stopMode="", time_out=300):
         """
         """
+        cmd = "%s/gs_ctl stop -D %s " % (
+            self.binPath, self.instInfo.datadir)
         if not self.isPidFileExist():
-            return
-        cmd = "%s/gs_ctl stop -D %s " % (self.binPath, self.instInfo.datadir)
-        # check stop mode
-        if (stopMode != ""):
-            cmd += " -m %s" % stopMode
+            cmd += " -m immediate"
+        else:
+            # check stop mode
+            if stopMode != "":
+                cmd += " -m %s" % stopMode
         cmd += " -t %s" % time_out
         self.logger.debug("stop cmd = %s" % cmd)
         (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
+        if status != 0:
             raise Exception(ErrorCode.GAUSS_516["GAUSS_51610"] %
                             "instance" + " Error: \n%s." % output)
 

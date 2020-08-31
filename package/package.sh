@@ -303,6 +303,11 @@ function install_gaussdb()
     export LD_LIBRARY_PATH=$GAUSSHOME/lib:$LD_LIBRARY_PATH
 
     commitid=$(LD_PRELOAD=''  ${BUILD_DIR}/bin/gaussdb -V | awk '{print $5}' | cut -d ")" -f 1)
+    if [ -z $commitid ]
+    then
+        commitid=$(date "+%Y%m%d%H%M%S")
+        commitid=${commitid:4:8}
+    fi
     echo "${commitid}" >>${SCRIPT_DIR}/version.cfg
     echo "End insert commitid into version.cfg" >> "$LOG_FILE" 2>&1
 }

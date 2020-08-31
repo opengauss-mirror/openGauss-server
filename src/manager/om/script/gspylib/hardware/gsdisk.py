@@ -180,7 +180,7 @@ class diskInfo():
             dev_info = os.statvfs(path)
             used = dev_info.f_blocks - dev_info.f_bfree
             valueable = dev_info.f_bavail + used
-            percent = math.ceil((float(used) // valueable) * 100)
+            percent = math.ceil((float(used) / valueable) * 100)
         except Exception as e:
             raise Exception(ErrorCode.GAUSS_530["GAUSS_53011"] + " disk space."
                             + "Error: %s" % str(e))
