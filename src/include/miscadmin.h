@@ -131,7 +131,6 @@ extern bool InplaceUpgradePrecommit;
 
 extern THR_LOCAL PGDLLIMPORT bool IsUnderPostmaster;
 extern THR_LOCAL PGDLLIMPORT char my_exec_path[];
-extern THR_LOCAL PGDLLIMPORT bool IsBackgroundWorker;
 
 #define MAX_QUERY_DOP (64)
 #define MIN_QUERY_DOP -(MAX_QUERY_DOP)

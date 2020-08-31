@@ -476,7 +476,7 @@ void InitProcess(void)
         t_thrd.proc = g_instance.proc_base->autovacFreeProcs;
     else if (IsJobSchedulerProcess() || IsJobWorkerProcess())
         t_thrd.proc = g_instance.proc_base->pgjobfreeProcs;
-    else if (IsBackgroundWorker)
+    else if (t_thrd.bgworker_cxt.is_background_worker)
         t_thrd.proc = g_instance.proc_base->bgworkerFreeProcs;
     else {
 #ifndef __USE_NUMA
@@ -493,7 +493,7 @@ void InitProcess(void)
             g_instance.proc_base->autovacFreeProcs = (PGPROC *)t_thrd.proc->links.next;
         else if (IsJobSchedulerProcess() || IsJobWorkerProcess())
             g_instance.proc_base->pgjobfreeProcs = (PGPROC *)t_thrd.proc->links.next;
-        else if (IsBackgroundWorker)
+        else if (t_thrd.bgworker_cxt.is_background_worker)
             g_instance.proc_base->bgworkerFreeProcs = (PGPROC *)t_thrd.proc->links.next;
         else {
 #ifndef __USE_NUMA
@@ -1054,7 +1054,7 @@ static void ProcKill(int code, Datum arg)
         t_thrd.proc->links.next = (SHM_QUEUE *)g_instance.proc_base->pgjobfreeProcs;
         g_instance.proc_base->pgjobfreeProcs = t_thrd.proc;
     }
-    else if (IsBackgroundWorker)
+    else if (t_thrd.bgworker_cxt.is_background_worker)
     {
         t_thrd.proc->links.next = (SHM_QUEUE *)g_instance.proc_base->bgworkerFreeProcs;
         g_instance.proc_base->bgworkerFreeProcs = t_thrd.proc;

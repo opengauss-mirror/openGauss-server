@@ -5595,7 +5595,7 @@ static bool CleanupBackgroundWorker(ThreadId pid,
     char namebuf[MAXPGPATH];
     slist_mutable_iter iter;
 
-    slist_foreach_modify(iter, &BackgroundWorkerList) {
+    slist_foreach_modify(iter, &t_thrd.bgworker_cxt.background_worker_list) {
         RegisteredBgWorker *rw;
 
         rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
@@ -8019,7 +8019,7 @@ static void maybe_start_bgworkers(void)
     g_instance.bgworker_cxt.start_worker_needed = false;
     g_instance.bgworker_cxt.have_crashed_worker = false;
 
-    slist_foreach_modify(iter, &BackgroundWorkerList) {
+    slist_foreach_modify(iter, &t_thrd.bgworker_cxt.background_worker_list) {
         RegisteredBgWorker *rw;
 
         rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
@@ -10388,7 +10388,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 #endif
 
         case BACKGROUND_WORKER: {
-            IsBackgroundWorker = true;
+            t_thrd.bgworker_cxt.is_background_worker = true;
             InitProcessAndShareMemory();
             StartBackgroundWorker(arg->payload);
             proc_exit(0);

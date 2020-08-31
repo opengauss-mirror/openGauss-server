@@ -29,6 +29,10 @@ typedef struct {
     size_t salen;
 } SockAddr;
 
+void PqCommMethods_init();
+typedef unsigned int uint32;   /* == 32 bits */
+typedef uint32 ProtocolVersion; /* FE/BE protocol version number */
+
 /*
  * In protocol 3.0 and later, the startup packet length is not fixed, but
  * we set an arbitrary limit on it anyway.	This is just to prevent simple

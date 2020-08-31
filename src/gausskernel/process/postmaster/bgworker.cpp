@@ -34,11 +34,6 @@
 #include "utils/postinit.h"
 
 /*
- * The postmaster's list of registered background workers, in private memory.
- */
-THR_LOCAL slist_head    BackgroundWorkerList = SLIST_STATIC_INIT(BackgroundWorkerList);
-
-/*
  * BackgroundWorkerSlots exist in shared memory and can be accessed (via
  * the BackgroundWorkerArray) by both the postmaster and by regular backends.
  * However, the postmaster cannot take locks, even spinlocks, because this
@@ -159,7 +154,7 @@ void BackgroundWorkerShmemInit(void)
          * correspondence between the postmaster's private list and the array
          * in shared memory.
          */
-        slist_foreach(siter, &BackgroundWorkerList) {
+        slist_foreach(siter, &t_thrd.bgworker_cxt.background_worker_list) {
             BackgroundWorkerSlot *slot = &t_thrd.bgworker_cxt.background_worker_data->slot[slotno];
             RegisteredBgWorker *rw;
 
@@ -198,7 +193,7 @@ static RegisteredBgWorker * FindRegisteredWorkerBySlotNumber(int slotno)
 {
     slist_iter  siter;
 
-    slist_foreach(siter, &BackgroundWorkerList) {
+    slist_foreach(siter, &t_thrd.bgworker_cxt.background_worker_list) {
         RegisteredBgWorker *rw = slist_container(RegisteredBgWorker, rw_lnode, siter.cur);
         if (rw->rw_shmem_slot == slotno) {
             return rw;
@@ -371,7 +366,7 @@ void BackgroundWorkerStateChange(void)
             (errmsg("registering background worker \"%s\"",
                 rw->rw_worker.bgw_name)));
 
-        slist_push_head(&BackgroundWorkerList, &rw->rw_lnode);
+        slist_push_head(&t_thrd.bgworker_cxt.background_worker_list, &rw->rw_lnode);
     }
 }
 
@@ -475,7 +470,7 @@ void BackgroundWorkerStopNotifications(ThreadId pid)
 {
     slist_iter  siter;
 
-    slist_foreach(siter, &BackgroundWorkerList)
+    slist_foreach(siter, &t_thrd.bgworker_cxt.background_worker_list)
     {
         RegisteredBgWorker *rw = slist_container(RegisteredBgWorker, rw_lnode, siter.cur);
         if (rw->rw_worker.bgw_notify_pid == pid) {
@@ -495,7 +490,7 @@ void ResetBackgroundWorkerCrashTimes(void)
 {
     slist_mutable_iter iter;
 
-    slist_foreach_modify(iter, &BackgroundWorkerList)
+    slist_foreach_modify(iter, &t_thrd.bgworker_cxt.background_worker_list)
     {
         RegisteredBgWorker *rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
 
@@ -705,7 +700,7 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
             (errmsg("unable to find bgworker entry")));
     }
 
-    IsBackgroundWorker = true;
+    t_thrd.bgworker_cxt.is_background_worker = true;
 
     /* Identify myself via ps */
     init_ps_display(worker->bgw_name, "", "", "");
@@ -889,7 +884,7 @@ void RegisterBackgroundWorker(BackgroundWorker *worker)
     rw->rw_crashed_at = 0;
     rw->rw_terminate = false;
 
-    slist_push_head(&BackgroundWorkerList, &rw->rw_lnode);
+    slist_push_head(&t_thrd.bgworker_cxt.background_worker_list, &rw->rw_lnode);
 }
 
 /*

@@ -41,8 +41,6 @@ typedef struct RegisteredBgWorker {
     slist_node  rw_lnode;       /* list link */
 } RegisteredBgWorker;
 
-extern THR_LOCAL slist_head BackgroundWorkerList;
-
 extern Size BackgroundWorkerShmemSize(void);
 extern void BackgroundWorkerShmemInit(void);
 extern void BackgroundWorkerStateChange(void);

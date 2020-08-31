@@ -35,7 +35,7 @@ typedef struct {
     } u;
 } PQArgBlock;
 
-typedef struct {
+struct PQcommMethods{
     void        (*comm_reset) (void);
     int         (*flush) (void);
     int         (*flush_if_writable) (void);
@@ -44,20 +44,18 @@ typedef struct {
     int     (*putmessage_noblock) (char msgtype, const char* s, size_t len);
     void        (*startcopyout) (void);
     void        (*endcopyout) (bool errorAbort);
-} PQcommMethods;
+};
 
-extern PGDLLIMPORT THR_LOCAL PQcommMethods *PqCommMethods;
-
-#define pq_comm_reset() (PqCommMethods->comm_reset())
-#define pq_flush() (PqCommMethods->flush())
-#define pq_flush_if_writable() (PqCommMethods->flush_if_writable())
-#define pq_is_send_pending() (PqCommMethods->is_send_pending())
+#define pq_comm_reset() (t_thrd.msqueue_cxt.PqCommMethods->comm_reset())
+#define pq_flush() (t_thrd.msqueue_cxt.PqCommMethods->flush())
+#define pq_flush_if_writable() (t_thrd.msqueue_cxt.PqCommMethods->flush_if_writable())
+#define pq_is_send_pending() (t_thrd.msqueue_cxt.PqCommMethods->is_send_pending())
 #define pq_putmessage(msgtype, s, len) \
-    (PqCommMethods->putmessage(msgtype, s, len))
+    (t_thrd.msqueue_cxt.PqCommMethods->putmessage(msgtype, s, len))
 #define pq_putmessage_noblock(msgtype, s, len) \
-    (PqCommMethods->putmessage_noblock(msgtype, s, len))
-#define pq_startcopyout() (PqCommMethods->startcopyout())
-#define pq_endcopyout(errorAbort) (PqCommMethods->endcopyout(errorAbort))
+    (t_thrd.msqueue_cxt.PqCommMethods->putmessage_noblock(msgtype, s, len))
+#define pq_startcopyout() (t_thrd.msqueue_cxt.PqCommMethods->startcopyout())
+#define pq_endcopyout(errorAbort) (t_thrd.msqueue_cxt.PqCommMethods->endcopyout(errorAbort))
 
 /*
  * External functions.

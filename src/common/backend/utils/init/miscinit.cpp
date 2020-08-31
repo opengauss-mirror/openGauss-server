@@ -846,7 +846,7 @@ void InitializeSessionUserIdStandalone(void)
      */
     AssertState(!IsUnderPostmaster || IsAutoVacuumWorkerProcess() ||
         IsJobSchedulerProcess() || IsJobWorkerProcess() || AM_WAL_SENDER ||
-        IsBackgroundWorker);
+        t_thrd.bgworker_cxt.is_background_worker);
 
     /* In pooler stateless reuse mode, to reset session userid */
     if (!g_instance.attr.attr_network.PoolerStatelessReuse) {
