@@ -3714,7 +3714,7 @@ CREATE VIEW DBE_PERF.replication_stat AS
     FROM pg_stat_get_activity(NULL) AS S, pg_authid U,
          pg_stat_get_wal_senders() AS W
     WHERE S.usesysid = U.oid AND
-          S.pid = W.sender_pid;
+          S.pid = W.pid;
 
 CREATE OR REPLACE FUNCTION DBE_PERF.get_global_replication_stat
   (OUT node_name name, 

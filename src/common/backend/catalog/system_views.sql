@@ -1521,7 +1521,7 @@ CREATE VIEW pg_stat_replication AS
     FROM pg_stat_get_activity(NULL) AS S, pg_authid U,
             pg_stat_get_wal_senders() AS W
     WHERE S.usesysid = U.oid AND
-            S.pid = W.sender_pid;
+            S.pid = W.pid;
             
 CREATE VIEW pg_replication_slots AS
     SELECT
