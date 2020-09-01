@@ -2665,6 +2665,7 @@ struct PLpgSQL_expr;
 typedef struct knl_t_autonomous_context {
     PLpgSQL_expr* sqlstmt;
     bool isnested;
+    BackgroundWorkerHandle* handle;
 } knl_t_autonomous_context;
 
 /* MOT thread attributes */
@@ -2716,7 +2717,28 @@ typedef struct knl_t_mot_context {
 typedef struct knl_t_bgworker_context {
     BackgroundWorkerArray *background_worker_data;
     BackgroundWorker *my_bgworker_entry;
+    bool is_background_worker;
+    /*
+     * The postmaster's list of registered background workers, in private memory.
+     */
+    slist_head background_worker_list;
 } knl_t_bgworker_context;
+
+struct shm_mq;
+struct shm_mq_handle;
+struct PQcommMethods;
+typedef struct knl_t_msqueue_context {
+    shm_mq *pq_mq;
+    shm_mq_handle *pq_mq_handle;
+    bool pq_mq_busy;
+    ThreadId pq_mq_parallel_master_pid;
+    BackendId pq_mq_parallel_master_backend_id;
+    const PQcommMethods *save_PqCommMethods;
+    CommandDest save_whereToSendOutput;
+    ProtocolVersion save_FrontendProtocol;
+    const PQcommMethods *PqCommMethods;
+    bool is_changed;
+} knl_t_msqueue_context;
 
 /* thread context. */
 typedef struct knl_thrd_context {
@@ -2817,6 +2839,7 @@ typedef struct knl_thrd_context {
     knl_t_poolcleaner_context poolcleaner_cxt;
     knl_t_mot_context mot_cxt;
     knl_t_bgworker_context bgworker_cxt;
+    knl_t_msqueue_context msqueue_cxt;
 } knl_thrd_context;
 
 extern void knl_thread_mot_init();

@@ -154,7 +154,7 @@ static int socket_putmessage_noblock(char msgtype, const char *s, size_t len);
 static void socket_startcopyout(void);
 static void socket_endcopyout(bool errorAbort);
 
-static PQcommMethods PqCommSocketMethods = {
+static const PQcommMethods PqCommSocketMethods = {
     socket_comm_reset,
     socket_flush,
     socket_flush_if_writable,
@@ -165,7 +165,10 @@ static PQcommMethods PqCommSocketMethods = {
     socket_endcopyout	
 };
 
-THR_LOCAL PQcommMethods *PqCommMethods = &PqCommSocketMethods;
+void PqCommMethods_init()
+{
+    t_thrd.msqueue_cxt.PqCommMethods = &PqCommSocketMethods;
+}
 
 extern bool FencedUDFMasterMode;
 

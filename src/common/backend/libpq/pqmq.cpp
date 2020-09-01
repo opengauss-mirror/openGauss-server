@@ -21,12 +21,6 @@
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 
-static THR_LOCAL shm_mq *pq_mq;
-static THR_LOCAL shm_mq_handle *pq_mq_handle;
-static THR_LOCAL bool pq_mq_busy = false;
-static THR_LOCAL ThreadId pq_mq_parallel_master_pid = 0;
-static THR_LOCAL BackendId pq_mq_parallel_master_backend_id = InvalidBackendId;
-
 static void mq_comm_reset(void);
 static int  mq_flush(void);
 static int  mq_flush_if_writable(void);
@@ -36,7 +30,7 @@ static int mq_putmessage_noblock(char msgtype, const char *s, size_t len);
 static void mq_startcopyout(void);
 static void mq_endcopyout(bool errorAbort);
 
-static THR_LOCAL PQcommMethods PqCommMqMethods = {
+static const PQcommMethods PqCommMqMethods = {
     mq_comm_reset,
     mq_flush,
     mq_flush_if_writable,
@@ -47,32 +41,31 @@ static THR_LOCAL PQcommMethods PqCommMqMethods = {
     mq_endcopyout
 };
 
-static THR_LOCAL PQcommMethods *save_PqCommMethods;
-static THR_LOCAL CommandDest save_whereToSendOutput;
-static THR_LOCAL ProtocolVersion save_FrontendProtocol;
-
 /*
  * Arrange to redirect frontend/backend protocol messages to a message queue.
  */
 void pq_redirect_to_shm_mq(shm_mq_handle *mqh)
 {
-	save_PqCommMethods = PqCommMethods;
-	save_whereToSendOutput = CommandDest(t_thrd.postgres_cxt.whereToSendOutput);
-	save_FrontendProtocol = FrontendProtocol;
+	t_thrd.msqueue_cxt.save_PqCommMethods = t_thrd.msqueue_cxt.PqCommMethods;
+	t_thrd.msqueue_cxt.save_whereToSendOutput = CommandDest(t_thrd.postgres_cxt.whereToSendOutput);
+	t_thrd.msqueue_cxt.save_FrontendProtocol = FrontendProtocol;
 
-	PqCommMethods = &PqCommMqMethods;
-	pq_mq_handle = mqh;
+	t_thrd.msqueue_cxt.PqCommMethods = &PqCommMqMethods;
+    t_thrd.msqueue_cxt.pq_mq = shm_mq_get_queue(mqh);
+	t_thrd.msqueue_cxt.pq_mq_handle = mqh;
 	t_thrd.postgres_cxt.whereToSendOutput = static_cast<int>(DestRemote);
 	FrontendProtocol = PG_PROTOCOL_LATEST;
+    t_thrd.msqueue_cxt.is_changed = true;
 }
 
 void pq_stop_redirect_to_shm_mq(void)
 {
-    PqCommMethods = save_PqCommMethods;
-    t_thrd.postgres_cxt.whereToSendOutput = static_cast<int>(save_whereToSendOutput);
-    FrontendProtocol = save_FrontendProtocol;
-    pq_mq = NULL;
-    pq_mq_handle = NULL;
+    t_thrd.msqueue_cxt.PqCommMethods = t_thrd.msqueue_cxt.save_PqCommMethods;
+    t_thrd.postgres_cxt.whereToSendOutput = static_cast<int>(t_thrd.msqueue_cxt.save_whereToSendOutput);
+    FrontendProtocol = t_thrd.msqueue_cxt.save_FrontendProtocol;
+    t_thrd.msqueue_cxt.pq_mq = NULL;
+    t_thrd.msqueue_cxt.pq_mq_handle = NULL;
+    t_thrd.msqueue_cxt.is_changed = false;
 }
 
 /*
@@ -81,9 +74,9 @@ void pq_stop_redirect_to_shm_mq(void)
  */
 void pq_set_parallel_master(ThreadId pid, BackendId backend_id)
 {
-    Assert(PqCommMethods == &PqCommMqMethods);
-    pq_mq_parallel_master_pid = pid;
-    pq_mq_parallel_master_backend_id = backend_id;
+    Assert(t_thrd.msqueue_cxt.PqCommMethods == &PqCommMqMethods);
+    t_thrd.msqueue_cxt.pq_mq_parallel_master_pid = pid;
+    t_thrd.msqueue_cxt.pq_mq_parallel_master_backend_id = backend_id;
 }
 
 static void mq_comm_reset(void)
@@ -127,10 +120,10 @@ static int mq_putmessage(char msgtype, const char *s, size_t len)
      * queueing the message would amount to indefinitely postponing the
      * response to the interrupt.  So we do this instead.
      */
-    if (pq_mq_busy) {
-        if (pq_mq_handle != NULL)
-            shm_mq_detach(pq_mq_handle);
-        pq_mq_handle = NULL;
+    if (t_thrd.msqueue_cxt.pq_mq_busy) {
+        if (t_thrd.msqueue_cxt.pq_mq_handle != NULL)
+            shm_mq_detach(t_thrd.msqueue_cxt.pq_mq_handle);
+        t_thrd.msqueue_cxt.pq_mq_handle = NULL;
         return EOF;
     }
 
@@ -140,24 +133,24 @@ static int mq_putmessage(char msgtype, const char *s, size_t len)
      * be generated late in the shutdown sequence, after all DSMs have already
      * been detached.
      */
-    if (pq_mq_handle == NULL)
+    if (t_thrd.msqueue_cxt.pq_mq_handle == NULL)
         return 0;
 
-    pq_mq_busy = true;
+    t_thrd.msqueue_cxt.pq_mq_busy = true;
 
     iov[0].data = &msgtype;
     iov[0].len = 1;
     iov[1].data = s;
     iov[1].len = len;
 
-    Assert(pq_mq_handle != NULL);
+    Assert(t_thrd.msqueue_cxt.pq_mq_handle != NULL);
 
     for (;;) {
-        result = shm_mq_sendv(pq_mq_handle, iov, 2, true);
+        result = shm_mq_sendv(t_thrd.msqueue_cxt.pq_mq_handle, iov, 2, true);
 
-        if (pq_mq_parallel_master_pid != 0)
-            (void)SendProcSignal(pq_mq_parallel_master_pid,PROCSIG_PARALLEL_MESSAGE,
-                                 pq_mq_parallel_master_backend_id);
+        if (t_thrd.msqueue_cxt.pq_mq_parallel_master_pid != 0)
+            (void)SendProcSignal(t_thrd.msqueue_cxt.pq_mq_parallel_master_pid,PROCSIG_PARALLEL_MESSAGE,
+                                 t_thrd.msqueue_cxt.pq_mq_parallel_master_backend_id);
 
         if (result != SHM_MQ_WOULD_BLOCK)
             break;
@@ -167,7 +160,7 @@ static int mq_putmessage(char msgtype, const char *s, size_t len)
         CHECK_FOR_INTERRUPTS();
     }
 
-    pq_mq_busy = false;
+    t_thrd.msqueue_cxt.pq_mq_busy = false;
 
     Assert(result == SHM_MQ_SUCCESS || result == SHM_MQ_DETACHED);
     if (result != SHM_MQ_SUCCESS)

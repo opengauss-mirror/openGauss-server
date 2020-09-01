@@ -804,7 +804,7 @@ void InitializeSessionUserId(const char* role_name, Oid role_id)
         if (!rform->rolcanlogin) {
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                    errmsg("role \"%s\" is not permitted to login", role_name)));
+                    errmsg("role \"%s\" is not permitted to login", rname)));
         }
         /*
          * Check connection limit for this role.
@@ -818,17 +818,17 @@ void InitializeSessionUserId(const char* role_name, Oid role_id)
          */
         if (rform->rolconnlimit >= 0 && !u_sess->misc_cxt.AuthenticatedUserIsSuperuser &&
             CountUserBackends(role_id) > rform->rolconnlimit) {
-            ReportAlarmTooManyDbUserConn(role_name);
+            ReportAlarmTooManyDbUserConn(rname);
 
             ereport(FATAL,
-                (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for role \"%s\"", role_name)));
+                (errcode(ERRCODE_TOO_MANY_CONNECTIONS), errmsg("too many connections for role \"%s\"", rname)));
         } else if (!u_sess->misc_cxt.AuthenticatedUserIsSuperuser) {
-            ReportResumeTooManyDbUserConn(role_name);
+            ReportResumeTooManyDbUserConn(rname);
         }
     }
 
     /* Record username and superuser status as GUC settings too */
-    SetConfigOption("session_authorization", role_name, PGC_BACKEND, PGC_S_OVERRIDE);
+    SetConfigOption("session_authorization", rname, PGC_BACKEND, PGC_S_OVERRIDE);
     SetConfigOption(
         "is_sysadmin", u_sess->misc_cxt.AuthenticatedUserIsSuperuser ? "on" : "off", PGC_INTERNAL, PGC_S_OVERRIDE);
 
@@ -846,7 +846,7 @@ void InitializeSessionUserIdStandalone(void)
      */
     AssertState(!IsUnderPostmaster || IsAutoVacuumWorkerProcess() ||
         IsJobSchedulerProcess() || IsJobWorkerProcess() || AM_WAL_SENDER ||
-        IsBackgroundWorker);
+        t_thrd.bgworker_cxt.is_background_worker);
 
     /* In pooler stateless reuse mode, to reset session userid */
     if (!g_instance.attr.attr_network.PoolerStatelessReuse) {

@@ -1495,7 +1495,7 @@ void PostgresInitializer::InitSession()
     if (!IsUnderPostmaster) {
         CheckAtLeastOneRoles();
         SetSuperUserStandalone();
-    } else if (IsBackgroundWorker) {
+    } else if (t_thrd.bgworker_cxt.is_background_worker) {
         if (m_username == NULL && !OidIsValid(m_useroid)) {
 			InitializeSessionUserIdStandalone();
 			m_isSuperUser = true;

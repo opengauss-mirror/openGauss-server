@@ -32,11 +32,8 @@
 #include "utils/ascii.h"
 #include "utils/ps_status.h"
 #include "utils/postinit.h"
-
-/*
- * The postmaster's list of registered background workers, in private memory.
- */
-THR_LOCAL slist_head    BackgroundWorkerList = SLIST_STATIC_INIT(BackgroundWorkerList);
+#include "access/xact.h"
+#include "utils/memtrack.h"
 
 /*
  * BackgroundWorkerSlots exist in shared memory and can be accessed (via
@@ -159,7 +156,7 @@ void BackgroundWorkerShmemInit(void)
          * correspondence between the postmaster's private list and the array
          * in shared memory.
          */
-        slist_foreach(siter, &BackgroundWorkerList) {
+        slist_foreach(siter, &t_thrd.bgworker_cxt.background_worker_list) {
             BackgroundWorkerSlot *slot = &t_thrd.bgworker_cxt.background_worker_data->slot[slotno];
             RegisteredBgWorker *rw;
 
@@ -198,7 +195,7 @@ static RegisteredBgWorker * FindRegisteredWorkerBySlotNumber(int slotno)
 {
     slist_iter  siter;
 
-    slist_foreach(siter, &BackgroundWorkerList) {
+    slist_foreach(siter, &t_thrd.bgworker_cxt.background_worker_list) {
         RegisteredBgWorker *rw = slist_container(RegisteredBgWorker, rw_lnode, siter.cur);
         if (rw->rw_shmem_slot == slotno) {
             return rw;
@@ -371,7 +368,7 @@ void BackgroundWorkerStateChange(void)
             (errmsg("registering background worker \"%s\"",
                 rw->rw_worker.bgw_name)));
 
-        slist_push_head(&BackgroundWorkerList, &rw->rw_lnode);
+        slist_push_head(&t_thrd.bgworker_cxt.background_worker_list, &rw->rw_lnode);
     }
 }
 
@@ -475,7 +472,7 @@ void BackgroundWorkerStopNotifications(ThreadId pid)
 {
     slist_iter  siter;
 
-    slist_foreach(siter, &BackgroundWorkerList)
+    slist_foreach(siter, &t_thrd.bgworker_cxt.background_worker_list)
     {
         RegisteredBgWorker *rw = slist_container(RegisteredBgWorker, rw_lnode, siter.cur);
         if (rw->rw_worker.bgw_notify_pid == pid) {
@@ -495,7 +492,7 @@ void ResetBackgroundWorkerCrashTimes(void)
 {
     slist_mutable_iter iter;
 
-    slist_foreach_modify(iter, &BackgroundWorkerList)
+    slist_foreach_modify(iter, &t_thrd.bgworker_cxt.background_worker_list)
     {
         RegisteredBgWorker *rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
 
@@ -643,8 +640,9 @@ static void bgworker_quickdie(SIGNAL_ARGS)
  */
 static void bgworker_die(SIGNAL_ARGS)
 {
-    (void)PG_SETMASK(&t_thrd.libpq_cxt.BlockSig);
+    (void)gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 
+    t_thrd.postgres_cxt.whereToSendOutput = DestNone;
     ereport(FATAL,
         (errcode(ERRCODE_ADMIN_SHUTDOWN),
             errmsg("terminating background worker \"%s\" due to administrator command",
@@ -679,6 +677,7 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
     BackgroundWorker *worker = t_thrd.bgworker_cxt.my_bgworker_entry;
     bgworker_main_type entrypt;
 
+    t_thrd.proc_cxt.MyProgName = "BackgroundWorker";
     /*
      * Create memory context and buffer used for RowDescription messages. As
      * SendRowDescriptionMessage(), via exec_describe_statement_message(), is
@@ -705,7 +704,7 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
             (errmsg("unable to find bgworker entry")));
     }
 
-    IsBackgroundWorker = true;
+    t_thrd.bgworker_cxt.is_background_worker = true;
 
     /* Identify myself via ps */
     init_ps_display(worker->bgw_name, "", "", "");
@@ -739,6 +738,14 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
     (void)gspqsignal(SIGUSR2, SIG_IGN);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
 
+    (void)gs_signal_unblock_sigusr2();
+    if (IsUnderPostmaster) {
+        /* We allow SIGQUIT (quickdie) at all times */
+        (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
+    }
+
+    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL); /* block everything except SIGQUIT */
+
     /*
      * If an exception is encountered, processing resumes here.
      *
@@ -751,9 +758,13 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
 
+        /* output the memory tracking information when error happened */
+        MemoryTrackingOutputFile();
+        
         /* Report the error to the server log */
         EmitErrorReport();
 
+        AbortCurrentTransaction();
         /*
          * Do we need more cleanup here?  For shmem-connected bgworkers, we
          * will call InitProcess below, which will install ProcKill as exit
@@ -790,6 +801,9 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
         InitProcess();
 #endif
     }
+
+    /* Initialize the memory tracking information */
+    MemoryTrackingInit();
 
     /*
      * Look up the entry point function, loading its library if necessary.
@@ -889,7 +903,7 @@ void RegisterBackgroundWorker(BackgroundWorker *worker)
     rw->rw_crashed_at = 0;
     rw->rw_terminate = false;
 
-    slist_push_head(&BackgroundWorkerList, &rw->rw_lnode);
+    slist_push_head(&t_thrd.bgworker_cxt.background_worker_list, &rw->rw_lnode);
 }
 
 /*
@@ -1303,12 +1317,12 @@ void BackgroundWorkerInitializeConnectionByOid(Oid dboid, Oid useroid, uint32 fl
  */
 void BackgroundWorkerBlockSignals(void)
 {
-    (void)PG_SETMASK(&t_thrd.libpq_cxt.BlockSig);
+    (void)gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 }
 
 void BackgroundWorkerUnblockSignals(void)
 {
-    (void)PG_SETMASK(&t_thrd.libpq_cxt.UnBlockSig);
+    (void)gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 }
 
 

@@ -239,6 +239,8 @@ typedef struct ConnPack {
     ConnectStreamPacket cp;
 } ConnPack;
 
+void PqCommMethods_init();
+
 /*
  * A client can also start by sending stop query request
  */

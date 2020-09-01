@@ -67,6 +67,7 @@
 #include "utils/postinit.h"
 #include "utils/relmapper.h"
 #include "workload/workload.h"
+#include "libpq/pqcomm.h"
 
 THR_LOCAL knl_thrd_context t_thrd;
 
@@ -1386,6 +1387,7 @@ static void knl_t_heartbeat_init(knl_t_heartbeat_context* heartbeat_cxt)
 static void knl_t_autonomous_init(knl_t_autonomous_context* autonomous_cxt)
 {
     autonomous_cxt->isnested = false;
+    autonomous_cxt->handle = NULL;
     autonomous_cxt->sqlstmt = NULL;
 }
 
@@ -1417,6 +1419,22 @@ void knl_t_bgworker_init(knl_t_bgworker_context* bgworker_cxt)
 {
     bgworker_cxt->background_worker_data = NULL;
     bgworker_cxt->my_bgworker_entry = NULL;
+    bgworker_cxt->is_background_worker = false;
+    bgworker_cxt->background_worker_list = SLIST_STATIC_INIT(background_worker_list);
+}
+
+void knl_t_msqueue_init(knl_t_msqueue_context* msqueue_cxt)
+{
+    msqueue_cxt->pq_mq = NULL;
+    msqueue_cxt->pq_mq_handle = NULL;
+    msqueue_cxt->pq_mq_busy = false;
+    msqueue_cxt->pq_mq_parallel_master_pid = 0;
+    msqueue_cxt->pq_mq_parallel_master_backend_id = InvalidBackendId;
+    msqueue_cxt->save_PqCommMethods = NULL;
+    msqueue_cxt->save_whereToSendOutput = DestDebug;
+    msqueue_cxt->save_FrontendProtocol = PG_PROTOCOL_LATEST;
+    msqueue_cxt->is_changed = false;
+    PqCommMethods_init();
 }
 
 void knl_thread_init(knl_thread_role role)
@@ -1507,6 +1525,8 @@ void knl_thread_init(knl_thread_role role)
     knl_t_poolcleaner_init(&t_thrd.poolcleaner_cxt);
     knl_t_mot_init(&t_thrd.mot_cxt);
     knl_t_autonomous_init(&t_thrd.autonomous_cxt);
+    knl_t_bgworker_init(&t_thrd.bgworker_cxt);
+    knl_t_msqueue_init(&t_thrd.msqueue_cxt);
 }
 
 void knl_thread_set_name(const char* name)

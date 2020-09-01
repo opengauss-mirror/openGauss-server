@@ -191,6 +191,8 @@ AutonomousSession * AutonomousSessionStart(void)
     shm_mq_set_handle(session->command_qh, session->worker_handle);
     shm_mq_set_handle(session->response_qh, session->worker_handle);
 
+    t_thrd.autonomous_cxt.handle = session->worker_handle;
+
     bgwstatus = WaitForBackgroundWorkerStartup(session->worker_handle, &pid);
     if (bgwstatus != BGWH_STARTED)
         ereport(ERROR,
@@ -244,6 +246,7 @@ void AutonomousSessionEnd(AutonomousSession *session)
     pfree(session->worker_handle);
     pfree(session->seg);
     pfree(session);
+    t_thrd.autonomous_cxt.handle = NULL;
 }
 
 AutonomousResult *AutonomousSessionExecute(AutonomousSession *session, const char *sql)
@@ -347,7 +350,6 @@ AutonomousPreparedStatement *AutonomousSessionPrepare(AutonomousSession *session
             invalid_protocol_message(msgtype);
             break;
     }
-
     pq_redirect_to_shm_mq(session->command_qh);
     pq_beginmessage(&msg, 'D');
     pq_sendbyte(&msg, 'S');
@@ -522,7 +524,6 @@ void autonomous_worker_main(Datum main_arg)
 
     char msgtype;
 
-    (void)gspqsignal(SIGTERM, die);
     BackgroundWorkerUnblockSignals();
 
     t_thrd.autonomous_cxt.isnested = true;

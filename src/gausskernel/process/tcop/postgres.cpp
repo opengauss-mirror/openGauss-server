@@ -67,6 +67,7 @@
 #endif /* PGXC */
 #include "postmaster/autovacuum.h"
 #include "postmaster/postmaster.h"
+#include "postmaster/bgworker.h"
 #include "replication/dataqueue.h"
 #include "replication/datasender.h"
 #include "replication/walsender.h"
@@ -146,6 +147,7 @@ extern int optreset; /* might not be declared by system headers */
 #include "utils/syscache.h"
 #include "utils/tqual.h"
 #include "storage/mot/jit_exec.h"
+#include "libpq/pqmq.h"
 
 #define GSCGROUP_ATTACH_TASK()                                                                                   \
     {                                                                                                            \
@@ -6624,6 +6626,13 @@ int StreamMain(void* arg)
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
+        if (t_thrd.msqueue_cxt.is_changed == true) {
+            pq_stop_redirect_to_shm_mq();
+        }
+        if (t_thrd.autonomous_cxt.handle) {
+            TerminateBackgroundWorker(t_thrd.autonomous_cxt.handle);
+            t_thrd.autonomous_cxt.handle = NULL;
+        }
         gstrace_tryblock_exit(true, oldTryCounter);
 
         (void)pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
@@ -7521,7 +7530,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             t_thrd.postgres_cxt.gpc_fisrt_send_clean = false;
             GPC->SendPrepareDestoryMsg();
         }
-
+        
         /*
          * Abort the current transaction in order to recover.
          */
