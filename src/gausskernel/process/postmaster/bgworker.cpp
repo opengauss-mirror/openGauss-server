@@ -32,6 +32,8 @@
 #include "utils/ascii.h"
 #include "utils/ps_status.h"
 #include "utils/postinit.h"
+#include "access/xact.h"
+#include "utils/memtrack.h"
 
 /*
  * BackgroundWorkerSlots exist in shared memory and can be accessed (via
@@ -675,6 +677,7 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
     BackgroundWorker *worker = t_thrd.bgworker_cxt.my_bgworker_entry;
     bgworker_main_type entrypt;
 
+    t_thrd.proc_cxt.MyProgName = "BackgroundWorker";
     /*
      * Create memory context and buffer used for RowDescription messages. As
      * SendRowDescriptionMessage(), via exec_describe_statement_message(), is
@@ -755,9 +758,13 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
 
+        /* output the memory tracking information when error happened */
+        MemoryTrackingOutputFile();
+        
         /* Report the error to the server log */
         EmitErrorReport();
 
+        AbortCurrentTransaction();
         /*
          * Do we need more cleanup here?  For shmem-connected bgworkers, we
          * will call InitProcess below, which will install ProcKill as exit
@@ -794,6 +801,9 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
         InitProcess();
 #endif
     }
+
+    /* Initialize the memory tracking information */
+    MemoryTrackingInit();
 
     /*
      * Look up the entry point function, loading its library if necessary.
