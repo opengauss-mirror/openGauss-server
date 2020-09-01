@@ -167,7 +167,8 @@ THR_LOCAL bool redo_oldversion_xlog = false;
 /*
  * GUC support
  */
-struct config_enum_entry sync_method_options[] = {{"fsync", SYNC_METHOD_FSYNC, false},
+struct config_enum_entry sync_method_options[] = {
+    {"fsync", SYNC_METHOD_FSYNC, false},
 #ifdef HAVE_FSYNC_WRITETHROUGH
     {"fsync_writethrough", SYNC_METHOD_FSYNC_WRITETHROUGH, false},
 #endif
@@ -180,7 +181,8 @@ struct config_enum_entry sync_method_options[] = {{"fsync", SYNC_METHOD_FSYNC, f
 #ifdef OPEN_DATASYNC_FLAG
     {"open_datasync", SYNC_METHOD_OPEN_DSYNC, false},
 #endif
-    {NULL, 0, false}};
+    {NULL, 0, false}
+};
 
 XLogRecPtr latestValidRecord = InvalidXLogRecPtr;
 XLogSegNo XlogRemoveSegPrimary = InvalidXLogSegPtr;
@@ -12272,7 +12274,7 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
             int rllen;
             errno_t errorno = EOK;
 
-            errorno = memset_s(fullpath, MAXPGPATH, '\0', MAXPGPATH);
+            errorno = memset_s(fullpath, MAXPGPATH + PG_TBLSPCS, '\0', MAXPGPATH + PG_TBLSPCS);
             securec_check(errorno, "", "");
 
             errorno = memset_s(linkpath, MAXPGPATH, '\0', MAXPGPATH);
@@ -12282,7 +12284,9 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
             if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
                 continue;
 
-            snprintf(fullpath, sizeof(fullpath), "pg_tblspc/%s", de->d_name);
+            errorno =
+                snprintf_s(fullpath, MAXPGPATH + PG_TBLSPCS, MAXPGPATH + PG_TBLSPCS - 1, "pg_tblspc/%s", de->d_name);
+            securec_check_ss(errorno, "\0", "\0");
 
 #if defined(HAVE_READLINK) || defined(WIN32)
             rllen = readlink(fullpath, linkpath, sizeof(linkpath));
@@ -13792,7 +13796,7 @@ static bool read_tablespace_map(List** tablespaces)
     char tbsoid[MAXPGPATH];
     char* tbslinkpath;
     char str[MAXPGPATH];
-    int ch, prev_ch = -1, i = 0, n;
+    int ch, prevCh = -1, i = 0, n;
 
     /*
      * See if tablespace_map file is present
@@ -13814,7 +13818,7 @@ static bool read_tablespace_map(List** tablespaces)
      * escape character that has been added in tablespace path during backup.
      */
     while ((ch = fgetc(lfp)) != EOF) {
-        if ((ch == '\n' || ch == '\r') && prev_ch != '\\') {
+        if ((ch == '\n' || ch == '\r') && prevCh != '\\') {
             str[i] = '\0';
             if (sscanf(str, "%s %n", tbsoid, &n) != 1)
                 ereport(FATAL,
@@ -13829,11 +13833,11 @@ static bool read_tablespace_map(List** tablespaces)
 
             *tablespaces = lappend(*tablespaces, ti);
             continue;
-        } else if ((ch == '\n' || ch == '\r') && prev_ch == '\\')
+        } else if ((ch == '\n' || ch == '\r') && prevCh == '\\')
             str[i - 1] = ch;
         else
             str[i++] = ch;
-        prev_ch = ch;
+        prevCh = ch;
     }
 
     if (ferror(lfp) || FreeFile(lfp))

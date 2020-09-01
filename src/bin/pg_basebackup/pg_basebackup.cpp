@@ -52,7 +52,6 @@ typedef struct TablespaceList {
 /* Global options */
 char* basedir = NULL;
 static TablespaceList tablespacee_dirs = {NULL, NULL};
-char* g_xlogOption = NULL;
 char format = 'p'; /* p(lain)/t(ar) */
 char* label = "gs_basebackup base backup";
 bool showprogress = false;
@@ -627,7 +626,8 @@ static void ReceiveTarFile(PGconn* conn, PGresult* res, int rownum)
             } else
 #endif
                 tarfile = stdout;
-            strcpy_s(filename, 1, "-");
+            errorno = strcpy_s(filename, 1, "-");
+            securec_check_c(errorno, "\0", "\0");
         } else {
 #ifdef HAVE_LIBZ
             if (compresslevel != 0) {
@@ -783,16 +783,20 @@ static void ReceiveTarFile(PGconn* conn, PGresult* res, int rownum)
  */
 static const char* get_tablespace_mapping(const char* dir)
 {
-    TablespaceListCell* cell;
+    TablespaceListCell* cell = NULL;
     char canon_dir[MAXPGPATH];
+    errno_t errorno = EOK;
 
     /* Canonicalize path for comparison consistency */
-    strlcpy(canon_dir, dir, sizeof(canon_dir));
+    errorno = strcpy_s(canon_dir, MAXPGPATH, dir);
+    securec_check_c(errorno, "\0", "\0");
     canonicalize_path(canon_dir);
 
-    for (cell = tablespacee_dirs.head; cell; cell = cell->next)
-        if (strcmp(canon_dir, cell->old_dir) == 0)
+    for (cell = tablespacee_dirs.head; cell; cell = cell->next) {
+        if (strcmp(canon_dir, cell->old_dir) == 0) {
             return cell->new_dir;
+        }
+    }
 
     return dir;
 }
@@ -928,7 +932,7 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             /*
              * All files are padded up to 512 bytes
              */
-            current_padding = ((current_len_left + TAR_FILE_PADDING) & ~TAR_FILE_PADDING) - current_len_left;
+            current_padding = PADDING_LEFT(current_len_left);
 
             /*
              * First part of header is zero terminated filename
@@ -1134,21 +1138,14 @@ static void BaseBackup(void)
      */
     res = PQexec(conn, "IDENTIFY_SYSTEM");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr,
-            _("%s: could not send replication command \"%s\": %s"),
-            progname,
-            "IDENTIFY_SYSTEM",
+        fprintf(stderr, _("%s: could not send replication command \"%s\": %s"), progname, "IDENTIFY_SYSTEM",
             PQerrorMessage(conn));
         disconnect_and_exit(1);
     }
     if (PQntuples(res) != 1 || PQnfields(res) < 3) {
         fprintf(stderr,
             _("%s: could not identify system: got %d rows and %d fields, expected %d rows and %d or more fields\n"),
-            progname,
-            PQntuples(res),
-            PQnfields(res),
-            1,
-            3);
+            progname, PQntuples(res), PQnfields(res), 1, 3);
         disconnect_and_exit(1);
     }
     sysidentifier = strdup(PQgetvalue(res, 0, 0));
@@ -1163,23 +1160,14 @@ static void BaseBackup(void)
      * Start the actual backup
      */
     PQescapeStringConn(conn, escaped_label, label, sizeof(escaped_label), &i);
-    rc = snprintf_s(current_path,
-        sizeof(current_path),
-        sizeof(current_path) - 1,
-        "BASE_BACKUP LABEL '%s' %s %s %s %s %s",
-        escaped_label,
-        showprogress ? "PROGRESS" : "",
-        includewal && !streamwal ? "WAL" : "",
-        fastcheckpoint ? "FAST" : "",
-        includewal ? "NOWAIT" : "",
+    rc = snprintf_s(current_path, sizeof(current_path), sizeof(current_path) - 1,
+        "BASE_BACKUP LABEL '%s' %s %s %s %s %s", escaped_label, showprogress ? "PROGRESS" : "",
+        includewal && !streamwal ? "WAL" : "", fastcheckpoint ? "FAST" : "", includewal ? "NOWAIT" : "",
         format == 't' ? "TABLESPACE_MAP" : "");
     securec_check_ss_c(rc, "", "");
 
     if (PQsendQuery(conn, current_path) == 0) {
-        fprintf(stderr,
-            _("%s: could not send replication command \"%s\": %s"),
-            progname,
-            "BASE_BACKUP",
+        fprintf(stderr, _("%s: could not send replication command \"%s\": %s"), progname, "BASE_BACKUP",
             PQerrorMessage(conn));
         free(sysidentifier);
         disconnect_and_exit(1);
@@ -1276,8 +1264,8 @@ static void BaseBackup(void)
                 rc = snprintf_s(prefix, MAXPGPATH, strlen(basedir) + 1, "%s/", basedir);
                 securec_check_ss_c(rc, "\0", "\0");
             }
-            rc = snprintf_s(
-                nodetablespacepath, MAXPGPATH, sizeof(nodetablespacepath) - 1, "%s%s", prefix, tablespacepath);
+            rc = snprintf_s(nodetablespacepath, MAXPGPATH, sizeof(nodetablespacepath) - 1, "%s%s", prefix,
+                tablespacepath);
             securec_check_ss_c(rc, "\0", "\0");
 
             verify_dir_is_empty_or_create(nodetablespacepath);
@@ -1543,7 +1531,7 @@ int main(int argc, char** argv)
     } else if (!strcmp(progname, "gs_tar")) {
         return GsTar(argc, argv);
     } else {
-        fprintf(stderr, _("unsupport progname: %s"), progname);
+        fprintf(stderr, _("unsupported progname: %s"), progname);
         return 0;
     }
 }
@@ -1628,14 +1616,15 @@ static int GsTar(int argc, char** argv)
     uint64 current_padding = 0;
     errno_t errorno = EOK;
 
-    strncpy_s(current_path, MAXPGPATH, basedir, strlen(basedir));
+    errorno = strncpy_s(current_path, MAXPGPATH, basedir, strlen(basedir));
+    securec_check_c(errorno, "\0", "\0");
     tarfile = fopen(tarfilename, "rb");
     if (tarfile == NULL) {
         fprintf(stderr, _("WARNING: %s not found!\n"), filename);
         exit(1);
     }
     while (true) {
-        int r;
+        size_t r;
 
         if (copybuf != NULL) {
             PQfreemem(copybuf);
@@ -1649,16 +1638,8 @@ static int GsTar(int argc, char** argv)
         } else {
             copybuf = (char*)xmalloc0(current_len_left);
             r = fread(copybuf, 1, current_len_left, tarfile);
-            // end of file
-            if ((uint64)r < current_len_left) {
-                if (file != NULL) {
-                    fclose(file);
-                    file = NULL;
-                }
-                break;
-            }
         }
-        if (r == -1) {
+        if (r == 0) {
             /*
              * End of chunk
              */
@@ -1667,9 +1648,6 @@ static int GsTar(int argc, char** argv)
                 file = NULL;
             }
             break;
-        } else if (r == -2) {
-            fprintf(stderr, "%s: could not read file data: %s", progname, tarfilename);
-            return -1;
         }
         if (file == NULL) {
             /* new file */
@@ -1677,7 +1655,7 @@ static int GsTar(int argc, char** argv)
 
             /* No current file, so this must be the header for a new file */
             if (r != TAR_BLOCK_SIZE) {
-                fprintf(stderr, "%s: invalid tar block header size: %d\n", progname, r);
+                fprintf(stderr, "%s: invalid tar block header size: %zu\n", progname, r);
                 fclose(tarfile);
                 return -1;
             }
@@ -1685,19 +1663,21 @@ static int GsTar(int argc, char** argv)
 
             if (sscanf_s(copybuf + 1048, "%201o", &current_len_left) != 1) {
                 fprintf(stderr, "%s: could not parse file size\n", progname);
+                fclose(tarfile);
                 return -1;
             }
 
             /* Set permissions on the file */
             if (sscanf_s(&copybuf[1024], "%07o ", (unsigned int*)&filemode) != 1) {
                 fprintf(stderr, "%s: could not parse file mode\n", progname);
+                fclose(tarfile);
                 return -1;
             }
 
             /*
              * All files are padded up to 512 bytes
              */
-            current_padding = ((current_len_left + 511) & ~511) - current_len_left;
+            current_padding = PADDING_LEFT(current_len_left);
 
             /*
              * First part of header is zero terminated filename
@@ -1707,6 +1687,7 @@ static int GsTar(int argc, char** argv)
                     "%s: the copybuf/current_path file path including .. is unallowed: %s\n",
                     progname,
                     strerror(errno));
+                fclose(tarfile);
                 return -1;
             }
             errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, copybuf);
@@ -1788,11 +1769,13 @@ static int GsTar(int argc, char** argv)
                                 filename,
                                 &copybuf[1081],
                                 strerror(errno));
+                            fclose(tarfile);
                             return -1;
                         }
                     }
                 } else {
                     pg_log(PG_WARNING, "unrecognized link indicator \"%c\"\n", copybuf[TAR_FILE_TYPE]);
+                    fclose(tarfile);
                     return -1;
                 }
                 continue; /* directory or link handled */
@@ -1828,21 +1811,22 @@ static int GsTar(int argc, char** argv)
             /*
              * Continuing blocks in existing file
              */
-            if (current_len_left == 0 && (uint64)r == current_padding) {
+            if (current_len_left == 0 && r == current_padding) {
                 /*
                  * Received the padding block for this file, ignore it and
                  * close the file, then move on to the next tar header.
                  */
                 fclose(file);
                 file = NULL;
-                totaldone += (uint64)r;
-                current_padding -= (uint64)r;
+                totaldone += r;
+                current_padding -= r;
                 continue;
             }
 
             if (fwrite(copybuf, r, 1, file) != 1) {
                 fprintf(stderr, "%s: could not write to file \"%s\": %s\n", progname, filename, strerror(errno));
                 fclose(file);
+                fclose(tarfile);
                 file = NULL;
                 return -1;
             }
@@ -1863,15 +1847,15 @@ static int GsTar(int argc, char** argv)
     }     /* loop over all data blocks */
     /* delete dw file if exists, recreate it and write a page of zero */
     backup_dw_file(basedir);
+    if (tarfile != NULL) {
+        fclose(tarfile);
+        tarfile = NULL;
+    }
     if (file != NULL) {
         fprintf(stderr, "%s: COPY stream ended before last file was finished\n", progname);
         fclose(file);
         file = NULL;
         return -1;
-    }
-    if (tarfile != NULL) {
-        fclose(tarfile);
-        tarfile = NULL;
     }
     return 0;
 }
@@ -1959,20 +1943,17 @@ static int GsBaseBackup(int argc, char** argv)
 
                 includewal = true;
                 check_env_value_c(optarg);
-                g_xlogOption = xstrdup(optarg);
-                if (strcmp(g_xlogOption, "f") == 0 || strcmp(g_xlogOption, "fetch") == 0)
+                if (strcmp(optarg, "f") == 0 || strcmp(optarg, "fetch") == 0)
                     streamwal = false;
-                else if (strcmp(g_xlogOption, "s") == 0 || strcmp(g_xlogOption, "stream") == 0)
+                else if (strcmp(optarg, "s") == 0 || strcmp(optarg, "stream") == 0)
                     streamwal = true;
                 else {
                     fprintf(stderr,
                         _("%s: invalid xlog-method option \"%s\", must be \"fetch\" or \"stream\"\n"),
                         progname,
                         optarg);
-                    GS_FREE(g_xlogOption);
                     exit(1);
                 }
-                GS_FREE(g_xlogOption);
                 break;
             case 'l':
                 if (label != NULL && strcmp(label, "gs_basebackup base backup") != 0) {

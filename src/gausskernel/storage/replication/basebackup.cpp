@@ -68,6 +68,12 @@ const int MATCH_SIX = 6;
  * Size of each block sent into the tar stream for larger files.
  */
 #define TAR_SEND_SIZE (32 * 1024) /* data send unit 32KB */
+#define EREPORT_WAL_NOT_FOUND(segno)                                              \
+    do {                                                                          \
+        char walErrorName[MAXFNAMELEN];                                           \
+        XLogFileName(walErrorName, t_thrd.xlog_cxt.ThisTimeLineID, segno);        \
+        ereport(ERROR, (errmsg("could not find WAL file \"%s\"", walErrorName))); \
+    } while (0)
 
 XLogRecPtr XlogCopyStartPtr = InvalidXLogRecPtr;
 
@@ -409,6 +415,14 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
          * recycled before we get a chance to send it over.
          */
         nWalFiles = list_length(walFileList);
+        /*
+         * There must be at least one xlog file in the pg_xlog directory,
+         * since we are doing backup-including-xlog.
+         */
+        if (nWalFiles < 1) {
+            ereport(ERROR, (errmsg("could not find any WAL files")));
+        }
+        
         walFiles = (char**)palloc0(nWalFiles * sizeof(char*));
         i = 0;
         foreach (lc, walFileList) {
@@ -417,23 +431,12 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
         qsort(walFiles, nWalFiles, sizeof(char*), CompareWalFileNames);
 
         /*
-         * There must be at least one xlog file in the pg_xlog directory,
-         * since we are doing backup-including-xlog.
-         */
-        if (nWalFiles < 1) {
-            ereport(ERROR, (errmsg("could not find any WAL files")));
-        }
-
-        /*
          * Sanity check: the first and last segment should cover startptr and
          * endptr, with no gaps in between.
          */
         XLogFromFileName(walFiles[0], &tli, &segno);
         if (segno != startsegno) {
-            char startfname[MAXFNAMELEN];
-
-            XLogFileName(startfname, t_thrd.xlog_cxt.ThisTimeLineID, startsegno);
-            ereport(ERROR, (errmsg("could not find WAL file \"%s\"", startfname)));
+            EREPORT_WAL_NOT_FOUND(startsegno);
         }
         for (i = 0; i < nWalFiles; i++) {
             XLogSegNo currsegno = segno;
@@ -441,17 +444,11 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
 
             XLogFromFileName(walFiles[i], &tli, &segno);
             if (!(nextsegno == segno || currsegno == segno)) {
-                char nextfname[MAXFNAMELEN];
-
-                XLogFileName(nextfname, t_thrd.xlog_cxt.ThisTimeLineID, nextsegno);
-                ereport(ERROR, (errmsg("could not find WAL file \"%s\"", nextfname)));
+                EREPORT_WAL_NOT_FOUND(nextsegno);
             }
         }
         if (segno != endsegno) {
-            char endfname[MAXFNAMELEN];
-
-            XLogFileName(endfname, t_thrd.xlog_cxt.ThisTimeLineID, endsegno);
-            ereport(ERROR, (errmsg("could not find WAL file \"%s\"", endfname)));
+            EREPORT_WAL_NOT_FOUND(endsegno);
         }
 
         /* Ok, we have everything we need. Send the WAL files. */
@@ -461,7 +458,8 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
             size_t cnt;
             pgoff_t len = 0;
 
-            snprintf(pathbuf, MAXPGPATH, XLOGDIR "/%s", walFiles[i]);
+            int rt = snprintf_s(pathbuf, MAXPGPATH,MAXPGPATH -1, XLOGDIR "/%s", walFiles[i]);
+            securec_check_ss_c(rt, "\0", "\0");
             XLogFromFileName(walFiles[i], &tli, &segno);
 
             fp = AllocateFile(pathbuf, "rb");
@@ -533,8 +531,8 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
         foreach (lc, historyFileList) {
             char* fname = (char*)lfirst(lc);
 
-            snprintf(pathbuf, MAXPGPATH, XLOGDIR "/%s", fname);
-
+            int rt = snprintf_s(pathbuf, MAXPGPATH, MAXPGPATH-1, XLOGDIR "/%s", fname);
+            securec_check_ss_c(rt, "\0", "\0");
             if (lstat(pathbuf, &statbuf) != 0)
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathbuf)));
 
@@ -705,8 +703,9 @@ static void parse_basebackup_options(List* options, basebackup_options* opt)
             opt->includewal = true;
             o_wal = true;
         } else if (strcmp(defel->defname, "tablespace_map") == 0) {
-            if (o_tablespace_map)
+            if (o_tablespace_map) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("duplicate option \"%s\"", defel->defname)));
+            }
             opt->sendtblspcmapfile = true;
             o_tablespace_map = true;
         } else
@@ -969,7 +968,7 @@ static void sendFileWithContent(const char* filename, const char* content)
     /* Pad to 512 byte boundary, per tar format requirements */
     pad = ((len + 511) & ~511) - len;
     if (pad > 0) {
-        char buf[512];
+        char buf[2560];
         errno_t rc = 0;
 
         rc = memset_s(buf, sizeof(buf), 0, pad);
@@ -1021,7 +1020,7 @@ int64 sendTablespace(const char* path, bool sizeonly)
     }
     if (!sizeonly)
         _tarWriteHeader(relativedirname, NULL, &statbuf);
-    size = 512; /* Size of the header just added */
+    size = 2560; /* Size of the header just added */
 
     /* Send all the files in the tablespace version directory */
     size += sendDir(pathbuf, strlen(path), sizeonly, NIL, true);
@@ -1237,7 +1236,7 @@ static int64 sendDir(
                     _tarWriteHeader(pathbuf + basepathlen + 1, NULL, &statbuf);
                 }
             }
-            size += 512; /* Size of the header just added */
+            size += 2560; /* Size of the header just added */
             if (!sizeonly) {
 #ifndef WIN32
                 if (S_ISLNK(statbuf.st_mode)) {
@@ -1279,7 +1278,7 @@ static int64 sendDir(
                     _tarWriteHeader("pg_xlog/archive_status", NULL, &statbuf);
                 }
             }
-            size += 512; /* Size of the header just added */
+            size += 2560; /* Size of the header just added */
             continue;    /* don't recurse into pg_xlog */
         }
         /* Allow symbolic links in pg_tblspc only */

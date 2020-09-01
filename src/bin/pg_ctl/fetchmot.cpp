@@ -66,7 +66,7 @@ static void MotReceiveAndAppendTarFile(
     int current_len_left = 0;
     int current_padding = 0;
 
-    errorno = strncpy_s(current_path, sizeof(current_path), basedir, sizeof(current_path) - 1);
+    errorno = strncpy_s(current_path, sizeof(current_path), basedir, strlen(basedir));
     securec_check_c(errorno, "", "");
 
 #ifdef HAVE_LIBZ
@@ -98,7 +98,8 @@ static void MotReceiveAndAppendTarFile(
         } else
 #endif
             tarfile = stdout;
-        strcpy_s(filename, 1, "-");
+        errorno = strcpy_s(filename, 1, "-");
+        securec_check_c(errorno, "\0", "\0");
     } else {
 #ifdef HAVE_LIBZ
         if (compresslevel != 0) {
@@ -118,14 +119,10 @@ static void MotReceiveAndAppendTarFile(
     /* chkptName header */
     copybuf = (char*)xmalloc0(TAR_BLOCK_SIZE);
 
-    int chkptDirLen = strlen(chkptName);
-    errorno = strcpy_s(copybuf + 2, chkptDirLen + 1, chkptName);
-    securec_check_ss_c(errorno, "", "");
-
-    copybuf[0] = '.';
-    copybuf[1] = '/';
-    copybuf[chkptDirLen + 2] = '/';
+    errorno = snprintf_s(copybuf, TAR_BLOCK_SIZE, TAR_BLOCK_SIZE - 1, "./%s/", chkptName);
     copybuf[TAR_FILE_TYPE] = TAR_TYPE_DICTORY;
+
+    securec_check_ss_c(errorno, "", "");
 
     for (int i = 0; i < 11; i++) {
         copybuf[TAR_LEN_LEFT + i] = '0';
@@ -210,7 +207,7 @@ static void MotReceiveAndAppendTarFile(
             /*
              * All files are padded up to 512 bytes
              */
-            current_padding = ((current_len_left + TAR_FILE_PADDING) & ~TAR_FILE_PADDING) - current_len_left;
+            current_padding = PADDING_LEFT(current_len_left);
             /*
              * First part of header is zero terminated filename.
              * when getting a checkpoint, file name can be either
@@ -236,7 +233,8 @@ static void MotReceiveAndAppendTarFile(
 
             if (filename[strlen(filename) - 1] == '/') {
                 filename[strlen(filename) - 1] = '\0'; /* Remove trailing slash */
-                strcpy_s(copybuf, strlen(filename), filename);
+                errorno = strcpy_s(copybuf, r, filename);
+                securec_check_c(errorno, "\0", "\0");
                 continue; /* directory or link handled */
             }
 #ifdef HAVE_LIBZ
@@ -405,7 +403,7 @@ static void MotReceiveAndUnpackTarFile(const char* basedir, const char* chkptNam
             /*
              * All files are padded up to 512 bytes
              */
-            current_padding = ((current_len_left + 511) & ~511) - current_len_left;
+            current_padding = PADDING_LEFT(current_len_left);
 
             /*
              * First part of header is zero terminated filename.

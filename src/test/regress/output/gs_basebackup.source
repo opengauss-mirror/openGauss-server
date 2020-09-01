@@ -1,0 +1,88 @@
+--restart_node
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_incremental_checkpoint=off"
+--?expected instance path: [.*/postgresql.conf]
+--?gs_guc set: enable_incremental_checkpoint=off: .*postgresql.conf.*
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1/ > @abs_bindir@/../datanode1.restart.log 2>&1
+---prepare data
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "create database gs_basebackup;"
+CREATE DATABASE
+\! @abs_bindir@/gsql -dgs_basebackup -p @portstring@ -f "@abs_srcdir@/sql/gs_basebackup/init/tablespace.sql";
+CREATE TABLESPACE
+CREATE TABLE
+INSERT 0 1
+--?total time: .*  ms
+\! @abs_bindir@/gsql -dgs_basebackup -p @portstring@ -f "@abs_srcdir@/sql/gs_basebackup/init/mot.sql";
+CREATE FOREIGN TABLE
+INSERT 0 1
+--?total time: .*  ms
+--pre
+\! mkdir @abs_bindir@/../gs_basebackup_node_stream_p
+\! chmod 700 @abs_bindir@/../gs_basebackup_node_stream_p
+\! mkdir @abs_bindir@/../gs_basebackup_node_fetch_t
+\! chmod 700 @abs_bindir@/../gs_basebackup_node_fetch_t
+--run
+\! chmod +x  @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh
+\! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_stream_p  stream p
+--?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_stream_p"
+--?! gs_ctl: server is running (PID: .*)
+--?!.*
+--?.*List of tablespaces.*
+--?.*Name.*|.*Owner.*|.*Location.*  
+--?--------------------------+.*+--------------------------
+--? gs_basebackup_tablespace |.*| gs_basebackup_tablespace
+(1 row)
+
+        tablespace        
+--------------------------
+ gs_basebackup_tablespace
+(1 row)
+
+ a 
+---
+ 1
+(1 row)
+
+--?total time: .*  ms
+ a 
+---
+ 1
+(1 row)
+
+--?total time: .*  ms
+--?.*[gs_ctl]: gs_ctl stopped ,datadir is -D ".*/gs_basebackup_node_stream_p"
+--?waiting for server to shut down.* done
+server stopped
+\! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_fetch_t  fetch t
+--?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_fetch_t"
+--?! gs_ctl: server is running (PID: .*)
+--?!.*
+--?.*List of tablespaces.*
+--?.*Name.*|.*Owner.*|.*Location.*
+--?--------------------------+.*+-------------------------------------------------------------------------------------------------
+--? gs_basebackup_tablespace |.*| .*/gs_basebackup_tablespace
+(1 row)
+
+        tablespace        
+--------------------------
+ gs_basebackup_tablespace
+(1 row)
+
+ a 
+---
+ 1
+(1 row)
+
+--?total time: .*  ms
+ a 
+---
+ 1
+(1 row)
+
+--?total time: *  ms
+--?.*[gs_ctl]: gs_ctl stopped ,datadir is -D ".*/gs_basebackup_node_fetch_t"
+--?waiting for server to shut down.* done
+server stopped
