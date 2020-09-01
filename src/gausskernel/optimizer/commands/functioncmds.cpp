@@ -105,11 +105,45 @@ static void compute_return_type(
     Type typtup;
     AclResult aclresult;
     Oid typowner = InvalidOid;
+    bool isSerial = false;
     /*
      * isalter is true, change the owner of the objects as the owner of the
      * namespace, if the owner of the namespce has the same name as the namescpe
      */
     bool isalter = false;
+    
+    /* Check for SERIAL pseudo-types */
+    isSerial = false;
+    if (returnType && list_length(returnType->names) == 1 && returnType->pct_type == false) {
+        char* typname = strVal(linitial(returnType->names));
+
+        if (strcmp(typname, "smallserial") == 0 || strcmp(typname, "serial2") == 0) {
+            isSerial = true;
+            returnType->names = NIL;
+            returnType->typeOid = INT2OID;
+        } else if (strcmp(typname, "serial") == 0 || strcmp(typname, "serial4") == 0) {
+            isSerial = true;
+            returnType->names = NIL;
+            returnType->typeOid = INT4OID;
+        } else if (strcmp(typname, "bigserial") == 0 || strcmp(typname, "serial8") == 0) {
+            isSerial = true;
+            returnType->names = NIL;
+            returnType->typeOid = INT8OID;
+        }
+
+        if (isSerial) {
+            /*
+             * We have to reject "serial[]" explicitly, because once we've set
+             * typeid, LookupTypeName won't notice arrayBounds.  We don't need any
+             * special coding for serial(typmod) though.
+             */
+            if (returnType->arrayBounds != NIL) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("array of serial is not implemented")));
+            }
+        }
+    }
 
     typtup = LookupTypeName(NULL, returnType, NULL);
     /*
@@ -223,6 +257,7 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
     int outCount = 0;
     int varCount = 0;
     bool have_names = false;
+    bool isSerial = false;
     ListCell* x = NULL;
     int i;
     ParseState* pstate = NULL;
@@ -248,6 +283,39 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         Oid toid;
         Type typtup;
         AclResult aclresult;
+
+        /* Check for SERIAL pseudo-types */
+        isSerial = false;
+        if (t && list_length(t->names) == 1 && t->pct_type == false) {
+            char* typname = strVal(linitial(t->names));
+
+            if (strcmp(typname, "smallserial") == 0 || strcmp(typname, "serial2") == 0) {
+                isSerial = true;
+                t->names = NIL;
+                t->typeOid = INT2OID;
+            } else if (strcmp(typname, "serial") == 0 || strcmp(typname, "serial4") == 0) {
+                isSerial = true;
+                t->names = NIL;
+                t->typeOid = INT4OID;
+            } else if (strcmp(typname, "bigserial") == 0 || strcmp(typname, "serial8") == 0) {
+                isSerial = true;
+                t->names = NIL;
+                t->typeOid = INT8OID;
+            }
+
+            if (isSerial) {
+                /*
+                 * We have to reject "serial[]" explicitly, because once we've set
+                 * typeid, LookupTypeName won't notice arrayBounds.  We don't need any
+                 * special coding for serial(typmod) though.
+                 */ 
+                if (t->arrayBounds != NIL) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("array of serial is not implemented"))); 
+                }
+            }
+        }
 
         typtup = LookupTypeName(NULL, t, NULL);
         /*
