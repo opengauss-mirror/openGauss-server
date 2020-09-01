@@ -28,6 +28,7 @@
 #include "zlib.h"
 #endif
 
+
 /* gs_tar offset */
 static const int TAR_LEN_LEFT = 1048;
 static const int TAR_FILE_PADDING = 511; /*  All files are padded up to 512 bytes */
@@ -41,6 +42,8 @@ static const int TAR_READ_ERROR = -2;
 /* file type */
 static const char TAR_TYPE_DICTORY = '5';
 static const int FILE_PERMISSION = 16832;
+
+#define PADDING_LEFT(current_len_left) (((current_len_left + TAR_FILE_PADDING) & ~TAR_FILE_PADDING) - current_len_left);
 
 #ifdef HAVE_LIBZ
 static const char* get_gz_error(gzFile gzf)

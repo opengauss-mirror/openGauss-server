@@ -76,6 +76,9 @@ Datum pg_start_backup(PG_FUNCTION_ARGS)
 
     backupidstr = text_to_cstring(backupid);
     dir = AllocateDir("pg_tblspc");
+    if (!dir) {
+        ereport(ERROR, (errmsg("could not open directory \"%s\": %m", "pg_tblspc")));
+    }
     startpoint = do_pg_start_backup(backupidstr, fast, NULL, dir, NULL, NULL, false, true);
 
     errorno = snprintf_s(startxlogstr,

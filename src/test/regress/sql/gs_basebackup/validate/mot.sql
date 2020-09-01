@@ -1,0 +1,1 @@
+select * from gs_basebackupmot_table;
