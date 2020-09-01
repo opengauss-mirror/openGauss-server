@@ -322,9 +322,9 @@ void tbm_add_tuples(TIDBitmap* tbm, const ItemPointer tids, int ntids, bool rech
  * This causes the whole page to be reported (with the recheck flag)
  * when the TIDBitmap is scanned.
  */
-void tbm_add_page(TIDBitmap* tbm, BlockNumber pageno)
+void tbm_add_page(TIDBitmap* tbm, BlockNumber pageno, Oid partitionOid)
 {
-    PagetableEntryNode pnode = {pageno, InvalidOid};
+    PagetableEntryNode pnode = {pageno, partitionOid};
     /* Enter the page in the bitmap, or mark it lossy if already present */
     tbm_mark_page_lossy(tbm, pnode);
     /* If we went over the memory limit, lossify some more pages */

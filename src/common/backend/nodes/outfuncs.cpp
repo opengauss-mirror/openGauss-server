@@ -3293,6 +3293,7 @@ static void _outIndexStmt(StringInfo str, IndexStmt* node)
     WRITE_OID_FIELD(oldNode);
     WRITE_NODE_FIELD(partClause);
     WRITE_BOOL_FIELD(isPartitioned);
+    WRITE_BOOL_FIELD(isGlobal);
     WRITE_BOOL_FIELD(unique);
     WRITE_BOOL_FIELD(primary);
     WRITE_BOOL_FIELD(isconstraint);

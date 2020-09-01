@@ -303,6 +303,7 @@ Datum hashgetbitmap(PG_FUNCTION_ARGS)
     HashScanOpaque so = (HashScanOpaque)scan->opaque;
     bool res = false;
     int64 ntids = 0;
+    Oid partHeapOid = IndexScanGetPartHeapOid(scan);
 
     res = _hash_first(scan, ForwardScanDirection);
 
@@ -325,7 +326,7 @@ Datum hashgetbitmap(PG_FUNCTION_ARGS)
         /* Save tuple ID, and continue scanning */
         if (add_tuple) {
             /* Note we mark the tuple ID as requiring recheck */
-            tbm_add_tuples(tbm, &(so->hashso_heappos), 1, true);
+            tbm_add_tuples(tbm, &(so->hashso_heappos), 1, true, partHeapOid);
             ntids++;
         }
 

@@ -1582,6 +1582,7 @@ static void scanPendingInsert(IndexScanDesc scan, TIDBitmap* tbm, int64* ntids)
     pendingPosition pos;
     Buffer metabuffer = ReadBuffer(scan->indexRelation, GIN_METAPAGE_BLKNO);
     BlockNumber blkno;
+    Oid partHeapOid = IndexScanGetPartHeapOid(scan);
 
     *ntids = 0;
 
@@ -1640,7 +1641,7 @@ static void scanPendingInsert(IndexScanDesc scan, TIDBitmap* tbm, int64* ntids)
         MemoryContextReset(so->tempCtx);
 
         if (match) {
-            tbm_add_tuples(tbm, &pos.item, 1, recheck);
+            tbm_add_tuples(tbm, &pos.item, 1, recheck, partHeapOid);
             (*ntids)++;
         }
     }
@@ -1664,6 +1665,7 @@ Datum gingetbitmap(PG_FUNCTION_ARGS)
     int64 ntids;
     ItemPointerData iptr;
     bool recheck = false;
+    Oid partHeapOid = IndexScanGetPartHeapOid(scan);
 
     /*
      * Set up the scan keys, and check for unsatisfiable query.
@@ -1702,9 +1704,9 @@ Datum gingetbitmap(PG_FUNCTION_ARGS)
             break;
 
         if (ItemPointerIsLossyPage(&iptr))
-            tbm_add_page(tbm, ItemPointerGetBlockNumber(&iptr));
+            tbm_add_page(tbm, ItemPointerGetBlockNumber(&iptr), partHeapOid);
         else
-            tbm_add_tuples(tbm, &iptr, 1, recheck);
+            tbm_add_tuples(tbm, &iptr, 1, recheck, partHeapOid);
         ntids++;
     }
 

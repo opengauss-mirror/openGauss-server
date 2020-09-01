@@ -4628,6 +4628,7 @@ static IndexStmt* _readIndexStmt()
     READ_OID_FIELD(oldNode);
     READ_NODE_FIELD(partClause);
     READ_BOOL_FIELD(isPartitioned);
+    READ_BOOL_FIELD(isGlobal);
     READ_BOOL_FIELD(unique);
     READ_BOOL_FIELD(primary);
     READ_BOOL_FIELD(isconstraint);
@@ -4674,18 +4675,21 @@ static Constraint* _readConstraint()
     } else if (MATCH_TYPE("PRIMARY_KEY")) {
         local_node->contype = CONSTR_PRIMARY;
         READ_NODE_FIELD(keys);
+        READ_NODE_FIELD(including);
         READ_NODE_FIELD(options);
         READ_STRING_FIELD(indexname);
         READ_STRING_FIELD(indexspace);
     } else if (MATCH_TYPE("UNIQUE")) {
         local_node->contype = CONSTR_UNIQUE;
         READ_NODE_FIELD(keys);
+        READ_NODE_FIELD(including);
         READ_NODE_FIELD(options);
         READ_STRING_FIELD(indexname);
         READ_STRING_FIELD(indexspace);
     } else if (MATCH_TYPE("EXCLUSION")) {
         local_node->contype = CONSTR_EXCLUSION;
         READ_NODE_FIELD(exclusions);
+        READ_NODE_FIELD(including);
         READ_NODE_FIELD(options);
         READ_STRING_FIELD(indexname);
         READ_STRING_FIELD(indexspace);

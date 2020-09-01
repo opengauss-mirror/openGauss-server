@@ -215,6 +215,7 @@ static void gistScanPage(IndexScanDesc scan, const GISTSearchItem *pageItem, con
     bool isNew = false;
     MemoryContext oldcxt;
     errno_t ret = EOK;
+    Oid partHeapOid = IndexScanGetPartHeapOid(scan);
 
     Assert(!GISTSearchItemIsHeap(*pageItem));
 
@@ -290,7 +291,7 @@ static void gistScanPage(IndexScanDesc scan, const GISTSearchItem *pageItem, con
              * getbitmap scan, so just push heap tuple TIDs into the bitmap
              * without worrying about ordering
              */
-            tbm_add_tuples(tbm, &it->t_tid, 1, recheck);
+            tbm_add_tuples(tbm, &it->t_tid, 1, recheck, partHeapOid);
             (*ntids)++;
         } else if (scan->numberOfOrderBys == 0 && GistPageIsLeaf(page)) {
             /*

@@ -433,6 +433,12 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot create concurrent partitioned indexes ")));
     }
 
+    if (stmt->isGlobal && (list_length(stmt->indexParams) > INDEX_MAX_KEYS - 1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                errmsg("cannot use more than %d columns in an global partition index", INDEX_MAX_KEYS - 1)));
+    }
+
     /* Add special index columns tableoid to global partition index */
     if (stmt->isGlobal) {
         AddIndexColumnForGpi(stmt);
@@ -3067,8 +3073,7 @@ static bool CheckGlobalIndexCompatible(Oid relOid, bool isGlobal, const IndexInf
         /* only check index of different type(local and global) */
         if (currIdxKind != tarIdxKind) {
             if (!CheckIndexMethodConsistency(tarTuple, indexRelation, currMethodOid)) {
-                ret = false;
-                break;
+                continue;
             }
 
             heap_getattr(tarTuple, Anum_pg_index_indexprs, RelationGetDescr(indexRelation), &isNull);

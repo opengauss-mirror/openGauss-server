@@ -4703,9 +4703,10 @@ List* RelationGetSpecificKindIndexList(Relation relation, bool isGlobal)
 {
     ListCell* indList = NULL;
     List* result = NULL;
+    List* indexOidList = RelationGetIndexList(relation);
 
     /* Ask the relcache to produce a list of the indexes of the rel */
-    foreach (indList, RelationGetIndexList(relation)) {
+    foreach (indList, indexOidList) {
         Oid indexId = lfirst_oid(indList);
         Relation currentIndex;
 
@@ -4723,6 +4724,7 @@ List* RelationGetSpecificKindIndexList(Relation relation, bool isGlobal)
         index_close(currentIndex, AccessShareLock);
     }
 
+    list_free_ext(indexOidList);
     return result;
 }
 

@@ -664,6 +664,7 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
     if (bms_is_member(gpiScan->currPartOid, gpiScan->invisiblePartMap)) {
         gpiScan->fakePartRelation = NULL;
         gpiScan->partition = NULL;
+        gpiScan->currPartOid = InvalidOid;
         return false;
     }
 
@@ -679,6 +680,7 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
         if (currStatus == PART_METADATA_INVISIBLE) {
             /* If current partition metadata is invisible, add current partition oid into invisiblePartMap */
             gpiScan->invisiblePartMap = bms_add_member(gpiScan->invisiblePartMap, gpiScan->currPartOid);
+            gpiScan->currPartOid = InvalidOid;
             result = false;
         } else {
             /* If current partition metadata is invisible, add current partition oid into fakeRelationTable */

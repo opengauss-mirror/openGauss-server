@@ -497,7 +497,7 @@ static void spgWalk(Relation index, SpGistScanOpaque so, bool scanWholeIndex, st
 /* storeRes subroutine for getbitmap case */
 static void storeBitmap(SpGistScanOpaque so, ItemPointer heapPtr, Datum leafValue, bool isnull, bool recheck)
 {
-    tbm_add_tuples(so->tbm, heapPtr, 1, recheck);
+    tbm_add_tuples(so->tbm, heapPtr, 1, recheck, so->partHeapOid);
     so->ntids++;
 }
 
@@ -511,6 +511,7 @@ Datum spggetbitmap(PG_FUNCTION_ARGS)
     so->want_itup = false;
     so->tbm = tbm;
     so->ntids = 0;
+    so->partHeapOid = IndexScanGetPartHeapOid(scan);
 
     spgWalk(scan->indexRelation, so, true, storeBitmap);
 

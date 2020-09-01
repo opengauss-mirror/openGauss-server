@@ -3159,6 +3159,12 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
         stmt->internal_flag = true;
     }
 
+    /* default partition index is set to Global index */
+    if (RELATION_IS_PARTITIONED(rel) && !stmt->isPartitioned) {
+        stmt->isPartitioned = true;
+        stmt->isGlobal = true;
+    }
+
     bool isColStore = RelationIsColStore(rel);
     if (stmt->accessMethod == NULL) {
         if (!isColStore) {
