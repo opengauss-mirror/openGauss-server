@@ -311,6 +311,25 @@ General options:
 
         # check log file
         self.checkLogFile()
+    
+    # set LD_LIBRARY_PATH add local lib
+    def setLibPath(self):
+        package_path = os.path.dirname(os.path.realpath(__file__))
+        ld_path = package_path + "/gspylib/clib"
+        rerun = True
+ 
+        if not 'LD_LIBRARY_PATH' in os.environ:
+            os.environ['LD_LIBRARY_PATH'] = ld_path
+        elif not ld_path in os.environ.get('LD_LIBRARY_PATH'):
+            os.environ['LD_LIBRARY_PATH'] = ld_path + ":" + os.environ['LD_LIBRARY_PATH']
+        else:
+            rerun = False
+
+        if rerun:
+            try:
+                os.execve(os.path.realpath(__file__), sys.argv, os.environ)
+            except Exception as e:
+                GaussLog.exitWithError(str(e))
 
     # init global variables
     def initGlobals(self):
@@ -443,6 +462,8 @@ if __name__ == '__main__':
     try:
         # Objectize class
         preinstall = Preinstall()
+        # set LD_LIBRARY_PATH
+        preinstall.setLibPath()
         # parse cmd lines
         preinstall.parseCommandLine()
         # check parameters
