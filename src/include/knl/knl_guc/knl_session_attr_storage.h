@@ -83,6 +83,7 @@ typedef struct knl_session_attr_storage {
     int wal_receiver_timeout;
     int wal_receiver_connect_timeout;
     int wal_receiver_connect_retries;
+    int basebackup_timeout;
     int max_loaded_cudesc;
     int num_temp_buffers;
     int psort_work_mem;
