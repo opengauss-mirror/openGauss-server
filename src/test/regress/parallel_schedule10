@@ -76,3 +76,4 @@ test: with
 #test: pg_object_test
 test: partition_foreign_key
 test: partition_trigger
+test: duplicate_column_index
