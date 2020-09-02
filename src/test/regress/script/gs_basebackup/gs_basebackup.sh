@@ -41,7 +41,7 @@ fi
 
 
 $abs_bindir/gs_ctl start -o "-p ${gs_basebackup_port} -c listen_addresses=*" -D $abs_bindir/../$dataNode >> $abs_bindir/../$dataNode.log 2>&1
-
+sleep 10s
 
 # ----check start or not
 $abs_bindir/gs_ctl status -D $abs_bindir/../$dataNode
