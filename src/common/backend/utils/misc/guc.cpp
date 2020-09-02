@@ -401,7 +401,8 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_incremental_catchup",
     "wait_dummy_time",
     "max_recursive_times",
-    "sql_use_spacelimit"};
+    "sql_use_spacelimit",
+    "basebackup_timeout"};
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
 static bool call_bool_check_hook(struct config_bool* conf, bool* newval, void** extra, GucSource source, int elevel);
@@ -4998,6 +4999,23 @@ static void init_configure_names_int()
             },
             &u_sess->attr.attr_storage.wal_receiver_timeout,
             6 * 1000,
+            0,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+                "basebackup_timeout",
+                PGC_USERSET,
+                WAL_SETTINGS,
+                gettext_noop("Sets the timeout in seconds for a reponse from gs_basebackup."),
+                NULL,
+                GUC_UNIT_S
+            },
+            &u_sess->attr.attr_storage.basebackup_timeout,
+            60 * 10,
             0,
             INT_MAX,
             NULL,

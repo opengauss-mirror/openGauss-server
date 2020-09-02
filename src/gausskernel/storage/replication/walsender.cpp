@@ -1755,7 +1755,7 @@ static bool HandleWalReplicationCommand(const char* cmd_string)
 
             /* Send CommandComplete and ReadyForQuery messages */
             EndCommand_noblock("SELECT", DestRemote);
-            ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.wal_sender_timeout);
+            ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.basebackup_timeout * MILLISECONDS_PER_SECONDS);
             /* ReadyForQuery did pq_flush for us */
             /* Audit database recovery */
             pgaudit_system_recovery_ok();

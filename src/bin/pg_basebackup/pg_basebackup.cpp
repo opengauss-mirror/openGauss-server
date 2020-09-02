@@ -1972,7 +1972,7 @@ static int GsBaseBackup(int argc, char** argv)
             case 'Z':
                 check_env_value_c(optarg);
                 compresslevel = atoi(optarg);
-                if (compresslevel <= 0 || compresslevel > 9) {
+                if (compresslevel < 0 || compresslevel > 9) {
                     fprintf(stderr, _("%s: invalid compression level \"%s\"\n"), progname, optarg);
                     exit(1);
                 }
