@@ -222,6 +222,7 @@ static List* DividePartitionStartEndInterval(ParseState* pstate, Form_pg_attribu
     Const* startVal, Const* endVal, Const* everyVal, Node* everyExpr, int* numPart, int maxNum);
 static void TryReuseFilenode(Relation rel, CreateStmtContext *ctx, bool clonepart);
 extern Node* makeAConst(Value* v, int location);
+static bool IsElementExisted(List* indexElements, IndexElem* ielem);
 
 /*
  * transformCreateStmt -
@@ -3243,7 +3244,7 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
         /* we have to fix its collations too */
         assign_expr_collations(pstate, stmt->whereClause);
     }
-
+    List* indexElements = NIL;
     /* take care of any index expressions */
     foreach (l, stmt->indexParams) {
         IndexElem* ielem = (IndexElem*)lfirst(l);
@@ -3267,7 +3268,14 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
             if (expression_returns_set(ielem->expr))
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("index expression cannot return a set")));
         }
+            
+        if (IsElementExisted(indexElements, ielem)) {
+            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_COLUMN), errmsg("duplicate column name")));
+        }
+        indexElements = lappend(indexElements, (IndexElem*)ielem);
     }
+
+    list_free(indexElements);
 
     /*
      * Check that only the base rel is mentioned.
@@ -3298,6 +3306,18 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
     }
 
     return stmt;
+}
+
+static bool IsElementExisted(List* indexElements, IndexElem* ielem)
+{
+    ListCell* lc = NULL;
+    foreach (lc, indexElements) {
+        IndexElem* theElement = (IndexElem*)lfirst(lc);
+        if (equal(theElement, ielem)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /*
