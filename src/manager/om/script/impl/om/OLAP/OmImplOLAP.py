@@ -242,7 +242,7 @@ class OmImplOLAP(OmImpl):
                 else:
                     break
             if time.time() > time_out + starttime:
-                raise Exception(ErrorCode.GAUSS_516["GAUSS_51610"] % "cluster"
+                raise Exception(ErrorCode.GAUSS_516["GAUSS_51607"] % "cluster"
                                 + "Start timeout, please check the process"
                                   " status manually")
         self.logger.log("=========================================")

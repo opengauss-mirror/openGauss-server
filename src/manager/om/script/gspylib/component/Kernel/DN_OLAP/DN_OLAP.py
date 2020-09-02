@@ -199,6 +199,9 @@ class DN_OLAP(Kernel):
                     tmpDNDict["synchronous_standby_names"] = "'ANY %d(%s)'" % \
                                                              (syncNum,
                                                               azNames[0])
+                elif syncNum == 0:
+                    tmpDNDict["synchronous_standby_names"] = "'ANY 1(%s)'" % \
+                                                             (azNames[0])
             elif (len(azNames) == 2 and len(peerInsts) == 3):
                 tmpDNDict["synchronous_standby_names"] = "'ANY 2(%s,%s)'" % \
                                                          (azNames[0],

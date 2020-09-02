@@ -1867,7 +1867,8 @@ class PreinstallImpl:
         self.createDirs()
 
         # set Sctp
-        self.setSctp()
+        if not DefaultValue.checkDockerEnv():
+            self.setSctp()
         # set os parameters
         self.setAndCheckOSParameter()
         # prepare cron service for user

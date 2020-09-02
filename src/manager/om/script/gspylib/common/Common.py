@@ -4086,6 +4086,15 @@ class DefaultValue():
             logger.debug(
                 "Successfully clear $WHITELIST_ENV in %s." % mpprcFile)
 
+    @staticmethod
+    def checkDockerEnv():
+        cmd = "egrep  '^1:.+(docker|lxc|kubepods)' /proc/1/cgroup"
+        (status, output) = subprocess.getstatusoutput(cmd)
+        if output:
+            return True
+        else:
+            return False
+
 
 class ClusterCommand():
     '''

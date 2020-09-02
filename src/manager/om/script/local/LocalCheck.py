@@ -46,6 +46,12 @@ actioItemMap = {
     "Set_FileSystem_Configure": ['/etc/security/limits.conf', True]
 }
 
+docker_no_need_check = ["net.core.wmem_max", "net.core.rmem_max",
+                        "net.core.wmem_default",
+                        "net.core.rmem_default", "net.sctp.sctp_mem",
+                        "net.sctp.sctp_rmem", "net.sctp.sctp_wmem",
+                        "net.core.netdev_max_backlog"]
+
 paraList = {}
 
 #############################################################################
@@ -223,6 +229,8 @@ def checkSysctlParameter(kernelParameter, isSet):
         # Skip check net.ipv4.tcp_tw_recycle with ARM
         if (platform.machine() == "aarch64"
                 and key == "net.ipv4.tcp_tw_recycle"):
+            continue
+        if (DefaultValue.checkDockerEnv() and key in docker_no_need_check):
             continue
         # The parameter sctpchecksumerrors check method is independent
         if (key == "sctpchecksumerrors"):
