@@ -1002,13 +1002,13 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
         return nullptr;
     }
 
+    MOT::Row* currRow;
     MOTFdwStateSt* festate = (MOTFdwStateSt*)node->fdw_state;
     TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
     bool found = false;
     bool stopAtFirst = (festate->m_bestIx && festate->m_bestIx->m_ixOpers[0] == KEY_OPER::READ_KEY_EXACT &&
                         festate->m_bestIx->m_ix->GetUnique() == true);
 
-    festate->m_currRow = NULL;
     (void)ExecClearTuple(slot);
 
     if (stopAtFirst) {
@@ -1018,18 +1018,18 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
         MOTAdaptor::CreateKeyBuffer(node->ss.ss_currentRelation, festate, 0);
         MOT::Sentinel* Sentinel =
             festate->m_bestIx->m_ix->IndexReadSentinel(&festate->m_stateKey[0], festate->m_currTxn->GetThdId());
-        festate->m_currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, Sentinel, rc);
+        currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, Sentinel, rc);
 
-        if (festate->m_currRow != NULL) {
+        if (currRow != NULL) {
             MOTAdaptor::UnpackRow(
-                slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(festate->m_currRow->GetData()));
+                slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
             node->ss.is_scan_end = true;
             fscan->scan.scan_qual_optimized = true;
             ExecStoreVirtualTuple(slot);
             if (festate->m_ctidNum > 0) {
                 HeapTuple resultTup = ExecFetchSlotTuple(slot);
                 MOTRecConvertSt cv;
-                cv.m_u.m_ptr = (uint64_t)festate->m_currRow->GetPrimarySentinel();
+                cv.m_u.m_ptr = (uint64_t)currRow->GetPrimarySentinel();
                 resultTup->t_self = cv.m_u.m_self;
                 HeapTupleSetXmin(resultTup, InvalidTransactionId);
                 HeapTupleSetXmax(resultTup, InvalidTransactionId);
@@ -1083,10 +1083,8 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
 
     do {
         MOT::Sentinel* Sentinel = festate->m_cursor[0]->GetPrimarySentinel();
-
-        festate->m_currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, Sentinel, rc);
-
-        if (festate->m_currRow == NULL) {
+        currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, Sentinel, rc);
+        if (currRow == NULL) {
             if (rc != MOT::RC_OK) {
                 if (MOT_IS_SEVERE()) {
                     MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "MOTIterateForeignScan", "Failed to lookup row");
@@ -1113,7 +1111,7 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
         }
 
         MOTAdaptor::UnpackRow(
-            slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(festate->m_currRow->GetData()));
+            slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
         found = true;
 
         festate->m_cursor[0]->Next();
@@ -1126,7 +1124,7 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
         if (festate->m_ctidNum > 0) {
             HeapTuple resultTup = ExecFetchSlotTuple(slot);
             MOTRecConvertSt cv;
-            cv.m_u.m_ptr = (uint64_t)festate->m_currRow->GetPrimarySentinel();
+            cv.m_u.m_ptr = (uint64_t)currRow->GetPrimarySentinel();
             resultTup->t_self = cv.m_u.m_self;
             HeapTupleSetXmin(resultTup, InvalidTransactionId);
             HeapTupleSetXmax(resultTup, InvalidTransactionId);
@@ -1456,58 +1454,48 @@ static TupleTableSlot* MOTExecForeignUpdate(
 {
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
     MOT::RC rc = MOT::RC_OK;
-    TupleTableSlot* dataSlot = slot;
-    bool cleanCurrRow = false;
-
+    MOT::Row* currRow;
+    AttrNumber num = fdwState->m_ctidNum - 1;
+    MOTRecConvertSt cv;
+    
     if (MOTAdaptor::m_engine->IsSoftMemoryLimitReached()) {
         CleanQueryStatesOnError(fdwState->m_currTxn);
     }
     isMemoryLimitReached();
 
-    if (fdwState->m_currRow == nullptr) {
-        AttrNumber num = fdwState->m_ctidNum - 1;
-        if (fdwState->m_ctidNum != 0 && planSlot->tts_nvalid >= fdwState->m_ctidNum && !planSlot->tts_isnull[num]) {
-            MOTRecConvertSt cv;
-            cv.m_u.m_ptr = 0;
-            cv.m_u.m_self = *(ItemPointerData*)planSlot->tts_values[num];
-
-            fdwState->m_currRow =
-                fdwState->m_currTxn->RowLookup(fdwState->m_internalCmdOper, (MOT::Sentinel*)cv.m_u.m_ptr, rc);
-        }
-
-        if (fdwState->m_currRow == nullptr) {
-            CleanQueryStatesOnError(fdwState->m_currTxn);
-            report_pg_error(MOT::RC_ERROR, fdwState->m_currTxn);
-            return nullptr;
-        }
-
-        cleanCurrRow = true;
-        if (slot->tts_nvalid == 0)
-            dataSlot = planSlot;
+    if (fdwState->m_ctidNum != 0 && planSlot->tts_nvalid >= fdwState->m_ctidNum && !planSlot->tts_isnull[num]) {
+        cv.m_u.m_ptr = 0;
+        cv.m_u.m_self = *(ItemPointerData*)planSlot->tts_values[num];
+        currRow = fdwState->m_currTxn->RowLookup(fdwState->m_internalCmdOper, (MOT::Sentinel*)cv.m_u.m_ptr, rc);
     } else {
-        fdwState->m_currRow =
-            fdwState->m_currTxn->RowLookup(fdwState->m_internalCmdOper, fdwState->m_currRow->GetPrimarySentinel(), rc);
+        elog(ERROR, "MOTExecForeignUpdate failed to fetch row for update ctid %d nvalid %d %s",
+            num, planSlot->tts_nvalid, (planSlot->tts_isnull[num] ? "NULL" : "NOT NULL"));
+        CleanQueryStatesOnError(fdwState->m_currTxn);
+        report_pg_error(MOT::RC_ERROR, fdwState->m_currTxn);
+        return nullptr;
     }
 
-    if ((rc = MOTAdaptor::UpdateRow(fdwState, dataSlot)) == MOT::RC_OK) {
-        if (cleanCurrRow)
-            fdwState->m_currRow = nullptr;
+    if (currRow == nullptr) {
+        elog(ERROR, "MOTExecForeignUpdate failed to fetch row");
+        CleanQueryStatesOnError(fdwState->m_currTxn);
+        report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc), fdwState->m_currTxn);
+        return nullptr;
+    }
 
-        if (resultRelInfo->ri_projectReturning)
-            return dataSlot;
-        else {
+    if ((rc = MOTAdaptor::UpdateRow(fdwState, planSlot, currRow)) == MOT::RC_OK) {
+        if (resultRelInfo->ri_projectReturning) {
+            return planSlot;
+        } else {
             estate->es_processed++;
             return nullptr;
         }
     } else {
-        if (cleanCurrRow)
-            fdwState->m_currRow = nullptr;
-
         elog(DEBUG2, "Abort parent transaction from MOT update, id %lu", fdwState->m_txnId);
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(rc,
             fdwState->m_currTxn,
-            (void*)(fdwState->m_currTxn->m_errIx != NULL ? fdwState->m_currTxn->m_errIx->GetName().c_str() : "unknown"),
+            (void*)(fdwState->m_currTxn->m_errIx != nullptr ? fdwState->m_currTxn->m_errIx->GetName().c_str()
+                                                            : "unknown"),
             (void*)fdwState->m_currTxn->m_errMsgBuf);
         return nullptr;
     }
@@ -1518,50 +1506,40 @@ static TupleTableSlot* MOTExecForeignDelete(
 {
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
     MOT::RC rc = MOT::RC_OK;
-    bool cleanCurrRow = false;
+    MOT::Row* currRow;
+    AttrNumber num = fdwState->m_ctidNum - 1;
+    MOTRecConvertSt cv;
 
-    if (fdwState->m_currRow == nullptr) {
-        AttrNumber num = fdwState->m_ctidNum - 1;
-        if (fdwState->m_ctidNum != 0 && planSlot->tts_nvalid >= fdwState->m_ctidNum && !planSlot->tts_isnull[num]) {
-            MOTRecConvertSt cv;
-            cv.m_u.m_ptr = 0;
-            cv.m_u.m_self = *(ItemPointerData*)planSlot->tts_values[num];
-
-            fdwState->m_currRow =
-                fdwState->m_currTxn->RowLookup(fdwState->m_internalCmdOper, (MOT::Sentinel*)cv.m_u.m_ptr, rc);
-        }
-
-        if (fdwState->m_currRow == nullptr) {
-            CleanQueryStatesOnError(fdwState->m_currTxn);
-            report_pg_error(MOT::RC_ERROR, fdwState->m_currTxn);
-            return nullptr;
-        }
-
-        cleanCurrRow = true;
+    if (fdwState->m_ctidNum != 0 && planSlot->tts_nvalid >= fdwState->m_ctidNum && !planSlot->tts_isnull[num]) {
+        cv.m_u.m_ptr = 0;
+        cv.m_u.m_self = *(ItemPointerData*)planSlot->tts_values[num];
+        currRow = fdwState->m_currTxn->RowLookup(fdwState->m_internalCmdOper, (MOT::Sentinel*)cv.m_u.m_ptr, rc);
     } else {
-        fdwState->m_currRow =
-            fdwState->m_currTxn->RowLookup(fdwState->m_internalCmdOper, fdwState->m_currRow->GetPrimarySentinel(), rc);
+        elog(ERROR, "MOTExecForeignDelete failed to fetch row for delete ctid %d nvalid %d %s",
+            num, planSlot->tts_nvalid, (planSlot->tts_isnull[num] ? "NULL" : "NOT NULL"));
+        CleanQueryStatesOnError(fdwState->m_currTxn);
+        report_pg_error(MOT::RC_ERROR, fdwState->m_currTxn);
+        return nullptr;
+    }
+
+    if (currRow == nullptr) {
+        elog(ERROR, "MOTExecForeignDelete failed to fetch row");
+        CleanQueryStatesOnError(fdwState->m_currTxn);
+        report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc), fdwState->m_currTxn);
+        return nullptr;
     }
 
     if ((rc = MOTAdaptor::DeleteRow(fdwState, slot)) == MOT::RC_OK) {
         if (resultRelInfo->ri_projectReturning) {
             MOTAdaptor::UnpackRow(
-                slot, fdwState->m_table, fdwState->m_attrsUsed, const_cast<uint8_t*>(fdwState->m_currRow->GetData()));
+                slot, fdwState->m_table, fdwState->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
             ExecStoreVirtualTuple(slot);
-            if (cleanCurrRow)
-                fdwState->m_currRow = nullptr;
-
             return slot;
         } else {
-            if (cleanCurrRow)
-                fdwState->m_currRow = nullptr;
             estate->es_processed++;
             return nullptr;
         }
     } else {
-        if (cleanCurrRow)
-            fdwState->m_currRow = nullptr;
-
         elog(DEBUG2, "Abort parent transaction from MOT delete, id %lu", fdwState->m_txnId);
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(rc,

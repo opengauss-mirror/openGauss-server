@@ -556,10 +556,10 @@ public:
      * @param row. New row to be inserted
      * @param tid The logical identifier of the requesting thread.
      * @param k row's primary ket
-     * @param isInterTest determines if secondaries should be added as well
+     * @param skipSecIndex determines if secondaries should be added as well
      * @return Status of the operation.
      */
-    RC InsertRowNonTransactional(Row* row, uint64_t tid, Key* k = NULL, bool isInterTest = false);
+    RC InsertRowNonTransactional(Row* row, uint64_t tid, Key* k = NULL, bool skipSecIndex = false);
 
     /**
      * @brief Inserts a row into a newly created secondary index storage without validation.

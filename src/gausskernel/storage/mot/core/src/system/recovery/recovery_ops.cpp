@@ -535,6 +535,33 @@ void RecoveryManager::InsertRow(uint64_t tableId, uint64_t exId, char* keyData, 
     }
 }
 
+void RecoveryManager::InsertRowFromCheckpoint(Table* table, char* keyData, uint16_t keyLen, char* rowData,
+    uint64_t rowLen, uint64_t csn, uint32_t tid, SurrogateState& sState, RC& status, uint64_t rowId)
+{
+    MaxKey key;
+    Row* row = table->CreateNewRow();
+    if (row == nullptr) {
+        status = RC_ERROR;
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Insert Row", "failed to create row");
+        return;
+    }
+    row->CopyData((const uint8_t*)rowData, rowLen);
+    row->SetCommitSequenceNumber(csn);
+    row->SetRowId(rowId);
+
+    MOT::Index* ix = table->GetPrimaryIndex();
+    if (ix->IsFakePrimary()) {
+        row->SetSurrogateKey(*(uint64_t*)keyData);
+        sState.UpdateMaxKey(rowId);
+    }
+    key.CpKey((const uint8_t*)keyData, keyLen);
+    status = table->InsertRowNonTransactional(row, tid, &key);
+    if (status != RC_OK) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Recovery Manager Insert Row", "failed to insert row");
+        table->DestroyRow(row);
+    }
+}
+
 void RecoveryManager::DeleteRow(
     uint64_t tableId, uint64_t exId, char* keyData, uint16_t keyLen, uint64_t csn, uint32_t tid, RC& status)
 {

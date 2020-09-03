@@ -273,7 +273,6 @@ struct MOTFdwState_St {
     MOT::Table* m_table;
     MOT::IndexIterator* m_cursor[2] = {nullptr, nullptr};
     MOT::TxnManager* m_currTxn;
-    MOT::Row* m_currRow = nullptr;
     void* m_currItem = nullptr;
     uint32_t m_rowsFound = 0;
     bool m_cursorOpened = false;
@@ -338,7 +337,7 @@ public:
     static MOT::RC RollbackPrepared(TransactionId tid);
     static MOT::RC FailedCommitPrepared(TransactionId tid);
     static MOT::RC InsertRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot);
-    static MOT::RC UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot);
+    static MOT::RC UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot, MOT::Row* currRow);
     static MOT::RC DeleteRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot);
 
     /* Convertors */

@@ -211,12 +211,15 @@ private:
      * @param tableId The table id to recover.
      * @param seg Segment file number to recover from.
      * @param tid The current thread id
+     * @param keyData The key buffer to use.
+     * @param entryData The row buffer to use.
      * @param maxCsn The returned maxCsn encountered during the recovery.
      * @param sState Surrogate key state structure that will be filled
      * during the recovery
      * @return Boolean value denoting success or failure.
      */
-    bool RecoverTableRows(uint32_t tableId, uint32_t seg, uint32_t tid, uint64_t& maxCsn, SurrogateState& sState);
+    bool RecoverTableRows(uint32_t tableId, uint32_t seg, uint32_t tid, char* keyData, char* entryData,
+        uint64_t& maxCsn, SurrogateState& sState);
 
     /**
      * @brief Reads and creates a table's defenition from a checkpoint
@@ -814,7 +817,7 @@ private:
     /**
      * @brief performs the actual row insertion to the storage.
      * @param tableId the table's id.
-     * @param exId the the table's external id.
+     * @param exId the table's external id.
      * @param keyData key's data buffer.
      * @param keyLen key's data buffer len.
      * @param rowData row's data buffer.
@@ -829,6 +832,22 @@ private:
     static void InsertRow(uint64_t tableId, uint64_t exId, char* keyData, uint16_t keyLen, char* rowData,
         uint64_t rowLen, uint64_t csn, uint32_t tid, SurrogateState& sState, RC& status, uint64_t rowId,
         bool insertLocked = false);
+
+    /**
+     * @brief performs non transactional row insertion (for checkpoint recovery).
+     * @param table the table's pointer.
+     * @param keyData key's data buffer.
+     * @param keyLen key's data buffer len.
+     * @param rowData row's data buffer.
+     * @param rowLen row's data buffer len.
+     * @param csn the operations's csn.
+     * @param tid the thread id of the recovering thread.
+     * @param sState the returned surrugate state.
+     * @param status the returned status of the operation
+     * @param rowId the row's internal id
+     */
+    static void InsertRowFromCheckpoint(Table* table, char* keyData, uint16_t keyLen, char* rowData, uint64_t rowLen,
+        uint64_t csn, uint32_t tid, SurrogateState& sState, RC& status, uint64_t rowId);
 
     /**
      * @brief performs the actual row update in the storage.
