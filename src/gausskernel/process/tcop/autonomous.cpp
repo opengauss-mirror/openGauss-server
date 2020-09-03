@@ -706,7 +706,7 @@ void autonomous_worker_main(Datum main_arg)
                     save_log_duration = u_sess->attr.attr_sql.log_duration;
                     save_log_min_duration_statement = u_sess->attr.attr_storage.log_min_duration_statement;
 
-                    check_client_encoding_hook = autonomous_check_client_encoding_hook;
+                    t_thrd.autonomous_cxt.check_client_encoding_hook = autonomous_check_client_encoding_hook;
                     u_sess->attr.attr_common.log_statement = LOGSTMT_NONE;
                     u_sess->attr.attr_sql.log_duration = false;
                     u_sess->attr.attr_storage.log_min_duration_statement = -1;
@@ -717,7 +717,7 @@ void autonomous_worker_main(Datum main_arg)
                     u_sess->attr.attr_common.log_statement = save_log_statement;
                     u_sess->attr.attr_sql.log_duration = save_log_duration;
                     u_sess->attr.attr_storage.log_min_duration_statement = save_log_min_duration_statement;
-                    check_client_encoding_hook = NULL;
+                    t_thrd.autonomous_cxt.check_client_encoding_hook = NULL;
 
                     ReadyForQuery((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
                     break;

@@ -2662,10 +2662,12 @@ typedef struct knl_t_heartbeat_context {
 
 /* autonomous_transaction */
 struct PLpgSQL_expr;
+typedef void (*check_client_encoding_hook_type)(void);
 typedef struct knl_t_autonomous_context {
     PLpgSQL_expr* sqlstmt;
     bool isnested;
     BackgroundWorkerHandle* handle;
+    check_client_encoding_hook_type check_client_encoding_hook;
 } knl_t_autonomous_context;
 
 /* MOT thread attributes */

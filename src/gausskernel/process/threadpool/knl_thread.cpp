@@ -1389,6 +1389,7 @@ static void knl_t_autonomous_init(knl_t_autonomous_context* autonomous_cxt)
     autonomous_cxt->isnested = false;
     autonomous_cxt->handle = NULL;
     autonomous_cxt->sqlstmt = NULL;
+    autonomous_cxt->check_client_encoding_hook = NULL;
 }
 
 static void knl_t_mot_init(knl_t_mot_context* mot_cxt)

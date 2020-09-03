@@ -19345,9 +19345,10 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
         return false;
     }
 #endif
-    if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
-            g_instance.attr.attr_storage.max_background_workers +
-            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
+    if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers +
+        g_instance.attr.attr_sql.job_queue_processes + 1 +
+        g_instance.attr.attr_storage.max_background_workers +
+        AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;
     }
@@ -19356,9 +19357,10 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
 
 static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource source)
 {
-    if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
-            g_instance.attr.attr_storage.max_background_workers +
-            g_instance.attr.attr_network.MaxConnections + AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS > MAX_BACKENDS) {
+    if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers +
+        g_instance.attr.attr_sql.job_queue_processes + 1 +
+        g_instance.attr.attr_storage.max_background_workers +
+        g_instance.attr.attr_network.MaxConnections + AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS > MAX_BACKENDS) {
         return false;
     }
     return true;
@@ -19366,9 +19368,10 @@ static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource so
 
 static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source)
 {
-    if (g_instance.attr.attr_network.MaxConnections + *newval + g_instance.attr.attr_sql.job_queue_processes +
-            g_instance.attr.attr_storage.max_background_workers +
-            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
+    if (g_instance.attr.attr_network.MaxConnections + *newval +
+        g_instance.attr.attr_sql.job_queue_processes + 1 +
+        g_instance.attr.attr_storage.max_background_workers +
+        AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;
     }
@@ -19378,8 +19381,8 @@ static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource so
 static bool check_max_worker_processes(int* newval, void** extra, GucSource source)
 {
     if (g_instance.attr.attr_network.MaxConnections + g_instance.attr.attr_storage.autovacuum_max_workers +
-            g_instance.attr.attr_sql.job_queue_processes + *newval +
-            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
+        g_instance.attr.attr_sql.job_queue_processes + 1 + *newval +
+        AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;
     }
@@ -19396,9 +19399,9 @@ static bool check_max_worker_processes(int* newval, void** extra, GucSource sour
  */
 static bool check_job_max_workers(int* newval, void** extra, GucSource source)
 {
-    if (g_instance.attr.attr_network.MaxConnections + g_instance.attr.attr_storage.autovacuum_max_workers + *newval +
-            g_instance.attr.attr_storage.max_background_workers +
-            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
+    if (g_instance.attr.attr_network.MaxConnections + g_instance.attr.attr_storage.autovacuum_max_workers +
+        *newval + 1 + g_instance.attr.attr_storage.max_background_workers +
+        AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
         MAX_BACKENDS) {
         return false;
     }
