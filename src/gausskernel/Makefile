@@ -624,6 +624,8 @@ else ifeq ($(PLAT_FORM_STR), euleros2.0_sp8_aarch64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else ifeq ($(PLAT_FORM_STR), openeuler_aarch64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
+else ifeq ($(PLAT_FORM_STR), openeuler_x86_64)
+	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else ifeq ($(PLAT_FORM_STR), centos7.6_x86_64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else ifeq ($(PLAT_FORM_STR), kylin_aarch64)
