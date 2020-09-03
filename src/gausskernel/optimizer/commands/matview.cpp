@@ -166,10 +166,9 @@ void ExecRefreshMatView(const RefreshMatViewStmt* stmt, const char* queryString,
 
     tableSpace = matviewRel->rd_rel->reltablespace;
 
-    heap_close(matviewRel, NoLock);
-
     /* Create the transient table that will receive the regenerated data. */
     OIDNewHeap = make_new_heap(matviewOid, tableSpace, ExclusiveLock);
+    LockRelationOid(OIDNewHeap, AccessExclusiveLock);
     dest = CreateTransientRelDestReceiver(OIDNewHeap);
     /*
      * Now lock down security-restricted operations.
@@ -183,8 +182,11 @@ void ExecRefreshMatView(const RefreshMatViewStmt* stmt, const char* queryString,
     t_thrd.storage_cxt.EnlargeDeadlockTimeout = true;
     LockRelationOid(matviewOid, AccessExclusiveLock);
     refresh_by_heap_swap(matviewOid, OIDNewHeap);
+
     if (!stmt->skipData)
         pgstat_count_heap_insert(matviewRel, processed);
+
+    heap_close(matviewRel, NoLock);
 
     /* Roll back any GUC changes */
     AtEOXact_GUC(false, save_nestlevel);
