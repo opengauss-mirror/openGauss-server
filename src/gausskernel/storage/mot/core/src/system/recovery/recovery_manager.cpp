@@ -235,11 +235,18 @@ bool RecoveryManager::RecoverTableMetadata(uint32_t tableId)
     return (status == RC_OK);
 }
 
-bool RecoveryManager::RecoverTableRows(
-    uint32_t tableId, uint32_t seg, uint32_t tid, uint64_t& maxCsn, SurrogateState& sState)
+bool RecoveryManager::RecoverTableRows(uint32_t tableId, uint32_t seg, uint32_t tid, char* keyData, char* entryData,
+    uint64_t& maxCsn, SurrogateState& sState)
 {
     RC status = RC_OK;
     int fd = -1;
+    Table* table = nullptr;
+
+    if (!GetRecoveryManager()->FetchTable(tableId, table)) {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "RecoveryManager::recoverTableRows", "Table %llu does not exist", tableId);
+        return false;
+    }
+
     std::string fileName;
     CheckpointUtils::MakeCpFilename(tableId, fileName, m_workingDir, seg);
     if (!CheckpointUtils::OpenFileRead(fileName, fd)) {
@@ -261,22 +268,14 @@ bool RecoveryManager::RecoverTableRows(
         return false;
     }
 
+    uint64_t tableExId = table->GetTableExId();
+    if (tableExId != fileHeader.m_exId) {
+        MOT_LOG_ERROR(
+            "RecoveryManager::recoverTableRows: exId mismatch: my %lu - pkt %lu", tableExId, fileHeader.m_exId);
+        return false;
+    }
+
     CheckpointUtils::EntryHeader entry;
-    char* keyData = (char*)malloc(MAX_KEY_SIZE);
-    if (keyData == nullptr) {
-        MOT_LOG_ERROR("RecoveryManager::recoverTableRows: failed to allocate key buffer");
-        CheckpointUtils::CloseFile(fd);
-        return false;
-    }
-
-    char* entryData = (char*)malloc(MAX_TUPLE_SIZE);
-    if (entryData == nullptr) {
-        MOT_LOG_ERROR("RecoveryManager::recoverTableRows: failed to allocate row buffer");
-        CheckpointUtils::CloseFile(fd);
-        free(keyData);
-        return false;
-    }
-
     for (uint64_t i = 0; i < fileHeader.m_numOps; i++) {
         if (IsRecoveryMemoryLimitReached(m_numWorkers)) {
             MOT_LOG_ERROR("Memory hard limit reached. Cannot recover datanode");
@@ -324,19 +323,16 @@ bool RecoveryManager::RecoverTableRows(
             break;
         }
 
-        BeginTransaction();
-        InsertRow(tableId,
-            fileHeader.m_exId,
+        InsertRowFromCheckpoint(table,
             keyData,
             entry.m_keyLen,
             entryData,
             entry.m_dataLen,
             entry.m_csn,
             tid,
-            m_sState,
+            sState,
             status,
             entry.m_rowId);
-        status = CommitTransaction(entry.m_csn);
         if (status != RC_OK) {
             MOT_LOG_ERROR(
                 "Failed to commit row recovery from checkpoint: %s (error code: %d)", RcToString(status), (int)status);
@@ -354,12 +350,7 @@ bool RecoveryManager::RecoverTableRows(
         seg,
         fileHeader.m_numOps,
         status == RC_OK ? "OK" : "Error");
-    if (keyData != nullptr) {
-        free(keyData);
-    }
-    if (entryData != nullptr) {
-        free(entryData);
-    }
+
     return (status == RC_OK);
 }
 
@@ -384,6 +375,21 @@ void RecoveryManager::CpWorkerFunc()
             "RecoveryManager::workerFunc failed to allocate surrogate state");
         return;
     }
+
+    char* keyData = (char*)malloc(MAX_KEY_SIZE);
+    if (keyData == nullptr) {
+        GetRecoveryManager()->OnError(
+            MOT::RecoveryManager::ErrCodes::CP_RECOVERY, "RecoveryManager::workerFunc: failed to allocate key buffer");
+        return;
+    }
+
+    char* entryData = (char*)malloc(MAX_TUPLE_SIZE);
+    if (entryData == nullptr) {
+        GetRecoveryManager()->OnError(
+            MOT::RecoveryManager::ErrCodes::CP_RECOVERY, "RecoveryManager::workerFunc: failed to allocate row buffer");
+        free(keyData);
+        return;
+    }
     MOT_LOG_DEBUG("RecoveryManager::workerFunc start [%u] on cpu %lu", (unsigned)MOTCurrThreadId, sched_getcpu());
 
     uint64_t maxCsn = 0;
@@ -391,7 +397,7 @@ void RecoveryManager::CpWorkerFunc()
         uint32_t tableId = 0;
         uint32_t seg = 0;
         if (GetTask(tableId, seg)) {
-            if (!RecoverTableRows(tableId, seg, MOTCurrThreadId, maxCsn, sState)) {
+            if (!RecoverTableRows(tableId, seg, MOTCurrThreadId, keyData, entryData, maxCsn, sState)) {
                 MOT_LOG_ERROR("RecoveryManager::workerFunc recovery of table %lu's data failed", tableId);
                 GetRecoveryManager()->OnError(MOT::RecoveryManager::ErrCodes::CP_RECOVERY,
                     "RecoveryManager::workerFunc failed to recover table: ",
@@ -403,9 +409,12 @@ void RecoveryManager::CpWorkerFunc()
         }
     }
 
+    free(keyData);
+    free(entryData);
+
     GetRecoveryManager()->SetCsnIfGreater(maxCsn);
-    if (sState.IsEmpty() == false) {
-        GetRecoveryManager()->AddSurrogateArrayToList(m_sState);
+    if (!sState.IsEmpty()) {
+        GetRecoveryManager()->AddSurrogateArrayToList(sState);
     }
 
     GetSessionManager()->DestroySessionContext(sessionContext);

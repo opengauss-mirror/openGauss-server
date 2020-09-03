@@ -388,22 +388,24 @@ bool Table::CreateSecondaryIndexData(MOT::Index* index, TxnManager* txn)
     return ret;
 }
 
-RC Table::InsertRowNonTransactional(Row* row, uint64_t tid, Key* k, bool isInterTest)
+RC Table::InsertRowNonTransactional(Row* row, uint64_t tid, Key* k, bool skipSecIndex)
 {
     RC rc = RC_OK;
-    MaxKey m_key;
+    MaxKey key;
     Key* pk = nullptr;
     uint64_t surrogateprimaryKey = 0;
     MOT::Index* ix = GetPrimaryIndex();
     uint32_t numIndexes = GetNumIndexes();
     SurrogateKeyGenerator& _surr_gen = GetSurrogateKeyManager()->GetSurrogateSlot(MOT_GET_CURRENT_CONNECTION_ID());
-    row->SetRowId(_surr_gen.GetSurrogateKey(MOT_GET_CURRENT_CONNECTION_ID()));
+    if (row->GetRowId() == 0) {
+        row->SetRowId(_surr_gen.GetSurrogateKey(MOT_GET_CURRENT_CONNECTION_ID()));
+    }
 
     // add row
     if (k != nullptr) {
         pk = k;
     } else {
-        pk = &m_key;
+        pk = &key;
         pk->InitKey(ix->GetKeyLength());
         // set primary key
         if (ix->IsFakePrimary()) {
@@ -427,18 +429,18 @@ RC Table::InsertRowNonTransactional(Row* row, uint64_t tid, Key* k, bool isInter
     }
 
     // add secondary indexes
-    if (!isInterTest) {
+    if (!skipSecIndex) {
         for (uint16_t i = 1; i < numIndexes; i++) {
             ix = GetSecondaryIndex(i);
-            m_key.InitKey(ix->GetKeyLength());
-            ix->BuildKey(this, row, &m_key);
-            if (ix->IndexInsert(&m_key, row, tid) == nullptr) {
+            key.InitKey(ix->GetKeyLength());
+            ix->BuildKey(this, row, &key);
+            if (ix->IndexInsert(&key, row, tid) == nullptr) {
                 if (MOT_IS_SEVERE()) {
                     MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                         "Insert row",
                         "Failed to insert row to secondary index %u, key: %s",
                         i,
-                        m_key.GetKeyStr().c_str());
+                        key.GetKeyStr().c_str());
                 }
                 return MOT_GET_LAST_ERROR_RC();
             }
