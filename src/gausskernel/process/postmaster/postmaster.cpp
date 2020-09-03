@@ -1022,12 +1022,12 @@ void SetShmemCxt(void)
                 Max(g_instance.attr.attr_network.MaxConnections, thread_pool_worker_num);
 
     g_instance.shmem_cxt.MaxBackends = g_instance.shmem_cxt.MaxConnections + 
-                                       g_instance.attr.attr_sql.job_queue_processes +
+                                       g_instance.attr.attr_sql.job_queue_processes + 1 +
                                        g_instance.attr.attr_storage.autovacuum_max_workers + 
                                        g_instance.attr.attr_storage.max_background_workers +
                                        AUXILIARY_BACKENDS + 
                                        AV_LAUNCHER_PROCS;
-    g_instance.shmem_cxt.MaxReserveBackendId = g_instance.attr.attr_sql.job_queue_processes +
+    g_instance.shmem_cxt.MaxReserveBackendId = g_instance.attr.attr_sql.job_queue_processes + 1 +
                                                g_instance.attr.attr_storage.autovacuum_max_workers +
                                                (thread_pool_worker_num * STREAM_RESERVE_PROC_TIMES) + 
                                                AUXILIARY_BACKENDS + 
