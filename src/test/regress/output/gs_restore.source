@@ -827,8 +827,8 @@ ALTER DATABASE
 ERROR:  tablespace "tbs_user_default" already exists
 \! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 1
 changing permissions for file "@abs_srcdir@/musicmultischema/toc.dat" failed with: Not a directory
-\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 3 -c --±¨´í
-@abs_bindir@/gs_restore: unrecognized option '--±¨´í'
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 3 -c --æŠ¥é”™
+@abs_bindir@/gs_restore: unrecognized option '--æŠ¥é”™'
 Try "gs_restore --help" for more information.
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
 SET
@@ -1064,24 +1064,24 @@ ERROR at pg_backup_tar.cpp : 1214 : The destination buffer or format is a NULL p
 --role=ROLENAME/--rolepassword=ROLEPASSWORD
 --------------------------------------------------------------------------------------------------------------------
 \! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -v -e
-could not find header for file "toc.dat" in tar archive
+@abs_srcdir@/tb1_zcl_shcema2: No such file or directory
 \! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 --no-tablespaces -v
-could not find header for file "toc.dat" in tar archive
+@abs_srcdir@/tb1_zcl_shcema2: No such file or directory
 \! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -v
-could not find header for file "toc.dat" in tar archive
+@abs_srcdir@/tb1_zcl_shcema2: No such file or directory
 \! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a
-could not find header for file "toc.dat" in tar archive
+@abs_srcdir@/tb1_zcl_shcema2: No such file or directory
 \! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -e
-could not find header for file "toc.dat" in tar archive
+@abs_srcdir@/tb1_zcl_shcema2: No such file or directory
 \! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -a -c
-gs_restore: options -c/--clean and -a/--data-only cannot be used together
+@abs_srcdir@/tb1_zcl_shcema2: No such file or directory
 gsql
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user createdatabase PASSWORD 'data_123';"
 CREATE ROLE
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create database createdatabase owner createdatabase;"
 CREATE DATABASE
 \! @abs_bindir@/gs_restore -d postgres -p @portstring@ -F t tb1_zcl_shcema2 -C
-could not find header for file "toc.dat" in tar archive
+@abs_srcdir@/tb1_zcl_shcema2: No such file or directory
 gsql
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "createdatabase=# set current_schema to zcl;"
 ERROR:  syntax error at or near "createdatabase"

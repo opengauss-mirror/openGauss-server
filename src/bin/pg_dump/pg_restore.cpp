@@ -224,6 +224,15 @@ int main(int argc, char** argv)
         exit_nicely(1);
     }
 
+    /* Make sure the input file exists */
+    FILE* fd = fopen(inputFileSpec, PG_BINARY_R);
+    if (NULL == fd) {
+        fprintf(stderr, "%s: %s\n", inputFileSpec, strerror(errno));
+        exit_nicely(1);
+    }
+    fclose(fd);
+    fd = NULL;
+
     /* validate the restore options before start the actual operation */
     validate_restore_options(argv, opts);
     decryptfile = checkDecryptArchive(&inputFileSpec, (ArchiveFormat)opts->format, decrypt_key);

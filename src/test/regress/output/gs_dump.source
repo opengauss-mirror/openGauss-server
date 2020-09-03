@@ -2955,9 +2955,8 @@ connection to database "postgres" failed: FATAL:  Invalid username/password,logi
 --?gs_dump[port='@portstring@'][postgres][.*]: [100.00%] 421 objects have been dumped.
 --?gs_dump[port='@portstring@'][postgres][.*]: dump database postgres successfully
 --?gs_dump[port='@portstring@'][postgres][.*]: total time: .* ms
-\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/t '@abs_srcdir@/tb1_zcl_shcema' -c
-gs_restore: options -d/--dbname and -f/--file cannot be used together
-Try "gs_restore --help" for more information.
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/t -c
+Mandatory to specify dump filename/path for gs_restore
 \! @abs_bindir@/gs_dump -p @portstring@ postgres -f '@abs_srcdir@/tb1_zcl_shcema1' -f @abs_srcdir@/t  -n zcl --inserts
 --?gs_dump[port='@portstring@'][postgres][.*]: The total objects number is 421.
 --?gs_dump[port='@portstring@'][postgres][.*]: [100.00%] 421 objects have been dumped.
