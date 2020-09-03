@@ -956,6 +956,10 @@ create index idx_rep_table on t_rep_table(a);
 explain (costs off) select  /*+ rows(t_rep_table #100000) */  * from t_hash_table where t_hash_table.a in (select a from t_rep_table);
 explain (costs off) select  /*+ rows(t_rep_table #100000) */  * from t_hash_table where '1' = '0' or t_hash_table.a in (select a from t_rep_table);
 
+create index test0 on t_rep_table(rownum);
+create index test0 on t_rep_table(sin(a), sin(rownum));
+create index test0 on t_rep_table(sin(a), sin(rownum+1));
+
 drop index idx_rep_table;
 drop table t_hash_table;
 drop table t_rep_table;

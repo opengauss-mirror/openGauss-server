@@ -2721,6 +2721,18 @@ explain (costs off) select  /*+ rows(t_rep_table #100000) */  * from t_hash_tabl
          Index Cond: (a = t_hash_table.a)
 (4 rows)
 
+create index test0 on t_rep_table(rownum);
+ERROR:  specified ROWNUM is not allowed here.
+LINE 1: create index test0 on t_rep_table(rownum);
+                                          ^
+create index test0 on t_rep_table(sin(a), sin(rownum));
+ERROR:  specified ROWNUM is not allowed here.
+LINE 1: create index test0 on t_rep_table(sin(a), sin(rownum));
+                                                  ^
+create index test0 on t_rep_table(sin(a), sin(rownum+1));
+ERROR:  specified ROWNUM is not allowed here.
+LINE 1: create index test0 on t_rep_table(sin(a), sin(rownum+1));
+                                                  ^
 drop index idx_rep_table;
 drop table t_hash_table;
 drop table t_rep_table;

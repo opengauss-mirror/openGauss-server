@@ -3265,6 +3265,7 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
              * consistency with what transformWhereClause() checks for the
              * predicate.  DefineIndex() will make more checks.
              */
+			ExcludeRownumExpr(pstate, (Node*)ielem->expr);
             if (expression_returns_set(ielem->expr))
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("index expression cannot return a set")));
         }
