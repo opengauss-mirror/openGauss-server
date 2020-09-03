@@ -6626,13 +6626,6 @@ int StreamMain(void* arg)
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
-        if (t_thrd.msqueue_cxt.is_changed == true) {
-            pq_stop_redirect_to_shm_mq();
-        }
-        if (t_thrd.autonomous_cxt.handle) {
-            TerminateBackgroundWorker(t_thrd.autonomous_cxt.handle);
-            t_thrd.autonomous_cxt.handle = NULL;
-        }
         gstrace_tryblock_exit(true, oldTryCounter);
 
         (void)pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
@@ -7407,6 +7400,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
+        if (t_thrd.msqueue_cxt.is_changed == true) {
+            pq_stop_redirect_to_shm_mq();
+        }
+        if (t_thrd.autonomous_cxt.handle) {
+            TerminateBackgroundWorker(t_thrd.autonomous_cxt.handle);
+            t_thrd.autonomous_cxt.handle = NULL;
+        }
         gstrace_tryblock_exit(true, oldTryCounter);
 
         u_sess->SPI_cxt.is_stp = true;
