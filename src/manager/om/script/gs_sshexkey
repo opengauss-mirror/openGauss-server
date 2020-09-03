@@ -748,16 +748,16 @@ General options:
         """
         self.logOut(4, 0)
 
-        if os.path.exists(self.sshDir):
-            g_file.removeDirectory(self.sshDir)
-        cmd = 'ssh-keygen -t rsa -N \"\" -f ~/.ssh/id_rsa < /dev/null'
-        cmd += "&& chmod %s %s %s" % (DefaultValue.KEY_FILE_MODE,
-                                      self.id_rsa_fname, self.id_rsa_pub_fname)
-        (status, output) = subprocess.getstatusoutput(cmd)
-        if (status != 0):
-            self.logger.log("The cmd is %s " % cmd)
-            raise Exception(ErrorCode.GAUSS_511["GAUSS_51108"]
-                            + " Error:\n%s" % output)
+        if not os.path.exists(self.id_rsa_pub_fname):
+            cmd = 'ssh-keygen -t rsa -N \"\" -f ~/.ssh/id_rsa < /dev/null'
+            cmd += "&& chmod %s %s %s" % (DefaultValue.KEY_FILE_MODE,
+                                          self.id_rsa_fname,
+                                          self.id_rsa_pub_fname)
+            (status, output) = subprocess.getstatusoutput(cmd)
+            if (status != 0):
+                self.logger.log("The cmd is %s " % cmd)
+                raise Exception(ErrorCode.GAUSS_511["GAUSS_51108"]
+                                + " Error:\n%s" % output)
         try:
             try:
                 with open(self.id_rsa_pub_fname, 'r') as f:
