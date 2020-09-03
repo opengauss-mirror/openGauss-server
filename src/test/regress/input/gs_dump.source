@@ -339,7 +339,7 @@ export PGUSER=zcl
 ================================================================================================================================================================
 ---f @abs_srcdir@/t test
 \! @abs_bindir@/gs_dump -p @portstring@ postgres --file='@abs_srcdir@/tb1_zcl_shcema' -f @abs_srcdir@/t  -n zcl --inserts
-\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/t '@abs_srcdir@/tb1_zcl_shcema' -c
+\! @abs_bindir@/gs_restore -d postgres -p @portstring@ -U zcl -W TestPwd@123 -f @abs_srcdir@/t -c
 \! @abs_bindir@/gs_dump -p @portstring@ postgres -f '@abs_srcdir@/tb1_zcl_shcema1' -f @abs_srcdir@/t  -n zcl --inserts
 --Export all information in a schema and insert statements in SQL format in insert mode.
 \! @abs_bindir@/gs_dump -p @portstring@ postgres -f '@abs_srcdir@/tb1_zcl_shcema2' -f @abs_srcdir@/t -n zcl --disable-dollar-quoting 

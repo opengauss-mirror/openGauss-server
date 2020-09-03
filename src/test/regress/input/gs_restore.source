@@ -262,7 +262,7 @@ gsql
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "ALTER DATABASE music OWNER TO jim;"
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create tablespace tbs_user_default  LOCATION '@abs_srcdir@/data/tbs_user_default_01';"
 \! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 1
-\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 3 -c --±¨´í
+\! @abs_bindir@/gs_restore -d music -p @portstring@ -L musicmultischema.sql -F d musicmultischema -j 3 -c --æŠ¥é”™
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "set current_schema to zcl;"
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\dt"
 \! @abs_bindir@/gsql -d postgres -p @portstring@ -c "\df"
