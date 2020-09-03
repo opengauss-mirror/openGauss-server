@@ -98,7 +98,7 @@ static const int PRO_RETURN_SET_COST = 1000;
  * validator, so as not to produce a NOTICE and then an ERROR for the same
  * condition.)
  */
- static void CheckIsSerialType(TypeName* t)
+static void CheckIsSerialType(TypeName* t)
 {
     bool isSerial = false;
     /* Check for SERIAL pseudo-types */
@@ -144,7 +144,7 @@ static void compute_return_type(
      * namespace, if the owner of the namespce has the same name as the namescpe
      */
     bool isalter = false;
-    
+
     CheckIsSerialType(returnType);
 
     typtup = LookupTypeName(NULL, returnType, NULL);
@@ -286,6 +286,17 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         AclResult aclresult;
 
         CheckIsSerialType(t);
+
+        typtup = LookupTypeName(NULL, t, NULL);
+        /*
+         * If the type is relation, then we check
+         * whether the table is in installation group
+         */
+        if (!in_logic_cluster() && !IsTypeTableInInstallationGroup(typtup)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("argument type '%s' must be in installation group", TypeNameToString(t))));
+        }
 
         if (typtup) {
             if (!((Form_pg_type)GETSTRUCT(typtup))->typisdefined) {
