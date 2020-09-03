@@ -1138,7 +1138,7 @@ MOT::RC MOTAdaptor::InsertRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot)
     return res;
 }
 
-MOT::RC MOTAdaptor::UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot)
+MOT::RC MOTAdaptor::UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot, MOT::Row* currRow)
 {
     EnsureSafeThreadAccessInline();
     MOT::RC rc;
@@ -1149,11 +1149,11 @@ MOT::RC MOTAdaptor::UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot)
         if (rc != MOT::RC::RC_OK) {
             break;
         }
-        uint8_t* rowData = const_cast<uint8_t*>(fdwState->m_currRow->GetData());
+        uint8_t* rowData = const_cast<uint8_t*>(currRow->GetData());
         PackUpdateRow(slot, fdwState->m_table, fdwState->m_attrsModified, rowData);
         MOT::BitmapSet modified_columns(fdwState->m_attrsModified, fdwState->m_table->GetFieldCount() - 1);
 
-        rc = fdwState->m_currTxn->OverwriteRow(fdwState->m_currRow, modified_columns);
+        rc = fdwState->m_currTxn->OverwriteRow(currRow, modified_columns);
     } while (0);
 
     return rc;
