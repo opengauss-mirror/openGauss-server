@@ -264,13 +264,7 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
                 m_writeSetSize++;
                 break;
             case RD:
-                if (txMan->GetTxnIsoLevel() > READ_COMMITED) {
-                    readSetSize++;
-                    if (m_preAbort && !QuickVersionCheck(ac)) {
-                        rc = RC_ABORT;
-                        goto final;
-                    }
-                }
+                readSetSize++;
                 break;
             default:
                 break;
@@ -291,8 +285,7 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
     }
 
     // validate rows in the read set and write set
-    // for repeatable_read, no need to validate the read set.
-    if (txMan->GetTxnIsoLevel() > READ_COMMITED) {
+    if (readSetSize > 0) {
         if (!ValidateReadSet(txMan)) {
             rc = RC_ABORT;
             goto final;
