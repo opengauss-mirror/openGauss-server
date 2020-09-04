@@ -1731,7 +1731,7 @@ static void UpdateWaitCleanGpiRelOptions(Relation pgPartition, HeapTuple partTup
         CatalogUpdateIndexes(pgPartition, newTuple);
     }
 
-    ereport(LOG, (errmsg("partition %u set reloptions wait_clean_gpi=n success", HeapTupleGetOid(partTuple))));
+    ereport(LOG, (errmsg("partition %u set reloptions wait_clean_gpi success", HeapTupleGetOid(partTuple))));
     heap_freetuple_ext(newTuple);
 }
 
