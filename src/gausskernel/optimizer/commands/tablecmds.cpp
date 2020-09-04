@@ -539,6 +539,8 @@ static void RangeVarCallbackForAlterRelation(
 static bool CheckRangePartitionKeyType(Oid typoid);
 static void CheckRangePartitionKeyType(Form_pg_attribute* attrs, List* pos);
 static void CheckIntervalPartitionKeyType(Form_pg_attribute* attrs, List* pos);
+static void CheckIntervalValue(
+    const Form_pg_attribute* attrs, const List* pos, const IntervalPartitionDefState* intervalPartDef);
 static void CheckPartitionTablespace(const char* spcname, Oid owner);
 static void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, PartitionState* partTableState);
 static bool ConfirmTypeInfo(Oid* target_oid, int* target_mod, Const* src, Form_pg_attribute attrs, bool isinterval);
@@ -1801,6 +1803,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
             CheckValuePartitionKeyType(descriptor->attrs, pos);
         } else if (stmt->partTableState->partitionStrategy == PART_STRATEGY_INTERVAL) {
             CheckIntervalPartitionKeyType(descriptor->attrs, pos);
+            CheckIntervalValue(descriptor->attrs, pos, stmt->partTableState->intervalPartDef);
         } else {
             CheckRangePartitionKeyType(descriptor->attrs, pos);
         }
@@ -15794,13 +15797,38 @@ static void CheckIntervalPartitionKeyType(Form_pg_attribute* attrs, List* pos)
     ListCell* cell = list_head(pos);
     int location = lfirst_int(cell);
     Oid typoid = attrs[location]->atttypid;
-    if (typoid != TIMESTAMPOID && typoid != TIMESTAMPTZOID) {
+    if (typoid != TIMESTAMPOID && typoid != TIMESTAMPTZOID && typoid != DATEOID) {
         list_free_ext(pos);
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("column %s cannot serve as a interval partitioning column because of its datatype",
                     NameStr(attrs[location]->attname))));
     }
+}
+
+static void CheckIntervalValue(
+    const Form_pg_attribute* attrs, const List* pos, const IntervalPartitionDefState* intervalPartDef)
+{
+    /* must be one partitionkey for interval partition, have checked before */
+    Assert(pos->length == 1);
+
+    ListCell* cell = list_head(pos);
+    int location = lfirst_int(cell);
+    Oid typoid = attrs[location]->atttypid;
+    if (typoid != DATEOID) {
+        return;
+    }
+
+    int32 typmod = -1;
+    Interval* interval = NULL;
+    A_Const* node = reinterpret_cast<A_Const*>(intervalPartDef->partInterval);
+    interval = char_to_interval(node->val.val.str, typmod);
+    if (interval->time != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("the interval of DATE type must be an integer multiple of days")));
+    }
+    pfree(interval);
 }
 
 /*

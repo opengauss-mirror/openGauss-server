@@ -1160,13 +1160,23 @@ Oid getRangePartitionOid(Relation relation, Const** partKeyValue, int32* partSeq
 
 inline Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
 {
-    Assert(upBoundary->consttype == TIMESTAMPOID || upBoundary->consttype == TIMESTAMPTZOID);
-    Timestamp lowTs = timestamp_mi_interval(DatumGetTimestamp(upBoundary->constvalue), intervalValue);
+    Assert(upBoundary->consttype == TIMESTAMPOID || upBoundary->consttype == TIMESTAMPTZOID ||
+           upBoundary->consttype == DATEOID);
+    Datum lowValue;
+    if (upBoundary->consttype == DATEOID) {
+        Timestamp lowTs = timestamp_mi_interval(date2timestamp(DatumGetDateADT(upBoundary->constvalue)), intervalValue);
+        lowValue = timestamp2date(lowTs);
+
+    } else {
+        Timestamp lowTs = timestamp_mi_interval(DatumGetTimestamp(upBoundary->constvalue), intervalValue);
+        lowValue = TimestampGetDatum(lowTs);
+    }
+
     return makeConst(upBoundary->consttype,
         upBoundary->consttypmod,
         upBoundary->constcollid,
         upBoundary->constlen,
-        TimestampGetDatum(lowTs),
+        lowValue,
         upBoundary->constisnull,
         upBoundary->constbyval);
 }

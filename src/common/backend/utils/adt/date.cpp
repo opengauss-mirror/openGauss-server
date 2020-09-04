@@ -965,12 +965,8 @@ Datum date_timestamp(PG_FUNCTION_ARGS)
     PG_RETURN_TIMESTAMP(result);
 }
 
-/* timestamp_date()
- * Convert timestamp to date data type.
- */
-Datum timestamp_date(PG_FUNCTION_ARGS)
+Datum timestamp2date(Timestamp timestamp)
 {
-    Timestamp timestamp = PG_GETARG_TIMESTAMP(0);
     DateADT result;
     struct pg_tm tt, *tm = &tt;
     fsec_t fsec;
@@ -986,8 +982,16 @@ Datum timestamp_date(PG_FUNCTION_ARGS)
 
         result = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday) - POSTGRES_EPOCH_JDATE;
     }
-
     PG_RETURN_DATEADT(result);
+}
+
+/* timestamp_date()
+ * Convert timestamp to date data type.
+ */
+Datum timestamp_date(PG_FUNCTION_ARGS)
+{
+    Timestamp timestamp = PG_GETARG_TIMESTAMP(0);
+    return timestamp2date(timestamp);
 }
 
 /* date_timestamptz()
@@ -1577,7 +1581,7 @@ Datum timestamptz_time(PG_FUNCTION_ARGS)
 
     if (TIMESTAMP_NOT_FINITE(timestamp)) {
         PG_RETURN_NULL();
-        }
+    }
 
     if (timestamp2tm(timestamp, &tz, tm, &fsec, NULL, NULL) != 0) {
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));

@@ -147,6 +147,7 @@ extern Datum varchar_date(PG_FUNCTION_ARGS);
 extern Datum bpchar_date(PG_FUNCTION_ARGS);
 extern Datum text_date(PG_FUNCTION_ARGS);
 
+extern Datum timestamp2date(Timestamp timestamp);
 extern Datum timestamp_date(PG_FUNCTION_ARGS);
 extern Datum date_timestamptz(PG_FUNCTION_ARGS);
 extern Datum timestamptz_date(PG_FUNCTION_ARGS);

@@ -1,0 +1,154 @@
+-- the date tyte of the compatible B/C/PG version is different from the A compatible version
+create database pg_db dbcompatibility 'PG';
+\c pg_db
+CREATE TABLE interval_tab1 (
+    city_id         int not null,
+    logdate         date not null,
+    peaktemp        int,
+    unitsales       int
+) 
+PARTITION BY RANGE (logdate)
+INTERVAL ('1 day')
+(
+	PARTITION p1 VALUES LESS THAN (('2020-03-01'))
+);
+select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
+    relname    | parttype | parentid | partstrategy |  boundaries  
+---------------+----------+----------+--------------+--------------
+ interval_tab1 | r        |    20186 | i            | 
+ p1            | p        |    20186 | r            | {2020-03-01}
+(2 rows)
+
+insert into interval_tab1 values(1,'2020-2-29',  1, 1);
+insert into interval_tab1 values(1,'2020-3-1',  1, 1);
+insert into interval_tab1 values(1,'2020-3-1 02:00:00',  1, 1);
+insert into interval_tab1 values(1,'2020-3-3',  1, 1);
+insert into interval_tab1 values(1,'2020-3-4',  1, 1);
+insert into interval_tab1 values(1,'2020-3-5',  1, 1);
+insert into interval_tab1 values(1,'2020-3-6',  1, 1);
+insert into interval_tab1 values(1,'2020-3-7',  1, 1);
+insert into interval_tab1 values(1,'2020-4-2',  1, 1);
+select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
+    relname    | parttype | parentid | partstrategy |  boundaries  
+---------------+----------+----------+--------------+--------------
+ interval_tab1 | r        |    20186 | i            | 
+ p1            | p        |    20186 | r            | {2020-03-01}
+ sys_p1        | p        |    20186 | i            | {03-02-2020}
+ sys_p2        | p        |    20186 | i            | {03-04-2020}
+ sys_p3        | p        |    20186 | i            | {03-05-2020}
+ sys_p4        | p        |    20186 | i            | {03-06-2020}
+ sys_p5        | p        |    20186 | i            | {03-07-2020}
+ sys_p6        | p        |    20186 | i            | {03-08-2020}
+ sys_p7        | p        |    20186 | i            | {04-03-2020}
+(9 rows)
+
+select * from interval_tab1 where logdate >= '2020-3-1' and logdate < '2020-3-7';
+ city_id |  logdate   | peaktemp | unitsales 
+---------+------------+----------+-----------
+       1 | 03-01-2020 |        1 |         1
+       1 | 03-01-2020 |        1 |         1
+       1 | 03-03-2020 |        1 |         1
+       1 | 03-04-2020 |        1 |         1
+       1 | 03-05-2020 |        1 |         1
+       1 | 03-06-2020 |        1 |         1
+(6 rows)
+
+explain (costs off, verbose on, nodes off) select * from interval_tab1 where logdate >= '2020-3-1' and logdate < '2020-3-7';
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Output: city_id, logdate, peaktemp, unitsales
+   Iterations: 5
+   ->  Partitioned Seq Scan on public.interval_tab1
+         Output: city_id, logdate, peaktemp, unitsales
+         Filter: ((interval_tab1.logdate >= '03-01-2020'::date) AND (interval_tab1.logdate < '03-07-2020'::date))
+         Selected Partitions:  2..6
+(7 rows)
+
+alter table interval_tab1 drop partition p1;
+select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
+    relname    | parttype | parentid | partstrategy |  boundaries  
+---------------+----------+----------+--------------+--------------
+ interval_tab1 | r        |    20186 | i            | 
+ sys_p2        | p        |    20186 | i            | {03-04-2020}
+ sys_p3        | p        |    20186 | i            | {03-05-2020}
+ sys_p4        | p        |    20186 | i            | {03-06-2020}
+ sys_p5        | p        |    20186 | i            | {03-07-2020}
+ sys_p6        | p        |    20186 | i            | {03-08-2020}
+ sys_p7        | p        |    20186 | i            | {04-03-2020}
+ sys_p1        | p        |    20186 | r            | {03-02-2020}
+(8 rows)
+
+alter table interval_tab1 merge partitions sys_p5, sys_p6 into partition sys_p5_p6;
+select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
+    relname    | parttype | parentid | partstrategy |  boundaries  
+---------------+----------+----------+--------------+--------------
+ interval_tab1 | r        |    20186 | i            | 
+ sys_p7        | p        |    20186 | i            | {04-03-2020}
+ sys_p1        | p        |    20186 | r            | {03-02-2020}
+ sys_p4        | p        |    20186 | r            | {03-06-2020}
+ sys_p3        | p        |    20186 | r            | {03-05-2020}
+ sys_p2        | p        |    20186 | r            | {03-04-2020}
+ sys_p5_p6     | p        |    20186 | r            | {03-08-2020}
+(7 rows)
+
+drop table interval_tab1;
+CREATE TABLE interval_tab1 (
+    city_id         int not null,
+    logdate         date not null,
+    peaktemp        int,
+    unitsales       int
+) 
+PARTITION BY RANGE (logdate)
+INTERVAL ('2 day')
+(
+	PARTITION p1 VALUES LESS THAN (('2020-03-01'))
+);
+insert into interval_tab1 values(1,'2020-2-29',  1, 1);
+insert into interval_tab1 values(1,'2020-3-1',  1, 1);
+insert into interval_tab1 values(1,'2020-3-1 02:00:00',  1, 1);
+insert into interval_tab1 values(1,'2020-3-2',  1, 1);
+insert into interval_tab1 values(1,'2020-4-2',  1, 1);
+select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
+    relname    | parttype | parentid | partstrategy |  boundaries  
+---------------+----------+----------+--------------+--------------
+ interval_tab1 | r        |    20201 | i            | 
+ p1            | p        |    20201 | r            | {2020-03-01}
+ sys_p1        | p        |    20201 | i            | {03-03-2020}
+ sys_p2        | p        |    20201 | i            | {04-04-2020}
+(4 rows)
+
+select * from interval_tab1 partition(sys_p1);
+ city_id |  logdate   | peaktemp | unitsales 
+---------+------------+----------+-----------
+       1 | 03-01-2020 |        1 |         1
+       1 | 03-01-2020 |        1 |         1
+       1 | 03-02-2020 |        1 |         1
+(3 rows)
+
+alter table interval_tab1 split partition sys_p1 at (to_date('2020-03-02', 'YYYY-MM-DD')) into (partition sys_p1_1, partition sys_p1_2);
+select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
+    relname    | parttype | parentid | partstrategy |  boundaries  
+---------------+----------+----------+--------------+--------------
+ interval_tab1 | r        |    20201 | i            | 
+ p1            | p        |    20201 | r            | {2020-03-01}
+ sys_p2        | p        |    20201 | i            | {04-04-2020}
+ sys_p1_1      | p        |    20201 | r            | {03-02-2020}
+ sys_p1_2      | p        |    20201 | r            | {03-03-2020}
+(5 rows)
+
+drop table interval_tab1;
+CREATE TABLE interval_tab1 (
+    city_id         int not null,
+    logdate         date not null,
+    peaktemp        int,
+    unitsales       int
+) 
+PARTITION BY RANGE (logdate)
+INTERVAL ('1 hour')
+(
+	PARTITION p1 VALUES LESS THAN (('2020-03-01'))
+);
+ERROR:  the interval of DATE type must be an integer multiple of days
+\c regression
+drop database pg_db;
