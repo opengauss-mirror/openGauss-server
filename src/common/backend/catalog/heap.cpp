@@ -5091,9 +5091,15 @@ Datum Timestamp2Boundarys(Relation rel, Timestamp ts)
 {
     Const consts;
     RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
-    bool isTimestamptz = partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0]->consttype == TIMESTAMPTZOID;
-    Datum columnRaw = TimestampGetDatum(ts);
-    int2vector*  partKeyColumn = partMap->partitionKey;
+    Const* lastPartBoundary = partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0];
+    bool isTimestamptz = lastPartBoundary->consttype == TIMESTAMPTZOID;
+    Datum columnRaw;
+    if (lastPartBoundary->consttype == DATEOID) {
+        columnRaw = timestamp2date(ts);
+    } else {
+        columnRaw = TimestampGetDatum(ts);
+    }
+    int2vector* partKeyColumn = partMap->partitionKey;
     Assert(partKeyColumn->dim1 == 1);
 
     (void)transformDatum2Const(rel->rd_att, partKeyColumn->values[0], columnRaw, false, &consts);
@@ -5110,14 +5116,22 @@ Datum GetPartBoundaryByTuple(Relation rel, HeapTuple tuple)
     Assert(partKeyColumn->dim1 == 1);
     Assert(partMap->type.type == PART_TYPE_INTERVAL);
     Assert(partMap->rangeElementsNum >= 1);
-    Assert(partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0]->consttype == TIMESTAMPOID ||
-           partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0]->consttype == TIMESTAMPTZOID);
+
+    Const* lastPartBoundary = partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0];
+    Assert(lastPartBoundary->consttype == TIMESTAMPOID || lastPartBoundary->consttype == TIMESTAMPTZOID ||
+           lastPartBoundary->consttype == DATEOID);
 
     bool isNull = false;
     Datum columnRaw = fastgetattr(tuple, partKeyColumn->values[0], rel->rd_att, &isNull);
-    Timestamp value = DatumGetTimestamp(columnRaw);
-    Timestamp boundaryTs =
-        DatumGetTimestamp(partMap->rangeElements[partMap->rangeElementsNum - 1].boundary[0]->constvalue);
+    Timestamp value;
+    Timestamp boundaryTs;
+    if (lastPartBoundary->consttype == DATEOID) {
+        value = date2timestamp(DatumGetDateADT(columnRaw));
+        boundaryTs = date2timestamp(DatumGetDateADT(lastPartBoundary->constvalue));
+    } else {
+        value = DatumGetTimestamp(columnRaw);
+        boundaryTs = DatumGetTimestamp(lastPartBoundary->constvalue);
+    }
     return Timestamp2Boundarys(rel, Align2UpBoundary(value, partMap->intervalValue, boundaryTs));
 }
 
