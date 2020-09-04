@@ -181,3 +181,64 @@ SELECT '9223372036854773760'::float8::int8;
 SELECT '9223372036854775807'::float8::int8;
 SELECT '-9223372036854775808.5'::float8::int8;
 SELECT '-9223372036854780000'::float8::int8;
+
+SELECT sin('1');
+SELECT cos('1');
+SELECT tan('1');
+-- test Inf/NaN cases for functions
+SELECT sin('infinity');
+SELECT sin('-infinity');
+SELECT sin('nan');
+SELECT cos('infinity');
+SELECT cos('-infinity');
+SELECT cos('nan');
+SELECT tan('infinity');
+SELECT tan('-infinity');
+SELECT tan('nan');
+
+--test power
+SELECT power('0', '0');
+SELECT power('0', '1');
+SELECT power('0', '2');
+SELECT power('0', 'infinity');
+SELECT power('0', '-infinity');
+SELECT power('0', 'nan');
+
+SELECT power('5', '0');
+SELECT power('5', '1');
+SELECT power('5', '2');
+SELECT power('5', 'infinity');
+SELECT power('5', '-infinity');
+SELECT power('5', 'nan');
+
+SELECT power('infinity', '0');
+SELECT power('infinity', '1');
+SELECT power('infinity', '2');
+SELECT power('infinity', 'infinity');
+SELECT power('infinity', '-infinity');
+SELECT power('infinity', 'nan');
+
+SELECT power('-infinity', '0');
+SELECT power('-infinity', '1');
+SELECT power('-infinity', '2');
+SELECT power('-infinity', 'infinity');
+SELECT power('-infinity', '-infinity');
+SELECT power('-infinity', 'nan');
+
+SELECT power('nan', '0');
+SELECT power('nan', '1');
+SELECT power('nan', '2');
+SELECT power('nan', 'infinity');
+SELECT power('nan', '-infinity');
+SELECT power('nan', 'nan');
+
+create type xfloat8;
+create function xfloat8in(cstring) returns xfloat8 immutable strict
+  language internal as 'int8in';
+create function xfloat8out(xfloat8) returns cstring immutable strict
+  language internal as 'int8out';
+create type xfloat8 (input = xfloat8in, output = xfloat8out, like = float8);
+create cast (xfloat8 as float8) without function;
+create cast (float8 as xfloat8) without function;
+create cast (xfloat8 as bigint) without function;
+create cast (bigint as xfloat8) without function;

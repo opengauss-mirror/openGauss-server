@@ -529,3 +529,245 @@ SELECT '-9223372036854775808.5'::float8::int8;
 SELECT '-9223372036854780000'::float8::int8;
 ERROR:  bigint out of range
 CONTEXT:  referenced column: int8
+SELECT sin('1');
+       sin        
+------------------
+ .841470984807897
+(1 row)
+
+SELECT cos('1');
+       cos       
+-----------------
+ .54030230586814
+(1 row)
+
+SELECT tan('1');
+       tan       
+-----------------
+ 1.5574077246549
+(1 row)
+
+-- test Inf/NaN cases for functions
+SELECT sin('infinity');
+ERROR:  input is out of range
+CONTEXT:  referenced column: sin
+SELECT sin('-infinity');
+ERROR:  input is out of range
+CONTEXT:  referenced column: sin
+SELECT sin('nan');
+ sin 
+-----
+ NaN
+(1 row)
+
+SELECT cos('infinity');
+ERROR:  input is out of range
+CONTEXT:  referenced column: cos
+SELECT cos('-infinity');
+ERROR:  input is out of range
+CONTEXT:  referenced column: cos
+SELECT cos('nan');
+ cos 
+-----
+ NaN
+(1 row)
+
+SELECT tan('infinity');
+ERROR:  input is out of range
+CONTEXT:  referenced column: tan
+SELECT tan('-infinity');
+ERROR:  input is out of range
+CONTEXT:  referenced column: tan
+SELECT tan('nan');
+ tan 
+-----
+ NaN
+(1 row)
+
+--test power
+SELECT power('0', '0');
+ power 
+-------
+     1
+(1 row)
+
+SELECT power('0', '1');
+ power 
+-------
+     0
+(1 row)
+
+SELECT power('0', '2');
+ power 
+-------
+     0
+(1 row)
+
+SELECT power('0', 'infinity');
+ power 
+-------
+     0
+(1 row)
+
+SELECT power('0', '-infinity');
+ERROR:  zero raised to a negative power is undefined
+CONTEXT:  referenced column: power
+SELECT power('0', 'nan');
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT power('5', '0');
+ power 
+-------
+     1
+(1 row)
+
+SELECT power('5', '1');
+ power 
+-------
+     5
+(1 row)
+
+SELECT power('5', '2');
+ power 
+-------
+    25
+(1 row)
+
+SELECT power('5', 'infinity');
+ERROR:  value out of range: overflow
+CONTEXT:  referenced column: power
+SELECT power('5', '-infinity');
+ power 
+-------
+     0
+(1 row)
+
+SELECT power('5', 'nan');
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT power('infinity', '0');
+ power 
+-------
+     1
+(1 row)
+
+SELECT power('infinity', '1');
+  power   
+----------
+ Infinity
+(1 row)
+
+SELECT power('infinity', '2');
+  power   
+----------
+ Infinity
+(1 row)
+
+SELECT power('infinity', 'infinity');
+  power   
+----------
+ Infinity
+(1 row)
+
+SELECT power('infinity', '-infinity');
+ power 
+-------
+     0
+(1 row)
+
+SELECT power('infinity', 'nan');
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT power('-infinity', '0');
+ power 
+-------
+     1
+(1 row)
+
+SELECT power('-infinity', '1');
+   power   
+-----------
+ -Infinity
+(1 row)
+
+SELECT power('-infinity', '2');
+  power   
+----------
+ Infinity
+(1 row)
+
+SELECT power('-infinity', 'infinity');
+  power   
+----------
+ Infinity
+(1 row)
+
+SELECT power('-infinity', '-infinity');
+ power 
+-------
+     0
+(1 row)
+
+SELECT power('-infinity', 'nan');
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT power('nan', '0');
+ power 
+-------
+     1
+(1 row)
+
+SELECT power('nan', '1');
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT power('nan', '2');
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT power('nan', 'infinity');
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT power('nan', '-infinity');
+ power 
+-------
+   NaN
+(1 row)
+
+SELECT power('nan', 'nan');
+ power 
+-------
+   NaN
+(1 row)
+
+create type xfloat8;
+create function xfloat8in(cstring) returns xfloat8 immutable strict
+  language internal as 'int8in';
+NOTICE:  return type xfloat8 is only a shell
+create function xfloat8out(xfloat8) returns cstring immutable strict
+  language internal as 'int8out';
+NOTICE:  argument type xfloat8 is only a shell
+create type xfloat8 (input = xfloat8in, output = xfloat8out, like = float8);
+create cast (xfloat8 as float8) without function;
+create cast (float8 as xfloat8) without function;
+create cast (xfloat8 as bigint) without function;
+create cast (bigint as xfloat8) without function;
