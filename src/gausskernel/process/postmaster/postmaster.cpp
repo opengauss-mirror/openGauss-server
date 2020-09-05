@@ -1018,8 +1018,8 @@ void SetShmemCxt(void)
     }
 
     /* Keep enough slot for thread pool. */
-    g_instance.shmem_cxt.MaxConnections = 
-                Max(g_instance.attr.attr_network.MaxConnections, thread_pool_worker_num);
+    g_instance.shmem_cxt.MaxConnections =  Max((g_instance.attr.attr_network.MaxConnections +
+        g_instance.attr.attr_network.maxInnerToolConnections), thread_pool_worker_num);
 
     g_instance.shmem_cxt.MaxBackends = g_instance.shmem_cxt.MaxConnections + 
                                        g_instance.attr.attr_sql.job_queue_processes + 1 +
