@@ -20,12 +20,44 @@ CREATE FOREIGN TABLE
 INSERT 0 1
 --?total time: .*  ms
 --pre
+\! mkdir @abs_bindir@/../gs_basebackup_node_nstream_np
+\! chmod 700 @abs_bindir@/../gs_basebackup_node_nstream_np
 \! mkdir @abs_bindir@/../gs_basebackup_node_stream_p
 \! chmod 700 @abs_bindir@/../gs_basebackup_node_stream_p
 \! mkdir @abs_bindir@/../gs_basebackup_node_fetch_t
 \! chmod 700 @abs_bindir@/../gs_basebackup_node_fetch_t
 --run
 \! chmod +x  @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh
+\! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_nstream_np
+--?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_nstream_np"
+--?! gs_ctl: server is running (PID: .*)
+--?!.*
+--?.*List of tablespaces.*
+--?.*Name.*|.*Owner.*|.*Location.*
+--?--------------------------+.*+-------------------------------------------------------------------------------------------------
+--? gs_basebackup_tablespace |.*| .*/gs_basebackup_tablespace
+(1 row)
+
+        tablespace        
+--------------------------
+ gs_basebackup_tablespace
+(1 row)
+
+ a 
+---
+ 1
+(1 row)
+
+--?total time: .*  ms
+ a 
+---
+ 1
+(1 row)
+
+--?total time: *  ms
+--?.*[gs_ctl]: gs_ctl stopped ,datadir is -D ".*/gs_basebackup_node_nstream_np"
+--?waiting for server to shut down.* done
+server stopped
 \! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_stream_p  stream p
 --?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_stream_p"
 --?! gs_ctl: server is running (PID: .*)
