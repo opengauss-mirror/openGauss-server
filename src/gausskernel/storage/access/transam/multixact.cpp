@@ -200,6 +200,7 @@ static void ExtendMultiXactOffset(MultiXactId multi);
 static void ExtendMultiXactMember(MultiXactOffset offset, int nmembers);
 static void TruncateMultiXact(void);
 static void WriteMZeroPageXlogRec(int64 pageno, uint8 info);
+static void get_multixact_pageno(uint8 info, int64* pageno, XLogReaderState* record);
 
 /*
  * MultiXactIdCreate
@@ -1789,20 +1790,19 @@ static void WriteMZeroPageXlogRec(int64 pageno, uint8 info)
 XLogRecParseState* multixact_xlog_ddl_parse_to_block(XLogReaderState* record, uint32* blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    uint8 mask_info = info & XLOG_MULTIXACT_MASK;
     int64 pageno;
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
     XLogRecParseState* recordstatehead = NULL;
     int ddltype = BLOCK_DDL_TYPE_NONE;
-    errno_t rc;
     *blocknum = 0;
-    if (info == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
-        rc = memcpy_s(&pageno, sizeof(int64), XLogRecGetData(record), XLogRecGetDataLen(record));
-        securec_check(rc, "", "");
+
+    if (mask_info == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
+        get_multixact_pageno(info, &pageno, record);
         ddltype = BLOCK_DDL_MULTIXACT_OFF_ZERO;
-    } else if (info == XLOG_MULTIXACT_ZERO_MEM_PAGE) {
-        rc = memcpy_s(&pageno, sizeof(int64), XLogRecGetData(record), XLogRecGetDataLen(record));
-        securec_check(rc, "", "");
+    } else if (mask_info == XLOG_MULTIXACT_ZERO_MEM_PAGE) {
+        get_multixact_pageno(info, &pageno, record);
         ddltype = BLOCK_DDL_MULTIXACT_MEM_ZERO;
     }
     forknum = (pageno >> LOW_BLOKNUMBER_BITS);
@@ -1955,6 +1955,8 @@ XLogRecParseState* multixact_redo_parse_to_block(XLogReaderState* record, uint32
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     XLogRecParseState* recordstatehead = NULL;
     *blocknum = 0;
+
+    info = info & XLOG_MULTIXACT_MASK;
     if ((info == XLOG_MULTIXACT_ZERO_OFF_PAGE) || (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)) {
         recordstatehead = multixact_xlog_ddl_parse_to_block(record, blocknum);
     } else if (info == XLOG_MULTIXACT_CREATE_ID) {
@@ -1982,11 +1984,12 @@ static void get_multixact_pageno(uint8 info, int64* pageno, XLogReaderState* rec
 void multixact_redo(XLogReaderState* record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    uint8 mask_info = info & XLOG_MULTIXACT_MASK;
 
     /* Backup blocks are not used in multixact records */
     Assert(!XLogRecHasAnyBlockRefs(record));
 
-    if ((info & XLOG_MULTIXACT_ZERO_OFF_PAGE) != 0) {
+    if (mask_info == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
         int64 pageno = 0;
         int slotno;
 
@@ -1999,7 +2002,7 @@ void multixact_redo(XLogReaderState* record)
         Assert(!t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl->shared->page_dirty[slotno]);
 
         LWLockRelease(MultiXactOffsetControlLock);
-    } else if ((info & XLOG_MULTIXACT_ZERO_MEM_PAGE) != 0) {
+    } else if (mask_info == XLOG_MULTIXACT_ZERO_MEM_PAGE) {
         int64 pageno = 0;
         int slotno;
 
@@ -2012,7 +2015,7 @@ void multixact_redo(XLogReaderState* record)
         Assert(!t_thrd.shemem_ptr_cxt.MultiXactMemberCtl->shared->page_dirty[slotno]);
 
         LWLockRelease(MultiXactMemberControlLock);
-    } else if (info == XLOG_MULTIXACT_CREATE_ID) {
+    } else if (mask_info == XLOG_MULTIXACT_CREATE_ID) {
         xl_multixact_create* xlrec = (xl_multixact_create*)XLogRecGetData(record);
         TransactionId* xids = xlrec->xids;
         TransactionId max_xid;

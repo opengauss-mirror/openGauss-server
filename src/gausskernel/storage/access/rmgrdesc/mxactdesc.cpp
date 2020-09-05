@@ -26,6 +26,7 @@ void multixact_desc(StringInfo buf, XLogReaderState* record)
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     errno_t rc;
 
+    info = info & XLOG_MULTIXACT_MASK;
     if (info == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
         int64 pageno = 0;
 
