@@ -40,6 +40,7 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
+#include "catalog/heap.h"
 #include "executor/spi.h"
 #include "foreign/foreign.h"
 #include "mb/pg_wchar.h"
@@ -1786,7 +1787,7 @@ static char** get_pkey_attnames(Relation rel, int16* indnkeyatts)
 
         /* we're only interested if it is the primary key */
         if (index->indisprimary) {
-            *indnkeyatts = index->indnkeyatts;
+            *indnkeyatts = GetIndexKeyAttsByTuple(NULL, indexTuple);
             if (*indnkeyatts > 0) {
                 result = (char**)palloc(*indnkeyatts * sizeof(char*));
 

@@ -17,6 +17,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/spi.h"
+#include "catalog/heap.h"
 #include "commands/async.h"
 #include "commands/trigger.h"
 #include "lib/stringinfo.h"
@@ -136,7 +137,7 @@ Datum triggered_change_notification(PG_FUNCTION_ARGS)
         index = (Form_pg_index)GETSTRUCT(indexTuple);
         /* we're only interested if it is the primary key and valid */
         if (index->indisprimary && IndexIsValid(index)) {
-            int indnkeyatts = index->indnkeyatts;
+            int indnkeyatts = GetIndexKeyAttsByTuple(NULL, indexTuple);
 
             if (indnkeyatts > 0) {
                 int i;
