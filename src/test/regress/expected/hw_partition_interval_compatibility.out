@@ -12,11 +12,11 @@ INTERVAL ('1 day')
 (
 	PARTITION p1 VALUES LESS THAN (('2020-03-01'))
 );
-select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
-    relname    | parttype | parentid | partstrategy |  boundaries  
----------------+----------+----------+--------------+--------------
- interval_tab1 | r        |    20186 | i            | 
- p1            | p        |    20186 | r            | {2020-03-01}
+select relname, parttype, partstrategy, boundaries from pg_partition;
+    relname    | parttype | partstrategy |  boundaries  
+---------------+----------+--------------+--------------
+ interval_tab1 | r        | i            | 
+ p1            | p        | r            | {2020-03-01}
 (2 rows)
 
 insert into interval_tab1 values(1,'2020-2-29',  1, 1);
@@ -28,18 +28,18 @@ insert into interval_tab1 values(1,'2020-3-5',  1, 1);
 insert into interval_tab1 values(1,'2020-3-6',  1, 1);
 insert into interval_tab1 values(1,'2020-3-7',  1, 1);
 insert into interval_tab1 values(1,'2020-4-2',  1, 1);
-select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
-    relname    | parttype | parentid | partstrategy |  boundaries  
----------------+----------+----------+--------------+--------------
- interval_tab1 | r        |    20186 | i            | 
- p1            | p        |    20186 | r            | {2020-03-01}
- sys_p1        | p        |    20186 | i            | {03-02-2020}
- sys_p2        | p        |    20186 | i            | {03-04-2020}
- sys_p3        | p        |    20186 | i            | {03-05-2020}
- sys_p4        | p        |    20186 | i            | {03-06-2020}
- sys_p5        | p        |    20186 | i            | {03-07-2020}
- sys_p6        | p        |    20186 | i            | {03-08-2020}
- sys_p7        | p        |    20186 | i            | {04-03-2020}
+select relname, parttype, partstrategy, boundaries from pg_partition;
+    relname    | parttype | partstrategy |  boundaries  
+---------------+----------+--------------+--------------
+ interval_tab1 | r        | i            | 
+ p1            | p        | r            | {2020-03-01}
+ sys_p1        | p        | i            | {03-02-2020}
+ sys_p2        | p        | i            | {03-04-2020}
+ sys_p3        | p        | i            | {03-05-2020}
+ sys_p4        | p        | i            | {03-06-2020}
+ sys_p5        | p        | i            | {03-07-2020}
+ sys_p6        | p        | i            | {03-08-2020}
+ sys_p7        | p        | i            | {04-03-2020}
 (9 rows)
 
 select * from interval_tab1 where logdate >= '2020-3-1' and logdate < '2020-3-7';
@@ -66,30 +66,30 @@ explain (costs off, verbose on, nodes off) select * from interval_tab1 where log
 (7 rows)
 
 alter table interval_tab1 drop partition p1;
-select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
-    relname    | parttype | parentid | partstrategy |  boundaries  
----------------+----------+----------+--------------+--------------
- interval_tab1 | r        |    20186 | i            | 
- sys_p2        | p        |    20186 | i            | {03-04-2020}
- sys_p3        | p        |    20186 | i            | {03-05-2020}
- sys_p4        | p        |    20186 | i            | {03-06-2020}
- sys_p5        | p        |    20186 | i            | {03-07-2020}
- sys_p6        | p        |    20186 | i            | {03-08-2020}
- sys_p7        | p        |    20186 | i            | {04-03-2020}
- sys_p1        | p        |    20186 | r            | {03-02-2020}
+select relname, parttype, partstrategy, boundaries from pg_partition;
+    relname    | parttype | partstrategy |  boundaries  
+---------------+----------+--------------+--------------
+ interval_tab1 | r        | i            | 
+ sys_p2        | p        | i            | {03-04-2020}
+ sys_p3        | p        | i            | {03-05-2020}
+ sys_p4        | p        | i            | {03-06-2020}
+ sys_p5        | p        | i            | {03-07-2020}
+ sys_p6        | p        | i            | {03-08-2020}
+ sys_p7        | p        | i            | {04-03-2020}
+ sys_p1        | p        | r            | {03-02-2020}
 (8 rows)
 
 alter table interval_tab1 merge partitions sys_p5, sys_p6 into partition sys_p5_p6;
-select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
-    relname    | parttype | parentid | partstrategy |  boundaries  
----------------+----------+----------+--------------+--------------
- interval_tab1 | r        |    20186 | i            | 
- sys_p7        | p        |    20186 | i            | {04-03-2020}
- sys_p1        | p        |    20186 | r            | {03-02-2020}
- sys_p4        | p        |    20186 | r            | {03-06-2020}
- sys_p3        | p        |    20186 | r            | {03-05-2020}
- sys_p2        | p        |    20186 | r            | {03-04-2020}
- sys_p5_p6     | p        |    20186 | r            | {03-08-2020}
+select relname, parttype, partstrategy, boundaries from pg_partition;
+    relname    | parttype | partstrategy |  boundaries  
+---------------+----------+--------------+--------------
+ interval_tab1 | r        | i            | 
+ sys_p7        | p        | i            | {04-03-2020}
+ sys_p1        | p        | r            | {03-02-2020}
+ sys_p4        | p        | r            | {03-06-2020}
+ sys_p3        | p        | r            | {03-05-2020}
+ sys_p2        | p        | r            | {03-04-2020}
+ sys_p5_p6     | p        | r            | {03-08-2020}
 (7 rows)
 
 drop table interval_tab1;
@@ -109,13 +109,13 @@ insert into interval_tab1 values(1,'2020-3-1',  1, 1);
 insert into interval_tab1 values(1,'2020-3-1 02:00:00',  1, 1);
 insert into interval_tab1 values(1,'2020-3-2',  1, 1);
 insert into interval_tab1 values(1,'2020-4-2',  1, 1);
-select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
-    relname    | parttype | parentid | partstrategy |  boundaries  
----------------+----------+----------+--------------+--------------
- interval_tab1 | r        |    20201 | i            | 
- p1            | p        |    20201 | r            | {2020-03-01}
- sys_p1        | p        |    20201 | i            | {03-03-2020}
- sys_p2        | p        |    20201 | i            | {04-04-2020}
+select relname, parttype, partstrategy, boundaries from pg_partition;
+    relname    | parttype | partstrategy |  boundaries  
+---------------+----------+--------------+--------------
+ interval_tab1 | r        | i            | 
+ p1            | p        | r            | {2020-03-01}
+ sys_p1        | p        | i            | {03-03-2020}
+ sys_p2        | p        | i            | {04-04-2020}
 (4 rows)
 
 select * from interval_tab1 partition(sys_p1);
@@ -127,14 +127,14 @@ select * from interval_tab1 partition(sys_p1);
 (3 rows)
 
 alter table interval_tab1 split partition sys_p1 at (to_date('2020-03-02', 'YYYY-MM-DD')) into (partition sys_p1_1, partition sys_p1_2);
-select relname, parttype, parentid, partstrategy, boundaries from pg_partition;
-    relname    | parttype | parentid | partstrategy |  boundaries  
----------------+----------+----------+--------------+--------------
- interval_tab1 | r        |    20201 | i            | 
- p1            | p        |    20201 | r            | {2020-03-01}
- sys_p2        | p        |    20201 | i            | {04-04-2020}
- sys_p1_1      | p        |    20201 | r            | {03-02-2020}
- sys_p1_2      | p        |    20201 | r            | {03-03-2020}
+select relname, parttype, partstrategy, boundaries from pg_partition;
+    relname    | parttype | partstrategy |  boundaries  
+---------------+----------+--------------+--------------
+ interval_tab1 | r        | i            | 
+ p1            | p        | r            | {2020-03-01}
+ sys_p2        | p        | i            | {04-04-2020}
+ sys_p1_1      | p        | r            | {03-02-2020}
+ sys_p1_2      | p        | r            | {03-03-2020}
 (5 rows)
 
 drop table interval_tab1;
