@@ -8,6 +8,8 @@
 \! @abs_bindir@/gsql -dgs_basebackup -p @portstring@ -f "@abs_srcdir@/sql/gs_basebackup/init/mot.sql";
 
 --pre
+\! mkdir @abs_bindir@/../gs_basebackup_node_nstream_np
+\! chmod 700 @abs_bindir@/../gs_basebackup_node_nstream_np
 \! mkdir @abs_bindir@/../gs_basebackup_node_stream_p
 \! chmod 700 @abs_bindir@/../gs_basebackup_node_stream_p
 \! mkdir @abs_bindir@/../gs_basebackup_node_fetch_t
@@ -15,6 +17,7 @@
 
 --run
 \! chmod +x  @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh
+\! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_nstream_np
 \! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_stream_p  stream p
 \! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_fetch_t  fetch t
 

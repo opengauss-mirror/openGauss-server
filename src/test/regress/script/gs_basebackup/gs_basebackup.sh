@@ -2,11 +2,18 @@ abs_bindir=$1
 abs_srcdir=$2
 abs_port=$3
 dataNode=$4
-x_option=$5
-format=$6
-# backup
-$abs_bindir/gs_basebackup -D $abs_bindir/../$dataNode -p $abs_port -X$x_option -F$format > $abs_bindir/../$dataNode.log 2>&1
-for gs_basebackup_port in {40015..60000}; 
+x_option=${5-}
+format=${6-}
+# backup 
+if [ 'x'${x_option} == 'x' ]
+then
+    # Compatible with old functions
+    $abs_bindir/gs_basebackup -D $abs_bindir/../$dataNode -p $abs_port > $abs_bindir/../$dataNode.log 2>&1
+else
+    $abs_bindir/gs_basebackup -D $abs_bindir/../$dataNode -p $abs_port -X$x_option -F$format > $abs_bindir/../$dataNode.log 2>&1
+fi
+
+for gs_basebackup_port in {4000..60000}; 
 do 
     if [ 'x'`netstat -an | grep -v STREAM | grep -v DGRAM | grep $gs_basebackup_port | head -n1 | awk '{print $1}'` == 'x' ]; 
     then  
@@ -14,7 +21,7 @@ do
     fi; 
 done; 
 
-if [ $format == 't' ] 
+if [ 'x'$format == 'xt' ] 
 then
     tmp_dir="$abs_bindir/../$dataNode/../tmp"
     mv $abs_bindir/../$dataNode/* $abs_bindir/../$dataNode/../

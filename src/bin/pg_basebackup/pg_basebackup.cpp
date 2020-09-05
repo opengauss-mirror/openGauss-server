@@ -57,8 +57,8 @@ char* label = "gs_basebackup base backup";
 bool showprogress = false;
 int verbose = 0;
 int compresslevel = 0;
-bool includewal = false;
-bool streamwal = false;
+bool includewal = true;
+bool streamwal = true;
 bool fastcheckpoint = false;
 
 extern char** tblspaceDirectory;
@@ -1927,21 +1927,9 @@ static int GsBaseBackup(int argc, char** argv)
                 tablespace_list_append(optarg);
                 break;
             case 'x':
-                if (includewal) {
-                    fprintf(stderr, _("%s: cannot specify both --xlog and --xlog-method\n"), progname);
-                    exit(1);
-                }
-
-                includewal = true;
                 streamwal = false;
                 break;
             case 'X':
-                if (includewal) {
-                    fprintf(stderr, _("%s: cannot specify both --xlog and --xlog-method\n"), progname);
-                    exit(1);
-                }
-
-                includewal = true;
                 check_env_value_c(optarg);
                 if (strcmp(optarg, "f") == 0 || strcmp(optarg, "fetch") == 0)
                     streamwal = false;
