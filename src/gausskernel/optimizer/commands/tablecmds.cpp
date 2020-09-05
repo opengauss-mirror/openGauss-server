@@ -686,6 +686,12 @@ static void CheckCStoreUnsupportedFeature(CreateStmt* stmt)
 {
     Assert(stmt);
 
+    if (stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                errmsg("global temporary table can only support heap table")));
+    }
+
     if (stmt->ofTypename) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -15351,7 +15357,14 @@ void PreCommit_on_commit_actions(void)
                 /* Do nothing (there shouldn't be such entries, actually) */
                 break;
             case ONCOMMIT_DELETE_ROWS:
-                oids_to_truncate = lappend_oid(oids_to_truncate, oc->relid);
+                /*
+                 * If this transaction hasn't accessed any temporary
+                 * relations, we can skip truncating ON COMMIT DELETE ROWS
+                 * tables, as they must still be empty.
+                 */
+                if (t_thrd.xact_cxt.MyXactAccessedTempRel) {
+                    oids_to_truncate = lappend_oid(oids_to_truncate, oc->relid);
+                }
                 break;
             case ONCOMMIT_DROP: {
                 ObjectAddress object;
