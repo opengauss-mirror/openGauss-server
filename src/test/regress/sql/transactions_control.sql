@@ -286,7 +286,7 @@ CREATE OR REPLACE PROCEDURE PROC_OUT_PARAM_001(P1 OUT INT)
 AS
 BEGIN
 select id into P1 from test1 where name = 'bbb';
-insert into test1 values(P1, 'dddd');
+insert into test1 values(P1, 'ddd');
 COMMIT;
 insert into test1 values(P1, 'eee');
 ROLLBACK;
@@ -301,5 +301,10 @@ END;
 /
 
 SELECT * from test1;
+
+start transaction;
+select * from test1 for share;
+select count(*) > 0 from dbe_perf.global_locks where transactionid is not null;
+commit;
 
 DROP TABLE TEST1;

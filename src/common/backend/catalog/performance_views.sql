@@ -3552,7 +3552,7 @@ DECLARE
         page := row_data.page;
         tuple := row_data.tuple;
         virtualxid := row_data.virtualxid;
-        transactionid := row_data.classid;
+        transactionid := row_data.transactionid;
         objid := row_data.objid;
         objsubid := row_data.objsubid;
         virtualtransaction := row_data.virtualtransaction;
