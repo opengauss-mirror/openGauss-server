@@ -15,7 +15,7 @@ insert into tbl_big_serial(b) values ('cc');
 
 CREATE  FUNCTION h_testfun6 (c_SMALLSERIAL SMALLSERIAL) RETURNS SMALLSERIAL   AS $$
         BEGIN
-                RETURN c_SMALLSERIAL+1 ;
+                RETURN c_SMALLSERIAL ;
         END;
 $$ LANGUAGE plpgsql;
 CREATE  FUNCTION h_testfun7 (c_SERIAL SERIAL) RETURNS SERIAL   AS $$
