@@ -2832,7 +2832,8 @@ static int ServerLoop(void)
             }
 
             if (g_instance.pid_cxt.RemoteServicePID == 0 && !dummyStandbyMode && IS_PGXC_DATANODE &&
-                t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE && !IS_DN_WITHOUT_STANDBYS_MODE())
+                t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE && !IS_DN_WITHOUT_STANDBYS_MODE() &&
+                IsRemoteReadModeOn())
                 g_instance.pid_cxt.RemoteServicePID = initialize_util_thread(RPC_SERVICE);
         }
 
@@ -5048,7 +5049,7 @@ static void reaper(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.RemoteServicePID == 0 && !dummyStandbyMode && IS_PGXC_DATANODE &&
                 t_thrd.postmaster_cxt.HaShmData && t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE &&
-                !IS_DN_WITHOUT_STANDBYS_MODE())
+                !IS_DN_WITHOUT_STANDBYS_MODE() && IsRemoteReadModeOn())
                 g_instance.pid_cxt.RemoteServicePID = initialize_util_thread(RPC_SERVICE);
 
             if (NeedHeartbeat())
@@ -6882,7 +6883,7 @@ static void handle_recovery_started()
         }
         Assert(g_instance.pid_cxt.RemoteServicePID == 0);
         if (IS_PGXC_DATANODE && t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE &&
-            !IS_DN_WITHOUT_STANDBYS_MODE())
+            !IS_DN_WITHOUT_STANDBYS_MODE() && IsRemoteReadModeOn())
             g_instance.pid_cxt.RemoteServicePID = initialize_util_thread(RPC_SERVICE);
 
         PMUpdateDBState(NORMAL_STATE, get_cur_mode(), get_cur_repl_num());
@@ -9964,10 +9965,8 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             break;
 
         case RPC_SERVICE:
-            if (IsRemoteReadModeOn()) {
-                RemoteServiceMain();
-                proc_exit(1); /* should never return */
-            }
+            RemoteServiceMain();
+            proc_exit(1); /* should never return */
             break;
 
         case PAGEWRITER_THREAD:
