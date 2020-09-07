@@ -155,7 +155,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
         RmgrRecordInfoValid,
         RM_MULTIXACT_ID,
         XLOG_MULTIXACT_ZERO_OFF_PAGE,
-        XLOG_MULTIXACT_INT64_PAGENO},
+        XLOG_MULTIXACT_CREATE_ID},
     {DispatchRelMapRecord, RmgrRecordInfoValid, RM_RELMAP_ID, XLOG_RELMAP_UPDATE, XLOG_RELMAP_UPDATE},
 #ifdef ENABLE_MULTIPLE_NODES
     {DispatchStandbyRecord, RmgrRecordInfoValid, RM_STANDBY_ID, XLOG_STANDBY_LOCK, XLOG_STANDBY_CSN},
@@ -526,6 +526,9 @@ static bool RmgrRecordInfoValid(XLogReaderState* record, uint8 minInfo, uint8 ma
 
     if ((XLogRecGetRmid(record) == RM_HEAP2_ID) || (XLogRecGetRmid(record) == RM_HEAP_ID)) {
         info = (info & XLOG_HEAP_OPMASK);
+    }
+    if ((XLogRecGetRmid(record) == RM_MULTIXACT_ID)) {
+        info = (info & XLOG_MULTIXACT_MASK);
     }
 
     info = (info >> XLOG_INFO_SHIFT_SIZE);
