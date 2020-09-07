@@ -48,6 +48,9 @@ create global temp table foo();
 alter table foo set (on_commit_delete_rows='true');
 
 -- ERROR
+create global temp table cgtt(id int, b text) with (ORIENTATION=column);
+
+-- ERROR
 CREATE global temp TABLE measurement (
     logdate         date not null,
     peaktemp        int,

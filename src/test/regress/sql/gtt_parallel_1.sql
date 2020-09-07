@@ -1,6 +1,8 @@
 
 set search_path=gtt,sys;
 
+analyze verify fast gtt1;
+
 select nextval('gtt_with_seq_c2_seq');
 
 insert into gtt1 values(1, 'test1');
