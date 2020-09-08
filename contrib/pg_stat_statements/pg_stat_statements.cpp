@@ -1662,6 +1662,12 @@ static void JumbleExpr(pgssJumbleState* jstate, Node* node)
                 JumbleExpr(jstate, (Node*)lfirst(temp));
             }
             break;
+        case T_IntList:
+             foreach(temp, (List *) node)
+             {
+                 APP_JUMB(lfirst_int(temp));
+             }
+             break;
         case T_SortGroupClause: {
             SortGroupClause* sgc = (SortGroupClause*)node;
 
@@ -1674,7 +1680,7 @@ static void JumbleExpr(pgssJumbleState* jstate, Node* node)
             GroupingSet* gsnode = (GroupingSet*)node;
 
             JumbleExpr(jstate, (Node*)gsnode->content);
-        }
+        } break;
         case T_WindowClause: {
             WindowClause* wc = (WindowClause*)node;
 
