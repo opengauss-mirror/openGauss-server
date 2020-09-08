@@ -98,6 +98,40 @@ static const int PRO_RETURN_SET_COST = 1000;
  * validator, so as not to produce a NOTICE and then an ERROR for the same
  * condition.)
  */
+static void CheckIsSerialType(TypeName* t)
+{
+    bool isSerial = false;
+    /* Check for SERIAL pseudo-types */
+    if (t && list_length(t->names) == 1 && t->pct_type == false) {
+        char* typname = strVal(linitial(t->names));
+
+        if (strcmp(typname, "smallserial") == 0 || strcmp(typname, "serial2") == 0) {
+            isSerial = true;
+            t->names = NIL;
+            t->typeOid = INT2OID;
+        } else if (strcmp(typname, "serial") == 0 || strcmp(typname, "serial4") == 0) {
+            isSerial = true;
+            t->names = NIL;
+            t->typeOid = INT4OID;
+        } else if (strcmp(typname, "bigserial") == 0 || strcmp(typname, "serial8") == 0) {
+            isSerial = true;
+            t->names = NIL;
+            t->typeOid = INT8OID;
+        } 
+
+        if (isSerial && t->arrayBounds != NIL) {
+            /*
+             * We have to reject "serial[]" explicitly, because once we've set
+             * typeid, LookupTypeName won't notice arrayBounds.  We don't need any
+             * special coding for serial(typmod) though.
+            */
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("array of serial is not implemented")));
+        }
+    }
+}
+
 static void compute_return_type(
     TypeName* returnType, Oid languageOid, Oid* prorettype_p, bool* returnsSet_p, bool fenced)
 {
@@ -110,6 +144,8 @@ static void compute_return_type(
      * namespace, if the owner of the namespce has the same name as the namescpe
      */
     bool isalter = false;
+
+    CheckIsSerialType(returnType);
 
     typtup = LookupTypeName(NULL, returnType, NULL);
     /*
@@ -248,6 +284,8 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         Oid toid;
         Type typtup;
         AclResult aclresult;
+
+        CheckIsSerialType(t);
 
         typtup = LookupTypeName(NULL, t, NULL);
         /*
