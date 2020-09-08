@@ -597,6 +597,8 @@ function make_package_srv()
     mv ./install_tools/netifaces                ./lib
 
     rm -r ./install_tools
+    mkdir simpleInstall
+    cp -r $ROOT_DIR/simpleInstall/. ./simpleInstall
         tar -zvcf "${server_package_name}" ./* >>"$LOG_FILE" 2>&1
     if [ $? -ne 0 ]; then
         die "$package_command ${server_package_name} failed"
