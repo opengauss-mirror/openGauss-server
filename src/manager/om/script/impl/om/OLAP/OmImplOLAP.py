@@ -223,7 +223,6 @@ class OmImplOLAP(OmImpl):
         self.context.g_opts.security_mode)
         if self.dataDir != "":
             cmd += " -D %s" % self.dataDir
-        starttime = time.time()
         (statusMap, output) = self.sshTool.getSshStatusOutput(cmd, hostList)
         for nodeName in hostList:
             if statusMap[nodeName] != 'Success':
@@ -232,19 +231,28 @@ class OmImplOLAP(OmImpl):
         if re.search("another server might be running", output):
             self.logger.log(output)
         if startType == "cluster":
-            cmd = "source %s; gs_om -t status|grep cluster_state|grep Normal" \
+            starttime = time.time()
+            cluster_state = ""
+            cmd = "source %s; gs_om -t status|grep cluster_state" \
                   % self.context.g_opts.mpprcFile
-            while time.time() <= time_out + starttime:
-                status = subprocess.getstatusoutput(cmd)[0]
+            while time.time() <= 30 + starttime:
+                status, output = subprocess.getstatusoutput(cmd)
                 if status != 0:
-                    self.logger.log("Waiting for check cluster state...")
-                    time.sleep(5)
+                    raise Exception(
+                        ErrorCode.GAUSS_516["GAUSS_51607"] % "cluster" +
+                        " After startup, check cluster_state failed")
                 else:
-                    break
-            if time.time() > time_out + starttime:
+                    cluster_state = output.split()[-1]
+                    if cluster_state != "Normal":
+                        self.logger.log("Waiting for check cluster state...")
+                        time.sleep(5)
+                    else:
+                        break
+            if cluster_state != "Normal":
                 raise Exception(ErrorCode.GAUSS_516["GAUSS_51607"] % "cluster"
-                                + "Start timeout, please check the process"
-                                  " status manually")
+                                + " After startup, the last check results were"
+                                  " %s. Please check manually."
+                                % cluster_state)
         self.logger.log("=========================================")
         self.logger.log("Successfully started.")
         self.logger.debug("Operation succeeded: Start.")
