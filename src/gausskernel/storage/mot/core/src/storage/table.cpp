@@ -87,7 +87,6 @@ bool Table::Init(const char* tableName, const char* longName, unsigned int field
     m_longTableName.assign(longName);
 
     // allocate columns
-    // static_assert((sizeof(Column) % 64) == 0, "Fix Column object size");
     MOT_LOG_DEBUG("GC Create table id %d table name %s table addr = %p \n", m_tableId, tableName, this);
     this->m_columns = (Column**)memalign(CL_SIZE, fieldCnt * sizeof(Column*));
     if (m_columns == nullptr) {

@@ -385,7 +385,6 @@ RC RedoLog::SerializeTransaction()
                     break;
                 case WR:
                     status = UpdateRow(access->GetTxnRow(), access->m_modifiedColumns);
-                    // case WR: status = overwriteRow(access->getRow());
                     break;
                 default:
                     break;

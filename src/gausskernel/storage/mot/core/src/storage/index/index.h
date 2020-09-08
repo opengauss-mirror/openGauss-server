@@ -734,6 +734,9 @@ class MOTIndexArr {
 public:
     explicit MOTIndexArr(MOT::Table* table);
 
+    ~MOTIndexArr()
+    {}
+
     MOT::Index* GetIndex(uint16_t ix)
     {
         if (likely(ix < m_numIndexes)) {

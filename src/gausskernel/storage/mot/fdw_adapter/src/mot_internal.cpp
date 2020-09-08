@@ -563,15 +563,15 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         case MOT::RC_OK:
             break;
         case MOT::RC_ERROR:
-            ereport(ERROR, (errmodule(MOD_MM), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
+            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
             break;
         case MOT::RC_ABORT:
-            ereport(ERROR, (errmodule(MOD_MM), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
+            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
             break;
         case MOT::RC_UNSUPPORTED_COL_TYPE: {
             ColumnDef* col = (ColumnDef*)arg1;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg(err->m_msg, col->colname),
                     errdetail(err->m_detail, NameListToString(col->typname->names))));
@@ -580,7 +580,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         case MOT::RC_UNSUPPORTED_COL_TYPE_ARR: {
             ColumnDef* col = (ColumnDef*)arg1;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg(err->m_msg, col->colname),
                     errdetail(err->m_detail, strVal(llast(col->typname->names)))));
@@ -589,7 +589,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         case MOT::RC_COL_NAME_EXCEEDS_MAX_SIZE: {
             ColumnDef* col = (ColumnDef*)arg1;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg(err->m_msg, col->colname),
                     errdetail(err->m_detail, col->colname, (uint32_t)MOT::Column::MAX_COLUMN_NAME_LEN)));
@@ -598,7 +598,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         case MOT::RC_COL_SIZE_INVLALID: {
             ColumnDef* col = (ColumnDef*)arg1;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg(err->m_msg, col->colname),
                     errdetail(err->m_detail, (uint32_t)(uint64_t)arg2, (uint32_t)MAX_VARCHAR_LEN)));
@@ -607,7 +607,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         case MOT::RC_EXCEEDS_MAX_ROW_SIZE: {
             ColumnDef* col = (ColumnDef*)arg1;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg(err->m_msg, col->colname),
                     errdetail(err->m_detail, (uint32_t)(uint64_t)arg2, (uint32_t)MAX_TUPLE_SIZE)));
@@ -616,7 +616,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         case MOT::RC_TABLE_EXCEEDS_MAX_DECLARED_COLS: {
             ColumnDef* col = (ColumnDef*)arg1;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg("%s", err->m_msg),
                     errdetail(err->m_detail, col->colname)));
@@ -624,28 +624,28 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         }
         case MOT::RC_INDEX_EXCEEDS_MAX_SIZE:
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg("%s", err->m_msg),
                     errdetail(err->m_detail, MAX_KEY_SIZE)));
             break;
         case MOT::RC_TABLE_EXCEEDS_MAX_INDEXES:
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg("%s", err->m_msg),
                     errdetail(err->m_detail, ((MOT::Table*)arg1)->GetTableName(), MAX_NUM_INDEXES)));
             break;
         case MOT::RC_TXN_EXCEEDS_MAX_DDLS:
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg("%s", err->m_msg),
                     errdetail(err->m_detail, MAX_DDL_ACCESS_SIZE)));
             break;
         case MOT::RC_UNIQUE_VIOLATION:
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg(err->m_msg, (char*)arg1),
                     errdetail(err->m_detail, (char*)arg2)));
@@ -653,7 +653,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
 
         case MOT::RC_TABLE_NOT_FOUND:
         case MOT::RC_INDEX_NOT_FOUND:
-            ereport(ERROR, (errmodule(MOD_MM), errcode(err->m_pgErr), errmsg(err->m_msg, (char*)arg1)));
+            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg(err->m_msg, (char*)arg1)));
             break;
 
             // following errors are internal and should not get to an upper layer
@@ -665,16 +665,16 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         case MOT::RC_INDEX_DELETE:
         case MOT::RC_LOCAL_ROW_NOT_VISIBLE:
         case MOT::RC_ILLEGAL_ROW_STATE:
-            ereport(ERROR, (errmodule(MOD_MM), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
+            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
             break;
         case MOT::RC_MEMORY_ALLOCATION_ERROR:
-            ereport(ERROR, (errmodule(MOD_MM), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
+            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
             break;
         case MOT::RC_NULL_VIOLATION: {
             ColumnDef* col = (ColumnDef*)arg1;
             MOT::Table* table = (MOT::Table*)arg2;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg("%s", err->m_msg),
                     errdetail(err->m_detail, col->colname, table->GetLongTableName().c_str())));
@@ -683,15 +683,15 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         case MOT::RC_PANIC: {
             char* msg = (char*)arg1;
             ereport(FATAL,
-                (errmodule(MOD_MM), errcode(err->m_pgErr), errmsg("%s", err->m_msg), errdetail(err->m_detail, msg)));
+                (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg), errdetail(err->m_detail, msg)));
             break;
         }
         case MOT::RC_NA:
-            ereport(ERROR, (errmodule(MOD_MM), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
+            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
             break;
         case MOT::RC_MAX_VALUE:
         default:
-            ereport(ERROR, (errmodule(MOD_MM), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
+            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
             break;
     }
 }
@@ -1534,7 +1534,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
 
     if (table == nullptr) {
         ereport(ERROR,
-            (errmodule(MOD_MM),
+            (errmodule(MOD_MOT),
                 errcode(ERRCODE_UNDEFINED_TABLE),
                 errmsg("Table not found for oid %u", index->relation->foreignOid)));
         return MOT::RC_ERROR;
@@ -1543,7 +1543,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
     if (index->primary) {
         if (!table->IsTableEmpty(txn->GetThdId())) {
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_FDW_ERROR),
                     errmsg(
                         "Table %s is not empty, create primary index is not allowed", table->GetTableName().c_str())));
@@ -1551,7 +1551,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         }
     } else if (table->GetNumIndexes() == MAX_NUM_INDEXES) {
         ereport(ERROR,
-            (errmodule(MOD_MM),
+            (errmodule(MOD_MOT),
                 errcode(ERRCODE_FDW_TOO_MANY_INDEXES),
                 errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
         return MOT::RC_ERROR;
@@ -1574,13 +1574,13 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         indexing_method = MOT::IndexingMethod::INDEXING_METHOD_TREE;
         flavor = MOT::GetGlobalConfiguration().m_indexTreeFlavor;
     } else {
-        ereport(ERROR, (errmodule(MOD_MM), errmsg("MOT supports indexes of type BTREE only (btree or btree_art)")));
+        ereport(ERROR, (errmodule(MOD_MOT), errmsg("MOT supports indexes of type BTREE only (btree or btree_art)")));
         return MOT::RC_ERROR;
     }
 
     if (list_length(index->indexParams) > (int)MAX_KEY_COLUMNS) {
         ereport(ERROR,
-            (errmodule(MOD_MM),
+            (errmodule(MOD_MOT),
                 errcode(ERRCODE_FDW_TOO_MANY_INDEX_COLUMNS),
                 errmsg("Can't create index"),
                 errdetail(
@@ -1610,7 +1610,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         if (colid == (uint64_t)-1) {  // invalid column
             delete ix;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
                     errmsg("Can't create index on field"),
                     errdetail("Specified column not found in table definition")));
@@ -1623,7 +1623,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         if (!MOT::GetGlobalConfiguration().m_allowIndexOnNullableColumn && !col->m_isNotNull) {
             delete ix;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_FDW_INDEX_ON_NULLABLE_COLUMN_NOT_ALLOWED),
                     errmsg("Can't create index on nullable columns"),
                     errdetail("Column %s is nullable", col->m_name)));
@@ -1634,7 +1634,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         if (col->m_type == MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL) {
             delete ix;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Can't create index on field"),
                     errdetail("INDEX on NUMERIC or DECIMAL fields not supported yet")));
@@ -1643,7 +1643,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         if (col->m_keySize > MAX_KEY_SIZE) {
             delete ix;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
                     errmsg("Can't create index on field"),
                     errdetail("Column size is greater than maximum index size")));
@@ -1668,7 +1668,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         delete ix;
         if (res == MOT::RC_TABLE_EXCEEDS_MAX_INDEXES) {
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_FDW_TOO_MANY_INDEXES),
                     errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
             return MOT::RC_TABLE_EXCEEDS_MAX_INDEXES;
@@ -1696,7 +1696,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
         currentTable = new (std::nothrow) MOT::Table();
         if (currentTable == nullptr) {
             ereport(ERROR,
-                (errmodule(MOD_MM), errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Allocation of table metadata failed")));
+                (errmodule(MOD_MOT), errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Allocation of table metadata failed")));
             break;
         }
 
@@ -1711,7 +1711,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
             delete currentTable;
             currentTable = nullptr;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_UNDEFINED_DATABASE),
                     errmsg("database with OID %u does not exist", u_sess->proc_cxt.MyDatabaseId)));
             break;
@@ -1757,7 +1757,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
                 delete currentTable;
                 currentTable = nullptr;
                 ereport(ERROR,
-                    (errmodule(MOD_MM),
+                    (errmodule(MOD_MOT),
                         errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
                         errmsg("Column definition is not complete"),
                         errdetail("target table is a foreign table")));
@@ -1838,7 +1838,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
             delete currentTable;
             currentTable = nullptr;
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Un-support feature"),
                     errdetail("MOT: Table %s tuple size %u exceeds MAX_TUPLE_SIZE=%u !!!",
@@ -2022,7 +2022,7 @@ uint64_t MOTAdaptor::GetTableIndexSize(uint64_t tabId, uint64_t ixId)
         tab = txn->GetTableByExternalId(tabId);
         if (tab == nullptr) {
             ereport(ERROR,
-                (errmodule(MOD_MM),
+                (errmodule(MOD_MOT),
                     errcode(ERRCODE_FDW_TABLE_NOT_FOUND),
                     errmsg("Get table size error, table oid %lu not found.", tabId)));
             break;
@@ -2032,7 +2032,7 @@ uint64_t MOTAdaptor::GetTableIndexSize(uint64_t tabId, uint64_t ixId)
             ix = tab->GetIndexByExtId(ixId);
             if (ix == nullptr) {
                 ereport(ERROR,
-                    (errmodule(MOD_MM),
+                    (errmodule(MOD_MOT),
                         errcode(ERRCODE_FDW_TABLE_NOT_FOUND),
                         errmsg("Get index size error, index oid %lu for table oid %lu not found.", ixId, tabId)));
                 break;
@@ -2418,7 +2418,7 @@ void MOTAdaptor::DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* da
 
             if (NUMERIC_NDIGITS(n) > DECIMAL_MAX_DIGITS) {
                 ereport(ERROR,
-                    (errmodule(MOD_MM),
+                    (errmodule(MOD_MOT),
                         errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                         errmsg("Value exceeds maximum precision: %d", NUMERIC_MAX_PRECISION)));
                 break;

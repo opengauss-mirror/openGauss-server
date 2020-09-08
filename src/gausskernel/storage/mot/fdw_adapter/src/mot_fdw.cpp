@@ -1110,8 +1110,7 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
             break;
         }
 
-        MOTAdaptor::UnpackRow(
-            slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
+        MOTAdaptor::UnpackRow(slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
         found = true;
 
         festate->m_cursor[0]->Next();
@@ -1457,7 +1456,7 @@ static TupleTableSlot* MOTExecForeignUpdate(
     MOT::Row* currRow;
     AttrNumber num = fdwState->m_ctidNum - 1;
     MOTRecConvertSt cv;
-    
+
     if (MOTAdaptor::m_engine->IsSoftMemoryLimitReached()) {
         CleanQueryStatesOnError(fdwState->m_currTxn);
     }
@@ -1468,8 +1467,11 @@ static TupleTableSlot* MOTExecForeignUpdate(
         cv.m_u.m_self = *(ItemPointerData*)planSlot->tts_values[num];
         currRow = fdwState->m_currTxn->RowLookup(fdwState->m_internalCmdOper, (MOT::Sentinel*)cv.m_u.m_ptr, rc);
     } else {
-        elog(ERROR, "MOTExecForeignUpdate failed to fetch row for update ctid %d nvalid %d %s",
-            num, planSlot->tts_nvalid, (planSlot->tts_isnull[num] ? "NULL" : "NOT NULL"));
+        elog(ERROR,
+            "MOTExecForeignUpdate failed to fetch row for update ctid %d nvalid %d %s",
+            num,
+            planSlot->tts_nvalid,
+            (planSlot->tts_isnull[num] ? "NULL" : "NOT NULL"));
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(MOT::RC_ERROR, fdwState->m_currTxn);
         return nullptr;
@@ -1515,8 +1517,11 @@ static TupleTableSlot* MOTExecForeignDelete(
         cv.m_u.m_self = *(ItemPointerData*)planSlot->tts_values[num];
         currRow = fdwState->m_currTxn->RowLookup(fdwState->m_internalCmdOper, (MOT::Sentinel*)cv.m_u.m_ptr, rc);
     } else {
-        elog(ERROR, "MOTExecForeignDelete failed to fetch row for delete ctid %d nvalid %d %s",
-            num, planSlot->tts_nvalid, (planSlot->tts_isnull[num] ? "NULL" : "NOT NULL"));
+        elog(ERROR,
+            "MOTExecForeignDelete failed to fetch row for delete ctid %d nvalid %d %s",
+            num,
+            planSlot->tts_nvalid,
+            (planSlot->tts_isnull[num] ? "NULL" : "NOT NULL"));
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(MOT::RC_ERROR, fdwState->m_currTxn);
         return nullptr;
@@ -1801,7 +1806,7 @@ static void MOTValidateTableDef(Node* obj)
             if (allow == false) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
-                        errmodule(MOD_MM),
+                        errmodule(MOD_MOT),
                         errmsg("Alter table operation is not supported for memory table.")));
             }
             break;
@@ -1811,7 +1816,7 @@ static void MOTValidateTableDef(Node* obj)
             if (g_instance.attr.attr_storage.enableIncrementalCheckpoint == true) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
-                        errmodule(MOD_MM),
+                        errmodule(MOD_MOT),
                         errmsg("Cannot create MOT tables while incremental checkpoint is enabled.")));
             }
 
@@ -1826,7 +1831,7 @@ static void MOTValidateTableDef(Node* obj)
         case T_ReindexStmt: {
             ereport(ERROR,
                 (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
-                    errmodule(MOD_MM),
+                    errmodule(MOD_MOT),
                     errmsg("Reindex is not supported for memory table.")));
             break;
         }
@@ -1860,7 +1865,7 @@ static void MOTTruncateForeignTable(TruncateStmt* stmt, Relation rel)
     if (rc == MOT::RC::RC_NA) {
         ereport(ERROR,
             (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
-                errmodule(MOD_MM),
+                errmodule(MOD_MOT),
                 errmsg("A checkpoint is in progress - cannot truncate table.")));
     } else {
         report_pg_error(rc, NULL, NULL, NULL, NULL, NULL, NULL);

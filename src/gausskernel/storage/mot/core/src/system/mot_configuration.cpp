@@ -507,7 +507,7 @@ MOTConfiguration::MOTConfiguration()
       m_configMonitorPeriodSeconds(DEFAULT_CFG_MONITOR_PERIOD_SECONDS),
       m_runInternalConsistencyValidation(DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION),
       m_totalMemoryMb(DEFAULT_TOTAL_MEMORY_MB),
-      m_suppressLog(false)
+      m_suppressLog(0)
 {}
 
 void MOTConfiguration::Initialize()
@@ -797,22 +797,33 @@ void MOTConfiguration::LoadConfig()
         MAX_MIN_MOT_GLOBAL_MEMORY_MB);
     // validate that min <= max
     if (m_globalMemoryMinLimitMB > m_globalMemoryMaxLimitMB) {
-        if (!m_suppressLog) {
+        // calculate min/max values, which may be specified in percentage from total
+        ++m_suppressLog;
+        uint64_t defaultMinMotGlobalMemoryMB =
+            ParseMemoryValueBytes(
+                DEFAULT_MIN_MOT_GLOBAL_MEMORY, DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB, "min_mot_global_memory") /
+            SCALE_MEGA_BYTES;
+        uint64_t defaultMaxMotGlobalMemoryMB =
+            ParseMemoryValueBytes(
+                DEFAULT_MAX_MOT_GLOBAL_MEMORY, DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB, "max_mot_global_memory") /
+            SCALE_MEGA_BYTES;
+        --m_suppressLog;
+        if (m_suppressLog == 0) {
             MOT_LOG_WARN("Invalid global memory configuration: minimum (%" PRIu64
                          " MB) is greater than maximum (%" PRIu64 " MB), using defaults (%" PRIu64 " MB, %" PRIu64
                          " MB)",
                 m_globalMemoryMinLimitMB,
                 m_globalMemoryMaxLimitMB,
-                DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB,
-                DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB);
+                defaultMinMotGlobalMemoryMB,
+                defaultMaxMotGlobalMemoryMB);
         }
         UpdateIntConfigItem(m_globalMemoryMaxLimitMB,
-            DEFAULT_MAX_MOT_GLOBAL_MEMORY_MB,
+            defaultMaxMotGlobalMemoryMB,
             "max_mot_global_memory",
             MIN_MAX_MOT_GLOBAL_MEMORY_MB,
             MAX_MAX_MOT_GLOBAL_MEMORY_MB);
         UpdateIntConfigItem(m_globalMemoryMinLimitMB,
-            DEFAULT_MIN_MOT_GLOBAL_MEMORY_MB,
+            defaultMinMotGlobalMemoryMB,
             "min_mot_global_memory",
             MIN_MIN_MOT_GLOBAL_MEMORY_MB,
             MAX_MIN_MOT_GLOBAL_MEMORY_MB);
@@ -831,22 +842,33 @@ void MOTConfiguration::LoadConfig()
         MAX_MIN_MOT_LOCAL_MEMORY_MB);
     // validate that min <= max
     if (m_localMemoryMinLimitMB > m_localMemoryMaxLimitMB) {
-        if (!m_suppressLog) {
+        // calculate min/max values, which may be specified in percentage from total
+        ++m_suppressLog;
+        uint64_t defaultMinMotLocalMemoryMB =
+            ParseMemoryValueBytes(
+                DEFAULT_MIN_MOT_LOCAL_MEMORY, DEFAULT_MIN_MOT_LOCAL_MEMORY_MB, "min_mot_local_memory") /
+            SCALE_MEGA_BYTES;
+        uint64_t defaultMaxMotLocalMemoryMB =
+            ParseMemoryValueBytes(
+                DEFAULT_MAX_MOT_LOCAL_MEMORY, DEFAULT_MAX_MOT_LOCAL_MEMORY_MB, "max_mot_local_memory") /
+            SCALE_MEGA_BYTES;
+        --m_suppressLog;
+        if (m_suppressLog == 0) {
             MOT_LOG_WARN("Invalid local memory configuration: minimum (%" PRIu64
                          " MB) is greater than maximum (%" PRIu64 " MB), using defaults (%" PRIu64 " MB, %" PRIu64
                          " MB)",
                 m_localMemoryMinLimitMB,
                 m_localMemoryMaxLimitMB,
-                DEFAULT_MIN_MOT_LOCAL_MEMORY_MB,
-                DEFAULT_MAX_MOT_LOCAL_MEMORY_MB);
+                defaultMinMotLocalMemoryMB,
+                defaultMaxMotLocalMemoryMB);
         }
         UpdateIntConfigItem(m_localMemoryMaxLimitMB,
-            DEFAULT_MAX_MOT_LOCAL_MEMORY_MB,
+            defaultMaxMotLocalMemoryMB,
             "max_mot_local_memory",
             MIN_MAX_MOT_LOCAL_MEMORY_MB,
             MAX_MAX_MOT_LOCAL_MEMORY_MB);
         UpdateIntConfigItem(m_localMemoryMinLimitMB,
-            DEFAULT_MIN_MOT_LOCAL_MEMORY_MB,
+            defaultMinMotLocalMemoryMB,
             "min_mot_local_memory",
             MIN_MIN_MOT_LOCAL_MEMORY_MB,
             MAX_MIN_MOT_LOCAL_MEMORY_MB);
@@ -865,22 +887,33 @@ void MOTConfiguration::LoadConfig()
         MAX_MIN_MOT_SESSION_MEMORY_KB);
     // validate that min <= max
     if ((m_sessionMemoryMaxLimitKB > 0) && (m_sessionMemoryMinLimitKB > m_sessionMemoryMaxLimitKB)) {
-        if (!m_suppressLog) {
+        // calculate min/max values, which may be specified in percentage from total
+        ++m_suppressLog;
+        uint64_t defaultMinMotSessionMemoryKB =
+            ParseMemoryValueBytes(
+                DEFAULT_MIN_MOT_SESSION_MEMORY, DEFAULT_MIN_MOT_SESSION_MEMORY_KB, "min_mot_session_memory") /
+            SCALE_KILO_BYTES;
+        uint64_t defaultMaxMotSessionMemoryKB =
+            ParseMemoryValueBytes(
+                DEFAULT_MAX_MOT_SESSION_MEMORY, DEFAULT_MAX_MOT_SESSION_MEMORY_KB, "max_mot_session_memory") /
+            SCALE_KILO_BYTES;
+        --m_suppressLog;
+        if (m_suppressLog == 0) {
             MOT_LOG_WARN("Invalid session memory configuration: minimum (%" PRIu64
                          " KB) is greater than maximum (%" PRIu64 " KB), using defaults (%" PRIu64 " KB, %" PRIu64
                          " KB)",
                 m_sessionMemoryMinLimitKB,
                 m_sessionMemoryMaxLimitKB,
-                DEFAULT_MIN_MOT_SESSION_MEMORY_KB,
-                DEFAULT_MAX_MOT_SESSION_MEMORY_KB);
+                defaultMinMotSessionMemoryKB,
+                defaultMaxMotSessionMemoryKB);
         }
         UpdateIntConfigItem(m_sessionMemoryMaxLimitKB,
-            DEFAULT_MAX_MOT_SESSION_MEMORY_KB,
+            defaultMaxMotSessionMemoryKB,
             "max_mot_session_memory",
             MIN_MAX_MOT_SESSION_MEMORY_KB,
             MAX_MAX_MOT_SESSION_MEMORY_KB);
         UpdateIntConfigItem(m_sessionMemoryMinLimitKB,
-            DEFAULT_MIN_MOT_SESSION_MEMORY_KB,
+            defaultMinMotSessionMemoryKB,
             "min_mot_session_memory",
             MIN_MIN_MOT_SESSION_MEMORY_KB,
             MAX_MIN_MOT_SESSION_MEMORY_KB);
@@ -970,8 +1003,11 @@ void MOTConfiguration::UpdateMemConfigItem(uint64_t& oldValue, const char* name,
     uint64_t scale, uint64_t lowerBound, uint64_t upperBound, bool allowPercentage)
 {
     // we prepare first a default value from the string default value
+    ++m_suppressLog;
     uint64_t defaultValueBytes = allowPercentage ? ParseMemoryValueBytes(defaultStrValue, (uint64_t)-1, name)
                                                  : ParseMemoryUnit(defaultStrValue, (uint64_t)-1, name);
+    UpdateIntConfigItem(oldValue, defaultValueBytes / scale, name, lowerBound, upperBound);
+    --m_suppressLog;
     MOT_LOG_TRACE(
         "Converted memory default string value %s to byte value: %" PRIu64, defaultStrValue, defaultValueBytes);
 
@@ -1000,8 +1036,8 @@ void MOTConfiguration::UpdateMemConfigItem(uint64_t& oldValue, const char* name,
             // value was parsed as string, meaning we have units or percentage specifier
             const char* strValue = cfg->GetStringConfigValue(name, defaultStrValue);
             if ((strValue != nullptr) && (strValue[0] != 0)) {
-                uint64_t memoryValueBytes = allowPercentage ? ParseMemoryValueBytes(strValue, (uint64_t)-1, name)
-                                                            : ParseMemoryUnit(strValue, (uint64_t)-1, name);
+                uint64_t memoryValueBytes = allowPercentage ? ParseMemoryValueBytes(strValue, defaultValueBytes, name)
+                                                            : ParseMemoryUnit(strValue, defaultValueBytes, name);
                 UpdateIntConfigItem(oldValue, memoryValueBytes / scale, name, lowerBound, upperBound);
             }
         } else {
@@ -1019,7 +1055,11 @@ void MOTConfiguration::UpdateTimeConfigItem(uint64_t& oldValue, const char* name
     uint64_t scale, uint64_t lowerBound, uint64_t upperBound)
 {
     // we prepare first a default value from the string default value
+    ++m_suppressLog;
     uint64_t defaultValueUSecs = ParseTimeValueMicros(defaultStrValue, (uint64_t)-1, name);
+    UpdateIntConfigItem(oldValue, defaultValueUSecs / scale, name, lowerBound, upperBound);
+    --m_suppressLog;
+
     MOT_LOG_TRACE("Converted time default string value %s to usec value: %" PRIu64, defaultStrValue, defaultValueUSecs);
 
     // now we carefully examine the configuration item type
@@ -1047,7 +1087,7 @@ void MOTConfiguration::UpdateTimeConfigItem(uint64_t& oldValue, const char* name
             // value was parsed as string, meaning we have units
             const char* strValue = cfg->GetStringConfigValue(name, defaultStrValue);
             if ((strValue != nullptr) && (strValue[0] != 0)) {
-                uint64_t timeValueUSecs = ParseTimeValueMicros(strValue, (uint64_t)-1, name);
+                uint64_t timeValueUSecs = ParseTimeValueMicros(strValue, defaultValueUSecs, name);
                 UpdateIntConfigItem(oldValue, timeValueUSecs / scale, name, lowerBound, upperBound);
             }
         } else {
@@ -1086,7 +1126,7 @@ void MOTConfiguration::UpdateComponentLogLevel()
             LogLevel componentLevel = componentCfg->GetUserConfigValue<LogLevel>("log_level", globalLogLevel);
             if (componentLevel != globalLogLevel) {
                 mot_string logLevelStr;
-                if (!m_suppressLog) {
+                if (m_suppressLog == 0) {
                     MOT_LOG_INFO("Updating the log level of component %s to: %s",
                         componentName.c_str(),
                         TypeFormatter<LogLevel>::ToString(componentLevel, logLevelStr));
@@ -1113,7 +1153,7 @@ void MOTConfiguration::UpdateComponentLogLevel()
                         componentCfg->GetUserConfigValue<LogLevel>(loggerName.c_str(), LogLevel::LL_INFO);
                     if (loggerLevel != LogLevel::LL_INFO) {
                         mot_string logLevelStr;
-                        if (!m_suppressLog) {
+                        if (m_suppressLog == 0) {
                             MOT_LOG_INFO("Updating the log level of logger %s in component %s to: %s",
                                 loggerName.c_str(),
                                 componentName.c_str(),
@@ -1194,7 +1234,7 @@ uint64_t MOTConfiguration::ParseMemoryPercentTotal(const char* memoryValue, uint
     int percent = ParseMemoryPercent(memoryValue);
     if (percent >= 0) {
         memoryValueBytes = m_totalMemoryMb * MEGA_BYTE * percent / 100;
-        if (!m_suppressLog) {
+        if (m_suppressLog == 0) {
             MOT_LOG_INFO(
                 "Loaded %s: %d%% from total = %" PRIu64 " MB", cfgPath, percent, memoryValueBytes / 1024ul / 1024ul);
         }

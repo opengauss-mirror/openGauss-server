@@ -1904,7 +1904,7 @@ extern void getSessionID(char* sessid, pg_time_t startTime, ThreadId Threadid);
 extern void getThrdID(char* thrdid, pg_time_t startTime, ThreadId Threadid);
 
 #define NUM_SESSION_MEMORY_DETAIL_ELEM 8
-#define NUM_MMENGINE_SESSION_MEMORY_DETAIL_ELEM 4
+#define NUM_MOT_SESSION_MEMORY_DETAIL_ELEM 4
 
 typedef struct ThreadMemoryDetail {
     char contextName[MEMORY_CONTEXT_NAME_LEN];

@@ -117,6 +117,13 @@
 /** @define Constant denoting default NUMA node id. */
 #define MEM_DEFAULT_NODE 0
 
+// Memory Debug
+/** @define Clean land memory pattern constant. */
+#define MEM_CLEAN_LAND 0xCD
+
+/** @define Dead land memory pattern constant. */
+#define MEM_DEAD_LAND 0xFD
+
 namespace MOT {
 
 /** @enum Report modes when reporting memory status. */

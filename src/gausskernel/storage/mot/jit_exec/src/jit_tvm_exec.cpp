@@ -1358,10 +1358,9 @@ class SetScanEndedInstruction : public Instruction {
 public:
     /**
      * @brief Constructor.
-     * @param result The scan-ended result. Zero means there are more tuples to report. One means the
-     * scan ended.
+     * @param result The scan-ended result. Zero means there are more tuples to report. One means the scan ended.
      */
-    SetScanEndedInstruction(int result) : Instruction(Instruction::Void), _result(result)
+    explicit SetScanEndedInstruction(int result) : Instruction(Instruction::Void), _result(result)
     {}
 
     /** @brief Destructor. */
@@ -2181,7 +2180,7 @@ public:
     explicit GetStateScanEndFlagInstruction(JitRangeScanType range_scan_type) : _range_scan_type(range_scan_type)
     {}
 
-    ~GetStateScanEndFlagInstruction()
+    ~GetStateScanEndFlagInstruction() final
     {}
 
 protected:
@@ -3576,7 +3575,7 @@ static void buildDeleteRow(JitTvmCodeGenContext* ctx)
 static Instruction* buildSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
     JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
-    // search the row, execute: IndexIterator* itr = searchIterator(table, key);
+    // search the row
     IssueDebugLog("Searching range start");
     Instruction* itr = AddSearchIterator(ctx, index_scan_direction, range_bound_mode, range_scan_type, subQueryIndex);
 
@@ -4216,7 +4215,7 @@ static bool writeRowColumns(
         Instruction* value = buildExpression(ctx, expr);
         buildWriteDatumColumn(ctx, row, column_expr->_table_column_id, value);
 
-        // execute (for incremental redo): setBit(bmp, bit_index);
+        // set bit for incremental redo
         if (is_update) {
             AddSetBit(ctx, column_expr->_table_column_id - 1);
         }
@@ -5402,10 +5401,7 @@ static JitContext* JitUpdateCodegen(const Query* query, const char* query_string
         return nullptr;
     }
 
-    // add code:
-    // MOT::Rc rc = writeRow(row, bmp);
-    // if (rc != MOT::RC_OK)
-    //   return rc;
+    // write row
     IssueDebugLog("Writing row");
     buildWriteRow(ctx, row, true, nullptr);
 
@@ -5487,10 +5483,7 @@ static JitContext* JitRangeUpdateCodegen(const Query* query, const char* query_s
         return nullptr;
     }
 
-    // add code:
-    // MOT::Rc rc = writeRow(row, bmp);
-    // if (rc != MOT::RC_OK)
-    //   return rc;
+    // write row
     IssueDebugLog("Writing row");
     buildWriteRow(ctx, row, false, &cursor);
 
@@ -5623,10 +5616,7 @@ static JitContext* JitDeleteCodegen(const Query* query, const char* query_string
         return nullptr;
     }
 
-    // add code:
-    // MOT::RC rc = deleteRow();
-    // if (rc != MOT::RC_OK)
-    //   return rc;
+    // delete row
     IssueDebugLog("Deleting row");
     buildDeleteRow(
         ctx);  // row is already cached in concurrency control module, so we do not need to provide an argument

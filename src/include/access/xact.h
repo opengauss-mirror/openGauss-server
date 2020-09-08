@@ -40,7 +40,7 @@
  *	start- and end-of-transaction callbacks for dynamically loaded modules
  */
 typedef enum {
-    XACT_EVENT_START,   /* For OltpNG, callback will notify us about new transaction */
+    XACT_EVENT_START,   /* For MOT, callback will notify us about new transaction */
     XACT_EVENT_COMMIT,
     XACT_EVENT_END_TRANSACTION,
     XACT_EVENT_COMMIT_START,

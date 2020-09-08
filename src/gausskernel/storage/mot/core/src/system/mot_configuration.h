@@ -80,9 +80,9 @@ public:
     inline void LoadPartial()
     {
         MOT_LOG_TRACE("Loading partial configuration after change");
-        m_suppressLog = true;
+        ++m_suppressLog;
         LoadConfig();
-        m_suppressLog = false;
+        --m_suppressLog;
     }
 
     /**
@@ -414,7 +414,7 @@ private:
     uint64_t m_totalMemoryMb;
 
     /** @var Controls suppressing of log messages during configuration loading. */
-    bool m_suppressLog;
+    int m_suppressLog;
 
     /** @var Memory scaling constants (from bytes). */
     static constexpr uint64_t SCALE_BYTES = 1;
@@ -716,7 +716,7 @@ private:
     void UpdateIntConfigItem(uint64_t& oldValue, T newValue, const char* name, uint64_t lowerBound, uint64_t upperBound)
     {
         if ((newValue > upperBound) || (lowerBound > 0 && newValue < lowerBound)) {
-            if (!m_suppressLog) {
+            if (m_suppressLog == 0) {
                 MOT_LOG_WARN("Configuration of %s=%" PRIu64 " is out of bounds [%" PRIu64 ", %" PRIu64 "]: keeping "
                              "default value %" PRIu64,
                     name,

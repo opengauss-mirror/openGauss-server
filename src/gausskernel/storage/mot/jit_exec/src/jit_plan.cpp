@@ -150,20 +150,6 @@ private:
 // Expression visitor that collects expressions for possibly open range scans
 // This requires special care: sort operators by index column id and evaluate the scan type
 class RangeScanExpressionCollector : public ExpressionVisitor {
-private:
-    Query* _query;
-    MOT::Table* _table;
-    MOT::Index* _index;
-
-    struct IndexOpClass {
-        int _index_column_id;
-        JitWhereOperatorClass _op_class;
-    };
-    IndexOpClass* _index_ops;
-    int _max_index_ops;
-    int _index_op_count;
-    JitIndexScan* _index_scan;
-
 public:
     RangeScanExpressionCollector(Query* query, MOT::Table* table, MOT::Index* index, JitIndexScan* index_scan)
         : _query(query),
@@ -322,6 +308,19 @@ public:
     }
 
 private:
+    Query* _query;
+    MOT::Table* _table;
+    MOT::Index* _index;
+
+    struct IndexOpClass {
+        int _index_column_id;
+        JitWhereOperatorClass _op_class;
+    };
+    IndexOpClass* _index_ops;
+    int _max_index_ops;
+    int _index_op_count;
+    JitIndexScan* _index_scan;
+
     void Cleanup()
     {
         for (int i = 0; i < _index_op_count; ++i) {
@@ -491,11 +490,6 @@ private:
 
 // Expression visitor that collects filters
 class FilterCollector : public ExpressionVisitor {
-private:
-    Query* _query;
-    JitFilterArray* _filter_array;
-    int* _filter_count;
-
 public:
     FilterCollector(Query* query, JitFilterArray* filter_array, int* count)
         : _query(query), _filter_array(filter_array), _filter_count(count)
@@ -540,6 +534,10 @@ public:
     }
 
 private:
+    Query* _query;
+    JitFilterArray* _filter_array;
+    int* _filter_count;
+
     void Cleanup()
     {
         for (int i = 0; i < *_filter_count; ++i) {
@@ -1504,7 +1502,7 @@ static bool getSelectExpressions(Query* query, JitSelectExprArray* select_exprs)
 // and have an EQUALS operator
 static bool countWhereClauseEqualsLeaves(Query* query, MOT::Table* table, MOT::Index* index, int* count)
 {
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_TRACE, LOGGER_LEVEL)) {
+    if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
         MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE,
             "Counting WHERE clause leaf nodes with EQUALS operator for table %s and index %s(",
             table->GetTableName().c_str(),

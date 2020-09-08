@@ -52,17 +52,17 @@ using std::string;
 #define MOT_UPDATE_INDEXED_FIELD_NOT_SUPPORTED "Update indexed field \"%s\" in table \"%s\" is not supported"
 
 #define NULL_DETAIL ((char*)nullptr)
-#define abortParentTransaction(msg, detail)                                                                         \
-    ereport(ERROR,                                                                                                  \
-        (errmodule(MOD_MM), errcode(ERRCODE_FDW_ERROR), errmsg(msg), (detail != nullptr ? errdetail(detail) : 0))); \
+#define abortParentTransaction(msg, detail)                                                                          \
+    ereport(ERROR,                                                                                                   \
+        (errmodule(MOD_MOT), errcode(ERRCODE_FDW_ERROR), errmsg(msg), (detail != nullptr ? errdetail(detail) : 0))); \
     u_sess->mot_cxt.txn_manager->SetTxnState(MOT::TxnState::TXN_REQUEST_FOR_ROLLBACK);
 
-#define abortParentTransactionParams(error, msg, msg_p, detail, detail_p)                                 \
-    ereport(ERROR, (errmodule(MOD_MM), errcode(error), errmsg(msg, msg_p), errdetail(detail, detail_p))); \
+#define abortParentTransactionParams(error, msg, msg_p, detail, detail_p)                                  \
+    ereport(ERROR, (errmodule(MOD_MOT), errcode(error), errmsg(msg, msg_p), errdetail(detail, detail_p))); \
     u_sess->mot_cxt.txn_manager->SetTxnState(MOT::TxnState::TXN_REQUEST_FOR_ROLLBACK);
 
-#define abortParentTransactionParamsNoDetail(error, msg, ...)                      \
-    ereport(ERROR, (errmodule(MOD_MM), errcode(error), errmsg(msg, __VA_ARGS__))); \
+#define abortParentTransactionParamsNoDetail(error, msg, ...)                       \
+    ereport(ERROR, (errmodule(MOD_MOT), errcode(error), errmsg(msg, __VA_ARGS__))); \
     u_sess->mot_cxt.txn_manager->SetTxnState(MOT::TxnState::TXN_REQUEST_FOR_ROLLBACK);
 
 #define isMemoryLimitReached()                                                                                         \
@@ -72,7 +72,7 @@ using std::string;
                 (uint64_t)MOTAdaptor::m_engine->GetCurrentMemoryConsumptionBytes(),                                    \
                 (uint64_t)MOTAdaptor::m_engine->GetHardMemoryLimitBytes());                                            \
             ereport(ERROR,                                                                                             \
-                (errmodule(MOD_MM),                                                                                    \
+                (errmodule(MOD_MOT),                                                                                   \
                     errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),                                                            \
                     errmsg("You have reached a maximum logical capacity"),                                             \
                     errdetail("Only destructive operations are allowed, please perform database cleanup to free some " \

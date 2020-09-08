@@ -95,7 +95,7 @@ typedef struct PACKED BitMask_ST {
 
 #define BITMASK_NBYTES(bmp) (LONGS_PER_BITS(bmp->m_size) * sizeof(unsigned long))
 #define BITMASK_GETBIT(bmp, n) \
-    ((unsigned int)n < bmp->m_size) ? ((bmp->m_maskp[n / BITS_PER_LONG] >> (n % BITS_PER_LONG)) & 1) : 0
+    (((unsigned int)n < bmp->m_size) ? ((bmp->m_maskp[n / BITS_PER_LONG] >> (n % BITS_PER_LONG)) & 1) : 0)
 #define BITMASK_SETBIT(bmp, n)                                         \
     if ((unsigned int)n < bmp->m_size) {                               \
         bmp->m_maskp[n / BITS_PER_LONG] |= 1UL << (n % BITS_PER_LONG); \
@@ -824,7 +824,7 @@ static void MotSysNumaReportError(const char* msg)
     char buffer[bufSize] = {0};
     int olde = errno;
     LogLevel logLevel = GetGlobalConfiguration().m_numaErrorsLogLevel;
-    if (CheckLogLevel(logLevel, LOGGER_LEVEL)) {
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) {
         char* errorString = strerror_r(olde, buffer, bufSize);
         MOT_LOG(logLevel, "%s: %s", msg, errorString);
     }
@@ -834,7 +834,7 @@ static void MotSysNumaReportError(const char* msg)
 static void MotSysNumaReportWarn(const char* msg, ...)
 {
     LogLevel logLevel = GetGlobalConfiguration().m_numaWarningsLogLevel;
-    if (CheckLogLevel(logLevel, LOGGER_LEVEL)) {
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) {
         va_list ap;
         va_start(ap, msg);
         MOT_LOG(logLevel, msg, ap);

@@ -26,10 +26,12 @@
 #include "string_buffer.h"
 #include "mm_api.h"
 #include "debug_utils.h"
+#include "mot_string.h"
 
 #include <pthread.h>
 #include <execinfo.h>
 #include <unistd.h>
+#include <algorithm>
 
 namespace MOT {
 DECLARE_LOGGER(DebugUtils, Utilities)
@@ -100,6 +102,100 @@ extern void MOTAbort(void* faultAddress /* = NULL */)
     pthread_mutex_unlock(&abortLock);  // just for proper order
 }
 
+static void SetCallStackName(char* name, const char* sourceName, size_t size)
+{
+    errno_t erc = strncpy_s(name, MOT_CALL_STACK_MAX_NAME - 1, sourceName, size);
+    securec_check(erc, "\0", "\0");
+    name[std::min(MOT_CALL_STACK_MAX_NAME - 1, size)] = 0;
+
+    // trim any trailing whitespace (including newline)
+    char ws[] = " \t\r\n";
+    int pos = (int)strlen(name);
+    if (pos > 0) {
+        --pos;
+        while ((pos >= 0) && (strchr(ws, name[pos]) != nullptr)) {
+            name[pos] = 0;
+            --pos;
+        }
+    }
+}
+
+static void ParseCallStackFrame(void* frame, char* frameStr, CallStackFrame* resolvedFrame, int opts)
+{
+    // expected format is MODULE(FRAME+OFFSET) [ADDRESS]
+    // 1. assign raw frame
+    size_t size = strlen(frameStr);
+    SetCallStackName(resolvedFrame->m_rawFrame, frameStr, size);
+
+    // 2. parse module and frame
+    char* openParenPos = strchr(frameStr, '(');
+    if (openParenPos != nullptr) {
+        size = openParenPos - frameStr;
+        SetCallStackName(resolvedFrame->m_module, frameStr, size);
+
+        // parse frame and offset
+        char* closeParenPos = strchr(frameStr, ')');
+        if (closeParenPos != nullptr) {
+            size = closeParenPos - openParenPos - 1;
+            SetCallStackName(resolvedFrame->m_frame, openParenPos + 1, size);
+
+            // now break it again into frame and offset
+            char* plusPos = strchr(resolvedFrame->m_frame, '+');
+            if (plusPos != nullptr) {
+                resolvedFrame->m_frameOffset = strtoull(plusPos + 1, nullptr, 16);
+                *plusPos = 0;
+            }
+        }
+    }
+
+    // 2. parse address
+    char* openBracketPos = strchr(frameStr, '[');
+    if (openBracketPos != nullptr) {
+        resolvedFrame->m_address = strtoull(openBracketPos + 1, nullptr, 16);
+    }
+
+    // 3. get demangled name if required
+    if (opts & MOT_CALL_STACK_DEMANGLE) {
+        if (resolvedFrame->m_frame[0] != 0) {
+            mot_string sysCom;
+            sysCom.format("echo '%s' | c++filt", resolvedFrame->m_frame);
+            std::string sysRes = ExecOsCommand(sysCom.c_str());
+            SetCallStackName(resolvedFrame->m_demangledFrame, sysRes.c_str(), sysRes.length());
+        }
+    }
+
+    // 4. get file and line if required
+    if (opts & MOT_CALL_STACK_FILE_LINE) {
+        mot_string sysCom;
+        sysCom.format("addr2line %p -e %s", frame, resolvedFrame->m_module);
+        std::string sysRes = ExecOsCommand(sysCom.c_str());
+        SetCallStackName(resolvedFrame->m_file, sysRes.c_str(), sysRes.length());
+        char* colonPos = strchr(resolvedFrame->m_file, ':');
+        if (colonPos != nullptr) {
+            resolvedFrame->m_line = strtoull(colonPos + 1, nullptr, 0);
+            *colonPos = 0;
+        }
+    }
+}
+
+extern int MOTGetCallStack(CallStackFrame* resolvedFrames, uint32_t frameCount, int opts)
+{
+    uint32_t actualFrameCount = std::min(MOT_CALL_STACK_MAX_FRAMES, frameCount);
+    void* rawFrames[MOT_CALL_STACK_MAX_FRAMES];
+
+    // get back-trace with symbols
+    int validFrameCount = backtrace(rawFrames, actualFrameCount);
+    char** frameStrArray = backtrace_symbols(rawFrames, validFrameCount);
+
+    // parse frames
+    for (int i = 0; i < validFrameCount; ++i) {
+        ParseCallStackFrame(rawFrames[i], frameStrArray[i], &resolvedFrames[i], opts);
+    }
+
+    free(frameStrArray);
+    return validFrameCount;
+}
+
 extern void MOTDumpCallStack()
 {
     void* buffer[100];
@@ -107,47 +203,50 @@ extern void MOTDumpCallStack()
     backtrace_symbols_fd(buffer, frames, STDERR_FILENO);
 }
 
-extern void MOTPrintCallStackImpl(LogLevel logLevel, const char* logger, const char* format, ...)
+extern void MOTPrintCallStackImpl(LogLevel logLevel, const char* logger, int opts, const char* format, ...)
 {
     va_list args;
     va_start(args, format);
 
-    MOTPrintCallStackImplV(logLevel, logger, format, args);
+    MOTPrintCallStackImplV(logLevel, logger, opts, format, args);
 
     va_end(args);
 }
 
-extern void MOTPrintCallStackImplV(LogLevel logLevel, const char* logger, const char* format, va_list args)
+extern void MOTPrintCallStackImplV(LogLevel logLevel, const char* logger, int opts, const char* format, va_list args)
 {
     va_list argsCopy;
     va_copy(argsCopy, args);
 
     // get stack trace
-    void* trace[100];
-    int frames = backtrace(trace, 100);
-    char** frameStrArray = backtrace_symbols(trace, 100);
+    CallStackFrame resolvedFrames[MOT_CALL_STACK_MAX_FRAMES];
+    int frameCount = MOTGetCallStack(resolvedFrames, MOT_CALL_STACK_MAX_FRAMES, opts);
 
     // format message
     StringBuffer sb = {0};
     StringBufferInit(&sb, 1024, 2, MOT::StringBuffer::MULTIPLY);
     StringBufferAppendV(&sb, format, argsCopy);
     StringBufferAppend(&sb, "\n");
-    for (int i = 0; i < frames; ++i) {
-        StringBufferAppend(&sb, "#%d %s\n", i, frameStrArray[i]);
-
-        // find first occurrence of '(' or ' ' in frameStrArray[i] and assume everything before that is
-        // the file name. (Don't go beyond 0 though (string terminator)
-        int p = 0;
-        while (frameStrArray[i][p] != '(' && frameStrArray[i][p] != ' ' && frameStrArray[i][p] != 0) {
-            ++p;
+    for (int i = 0; i < frameCount; ++i) {
+        CallStackFrame* frame = &resolvedFrames[i];
+        if (opts == 0) {
+            // raw printing
+            StringBufferAppend(&sb, "#%d %s\n", frame->m_rawFrame);
+        } else {
+            // formatted printing
+            StringBufferAppend(&sb, "#%d ", i);
+            if (opts & MOT_CALL_STACK_DEMANGLE) {
+                StringBufferAppend(&sb, "%s (+0x%x)\n", frame->m_demangledFrame, frame->m_frameOffset);
+            } else {
+                StringBufferAppend(&sb, "%s (+0x%x)\n", frame->m_frame, frame->m_frameOffset);
+            }
+            if (opts & MOT_CALL_STACK_FILE_LINE) {
+                StringBufferAppend(&sb, "\tat %s:%" PRIu64 "\n", frame->m_file, frame->m_line);
+            }
+            if (opts & MOT_CALL_STACK_MODULE) {
+                StringBufferAppend(&sb, "\tat %s [0x%" PRIx64 "]\n", frame->m_module, frame->m_address);
+            }
         }
-
-        char sysCom[256];
-        errno_t erc = snprintf_s(
-            sysCom, sizeof(sysCom), sizeof(sysCom) - 1, "addr2line %p -e %.*s", trace[i], p, frameStrArray[i]);
-        securec_check_ss(erc, "\0", "\0");
-        std::string fileLine = ExecOsCommand(sysCom);
-        StringBufferAppend(&sb, "%s\n", fileLine.c_str());
     }
 
     // print
@@ -155,7 +254,6 @@ extern void MOTPrintCallStackImplV(LogLevel logLevel, const char* logger, const 
 
     // cleanup
     StringBufferDestroy(&sb);
-    free(frameStrArray);
 
     va_end(argsCopy);
 }

@@ -87,11 +87,42 @@ static void MOTWriteToFileSink(const char* line, size_t size, void* userData);
 static void MOTFormatToFileSink(const char* format, va_list args, void* userData);
 static void MOTFlushFileSink(void* userData);
 
+static void MOTWriteToStdoutSink(const char* line, size_t size, void* userData)
+{
+    MOTWriteToFileSink(line, size, stdout);
+}
+
+static void MOTFormatToStdoutSink(const char* format, va_list args, void* userData)
+{
+    MOTFormatToFileSink(format, args, stdout);
+}
+
+static void MOTFlushStdoutSink(void* userData)
+{
+    MOTFlushFileSink(stdout);
+}
+
+static void MOTWriteToStderrSink(const char* line, size_t size, void* userData)
+{
+    MOTWriteToFileSink(line, size, stderr);
+}
+
+static void MOTFormatToStderrSink(const char* format, va_list args, void* userData)
+{
+    MOTFormatToFileSink(format, args, stderr);
+}
+
+static void MOTFlushStderrSink(void* userData)
+{
+    MOTFlushFileSink(stderr);
+}
+
+// we cannot put stdout and stderr in static initializer because they are not initialized yet
+// so we use specialized functions instead
 static MOTLogSink noneLogSink = {MOTWriteToNone, MOTFormatToNone, MOTFlushNone, nullptr};
-static MOTLogSink stdoutLogSink = {MOTWriteToFileSink, MOTFormatToFileSink, MOTFlushFileSink, stdout};
-static MOTLogSink stderrLogSink = {MOTWriteToFileSink, MOTFormatToFileSink, MOTFlushFileSink, stderr};
-static MOTLogSink fileLogSink = {
-    MOTWriteToFileSink, MOTFormatToFileSink, MOTFlushFileSink, nullptr};  // not configured yet
+static MOTLogSink stdoutLogSink = {MOTWriteToStdoutSink, MOTFormatToStdoutSink, MOTFlushStdoutSink, nullptr};
+static MOTLogSink stderrLogSink = {MOTWriteToStderrSink, MOTFormatToStderrSink, MOTFlushStderrSink, nullptr};
+static MOTLogSink fileLogSink = {MOTWriteToFileSink, MOTFormatToFileSink, MOTFlushFileSink, nullptr};
 
 static MotLogSinkType globalLogSinkType = MOT_LOG_SINK_STDOUT;
 static MOTLogSink* globalLogSink = &stdoutLogSink;
@@ -470,12 +501,12 @@ extern void MOTLogSystemErrorCode(
     va_end(args);
 }
 
-extern void MOTPrintCallStack(LogLevel logLevel, const char* loggerName, const char* format, ...)
+extern void MOTPrintCallStack(LogLevel logLevel, const char* loggerName, int opts, const char* format, ...)
 {
     va_list args;
     va_start(args, format);
 
-    MOTPrintCallStackImplV(logLevel, loggerName, format, args);
+    MOTPrintCallStackImplV(logLevel, loggerName, opts, format, args);
 
     va_end(args);
 }

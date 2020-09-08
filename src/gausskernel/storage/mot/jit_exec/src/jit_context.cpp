@@ -600,17 +600,23 @@ static void CleanupJitContextSubQueryData(JitContext::SubQueryData* subQueryData
 
 static JitContextPool* AllocSessionJitContextPool()
 {
-    JitContextPool* result = (JitContextPool*)MOT::MemGlobalAllocAligned(sizeof(JitContextPool), L1_CACHE_LINE);
-    if (result == NULL) {
-        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Allocate JIT Context", "Failed to allocate buffer for JIT context");
-        return NULL;
-    }
+    size_t allocSize = sizeof(JitContextPool);
+    JitContextPool* jitContextPool = (JitContextPool*)MOT::MemGlobalAllocAligned(allocSize, L1_CACHE_LINE);
+    if (jitContextPool == NULL) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "Allocate JIT Context",
+            "Failed to allocate %u bytes for JIT context pool",
+            (unsigned)allocSize);
+    } else {
+        errno_t erc = memset_s(jitContextPool, allocSize, 0, allocSize);
+        securec_check(erc, "\0", "\0");
 
-    if (!InitJitContextPool(result, JIT_CONTEXT_LOCAL, GetMotCodegenLimit())) {
-        pfree_top(result);
-        return NULL;
+        if (!InitJitContextPool(jitContextPool, JIT_CONTEXT_LOCAL, GetMotCodegenLimit())) {
+            MOT::MemGlobalFree(jitContextPool);
+            jitContextPool = NULL;
+        }
     }
-    return result;
+    return jitContextPool;
 }
 
 extern void FreeSessionJitContextPool(JitContextPool* jitContextPool)

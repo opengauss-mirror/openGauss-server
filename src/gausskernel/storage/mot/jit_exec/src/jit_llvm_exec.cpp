@@ -2203,7 +2203,7 @@ static void buildDeleteRow(JitLlvmCodeGenContext* ctx)
 static llvm::Value* buildSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
     JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
-    // search the row, execute: IndexIterator* itr = searchIterator(table, key);
+    // search the row
     IssueDebugLog("Searching range start");
     llvm::Value* itr = AddSearchIterator(ctx, index_scan_direction, range_bound_mode, range_scan_type, subQueryIndex);
 
@@ -2993,7 +2993,7 @@ static bool writeRowColumns(
         // set null bit or copy result data to column
         buildWriteDatumColumn(ctx, row, column_expr->_table_column_id, value);
 
-        // execute (for incremental redo): setBit(bmp, bit_index);
+        // set bit for incremental redo
         if (is_update) {
             AddSetBit(ctx, column_expr->_table_column_id - 1);
         }
@@ -3443,9 +3443,12 @@ static bool buildPrepareStateRow(JitLlvmCodeGenContext* ctx, MOT::AccessType acc
         ctx->_builder->GetInsertBlock()->getName().data());
     ctx->_builder->CreateBr(prepare_state_row_bb);
     if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
-        MOT_LOG_TRACE("Added unconditional branch result:");
-        ctx->_builder->GetInsertBlock()->back().print(llvm::errs());
-        fprintf(stderr, "\n");
+        MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE, "Added unconditional branch result:");
+        std::string s;
+        llvm::raw_string_ostream os(s);
+        ctx->_builder->GetInsertBlock()->back().print(os);
+        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "%s", s.c_str());
+        MOT_LOG_END(MOT::LogLevel::LL_TRACE);
     }
     ctx->_builder->SetInsertPoint(prepare_state_row_bb);
 
@@ -4183,10 +4186,7 @@ static JitContext* JitUpdateCodegen(Query* query, const char* query_string, JitU
         return nullptr;
     }
 
-    // add code:
-    // MOT::Rc rc = writeRow(row, bmp);
-    // if (rc != MOT::RC_OK)
-    //   return rc;
+    // write row
     IssueDebugLog("Writing row");
     buildWriteRow(ctx, row, true, nullptr);
 

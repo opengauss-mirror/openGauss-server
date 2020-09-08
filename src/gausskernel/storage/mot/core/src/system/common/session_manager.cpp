@@ -339,9 +339,13 @@ void SessionManager::DestroySessionContext(SessionContext* sessionContext)
 
 #ifdef MEM_SESSION_ACTIVE
         MemSessionFree(sessionContext);
+        // we must set the current session context point to null right now, otherwise the subsequent call to
+        // MemSessionUnreserve() touches deallocated memory
+        MOT_SET_CURRENT_SESSION_CONTEXT(nullptr);
         MemSessionUnreserve();
 #else
         free(sessionContext);
+        MOT_SET_CURRENT_SESSION_CONTEXT(nullptr);
 #endif
 
         MOT_LOG_DEBUG(
@@ -352,7 +356,6 @@ void SessionManager::DestroySessionContext(SessionContext* sessionContext)
         MOT_ASSERT(sessionId == MOT_GET_CURRENT_SESSION_ID());
         MOT_SET_CURRENT_CONNECTION_ID(INVALID_CONNECTION_ID);
         MOT_SET_CURRENT_SESSION_ID(INVALID_SESSION_ID);
-        MOT_SET_CURRENT_SESSION_CONTEXT(nullptr);
     }
 }
 
