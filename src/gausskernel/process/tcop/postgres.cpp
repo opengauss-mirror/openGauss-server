@@ -2218,25 +2218,25 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
         SetCurrentTransactionStorageEngine(storageEngineType);
 
         if (!IsTransactionExitStmt(parsetree) && storageEngineType == SE_TYPE_MIXED) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_QUERY_NOT_SUPPORTED), errmodule(MOD_MM),
+            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_QUERY_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Cross storage engine query is not supported")));
         }
 
         if (!IsTransactionExitStmt(parsetree) && IsMixedEngineUsed()) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MM),
+            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Cross storage engine transaction is not supported")));
         }
 
         /* block MM engine queries in sub-transactions */
         if (!IsTransactionExitStmt(parsetree) && IsMMEngineUsedInParentTransaction() && IsMMEngineUsed()) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MM),
+            ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("SubTransaction is not supported for memory table.")));
         }
 
         /* check for MM update of indexed field. Can check only the querytree head, no need for drill down */
         if (!IsTransactionExitStmt(parsetree) &&
                 (querytree_list != NULL && IsMMIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MM),
+            ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for main memory tables")));
         }
 
@@ -3118,7 +3118,7 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         psrc->storageEngineType = storageEngineType;
 
         if (!IsTransactionExitStmt(raw_parse_tree) && storageEngineType == SE_TYPE_MIXED) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_QUERY_NOT_SUPPORTED), errmodule(MOD_MM),
+            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_QUERY_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Cross storage engine query is not supported")));
         }
 
@@ -3145,7 +3145,7 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         /******************************* MOT LLVM *************************************/
 
         if (!IsTransactionExitStmt(raw_parse_tree) && IsMMIndexedColumnUpdate(query)) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MM),
+            ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for main memory tables")));
         }
 
@@ -3863,12 +3863,12 @@ void exec_bind_message(StringInfo input_message)
     /* set transaction storage engine and check for cross transaction violation */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
     if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed())
-        ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MM),
+        ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MOT),
                 errmsg("Cross storage engine transaction is not supported")));
 
     /* block MM engine queries in sub-transactions */
     if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMMEngineUsedInParentTransaction() && IsMMEngineUsed())
-        ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MM),
+        ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
                 errmsg("SubTransaction is not supported for memory table.")));
 
     /*

@@ -684,8 +684,16 @@ static void FreeChunk(MemRawChunkPool* chunkPool, MemRawChunkHeader* chunkHeader
                     MemNumaFreeLocal(chunkHeader, MEM_CHUNK_SIZE_MB * MEGA_BYTE, chunkPool->m_node);
                 } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_CHUNK_INTERLEAVED) {
                     NumaFreeInterleavedChunk(chunkHeader, MEM_CHUNK_SIZE_MB * MEGA_BYTE, chunkPool->m_node);
-                } else {  // MEM_ALLOC_POLICY_PAGE_INTERLEAVED
+                } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_PAGE_INTERLEAVED) {
                     MemNumaFreeGlobal(chunkHeader, MEM_CHUNK_SIZE_MB * MEGA_BYTE);
+                } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_NATIVE) {
+                    free(chunkHeader);
+                } else {
+                    MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                        "Chunk De-Allocation",
+                        "Invalid chunk allocation policy: %u",
+                        (unsigned)g_memGlobalCfg.m_chunkAllocPolicy);
+                    return;
                 }
                 MemoryStatisticsProvider::m_provider->AddGlobalChunksReserved(
                     -((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));

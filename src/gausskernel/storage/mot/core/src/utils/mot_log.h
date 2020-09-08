@@ -102,7 +102,7 @@ extern LogLevel GetGlobalLogLevel();
 
 /**
  * @brief Queries whether a log level qualifies for printing.
- * @details A log level qulifies for printing if it passes three qualification tests, the global log level, the log
+ * @details A log level qualifies for printing if it passes three qualification tests, the global log level, the log
  * level of the current thread , and the log level of the reporting component.
  * @param logLevel The log level to check.
  * @param componentLogLevel The reporting component.
@@ -191,163 +191,129 @@ extern void MOTLogSystemErrorCode(
  * @brief Utility function for printing call stack of the current thread.
  * @param logLevel The message log level.
  * @param loggerName The name of the logger.
+ * @param opts Call stack printing options (see debug_utils.h for definitions).
  * @param format A user message to print.
  * @param ... Any additional extra arguments to the format message.
  */
-extern void MOTPrintCallStack(LogLevel logLevel, const char* loggerName, const char* format, ...);
+extern void MOTPrintCallStack(LogLevel logLevel, const char* loggerName, int opts, const char* format, ...);
 }  // namespace MOT
 
+/** @define Utility macro for checking whether the log level of the current logger is sufficient for printing. */
+#define MOT_CHECK_LOG_LEVEL(logLevel) MOT::CheckLogLevelInline(logLevel, MOT_LOGGER_LEVEL)
+
 /** @define Begins a log printing in continuation. */
-#define MOT_LOG_BEGIN(logLevel, format, ...)                                 \
-    if (MOT::CheckLogLevelInline(logLevel, LOGGER_LEVEL)) {                  \
-        MOT::MOTLogBegin(logLevel, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
+#define MOT_LOG_BEGIN(logLevel, format, ...)                                     \
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) {                                         \
+        MOT::MOTLogBegin(logLevel, MOT_LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
     }
 
 /** @define Adds a log message to log printing in continuation. */
-#define MOT_LOG_APPEND(logLevel, format, ...)               \
-    if (MOT::CheckLogLevelInline(logLevel, LOGGER_LEVEL)) { \
-        MOT::MOTLogAppend(format, ##__VA_ARGS__);           \
+#define MOT_LOG_APPEND(logLevel, format, ...)     \
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) {          \
+        MOT::MOTLogAppend(format, ##__VA_ARGS__); \
     }
 
 /** @define Ends a log printing in continuation. */
-#define MOT_LOG_END(logLevel)                               \
-    if (MOT::CheckLogLevelInline(logLevel, LOGGER_LEVEL)) { \
-        MOT::MOTLogEnd();                                   \
-    }
-
-/** @define Utility macro for checking whether the log level of the current logger is sufficient for printing. */
-#define MOT_CHECK_LOG_LEVEL(logLevel) MOT::CheckLogLevelInline(logLevel, LOGGER_LEVEL)
-
-/** @define Utility log printing macro. */
-#define MOT_LOG(logLevel, format, ...)                                  \
-    if (MOT::CheckLogLevelInline(logLevel, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(logLevel, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
+#define MOT_LOG_END(logLevel)            \
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) { \
+        MOT::MOTLogEnd();                \
     }
 
 /** @define Utility log printing macro. */
-#define MOT_LOG_PANIC(format, ...)                                                     \
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_PANIC, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(MOT::LogLevel::LL_PANIC, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
+#define MOT_LOG(logLevel, format, ...)                                      \
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) {                                    \
+        MOT::MOTLog(logLevel, MOT_LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
     }
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_ERROR(format, ...)                                                     \
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_ERROR, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(MOT::LogLevel::LL_ERROR, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
+/** @define Utility PANIC-level log printing macro. */
+#define MOT_LOG_PANIC(format, ...) MOT_LOG(MOT::LogLevel::LL_PANIC, format, ##__VA_ARGS__)
+
+/** @define Utility ERROR-level log printing macro. */
+#define MOT_LOG_ERROR(format, ...) MOT_LOG(MOT::LogLevel::LL_ERROR, format, ##__VA_ARGS__)
+
+/** @define Utility WARN-level log printing macro. */
+#define MOT_LOG_WARN(format, ...) MOT_LOG(MOT::LogLevel::LL_WARN, format, ##__VA_ARGS__)
+
+/** @define Utility INFO-level log printing macro. */
+#define MOT_LOG_INFO(format, ...) MOT_LOG(MOT::LogLevel::LL_INFO, format, ##__VA_ARGS__)
+
+/** @define Utility TRACE-level log printing macro. */
+#define MOT_LOG_TRACE(format, ...) MOT_LOG(MOT::LogLevel::LL_TRACE, format, ##__VA_ARGS__)
+
+/** @define Utility DEBUG-level log printing macro. */
+#define MOT_LOG_DEBUG(format, ...) MOT_LOG(MOT::LogLevel::LL_DEBUG, format, ##__VA_ARGS__)
+
+/** @define Utility DIAG1-level log printing macro. */
+#define MOT_LOG_DIAG1(format, ...) MOT_LOG(MOT::LogLevel::LL_DIAG1, format, ##__VA_ARGS__)
+
+/** @define Utility DIAG2-level log printing macro. */
+#define MOT_LOG_DIAG2(format, ...) MOT_LOG(MOT::LogLevel::LL_DIAG2, format, ##__VA_ARGS__)
+
+/** @define Utility log printing macro with variadic va_list argument. */
+#define MOT_LOG_V(logLevel, format, args)                           \
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) {                            \
+        MOT::MOTLogV(logLevel, MOT_LOGGER_FULL_NAME, format, args); \
     }
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_WARN(format, ...)                                                     \
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_WARN, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(MOT::LogLevel::LL_WARN, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
-    }
+/** @define Utility PANIC-level log printing macro with variadic va_list argument. */
+#define MOT_LOG_PANIC_V(format, args) MOT_LOG_V(MOT::LogLevel::LL_PANIC, format, args)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_INFO(format, ...)                                                     \
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_INFO, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(MOT::LogLevel::LL_INFO, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
-    }
+/** @define Utility ERROR-level log printing macro with variadic va_list argument. */
+#define MOT_LOG_ERROR_V(format, args) MOT_LOG_V(MOT::LogLevel::LL_ERROR, format, args)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_TRACE(format, ...)                                                     \
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_TRACE, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(MOT::LogLevel::LL_TRACE, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
-    }
+/** @define Utility WANR-level log printing macro with variadic va_list argument. */
+#define MOT_LOG_WARN_V(format, args) MOT_LOG_V(MOT::LogLevel::LL_WARN, format, args)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_DEBUG(format, ...)                                                     \
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_DEBUG, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(MOT::LogLevel::LL_DEBUG, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
-    }
+/** @define Utility INFO-level log printing macro with variadic va_list argument. */
+#define MOT_LOG_INFO_V(format, args) MOT_LOG_V(MOT::LogLevel::LL_INFO, format, args)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_DIAG1(format, ...)                                                     \
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_DIAG1, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(MOT::LogLevel::LL_DIAG1, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
-    }
+/** @define Utility TRACE-level log printing macro with variadic va_list argument. */
+#define MOT_LOG_TRACE_V(format, args) MOT_LOG_V(MOT::LogLevel::LL_TRACE, format, args)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_DIAG2(format, ...)                                                     \
-    if (MOT::CheckLogLevelInline(MOT::LogLevel::LL_DIAG2, LOGGER_LEVEL)) {             \
-        MOT::MOTLog(MOT::LogLevel::LL_DIAG2, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
-    }
+/** @define Utility DEBUG-level log printing macro with variadic va_list argument. */
+#define MOT_LOG_DEBUG_V(format, args) MOT_LOG_V(MOT::LogLevel::LL_DEBUG, format, args)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_V(logLevel, format, args)                       \
-    if (MOT::CheckLogLevelInline(logLevel, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(logLevel, LOGGER_FULL_NAME, format, args); \
-    }
+/** @define Utility DIAG1-level log printing macro with variadic va_list argument. */
+#define MOT_LOG_DIAG1_V(format, args) MOT_LOG_V(MOT::LogLevel::LL_DIAG1, format, args)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_PANIC_V(format, args)                                     \
-    if (MOT::CheckLogLevelInline(LogLevel::LL_PANIC, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(LogLevel::LL_PANIC, LOGGER_FULL_NAME, format, args); \
-    }
+/** @define Utility DIAG2-level log printing macro with variadic va_list argument. */
+#define MOT_LOG_DIAG2_V(format, args) MOT_LOG_V(MOT::LogLevel::LL_DIAG2, format, args)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_ERROR_V(format, args)                                     \
-    if (MOT::CheckLogLevelInline(LogLevel::LL_ERROR, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(LogLevel::LL_ERROR, LOGGER_FULL_NAME, format, args); \
-    }
+/** @define Utility log printing macro for failed system call. */
+#define MOT_LOG_SYSTEM(logLevel, syscall, format, ...) \
+    MOT::MOTLogSystemError(logLevel, #syscall, MOT_LOGGER_FULL_NAME, format, ##__VA_ARGS__)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_WARN_V(format, args)                                     \
-    if (MOT::CheckLogLevelInline(LogLevel::LL_WARN, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(LogLevel::LL_WARN, LOGGER_FULL_NAME, format, args); \
-    }
+/** @define Utility log printing macro for failed system call with error code. */
+#define MOT_LOG_SYSTEM_CODE(logLevel, rc, syscall, format, ...) \
+    MOT::MOTLogSystemErrorCode(logLevel, rc, #syscall, MOT_LOGGER_FULL_NAME, format, ##__VA_ARGS__)
 
-/** @define Utility log printing macro. */
-#define MOT_LOG_INFO_V(format, args)                                     \
-    if (MOT::CheckLogLevelInline(LogLevel::LL_INFO, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(LogLevel::LL_INFO, LOGGER_FULL_NAME, format, args); \
-    }
-
-/** @define Utility log printing macro. */
-#define MOT_LOG_TRACE_V(format, args)                                     \
-    if (MOT::CheckLogLevelInline(LogLevel::LL_TRACE, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(LogLevel::LL_TRACE, LOGGER_FULL_NAME, format, args); \
-    }
-
-/** @define Utility log printing macro. */
-#define MOT_LOG_DEBUG_V(format, args)                                     \
-    if (MOT::CheckLogLevelInline(LogLevel::LL_DEBUG, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(LogLevel::LL_DEBUG, LOGGER_FULL_NAME, format, args); \
-    }
-
-/** @define Utility log printing macro. */
-#define MOT_LOG_DIAG1_V(format, args)                                     \
-    if (MOT::CheckLogLevelInline(LogLevel::LL_DIAG1, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(LogLevel::LL_DIAG1, LOGGER_FULL_NAME, format, args); \
-    }
-
-/** @define Utility log printing macro. */
-#define MOT_LOG_DIAG2_V(format, args)                                     \
-    if (MOT::CheckLogLevelInline(LogLevel::LL_DIAG2, LOGGER_LEVEL)) {     \
-        MOT::MOTLogV(LogLevel::LL_DIAG2, LOGGER_FULL_NAME, format, args); \
-    }
-
+/** @define Utility PANIC-level log printing macro for failed system call. */
 #define MOT_LOG_SYSTEM_PANIC(syscall, format, ...) \
-    MOT::MOTLogSystemError(MOT::LogLevel::LL_PANIC, #syscall, LOGGER_FULL_NAME, format, ##__VA_ARGS__)
+    MOT_LOG_SYSTEM(MOT::LogLevel::LL_PANIC, syscall, format, ##__VA_ARGS__)
 
+/** @define Utility PANIC-level log printing macro for failed system call with error code. */
 #define MOT_LOG_SYSTEM_PANIC_CODE(rc, syscall, format, ...) \
-    MOT::MOTLogSystemErrorCode(MOT::LogLevel::LL_PANIC, rc, #syscall, LOGGER_FULL_NAME, format, ##__VA_ARGS__)
+    MOT_LOG_SYSTEM_CODE(MOT::LogLevel::LL_PANIC, rc, syscall, format, ##__VA_ARGS__)
 
+/** @define Utility ERROR-level log printing macro for failed system call. */
 #define MOT_LOG_SYSTEM_ERROR(syscall, format, ...) \
-    MOT::MOTLogSystemError(MOT::LogLevel::LL_ERROR, #syscall, LOGGER_FULL_NAME, format, ##__VA_ARGS__)
+    MOT_LOG_SYSTEM(MOT::LogLevel::LL_ERROR, syscall, format, ##__VA_ARGS__)
 
+/** @define Utility ERROR-level log printing macro for failed system call with error code. */
 #define MOT_LOG_SYSTEM_ERROR_CODE(rc, syscall, format, ...) \
-    MOT::MOTLogSystemErrorCode(MOT::LogLevel::LL_ERROR, rc, #syscall, LOGGER_FULL_NAME, format, ##__VA_ARGS__)
+    MOT_LOG_SYSTEM_CODE(MOT::LogLevel::LL_ERROR, rc, syscall, format, ##__VA_ARGS__)
 
-#define MOT_LOG_SYSTEM_WARN(syscall, format, ...) \
-    MOT::MOTLogSystemError(MOT::LogLevel::LL_WARN, #syscall, LOGGER_FULL_NAME, format, ##__VA_ARGS__)
+/** @define Utility WARN-level log printing macro for failed system call. */
+#define MOT_LOG_SYSTEM_WARN(syscall, format, ...) MOT_LOG_SYSTEM(MOT::LogLevel::LL_WARN, syscall, format, ##__VA_ARGS__)
 
+/** @define Utility WARN-level log printing macro for failed system call with error code. */
 #define MOT_LOG_SYSTEM_WARN_CODE(rc, syscall, format, ...) \
-    MOT::MOTLogSystemErrorCode(MOT::LogLevel::LL_WARN, rc, #syscall, LOGGER_FULL_NAME, format, ##__VA_ARGS__)
+    MOT_LOG_SYSTEM_CODE(MOT::LogLevel::LL_WARN, rc, syscall, format, ##__VA_ARGS__)
 
 /** @define Utility macro for printing call stack of current thread. */
-#define MOT_PRINT_CALL_STACK(logLevel, format, ...)                                \
-    if (MOT_CHECK_LOG_LEVEL(logLevel)) {                                           \
-        MOT::MOTPrintCallStack(logLevel, LOGGER_FULL_NAME, format, ##__VA_ARGS__); \
+#define MOT_PRINT_CALL_STACK(logLevel, opts, format, ...)                                    \
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) {                                                     \
+        MOT::MOTPrintCallStack(logLevel, MOT_LOGGER_FULL_NAME, opts, format, ##__VA_ARGS__); \
     }
 
 #endif /* MOT_LOG_H */

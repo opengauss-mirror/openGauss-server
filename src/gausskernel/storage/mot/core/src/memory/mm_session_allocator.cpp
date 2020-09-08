@@ -322,6 +322,12 @@ extern void MemSessionAllocatorFree(MemSessionAllocator* sessionAllocator, void*
             object,
             objectHeader->m_sessionId);
         sessionAllocator->m_freeList[index] = objectHeader;
+#ifdef MOT_DEBUG
+        // set dead land pattern in object
+        errno_t erc = memset_s(
+            object, objectHeader->m_objectSize.m_realSize, MEM_DEAD_LAND, objectHeader->m_objectSize.m_realSize);
+        securec_check(erc, "\0", "\0");
+#endif
     }
 }
 
@@ -761,6 +767,12 @@ static void* GetBlockFromChunk(MemSessionAllocator* sessionAllocator, MemSession
         chunk->m_freeSize -= (realSize + MEM_SESSION_OBJECT_HEADER_LEN);
         MemSessionObjectInit(sessionAllocator->m_sessionId, objectHeader, size, realSize);
         result = (void*)((char*)objectHeader + MEM_SESSION_OBJECT_HEADER_LEN);
+#ifdef MOT_DEBUG
+        // set clean land pattern in object
+        errno_t erc = memset_s(
+            result, objectHeader->m_objectSize.m_realSize, MEM_CLEAN_LAND, objectHeader->m_objectSize.m_realSize);
+        securec_check(erc, "\0", "\0");
+#endif
     } else {
         if (printError) {
             MOT_REPORT_ERROR(MOT_ERROR_OOM,

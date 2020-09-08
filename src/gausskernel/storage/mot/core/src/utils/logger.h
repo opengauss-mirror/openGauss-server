@@ -29,7 +29,7 @@
 
 namespace MOT {
 /** @define Maximum size of logger name. */
-#define LOGGER_MAX_NAME_LEN 64
+#define MOT_LOGGER_MAX_NAME_LEN 64
 
 /**
  * @struct Logger
@@ -48,16 +48,16 @@ struct Logger {
     ~Logger();
 
     /** @var The full name of the logger as it would appear in the log file. */
-    char m_fullName[LOGGER_MAX_NAME_LEN];
+    char m_fullName[MOT_LOGGER_MAX_NAME_LEN];
 
     /** @var The name of the logger under its component. */
-    char m_loggerName[LOGGER_MAX_NAME_LEN];
+    char m_loggerName[MOT_LOGGER_MAX_NAME_LEN];
 
     /** @var The name of the component to which the logger belongs. */
-    char m_componentName[LOGGER_MAX_NAME_LEN];
+    char m_componentName[MOT_LOGGER_MAX_NAME_LEN];
 
     /** @var The qualified name of the logger. */
-    char m_qualifiedName[LOGGER_MAX_NAME_LEN];
+    char m_qualifiedName[MOT_LOGGER_MAX_NAME_LEN];
 
     /** @var The log level of this logger. */
     LogLevel m_logLevel;
@@ -78,16 +78,16 @@ struct Logger {
     IMPLEMENT_CLASS_LOGGER(Class, Component)
 
 /** @define LOGGER_FULL_NAME The full name of the current logger as it would appear in the log file. */
-#define LOGGER_FULL_NAME _logger.m_fullName
+#define MOT_LOGGER_FULL_NAME _logger.m_fullName
 
 /** @define LOGGER_LEVEL The log level of the current logger. */
-#define LOGGER_LEVEL _logger.m_logLevel
+#define MOT_LOGGER_LEVEL _logger.m_logLevel
 
 /** @define LOGGER_NAME The name of the current logger. */
-#define LOGGER_NAME _logger.m_loggerName
+#define MOT_LOGGER_NAME _logger.m_loggerName
 
 /** @define LOGGER_COMPONENT_NAME The name of the component to which the current logger belongs. */
-#define LOGGER_COMPONENT_NAME _logger.m_componentName
+#define MOT_LOGGER_COMPONENT_NAME _logger.m_componentName
 
 /**
  * @brief Retrieves the log level of all loggers belonging to a specific component.

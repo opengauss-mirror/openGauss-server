@@ -46,13 +46,14 @@ static void UnregisterLogger(Logger* logger);
 
 Logger::Logger(const char* loggeName, const char* componentName) : m_logLevel(LogLevel::LL_INFO)
 {
-    errno_t erc = snprintf_s(m_fullName, LOGGER_MAX_NAME_LEN, LOGGER_MAX_NAME_LEN - 1, "<%s>", componentName);
+    errno_t erc = snprintf_s(m_fullName, MOT_LOGGER_MAX_NAME_LEN, MOT_LOGGER_MAX_NAME_LEN - 1, "<%s>", componentName);
     securec_check_ss(erc, "\0", "\0");
-    erc = snprintf_s(m_loggerName, LOGGER_MAX_NAME_LEN, LOGGER_MAX_NAME_LEN - 1, "%s", loggeName);
+    erc = snprintf_s(m_loggerName, MOT_LOGGER_MAX_NAME_LEN, MOT_LOGGER_MAX_NAME_LEN - 1, "%s", loggeName);
     securec_check_ss(erc, "\0", "\0");
-    erc = snprintf_s(m_componentName, LOGGER_MAX_NAME_LEN, LOGGER_MAX_NAME_LEN - 1, "%s", componentName);
+    erc = snprintf_s(m_componentName, MOT_LOGGER_MAX_NAME_LEN, MOT_LOGGER_MAX_NAME_LEN - 1, "%s", componentName);
     securec_check_ss(erc, "\0", "\0");
-    erc = snprintf_s(m_qualifiedName, LOGGER_MAX_NAME_LEN, LOGGER_MAX_NAME_LEN - 1, "%s.%s", componentName, loggeName);
+    erc = snprintf_s(
+        m_qualifiedName, MOT_LOGGER_MAX_NAME_LEN, MOT_LOGGER_MAX_NAME_LEN - 1, "%s.%s", componentName, loggeName);
     securec_check_ss(erc, "\0", "\0");
     RegisterLogger(this);
 }

@@ -30,6 +30,7 @@
 #include "utilities.h"
 #include "cycles.h"
 #include "debug_utils.h"
+#include "mot_engine.h"
 
 namespace MOT {
 DECLARE_LOGGER(RowHeader, ConcurrenyControl);
@@ -109,9 +110,18 @@ void RowHeader::WriteChangesToRow(const Access* access, uint64_t csn)
 #ifdef MOT_DEBUG
     if (access->m_params.IsPrimarySentinel()) {
         uint64_t v = m_csnWord;
-        if (!(csn > GetCSN() && (v & LOCK_BIT))) {
-            MOT_LOG_ERROR("csn=%ld, v & LOCK_BIT=%ld, v & (~LOCK_BIT)=%ld\n", csn, (v & LOCK_BIT), (v & (~LOCK_BIT)));
-            MOT_ASSERT(false);
+        if (MOTEngine::GetInstance()->IsRecovering()) {
+            if (!(csn == GetCSN() && (v & LOCK_BIT))) {
+                MOT_LOG_ERROR(
+                    "csn=%ld, v & LOCK_BIT=%ld, v & (~LOCK_BIT)=%ld\n", csn, (v & LOCK_BIT), (v & (~LOCK_BIT)));
+                MOT_ASSERT(false);
+            }
+        } else {
+            if (!(csn > GetCSN() && (v & LOCK_BIT))) {
+                MOT_LOG_ERROR(
+                    "csn=%ld, v & LOCK_BIT=%ld, v & (~LOCK_BIT)=%ld\n", csn, (v & LOCK_BIT), (v & (~LOCK_BIT)));
+                MOT_ASSERT(false);
+            }
         }
     }
 #endif

@@ -326,7 +326,7 @@ static bool IsLessEqualsWhereOperator(int whereOp)
         (whereOp == 2346 /* date_le_timestamp */) || (whereOp == 2372 /* timestamp_le_date */) ||
         (whereOp == 2359 /* date_le_timestamptz */) || (whereOp == 2385 /* timestamptz_le_date */) ||
         (whereOp == 2535 /* timestamp_le_timestamptz */) || (whereOp == 2541 /* timestamptz_le_timestamp */) ||
-        (whereOp == 1333 /* interval_le*/)
+        (whereOp == 1333 /* interval_le */)
 #endif
     ) {
         result = true;

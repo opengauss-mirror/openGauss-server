@@ -85,7 +85,7 @@ public:
                     m_status = false;
                     return;
                 }
-                if (CheckLogLevelInline(LogLevel::LL_DEBUG, LOGGER_LEVEL)) {
+                if (MOT_CHECK_LOG_LEVEL(LogLevel::LL_DEBUG)) {
                     MOT_LOG_DEBUG("Adding config item to print list:");
                     configItem->Print(LogLevel::LL_DEBUG, true);
                 }

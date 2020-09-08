@@ -6815,7 +6815,7 @@ Datum mot_session_memory_detail(PG_FUNCTION_ARGS)
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
         /* need a tuple descriptor representing 4 columns */
-        tupdesc = CreateTemplateTupleDesc(NUM_MMENGINE_SESSION_MEMORY_DETAIL_ELEM, false);
+        tupdesc = CreateTemplateTupleDesc(NUM_MOT_SESSION_MEMORY_DETAIL_ELEM, false);
 
         TupleDescInitEntry(tupdesc, (AttrNumber) 1, "sessid", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) 2, "totalsize", INT8OID, -1, 0);
@@ -6837,8 +6837,8 @@ Datum mot_session_memory_detail(PG_FUNCTION_ARGS)
 
     if (funcctx->call_cntr < funcctx->max_calls) {
         /* do when there is more left to send */
-        Datum values[NUM_MMENGINE_SESSION_MEMORY_DETAIL_ELEM];
-        bool nulls[NUM_MMENGINE_SESSION_MEMORY_DETAIL_ELEM] = {false};
+        Datum values[NUM_MOT_SESSION_MEMORY_DETAIL_ELEM];
+        bool nulls[NUM_MOT_SESSION_MEMORY_DETAIL_ELEM] = {false};
         char sessId[SESSION_ID_LEN];
         HeapTuple tuple = NULL;
 

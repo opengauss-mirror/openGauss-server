@@ -814,7 +814,7 @@ void CreateForeignServer(CreateForeignServerStmt* stmt)
      * to sync correctly with pg_catalog.
      */
     if (strcmp(stmt->fdwname, MOT_FDW) == 0 && strcmp(stmt->servername, MOT_FDW_SERVER) != 0) {
-        ereport(ERROR, (errmodule(MOD_MM), errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
+        ereport(ERROR, (errmodule(MOD_MOT), errcode(ERRCODE_FDW_INVALID_OPTION_NAME),
                 errmsg("Creating additional server with %s is not allowed.", MOT_FDW)));
     }
 
