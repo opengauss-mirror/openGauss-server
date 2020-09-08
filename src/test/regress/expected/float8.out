@@ -547,6 +547,36 @@ SELECT tan('1');
  1.5574077246549
 (1 row)
 
+SELECT cot('1');
+       cot        
+------------------
+ .642092615934331
+(1 row)
+
+SELECT sin('0');
+ sin 
+-----
+   0
+(1 row)
+
+SELECT cos('0');
+ cos 
+-----
+   1
+(1 row)
+
+SELECT tan('0');
+ tan 
+-----
+   0
+(1 row)
+
+SELECT cot('0');
+   cot    
+----------
+ Infinity
+(1 row)
+
 -- test Inf/NaN cases for functions
 SELECT sin('infinity');
 ERROR:  input is out of range
@@ -580,6 +610,18 @@ ERROR:  input is out of range
 CONTEXT:  referenced column: tan
 SELECT tan('nan');
  tan 
+-----
+ NaN
+(1 row)
+
+SELECT cot('infinity');
+ERROR:  input is out of range
+CONTEXT:  referenced column: cot
+SELECT cot('-infinity');
+ERROR:  input is out of range
+CONTEXT:  referenced column: cot
+SELECT cot('nan');
+ cot 
 -----
  NaN
 (1 row)
@@ -637,14 +679,14 @@ SELECT power('5', '2');
 (1 row)
 
 SELECT power('5', 'infinity');
-ERROR:  value out of range: overflow
-CONTEXT:  referenced column: power
-SELECT power('5', '-infinity');
- power 
--------
-     0
+  power   
+----------
+ Infinity
 (1 row)
 
+SELECT power('5', '-infinity');
+ERROR:  value out of range: underflow
+CONTEXT:  referenced column: power
 SELECT power('5', 'nan');
  power 
 -------
@@ -676,11 +718,8 @@ SELECT power('infinity', 'infinity');
 (1 row)
 
 SELECT power('infinity', '-infinity');
- power 
--------
-     0
-(1 row)
-
+ERROR:  value out of range: underflow
+CONTEXT:  referenced column: power
 SELECT power('infinity', 'nan');
  power 
 -------
@@ -712,17 +751,11 @@ SELECT power('-infinity', 'infinity');
 (1 row)
 
 SELECT power('-infinity', '-infinity');
- power 
--------
-     0
-(1 row)
-
+ERROR:  value out of range: underflow
+CONTEXT:  referenced column: power
 SELECT power('-infinity', 'nan');
- power 
--------
-   NaN
-(1 row)
-
+ERROR:  a negative number raised to a non-integer power yields a complex result
+CONTEXT:  referenced column: power
 SELECT power('nan', '0');
  power 
 -------

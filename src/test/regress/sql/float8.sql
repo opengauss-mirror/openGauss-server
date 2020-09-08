@@ -185,6 +185,11 @@ SELECT '-9223372036854780000'::float8::int8;
 SELECT sin('1');
 SELECT cos('1');
 SELECT tan('1');
+SELECT cot('1');
+SELECT sin('0');
+SELECT cos('0');
+SELECT tan('0');
+SELECT cot('0');
 -- test Inf/NaN cases for functions
 SELECT sin('infinity');
 SELECT sin('-infinity');
@@ -195,6 +200,9 @@ SELECT cos('nan');
 SELECT tan('infinity');
 SELECT tan('-infinity');
 SELECT tan('nan');
+SELECT cot('infinity');
+SELECT cot('-infinity');
+SELECT cot('nan');
 
 --test power
 SELECT power('0', '0');
