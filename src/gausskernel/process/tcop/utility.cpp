@@ -5789,11 +5789,11 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateCastStmt:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && !u_sess->exec_cxt.extension_is_valid && !u_sess->attr.attr_common.IsInplaceUpgrade)
                 ereport(
                     ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("user defined cast is not yet supported.")));
-#endif /* PGXC */
+#endif
             CreateCast((CreateCastStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR)
