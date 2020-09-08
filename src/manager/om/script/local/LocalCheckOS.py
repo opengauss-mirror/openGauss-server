@@ -1882,7 +1882,7 @@ def CheckPlatformInfo():
                                         data.bits)
             g_logger.log("False %s %s" % (data.distname, platformStr))
             return
-    elif (data.distname == "euleros" or data.distname == "openEuler"):
+    elif (data.distname == "euleros" or data.distname == "openEuler" or data.distname == "kylin"):
         mixedType = "%s" % data.distname
         platformStr = "%s_%s_%s" % (data.distname, data.version, data.bits)
     else:

@@ -99,11 +99,11 @@ CENTOS = "centos"
 EULEROS = "euleros"
 KYLIN = "kylin"
 OPENEULER = "openeuler"
-SUPPORT_WHOLE_PLATFORM_LIST = [SUSE, REDHAT, CENTOS, EULEROS, OPENEULER]
+SUPPORT_WHOLE_PLATFORM_LIST = [SUSE, REDHAT, CENTOS, EULEROS, OPENEULER, KYLIN]
 # RedhatX platform
-SUPPORT_RHEL_SERIES_PLATFORM_LIST = [REDHAT, CENTOS]
-SUPPORT_RHEL6X_VERSION_LIST = ["6.4", "6.5", "6.6", "6.7", "6.8", "6.9"]
-SUPPORT_RHEL7X_VERSION_LIST = ["7.0", "7.1", "7.2", "7.3", "7.4", "7.5", "7.6"]
+SUPPORT_RHEL_SERIES_PLATFORM_LIST = [REDHAT, CENTOS, "kylin"]
+SUPPORT_RHEL6X_VERSION_LIST = ["6.4", "6.5", "6.6", "6.7", "6.8", "6.9", "10"]
+SUPPORT_RHEL7X_VERSION_LIST = ["7.0", "7.1", "7.2", "7.3", "7.4", "7.5", "7.6", "10"]
 SUPPORT_RHEL_SERIES_VERSION_LIST = (SUPPORT_RHEL6X_VERSION_LIST +
                                     SUPPORT_RHEL7X_VERSION_LIST)
 # EulerOS 2.3 -> 2.0 SP3
@@ -132,7 +132,7 @@ PAK_REDHAT = "RedHat"
 _supported_dists = (
     'SuSE', 'debian', 'fedora', 'redhat', 'centos', 'euleros', "openEuler",
     'mandrake', 'mandriva', 'rocks', 'slackware', 'yellowdog', 'gentoo',
-    'UnitedLinux', 'turbolinux')
+    'UnitedLinux', 'turbolinux', 'kylin')
 _release_filename = re.compile(r'(\w+)[-_](release|version)')
 _lsb_release_version = re.compile(r'(.+)'
                                   ' release '
@@ -1549,7 +1549,7 @@ class LinuxPlatform(GenericPlatform):
                                     "%s-%s-%s-%s.%s" % (
                                         prefixStr, packageVersion, PAK_REDHAT,
                                         BIT_VERSION, postfixStr))
-        elif distname in OPENEULER:
+        elif distname in OPENEULER or distname in KYLIN:
             fileName = os.path.join(dirName, "./../../../",
                                     "%s-%s-%s-%s.%s" % (
                                         prefixStr, packageVersion,

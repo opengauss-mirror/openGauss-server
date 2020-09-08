@@ -29,7 +29,7 @@ def checkPythonVersion():
                             " is not correct: %s." %
                             distName + " should use Python 3.7.*")
     else:
-        if not pythonVersion == (3, 6):
+        if not pythonVersion >= (3, 6):
             raise Exception("[GAUSS-52200] : version of python"
                             " is not correct: %s." %
                             distName + " should use Python 3.6.*")
