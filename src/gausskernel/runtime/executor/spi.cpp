@@ -316,8 +316,7 @@ void SPI_rollback(void)
  */
 void SPICleanup(void)
 {
-    u_sess->SPI_cxt._current = u_sess->SPI_cxt._stack = NULL;
-    u_sess->SPI_cxt._stack_depth = 0;
+    u_sess->SPI_cxt._current = NULL;
     u_sess->SPI_cxt._connected = u_sess->SPI_cxt._curid = -1;
     SPI_processed = 0;
     u_sess->SPI_cxt.lastoid = InvalidOid;
