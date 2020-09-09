@@ -47,10 +47,17 @@ actioItemMap = {
 }
 
 docker_no_need_check = ["net.core.wmem_max", "net.core.rmem_max",
-                        "net.core.wmem_default",
-                        "net.core.rmem_default", "net.sctp.sctp_mem",
-                        "net.sctp.sctp_rmem", "net.sctp.sctp_wmem",
-                        "net.core.netdev_max_backlog"]
+                        "net.core.wmem_default", "net.core.rmem_default",
+                        "net.sctp.sctp_mem", "net.sctp.sctp_rmem",
+                        "net.sctp.sctp_wmem", "net.core.netdev_max_backlog",
+                        "net.ipv4.tcp_max_tw_buckets", "net.ipv4.tcp_tw_reuse",
+                        "net.ipv4.tcp_tw_recycle", "net.ipv4.tcp_retries2",
+                        "net.ipv4.ip_local_reserved_ports", "net.ipv4.tcp_rmem",
+                        "net.ipv4.tcp_wmem", "net.ipv4.tcp_max_syn_backlog",
+                        "net.ipv4.tcp_syncookies", "net.ipv4.tcp_fin_timeout",
+                        "net.ipv4.tcp_sack", "net.ipv4.tcp_timestamps",
+                        "net.ipv4.tcp_retries1", "net.ipv4.tcp_syn_retries",
+                        "net.ipv4.tcp_synack_retries"]
 
 paraList = {}
 
@@ -227,7 +234,7 @@ def checkSysctlParameter(kernelParameter, isSet):
         if (patchlevel == "1" and key == "vm.extfrag_threshold"):
             continue
         # Skip check net.ipv4.tcp_tw_recycle with ARM
-        if (platform.machine() == "aarch64"
+        if ((platform.machine() == "aarch64" or  platform.release().endswith("oe1.x86_64"))
                 and key == "net.ipv4.tcp_tw_recycle"):
             continue
         if (DefaultValue.checkDockerEnv() and key in docker_no_need_check):

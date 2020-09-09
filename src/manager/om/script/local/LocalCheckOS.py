@@ -915,6 +915,9 @@ def CheckNetWorkBonding(serviceIP, bondMode=False):
     """
     networkCardNum = DefaultValue.getNICNum(serviceIP)
     NetWorkConfFile = DefaultValue.getNetWorkConfFile(networkCardNum)
+    if (NetWorkConfFile.find("No such file or directory") >= 0
+            and DefaultValue.checkDockerEnv()):
+        return
     networkCardNumList = []
     networkCardNumList.append(networkCardNum)
     bondingConfFile = "/proc/net/bonding/%s" % networkCardNum
@@ -994,6 +997,13 @@ def getNetWorkTXRXValue(networkCardNum, valueType):
     cmd = "/sbin/ethtool -g %s | grep '%s:' | tail -n 2" % (networkCardNum,
                                                             valueType)
     (status, output) = subprocess.getstatusoutput(cmd)
+    if (output.find("Operation not supported") >= 0
+            and DefaultValue.checkDockerEnv()):
+        g_logger.log("        Warning reason: Failed to obtain the"
+                     " network card TXRX value in docker container. Commands "
+                     "for obtain the network card TXRX: %s. Error: \n%s"
+                     % (cmd, output))
+        return (0, 0)
     if (status != 0 or len(output.splitlines()) != 2):
         g_logger.debug("Failed to obtain network card %s value. Commands"
                        " for getting information: %s." % (valueType, cmd))

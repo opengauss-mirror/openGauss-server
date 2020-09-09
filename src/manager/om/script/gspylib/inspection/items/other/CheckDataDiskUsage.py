@@ -59,7 +59,7 @@ class CheckDataDiskUsage(BaseItem):
             # Check inode usage
             diskName = g_disk.getMountPathByDataDir(path)
             diskType = g_disk.getDiskMountType(diskName)
-            if (not diskType in ["xfs", "ext3", "ext4"]):
+            if (not diskType in ["xfs", "ext3", "ext4", "overlay"]):
                 resultStr += \
                     "Path(%s) inodes usage(%s)     Warning reason: " \
                     "The file system type [%s] is unrecognized " \

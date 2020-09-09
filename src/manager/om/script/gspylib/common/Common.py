@@ -754,6 +754,8 @@ class DefaultValue():
                 cmd = "find %s -iname 'ifcfg-*-%s' -print" % (
                     SuSENetWorkConfPath, networkCardNum)
             (status, output) = subprocess.getstatusoutput(cmd)
+            if (status != 0 and DefaultValue.checkDockerEnv()):
+                return output.strip()
             if (status != 0):
                 raise Exception(ErrorCode.GAUSS_514["GAUSS_51400"] % cmd)
             if (len(output.split('\n')) != 1):

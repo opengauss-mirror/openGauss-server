@@ -275,7 +275,8 @@ class ErrorCode():
     GAUSS_506 = {
         'GAUSS_50600': "[GAUSS-50600] : The IP address cannot be pinged, "
                        "which is caused by network faults.",
-        'GAUSS_50601': "[GAUSS-50601] : The port [%s] is occupied.",
+        'GAUSS_50601': "[GAUSS-50601] : The port [%s] is occupied or the ip "
+                       "address is incorrectly configured.",
         'GAUSS_50602': "[GAUSS-50602] : Failed to bind network adapters.",
         'GAUSS_50603': "[GAUSS-50603] : The IP address is invalid.",
         'GAUSS_50604': "[GAUSS-50604] : Failed to obtain network interface "
