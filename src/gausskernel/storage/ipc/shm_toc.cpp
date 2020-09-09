@@ -17,14 +17,12 @@
 #include "storage/shm_toc.h"
 #include "storage/spin.h"
 
-struct shm_toc_entry
-{
+struct shm_toc_entry {
     uint64        key;            /* Arbitrary identifier */
     uint64        offset;            /* Bytes offset */
 };
 
-struct shm_toc
-{
+struct shm_toc {
     uint64        toc_magic;        /* Magic number for this TOC */
     slock_t        toc_mutex;        /* Spinlock for mutual exclusion */
     Size        toc_total_bytes;    /* Bytes managed by this TOC */
@@ -93,19 +91,17 @@ extern void *shm_toc_allocate(shm_toc *toc, Size nbytes)
     total_bytes = vtoc->toc_total_bytes;
     allocated_bytes = vtoc->toc_allocated_bytes;
     nentry = vtoc->toc_nentry;
-    toc_bytes = offsetof(shm_toc, toc_entry) +nentry * sizeof(shm_toc_entry)
+    toc_bytes = offsetof(shm_toc, toc_entry) + nentry * sizeof(shm_toc_entry)
         + allocated_bytes;
 
     /* Check for memory exhaustion and overflow. */
-    if (toc_bytes + nbytes > total_bytes || toc_bytes + nbytes < toc_bytes)
-    {
+    if (toc_bytes + nbytes > total_bytes || toc_bytes + nbytes < toc_bytes) {
         SpinLockRelease(&toc->toc_mutex);
         ereport(ERROR,
                 (errcode(ERRCODE_OUT_OF_MEMORY),
                  errmsg("out of shared memory")));
     }
     vtoc->toc_allocated_bytes += nbytes;
-
     SpinLockRelease(&toc->toc_mutex);
 
     return ((char *) toc) + (total_bytes - allocated_bytes - nbytes);
@@ -128,7 +124,7 @@ extern Size shm_toc_freespace(shm_toc *toc)
     nentry = vtoc->toc_nentry;
     SpinLockRelease(&toc->toc_mutex);
 
-    toc_bytes = offsetof(shm_toc, toc_entry) +nentry * sizeof(shm_toc_entry);
+    toc_bytes = offsetof(shm_toc, toc_entry) + nentry * sizeof(shm_toc_entry);
     Assert(allocated_bytes + BUFFERALIGN(toc_bytes) <= total_bytes);
     return total_bytes - (allocated_bytes + BUFFERALIGN(toc_bytes));
 }
@@ -153,8 +149,7 @@ extern Size shm_toc_freespace(shm_toc *toc)
  * pointers that they need to bootstrap.  If you're storing a lot of stuff in
  * here, you're doing it wrong.
  */
-void
-shm_toc_insert(shm_toc *toc, uint64 key, void *address)
+void shm_toc_insert(shm_toc *toc, uint64 key, void *address)
 {
     volatile shm_toc *vtoc = toc;
     uint64        total_bytes;
@@ -172,13 +167,12 @@ shm_toc_insert(shm_toc *toc, uint64 key, void *address)
     total_bytes = vtoc->toc_total_bytes;
     allocated_bytes = vtoc->toc_allocated_bytes;
     nentry = vtoc->toc_nentry;
-    toc_bytes = offsetof(shm_toc, toc_entry) +nentry * sizeof(shm_toc_entry)
+    toc_bytes = offsetof(shm_toc, toc_entry) + nentry * sizeof(shm_toc_entry)
         + allocated_bytes;
 
     /* Check for memory exhaustion and overflow. */
     if (toc_bytes + sizeof(shm_toc_entry) > total_bytes ||
-        toc_bytes + sizeof(shm_toc_entry) < toc_bytes)
-    {
+        toc_bytes + sizeof(shm_toc_entry) < toc_bytes) {
         SpinLockRelease(&toc->toc_mutex);
         ereport(ERROR,
                 (errcode(ERRCODE_OUT_OF_MEMORY),
@@ -232,8 +226,7 @@ void *shm_toc_lookup(shm_toc *toc, uint64 key)
  * Estimate how much shared memory will be required to store a TOC and its
  * dependent data structures.
  */
-Size
-shm_toc_estimate(shm_toc_estimator *e)
+Size shm_toc_estimate(shm_toc_estimator *e)
 {
     return add_size(offsetof(shm_toc, toc_entry),
                  add_size(mul_size(e->number_of_keys, sizeof(shm_toc_entry)),

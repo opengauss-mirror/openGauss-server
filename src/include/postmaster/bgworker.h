@@ -123,6 +123,7 @@ extern BgwHandleStatus WaitForBackgroundWorkerStartup(const BackgroundWorkerHand
 extern BgwHandleStatus WaitForBackgroundWorkerShutdown(const BackgroundWorkerHandle *handle);
 extern const char *GetBackgroundWorkerTypeByPid(ThreadId pid);
 
+extern void StopBackgroundWorker();
 /* Terminate a bgworker */
 extern void TerminateBackgroundWorker(const BackgroundWorkerHandle *handle);
 

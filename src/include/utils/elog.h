@@ -544,8 +544,7 @@ extern inline int defence_errlevel(void)
     return ERROR;
 #endif
 }
-
-#endif
+#endif   
 
 /*
  * Write errors to stderr (or by equal means when stderr is

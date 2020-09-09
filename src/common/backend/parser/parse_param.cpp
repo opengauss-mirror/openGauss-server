@@ -88,42 +88,41 @@ void parse_variable_parameters(ParseState* pstate, Oid** paramTypes, int* numPar
     pstate->p_coerce_param_hook = variable_coerce_param_hook;
 }
 
-static Node * variable_post_column_ref_hook(ParseState *pstate, ColumnRef *cref, Node *var)
+static Node *variable_post_column_ref_hook(ParseState *pstate, ColumnRef *cref, Node *var)
 {
-	VarParamState *parstate = (VarParamState *) pstate->p_ref_hook_state;
+    VarParamState *parstate = (VarParamState *) pstate->p_ref_hook_state;
+    /* already resolved */
+    if (var != NULL) {
+        return NULL;
+    }
 
-	/* already resolved */
-	if (var != NULL)
-		return NULL;
+    /* did not supply parameter names */
+    if (!parstate->paramTypeNames) {
+        return NULL;
+    }
 
-	/* did not supply parameter names */
-	if (!parstate->paramTypeNames)
-		return NULL;
+    if (list_length(cref->fields) == 1) {
+        Node *field1 = (Node *) linitial(cref->fields);
+        char *name1;
+        int i;
+        Param *param;
 
-	if (list_length(cref->fields) == 1)
-	{
-		Node	   *field1 = (Node *) linitial(cref->fields);
-		char	   *name1;
-		int			i;
-		Param	   *param;
-
-		Assert(IsA(field1, String));
-		name1 = strVal(field1);
-		for (i = 0; i < *parstate->numParams; i++)
-			if (strcmp(name1, parstate->paramTypeNames[i]) == 0)
-			{
-				param = makeNode(Param);
-				param->paramkind = PARAM_EXTERN;
-				param->paramid = i + 1;
-				param->paramtype = (*parstate->paramTypes)[i];
-				param->paramtypmod = -1;
-				param->paramcollid = InvalidOid;
-				param->location = -1;
-				return (Node *) param;
-			}
-	}
-
-	return NULL;
+        Assert(IsA(field1, String));
+        name1 = strVal(field1);
+        for (i = 0; i < *parstate->numParams; i++) {
+            if (strcmp(name1, parstate->paramTypeNames[i]) == 0) {
+                param = makeNode(Param);
+                param->paramkind = PARAM_EXTERN;
+                param->paramid = i + 1;
+                param->paramtype = (*parstate->paramTypes)[i];
+                param->paramtypmod = -1;
+                param->paramcollid = InvalidOid;
+                param->location = -1;
+                return (Node *) param;
+            }
+        }
+    }
+    return NULL;
 }
 
 /*

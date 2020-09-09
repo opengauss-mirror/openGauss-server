@@ -205,7 +205,6 @@ static void get_query_result(TupleTableSlot* slot, DestReceiver* self);
  * @hdfs
  * Define different mesage type used for exec_simple_query
  */
-//typedef enum { QUERY_MESSAGE = 0, HYBRID_MESSAGE } MessageType;
 
 /* ----------------------------------------------------------------
  *		decls for routines only used in this file
@@ -236,8 +235,6 @@ static int getSingleNodeIdx_internal(ExecNodes* exec_nodes, ParamListInfo params
 extern void CancelAutoAnalyze();
 extern List* RevalidateCachedQuery(CachedPlanSource* plansource);
 static void InitRecursiveCTEGlobalVariables(const PlannedStmt* planstmt);
-
-THR_LOCAL bool needEnd = true;
 
 bool StreamThreadAmI()
 {
@@ -7400,12 +7397,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
-        if (t_thrd.msqueue_cxt.is_changed == true) {
+        /* error process of autonomous transaction */
+        if (t_thrd.msqueue_cxt.is_changed) {
             pq_stop_redirect_to_shm_mq();
         }
         if (t_thrd.autonomous_cxt.handle) {
-            TerminateBackgroundWorker(t_thrd.autonomous_cxt.handle);
-            t_thrd.autonomous_cxt.handle = NULL;
+            StopBackgroundWorker();
         }
         gstrace_tryblock_exit(true, oldTryCounter);
 
