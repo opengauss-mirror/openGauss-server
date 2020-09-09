@@ -2167,7 +2167,7 @@ int PostmasterMain(int argc, char* argv[])
     /* init Opfusion function id */
     InitOpfusionFunctionId();
 
-    ereport(LOG, (errmsg("Success to start openGauss Database, please press any key to exit...")));
+    ereport(LOG, (errmsg("Success to start openGauss Database. If you specify \"&\", please press any key to exit...")));
 
     /*
      * If enabled, start up syslogger collection subprocess
