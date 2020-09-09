@@ -217,16 +217,18 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
 
     knl_sess_control* ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
     knl_session_context* sess = ctrl->sess;
-
+    knl_session_context* sessBuff = u_sess;
+    u_sess = sess;
     /* check permission */
     if (!superuser()) {
         if (sess->proc_cxt.MyRoleId != GetUserId()) {
+            u_sess = sessBuff;
             ereport(ERROR,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     (errmsg("must be system admin or have the same role to terminate other backend"))));
         }
     }
-
+    u_sess = sessBuff;
     volatile sig_atomic_t* plock = &ctrl->lock;
     sig_atomic_t val;
     do {
