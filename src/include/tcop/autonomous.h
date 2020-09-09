@@ -25,8 +25,7 @@ typedef struct AutonomousPreparedStatement AutonomousPreparedStatement;
 struct autonomous_session_fixed_data;
 typedef struct autonomous_session_fixed_data autonomous_session_fixed_data;
 
-typedef struct AutonomousResult
-{
+typedef struct AutonomousResult {
 	TupleDesc	tupdesc;
 	List	   *tuples;
 	char	   *command;
@@ -36,7 +35,7 @@ AutonomousSession *AutonomousSessionStart(void);
 void AutonomousSessionEnd(AutonomousSession *session);
 AutonomousResult *AutonomousSessionExecute(AutonomousSession *session, const char *sql);
 AutonomousPreparedStatement *AutonomousSessionPrepare(AutonomousSession *session, const char *sql, int16 nargs,
-							  Oid argtypes[], const char *argnames[]);
+                                                      Oid argtypes[], const char *argnames[]);
 AutonomousResult *AutonomousSessionExecutePrepared(AutonomousPreparedStatement *stmt, int16 nargs, Datum *values, bool *nulls);
 extern void autonomous_worker_main(Datum main_arg);
 

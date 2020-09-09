@@ -94,6 +94,8 @@
 #include "tcop/stmt_retry.h"
 #include "replication/walsender.h"
 
+#include "libpq/pqmq.h"
+
 #undef _
 #define _(x) err_gettext(x)
 
@@ -584,6 +586,15 @@ void errfinish(int dummy, ...)
             u_sess->stream_cxt.producer_obj->reportNotice();
         }
     } else {
+        if (elevel == FATAL) {
+            if (t_thrd.msqueue_cxt.is_changed) {
+                pq_stop_redirect_to_shm_mq();
+            }
+            if (t_thrd.autonomous_cxt.handle) {
+                StopBackgroundWorker();
+            }
+        }
+
         /* Emit the message to the right places */
         EmitErrorReport();
     }
@@ -1648,34 +1659,34 @@ void FlushErrorStateWithoutDeleteChildrenContext(void)
  * background worker processes and then propagated (with or without
  * modification) to the backend responsible for them.
  */
-void
-ThrowErrorData(ErrorData *edata)
+void ThrowErrorData(ErrorData *edata)
 {
-	ErrorData  *newedata;
-	MemoryContext oldcontext;
+    ErrorData *newedata;
+    MemoryContext oldcontext;
 
-	if (!errstart(edata->elevel, edata->filename, edata->lineno,
-				  edata->funcname, NULL))
-		return;					/* error is not to be reported at all */
+    if (!errstart(edata->elevel, edata->filename, edata->lineno, edata->funcname, NULL)) {
+        /* error is not to be reported at all */
+        return;
+    }
 
-	newedata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
-	t_thrd.log_cxt.recursion_depth++;
-	oldcontext =  MemoryContextSwitchTo(ErrorContext);
+    newedata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+    t_thrd.log_cxt.recursion_depth++;
+    oldcontext =  MemoryContextSwitchTo(ErrorContext);
 
-	/* Copy the supplied fields to the error stack entry. */
-	if (edata->sqlerrcode != 0)
-		newedata->sqlerrcode = edata->sqlerrcode;
-	if (edata->message)
-		newedata->message = pstrdup(edata->message);
-	if (edata->detail)
-		newedata->detail = pstrdup(edata->detail);
-	if (edata->detail_log)
-		newedata->detail_log = pstrdup(edata->detail_log);
-	if (edata->hint)
-		newedata->hint = pstrdup(edata->hint);
-	if (edata->context)
-		newedata->context = pstrdup(edata->context);
-	/* assume message_id is not available */
+    /* Copy the supplied fields to the error stack entry. */
+    if (edata->sqlerrcode != 0)
+        newedata->sqlerrcode = edata->sqlerrcode;
+    if (edata->message)
+        newedata->message = pstrdup(edata->message);
+    if (edata->detail)
+        newedata->detail = pstrdup(edata->detail);
+    if (edata->detail_log)
+        newedata->detail_log = pstrdup(edata->detail_log);
+    if (edata->hint)
+        newedata->hint = pstrdup(edata->hint);
+    if (edata->context)
+        newedata->context = pstrdup(edata->context);
+    /* assume message_id is not available */
     if (newedata->filename)
         newedata->filename = pstrdup(edata->filename);
     if (newedata->funcname)
@@ -1683,16 +1694,16 @@ ThrowErrorData(ErrorData *edata)
     if (newedata->backtrace_log)
         newedata->backtrace_log = pstrdup(edata->backtrace_log);
 
-	newedata->cursorpos = edata->cursorpos;
-	newedata->internalpos = edata->internalpos;
-	if (edata->internalquery)
-		newedata->internalquery = pstrdup(edata->internalquery);
+    newedata->cursorpos = edata->cursorpos;
+    newedata->internalpos = edata->internalpos;
+    if (edata->internalquery)
+        newedata->internalquery = pstrdup(edata->internalquery);
 
-	MemoryContextSwitchTo(oldcontext);
-	t_thrd.log_cxt.recursion_depth--;
+    MemoryContextSwitchTo(oldcontext);
+    t_thrd.log_cxt.recursion_depth--;
 
-	/* Process the error. */
-	errfinish(0);
+    /* Process the error. */
+    errfinish(0);
 }
 
 /*

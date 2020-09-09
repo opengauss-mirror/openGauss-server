@@ -108,7 +108,7 @@ static void forward_NotifyResponse(StringInfo msg);
 static void rethrow_errornotice(StringInfo msg);
 static void invalid_protocol_message(char msgtype);
 
-AutonomousSession * AutonomousSessionStart(void)
+AutonomousSession *AutonomousSessionStart(void)
 {
     BackgroundWorker worker = {0};
     ThreadId pid;
@@ -562,7 +562,9 @@ void autonomous_worker_main(Datum main_arg)
     shm_mq_set_sender(response_mq, t_thrd.proc);
     response_qh = shm_mq_attach(response_mq, seg, NULL);
 
-    pq_redirect_to_shm_mq(response_qh);
+    if (!t_thrd.msqueue_cxt.is_changed) {
+        pq_redirect_to_shm_mq(response_qh);
+    }
     BackgroundWorkerInitializeConnectionByOid(fdata->database_id,
                                               fdata->authenticated_user_id);
 
@@ -730,6 +732,7 @@ void autonomous_worker_main(Datum main_arg)
                     break;
                 }
             case 'X':
+            case 'N':
                 break;
             default:
                 ereport(ERROR,
@@ -813,15 +816,12 @@ static HeapTuple HeapTuple_from_DataRow(TupleDesc tupdesc, StringInfo msg)
 
     for (i = 0; i < natts; i++) {
         int32 len = pq_getmsgint(msg, 4);
-
         if (len < 0)
             nulls[i] = true;
         else {
             Oid recvid;
             Oid typioparams;
-
             nulls[i] = false;
-
             getTypeBinaryInputInfo(tupdesc->attrs[i]->atttypid,
                                    &recvid,
                                    &typioparams);
@@ -849,16 +849,13 @@ static void forward_NotifyResponse(StringInfo msg)
     NotifyMyFrontEnd(channel, payload, pid);
 }
 
-
 static void rethrow_errornotice(StringInfo msg)
 {
     ErrorData edata;
-
     pq_parse_errornotice(msg, &edata);
     edata.elevel = Min(edata.elevel, ERROR);
     ThrowErrorData(&edata);
 }
-
 
 static void invalid_protocol_message(char msgtype)
 {

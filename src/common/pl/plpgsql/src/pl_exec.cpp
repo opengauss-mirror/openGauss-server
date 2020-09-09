@@ -198,6 +198,8 @@ static int check_line_validity_in_for_query(PLpgSQL_stmt_forq* stmt, int, int);
 static void bind_cursor_with_portal(Portal portal, PLpgSQL_execstate *estate, int varno);
 static char* transform_anonymous_block(char* query);
 static bool need_recompile_plan(SPIPlanPtr plan);
+static void build_symbol_table(PLpgSQL_execstate *estate, PLpgSQL_nsitem *ns_start,
+                               int *ret_nitems, const char ***ret_names, Oid **ret_types);
 
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
@@ -1413,7 +1415,12 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     bool savedIsStp = u_sess->SPI_cxt.is_stp;
     TransactionId oldTransactionId = InvalidTransactionId;
 
+    /* autonomous transaction */
     if (block->autonomous) {
+        if (block->exceptions != NULL) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature : Autonomous transaction doesnot support exception")));
+        }
         if (estate->func->fn_is_trigger) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1747,9 +1754,10 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     }
 
     estate->err_text = NULL;
-	if (block->autonomous)
-		AutonomousSessionEnd(estate->autonomous_session);
 
+    if (block->autonomous) {
+        AutonomousSessionEnd(estate->autonomous_session);
+    }
     /*
      * Handle the return code.
      */
@@ -2123,12 +2131,38 @@ static int exec_stmt_assign(PLpgSQL_execstate* estate, PLpgSQL_stmt_assign* stmt
 static int exec_stmt_perform(PLpgSQL_execstate* estate, PLpgSQL_stmt_perform* stmt)
 {
     PLpgSQL_expr* expr = stmt->expr;
-    TransactionId oldTransactionId = InvalidTransactionId;
     int rc;
+    TransactionId oldTransactionId = InvalidTransactionId;
+    /* autonomous transaction */
+    if (estate->autonomous_session) {
+        if (expr) {
+            int nparams = 0;
+            int i;
+            const char **param_names = NULL;
+            Oid *param_types = NULL;
+            AutonomousPreparedStatement *astmt = NULL;
+            Datum *values = NULL;
+            bool *nulls = NULL;
+            AutonomousResult *aresult = NULL;
+            ereport(LOG, (errmsg("query %s", expr->query)));
+            build_symbol_table(estate, expr->ns, &nparams, &param_names, &param_types);
+            astmt = AutonomousSessionPrepare(estate->autonomous_session, expr->query, (int16)nparams, param_types, param_names);
 
-    if (!RecoveryInProgress()) {
+            values = (Datum *)palloc(nparams * sizeof(*values));
+            nulls = (bool *)palloc(nparams * sizeof(*nulls));
+            for (i = 0; i < nparams; i++) {
+                nulls[i] = true;
+            }
+            aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
+            exec_set_found(estate, (list_length(aresult->tuples) != 0));
+            return PLPGSQL_RC_OK;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Syntax error: perform error")));
+        }
+    }     
+    if (!RecoveryInProgress())
         oldTransactionId = GetTopTransactionId();
-    }
 
     rc = exec_run_select(estate, expr, 0, NULL);
     if (rc != SPI_OK_SELECT) {
@@ -3898,29 +3932,6 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
         oldTransactionId = GetTopTransactionId();
     }
 
-    if (estate->autonomous_session) {
-        int nparams = 0;
-        int i;
-        const char **param_names = NULL;
-        Oid *param_types = NULL;
-        AutonomousPreparedStatement *astmt = NULL;
-        Datum *values = NULL;
-        bool *nulls = NULL;
-        AutonomousResult *aresult = NULL;
-        t_thrd.autonomous_cxt.sqlstmt = stmt->sqlstmt;
-        build_symbol_table(estate, stmt->sqlstmt->ns, &nparams, &param_names, &param_types);
-        astmt = AutonomousSessionPrepare(estate->autonomous_session, stmt->sqlstmt->query, (int16)nparams, param_types, param_names);
-
-        values = (Datum *)palloc(nparams * sizeof(*values));
-        nulls = (bool *)palloc(nparams * sizeof(*nulls));
-        for (i = 0; i < nparams; i++) {
-            nulls[i] = true;
-        }
-        aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
-        exec_set_found(estate, (list_length(aresult->tuples) != 0));
-        return PLPGSQL_RC_OK;
-    }
-
     /*
      * On the first call for this statement generate the plan, and detect
      * whether the statement is INSERT/UPDATE/DELETE/MERGE
@@ -3955,6 +3966,41 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
      * Set up ParamListInfo (hook function and possibly data values)
      */
     paramLI = setup_param_list(estate, expr);
+    
+    /* autonomous transaction */
+    if (estate->autonomous_session) {
+        int nparams = 0;
+        int i;
+        const char **param_names = NULL;
+        Oid *param_types = NULL;
+        AutonomousPreparedStatement *astmt = NULL;
+        Datum *values = NULL;
+        bool *nulls = NULL;
+        AutonomousResult *aresult = NULL;
+        t_thrd.autonomous_cxt.sqlstmt = stmt->sqlstmt;
+        build_symbol_table(estate, stmt->sqlstmt->ns, &nparams, &param_names, &param_types);
+
+        if (paramLI) {
+            for (i = 0; i < paramLI->numParams; i++) {
+                ParamExternData* param = &paramLI->params[i];
+                if (!param->isnull) {
+                    pfree_ext(paramLI);
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+                        errmsg("Autonomous transaction doesnot suport variable transmition")));
+                }
+            }
+        }
+        astmt = AutonomousSessionPrepare(estate->autonomous_session, stmt->sqlstmt->query, (int16)nparams, param_types, param_names);
+
+        values = (Datum *)palloc(nparams * sizeof(*values));
+        nulls = (bool *)palloc(nparams * sizeof(*nulls));
+        for (i = 0; i < nparams; i++) {
+            nulls[i] = true;
+        }
+        aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
+        exec_set_found(estate, (list_length(aresult->tuples) != 0));
+        return PLPGSQL_RC_OK;
+    }
 
     /*
      * If we have INTO, then we only need one row back ... but if we have INTO
@@ -3979,7 +4025,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
         }
     } else {
         tcount = 0;
-	}
+    }
 
     saved_cursor_data = estate->cursor_return_data;
     if (stmt->row != NULL && stmt->row->nfields > 0) {
@@ -4334,11 +4380,10 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
 
     exec_eval_cleanup(estate);
 
-	if (estate->autonomous_session)
-	{
-		(void *)AutonomousSessionExecute(estate->autonomous_session, querystr);
-		return PLPGSQL_RC_OK;
-	}    
+    if (estate->autonomous_session) {
+        (void *)AutonomousSessionExecute(estate->autonomous_session, querystr);
+        return PLPGSQL_RC_OK;
+    }    
 
     if (stmt->params != NULL) {
         stmt->ppd = (void*)exec_eval_using_params(estate, stmt->params);
@@ -5084,6 +5129,7 @@ static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
  */
 static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt)
 {
+    /* autonomous transaction */
     if (estate->autonomous_session) {
         if (t_thrd.autonomous_cxt.sqlstmt) {
             int nparams = 0;
@@ -5100,8 +5146,7 @@ static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt
 
             values = (Datum *)palloc(nparams * sizeof(*values));
             nulls = (bool *)palloc(nparams * sizeof(*nulls));
-            for (i = 0; i < nparams; i++)
-            {
+            for (i = 0; i < nparams; i++) {
                 nulls[i] = true;
             }
             aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
@@ -5113,7 +5158,7 @@ static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt
                 errmsg("Syntax error: In antonomous transaction, commit/rollback must match start transaction")));
         }
     }
-
+    
     const char* PORTAL = "Portal";
     int subTransactionCount = u_sess->SPI_cxt.portal_stp_exception_counter;
 
@@ -5176,6 +5221,7 @@ static int exec_stmt_commit(PLpgSQL_execstate* estate, PLpgSQL_stmt_commit* stmt
  */
 static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* stmt)
 {
+    /* autonomous transaction */
     if (estate->autonomous_session) {
         if (t_thrd.autonomous_cxt.sqlstmt) {
             int nparams = 0;
@@ -5192,8 +5238,7 @@ static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* 
 
             values = (Datum *)palloc(nparams * sizeof(*values));
             nulls = (bool *)palloc(nparams * sizeof(*nulls));
-            for (i = 0; i < nparams; i++)
-            {
+            for (i = 0; i < nparams; i++) {
                 nulls[i] = true;
             }
             aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
@@ -5203,9 +5248,8 @@ static int exec_stmt_rollback(PLpgSQL_execstate* estate, PLpgSQL_stmt_rollback* 
         } else {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Syntax error: In antonomous transaction, commit/rollback must match start transaction")));
-           }
+        }
     }
-
     const char* PORTAL = "Portal";
     int subTransactionCount = u_sess->SPI_cxt.portal_stp_exception_counter;
 

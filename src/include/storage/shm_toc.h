@@ -40,8 +40,7 @@ extern void *shm_toc_lookup(shm_toc *toc, uint64 key);
  * Tools for estimating how large a chunk of shared memory will be needed
  * to store a TOC and its dependent objects.
  */
-typedef struct
-{
+typedef struct {
     Size        space_for_chunks;
     Size        number_of_keys;
 } shm_toc_estimator;

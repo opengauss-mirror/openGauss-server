@@ -114,6 +114,9 @@
 /* the maximum number of autovacuum launcher thread */
 #define AV_LAUNCHER_PROCS 2
 
+/* the number of Job Schedule Lancher thread */
+#define JOB_SCHEDULE_LAUNCHER_PROCS 1
+
 #ifdef ENABLE_MULTIPLE_NODES
 #define STREAM_RESERVE_PROC_TIMES (16)
 #else

@@ -105,9 +105,7 @@ struct BackgroundWorkerHandle {
 static const struct {
     const char *fn_name;
     bgworker_main_type fn_addr;
-} InternalBGWorkers[] =
-
-{
+} InternalBGWorkers[] = {
     {
         "autonomous_worker_main",
         autonomous_worker_main
@@ -140,8 +138,8 @@ void BackgroundWorkerShmemInit(void)
     bool found;
 
     t_thrd.bgworker_cxt.background_worker_data = (BackgroundWorkerArray*)ShmemInitStruct("Background Worker Data",
-       BackgroundWorkerShmemSize(),
-       &found);
+        BackgroundWorkerShmemSize(),
+        &found);
     if (!IsUnderPostmaster) {
         slist_iter siter;
         int slotno = 0;
@@ -191,7 +189,7 @@ void BackgroundWorkerShmemInit(void)
  * Search the postmaster's backend-private list of RegisteredBgWorker objects
  * for the one that maps to the given slot number.
  */
-static RegisteredBgWorker * FindRegisteredWorkerBySlotNumber(int slotno)
+static RegisteredBgWorker* FindRegisteredWorkerBySlotNumber(int slotno)
 {
     slist_iter  siter;
 
@@ -222,7 +220,8 @@ void BackgroundWorkerStateChange(void)
      * max_background_workers, in case shared memory gets corrupted while we're
      * looping.
      */
-    if (g_instance.attr.attr_storage.max_background_workers != t_thrd.bgworker_cxt.background_worker_data->total_slots) {
+    if (g_instance.attr.attr_storage.max_background_workers !=
+        t_thrd.bgworker_cxt.background_worker_data->total_slots) {
         elog(LOG,
              "inconsistent background worker state (max_background_workers=%d, total_slots=%d",
              g_instance.attr.attr_storage.max_background_workers,
@@ -582,7 +581,7 @@ static bool SanityCheckBackgroundWorker(BackgroundWorker *worker, int elevel)
     }
 
     if ((worker->bgw_restart_time < 0 &&
-         worker->bgw_restart_time != BGW_NEVER_RESTART) ||
+        worker->bgw_restart_time != BGW_NEVER_RESTART) ||
         (worker->bgw_restart_time > USECS_PER_DAY / 1000))  {
         ereport(elevel,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -917,7 +916,7 @@ void RegisterBackgroundWorker(BackgroundWorker *worker)
  * free this pointer using pfree(), if desired.
  */
 bool RegisterDynamicBackgroundWorker(BackgroundWorker *worker,
-                                BackgroundWorkerHandle **handle)
+    BackgroundWorkerHandle **handle)
 {
     int         slotno;
     bool        success = false;
@@ -954,11 +953,11 @@ bool RegisterDynamicBackgroundWorker(BackgroundWorker *worker,
      * anything useful.
      */
     if (parallel && (int)(t_thrd.bgworker_cxt.background_worker_data->parallel_register_count -
-                     t_thrd.bgworker_cxt.background_worker_data->parallel_terminate_count) >=
+        t_thrd.bgworker_cxt.background_worker_data->parallel_terminate_count) >=
         g_instance.shmem_cxt.max_parallel_workers) {
         Assert(t_thrd.bgworker_cxt.background_worker_data->parallel_register_count -
-               t_thrd.bgworker_cxt.background_worker_data->parallel_terminate_count <=
-               MAX_PARALLEL_WORKER_LIMIT);
+            t_thrd.bgworker_cxt.background_worker_data->parallel_terminate_count <=
+            MAX_PARALLEL_WORKER_LIMIT);
         LWLockRelease(BackgroundWorkerLock);
         return false;
     }
@@ -1108,7 +1107,6 @@ BgwHandleStatus WaitForBackgroundWorkerStartup(const BackgroundWorkerHandle *han
 
         rc = WaitLatch(&t_thrd.proc->procLatch,
                        WL_LATCH_SET | WL_POSTMASTER_DEATH, 0);
-
         if (rc & WL_POSTMASTER_DEATH) {
             status = BGWH_POSTMASTER_DIED;
             break;
@@ -1145,7 +1143,6 @@ BgwHandleStatus WaitForBackgroundWorkerShutdown(const BackgroundWorkerHandle *ha
 
         rc = WaitLatch(&t_thrd.proc->procLatch,
                        WL_LATCH_SET | WL_POSTMASTER_DEATH, 0);
-
         if (rc & WL_POSTMASTER_DEATH) {
             status = BGWH_POSTMASTER_DIED;
             break;
@@ -1183,6 +1180,13 @@ void TerminateBackgroundWorker(const BackgroundWorkerHandle *handle)
     if (signal_postmaster) {
         SendPostmasterSignal(PMSIGNAL_BACKGROUND_WORKER_CHANGE);
     }
+}
+
+void StopBackgroundWorker() 
+{
+    TerminateBackgroundWorker(t_thrd.autonomous_cxt.handle);
+    (void)WaitForBackgroundWorkerShutdown(t_thrd.autonomous_cxt.handle);
+    t_thrd.autonomous_cxt.handle = NULL;
 }
 
 /*
@@ -1234,7 +1238,7 @@ static bgworker_main_type LookupBackgroundWorkerFunction(const char *libraryname
  * to be used before calling this function again.  This is so that the caller
  * doesn't have to worry about the background worker locking protocol.
  */
-const char * GetBackgroundWorkerTypeByPid(ThreadId pid)
+const char* GetBackgroundWorkerTypeByPid(ThreadId pid)
 {
     int         slotno;
     bool        found = false;
@@ -1324,5 +1328,4 @@ void BackgroundWorkerUnblockSignals(void)
 {
     (void)gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 }
-
 
