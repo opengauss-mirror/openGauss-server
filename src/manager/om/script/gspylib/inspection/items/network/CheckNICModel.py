@@ -35,6 +35,8 @@ class CheckNICModel(BaseItem):
         else:
             backIP = SharedFuncs.getIpByHostName(self.host)
         networkCardNumList = SharedFuncs.CheckNetWorkBonding(backIP)
+        if networkCardNumList == "Shell command faild":
+            return
         networkCardNums = []
         if (len(networkCardNumList) != 1):
             networkCardNums = networkCardNumList[1:]

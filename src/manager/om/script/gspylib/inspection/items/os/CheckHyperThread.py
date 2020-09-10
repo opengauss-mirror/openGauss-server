@@ -17,6 +17,7 @@
 from gspylib.inspection.common.CheckItem import BaseItem
 from gspylib.inspection.common.CheckResult import ResultStatus
 from gspylib.os.gsfile import g_file
+from gspylib.common.Common import DefaultValue
 
 
 class CheckHyperThread(BaseItem):
@@ -46,6 +47,8 @@ class CheckHyperThread(BaseItem):
         if (cpuCount == 2 * idCount * cores):
             self.result.rst = ResultStatus.OK
         else:
+            if DefaultValue.checkDockerEnv():
+                return
             flag = "down"
             self.result.rst = ResultStatus.NG
 

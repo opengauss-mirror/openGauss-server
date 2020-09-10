@@ -63,6 +63,8 @@ def runShellCmd(cmd, user=None, mpprcFile=""):
         user, cmd)
         cmd = cmd.replace("$", "\$")
     (status, output) = subprocess.getstatusoutput(cmd)
+    if (status != 0 and DefaultValue.checkDockerEnv()):
+        return output
     if (status != 0):
         raise ShellCommandException(cmd, output)
     return output
@@ -860,6 +862,9 @@ def getNetWorkConfFile(networkCardNum):
             cmd = "find %s -iname 'ifcfg-*-%s' -print" % (
             SuSENetWorkConfPath, networkCardNum)
         output = runShellCmd(cmd)
+        if (DefaultValue.checkDockerEnv() and
+                output.find("No such file or directory") >= 0):
+            return output.strip()
         if (output.strip() == "" or len(output.split('\n')) != 1):
             raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"]
                             % NetWorkConfFile)
@@ -875,6 +880,9 @@ def CheckNetWorkBonding(serviceIP):
     """
     networkCardNum = getNICNum(serviceIP)
     NetWorkConfFile = getNetWorkConfFile(networkCardNum)
+    if (NetWorkConfFile.find("No such file or directory") >= 0
+            and DefaultValue.checkDockerEnv()):
+        return "Shell command faild"
     bondingConfFile = "/proc/net/bonding/%s" % networkCardNum
     networkCardNumList = [networkCardNum]
     cmd = "grep -i 'BONDING_OPTS\|BONDING_MODULE_OPTS' %s" % NetWorkConfFile
