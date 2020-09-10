@@ -19,7 +19,6 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
 [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
 [ COMPRESS | NOCOMPRESS ]
 [ TABLESPACE tablespace_name ]
-[ DISTRIBUTE BY { REPLICATION | { HASH ( column_name [,...] ) } } ]
 [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ];
 
 where column_constraint can be:
