@@ -3931,6 +3931,30 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     if (!RecoveryInProgress()) {
         oldTransactionId = GetTopTransactionId();
     }
+    /* autonomous transaction */
+    if (estate->autonomous_session) {
+        int nparams = 0;
+        int i;
+        const char **param_names = NULL;
+        Oid *param_types = NULL;
+        AutonomousPreparedStatement *astmt = NULL;
+        Datum *values = NULL;
+        bool *nulls = NULL;
+        AutonomousResult *aresult = NULL;
+        t_thrd.autonomous_cxt.sqlstmt = stmt->sqlstmt;
+        build_symbol_table(estate, stmt->sqlstmt->ns, &nparams, &param_names, &param_types);
+
+        astmt = AutonomousSessionPrepare(estate->autonomous_session, stmt->sqlstmt->query, (int16)nparams, param_types, param_names);
+
+        values = (Datum *)palloc(nparams * sizeof(*values));
+        nulls = (bool *)palloc(nparams * sizeof(*nulls));
+        for (i = 0; i < nparams; i++) {
+            nulls[i] = true;
+        }
+        aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
+        exec_set_found(estate, (list_length(aresult->tuples) != 0));
+        return PLPGSQL_RC_OK;
+    }
 
     /*
      * On the first call for this statement generate the plan, and detect
@@ -3967,41 +3991,6 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
      */
     paramLI = setup_param_list(estate, expr);
     
-    /* autonomous transaction */
-    if (estate->autonomous_session) {
-        int nparams = 0;
-        int i;
-        const char **param_names = NULL;
-        Oid *param_types = NULL;
-        AutonomousPreparedStatement *astmt = NULL;
-        Datum *values = NULL;
-        bool *nulls = NULL;
-        AutonomousResult *aresult = NULL;
-        t_thrd.autonomous_cxt.sqlstmt = stmt->sqlstmt;
-        build_symbol_table(estate, stmt->sqlstmt->ns, &nparams, &param_names, &param_types);
-
-        if (paramLI) {
-            for (i = 0; i < paramLI->numParams; i++) {
-                ParamExternData* param = &paramLI->params[i];
-                if (!param->isnull) {
-                    pfree_ext(paramLI);
-                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-                        errmsg("Autonomous transaction doesnot suport variable transmition")));
-                }
-            }
-        }
-        astmt = AutonomousSessionPrepare(estate->autonomous_session, stmt->sqlstmt->query, (int16)nparams, param_types, param_names);
-
-        values = (Datum *)palloc(nparams * sizeof(*values));
-        nulls = (bool *)palloc(nparams * sizeof(*nulls));
-        for (i = 0; i < nparams; i++) {
-            nulls[i] = true;
-        }
-        aresult = AutonomousSessionExecutePrepared(astmt, (int16)nparams, values, nulls);
-        exec_set_found(estate, (list_length(aresult->tuples) != 0));
-        return PLPGSQL_RC_OK;
-    }
-
     /*
      * If we have INTO, then we only need one row back ... but if we have INTO
      * STRICT, ask for two rows, so that we can verify the statement returns
