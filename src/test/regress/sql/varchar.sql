@@ -68,3 +68,7 @@ SELECT '' AS four, * FROM VARCHAR_TBL ORDER BY f1;
 select char_length(to_char(lpad('abc', 1024 * 1024 *10, 'x')));
 
 select char_length(to_char(lpad('abc', 1024 * 1024 *10 + 1, 'x')));
+
+SELECT char_length(lpad('abcCC',1024*1024*11,'x')::varchar2(10485760));
+
+SELECT char_length(lpad('abcCC',1024*1024*11,'x')::varchar(10485760));
