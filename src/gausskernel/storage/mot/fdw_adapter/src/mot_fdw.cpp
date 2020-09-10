@@ -965,7 +965,14 @@ static void MOTBeginForeignModify(
         if (MOTAdaptor::m_engine->IsSoftMemoryLimitReached()) {
             CleanQueryStatesOnError(festate->m_currTxn);
         }
-        isMemoryLimitReached();
+        switch (mtstate->operation) {
+            case CMD_INSERT:
+            case CMD_UPDATE:
+                isMemoryLimitReached();
+                break;
+            default:
+                break;
+        }
         // bring all attributes
         int len = BITMAP_GETLEN(festate->m_numAttrs);
         if (fdwPrivate != nullptr) {
@@ -1320,7 +1327,14 @@ static bool MOTAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc* fun
 
 List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultRelation, int subplanIndex)
 {
-    isMemoryLimitReached();
+    switch (plan->operation) {
+        case CMD_INSERT:
+        case CMD_UPDATE:
+            isMemoryLimitReached();
+            break;
+        default:
+            break;
+    }
 
     MOTFdwStateSt* fdwState = nullptr;
     RangeTblEntry* rte = planner_rt_fetch(resultRelation, root);
