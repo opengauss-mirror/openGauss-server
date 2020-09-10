@@ -20,6 +20,7 @@ from gspylib.inspection.common import SharedFuncs
 from gspylib.inspection.common.CheckItem import BaseItem
 from gspylib.inspection.common.CheckResult import ResultStatus
 from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.Common import DefaultValue
 from gspylib.os.gsnetwork import g_network
 from gspylib.os.gsfile import g_file
 from gspylib.os.gsplatform import findCmdInPath
@@ -57,6 +58,8 @@ class CheckMultiQueue(BaseItem):
                 break
 
         if not networkNum or not BondMode or not confFile:
+            if DefaultValue.checkDockerEnv():
+                return
             raise Exception(ErrorCode.GAUSS_506["GAUSS_50619"])
         if BondMode != "BondMode Null":
             bondFile = '/proc/net/bonding/%s' % networkNum
