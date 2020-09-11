@@ -737,7 +737,9 @@ Datum pg_tablespace_location(PG_FUNCTION_ARGS)
     target_path[rllen] = '\0';
 
     /* relative location will contain t_thrd.proc_cxt.DataDir */
-    if (0 == strncmp(target_path, t_thrd.proc_cxt.DataDir, strlen(t_thrd.proc_cxt.DataDir))) {
+    size_t dataDirLength = strlen(t_thrd.proc_cxt.DataDir);
+    if (0 == strncmp(target_path, t_thrd.proc_cxt.DataDir, dataDirLength) && rllen > dataDirLength &&
+        target_path[dataDirLength] == '/') {
         /*
          * The position is  not '/' when skip t_thrd.proc_cxt.DataDir. the relative location can't start from '/'
          * We only need get the relative location, so remove the common prefix
