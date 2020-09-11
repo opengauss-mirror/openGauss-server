@@ -156,6 +156,11 @@ typedef struct {
     int objsubid;         /* subobject (table column #) */
 } SecLabelItem;
 
+typedef struct {
+    Oid oid;
+    char* name;
+} TablespaceInfo;
+
 /* global decls */
 bool g_verbose; /* User wants verbose narration of our
                  * activities. */
@@ -266,6 +271,9 @@ bool isSingleTableDump = false;
 #ifdef PGXC
 static int include_nodes = 0;
 #endif
+
+static int g_tablespaceNum = -1;
+static TablespaceInfo* g_tablespaces = nullptr;
 
 #define disconnect_and_exit(conn, code)                                        \
     do {                                                                       \
@@ -15630,6 +15638,65 @@ static void binary_upgrade_set_pg_partition_oids(
     destroyPQExpBuffer(upgrade_query);
 }
 
+static void LoadTablespaces(Archive* fout)
+{
+    PQExpBuffer query = createPQExpBuffer();
+    appendPQExpBuffer(query, "select oid, spcname from pg_tablespace");
+    PGresult* res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+    g_tablespaceNum = PQntuples(res);
+    Assert(g_tablespaceNum > 0);
+    g_tablespaces = (TablespaceInfo*)pg_malloc(g_tablespaceNum * sizeof(TablespaceInfo));
+    for (int i = 0; i < g_tablespaceNum; ++i) {
+        g_tablespaces[i].oid = atooid(PQgetvalue(res, i, 0));
+        g_tablespaces[i].name = gs_strdup(PQgetvalue(res, i, 1));
+    }
+    destroyPQExpBuffer(query);
+    PQclear(res);
+}
+
+static const char* GetTablespaceNameByOid(Archive* fout, Oid oid)
+{
+    if (g_tablespaceNum == -1) {
+        LoadTablespaces(fout);
+    }
+
+    for (int i = 0; i < g_tablespaceNum; ++i) {
+        if (g_tablespaces[i].oid == oid) {
+            return g_tablespaces[i].name;
+        }
+    }
+    exit_horribly(NULL, "tablespace %u not exist\n", oid);
+}
+
+static void OutputIntervalPartitionDef(Archive* fout, const PGresult* res, PQExpBuffer outputBuf)
+{
+    int intervalIdx = PQfnumber(res, "interval");
+    appendPQExpBuffer(outputBuf, "INTERVAL('%s')", PQgetvalue(res, 0, intervalIdx));
+
+    int interTblSpcNumIdx = PQfnumber(res, "inttblspcnum");
+    if (PQgetisnull(res, 0, interTblSpcNumIdx)) {
+        return;
+    }
+
+    int interTblSpcNum = atoi(PQgetvalue(res, 0, interTblSpcNumIdx));
+    if (interTblSpcNum <= 0) {
+        return;
+    }
+    appendPQExpBuffer(outputBuf, " STORE IN(");
+
+    int interTblSpcIdx = PQfnumber(res, "intervaltablespace");
+    Oid* interTblSpcs = (Oid*)pg_malloc((size_t)interTblSpcNum * sizeof(Oid));
+    parseOidArray(PQgetvalue(res, 0, interTblSpcIdx), interTblSpcs, interTblSpcNum);
+    for (int i = 0; i < interTblSpcNum; ++i) {
+        if (i > 0) {
+            appendPQExpBuffer(outputBuf, ", ");
+        }
+        appendPQExpBuffer(outputBuf, "%s", GetTablespaceNameByOid(fout, interTblSpcs[i]));
+    }
+    appendPQExpBuffer(outputBuf, ")");
+    free(interTblSpcs);
+}
+
 /*
  * createTablePartition
  * Write the declaration of partitioned table.
@@ -15659,7 +15726,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     appendPQExpBuffer(defq,
         "SELECT partstrategy, interval[1], "
         "array_length(partkey, 1) AS partkeynum, partkey, "
-        "intspnum AS inttblspcnum, intervaltablespace "
+        "array_length(intervaltablespace, 1) AS inttblspcnum, intervaltablespace "
         "FROM pg_partition WHERE parentid = '%u' AND parttype = '%c'",
         tbinfo->dobj.catId.oid,
         PART_OBJ_TYPE_PARTED_TABLE);
@@ -15670,7 +15737,11 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     partkeynum = atoi(PQgetvalue(res, 0, i_partkeynum));
     partkeycols = (Oid*)pg_malloc((size_t)partkeynum * sizeof(Oid));
     parseOidArray(PQgetvalue(res, 0, i_partkey), partkeycols, partkeynum);
-    PQclear(res);
+    int partStrategyIdx = PQfnumber(res, "partstrategy");
+    char partStrategy = *PQgetvalue(res, 0, partStrategyIdx);
+    if (partStrategy != PART_STRATEGY_INTERVAL) {
+        PQclear(res);
+    }
 
     if (RELKIND_FOREIGN_TABLE == tbinfo->relkind) {
         int i_fdwname = -1;
@@ -15713,6 +15784,12 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
         appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
     }
     appendPQExpBuffer(result, ")\n");
+
+    if (partStrategy == PART_STRATEGY_INTERVAL) {
+        OutputIntervalPartitionDef(fout, res, result);
+        appendPQExpBuffer(result, "\n");
+        PQclear(res);
+    }
 
     /* generate partition details */
     if (isHDFSFTbl) {

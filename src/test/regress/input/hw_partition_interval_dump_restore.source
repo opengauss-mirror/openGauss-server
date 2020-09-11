@@ -1,0 +1,112 @@
+--
+-- test interval partition without specified tablespaces
+--
+
+-- prepare: create interval partition table and load data
+create database interval_db;
+\c interval_db;
+
+drop table if exists t_part_auto;
+create table t_part_auto(id int not null, name varchar, birthday timestamp not null, age int)
+partition by range(birthday) interval ('1 month') (
+  partition p1 values less than('2000-01-01 00:00:00'),
+  partition p2 values less than('2000-02-01 00:00:00')
+);
+
+declare
+  v_sql varchar;
+  v_name varchar;
+  v_dt_begin timestamp;
+  v_dt timestamp;
+  v_age int;
+begin
+  v_sql := 'insert into t_part_auto(id, name, birthday, age) values(:1, :2, :3, :4)';
+  v_dt_begin := to_date('1999-10-01 00:00:00', 'yyyy-mm-dd hh24:mi:ss');
+  for i in 1..200 loop
+    v_name := 'name_' || i;
+	v_dt := v_dt_begin + i*30;
+	v_age := mod(i,90) + 5;
+	execute immediate v_sql using i, v_name, v_dt, v_age;
+  end loop;
+end;
+/
+
+\d t_part_auto
+
+select count(1) from t_part_auto;
+
+-- dump data
+\! @abs_bindir@/gs_dump interval_db -p @portstring@ -t t_part_auto -f @abs_bindir@/backup.sql
+
+drop table t_part_auto;
+
+-- restore data
+\! @abs_bindir@/gsql -p @portstring@ -d interval_db -f @abs_bindir@/backup.sql
+
+\d t_part_auto
+
+select count(1) from t_part_auto;
+
+drop table t_part_auto;
+
+
+--
+-- test interval partition with specified tablespaces
+--
+
+
+-- prepare: create interval partition table and load data
+create tablespace interval_tsp1 location '@testtablespace@/interval_tsp1' maxsize '20M';
+create tablespace interval_tsp2 location '@testtablespace@/interval_tsp2' maxsize '20M';
+create tablespace interval_tsp3 location '@testtablespace@/interval_tsp3' maxsize '20M';
+
+drop table if exists t_part_auto;
+create table t_part_auto(id int not null, name varchar, birthday timestamp not null, age int)
+partition by range(birthday) 
+interval ('1 month') store in(interval_tsp1, interval_tsp2, interval_tsp3)
+(
+  partition p1 values less than('2000-01-01 00:00:00'),
+  partition p2 values less than('2000-02-01 00:00:00')
+);
+
+declare
+  v_sql varchar;
+  v_name varchar;
+  v_dt_begin timestamp;
+  v_dt timestamp;
+  v_age int;
+begin
+  v_sql := 'insert into t_part_auto(id, name, birthday, age) values(:1, :2, :3, :4)';
+  v_dt_begin := to_date('1999-10-01 00:00:00', 'yyyy-mm-dd hh24:mi:ss');
+  for i in 1..200 loop
+    v_name := 'name_' || i;
+	v_dt := v_dt_begin + i*30;
+	v_age := mod(i,90) + 5;
+	execute immediate v_sql using i, v_name, v_dt, v_age;
+  end loop;
+end;
+/
+
+-- dump data
+\! @abs_bindir@/gs_dump interval_db -p @portstring@ -t t_part_auto -f @abs_bindir@/backup.sql
+
+drop table t_part_auto;
+
+-- restore data
+\! @abs_bindir@/gsql -p @portstring@ -d interval_db -f @abs_bindir@/backup.sql
+
+\d t_part_auto
+
+select count(1) from t_part_auto;
+
+-- check tablespace
+select spcname from pg_tablespace where oid in(select intervaltablespace[0] from pg_partition where relname = 't_part_auto' union select intervaltablespace[1] from pg_partition where relname = 't_part_auto' union select intervaltablespace[2] from pg_partition where relname = 't_part_auto') order by spcname;
+
+drop table t_part_auto;
+drop tablespace interval_tsp1;
+drop tablespace interval_tsp2;
+drop tablespace interval_tsp3;
+
+\c regression 
+drop database interval_db;
+

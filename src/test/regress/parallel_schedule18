@@ -27,6 +27,7 @@ test: hw_partition_interval_check_syntax
 test: hw_partition_interval_split
 test: hw_partition_interval_merge
 test: hw_partition_interval_compatibility
+test: hw_partition_interval_dump_restore
 
 # Global Partition index feature testcase
 # gpi create
