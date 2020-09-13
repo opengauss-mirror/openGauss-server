@@ -1108,7 +1108,11 @@ class ErrorCode():
                        "database on node is abnormal. \n"
                        "node [%s], user [%s], dataNode [%s]. \n"
                        "You can use command \"gs_ctl query -D %s\" for more "
-                       "detail."
+                       "detail.",
+        "GAUSS_35704": "[GAUSS-35704] %s [%s] does not exist on node [%s].",
+        "GAUSS_35705": "[GAUSS-35705] Error, the database version is "
+                       "inconsistent in %s: %s" 
+                       
     }
 
 
