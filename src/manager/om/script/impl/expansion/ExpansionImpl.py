@@ -355,6 +355,7 @@ class ExpansionImpl():
         self.queryPrimaryClusterDetail()
         self.setPrimaryGUCConfig()
         self.setStandbyGUCConfig()
+        self.restartSingleDbWithPrimaryMode()
         self.buildStandbyHosts()
         self.generateClusterStaticFile()
 
@@ -378,10 +379,27 @@ class ExpansionImpl():
         """
         self.logger.debug("Start to set primary node GUC config.\n")
         primaryHost = self.getPrimaryHostName()
-        dataNode = self.context.clusterInfoDict[primaryHost]["dataNode"]
 
         self.setGUCOnClusterHosts([primaryHost])
         self.addStandbyIpInPrimaryConf()
+        
+        
+    def setStandbyGUCConfig(self):
+        """
+        set the expansion standby node db guc config
+        """
+        self.logger.debug("Stat to set standby node GUC config.\n")
+        nodeList = self.context.nodeNameList
+        primaryHost = self.getPrimaryHostName()
+        standbyHostNames = list(set(nodeList).difference(set([primaryHost])))
+        self.setGUCOnClusterHosts(standbyHostNames)
+    
+    def restartSingleDbWithPrimaryMode(self):
+        """
+        """
+        primaryHost = self.getPrimaryHostName()
+        dataNode = self.context.clusterInfoDict[primaryHost]["dataNode"]
+
         insType, dbStat = self.commonGsCtl.queryInstanceStatus(primaryHost,
         dataNode,self.envFile)
         if insType != MODE_PRIMARY:
@@ -401,17 +419,6 @@ retry for %s times" % start_retry_num)
             self.commonGsCtl.startInstanceWithMode(primaryHost, dataNode,
             MODE_PRIMARY, self.envFile)
             start_retry_num = start_retry_num + 1
-        
-    def setStandbyGUCConfig(self):
-        """
-        """
-        self.logger.debug("Start to set standby node GUC config.\n")
-        standbyHosts = self.context.newHostList
-        standbyHostNames = []
-        for host in standbyHosts:
-            hostName = self.context.backIpNameMap[host]
-            standbyHostNames.append(hostName)
-        self.setGUCOnClusterHosts(standbyHostNames)
 
     def addStandbyIpInPrimaryConf(self):
         """
@@ -463,7 +470,7 @@ retry for %s times" % start_retry_num)
         stop the new standby host`s database and build it as standby mode
         """
         self.logger.debug("start to build standby node...\n")
-
+        
         standbyHosts = self.context.newHostList
 
         for host in standbyHosts:
@@ -484,9 +491,6 @@ retry for %s times" % start_retry_num)
                 if insType != MODE_STANDBY:
                     self.logger.debug("Start database as Standby mode failed, \
 retry for %s times" % start_retry_num)
-                    self.setGUCOnClusterHosts([])
-                    self.addStandbyIpInPrimaryConf()
-                    self.reloadPrimaryConf()
                     self.commonGsCtl.startInstanceWithMode(hostName, dataNode, 
                     MODE_STANDBY, self.envFile)
                     start_retry_num = start_retry_num + 1
@@ -586,7 +590,7 @@ retry for %s times" % start_retry_num)
                 if dbStat != STAT_NORMAL:
                     self.commonGsCtl.startInstanceWithMode(hostName, dataNode, 
                     MODE_STANDBY, self.envFile)
-            
+
             self.commonGsCtl.startOmCluster(primaryHosts, self.envFile)
 
     def setGUCOnClusterHosts(self, hostNames=[]):
