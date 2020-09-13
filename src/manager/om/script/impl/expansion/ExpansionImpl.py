@@ -90,12 +90,14 @@ class ExpansionImpl():
         self.tempFileDir = "/tmp/gs_expansion_%s" % (currentTime)
         self.logger.debug("tmp expansion dir is %s ." % self.tempFileDir)
 
-
+        self._finalizer = weakref.finalize(self, self.clearTmpFile)
+        
+        
     def sendSoftToHosts(self):
         """
         create software dir and send it on each nodes
         """
-        self.logger.debug("Start to send software to each standby nodes.\n")
+        self.logger.debug("Start to send soft to each standby nodes.\n")
         hostNames = self.context.newHostList
         hostList = hostNames
 
@@ -119,7 +121,8 @@ class ExpansionImpl():
             group=self.group,srcFile=path2ChangeMode)
         sshTool.executeCommand(changeModCmd, "", DefaultValue.SUCCESS,
                        hostList)
-        self.logger.debug("End to send software to each standby nodes.\n")
+        self.logger.debug("End to send soft to each standby nodes.\n")
+        self.cleanSshToolFile(sshTool)
 
     def generateAndSendXmlFile(self):
         """
@@ -150,7 +153,8 @@ class ExpansionImpl():
             (self.user, self.group, self.tempFileDir), [host], self.envFile)
             sshTool.scpFiles("%s" % tempXmlFile, "%s" % 
             tempXmlFile, [host], self.envFile)
-
+            self.cleanSshToolFile(sshTool)
+        
         self.logger.debug("End to generateAndSend XML file.\n")
 
     def __generateXml(self, backIp):
@@ -331,8 +335,9 @@ class ExpansionImpl():
         statusValues = status.values()
         if STATUS_FAIL in statusValues:
             GaussLog.exitWithError(output)
-
+        
         self.logger.debug("End to preinstall database step.\n")
+        self.cleanSshToolFile(sshTool)
 
     
     def buildStandbyRelation(self):
@@ -426,6 +431,7 @@ retry for %s times" % start_retry_num)
         resultMap, outputCollect = sshTool.getSshStatusOutput(command, 
         [primaryHost], self.envFile)
         self.logger.debug(outputCollect)
+        self.cleanSshToolFile(sshTool)
 
     def reloadPrimaryConf(self):
         """
@@ -438,6 +444,7 @@ retry for %s times" % start_retry_num)
         resultMap, outputCollect = sshTool.getSshStatusOutput(command, 
         [primaryHost], self.envFile)
         self.logger.debug(outputCollect)
+        self.cleanSshToolFile(sshTool)
 
     def getPrimaryHostName(self):
         """
@@ -462,6 +469,9 @@ retry for %s times" % start_retry_num)
         for host in standbyHosts:
             hostName = self.context.backIpNameMap[host]
             dataNode = self.context.clusterInfoDict[hostName]["dataNode"]
+
+            self.checkTmpDir(hostName)
+
             self.commonGsCtl.stopInstance(hostName, dataNode, self.envFile)
             self.commonGsCtl.startInstanceWithMode(hostName, dataNode, 
             MODE_STANDBY, self.envFile)
@@ -472,7 +482,7 @@ retry for %s times" % start_retry_num)
                 insType, dbStat = self.commonGsCtl.queryInstanceStatus(hostName,
                  dataNode, self.envFile)
                 if insType != MODE_STANDBY:
-                    self.logger.debug("Start databasse as Standby mode failed, \
+                    self.logger.debug("Start database as Standby mode failed, \
 retry for %s times" % start_retry_num)
                     self.setGUCOnClusterHosts([])
                     self.addStandbyIpInPrimaryConf()
@@ -505,6 +515,21 @@ retry for %s times" % start_retry_num)
                 else:
                     break
                 
+    def checkTmpDir(self, hostName):
+        """
+        if the tmp dir id not exist, create it.
+        """
+        tmpDir = os.path.realpath(DefaultValue.getTmpDirFromEnv())
+        checkCmd = 'if [ ! -d "%s" ]; then exit 1;fi;' % (tmpDir)
+        sshTool = SshTool([hostName])
+        resultMap, outputCollect = sshTool.getSshStatusOutput(checkCmd, 
+        [hostName], self.envFile)
+        ret = resultMap[hostName]
+        if ret == STATUS_FAIL:
+            self.logger.debug("Node [%s] does not have tmp dir. need to fix.")
+            fixCmd = "mkdir -p %s" % (tmpDir)
+            sshTool.getSshStatusOutput(fixCmd, [hostName], self.envFile)
+        self.cleanSshToolFile(sshTool)
 
     def generateClusterStaticFile(self):
         """
@@ -513,11 +538,12 @@ retry for %s times" % start_retry_num)
         self.logger.debug("Start to generate and send cluster static file.\n")
 
         primaryHosts = self.getPrimaryHostName()
-        command = "gs_om -t generateconf -X %s" % self.context.xmlFile
+        command = "gs_om -t generateconf -X %s --distribute" % self.context.xmlFile
         sshTool = SshTool([primaryHosts])
         resultMap, outputCollect = sshTool.getSshStatusOutput(command, 
         [primaryHosts], self.envFile)
         self.logger.debug(outputCollect)
+        self.cleanSshToolFile(sshTool)
 
         nodeNameList = self.context.nodeNameList
 
@@ -527,8 +553,12 @@ retry for %s times" % start_retry_num)
             appPath = self.context.clusterInfoDict["appPath"]
             srcFile = "%s/script/static_config_files/cluster_static_config_%s" \
                 % (toolPath, hostName)
+            if not os.path.exists(srcFile):
+                GaussLog.exitWithError("Generate static file [%s] not found." \
+                    % srcFile)
             targetFile = "%s/bin/cluster_static_config" % appPath
             hostSsh.scpFiles(srcFile, targetFile, [hostName], self.envFile)
+            self.cleanSshToolFile(hostSsh)
 
         self.logger.debug("End to generate and send cluster static file.\n")
         time.sleep(10)
@@ -554,7 +584,7 @@ retry for %s times" % start_retry_num)
                 insType, dbStat = self.commonGsCtl.queryInstanceStatus(hostName,
                 dataNode, self.envFile)
                 if dbStat != STAT_NORMAL:
-                    self.commonGsCtl.buildInstance(hostName, dataNode, 
+                    self.commonGsCtl.startInstanceWithMode(hostName, dataNode, 
                     MODE_STANDBY, self.envFile)
             
             self.commonGsCtl.startOmCluster(primaryHosts, self.envFile)
@@ -601,6 +631,7 @@ retry for %s times" % start_retry_num)
                 tempShFile, [host], self.envFile)
 
             self.logger.debug(outputCollect)
+            self.cleanSshToolFile(sshTool)
 
     def getGUCConfig(self):
         """
@@ -728,8 +759,31 @@ standby nodes.")
         """
         clear temporary file after expansion success
         """
-        self.logger.debug("start to delete temporary file")
+        self.logger.debug("start to delete temporary file %s" % self.tempFileDir)
+        clearCmd = "if [ -d '%s' ];then rm -rf %s;fi" % \
+            (self.tempFileDir, self.tempFileDir)
         hostNames = self.context.nodeNameList
+        for host in hostNames:
+            try:
+                sshTool = SshTool(hostNames)
+                result, output = sshTool.getSshStatusOutput(clearCmd, 
+                hostNames, self.envFile)
+                self.logger.debug(output)
+                self.cleanSshToolFile(sshTool)
+            except Exception as e:
+                self.logger.debug(str(e))
+                self.cleanSshToolFile(sshTool)
+        
+
+    def cleanSshToolFile(self, sshTool):
+        """
+        """
+        try:
+            sshTool.clenSshResultFiles()
+        except Exception as e:
+            self.logger.debug(str(e))
+
+    
     def checkNodesDetail(self):
         """
         """
@@ -858,10 +912,8 @@ Start to establish the primary-standby relationship.")
 
         self.installAndExpansion()
 
-        self.clearTmpFile()
-        
         self.logger.log("\nSuccess to expansion standby nodes.")
-    
+
 
 class GsCtlCommon:
 
@@ -893,7 +945,7 @@ class GsCtlCommon:
             dbStatus = ""
         else:
             dbStatus = db_state[0]
-        
+        self.cleanSshToolTmpFile(sshTool)
         return insType.strip().lower(), dbStatus.strip().lower()
 
     def stopInstance(self, host, datanode, env):
@@ -905,6 +957,7 @@ class GsCtlCommon:
         [host], env)
         self.logger.debug(host)
         self.logger.debug(outputCollect)
+        self.cleanSshToolTmpFile(sshTool)
     
     def startInstanceWithMode(self, host, datanode, mode, env):
         """
@@ -916,6 +969,7 @@ class GsCtlCommon:
         [host], env)
         self.logger.debug(host)
         self.logger.debug(outputCollect)
+        self.cleanSshToolTmpFile(sshTool)
 
     def buildInstance(self, host, datanode, mode, env):
         command = "source %s ; gs_ctl build -D %s -M %s" % (env, datanode, mode)
@@ -925,6 +979,7 @@ class GsCtlCommon:
         [host], env)
         self.logger.debug(host)
         self.logger.debug(outputCollect)
+        self.cleanSshToolTmpFile(sshTool)
 
     def startOmCluster(self, host, env):
         """
@@ -937,6 +992,7 @@ class GsCtlCommon:
         [host], env)
         self.logger.debug(host)
         self.logger.debug(outputCollect)
+        self.cleanSshToolTmpFile(sshTool)
     
     def queryOmCluster(self, host, env):
         """
@@ -949,6 +1005,16 @@ class GsCtlCommon:
         [host], env)
         self.logger.debug(host)
         self.logger.debug(outputCollect)
+        self.cleanSshToolTmpFile(sshTool)
         return outputCollect
+
+    def cleanSshToolTmpFile(self, sshTool):
+        """
+        """
+        try:
+            sshTool.clenSshResultFiles()
+        except Exception as e:
+            self.logger.debug(str(e))
+
 
 
