@@ -233,7 +233,7 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
         case OBJECT_RLSPOLICY:
             msg = gettext_noop("row level security policy \"%s\" for relation \"%s\" does not exist");
             name = pstrdup(strVal(llast(objname)));
-            args = strVal(linitial(objname));
+            args = NameListToString(list_truncate(list_copy(objname), list_length(objname) - 1));
             break;
         default:
             pfree_ext(message->data);
