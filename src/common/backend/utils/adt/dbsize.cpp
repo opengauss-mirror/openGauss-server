@@ -1765,6 +1765,62 @@ Datum pg_partition_filenode(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Get the pathname (relative to $PGDATA) of a partition
+ *
+ */
+Datum pg_partition_filepath(PG_FUNCTION_ARGS)
+{
+    Oid partRelId = PG_GETARG_OID(0);
+    HeapTuple tuple;
+    Form_pg_partition partRelForm;
+    RelFileNode rnode;
+    BackendId backend = InvalidBackendId;
+    char* path = NULL;
+
+    tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partRelId));
+    if (!HeapTupleIsValid(tuple))
+        PG_RETURN_NULL();
+    partRelForm = (Form_pg_partition)GETSTRUCT(tuple);
+
+    switch (partRelForm->parttype) {
+        case PARTTYPE_PARTITIONED_RELATION:
+        case PARTTYPE_VALUE_PARTITIONED_RELATION:
+            rnode.spcNode = ConvertToRelfilenodeTblspcOid(partRelForm->reltablespace);
+            if (rnode.spcNode == GLOBALTABLESPACE_OID) {
+                rnode.dbNode = InvalidOid;
+            } else {
+                rnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
+            }
+            if (partRelForm->relfilenode) {
+                rnode.relNode = partRelForm->relfilenode;
+            } else {
+                /* Consult the relation mapper */
+                rnode.relNode = RelationMapOidToFilenode(partRelId, false);
+            }
+            rnode.bucketNode = InvalidBktId;
+            break;
+
+        default:
+            /* no storage, return NULL */
+            rnode.relNode = InvalidOid;
+            /* some compilers generate warnings without these next two lines */
+            rnode.dbNode = InvalidOid;
+            rnode.spcNode = InvalidOid;
+            rnode.bucketNode = InvalidBktId;
+            break;
+    }
+
+    if (!OidIsValid(rnode.relNode)) {
+        ReleaseSysCache(tuple);
+        PG_RETURN_NULL();
+    }
+
+    ReleaseSysCache(tuple);
+    path = relpathbackend(rnode, backend, MAIN_FORKNUM);
+    PG_RETURN_TEXT_P(cstring_to_text(path));
+}
+
+/*
  * Get the pathname (relative to $PGDATA) of a relation
  *
  * See comments for pg_relation_filenode.

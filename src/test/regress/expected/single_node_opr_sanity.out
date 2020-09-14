@@ -1954,6 +1954,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3217 | cupointer_bigint
  3218 | pg_stat_bad_block
  3219 | pg_stat_bad_block_clear
+ 3220 | pg_partition_filepath
  3221 | pg_stat_get_tuples_changed
  3222 | pg_total_autovac_tuples
  3223 | pg_autovac_status
@@ -2677,7 +2678,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
  9999 | pg_test_err_contain_err
-(2276 rows)
+(2277 rows)
 
 -- Check prokind
 select count(*) from pg_proc where prokind = 'a';
@@ -2695,7 +2696,7 @@ select count(*) from pg_proc where prokind = 'w';
 select count(*) from pg_proc where prokind = 'f';
  count 
 -------
-  3150
+  3151
 (1 row)
 
 select count(*) from pg_proc where prokind = 'p';

@@ -426,4 +426,54 @@ select * from test_numeric order by id;
 -- drop table at last
 drop table test_null_repeat;
 drop table test_numeric;
+--test function pg_partition_filepath
+CREATE TABLE test_func_partition_filepath_table
+(
+    c1 int,
+    c2 int,
+    c3 int
+)
+partition by range (c1)
+(
+    partition p0_partition_filepath_table1 VALUES less than (10000),
+    partition p1_partition_filepath_table1 VALUES less than (20000),
+    partition p2_partition_filepath_table1 VALUES less than (30000),
+    partition p3_partition_filepath_table1 VALUES less than (maxvalue)
+);
+create or replace function func_get_partition_filepath(partname text) returns text as $$ 
+declare
+    partoid integer;
+    filepath text;
+begin
+    select oid from pg_partition where relname = partname into partoid;
+    select * from pg_partition_filepath(partoid) into filepath;
+    return filepath;
+end;
+$$ language plpgsql;
+select func_get_partition_filepath('p0_partition_filepath_table1');
+--? func_get_partition_filepath 
+--?.*
+--? base/.*/.*
+(1 row)
+
+select func_get_partition_filepath('p1_partition_filepath_table1');
+--? func_get_partition_filepath 
+--?.*
+--?.base/.*/.*
+(1 row)
+
+select func_get_partition_filepath('p2_partition_filepath_table1');
+--? func_get_partition_filepath 
+--?.*
+--? base/.*/.*
+(1 row)
+
+select func_get_partition_filepath('p3_partition_filepath_table1');
+--? func_get_partition_filepath 
+--?.*
+--? base/.*/.*
+(1 row)
+
+drop function func_get_partition_filepath;
+drop table test_func_partition_filepath_table;
 drop schema basefunc cascade;
