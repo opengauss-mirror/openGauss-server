@@ -57,6 +57,7 @@
 #include "getopt_long.h"
 #include "miscadmin.h"
 #include "bin/elog.h"
+#include "pgxc/nodemgr.h"
 
 #define PROG_NAME "gs_initdb"
 
@@ -248,6 +249,7 @@ static void setup_perfviews(void);
 static void setup_update(void);
 #ifdef PGXC
 static void setup_nodeself(void);
+static bool is_valid_nodename(const char* nodename);
 #endif
 static void setup_description(void);
 static void setup_collation(void);
@@ -1814,6 +1816,40 @@ static void setup_nodeself(void)
     PG_CMD_CLOSE;
 
     check_ok();
+}
+
+static bool is_valid_nodename(const char* nodename)
+{
+    /*
+     * The node name must contain lowercase letters (a-z), underscores (_),
+     * special characters #, digits (0-9), or dollar ($).
+     * 
+     * The node name must start with a lowercase letter (a-z), or an underscore (_).
+     * 
+     * The max length of nodename is 64.
+     */
+    int len = strlen(nodename);
+    if (len <= 0 || len > PGXC_NODENAME_LENGTH) {
+        return false;
+    }
+
+    for (int i = 0; i < len; i++) {
+        char c = nodename[i];
+        if (c == '_' || (c >= 'a' && c <= 'z')) {
+            continue;
+        }
+
+        if (i == 0) {
+            return false;
+        }
+
+        if ((c >= '0' && c <= '9') || c == '#' || c == '$') {
+            continue;
+        }
+
+        return false;
+    }
+    return true;
 }
 #endif
 
@@ -3444,6 +3480,15 @@ int main(int argc, char* argv[])
         write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
         exit(1);
     }
+
+    if (!is_valid_nodename(nodename)) {
+        write_stderr(_("%s: Postgres-XC node name:%s is invalid.\nThe node name must consist of lowercase letters "
+            "(a-z), underscores (_), special characters #, digits (0-9), or dollar ($).\n"
+            "The node name must start with a lowercase letter (a-z),"
+            " or an underscore (_).\nThe max length of nodename is %d.\n"), progname, nodename, PGXC_NODENAME_LENGTH);
+        exit(1);
+    }
+
 #endif
 
     check_authmethod_unspecified(&authmethodlocal);

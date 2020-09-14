@@ -1,0 +1,7 @@
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='single_node$#A999';
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='single_node$#!999';
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='#ingle_node$#999';
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='$ingle_node$#999';
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='9ingle_node$#999';
+--nodename's lenth is 64.
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='single_nodddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
