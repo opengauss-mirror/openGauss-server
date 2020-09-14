@@ -10807,6 +10807,9 @@ void lock_codegen_process_add()
 /* lock function for  g_instance.codegen_IRload_process_count Subtraction */
 void lock_codegen_process_sub(int count)
 {
+	if (count == 0) {
+		return;
+	}
     AutoMutexLock copyLock(&nodeDefCopyLock);
     copyLock.lock();
     g_instance.codegen_IRload_process_count = g_instance.codegen_IRload_process_count - count;
