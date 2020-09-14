@@ -20,12 +20,8 @@
 #############################################################################
 
 import os
-import pwd
 import sys
-import threading
-import uuid
-import subprocess
-import weakref
+
 
 sys.path.append(sys.path[0])
 from gspylib.common.DbClusterInfo import dbClusterInfo, \
@@ -61,6 +57,7 @@ class Expansion(ParallelBaseOM):
                     os.path.join(os.path.realpath(__file__), "../../"))
 
         self.standbyLocalMode = False
+        self.envFile = DefaultValue.getEnv("MPPDB_ENV_SEPARATE_PATH")
 
     def usage(self):
         """
@@ -142,6 +139,13 @@ General options:
         backIpList = clusterInfo.getClusterBackIps()
         nodeNameList = clusterInfo.getClusterNodeNames()
 
+        # only support single az now.
+        azNames = clusterInfo.getazNames()
+        self.azName = "AZ1"
+        if len(azNames) > 0:
+            self.azName = azNames[0]
+        
+        self.localIp = backIpList[0]
         self.nodeNameList = nodeNameList
         self.backIpNameMap = {}
         for backip in backIpList:
