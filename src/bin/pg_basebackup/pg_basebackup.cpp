@@ -247,7 +247,7 @@ static void tablespace_list_create()
     securec_check_c(rcm, "", "");
 }
 
-static void save_tablespace_dir(char* dir)
+static void save_tablespace_dir(const char* dir)
 {
     if (tblspaceDirectory != NULL) {
         tblspaceDirectory[tblspaceIndex] = xstrdup(dir);
@@ -1268,10 +1268,10 @@ static void BaseBackup(void)
                 tablespacepath);
             securec_check_ss_c(rc, "\0", "\0");
 
-            verify_dir_is_empty_or_create(nodetablespacepath);
-
+            const char* mappingSpacePath = get_tablespace_mapping(nodetablespacepath);
+            verify_dir_is_empty_or_create((char*)mappingSpacePath);
             /* Save the tablespace directory here so we can remove it when errors happen. */
-            save_tablespace_dir(nodetablespacepath);
+            save_tablespace_dir(mappingSpacePath);
         }
     }
 
