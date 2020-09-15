@@ -95,20 +95,20 @@ function mk_fastcheck
     chmod 755 configure
     if [ "${check_mode}" == "fastcheck_single" -o "${check_mode}" == "fastcheck_single_mot" ]; then
         if [ "${g_release_mode}" == "release" ]; then
-            log "openGauss" "Command: ./configure --prefix="${g_build_dir}" CC=g++  CFLAGS='-O2' --enable-thread-safety --without-readline --without-zlib --disable-debug --gcc-version=8.2.0"
-            ./configure --prefix="${g_build_dir}" CC=g++  CFLAGS='-O2' --enable-thread-safety --without-readline --without-zlib --disable-debug --gcc-version=8.2.0 >> ${g_log_file} 2>&1
+            log "openGauss" "Command: ./configure --prefix="${g_build_dir}" CC=g++  CFLAGS='-O2' --enable-thread-safety --with-readline --without-zlib --disable-debug --gcc-version=8.2.0"
+            ./configure --prefix="${g_build_dir}" CC=g++  CFLAGS='-O2' --enable-thread-safety --with-readline --without-zlib --disable-debug --gcc-version=8.2.0 >> ${g_log_file} 2>&1
         else
             log "openGauss" "Command: ./configure --prefix="${g_build_dir}" --enable-debug --enable-cassert CC=g++ CFLAGS='-g3 -O2 -w' --without-zlib --gcc-version=8.2.0 --3rd="${BINARYLIBS}""
             ./configure --prefix="${g_build_dir}" --enable-debug --enable-cassert CC=g++ CFLAGS='-g3 -O2 -w' --without-zlib --gcc-version=8.2.0 --3rd="${BINARYLIBS}" >> ${g_log_file} 2>&1
         fi
     else
         if [ "${g_release_mode}" == "release" ]; then
-            log "openGauss" "Command: ./configure --prefix="${g_build_dir}" CC=g++  CFLAGS='-O2' --enable-thread-safety --without-readline --without-zlib --disable-debug --gcc-version=8.2.0 "
-            ./configure --prefix="${g_build_dir}" CC=g++  CFLAGS='-O2' --enable-thread-safety --without-readline --without-zlib --disable-debug --gcc-version=8.2.0 >> ${g_log_file} 2>&1
+            log "openGauss" "Command: ./configure --prefix="${g_build_dir}" CC=g++  CFLAGS='-O2' --enable-thread-safety --with-readline --without-zlib --disable-debug --gcc-version=8.2.0 "
+            ./configure --prefix="${g_build_dir}" CC=g++  CFLAGS='-O2' --enable-thread-safety --with-readline --without-zlib --disable-debug --gcc-version=8.2.0 >> ${g_log_file} 2>&1
         else
             if [ "X${os_name}" == "Xopeneuler" ]; then
-                log "makemppdb" "Command: ./configure --prefix="${g_build_dir}" --enable-debug --enable-cassert --gcc-version=8.2.0 CC=g++ CFLAGS="-O2 -g3 -D__USE_NUMA" --enable-thread-safety --without-readline --without-zlib --3rd="${BINARYLIBS}""
-                ./configure --prefix="${g_build_dir}" --enable-debug --enable-cassert --gcc-version=8.2.0 CC=g++ CFLAGS="-O2 -g3 -D__USE_NUMA" --enable-thread-safety --without-readline --without-zlib --3rd="${BINARYLIBS}" >> ${g_log_file} 2>&1
+                log "makemppdb" "Command: ./configure --prefix="${g_build_dir}" --enable-debug --enable-cassert --gcc-version=8.2.0 CC=g++ CFLAGS="-O2 -g3 -D__USE_NUMA" --enable-thread-safety --with-readline --without-zlib --3rd="${BINARYLIBS}""
+                ./configure --prefix="${g_build_dir}" --enable-debug --enable-cassert --gcc-version=8.2.0 CC=g++ CFLAGS="-O2 -g3 -D__USE_NUMA" --enable-thread-safety --with-readline --without-zlib --3rd="${BINARYLIBS}" >> ${g_log_file} 2>&1
             else
                 log "openGauss" "Command: ./configure --prefix="${g_build_dir}" --enable-debug --enable-cassert CC=g++ CFLAGS='-g3 -O2 -w' --without-zlib --gcc-version=8.2.0 --3rd="${BINARYLIBS}""
                 ./configure --prefix="${g_build_dir}" --enable-debug --enable-cassert CC=g++ CFLAGS='-g3 -O2 -w' --without-zlib --gcc-version=8.2.0 --3rd="${BINARYLIBS}" >> ${g_log_file} 2>&1
