@@ -318,8 +318,8 @@ Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
     char* str_tmp_lsn = NULL;
     NameData databaseName;
 
-    (void)ValidateName(NameStr(*name));
-    (void)ValidateName(NameStr(*plugin));
+    ValidateName(NameStr(*name));
+    ValidateName(NameStr(*plugin));
     str_tmp_lsn = (char*)palloc0(128);
 
     check_permissions();
@@ -351,7 +351,7 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
 {
     Name name = PG_GETARG_NAME(0);
 
-    (void)ValidateName(NameStr(*name));
+    ValidateName(NameStr(*name));
 
     check_permissions();
 
@@ -718,7 +718,7 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
     Datum result;
     NameData database;
     char EndLsn[NAMEDATALEN];
-    (void)ValidateName(NameStr(*slotname));
+    ValidateName(NameStr(*slotname));
     if (RecoveryInProgress()) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("couldn't advance in recovery")));
     }
@@ -729,7 +729,7 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
             moveto = GetXLogReplayRecPtr(NULL);
     } else {
         const char* str_upto_lsn = TextDatumGetCString(PG_GETARG_DATUM(1));
-        (void)ValidateName(str_upto_lsn);
+        ValidateName(str_upto_lsn);
         if (!AssignLsn(&moveto, str_upto_lsn)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
