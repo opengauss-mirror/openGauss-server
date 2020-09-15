@@ -34,6 +34,8 @@ class CheckSctpService(BaseItem):
         (status, output) = subprocess.getstatusoutput(cmd)
         if (status != 0 or output == "" or output.find(
                 "No such file or directory") > 0):
+            if DefaultValue.checkDockerEnv():
+                return
             flag = "Error"
             parRes += "There is no sctp service."
         else:

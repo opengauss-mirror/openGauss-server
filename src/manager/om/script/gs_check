@@ -780,7 +780,7 @@ def parseCheckContext():
                 failedItems.append(i)
             else:
                 items_all.append(item)
-    for item in items_all:
+    for item in items_all[:]:
         if not g_context.set and item['name'] in g_opts.skipItems:
             items_all.remove(item)
             continue

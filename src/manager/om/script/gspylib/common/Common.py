@@ -495,7 +495,54 @@ class DefaultValue():
         "gs_rewind_stack": "gs_rewind_stack",
         "cm_server_stack": "cm_server_stack",
         "cm_agent_stack": "cm_agent_stack",
-        "gs_ctl_stack": "gs_ctl_stack"
+        "gs_ctl_stack": "gs_ctl_stack",
+        "AioWorker": "AioWorker",
+        "AlarmChecker": "AlarmChecker",
+        "Archiver": "Archiver",
+        "Auditor": "Auditor",
+        "AutoVacLauncher": "AutoVacLauncher",
+        "AutoVacWorker": "AutoVacWorker",
+        "AuxMain": "AuxMain",
+        "BackendMode": "BackendMode",
+        "BgWriter": "BgWriter",
+        "BootStrap": "BootStrap",
+        "Catchup": "Catchup",
+        "CBMWriter": "CBMWriter",
+        "Checkpointer": "Checkpointer",
+        "CommAuxStream": "CommAuxStream",
+        "CommPoolCleaner": "CommPoolCleaner",
+        "CommRcvStream": "CommRcvStream",
+        "CommRcvWorker": "CommRcvWorker",
+        "CommSendStream": "CommSendStream",
+        "CpMonitor": "CpMonitor",
+        "DataRcvWriter": "DataRcvWriter",
+        "DataReceiver": "DataReceiver",
+        "DataSender": "DataSender",
+        "ExtremeRTO": "ExtremeRTO",
+        "FencedUDFMaster": "FencedUDFMaster",
+        "GaussMaster": "GaussMaster",
+        "Heartbeater": "Heartbeater",
+        "JobExecutor": "JobExecutor",
+        "LWLockMonitor": "LWLockMonitor",
+        "PageWriter": "PageWriter",
+        "ParallelRecov": "ParallelRecov",
+        "PercentileJob": "PercentileJob",
+        "Reaper": "Reaper",
+        "RemoteSrv": "RemoteSrv",
+        "StartupProcess": "StartupProcess",
+        "StatCollector": "StatCollector",
+        "Stream": "Stream",
+        "SysLogger": "SysLogger",
+        "ThdPoolListener": "ThdPoolListener",
+        "TwoPhaseCleaner": "TwoPhaseCleaner",
+        "WalRcvWriter": "WalRcvWriter",
+        "WalReceiver": "WalReceiver",
+        "WalSender": "WalSender",
+        "WalWriter": "WalWriter",
+        "WDRSnapshot": "WDRSnapshot",
+        "WlmArbiter": "WlmArbiter",
+        "WlmCollector": "WlmCollector",
+        "WlmMonitor": "WlmMonitor"
     }
 
     COLLECT_CONF_MAP = {
@@ -508,7 +555,18 @@ class DefaultValue():
         "CoreDump": "gaussdb,gs_gtm,gs_rewind,cm_server,cm_agent,gs_ctl,"
                     "gaussdb_stack,gs_gtm_stack,gs_rewind_stack,"
                     "cm_server_stack,cm_agent_stack,cm_server_stack,"
-                    "gs_ctl_stack",
+                    "gs_ctl_stack,AioWorker,AlarmChecker,Archiver,Auditor,"
+                    "AutoVacLauncher,AutoVacWorker,AuxMain,BackendMode,"
+                    "BgWriter,BootStrap,Catchup,CBMWriter,Checkpointer,"
+                    "CommAuxStream,CommPoolCleaner,CommRcvStream,CommRcvWorker,"
+                    "CommSendStream,CpMonitor,DataRcvWriter,DataReceiver,"
+                    "DataSender,ExtremeRTO,FencedUDFMaster,GaussMaster,"
+                    "Heartbeater,JobExecutor,JobScheduler,LWLockMonitor,"
+                    "PageWriter,ParallelRecov,PercentileJob,Reaper,RemoteSrv,"
+                    "StartupProcess,StatCollector,Stream,SysLogger,"
+                    "ThdPoolListener,TwoPhaseCleaner,WalRcvWriter,WalReceiver,"
+                    "WalSender,WalWriter,WDRSnapshot,WlmArbiter,WlmCollector,"
+                    "WlmMonitor",
         "Trace": "Dump",
         "Plan": "*"
     }

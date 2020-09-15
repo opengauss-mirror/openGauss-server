@@ -866,6 +866,8 @@ def getNetWorkConfFile(networkCardNum):
                 output.find("No such file or directory") >= 0):
             return output.strip()
         if (output.strip() == "" or len(output.split('\n')) != 1):
+            if DefaultValue.checkDockerEnv():
+                return ""
             raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"]
                             % NetWorkConfFile)
         NetWorkConfFile = output.strip()
@@ -880,8 +882,8 @@ def CheckNetWorkBonding(serviceIP):
     """
     networkCardNum = getNICNum(serviceIP)
     NetWorkConfFile = getNetWorkConfFile(networkCardNum)
-    if (NetWorkConfFile.find("No such file or directory") >= 0
-            and DefaultValue.checkDockerEnv()):
+    if ((NetWorkConfFile.find("No such file or directory") >= 0
+         or NetWorkConfFile == "") and DefaultValue.checkDockerEnv()):
         return "Shell command faild"
     bondingConfFile = "/proc/net/bonding/%s" % networkCardNum
     networkCardNumList = [networkCardNum]
