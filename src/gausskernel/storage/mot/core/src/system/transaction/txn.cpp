@@ -516,11 +516,11 @@ void TxnManager::RollbackDDLs()
                 break;
             case DDL_ACCESS_TRUNCATE_TABLE:
                 indexArr = (MOTIndexArr*)ddl_access->GetEntry();
+                table = indexArr->GetTable();
+                table->WrLock();
                 if (indexArr->GetNumIndexes() > 0) {
                     MOT_ASSERT(indexArr->GetNumIndexes() == table->GetNumIndexes());
-                    table = indexArr->GetTable();
                     MOT_LOG_INFO("Rollback of truncate table %s", table->GetLongTableName().c_str());
-                    table->WrLock();
                     for (int idx = 0; idx < indexArr->GetNumIndexes(); idx++) {
                         uint16_t oldIx = indexArr->GetIndexIx(idx);
                         MOT::Index* oldIndex = indexArr->GetIndex(idx);
@@ -534,8 +534,9 @@ void TxnManager::RollbackDDLs()
                         index->Truncate(true);
                         delete index;
                     }
-                    table->Unlock();
                 }
+                table->ReplaceRowPool(indexArr->GetRowPool());
+                table->Unlock();
                 delete indexArr;
                 break;
             case DDL_ACCESS_CREATE_INDEX:
@@ -595,14 +596,15 @@ void TxnManager::CleanDDLChanges()
                 break;
             case DDL_ACCESS_TRUNCATE_TABLE:
                 indexArr = (MOTIndexArr*)ddl_access->GetEntry();
+                table = indexArr->GetTable();
                 if (indexArr->GetNumIndexes() > 0) {
-                    table = indexArr->GetTable();
                     table->m_rowCount = 0;
                     for (int i = 0; i < indexArr->GetNumIndexes(); i++) {
                         index = indexArr->GetIndex(i);
                         table->DeleteIndex(index);
                     }
                 }
+                table->FreeObjectPool(indexArr->GetRowPool());
                 delete indexArr;
                 break;
             case DDL_ACCESS_CREATE_INDEX:
@@ -1121,6 +1123,13 @@ RC TxnManager::TruncateTable(Table* table)
         if (ddl_access == nullptr) {
             MOT_REPORT_ERROR(MOT_ERROR_OOM, "Truncate Table", "Failed to allocate memory for DDL Access object");
             delete indexesArr;
+            return RC_MEMORY_ALLOCATION_ERROR;
+        }
+
+        if (!table->InitRowPool()) {
+            table->m_rowPool = indexesArr->GetRowPool();
+            delete indexesArr;
+            delete ddl_access;
             return RC_MEMORY_ALLOCATION_ERROR;
         }
 

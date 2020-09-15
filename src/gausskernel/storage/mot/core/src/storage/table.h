@@ -64,6 +64,7 @@ class alignas(CL_SIZE) Table : public Serializable {
     friend TxnManager;
     friend TxnInsertAction;
     friend MOT::Index;
+    friend MOT::MOTIndexArr;
     friend RecoveryManager;
     friend TxnDDLAccess;
 
@@ -825,6 +826,22 @@ public:
     Row* RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcManager* gc);
 
 private:
+    inline MOT::ObjAllocInterface* GetRowPool()
+    {
+        return m_rowPool;
+    }
+
+    inline void ReplaceRowPool(MOT::ObjAllocInterface* rowPool)
+    {
+        ObjAllocInterface::FreeObjPool(&m_rowPool);
+        m_rowPool = rowPool;
+    }
+
+    inline void FreeObjectPool(MOT::ObjAllocInterface* rowPool)
+    {
+        ObjAllocInterface::FreeObjPool(&rowPool);
+    }
+
     /** @var Global atomic table identifier. */
     static std::atomic<uint32_t> tableCounter;
 
