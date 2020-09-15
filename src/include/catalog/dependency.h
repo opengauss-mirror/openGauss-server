@@ -120,6 +120,9 @@ struct ObjectAddresses {
  * is the role mentioned in a policy object. The referenced object must be a
  * pg_authid entry.
  *
+ * (m) a SHARED_DEPENDENCY_MOT_TABLE entry means that the referenced object
+ * is the database holding FDW table. The dependent object must be a FDW table entry.
+ *
  * SHARED_DEPENDENCY_INVALID is a value used as a parameter in internal
  * routines, and is not valid in the catalog itself.
  */
@@ -128,6 +131,7 @@ typedef enum SharedDependencyType {
 	SHARED_DEPENDENCY_OWNER = 'o',
 	SHARED_DEPENDENCY_ACL = 'a',
 	SHARED_DEPENDENCY_RLSPOLICY = 'r',
+    SHARED_DEPENDENCY_MOT_TABLE = 'm',
 	SHARED_DEPENDENCY_INVALID = 0
 } SharedDependencyType;
 

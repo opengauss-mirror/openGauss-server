@@ -1887,8 +1887,8 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
     referenced.objectSubId = 0;
     recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 
-    //For external lookup when drop database
-    recordDependencyOnDatabase(ForeignTableRelationId, relid, server->serverid, u_sess->proc_cxt.MyDatabaseId);
+    // For external lookup when drop database
+    recordDependencyOnDatabase(RelationRelationId, relid, server->serverid, u_sess->proc_cxt.MyDatabaseId);
 
     if (errortableOid != InvalidOid) {
         /* Add dependency on error info table */
