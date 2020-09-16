@@ -9092,11 +9092,14 @@ static void CreateHaListenSocket(void)
 
     /* we should not reset pooler port if it is used */
     use_pooler_port = NeedPoolerPort();
-
-    Assert(t_thrd.postmaster_cxt.ReplConnArray[1] || t_thrd.postmaster_cxt.ReplConnArray[2] ||
-           t_thrd.postmaster_cxt.ReplConnArray[3] || t_thrd.postmaster_cxt.ReplConnArray[4] ||
-           t_thrd.postmaster_cxt.ReplConnArray[5] || t_thrd.postmaster_cxt.ReplConnArray[6] ||
-           t_thrd.postmaster_cxt.ReplConnArray[7]);
+    if (MAX_REPLNODE_NUM == 8)
+        Assert(t_thrd.postmaster_cxt.ReplConnArray[1] || t_thrd.postmaster_cxt.ReplConnArray[2] ||
+               t_thrd.postmaster_cxt.ReplConnArray[3] || t_thrd.postmaster_cxt.ReplConnArray[4] ||
+               t_thrd.postmaster_cxt.ReplConnArray[5] || t_thrd.postmaster_cxt.ReplConnArray[6] ||
+               t_thrd.postmaster_cxt.ReplConnArray[7]);
+    else if (MAX_REPLNODE_NUM == 5)
+        Assert(t_thrd.postmaster_cxt.ReplConnArray[1] || t_thrd.postmaster_cxt.ReplConnArray[2] ||
+               t_thrd.postmaster_cxt.ReplConnArray[3] || t_thrd.postmaster_cxt.ReplConnArray[4]);
 
     int ss_rc = memset_s(&newListenAddrs, sizeof(newListenAddrs), 0, sizeof(newListenAddrs));
     securec_check(ss_rc, "\0", "\0");
