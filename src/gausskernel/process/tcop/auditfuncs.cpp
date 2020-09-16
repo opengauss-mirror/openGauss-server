@@ -1000,6 +1000,7 @@ static void pgaudit_process_rename_object(Node* node, const char* querystring)
         case OBJECT_TRIGGER:
         case OBJECT_FOREIGN_SERVER:
         case OBJECT_RLSPOLICY:
+        case OBJECT_DATA_SOURCE:
             objectname = stmt->subname;
             break;
         case OBJECT_FUNCTION:
