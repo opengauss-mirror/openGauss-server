@@ -29,14 +29,14 @@ function fn_get_openGauss_tar()
         echo "We only support CentOS+x86 and openEuler+arm by now."
         return 1
     fi
-    if [ "`find ../ -maxdepth 1 -name "openGauss-1.0.0*tar.gz"`" == "" ]
+    if [ "`find $cur_path/../ -maxdepth 1 -name "openGauss-1.0.0*tar.gz"`" == "" ]
     then
         cd "$install_tar"
         if [ "`find . -maxdepth 1 -name "openGauss-1.0.0*tar.gz"`" == "" ]
         then
             url="https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.0/${system_arch}/openGauss-1.0.0-${system_name}-64bit.tar.gz"
             echo "Downloading openGauss tar from official website at ${install_tar}"
-            wget $url
+            wget $url --timeout=30 --tries=3
             if [ $? -ne 0 ]
             then
                 echo "wget error."
@@ -46,7 +46,7 @@ function fn_get_openGauss_tar()
             fi
         fi
     else
-        cp "../openGauss-1.0.0-${system_name}-64bit.tar.gz" "$install_tar"
+        cp "$cur_path/../openGauss-1.0.0-${system_name}-64bit.tar.gz" "$install_tar"
         if [ $? -ne 0 ]
         then
             echo "copy Installation package error."
@@ -65,15 +65,34 @@ function fn_create_file()
     user_name=$3
     host_port=$4
     install_location=$5
+    
+    mkdir -p $install_location
+    chmod -R 755 $install_location
+    chown -R $user_name:$user_grp $install_location
+
     install_location=${install_location//\//\\\/}
 
+    if [ ! -e $cur_path/template.xml ]
+    then
+        echo "cannot find template.xml"
+        return 1
+    fi
     sed 's/@{host_name}/'$host_name'/g' $cur_path/template.xml | sed 's/@{host_ip}/'$host_ip'/g' | sed 's/@{user_name}/'$user_name'/g' | sed 's/@{host_port}/'$host_port'/g' | sed 's/@{install_location}/'$install_location'/g' > $cur_path/single.xml
+    cp $cur_path/single.xml /home/$user_name/
     echo "create config file success."
     return 0
 }
 
 function fn_post_check()
 {
+    fn_check_user
+    if [ $? -ne 0 ]
+    then
+        echo "Check user failed."
+        return 1
+    else
+        echo "Check user success."
+    fi
     fn_check_input
     if [ $? -ne 0 ]
     then
@@ -121,7 +140,16 @@ function fn_check_input()
         echo "port $host_port occupied,please choose another."
         return 1
     fi
-    echo "Check input success."
+    return 0
+}
+
+function fn_check_user()
+{
+    if [ `id -u` -ne 0 ]
+    then
+        echo "Only a user with the root permission can run this script."
+        return 1
+    fi
     return 0
 }
 
@@ -136,7 +164,7 @@ function fn_install()
         echo "Get openGauss Installation package and tar package success."
     fi
     export LD_LIBRARY_PATH="${install_tar}/script/gspylib/clib:"$LD_LIBRARY_PATH
-    python3 "${install_tar}/script/gs_preinstall" -U $1 -G $2 -X $cur_path/single.xml --sep-env-file='/home/'$1'/env_single'
+    python3 "${install_tar}/script/gs_preinstall" -U $1 -G $2 -X '/home/'$1'/single.xml' --sep-env-file='/home/'$1'/env_single'
     if [ $? -ne 0 ]
     then
         echo "Preinstall failed."
@@ -144,9 +172,16 @@ function fn_install()
     else
         echo "Preinstall success."
     fi
-    chmod 755 -R $cur_path
-    chown -R $1:$2 $cur_path'/single.xml'
-    su - $1 -c "source /home/$1/env_single;gs_install -X $cur_path/single.xml"
+    chmod 755 "/home/$1/single.xml"
+    chown $1:$2 "/home/$1/single.xml"
+    su - $1 -c "source /home/$1/env_single;gs_install -X /home/$1/single.xml"
+    if [ $? -ne 0 ]
+    then
+        echo "Install failed."
+        return 1
+    else
+        echo "Install success."
+    fi
     return 0
 }
 
