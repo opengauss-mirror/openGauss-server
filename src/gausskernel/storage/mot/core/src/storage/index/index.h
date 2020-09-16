@@ -774,9 +774,20 @@ public:
         return m_table;
     }
 
+    void SetRowPool(MOT::ObjAllocInterface* rowPool)
+    {
+        m_rowPool = rowPool;
+    }
+
+    MOT::ObjAllocInterface* GetRowPool()
+    {
+        return m_rowPool;
+    }
+
 private:
     MOT::Index* m_indexArr[MAX_NUM_INDEXES];
     MOT::Table* m_table;
+    MOT::ObjAllocInterface* m_rowPool;
     uint16_t m_origIx[MAX_NUM_INDEXES];
     uint16_t m_numIndexes;
 };

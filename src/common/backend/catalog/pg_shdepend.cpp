@@ -40,7 +40,6 @@
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_ts_dict.h"
 #include "catalog/pg_type.h"
-#include "catalog/pg_foreign_table.h"
 #include "commands/dbcommands.h"
 #include "commands/collationcmds.h"
 #include "commands/conversioncmds.h"
@@ -98,7 +97,7 @@ void recordSharedDependencyOn(
     /*
      * Objects in pg_shdepend can't have SubIds.
      */
-    Assert(depender->classId == ForeignTableRelationId || depender->objectSubId == 0);
+    Assert(deptype == SHARED_DEPENDENCY_MOT_TABLE || depender->objectSubId == 0);
     Assert(referenced->objectSubId == 0);
 
     /*
@@ -160,7 +159,7 @@ void recordDependencyOnDatabase(Oid classId, Oid objectId, Oid serverId, Oid dat
     referenced.objectId = database;
     referenced.objectSubId = 0;
 
-    recordSharedDependencyOn(&myself, &referenced, SHARED_DEPENDENCY_OWNER, objfile);
+    recordSharedDependencyOn(&myself, &referenced, SHARED_DEPENDENCY_MOT_TABLE, objfile);
 }
 
 /*
@@ -764,7 +763,7 @@ void dropDatabaseDependencies(Oid databaseId)
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_shdepend shdepForm = (Form_pg_shdepend)GETSTRUCT(tup);
-        if (shdepForm->classid == ForeignTableRelationId && shdepForm->objsubid != 0) {
+        if (shdepForm->deptype == SHARED_DEPENDENCY_MOT_TABLE && shdepForm->objsubid != 0) {
             FdwRoutine* fdwRoutine = GetFdwRoutineByServerId(shdepForm->objsubid);
             /* forward drop stmt to fdw */
             if (fdwRoutine != NULL && fdwRoutine->GetFdwType != NULL &&
@@ -774,6 +773,7 @@ void dropDatabaseDependencies(Oid databaseId)
                 stmt.relkind = RELKIND_RELATION;
                 stmt.reloid = shdepForm->objid;
                 stmt.indexoid = 0;
+                stmt.name = "#FROM DROP DB#";
                 fdwRoutine->ValidateTableDef((Node*)&stmt);
             }
         }

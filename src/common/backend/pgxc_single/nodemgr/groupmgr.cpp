@@ -927,7 +927,9 @@ static List* PgxcGetRelationRoleList()
         shdepend = (Form_pg_shdepend)GETSTRUCT(tuple);
         if ((shdepend->classid != RelationRelationId && shdepend->classid != NamespaceRelationId &&
                 shdepend->classid != ProcedureRelationId) ||
-            (shdepend->deptype != SHARED_DEPENDENCY_OWNER && shdepend->deptype != SHARED_DEPENDENCY_ACL)) {
+            (shdepend->deptype != SHARED_DEPENDENCY_OWNER &&
+                shdepend->deptype != SHARED_DEPENDENCY_ACL &&
+                shdepend->deptype != SHARED_DEPENDENCY_MOT_TABLE)) {
             tuple = heap_getnext(scan, ForwardScanDirection);
             continue;
         }

@@ -502,6 +502,7 @@ MOTIndexArr::MOTIndexArr(MOT::Table* table)
 {
     m_numIndexes = 0;
     m_table = table;
+    m_rowPool = table->GetRowPool();
     errno_t erc = memset_s(m_indexArr, MAX_NUM_INDEXES * sizeof(MOT::Index*), 0, MAX_NUM_INDEXES * sizeof(MOT::Index*));
     securec_check(erc, "\0", "\0");
     erc = memset_s(m_origIx, MAX_NUM_INDEXES * sizeof(uint16_t), 0, MAX_NUM_INDEXES * sizeof(uint16_t));
