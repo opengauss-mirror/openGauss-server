@@ -1644,6 +1644,10 @@ static void WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner, bool allow_con
          *
          * Report change to non-waiting status
          */
+        if (t_thrd.storage_cxt.deadlock_state == DS_LOCK_TIMEOUT) {
+            pgstat_report_wait_lock_failed(PG_WAIT_LOCK | locallock->tag.lock.locktag_type);
+        }
+		
         pgstat_report_waitevent(WAIT_EVENT_END);
         if (u_sess->attr.attr_common.update_process_title) {
             set_ps_display(new_status, false);
