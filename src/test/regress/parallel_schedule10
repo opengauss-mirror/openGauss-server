@@ -77,3 +77,4 @@ test: with
 test: partition_foreign_key
 test: partition_trigger
 test: duplicate_column_index
+test: initdb

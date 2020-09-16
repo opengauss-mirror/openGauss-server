@@ -1,0 +1,31 @@
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='single_node$#A999';
+gs_initdb: Postgres-XC node name:single_node$#A999 is invalid.
+The node name must consist of lowercase letters (a-z), underscores (_), special characters #, digits (0-9), or dollar ($).
+The node name must start with a lowercase letter (a-z), or an underscore (_).
+The max length of nodename is 64.
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='single_node$#!999';
+gs_initdb: Postgres-XC node name:single_node$#!999 is invalid.
+The node name must consist of lowercase letters (a-z), underscores (_), special characters #, digits (0-9), or dollar ($).
+The node name must start with a lowercase letter (a-z), or an underscore (_).
+The max length of nodename is 64.
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='#ingle_node$#999';
+gs_initdb: Postgres-XC node name:#ingle_node$#999 is invalid.
+The node name must consist of lowercase letters (a-z), underscores (_), special characters #, digits (0-9), or dollar ($).
+The node name must start with a lowercase letter (a-z), or an underscore (_).
+The max length of nodename is 64.
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='$ingle_node$#999';
+gs_initdb: Postgres-XC node name:$ingle_node$#999 is invalid.
+The node name must consist of lowercase letters (a-z), underscores (_), special characters #, digits (0-9), or dollar ($).
+The node name must start with a lowercase letter (a-z), or an underscore (_).
+The max length of nodename is 64.
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='9ingle_node$#999';
+gs_initdb: Postgres-XC node name:9ingle_node$#999 is invalid.
+The node name must consist of lowercase letters (a-z), underscores (_), special characters #, digits (0-9), or dollar ($).
+The node name must start with a lowercase letter (a-z), or an underscore (_).
+The max length of nodename is 64.
+--nodename's lenth is 64.
+\! @abs_bindir@/gs_initdb -w 'openGauss@123' -D @cndata@/single_nod --nodename='single_nodddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+gs_initdb: Postgres-XC node name:single_nodddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd is invalid.
+The node name must consist of lowercase letters (a-z), underscores (_), special characters #, digits (0-9), or dollar ($).
+The node name must start with a lowercase letter (a-z), or an underscore (_).
+The max length of nodename is 64.
