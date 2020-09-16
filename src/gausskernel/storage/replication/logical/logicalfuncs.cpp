@@ -316,7 +316,7 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
     struct stat st;
 
     check_permissions();
-    (void)ValidateName(NameStr(*name));
+    ValidateName(NameStr(*name));
     if (RecoveryInProgress() && confirm)
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("couldn't advance in recovery")));
 
@@ -324,7 +324,7 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
         upto_lsn = InvalidXLogRecPtr;
     else {
         const char* str_upto_lsn = TextDatumGetCString(PG_GETARG_DATUM(1));
-        (void)ValidateName(str_upto_lsn);
+        ValidateName(str_upto_lsn);
         if (!AssignLsn(&upto_lsn, str_upto_lsn)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
@@ -386,7 +386,7 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
         for (i = 0; i < nelems; i += 2) {
             char* dname = TextDatumGetCString(datum_opts[i]);
             char* opt = TextDatumGetCString(datum_opts[i + 1]);
-            (void)ValidateName(dname);
+            ValidateName(dname);
             options = lappend(options, makeDefElem(dname, (Node*)makeString(opt)));
         }
     }

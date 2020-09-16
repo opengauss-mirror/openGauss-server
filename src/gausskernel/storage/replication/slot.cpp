@@ -156,7 +156,7 @@ bool ReplicationSlotValidateName(const char* name, int elevel)
  *
  * Returns whether the directory name is valid or not if elevel < ERROR.
  */
-bool ValidateName(const char* name)
+void ValidateName(const char* name)
 {
     if (name == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name should not be NULL.")));
@@ -164,10 +164,9 @@ bool ValidateName(const char* name)
 
     if (strlen(name) == 0) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name \"%s\" is too short", name)));
-        return false;
     }
 
-    if (strlen(name) >= NAMEDATALEN - 1) {
+    if (strlen(name) >= NAMEDATALEN) {
         ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("replication slot name \"%s\" is too long", name)));
     }
     const char* danger_character_list[] = {";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", "\n", NULL};
@@ -179,11 +178,8 @@ bool ValidateName(const char* name)
                 (errcode(ERRCODE_INVALID_NAME),
                     errmsg("replication slot name \"%s\" contains invalid character", name),
                     errhint("Replication slot names may only contain letters, numbers and the underscore character.")));
-            return false;
         }
     }
-
-    return true;
 }
 
 /*

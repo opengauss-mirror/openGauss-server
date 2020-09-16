@@ -1091,8 +1091,8 @@ static void CreateReplicationSlot(const CreateReplicationSlotCmd* cmd)
     slot_name = NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name);
 
     if (cmd->kind == REPLICATION_KIND_LOGICAL) {
-        (void)ValidateName(cmd->slotname);
-        (void)ValidateName(cmd->plugin);
+        ValidateName(cmd->slotname);
+        ValidateName(cmd->plugin);
         char* fullname = NULL;
         fullname = expand_dynamic_library_name(cmd->plugin);
 
