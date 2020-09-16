@@ -56,4 +56,6 @@ extern bool is_func_distinct_unshippable(Oid funcid);
 
 extern bool lockNextvalWalker(Node* node, void* context);
 
+struct PlanState;
+extern bool planstate_tree_walker(struct PlanState *planstate, bool (*walker)(), void *context);
 #endif /* NODEFUNCS_H */

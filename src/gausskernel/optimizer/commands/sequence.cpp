@@ -962,6 +962,14 @@ static int64 nextval_internal(Oid relid)
     /* read-only transactions may only modify temp sequences */
     if (!is_use_local_seq)
         PreventCommandIfReadOnly("nextval()");
+
+    /*
+     * Forbid this during parallel operation because, to make it work, the
+     * cooperating backends would need to share the backend-local cached
+     * sequence information.  Currently, we don't support that.
+     */
+    PreventCommandIfParallelMode("nextval()");
+
     if (elm->last != elm->cached) {
         /* some numbers were cached */
         Assert(elm->last_valid);
@@ -1360,6 +1368,13 @@ static void do_setval(Oid relid, int64 next, bool iscalled)
     if (!is_temp)
         PreventCommandIfReadOnly("setval()");
 #endif
+
+    /*
+     * Forbid this during parallel operation because, to make it work, the
+     * cooperating backends would need to share the backend-local cached
+     * sequence information.  Currently, we don't support that.
+     */
+    PreventCommandIfParallelMode("setval()");
 
     /* lock page' buffer and read tuple */
     GTM_UUID uuid;

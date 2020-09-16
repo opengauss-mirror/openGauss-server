@@ -1431,6 +1431,16 @@ char func_volatile(Oid funcid)
 }
 
 /*
+ * func_parallel
+ * 		Given procedure id, return the function's proparallel flag.
+ */
+char func_parallel(Oid funcid)
+{
+    /* Now we treat all func as parallel safe */
+    return PROPARALLEL_SAFE;
+}
+
+/*
  * get_func_proshippable
  *		Given procedure id, return the function's proshippable flag.
  */

@@ -20,6 +20,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/parallel.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #ifdef PGXC
@@ -2979,6 +2980,47 @@ Oid GetTempToastNamespace(void)
 }
 
 /*
+ * GetTempNamespaceState - fetch status of session's temporary namespace
+ *
+ * This is used for conveying state to a parallel worker, and is not meant
+ * for general-purpose access.
+ */
+void GetTempNamespaceState(Oid *tempNamespaceId, Oid *tempToastNamespaceId)
+{
+    /* Return namespace OIDs, or 0 if session has not created temp namespace */
+    *tempNamespaceId = u_sess->catalog_cxt.myTempNamespace;
+    *tempToastNamespaceId = u_sess->catalog_cxt.myTempToastNamespace;
+}
+
+/*
+ * SetTempNamespaceState - set status of session's temporary namespace
+ *
+ * This is used for conveying state to a parallel worker, and is not meant for
+ * general-purpose access.  By transferring these namespace OIDs to workers,
+ * we ensure they will have the same notion of the search path as their leader
+ * does.
+ */
+void SetTempNamespaceState(Oid tempNamespaceId, Oid tempToastNamespaceId)
+{
+    /* Worker should not have created its own namespaces ... */
+    Assert(u_sess->catalog_cxt.myTempNamespace == InvalidOid);
+    Assert(u_sess->catalog_cxt.myTempToastNamespace == InvalidOid);
+    Assert(u_sess->catalog_cxt.myTempNamespaceSubID == InvalidSubTransactionId);
+
+    /* Assign same namespace OIDs that leader has */
+    u_sess->catalog_cxt.myTempNamespace = tempNamespaceId;
+    u_sess->catalog_cxt.myTempToastNamespace = tempToastNamespaceId;
+
+    /*
+     * It's fine to leave myTempNamespaceSubID == InvalidSubTransactionId.
+     * Even if the namespace is new so far as the leader is concerned, it's
+     * not new to the worker, and we certainly wouldn't want the worker trying
+     * to destroy it.
+     */
+    u_sess->catalog_cxt.baseSearchPathValid = false; /* may need to rebuild list */
+}
+
+/*
  * GetOverrideSearchPath - fetch current search path definition in form
  * used by PushOverrideSearchPath.
  *
@@ -3622,6 +3664,12 @@ static void InitTempTableNamespace(void)
         ereport(ERROR,
             (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION), errmsg("cannot create temporary tables during recovery")));
 
+    /* Parallel workers can't create temporary tables, either. */
+    if (IsParallelWorker()) {
+        ereport(ERROR, (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
+            errmsg("cannot create temporary tables during a parallel operation")));
+    }
+
     timeLineId = get_controlfile_timeline();
     tempID = __sync_add_and_fetch(&gt_tempID_seed, 1);
 
@@ -3762,7 +3810,7 @@ static void InitTempTableNamespace(void)
 /*
  * End-of-transaction cleanup for namespaces.
  */
-void AtEOXact_Namespace(bool isCommit)
+void AtEOXact_Namespace(bool isCommit, bool parallel)
 {
     /*
      * If we abort the transaction in which a temp namespace was selected,
@@ -3772,7 +3820,7 @@ void AtEOXact_Namespace(bool isCommit)
      * at backend shutdown.  (We only want to register the callback once per
      * session, so this is a good place to do it.)
      */
-    if (u_sess->catalog_cxt.myTempNamespaceSubID != InvalidSubTransactionId) {
+    if (u_sess->catalog_cxt.myTempNamespaceSubID != InvalidSubTransactionId && !parallel) {
         //@Temp table. No need to register RemoveTempRelationsCallback here,
         // because we don't drop temp objects by porc_exit();
         if (!isCommit) {

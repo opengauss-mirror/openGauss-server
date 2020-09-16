@@ -85,6 +85,8 @@ typedef struct PlannedStmt {
 
     bool dependsOnRole; /* is plan specific to current role? */
 
+    bool parallelModeNeeded; /* parallel mode required to execute? */
+
     Plan* planTree; /* tree of Plan nodes */
 
     List* rtable; /* list of RangeTblEntry nodes */
@@ -241,6 +243,11 @@ typedef struct Plan {
     double multiple;
     int plan_width; /* average row width in bytes */
     int dop;        /* degree of parallelism of current plan */
+
+    /*
+     * information needed for parallel query
+     */
+    bool parallel_aware; /* engage parallel-aware logic? */
 
     /*
      * machine learning model estimations
@@ -1143,6 +1150,16 @@ typedef struct Unique {
     AttrNumber* uniqColIdx; /* their indexes in the target list */
     Oid* uniqOperators;     /* equality operators to compare with */
 } Unique;
+
+/* ------------
+ * 		gather node
+ * ------------
+ */
+typedef struct Gather {
+    Plan plan;
+    int num_workers;
+    bool single_copy;
+} Gather;
 
 /* ----------------
  *		hash build node

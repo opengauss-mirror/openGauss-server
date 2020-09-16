@@ -108,7 +108,8 @@ typedef enum {
     DestBatchLocalRedistribute, /* results send to consumer thread in a local redistribute way */
     DestBatchLocalRoundRobin,   /* results send to consumer thread in a local roundrobin way */
 
-    DestBatchHybrid
+    DestBatchHybrid,
+    DestTupleQueue              /* results sent to tuple queue */
 
 } CommandDest;
 

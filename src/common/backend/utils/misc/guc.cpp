@@ -67,6 +67,7 @@
 #include "parser/parser.h"
 #include "parser/scansup.h"
 #include "pgstat.h"
+#include "postmaster/bgworker_internals.h"
 #include "workload/workload.h"
 #include "pgaudit.h"
 #include "instruments/instr_unique_sql.h"
@@ -909,6 +910,19 @@ static const struct config_enum_entry synchronous_commit_options[] = {{"local", 
     {"2", SYNCHRONOUS_COMMIT_REMOTE_REPLAY, false},
     {"remote_apply", SYNCHRONOUS_COMMIT_REMOTE_REPLAY, false},
     {NULL, 0, false}};
+
+static const struct config_enum_entry force_parallel_mode_options[] = {
+    {"off", FORCE_PARALLEL_OFF, false},
+    {"on", FORCE_PARALLEL_ON, false},
+    {"regress", FORCE_PARALLEL_REGRESS, false},
+    {"true", FORCE_PARALLEL_ON, true},
+    {"false", FORCE_PARALLEL_OFF, true},
+    {"yes", FORCE_PARALLEL_ON, true},
+    {"no", FORCE_PARALLEL_OFF, true},
+    {"1", FORCE_PARALLEL_ON, true},
+    {"0", FORCE_PARALLEL_OFF, true},
+    {NULL, 0, false}
+};
 
 static const struct config_enum_entry plan_cache_mode_options[] = {
     {"auto", PLAN_CACHE_MODE_AUTO, false},
@@ -4549,6 +4563,20 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
+        {
+            {
+                "parallel_leader_participation",
+                PGC_USERSET,
+                RESOURCES_ASYNCHRONOUS,
+                gettext_noop("Controls whether Gather and Gather Merge also run subplans."),
+                gettext_noop("Should gather nodes also run subplans, or just gather tuples?")
+            },
+            &u_sess->attr.attr_sql.parallel_leader_participation,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {
             {
@@ -7305,6 +7333,24 @@ static void init_configure_names_int()
             NULL
         },
         {
+            {
+                "min_parallel_table_scan_size",
+                PGC_USERSET,
+                QUERY_TUNING_COST,
+                gettext_noop("Sets the minimum amount of table data for a parallel scan."),
+                gettext_noop("If the planner estimates that it will read a number of table "
+                    "pages too small to reach this limit, a parallel scan will not be considered."),
+                GUC_UNIT_BLOCKS,
+            },
+            &u_sess->attr.attr_sql.min_parallel_table_scan_size,
+            (8 * 1024 * 1024) / BLCKSZ,
+            0,
+            INT_MAX / 3,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
             /* Can't be set in postgresql.conf */
             {
                 "server_version_num",
@@ -9183,6 +9229,38 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
+        {
+            {
+                "max_parallel_workers",
+                PGC_USERSET,
+                RESOURCES_ASYNCHRONOUS,
+                gettext_noop("Sets the maximum number of parallel workers that can be active at one time."),
+                NULL
+            },
+            &g_instance.attr.attr_common.max_parallel_workers,
+            8,
+            0,
+            MAX_PARALLEL_WORKER_LIMIT,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+                "max_parallel_workers_per_gather",
+                PGC_USERSET,
+                RESOURCES_ASYNCHRONOUS,
+                gettext_noop("Sets the maximum number of parallel processes per executor node."),
+                NULL
+            },
+            &g_instance.attr.attr_common.max_parallel_workers_per_gather,
+            2,
+            0,
+            MAX_PARALLEL_WORKER_LIMIT,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {
             {
@@ -9332,6 +9410,40 @@ static void init_configure_names_real()
             NULL
         },
 #endif
+        {
+            {
+                "parallel_tuple_cost",
+                PGC_USERSET,
+                QUERY_TUNING_COST,
+                gettext_noop("Sets the planner's estimate of the cost of "
+                    "passing each tuple (row) from worker to master backend."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.parallel_tuple_cost,
+            DEFAULT_PARALLEL_TUPLE_COST,
+            0,
+            DBL_MAX,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+                "parallel_setup_cost",
+                PGC_USERSET,
+                QUERY_TUNING_COST,
+                gettext_noop("Sets the planner's estimate of the cost of "
+                    "starting up worker processes for parallel query."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.parallel_setup_cost,
+            DEFAULT_PARALLEL_SETUP_COST,
+            0,
+            DBL_MAX,
+            NULL,
+            NULL,
+            NULL
+        },
         {
             {
                 "cursor_tuple_fraction",
@@ -11735,6 +11847,21 @@ static void init_configure_names_enum()
             NULL
         },
 #endif
+        {
+            {
+                "force_parallel_mode",
+                PGC_USERSET,
+                QUERY_TUNING_OTHER,
+                gettext_noop("Forces use of parallel query facilities."),
+                gettext_noop("If possible, run query using a parallel worker and with parallel restrictions.")
+            },
+            &u_sess->attr.attr_sql.force_parallel_mode,
+            FORCE_PARALLEL_OFF,
+            force_parallel_mode_options,
+            NULL,
+            NULL,
+            NULL
+        },
         {
             {
                 "plan_cache_mode",
@@ -14667,6 +14794,20 @@ int set_config_option(const char* name, const char* value, GucContext context, G
         }
     }
 
+    /*
+     * GUC_ACTION_SAVE changes are acceptable during a parallel operation,
+     * because the current worker will also pop the change.  We're probably
+     * dealing with a function having a proconfig entry.  Only the function's
+     * body should observe the change, and peer workers do not share in the
+     * execution of a function call started by this worker.
+     *
+     * Other changes might need to affect other workers, so forbid them.
+     */
+    if (IsInParallelMode() && changeVal && action != GUC_ACTION_SAVE) {
+        ereport(elevel,
+            (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("cannot set parameters during a parallel operation")));
+    }
+
     record = find_option(name, true, elevel);
     if (record == NULL) {
         ereport(
@@ -15900,6 +16041,15 @@ void ExecSetVariableStmt(VariableSetStmt* stmt)
     char* role = NULL;
     char* passwd = NULL;
     ListCell* phead = NULL;
+
+    /*
+     * Workers synchronize these parameters at the start of the parallel
+     * operation; then, we block SET during the operation.
+     */
+    if (IsInParallelMode()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("cannot set parameters during a parallel operation")));
+    }
 
     switch (stmt->kind) {
         case VAR_SET_VALUE:

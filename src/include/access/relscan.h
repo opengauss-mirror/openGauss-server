@@ -21,6 +21,27 @@
 
 #define PARALLEL_SCAN_GAP 100
 
+/*
+ * Shared state for parallel heap scan.
+ *
+ * Each backend participating in a parallel heap scan has its own
+ * HeapScanDesc in backend-private memory, and those objects all contain
+ * a pointer to this structure.  The information here must be sufficient
+ * to properly initialize each new HeapScanDesc as workers join the scan,
+ * and it must act as a font of block numbers for those workers.
+ */
+typedef struct ParallelHeapScanDescData {
+    int plan_node_id;                /* used to identify speicific plan */
+    Oid phs_relid;                   /* OID of relation to scan */
+    bool phs_syncscan;               /* report location to syncscan logic? */
+    BlockNumber phs_nblocks;         /* # blocks in relation at start of scan */
+    slock_t phs_mutex;               /* mutual exclusion for setting startblock */
+    BlockNumber phs_startblock;      /* starting block number */
+    pg_atomic_uint64 phs_nallocated; /* number of blocks allocated to workers so far. */
+    uint32 pscan_len;                /* total size of this struct, including phs_snapshot_data */
+    char phs_snapshot_data[FLEXIBLE_ARRAY_MEMBER];
+} ParallelHeapScanDescData;
+
 /* ----------------------------------------------------------------
  *				 Scan State Information
  * ----------------------------------------------------------------
@@ -62,18 +83,17 @@ typedef struct HeapScanDescData {
     Snapshot rs_snapshot; /* snapshot to see */
     int rs_nkeys;         /* number of scan keys */
     ScanKey rs_key;       /* array of scan key descriptors */
-    bool rs_bitmapscan;   /* true if this is really a bitmap scan */
-    bool rs_samplescan;   /* true if this is really a sample scan */
-    bool rs_pageatatime;  /* verify visibility page-at-a-time? */
-    bool rs_allow_strat;  /* allow or disallow use of access strategy */
-    bool rs_allow_sync;   /* allow or disallow use of syncscan */
+    /*
+     * Information about type and behaviour of the scan, a bitmask of members
+     * of the ScanOptions enum (see tableam.h).
+     */
+    uint32 rs_flags;
 
     /* state set up at initscan time */
     BlockNumber rs_nblocks;           /* number of blocks to scan */
     BlockNumber rs_startblock;        /* block # to start at */
     BufferAccessStrategy rs_strategy; /* access strategy for reads */
     bool rs_syncscan;                 /* report location to syncscan logic? */
-    bool rs_isRangeScanInRedis;       /* if it is a range scan in redistribution */
 
     /* scan current state */
     bool rs_inited;        /* false = scan not init'd yet */
@@ -82,6 +102,7 @@ typedef struct HeapScanDescData {
     Buffer rs_cbuf;        /* current buffer in scan, if any */
     /* NB: if rs_cbuf is not InvalidBuffer, we hold a pin on that buffer */
     ItemPointerData rs_mctid; /* marked scan position, if any */
+    ParallelHeapScanDesc rs_parallel; /* parallel scan information */
 
     /* these fields only used in page-at-a-time mode and for bitmap scans */
     int rs_cindex;                                   /* current tuple's index in vistuples */

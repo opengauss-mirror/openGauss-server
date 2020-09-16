@@ -4334,6 +4334,11 @@ static void SetReindexPending(List* indexes)
     /* Reindexing is not re-entrant. */
     if (u_sess->catalog_cxt.pendingReindexedIndexes)
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("cannot reindex while reindexing")));
+
+    if (IsInParallelMode()) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("cannot modify reindex state during a parallel operation")));
+    }
     u_sess->catalog_cxt.pendingReindexedIndexes = list_copy(indexes);
 }
 
@@ -4343,6 +4348,10 @@ static void SetReindexPending(List* indexes)
  */
 static void RemoveReindexPending(Oid indexOid)
 {
+    if (IsInParallelMode()) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("cannot modify reindex state during a parallel operation")));
+    }
     u_sess->catalog_cxt.pendingReindexedIndexes =
         list_delete_oid(u_sess->catalog_cxt.pendingReindexedIndexes, indexOid);
 }

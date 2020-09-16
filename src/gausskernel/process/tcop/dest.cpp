@@ -36,6 +36,7 @@
 #include "commands/matview.h"
 #include "executor/functions.h"
 #include "executor/spi.h"
+#include "executor/tqueue.h"
 #include "executor/tstoreReceiver.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
@@ -149,6 +150,8 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
         case DestBatchLocalRoundRobin:
         case DestBatchHybrid:
             return createStreamDestReceiver(dest);
+        case DestTupleQueue:
+            return CreateTupleQueueDestReceiver(NULL);
         default:
             break;
     }
@@ -187,6 +190,7 @@ void EndCommand(const char* commandTag, CommandDest dest)
         case DestCopyOut:
         case DestSQLFunction:
         case DestTransientRel:
+        case DestTupleQueue:
         default:
             break;
     }
@@ -217,6 +221,7 @@ void EndCommand_noblock(const char* commandTag, CommandDest dest)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
+        case DestTupleQueue:
         default:
             break;
     }
@@ -264,6 +269,7 @@ void NullCommand(CommandDest dest)
         case DestCopyOut:
         case DestSQLFunction:
         case DestTransientRel:
+        case DestTupleQueue:
         default:
             break;
     }
@@ -312,6 +318,7 @@ void ReadyForQuery(CommandDest dest)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
+        case DestTupleQueue:
         default:
             break;
     }
@@ -346,6 +353,7 @@ void ReadyForQuery_noblock(CommandDest dest, int timeout)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
+        case DestTupleQueue:
         default:
             break;
     }

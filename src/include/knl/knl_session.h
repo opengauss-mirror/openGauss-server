@@ -45,6 +45,7 @@
 #include <signal.h>
 
 #include "c.h"
+#include "access/heapam.h"
 #include "datatype/timestamp.h"
 #include "gs_thread.h"
 #include "knl/knl_guc.h"
@@ -59,9 +60,13 @@
 #include "storage/backendid.h"
 #include "storage/s_lock.h"
 #include "storage/shmem.h"
+#include "storage/predicate.h"
+#include "postmaster/bgworker.h"
+#include "storage/dsm.h"
 #include "utils/palloc.h"
 
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
+
 
 /* all session level attribute which expose to user. */
 typedef struct knl_session_attr {
@@ -2036,6 +2041,63 @@ typedef struct knl_u_ext_fdw_context {
     pg_on_exit_callback fdwExitFunc;    /* Exit callback, will be called when session exit */
 } knl_u_ext_fdw_context;
 
+/* Info need to pass from leader to worker */
+typedef struct ParallelInfoContext {
+    Oid database_id;
+    Oid authenticated_user_id;
+    Oid current_user_id;
+    Oid outer_user_id;
+    Oid temp_namespace_id;
+    Oid temp_toast_namespace_id;
+    int sec_context;
+    bool is_superuser;
+    void *parallel_master_pgproc; /* PGPROC */
+    ThreadId parallel_master_pid;
+    BackendId parallel_master_backend_id;
+    TimestampTz xact_ts;
+    TimestampTz stmt_ts;
+    char *pstmt_space;
+    char *param_space;
+    Size param_len;
+    int pscan_num;
+    ParallelHeapScanDesc *pscan;
+    int usedComboCids;
+    int sizeComboCids;
+    HTAB *comboHash;
+    struct ComboCidKeyData *comboCids;
+    char *tsnapspace;
+    Size tsnapspace_len;
+    char *asnapspace;
+    Size asnapspace_len;
+    struct RelMapFile *active_shared_updates;
+    struct RelMapFile *active_local_updates;
+    char *errorQueue;
+    int xactIsoLevel;
+    bool xactDeferrable;
+    TransactionId topTransactionId;
+    TransactionId currentTransactionId;
+    CommandId currentCommandId;
+    int nParallelCurrentXids;
+    TransactionId *ParallelCurrentXids;
+    char *library_name;
+    char *function_name;
+    BufferUsage *bufUsage;
+    char *tupleQueue;
+    struct SharedExecutorInstrumentation *instrumentation;
+    char *namespace_search_path;
+
+    /* Mutex protects remaining fields. */
+    slock_t mutex;
+    /* Maximum XactLastRecEnd of any worker. */
+    XLogRecPtr last_xlog_end;
+} ParallelInfoContext;
+
+typedef struct knl_u_parallel_context {
+    ParallelInfoContext *pwCtx;
+    MemoryContext memCtx;
+    bool used;
+} knl_u_parallel_context;
+
 enum knl_session_status {
     KNL_SESS_FAKE,
     KNL_SESS_UNINIT,
@@ -2131,6 +2193,9 @@ typedef struct knl_session_context {
 
     /* external FDW */
     knl_u_ext_fdw_context ext_fdw_ctx[MAX_TYPE_FDW];
+
+    /* parallel query context */
+    knl_u_parallel_context parallel_ctx[DSM_MAX_ITEM_PER_QUERY];
 } knl_session_context;
 
 extern knl_session_context* create_session_context(MemoryContext parent, uint64 id);

@@ -11,6 +11,8 @@
  *	cpu_tuple_cost		Cost of typical CPU time to process a tuple
  *	cpu_index_tuple_cost  Cost of typical CPU time to process an index tuple
  *	cpu_operator_cost	Cost of CPU time to execute an operator or function
+ *	parallel_tuple_cost Cost of CPU time to pass a tuple from worker to master backend
+ *	parallel_setup_cost Cost of setting up shared memory for parallelism
  *
  * We expect that the kernel will typically do some amount of read-ahead
  * optimization; this in conjunction with seek costs means that seq_page_cost
@@ -157,6 +159,7 @@ void init_plan_cost(Plan* plan)
     plan->pred_startup_time = -1.0;
     plan->pred_total_time = -1.0;
     plan->pred_max_memory = -1;
+    plan->parallel_aware = false;
 }
 
 static inline void get_info_from_rel(
@@ -669,7 +672,7 @@ static void set_parallel_path_rows(Path* path)
  * 'baserel' is the relation to be scanned
  * 'param_info' is the ParamPathInfo if this is a parameterized path, else NULL
  */
-void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info)
+void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info, int nworkers)
 {
     Cost startup_cost = 0;
     Cost run_cost = 0;
@@ -702,6 +705,17 @@ void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathI
     run_cost += spc_seq_page_cost * baserel->pages / dop;
     cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
     run_cost += cpu_per_tuple * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples) / dop;
+
+    /*
+     * Primitive parallel cost model.  Assume the leader will do half as much
+     * work as a regular worker, because it will also need to read the tuples
+     * returned by the workers when they percolate up to the gather ndoe.
+     * This is almost certainly not exactly the right way to model this, so
+     * this will probably need to be changed at some point...
+     */
+    if (nworkers > 0) {
+        run_cost = run_cost / (nworkers + 0.5);
+    }
 
     path->startup_cost = startup_cost;
     path->total_cost = startup_cost + run_cost;
@@ -944,6 +958,36 @@ void cost_tsstorescan(Path *path, PlannerInfo *root, RelOptInfo *baserel)
         path->total_cost *= 
             (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
     }
+}
+
+/*
+ * cost_gather
+ * 	  Determines and returns the cost of gather path.
+ *
+ * 'rel' is the relation to be operated upon
+ * 'param_info' is the ParamPathInfo if this is a parameterized path, else NULL
+ */
+void cost_gather(GatherPath *path, RelOptInfo *rel, ParamPathInfo *param_info)
+{
+    Cost startup_cost = 0;
+    Cost run_cost = 0;
+
+    /* Mark the path with the correct row estimate */
+    if (param_info)
+        path->path.rows = param_info->ppi_rows;
+    else
+        path->path.rows = rel->rows;
+
+    startup_cost = path->subpath->startup_cost;
+
+    run_cost = path->subpath->total_cost - path->subpath->startup_cost;
+
+    /* Parallel setup and communication cost. */
+    startup_cost += u_sess->attr.attr_sql.parallel_setup_cost;
+    run_cost += u_sess->attr.attr_sql.parallel_tuple_cost * path->path.rows;
+
+    path->path.startup_cost = startup_cost;
+    path->path.total_cost = (startup_cost + run_cost);
 }
 
 /*

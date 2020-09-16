@@ -28,6 +28,26 @@
 #include "utils/snapshot.h"
 #include "nodes/execnodes.h"
 
+/*
+ * Bitmask values for the flags argument to the scan_begin callback.
+ */
+typedef enum ScanOptions {
+    /* true if this is really a bitmap scan */
+    SO_TYPE_BITMAPSCAN = 1 << 1,
+    /* true if this is really a sample scan */
+    SO_TYPE_SAMPLESCAN = 1 << 2,
+    /* if it is a range scan in redistribution */
+    SO_TYPE_RANGESCAN = 1 << 3,
+    /* verify visibility page-at-a-time? */
+    SO_ALLOW_PAGEMODE = 1 << 4,
+    /* allow or disallow use of access strategy */
+    SO_ALLOW_STRAT = 1 << 5,
+    /* allow or disallow use of syncscan */
+    SO_ALLOW_SYNC = 1 << 6,
+    /* unregister snapshot at scan end? */
+    SO_TEMP_SNAPSHOT = 1 << 7
+} ScanOptions;
+
 extern bool reset_scan_qual(Relation currHeapRel, ScanState * node);
 
 

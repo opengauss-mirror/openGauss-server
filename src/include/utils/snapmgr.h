@@ -14,6 +14,7 @@
 #define SNAPMGR_H
 
 #include "utils/resowner.h"
+#include "utils/snapshot.h"
 
 extern Snapshot GetTransactionSnapshot(bool force_local_snapshot = false);
 extern Snapshot GetLatestSnapshot(void);
@@ -59,4 +60,10 @@ extern struct HTAB* HistoricSnapshotGetTupleCids(void);
 extern void SetupHistoricSnapshot(Snapshot snapshot_now, struct HTAB* tuplecids);
 extern void TeardownHistoricSnapshot(bool is_error);
 extern bool HistoricSnapshotActive(void);
+
+extern Size EstimateSnapshotSpace(Snapshot snapshot);
+extern void SerializeSnapshot(Snapshot snapshot, char *start_address, Size len);
+extern Snapshot RestoreSnapshot(char *start_address, Size len);
+extern void RestoreTransactionSnapshot(Snapshot snapshot, void *master_pgproc);
+
 #endif /* SNAPMGR_H */

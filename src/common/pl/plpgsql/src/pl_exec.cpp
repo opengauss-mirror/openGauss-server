@@ -150,7 +150,8 @@ static void exec_eval_datum(
 static int exec_eval_integer(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool* isNull);
 static bool exec_eval_boolean(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool* isNull);
 static Datum exec_eval_expr(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool* isNull, Oid* rettype);
-static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples, Portal* portalP);
+static int exec_run_select(PLpgSQL_execstate *estate, PLpgSQL_expr *expr, long maxtuples, Portal *portalP,
+    bool parallelOK);
 static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Portal portal, bool prefetch_ok, int dno);
 static ParamListInfo setup_param_list(PLpgSQL_execstate* estate, PLpgSQL_expr* expr);
 static void plpgsql_param_fetch(ParamListInfo params, int paramid);
@@ -2164,7 +2165,7 @@ static int exec_stmt_perform(PLpgSQL_execstate* estate, PLpgSQL_stmt_perform* st
     if (!RecoveryInProgress())
         oldTransactionId = GetTopTransactionId();
 
-    rc = exec_run_select(estate, expr, 0, NULL);
+    rc = exec_run_select(estate, expr, 0, NULL, true);
     if (rc != SPI_OK_SELECT) {
         ereport(DEBUG1,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmodule(MOD_PLSQL), errmsg("exec_run_select returns %d", rc)));
@@ -2708,7 +2709,7 @@ static int exec_stmt_fors(PLpgSQL_execstate* estate, PLpgSQL_stmt_fors* stmt)
     /*
      * Open the implicit cursor for the statement using exec_run_select
      */
-    rc = exec_run_select(estate, stmt->query, 0, &portal);
+    rc = exec_run_select(estate, stmt->query, 0, &portal, false);
     if (rc != SPI_OK_SELECT) {
         ereport(DEBUG1,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmodule(MOD_PLSQL), errmsg("exec_run_select returns %d", rc)));
@@ -3206,7 +3207,7 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
 
     if (stmt->expr != NULL) {
         if (estate->retistuple) {
-            exec_run_select(estate, stmt->expr, 1, NULL);
+            exec_run_select(estate, stmt->expr, 1, NULL, true);
             if (estate->eval_processed > 0) {
                 estate->retval = PointerGetDatum(estate->eval_tuptable->vals[0]);
                 estate->rettupdesc = estate->eval_tuptable->tupdesc;
@@ -3398,11 +3399,11 @@ static int exec_stmt_return_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_return
 
     if (stmt->query != NULL) {
         /* static query */
-        exec_run_select(estate, stmt->query, 0, &portal);
+        exec_run_select(estate, stmt->query, 0, &portal, true);
     } else {
         /* RETURN QUERY EXECUTE */
         AssertEreport(stmt->dynquery != NULL, MOD_PLSQL, "stmt's dynamic query is required.");
-        portal = exec_dynquery_with_params(estate, stmt->dynquery, stmt->params, NULL, 0);
+        portal = exec_dynquery_with_params(estate, stmt->dynquery, stmt->params, NULL, CURSOR_OPT_PARALLEL_OK);
     }
 
     tupmap = convert_tuples_by_position(
@@ -6222,7 +6223,7 @@ static Datum exec_eval_expr(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool*
     /*
      * Else do it the hard way via exec_run_select
      */
-    rc = exec_run_select(estate, expr, 2, NULL);
+    rc = exec_run_select(estate, expr, 2, NULL, false);
     if (rc != SPI_OK_SELECT) {
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -6279,7 +6280,8 @@ static Datum exec_eval_expr(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool*
  * exec_run_select			Execute a select query
  * ----------
  */
-static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples, Portal* portalP)
+static int exec_run_select(PLpgSQL_execstate *estate, PLpgSQL_expr *expr, long maxtuples, Portal *portalP,
+    bool parallelOK)
 {
     ParamListInfo paramLI;
     int rc;
@@ -6288,7 +6290,7 @@ static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long m
      * On the first call for this expression generate the plan
      */
     if (expr->plan == NULL) {
-        exec_prepare_plan(estate, expr, 0);
+        exec_prepare_plan(estate, expr, parallelOK ? CURSOR_OPT_PARALLEL_OK : 0);
     }
 
     /*
@@ -6711,6 +6713,11 @@ static ParamListInfo setup_param_list(PLpgSQL_execstate* estate, PLpgSQL_expr* e
         paramLI->parserSetupArg = (void*)expr;
         paramLI->params_need_process = false;
         paramLI->numParams = estate->ndatums;
+        /*
+         * Allow parameters that aren't needed by this expression to be
+         * ignored.
+         */
+        paramLI->paramMask = expr->paramnos;
 
         /* Instantiate values for "safe" parameters of the expression */
         tmpset = bms_copy(expr->paramnos);

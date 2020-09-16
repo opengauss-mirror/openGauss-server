@@ -22,6 +22,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_partition.h"
 #include "catalog/pg_partition_fn.h"
+#include "catalog/pg_proc.h"
 #include "foreign/fdwapi.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
@@ -65,6 +66,7 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
 static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_tablesample_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
+static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte);
 static void set_foreign_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_foreign_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_append_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* rte);
@@ -263,6 +265,16 @@ static void set_base_rel_sizes(PlannerInfo* root)
         /* ignore RTEs that are "other rels" */
         if (rel->reloptkind != RELOPT_BASEREL)
             continue;
+
+        /*
+         * If parallelism is allowable for this query in general, see whether
+         * it's allowable for this rel in particular.  We have to do this
+         * before set_rel_size, because that if this is an inheritance parent,
+         * set_append_rel_size will pass the consider_parallel flag down to
+         * inheritance children.
+         */
+        if (root->glob->parallelModeOK)
+            set_rel_consider_parallel(root, rel, root->simple_rte_array[rti]);
 
         set_rel_size(root, rel, (Index)rti, root->simple_rte_array[rti]);
 
@@ -812,6 +824,7 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
     List* quals = NIL;
     bool has_vecengine_unsupport_expr = false;
     ListCell* lc = NULL;
+    int parallel_threshold = u_sess->attr.attr_sql.min_parallel_table_scan_size;
 
 #ifdef PGXC
     bool isrp = create_plainrel_rqpath(root, rel, rte);
@@ -871,8 +884,39 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
             }
             case REL_ROW_ORIENTED: {
                 add_path(root, rel, create_seqscan_path(root, rel, NULL));
-                if (can_parallel)
+                if (can_parallel) {
                     add_path(root, rel, create_seqscan_path(root, rel, NULL, u_sess->opt_cxt.query_dop));
+                }
+
+                /* Consider parallel sequential scan */
+                if (rel->consider_parallel && rel->pages > parallel_threshold) {
+                    Path *path;
+                    int parallel_degree = 1;
+
+                    /*
+                     * Limit the degree of parallelism logarithmically based on the size
+                     * of the relation.  This probably needs to be a good deal more
+                     * sophisticated, but we need something here for now.
+                     */
+                    while (rel->pages > parallel_threshold * 3 &&
+                        parallel_degree < g_instance.attr.attr_common.max_parallel_workers_per_gather) {
+                        parallel_degree++;
+                        parallel_threshold *= 3;
+                        if (parallel_threshold >= PG_INT32_MAX / 3)
+                            break;
+                    }
+
+                    /*
+                     * Ideally we should consider postponing the gather operation until
+                     * much later, after we've pushed joins and so on atop the parallel
+                     * sequential scan path.  But we don't have the infrastructure for
+                     * that yet, so just do this for now.
+                     */
+                    path = create_seqscan_path(root, rel, NULL, 1, parallel_degree);
+                    path = (Path *)create_gather_path(root, rel, path, NULL, parallel_degree);
+                    add_path(root, rel, path);
+                }
+
                 break;
             }
             default: {
@@ -938,14 +982,122 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
 }
 
 /*
+ * If this relation could possibly be scanned from within a worker, then set
+ * the consider_parallel flag.  The flag has previously been initialized to
+ * false, so we just bail out if it becomes clear that we can't safely set it.
+ */
+static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
+{
+    /* Don't call this if parallelism is disallowed for the entire query. */
+    Assert(root->glob->parallelModeOK);
+
+    /* Don't call this for non-baserels. */
+    Assert(rel->reloptkind == RELOPT_BASEREL);
+
+    /* Assorted checks based on rtekind. */
+    switch (rte->rtekind) {
+        case RTE_RELATION:
+            /*
+             * Currently, parallel workers can't access the leader's temporary
+             * tables.  We could possibly relax this if the wrote all of its
+             * local buffers at the start of the query and made no changes
+             * thereafter (maybe we could allow hint bit changes), and if we
+             * taught the workers to read them.  Writing a large number of
+             * temporary buffers could be expensive, though, and we don't have
+             * the rest of the necessary infrastructure right now anyway.  So
+             * for now, bail out if we see a temporary table.
+             */
+            if (get_rel_persistence(rte->relid) == RELPERSISTENCE_TEMP)
+                return;
+
+            /* Don't support parallel for partitioned table. */
+            if (rte->ispartrel) {
+                return;
+            }
+
+            /*
+             * Table sampling can be pushed down to workers if the sample
+             * function and its arguments are safe.
+             */
+            if (rte->tablesample != NULL) {
+                // TODO, try to use this: func_parallel(rte->tablesample->tsmhandler)
+                Oid proparallel = PROPARALLEL_SAFE;
+
+                if (proparallel != PROPARALLEL_SAFE)
+                    return;
+                if (has_parallel_hazard((Node *)rte->tablesample->args, false))
+                    return;
+                return;
+            }
+            break;
+
+        case RTE_SUBQUERY:
+            /*
+             * Subplans currently aren't passed to workers.  Even if they
+             * were, the subplan might be using parallelism internally, and
+             * we can't support nested Gather nodes at present.  Finally,
+             * we don't have a good way of knowing whether the subplan
+             * involves any parallel-restricted operations.  It would be
+             * nice to relax this restriction some day, but it's going to
+             * take a fair amount of work.
+             */
+            return;
+
+        case RTE_JOIN:
+            /* Shouldn't happen; we're only considering baserels here. */
+            Assert(false);
+            return;
+
+        case RTE_FUNCTION:
+            /* Check for parallel-restricted functions. */
+            if (has_parallel_hazard(rte->funcexpr, false))
+                return;
+            break;
+
+        case RTE_VALUES:
+            /*
+             * The data for a VALUES clause is stored in the plan tree itself,
+             * so scanning it in a worker is fine.
+             */
+            break;
+
+        case RTE_CTE:
+            /*
+             * CTE tuplestores aren't shared among parallel workers, so we
+             * force all CTE scans to happen in the leader.  Also, populating
+             * the CTE would require executing a subplan that's not available
+             * in the worker, might be parallel-restricted, and must get
+             * executed only once.
+             */
+            return;
+        case RTE_REMOTE_DUMMY:
+            return;
+    }
+
+    /*
+     * If there's anything in baserestrictinfo that's parallel-restricted,
+     * we give up on parallelizing access to this relation.  We could consider
+     * instead postponing application of the restricted quals until we're
+     * above all the parallelism in the plan tree, but it's not clear that
+     * this would be a win in very many cases, and it might be tricky to make
+     * outer join clauses work correctly.
+     */
+    if (has_parallel_hazard((Node *)rel->baserestrictinfo, false))
+        return;
+
+    /* We have a winner. */
+    rel->consider_parallel = true;
+}
+
+/*
  * Description:add result operator over scan operator. And add
  * vector type scan's qual with unsupport expression in vector engine
  * to result operator
  *
  * Parameters:
- *	@in root: plannerinfo struct for current query level.
- *	@in rel: Per-relation information for planning/optimization.
- *	@in quals: filter condition
+ * 	@in root: plannerinfo struct for current query level.
+ * 	@in rel: Per-relation information for planning/optimization.
+ * 	@in quals: filter condition
  *
  * Return: void
  */
@@ -1146,6 +1298,9 @@ static void set_append_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, R
             set_dummy_rel_pathlist(childrel);
             continue;
         }
+
+        /* Copy consider_parallel flag from parent. */
+        childrel->consider_parallel = rel->consider_parallel;
 
         /*
          * CE failed, so finish copying/modifying targetlist and join quals.
@@ -3024,6 +3179,9 @@ static void print_path(PlannerInfo* root, Path* path, int indent)
             break;
         case T_Unique:
             subpath = ((UniquePath*)path)->subpath;
+            break;
+        case T_GatherPath:
+            subpath = ((GatherPath*)path)->subpath;
             break;
         case T_NestLoop:
             join = true;

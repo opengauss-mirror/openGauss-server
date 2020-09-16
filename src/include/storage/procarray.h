@@ -55,6 +55,8 @@ extern Snapshot GetLocalSnapshotData(Snapshot snapshot);
 extern void ReleaseSnapshotData(Snapshot snapshot);
 
 extern bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid);
+extern bool ProcArrayInstallRestoredXmin(TransactionId xmin, PGPROC *proc);
+
 extern void set_proc_csn_and_check(const char* func, CommitSeqNo csn_min, SnapshotType snapshot_type);
 extern RunningTransactions GetRunningTransactionData(void);
 

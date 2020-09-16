@@ -625,7 +625,7 @@ static void execute_sql_string(const char* sql, const char* filename)
          * We use a null string query_string here to avoid this.
          */
         stmt_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
-        stmt_list = pg_plan_queries(stmt_list, 0, NULL);
+        stmt_list = pg_plan_queries(stmt_list, CURSOR_OPT_PARALLEL_OK, NULL);
         foreach (lc2, stmt_list) {
             Node* stmt = (Node*)lfirst(lc2);
 

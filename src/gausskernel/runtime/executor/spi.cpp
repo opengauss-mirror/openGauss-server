@@ -421,6 +421,18 @@ void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool stpRollback, 
     }
 }
 
+/*
+ * Are we executing inside a procedure (that is, a nonatomic SPI context)?
+ */
+bool SPI_inside_nonatomic_context(void)
+{
+    if (u_sess->SPI_cxt._current == NULL)
+        return false; /* not in any SPI context at all */
+    if (u_sess->SPI_cxt._current->atomic)
+        return false; /* it's atomic (ie function not procedure) */
+    return true;
+}
+
 /* Pushes SPI stack to allow recursive SPI calls */
 void SPI_push(void)
 {
@@ -1382,23 +1394,27 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
     }
 
     /*
-     * If told to be read-only, we'd better check for read-only queries. This
-     * can't be done earlier because we need to look at the finished, planned
-     * queries.  (In particular, we don't want to do it between GetCachedPlan
-     * and PortalDefineQuery, because throwing an error between those steps
-     * would result in leaking our plancache refcount.)
+     * If told to be read-only, or in parallel mode, verify that this query is
+     * in fact read-only. This  can't be done earlier because we need to look
+     * at the finished, planned queries.  (In particular, we don't want to do
+     * it between GetCachedPlan and PortalDefineQuery, because throwing an
+     * error between those steps would result in leaking our plancache refcount.)
      */
-    if (read_only) {
+    if (read_only || IsInParallelMode()) {
         ListCell *lc = NULL;
 
         foreach (lc, stmt_list) {
             Node *pstmt = (Node *)lfirst(lc);
 
             if (!CommandIsReadOnly(pstmt)) {
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    /* translator: %s is a SQL statement name */
-                    errmsg("%s is not allowed in a non-volatile function", CreateCommandTag(pstmt)),
-                    errhint("You can change function definition.")));
+                if (read_only) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        /* translator: %s is a SQL statement name */
+                        errmsg("%s is not allowed in a non-volatile function", CreateCommandTag(pstmt)),
+                        errhint("You can change function definition.")));
+                } else {
+                    PreventCommandIfParallelMode(CreateCommandTag((Node *) pstmt));
+                }
             }
         }
     }
@@ -2153,6 +2169,10 @@ static int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
                     errmsg("%s is not allowed in a non-volatile function", CreateCommandTag(stmt))));
             }
 
+            if (IsInParallelMode() && !CommandIsReadOnly(stmt)) {
+                PreventCommandIfParallelMode(CreateCommandTag((Node *) stmt));
+            }
+
             /*
              * If not read-only mode, advance the command counter before each
              * command and update the snapshot.
@@ -2360,6 +2380,7 @@ static ParamListInfo _SPI_convert_params(int nargs, Oid *argtypes, Datum *Values
         param_list_info->parserSetupArg = NULL;
         param_list_info->params_need_process = false;
         param_list_info->numParams = nargs;
+        param_list_info->paramMask = NULL;
 
         for (i = 0; i < nargs; i++) {
             ParamExternData *prm = &param_list_info->params[i];

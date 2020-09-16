@@ -1425,6 +1425,16 @@ static Snapshot GetSerializableTransactionSnapshotInt(Snapshot snapshot, Transac
 
     Assert(!RecoveryInProgress());
 
+    /*
+     * Since all parts of a serializable transaction must use the same
+     * snapshot, it is too late to establish one after a parallel operation
+     * has begun.
+     */
+    if (IsInParallelMode()) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot establish serializable snapshot during a parallel operation")));
+    }
+
     proc = t_thrd.proc;
     Assert(proc != NULL);
     GET_VXID_FROM_PGPROC(vxid, *proc);

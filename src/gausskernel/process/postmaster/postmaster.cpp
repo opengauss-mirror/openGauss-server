@@ -152,6 +152,7 @@
 #include "utils/datetime.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
+#include "utils/postinit.h"
 #include "utils/ps_status.h"
 #include "utils/plog.h"
 #include "utils/zfiles.h"
@@ -384,8 +385,8 @@ bool PMstateIsRun(void);
 #define BACKEND_TYPE_TEMPBACKEND                                        \
     0x0010                      /* temp thread processing cancel signal \
                                    or stream connection */
-
-#define BACKEND_TYPE_ALL 0x001F /* OR of all the above */
+#define BACKEND_TYPE_BGWORKER 0x0020
+#define BACKEND_TYPE_ALL 0x003F /* OR of all the above */
 
 static int CountChildren(int target);
 static bool CreateOptsFile(int argc, const char* argv[], const char* fullprogname);
@@ -1029,8 +1030,8 @@ void SetShmemCxt(void)
                                        AV_LAUNCHER_PROCS;
     g_instance.shmem_cxt.MaxReserveBackendId = g_instance.attr.attr_sql.job_queue_processes + 1 +
                                                g_instance.attr.attr_storage.autovacuum_max_workers +
-                                               (thread_pool_worker_num * STREAM_RESERVE_PROC_TIMES) + 
-                                               AUXILIARY_BACKENDS + 
+                                               (thread_pool_worker_num * STREAM_RESERVE_PROC_TIMES) +
+                                               AUXILIARY_BACKENDS +
                                                AV_LAUNCHER_PROCS;
     g_instance.shmem_cxt.ThreadPoolGroupNum = thread_pool_group_num;
 
@@ -2544,6 +2545,85 @@ static bool save_backend_variables_for_callback_thread()
 }
 
 /*
+ * Determine how long should we let ServerLoop sleep.
+ *
+ * In normal conditions we wait at most one minute, to ensure that the other
+ * background tasks handled by ServerLoop get done even when no requests are
+ * arriving.  However, if there are background workers waiting to be started,
+ * we don't actually sleep so that they are quickly serviced.  Other exception
+ * cases are as shown in the code.
+ */
+static void DetermineSleepTime(struct timeval *timeout)
+{
+    TimestampTz next_wakeup = 0;
+
+    /*
+     * Normal case: either there are no background workers at all, or we're in
+     * a shutdown sequence (during which we ignore bgworkers altogether).
+     */
+    if (Shutdown > NoShutdown ||
+        (!g_instance.bgworker_cxt.start_worker_needed && !g_instance.bgworker_cxt.have_crashed_worker)) {
+        timeout->tv_sec = PM_POLL_TIMEOUT_SECOND;
+        timeout->tv_usec = 0;
+        return;
+    }
+
+    if (g_instance.bgworker_cxt.start_worker_needed) {
+        timeout->tv_sec = 0;
+        timeout->tv_usec = 0;
+        return;
+    }
+
+    if (g_instance.bgworker_cxt.have_crashed_worker) {
+        slist_mutable_iter siter;
+
+        /*
+         * When there are crashed bgworkers, we sleep just long enough that
+         * they are restarted when they request to be.  Scan the list to
+         * determine the minimum of all wakeup times according to most recent
+         * crash time and requested restart interval.
+         */
+        slist_foreach_modify(siter, &t_thrd.bgworker_cxt.background_worker_list)
+        {
+            RegisteredBgWorker *rw = slist_container(RegisteredBgWorker, rw_lnode, siter.cur);
+
+            if (rw->rw_crashed_at == 0) {
+                continue;
+            }
+
+            if (rw->rw_worker.bgw_restart_time == BGW_NEVER_RESTART || rw->rw_terminate) {
+                ForgetBackgroundWorker(&siter);
+                continue;
+            }
+
+            TimestampTz this_wakeup = TimestampTzPlusMilliseconds(rw->rw_crashed_at,
+                1000L * rw->rw_worker.bgw_restart_time);
+            if (next_wakeup == 0 || this_wakeup < next_wakeup) {
+                next_wakeup = this_wakeup;
+            }
+        }
+    }
+
+    if (next_wakeup != 0) {
+        long secs;
+        int microsecs;
+
+        TimestampDifference(GetCurrentTimestamp(), next_wakeup, &secs, &microsecs);
+        timeout->tv_sec = secs;
+        timeout->tv_usec = microsecs;
+
+        /* Ensure we don't exceed PM_POLL_TIMEOUT_SECOND */
+        if (timeout->tv_sec > PM_POLL_TIMEOUT_SECOND) {
+            timeout->tv_sec = PM_POLL_TIMEOUT_SECOND;
+            timeout->tv_usec = 0;
+        }
+    } else {
+        timeout->tv_sec = PM_POLL_TIMEOUT_SECOND;
+        timeout->tv_usec = 0;
+    }
+}
+
+/*
  * Main idle loop of postmaster
  */
 static int ServerLoop(void)
@@ -2651,8 +2731,7 @@ static int ServerLoop(void)
             /* must set timeout each time; some OSes change it! */
             struct timeval timeout;
 
-            timeout.tv_sec = PM_POLL_TIMEOUT_SECOND;
-            timeout.tv_usec = 0;
+            DetermineSleepTime(&timeout);
 
 #ifdef HAVE_POLL
             selres = poll(ufds, nSockets, timeout.tv_sec * 1000);
@@ -3807,7 +3886,8 @@ CAC_state canAcceptConnections(bool isSession)
 
     /*
      * Can't start backends when in startup/shutdown/inconsistent recovery
-     * state.
+     * state. bgworkers are excluded from this test; we expect
+     * bgworker_should_start_now() decided whether the DB state allows them.
      *
      * In state PM_WAIT_BACKUP only superusers can connect (this must be
      * allowed so that a superuser can end online backup mode); we return
@@ -4513,10 +4593,11 @@ static void pmdie(SIGNAL_ARGS)
             }
 
             if (pmState == PM_RECOVERY) {
+                (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_BGWORKER);
                 /*
-                 * Only startup, bgwriter, walreceiver, and/or checkpointer
-                 * should be active in this state; we just signaled the first
-                 * three, and we don't want to kill checkpointer yet.
+                 * Only startup, bgwriter, walreceiver, possibly bgworkers,
+                 * and/or checkpointer should be active in this state; we just
+                 * signaled the first four, and we don't want to kill checkpointer yet.
                  */
                 pmState = PM_WAIT_BACKENDS;
             } else if (pmState == PM_RUN || pmState == PM_WAIT_BACKUP || pmState == PM_WAIT_READONLY ||
@@ -4527,8 +4608,8 @@ static void pmdie(SIGNAL_ARGS)
                     g_threadPoolControler->CloseAllSessions();
                     g_threadPoolControler->ShutDownWorker();
                 }
-                /* shut down all backends and autovac workers */
-                (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+                /* shut down all backends and bgworkers and autovac workers */
+                (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC | BACKEND_TYPE_BGWORKER);
 
                 /* and the autovac launcher too */
                 if (g_instance.pid_cxt.AutoVacPID != 0)
@@ -5680,6 +5761,8 @@ static bool CleanupBackgroundWorker(ThreadId pid,
  * CleanupBackend -- cleanup after terminated backend.
  *
  * Remove all local state associated with backend.
+ *
+ * If you change this, see also CleanupBackgroundWorker.
  */
 static void CleanupBackend(ThreadId pid, int exitstatus) /* child's exit status. */
 {
@@ -5725,8 +5808,8 @@ static void CleanupBackend(ThreadId pid, int exitstatus) /* child's exit status.
     for (curr = DLGetTail(g_instance.backend_list); curr; curr = DLGetPred(curr)) {
         Backend* bp = (Backend*)DLE_VAL(curr);
 
-        if (bp->pid == pid && bp->dead_end) {
-            {
+        if (bp->pid == pid) {
+            if (bp->dead_end) {
                 if (!ReleasePostmasterChildSlot(bp->child_slot)) {
                     /*
                      * Uh-oh, the child failed to clean itself up.	Treat as a
@@ -5739,8 +5822,7 @@ static void CleanupBackend(ThreadId pid, int exitstatus) /* child's exit status.
                 BackendArrayRemove(bp);
             }
 
-			if (bp->bgworker_notify)
-			{
+			if (bp->bgworker_notify) {
 				/*
 				 * This backend may have been slated to receive SIGUSR1 when
 				 * some background worker started or stopped.  Cancel those
@@ -5930,7 +6012,8 @@ static void PostmasterStateMachine(void)
     if (pmState == PM_WAIT_BACKENDS) {
         /*
          * PM_WAIT_BACKENDS state ends when we have no regular backends
-         * (including autovac workers) and no walwriter, autovac launcher or
+         * (including autovac workers), no bgworkers (including 
+         * unconnected ones), and no walwriter, autovac launcher or
          * bgwriter.  If we are doing crash recovery then we expect the
          * checkpointer to exit as well, otherwise not. The archiver, stats,
          * and syslogger processes are disregarded since they are not
@@ -5939,7 +6022,8 @@ static void PostmasterStateMachine(void)
          * later after writing the checkpoint record, like the archiver
          * process.
          */
-        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0 && g_instance.pid_cxt.StartupPID == 0 &&
+        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC | BACKEND_TYPE_BGWORKER) == 0 &&
+            g_instance.pid_cxt.StartupPID == 0 &&
             g_instance.pid_cxt.TwoPhaseCleanerPID == 0 && g_instance.pid_cxt.FaultMonitorPID == 0 &&
             g_instance.pid_cxt.WalReceiverPID == 0 && g_instance.pid_cxt.WalRcvWriterPID == 0 &&
             g_instance.pid_cxt.DataReceiverPID == 0 && g_instance.pid_cxt.DataRcvWriterPID == 0 &&
@@ -6162,6 +6246,10 @@ static void PostmasterStateMachine(void)
      */
     if (g_instance.demotion > NoDemote && pmState == PM_NO_CHILDREN) {
         ereport(LOG, (errmsg("all server processes terminated; reinitializing")));
+
+        /* allow background workers to immediately restart */
+        ResetBackgroundWorkerCrashTimes();
+
         shmem_exit(1);
         reset_shared(g_instance.attr.attr_network.PostPortNumber);
 
@@ -6346,6 +6434,8 @@ static int BackendStartup(Port* port)
      * Unless it's a dead_end child, assign it a child slot number
      */
     bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = childSlot;
+    /* Hasn't asked to be notified about any bgworkers yet */
+    bn->bgworker_notify = false;
 
     pid = initialize_worker_thread(WORKER, port);
     t_thrd.proc_cxt.MyPMChildSlot = 0;
@@ -7360,6 +7450,7 @@ static void StartAutovacuumWorker(void)
 
             /* Autovac workers are not dead_end and need a child slot */
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->bgworker_notify = false;
             bn->pid = initialize_util_thread(AUTOVACUUM_WORKER, bn);
             t_thrd.proc_cxt.MyPMChildSlot = 0;
             if (bn->pid > 0) {
@@ -8405,6 +8496,7 @@ static void BackendArrayRemove(Backend* bn)
     g_instance.backend_array[i].flag = 0;
     g_instance.backend_array[i].cancel_key = 0;
     g_instance.backend_array[i].dead_end = false;
+    g_instance.backend_array[i].bgworker_notify = false;
 }
 
 #ifdef WIN32

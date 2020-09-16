@@ -53,7 +53,7 @@ extern PGPROC *shm_mq_get_receiver(shm_mq *);
 extern PGPROC *shm_mq_get_sender(shm_mq *);
 
 /* Set up backend-local queue state. */
-extern shm_mq_handle *shm_mq_attach(shm_mq *mq, char *seg,
+extern shm_mq_handle *shm_mq_attach(shm_mq *mq, void *seg,
                                     BackgroundWorkerHandle *handle);
 
 /* Associate worker handle with shm_mq. */

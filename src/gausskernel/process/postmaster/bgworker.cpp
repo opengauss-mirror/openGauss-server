@@ -14,6 +14,7 @@
 
 #include <unistd.h>
 
+#include "access/parallel.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -109,6 +110,10 @@ static const struct {
     {
         "autonomous_worker_main",
         autonomous_worker_main
+    },
+    {
+        "ParallelWorkerMain",
+        ParallelWorkerMain
     }
 };
 

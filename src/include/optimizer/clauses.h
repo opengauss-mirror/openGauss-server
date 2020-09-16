@@ -65,6 +65,7 @@ extern bool contain_subplans(Node* clause);
 extern bool contain_mutable_functions(Node* clause);
 extern bool contain_volatile_functions(Node* clause);
 extern bool contain_specified_function(Node* clause, Oid funcid);
+extern bool has_parallel_hazard(Node *node, bool allow_restricted);
 extern bool contain_nonstrict_functions(Node* clause, bool check_agg = false);
 extern bool contain_leaky_functions(Node* clause);
 extern bool exec_simple_check_mutable_function(Node* clause);

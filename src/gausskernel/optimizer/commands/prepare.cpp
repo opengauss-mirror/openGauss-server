@@ -400,6 +400,7 @@ static ParamListInfo EvaluateParams(PreparedStatement* pstmt, List* params, cons
     paramLI->parserSetupArg = NULL;
     paramLI->params_need_process = false;
     paramLI->numParams = num_params;
+    paramLI->paramMask = NULL;
 
     i = 0;
     foreach (l, exprstates) {

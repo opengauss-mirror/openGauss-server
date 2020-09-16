@@ -19,6 +19,7 @@
 #include <limits.h>
 #include <math.h>
 
+#include "access/parallel.h"
 #include "access/transam.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_cast.h"
@@ -438,6 +439,52 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     glob->bloomfilter.bloomfilter_index = -1;
     glob->bloomfilter.add_index = true;
     glob->estiopmem = esti_op_mem;
+
+    /*
+     * Assess whether it's feasible to use parallel mode for this query.
+     * We can't do this in a standalone backend, or if the command will
+     * try to modify any data, or if this is a cursor operation, or if
+     * GUCs are set to values that don't permit parallelism, or if
+     * parallel-unsafe functions are present in the query tree.
+     *
+     * For now, we don't try to use parallel mode if we're running inside
+     * a parallel worker.  We might eventually be able to relax this
+     * restriction, but for now it seems best not to have parallel workers
+     * trying to create their own parallel workers.
+     *
+     * We can't use parallelism in serializable mode because the predicate
+     * locking code is not parallel-aware.  It's not catastrophic if someone
+     * tries to run a parallel plan in serializable mode; it just won't get
+     * any workers and will run serially.  But it seems like a good heuristic
+     * to assume that the same serialization level will be in effect at plan
+     * time and execution time, so don't generate a parallel plan if we're
+     * in serializable mode.
+     */
+    glob->parallelModeOK = (cursorOptions & CURSOR_OPT_PARALLEL_OK) != 0 && IsUnderPostmaster &&
+        parse->commandType == CMD_SELECT && !parse->hasModifyingCTE && parse->utilityStmt == NULL &&
+        g_instance.attr.attr_common.max_parallel_workers_per_gather > 0 && !IsParallelWorker() &&
+        !IsolationIsSerializable() && !has_parallel_hazard((Node *)parse, true);
+
+    /*
+     * glob->parallelModeNeeded is normally set to false here and changed to
+     * true during plan creation if a Gather or Gather Merge plan is actually
+     * created (cf. create_gather_plan, create_gather_merge_plan).
+     *
+     * However, if force_parallel_mode = on or force_parallel_mode = regress,
+     * then we impose parallel mode whenever it's safe to do so, even if the
+     * final plan doesn't use parallelism.  It's not safe to do so if the
+     * query contains anything parallel-unsafe; parallelModeOK will be false
+     * in that case.  Note that parallelModeOK can't change after this point.
+     * Otherwise, everything in the query is either parallel-safe or
+     * parallel-restricted, and in either case it should be OK to impose
+     * parallel-mode restrictions.  If that ends up breaking something, then
+     * either some function the user included in the query is incorrectly
+     * labelled as parallel-safe or parallel-restricted when in reality it's
+     * parallel-unsafe, or else the query planner itself has a bug.
+     */
+    glob->parallelModeNeeded =
+        glob->parallelModeOK && (u_sess->attr.attr_sql.force_parallel_mode != FORCE_PARALLEL_OFF);
+
     if (IS_STREAM_PLAN)
         glob->vectorized = !vector_engine_preprocess_walker((Node*)parse, parse->rtable);
     else
@@ -723,6 +770,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     result->canSetTag = parse->canSetTag;
     result->transientPlan = glob->transientPlan;
     result->dependsOnRole = glob->dependsOnRole;
+    result->parallelModeNeeded = glob->parallelModeNeeded;
     result->planTree = top_plan;
     result->rtable = glob->finalrtable;
     result->resultRelations = glob->resultRelations;

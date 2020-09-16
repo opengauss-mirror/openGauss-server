@@ -59,6 +59,7 @@ extern const char* GetStreamType(Stream* node);
 extern void insert_obsscaninfo(
     uint64 queryid, const char* rel_name, int64 file_count, double scan_data_size, double total_time, int format);
 
+static void BufferUsageAdd(BufferUsage *dst, const BufferUsage *add);
 static void BufferUsageAccumDiff(BufferUsage* dst, const BufferUsage* add, const BufferUsage* sub);
 static void CPUUsageGetCurrent(CPUUsage* cur);
 static void CPUUsageAccumDiff(CPUUsage* dst, const CPUUsage* add, const CPUUsage* sub);
@@ -454,6 +455,15 @@ Instrumentation* InstrAlloc(int n, int instrument_options)
     return instr;
 }
 
+/* Initialize an pre-allocated instrumentation structure. */
+void InstrInit(Instrumentation *instr, int instrument_options)
+{
+    int rc = memset_s(instr, sizeof(Instrumentation), 0, sizeof(Instrumentation));
+    securec_check(rc, "", "");
+    instr->need_bufusage = (instrument_options & INSTRUMENT_BUFFERS) != 0;
+    instr->need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
+}
+
 /* Entry to a plan node */
 void InstrStartNode(Instrumentation* instr)
 {
@@ -689,11 +699,72 @@ void StreamEndLoop(StreamTime* instr)
     instr->tuplecount = 0;
 }
 
-/* 
+/* aggregate instrumentation information */
+void InstrAggNode(Instrumentation *dst, Instrumentation *add)
+{
+    if (!dst->running && add->running) {
+        dst->running = true;
+        dst->firsttuple = add->firsttuple;
+    } else if (dst->running && add->running && dst->firsttuple > add->firsttuple) {
+        dst->firsttuple = add->firsttuple;
+    }
+
+    INSTR_TIME_ADD(dst->counter, add->counter);
+
+    dst->tuplecount += add->tuplecount;
+    dst->startup += add->startup;
+    dst->total += add->total;
+    dst->ntuples += add->ntuples;
+    dst->nloops += add->nloops;
+    dst->nfiltered1 += add->nfiltered1;
+    dst->nfiltered2 += add->nfiltered2;
+
+    /* Add delta of buffer usage since entry to node's totals */
+    if (dst->need_bufusage)
+        BufferUsageAdd(&dst->bufusage, &add->bufusage);
+}
+
+/* note current values during parallel executor startup */
+void InstrStartParallelQuery(void)
+{
+    t_thrd.bgworker_cxt.save_pgBufferUsage = u_sess->instr_cxt.pg_buffer_usage;
+}
+
+/* report usage after parallel executor shutdown */
+void InstrEndParallelQuery(BufferUsage *result)
+{
+    int rc = memset_s(result, sizeof(BufferUsage), 0, sizeof(BufferUsage));
+    securec_check(rc, "", "");
+    BufferUsageAccumDiff(result, u_sess->instr_cxt.pg_buffer_usage, t_thrd.bgworker_cxt.save_pgBufferUsage);
+}
+
+/* accumulate work done by workers in leader's stats */
+void InstrAccumParallelQuery(BufferUsage *result)
+{
+    BufferUsageAdd(u_sess->instr_cxt.pg_buffer_usage, result);
+}
+
+static void BufferUsageAdd(BufferUsage *dst, const BufferUsage *add)
+{
+    dst->shared_blks_hit += add->shared_blks_hit;
+    dst->shared_blks_read += add->shared_blks_read;
+    dst->shared_blks_dirtied += add->shared_blks_dirtied;
+    dst->shared_blks_written += add->shared_blks_written;
+    dst->local_blks_hit += add->local_blks_hit;
+    dst->local_blks_read += add->local_blks_read;
+    dst->local_blks_dirtied += add->local_blks_dirtied;
+    dst->local_blks_written += add->local_blks_written;
+    dst->temp_blks_read += add->temp_blks_read;
+    dst->temp_blks_written += add->temp_blks_written;
+    INSTR_TIME_ADD(dst->blk_read_time, add->blk_read_time);
+    INSTR_TIME_ADD(dst->blk_write_time, add->blk_write_time);
+}
+
+/*
  * BufferUsageAccumDiff
- * calculate every element of dst like: dst += add - sub 
+ * calculate every element of dst like: dst += add - sub
  */
-static void BufferUsageAccumDiff(BufferUsage* dst, const BufferUsage* add, const BufferUsage* sub)
+static void BufferUsageAccumDiff(BufferUsage *dst, const BufferUsage *add, const BufferUsage *sub)
 {
     dst->shared_blks_hit += add->shared_blks_hit - sub->shared_blks_hit;
     dst->shared_blks_read += add->shared_blks_read - sub->shared_blks_read;

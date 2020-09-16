@@ -661,7 +661,7 @@ static void ExplainOneQuery(
     PlannedStmt* plan = NULL;
 
     /* plan the query */
-    plan = pg_plan_query(query, 0, params, true);
+    plan = pg_plan_query(query, CURSOR_OPT_PARALLEL_OK, params, true);
 
     /* run it (if needed) and produce output */
     ExplainOnePlan(plan, into, es, queryString, params);
@@ -1790,6 +1790,9 @@ static void ExplainNode(
                     appendStringInfoString(es->str, "->  ");
                     es->indent += 2;
                 }
+                if (plan->parallel_aware) {
+                    appendStringInfoString(es->str, "Parallel ");
+                }
                 appendStringInfoString(es->str, pname);
 
                 es->indent++;
@@ -1805,6 +1808,9 @@ static void ExplainNode(
             ExplainPropertyText("Parent Relationship", relationship, es);
         if (plan_name != NULL)
             ExplainPropertyText("Subplan Name", plan_name, es);
+        if (plan->parallel_aware) {
+            ExplainPropertyText("Parallel Aware", "true", es);
+        }
     }
 
     switch (nodeTag(plan)) {
@@ -2379,6 +2385,16 @@ static void ExplainNode(
                 show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
             show_llvm_info(planstate, es);
             break;
+        case T_Gather: {
+            Gather *gather = (Gather *)plan;
+            show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
+            if (plan->qual)
+                show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
+            ExplainPropertyInteger("Number of Workers", gather->num_workers, es);
+            if (gather->single_copy)
+                ExplainPropertyText("Single Copy", gather->single_copy ? "true" : "false", es);
+            break;
+        }
         case T_DfsScan: {
             show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
             show_pushdown_qual(planstate, ancestors, es, PUSHDOWN_PREDICATE_FLAG);

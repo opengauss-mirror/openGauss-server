@@ -295,8 +295,9 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
 {
     ListCell* l = NULL;
 
-    if (plan == NULL)
+    if (plan == NULL) {
         return NULL;
+    }
 
     /*
      * Plan-type-specific fixes
@@ -571,6 +572,10 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                     set_dummy_tlist_references(plan, rtoffset);
             }
         } break;
+
+        case T_Gather:
+            set_upper_references(root, plan, rtoffset);
+            break;
 
         case T_Hash:
         case T_Material:

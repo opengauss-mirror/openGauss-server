@@ -308,7 +308,7 @@ bool CommandIsReadOnly(Node* parse_tree)
  */
 static void check_xact_readonly(Node* parse_tree)
 {
-    if (!u_sess->attr.attr_common.XactReadOnly)
+    if (!u_sess->attr.attr_common.XactReadOnly && !IsInParallelMode())
         return;
 
     /*
@@ -410,12 +410,14 @@ static void check_xact_readonly(Node* parse_tree)
         case T_CreateSynonymStmt:
         case T_DropSynonymStmt:
             PreventCommandIfReadOnly(CreateCommandTag(parse_tree));
+            PreventCommandIfParallelMode(CreateCommandTag(parse_tree));
             break;
         case T_VacuumStmt: {
             VacuumStmt* stmt = (VacuumStmt*)parse_tree;
             /* on verify mode, do nothing */
             if (!(stmt->options & VACOPT_VERIFY)) {
                 PreventCommandIfReadOnly(CreateCommandTag(parse_tree));
+                PreventCommandIfParallelMode(CreateCommandTag(parse_tree));
             }
             break;
         }
@@ -423,6 +425,7 @@ static void check_xact_readonly(Node* parse_tree)
             AlterRoleStmt* stmt = (AlterRoleStmt*)parse_tree;
             if (!(DO_NOTHING != stmt->lockstatus && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE)) {
                 PreventCommandIfReadOnly(CreateCommandTag(parse_tree));
+                PreventCommandIfParallelMode(CreateCommandTag(parse_tree));
             }
             break;
         }
@@ -445,6 +448,21 @@ void PreventCommandIfReadOnly(const char* cmd_name)
             (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
                 /* translator: %s is name of a SQL command, eg CREATE */
                 errmsg("cannot execute %s in a read-only transaction", cmd_name)));
+}
+
+/*
+ * PreventCommandIfParallelMode: throw error if current (sub)transaction is
+ * in parallel mode.
+ *
+ * This is useful mainly to ensure consistency of the error message wording;
+ * most callers have checked IsInParallelMode() for themselves.
+ */
+void PreventCommandIfParallelMode(const char *cmdname)
+{
+    if (IsInParallelMode())
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+            /* translator: %s is name of a SQL command, eg CREATE */
+            errmsg("cannot execute %s during a parallel operation", cmdname)));
 }
 
 /*

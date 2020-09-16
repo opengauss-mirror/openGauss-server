@@ -983,8 +983,10 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         Assert(rel);
 
         /* check read-only transaction */
-        if (u_sess->attr.attr_common.XactReadOnly && !RELATION_IS_TEMP(rel))
+        if (u_sess->attr.attr_common.XactReadOnly && !RELATION_IS_TEMP(rel)) {
             PreventCommandIfReadOnly("COPY FROM");
+        }
+        PreventCommandIfParallelMode("COPY FROM");
 
         /* set write for backend status for the thread, we will use it to check default transaction readOnly */
         pgstat_set_stmt_tag(STMTTAG_WRITE);

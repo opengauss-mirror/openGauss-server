@@ -207,6 +207,7 @@ extern bool stack_is_too_deep(void);
 
 /* in tcop/utility.c */
 extern void PreventCommandIfReadOnly(const char* cmdname);
+extern void PreventCommandIfParallelMode(const char *cmdname);
 extern void PreventCommandDuringRecovery(const char* cmdname);
 
 extern int trace_recovery(int trace_level);
@@ -410,6 +411,9 @@ extern void EarlyBindingTLSVariables(void);
 extern bool StreamThreadAmI();
 extern void StreamTopConsumerReset();
 extern bool StreamTopConsumerAmI();
+extern bool ParallelWorkerAmI();
+extern bool ParallelLeaderAmI();
+
 
 /*
  * converts the 64 bits unsigned integer between host byte order and network byte order.

@@ -140,6 +140,8 @@ extern void ClosePostmasterPorts(bool am_syslogger);
 
 extern int MaxLivePostmasterChildren(void);
 
+extern bool PostmasterMarkPIDForWorkerNotify(ThreadId pid);
+
 extern Size CBMShmemSize(void);
 extern void CBMShmemInit(void);
 

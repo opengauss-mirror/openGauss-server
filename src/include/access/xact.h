@@ -328,6 +328,9 @@ extern void BeginInternalSubTransaction(const char* name);
 extern void ReleaseCurrentSubTransaction(void);
 extern void RollbackAndReleaseCurrentSubTransaction(void);
 extern bool IsSubTransaction(void);
+extern void StartParallelWorkerTransaction(ParallelInfoContext *cxt);
+extern void EndParallelWorkerTransaction(void);
+extern void SetParallelStartTimestamps(TimestampTz xact_ts, TimestampTz stmt_ts);
 extern void SetCurrentTransactionId(TransactionId tid);
 extern bool IsTransactionBlock(void);
 extern bool IsTransactionOrTransactionBlock(void);
@@ -389,5 +392,9 @@ extern bool IsPGEngineUsed();
 extern bool IsMixedEngineUsed();
 extern void SetCurrentTransactionStorageEngine(StorageEngineType storageEngineType);
 extern void CallXactCallbacks(XactEvent event);
+
+extern void EnterParallelMode(void);
+extern void ExitParallelMode(void);
+extern bool IsInParallelMode(void);
 
 #endif /* XACT_H */

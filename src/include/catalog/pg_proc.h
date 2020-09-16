@@ -414,6 +414,15 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define PROVOLATILE_VOLATILE    'v'        /* can change even within a scan */
 
 /*
+ * Symbolic values for proparallel column: these indicate whether a function
+ * can be safely be run in a parallel backend, during parallelism but
+ * necessarily in the master, or only in non-parallel mode.
+ */
+#define PROPARALLEL_SAFE        's' /* can run in worker or master */
+#define PROPARALLEL_RESTRICTED  'r' /* can run in parallel master only */
+#define PROPARALLEL_UNSAFE      'u' /* banned while in parallel mode */
+
+/*
  * Symbolic values for proargmodes column.    Note that these must agree with
  * the FunctionParameterMode enum in parsenodes.h; we declare them here to
  * be accessible from either header.

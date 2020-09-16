@@ -90,6 +90,16 @@ AbsTblScanDesc InitSampleScanDesc(ScanState* scanstate, Relation currentRelation
 static inline HeapTuple SampleFetchNextTuple(SeqScanState* node)
 {
     HeapScanDesc heapScanDesc = GetHeapScanDesc(node->ss_currentScanDesc);
+    if (heapScanDesc == NULL) {
+        /*
+         * We reach here if the scan is not parallel, or if we're executing
+         * a scan that was intended to be parallel serially.
+         * It must be a non-partitioned table.
+         */
+        Assert(!node->isPartTbl);
+        heapScanDesc = (HeapScanDesc)InitSampleScanDesc(node, node->ss_currentRelation);
+        node->ss_currentScanDesc = (AbsTblScanDesc)heapScanDesc;
+    }
     heapScanDesc->rs_ss_accessor = node->ss_scanaccessor;
 
     /*
@@ -419,7 +429,7 @@ void RowTableSample::getMaxOffset()
 {
     HeapScanDesc heapscan = NULL;
     AbsTblScanDesc scan = sampleScanState->ss_currentScanDesc;
-    bool pagemode = GetHeapScanDesc(scan)->rs_pageatatime;
+    bool pagemode = (GetHeapScanDesc(scan)->rs_flags) & SO_ALLOW_PAGEMODE;
     Page page;
 
     Assert(BlockNumberIsValid(currentBlock));
@@ -456,7 +466,7 @@ void RowTableSample::getMaxOffset()
 ScanValid RowTableSample::scanTup()
 {
     HeapScanDesc scan = GetHeapScanDesc(sampleScanState->ss_currentScanDesc);
-    bool pagemode = scan->rs_pageatatime;
+    bool pagemode = scan->rs_flags & SO_ALLOW_PAGEMODE;
     HeapTuple tuple = &(scan->rs_ctup);
     Snapshot snapshot = scan->rs_snapshot;
     ItemId itemid;
