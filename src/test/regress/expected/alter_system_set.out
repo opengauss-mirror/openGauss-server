@@ -120,6 +120,13 @@ SHOW parctl_min_cost;
 (1 row)
 
 ALTER SYSTEM SET parctl_min_cost TO 1000;
+SHOW vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 50000;
 select pg_sleep(2);  -- wait to reload postgres.conf file
  pg_sleep 
 ----------
@@ -162,6 +169,13 @@ SHOW parctl_min_cost;
 (1 row)
 
 ALTER SYSTEM SET parctl_min_cost TO 100000;
+SHOW vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 50000
+(1 row)
+
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 0;
 select pg_sleep(2);  -- wait to reload postgres.conf file
  pg_sleep 
 ----------
@@ -216,6 +230,10 @@ ALTER SYSTEM SET parctl_min_cost TO -100;
 ERROR:  -100 is outside the valid range for parameter "parctl_min_cost" (-1 .. 2147483647)
 ALTER SYSTEM SET parctl_min_cost TO 1.1;
 ERROR:  invalid value for parameter "parctl_min_cost": "1.1"
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 5.1;
+ERROR:  parameter "vacuum_defer_cleanup_age" requires a numeric value
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO '8#@da%';
+ERROR:  parameter "vacuum_defer_cleanup_age" requires a numeric value
 select pg_sleep(2);  -- wait to reload postgres.conf file
  pg_sleep 
 ----------
@@ -383,24 +401,26 @@ END;
 -- shoule be audited.
 ------------------------------------------------------
 SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM pg_query_audit('2000-01-01 08:00:00','9999-01-01 08:00:00');
-      type      | result | userid |  database  | client_conninfo |      object_name      |                     detail_info                      
-----------------+--------+--------+------------+-----------------+-----------------------+------------------------------------------------------
- internal_event | ok     | 10     | regression | gsql@[local]    | null                  | SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
- set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool    | ALTER SYSTEM SET enable_thread_pool to on;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool    | ALTER SYSTEM SET enable_thread_pool to off;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | password_lock_time    | ALTER SYSTEM SET  password_lock_time to 1.1;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum            | ALTER SYSTEM SET autovacuum to off;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | log_destination       | ALTER SYSTEM SET log_destination to 'stderr,csvlog';
- set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum_mode       | ALTER SYSTEM SET autovacuum_mode to 'analyze';
- set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost       | ALTER SYSTEM SET parctl_min_cost TO 1000;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | password_lock_time    | ALTER SYSTEM SET  password_lock_time to 1;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum            | ALTER SYSTEM SET autovacuum to on;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | log_destination       | ALTER SYSTEM SET log_destination to 'stderr';
- set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum_mode       | ALTER SYSTEM SET autovacuum_mode to mix;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost       | ALTER SYSTEM SET parctl_min_cost TO 100000;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | ignore_system_indexes | ALTER SYSTEM SET ignore_system_indexes TO on;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | ignore_system_indexes | ALTER SYSTEM SET ignore_system_indexes TO off;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost       | ALTER SYSTEM SET parctl_min_cost TO 1000;
- set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost       | ALTER SYSTEM SET parctl_min_cost TO 100000;
-(17 rows)
+      type      | result | userid |  database  | client_conninfo |       object_name        |                     detail_info                      
+----------------+--------+--------+------------+-----------------+--------------------------+------------------------------------------------------
+ internal_event | ok     | 10     | regression | gsql@[local]    | null                     | SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool       | ALTER SYSTEM SET enable_thread_pool to on;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | enable_thread_pool       | ALTER SYSTEM SET enable_thread_pool to off;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | password_lock_time       | ALTER SYSTEM SET  password_lock_time to 1.1;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum               | ALTER SYSTEM SET autovacuum to off;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | log_destination          | ALTER SYSTEM SET log_destination to 'stderr,csvlog';
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum_mode          | ALTER SYSTEM SET autovacuum_mode to 'analyze';
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost          | ALTER SYSTEM SET parctl_min_cost TO 1000;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | vacuum_defer_cleanup_age | ALTER SYSTEM SET vacuum_defer_cleanup_age TO 50000;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | password_lock_time       | ALTER SYSTEM SET  password_lock_time to 1;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum               | ALTER SYSTEM SET autovacuum to on;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | log_destination          | ALTER SYSTEM SET log_destination to 'stderr';
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | autovacuum_mode          | ALTER SYSTEM SET autovacuum_mode to mix;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost          | ALTER SYSTEM SET parctl_min_cost TO 100000;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | vacuum_defer_cleanup_age | ALTER SYSTEM SET vacuum_defer_cleanup_age TO 0;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | ignore_system_indexes    | ALTER SYSTEM SET ignore_system_indexes TO on;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | ignore_system_indexes    | ALTER SYSTEM SET ignore_system_indexes TO off;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost          | ALTER SYSTEM SET parctl_min_cost TO 1000;
+ set_parameter  | ok     | 10     | regression | gsql@[local]    | parctl_min_cost          | ALTER SYSTEM SET parctl_min_cost TO 100000;
+(19 rows)
 

@@ -47,7 +47,8 @@ SHOW autovacuum_mode;
 ALTER SYSTEM SET autovacuum_mode to 'analyze';
 SHOW parctl_min_cost;
 ALTER SYSTEM SET parctl_min_cost TO 1000;
-
+SHOW vacuum_defer_cleanup_age;
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 50000;
 
 select pg_sleep(2);  -- wait to reload postgres.conf file
 
@@ -63,6 +64,8 @@ SHOW autovacuum_mode;
 ALTER SYSTEM SET autovacuum_mode to mix;
 SHOW parctl_min_cost;
 ALTER SYSTEM SET parctl_min_cost TO 100000;
+SHOW vacuum_defer_cleanup_age;
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 0;
 
 select pg_sleep(2);  -- wait to reload postgres.conf file
 
@@ -82,6 +85,8 @@ ALTER SYSTEM SET autovacuum_mode to 123;
 ALTER SYSTEM SET autovacuum_mode to lalala;
 ALTER SYSTEM SET parctl_min_cost TO -100;
 ALTER SYSTEM SET parctl_min_cost TO 1.1;
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 5.1;
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO '8#@da%';
 
 select pg_sleep(2);  -- wait to reload postgres.conf file
 
@@ -146,4 +151,5 @@ END;
 -- shoule be audited.
 ------------------------------------------------------
 SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM pg_query_audit('2000-01-01 08:00:00','9999-01-01 08:00:00');
+
 

@@ -887,3 +887,30 @@ show analysis_options;
  ALL,on(),off(LLVM_COMPILE,HASH_CONFLICT,STREAM_DATA_CHECK)
 (1 row)
 
+---
+-- int64 type
+---
+show vacuum_freeze_table_age;
+ vacuum_freeze_table_age 
+-------------------------
+ 15000000000
+(1 row)
+
+set vacuum_freeze_table_age to 100;
+set vacuum_freeze_table_age to 1.3;
+ERROR:  parameter "vacuum_freeze_table_age" requires a numeric value
+set vacuum_freeze_table_age to '1DSADA';
+ERROR:  parameter "vacuum_freeze_table_age" requires a numeric value
+show vacuum_freeze_table_age;
+ vacuum_freeze_table_age 
+-------------------------
+ 100
+(1 row)
+
+reset vacuum_freeze_table_age;
+show vacuum_freeze_table_age;
+ vacuum_freeze_table_age 
+-------------------------
+ 15000000000
+(1 row)
+

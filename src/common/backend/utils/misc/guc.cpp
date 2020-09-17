@@ -14285,7 +14285,7 @@ bool parse_int64(const char* value, int64* result, const char** hintmsg)
     val = strtol(value, &endptr, 10);
 #endif
 
-    if (endptr == value) {
+    if (endptr == value || *endptr != '\0') {
         return false; /* no HINT for integer syntax error */
     }
 
