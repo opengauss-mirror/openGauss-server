@@ -88,9 +88,9 @@ public:
         return m_activelist;
     }
 
-    inline pthread_mutex_t GetSessionCtrlLock()
+    inline pthread_mutex_t* GetSessionCtrlLock()
     {
-        return m_sessCtrlock;
+        return &m_sessCtrlock;
     }
 
 private:

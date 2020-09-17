@@ -4674,6 +4674,8 @@ TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, Transacti
     }
 
     ThreadPoolSessControl *sessCtrl = g_threadPoolControler->GetSessionCtrl();
+    AutoMutexLock alock(sessCtrl->GetSessionCtrlLock());
+    alock.lock();
     const knl_sess_control *sessList = sessCtrl->GetSessionList();
     const knl_sess_control *currSess = sessList;
     while (currSess != nullptr) {
@@ -4694,6 +4696,7 @@ TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, Transacti
         }
         currSess = currSess->next;
     }
+    alock.unLock();
 
     if (maxSize > 0) {
         *n = i;
