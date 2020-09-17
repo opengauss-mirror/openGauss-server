@@ -340,12 +340,12 @@ void ExplainQuery(
             es.costs = defGetBoolean(opt);
         else if (strcmp(opt->defname, "buffers") == 0)
             es.buffers = defGetBoolean(opt);
-#ifdef PGXC
+#if defined(USE_ASSERT_CHECKING) || defined(ENABLE_MULTIPLE_NODES) 
         else if (strcmp(opt->defname, "nodes") == 0)
             es.nodes = defGetBoolean(opt);
         else if (strcmp(opt->defname, "num_nodes") == 0)
             es.num_nodes = defGetBoolean(opt);
-#endif /* PGXC */
+#endif 
         else if (strcmp(opt->defname, "timing") == 0) {
             timing_set = true;
             es.timing = defGetBoolean(opt);
@@ -384,10 +384,13 @@ void ExplainQuery(
         es.costs = true;
         es.cpu = true;
         es.detail = true;
-#ifdef PGXC
+#if defined(USE_ASSERT_CHECKING) || defined(ENABLE_MULTIPLE_NODES) 
         es.nodes = true;
         es.num_nodes = true;
-#endif /* PGXC */
+#else 
+        es.nodes = false;
+        es.num_nodes = false;
+#endif 
         es.timing = true;
         es.verbose = true;
     }
