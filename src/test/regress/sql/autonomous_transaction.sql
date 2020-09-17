@@ -54,6 +54,32 @@ select at_test4(6);
 select * from at_tb2;
 
 truncate table at_tb2;
+create or replace procedure at_test5(i int)
+AS 
+DECLARE
+  PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+  insert into at_tb2 values(3, 'klk');
+  commit;
+end;
+/
+select at_test5(6);
+select * from at_tb2;
+
+truncate table at_tb2;
+create or replace procedure at_test6(i int)
+AS 
+DECLARE
+  PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+  insert into at_tb2 values(3, 'klk');
+  rollback;
+end;
+/
+select at_test6(6);
+select * from at_tb2;
+
+truncate table at_tb2;
 DECLARE
 begin
 insert into at_tb2 values(1, 'begin');

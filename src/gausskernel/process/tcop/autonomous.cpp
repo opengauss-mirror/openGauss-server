@@ -742,7 +742,7 @@ void autonomous_worker_main(Datum main_arg)
                 break;
         }
     }
-    while (msgtype != 'X');
+    while ((msgtype != 'X') && !(t_thrd.bgworker_cxt.worker_shutdown_requested));
 }
 
 static void shm_mq_receive_stringinfo(shm_mq_handle *qh, StringInfoData *msg)

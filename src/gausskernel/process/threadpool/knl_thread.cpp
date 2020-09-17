@@ -1421,6 +1421,7 @@ void knl_t_bgworker_init(knl_t_bgworker_context* bgworker_cxt)
     bgworker_cxt->background_worker_data = NULL;
     bgworker_cxt->my_bgworker_entry = NULL;
     bgworker_cxt->is_background_worker = false;
+    bgworker_cxt->worker_shutdown_requested = false;
     bgworker_cxt->background_worker_list = SLIST_STATIC_INIT(background_worker_list);
     bgworker_cxt->ParallelMessagePending = false;
     bgworker_cxt->InitializingParallelWorker = false;

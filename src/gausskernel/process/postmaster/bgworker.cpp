@@ -645,9 +645,11 @@ static void bgworker_quickdie(SIGNAL_ARGS)
 static void bgworker_die(SIGNAL_ARGS)
 {
     (void)gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
-
+    t_thrd.bgworker_cxt.worker_shutdown_requested = true;
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-    ereport(FATAL,
+    if (t_thrd.proc)
+        SetLatch(&t_thrd.proc->procLatch);
+    ereport(WARNING,
         (errcode(ERRCODE_ADMIN_SHUTDOWN),
             errmsg("terminating background worker \"%s\" due to administrator command",
                 t_thrd.bgworker_cxt.my_bgworker_entry->bgw_type)));
@@ -709,7 +711,7 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
     }
 
     t_thrd.bgworker_cxt.is_background_worker = true;
-
+    t_thrd.bgworker_cxt.worker_shutdown_requested = false;
     /* Identify myself via ps */
     init_ps_display(worker->bgw_name, "", "", "");
 

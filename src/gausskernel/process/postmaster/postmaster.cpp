@@ -10483,6 +10483,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 
         case BACKGROUND_WORKER: {
             t_thrd.bgworker_cxt.is_background_worker = true;
+            t_thrd.bgworker_cxt.worker_shutdown_requested = false;
             InitProcessAndShareMemory();
             StartBackgroundWorker(arg->payload);
             proc_exit(0);

@@ -1017,6 +1017,8 @@ static shm_mq_result shm_mq_receive_bytes(shm_mq_handle *mqh, Size bytes_needed,
 
         /* An interrupt may have occurred while we were waiting. */
         CHECK_FOR_INTERRUPTS();
+        if (t_thrd.bgworker_cxt.worker_shutdown_requested)
+            return SHM_MQ_DETACHED;
     }
 }
 
