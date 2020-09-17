@@ -670,22 +670,25 @@ shm_mq_result shm_mq_receive(shm_mq_handle *mqh, Size *nbytesp, void **datap, bo
 
         /* Copy as much as we can. */
         Assert(mqh->mqh_partial_bytes + rb <= nbytes);
-        errno_t rc = memcpy_s(&mqh->mqh_buffer[mqh->mqh_partial_bytes], rb, rawdata, rb);
-        securec_check(rc, "\0", "\0");
-        mqh->mqh_partial_bytes += rb;
+        if (rb != 0) {
+            errno_t rc = memcpy_s(&mqh->mqh_buffer[mqh->mqh_partial_bytes], rb, rawdata, rb);
+            securec_check(rc, "\0", "\0");
+            mqh->mqh_partial_bytes += rb;
 
-        /*
-         * Update count of bytes that can be consumed, accounting for
-         * alignment padding.  Note that this will never actually insert any
-         * padding except at the end of a message, because the buffer size is
-         * a multiple of MAXIMUM_ALIGNOF, and each read and write is as well.
-         */
-        Assert(mqh->mqh_partial_bytes == nbytes || rb == MAXALIGN(rb));
-        mqh->mqh_consume_pending += MAXALIGN(rb);
+            /*
+             * Update count of bytes that can be consumed, accounting for
+             * alignment padding.  Note that this will never actually insert any
+             * padding except at the end of a message, because the buffer size is
+             * a multiple of MAXIMUM_ALIGNOF, and each read and write is as well.
+             */
+            Assert(mqh->mqh_partial_bytes == nbytes || rb == MAXALIGN(rb));
+            mqh->mqh_consume_pending += MAXALIGN(rb);
+        }
 
         /* If we got all the data, exit the loop. */
-        if (mqh->mqh_partial_bytes >= nbytes)
+        if (mqh->mqh_partial_bytes >= nbytes) {
             break;
+        }
 
         /* Wait for some more data. */
         still_needed = nbytes - mqh->mqh_partial_bytes;

@@ -1065,7 +1065,7 @@ BgwHandleStatus GetBackgroundWorkerPid(const BackgroundWorkerHandle *handle, Thr
     /* All done. */
     LWLockRelease(BackgroundWorkerLock);
 
-    ereport(LOG,
+    ereport(DEBUG1,
         (errmsg("GetBackgroundWorkerPid slot: %d, pid: %lu",
             handle->slot, pid)));
     if (pid == 0) {
