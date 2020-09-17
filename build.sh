@@ -160,11 +160,11 @@ function compile_gaussdb()
     chmod 755 configure
 
     if [ "${build_version_mode}"x == "release"x ]; then
-        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-thread-safety --without-readline --without-zlib CC=g++ >> "$LOG_FILE" 2>&1
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-thread-safety --with-readline --without-zlib CC=g++ >> "$LOG_FILE" 2>&1
     elif [ "${build_version_mode}"x == "memcheck"x ]; then
-        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS='-O0' --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib --enable-memory-check CC=g++  >> "$LOG_FILE" 2>&1
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS='-O0' --enable-debug --enable-cassert --enable-thread-safety --with-readline --without-zlib --enable-memory-check CC=g++  >> "$LOG_FILE" 2>&1
     else
-        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib CC=g++ >> "$LOG_FILE" 2>&1
+        ./configure --prefix="${BUILD_DIR}" --3rd=${with_3rd} CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert --enable-thread-safety --with-readline --without-zlib CC=g++ >> "$LOG_FILE" 2>&1
     fi
 
     if [ $? -ne 0 ]; then
