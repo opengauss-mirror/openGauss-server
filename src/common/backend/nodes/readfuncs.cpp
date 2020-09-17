@@ -2684,6 +2684,7 @@ static Plan* _readPlan(Plan* local_node)
     READ_FLOAT_FIELD(plan_rows);
     READ_FLOAT_FIELD(multiple);
     READ_INT_FIELD(plan_width);
+    READ_BOOL_FIELD(parallel_aware);
     READ_NODE_FIELD(targetlist);
     READ_NODE_FIELD(qual);
     READ_NODE_FIELD(lefttree);
@@ -3722,6 +3723,7 @@ static PlannedStmt* _readPlannedStmt(void)
     }
     READ_BOOL_FIELD(isRowTriggerShippable);
     READ_BOOL_FIELD(is_stream_plan);
+    READ_BOOL_FIELD(parallelModeNeeded);
 
     READ_DONE();
 }

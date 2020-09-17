@@ -152,6 +152,7 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(gather_count);
     COPY_SCALAR_FIELD(isRowTriggerShippable);
     COPY_SCALAR_FIELD(is_stream_plan);
+    COPY_SCALAR_FIELD(parallelModeNeeded);
     /*
      * Not copy ng_queryMem to avoid memory leak in CachedPlan context,
      * and dywlm_client_manager always calls CalculateQueryMemMain to generate it.
@@ -175,6 +176,7 @@ static void CopyPlanFields(const Plan* from, Plan* newnode)
     COPY_SCALAR_FIELD(plan_rows);
     COPY_SCALAR_FIELD(multiple);
     COPY_SCALAR_FIELD(plan_width);
+    COPY_SCALAR_FIELD(parallel_aware);
     COPY_SCALAR_FIELD(dop);
     COPY_NODE_FIELD(targetlist);
     COPY_NODE_FIELD(qual);
@@ -417,6 +419,27 @@ static BitmapAnd* _copyBitmapAnd(const BitmapAnd* from)
      * copy remainder of node
      */
     COPY_NODE_FIELD(bitmapplans);
+
+    return newnode;
+}
+
+/*
+ * _copyGather
+ */
+static Gather *_copyGather(const Gather *from)
+{
+    Gather *newnode = makeNode(Gather);
+
+    /*
+     * copy node superclass fields
+     */
+    CopyPlanFields((const Plan *)from, (Plan *)newnode);
+
+    /*
+     * copy remainder of node
+     */
+    COPY_SCALAR_FIELD(num_workers);
+    COPY_SCALAR_FIELD(single_copy);
 
     return newnode;
 }
@@ -5833,6 +5856,9 @@ void* copyObject(const void* from)
             break;
         case T_Scan:
             retval = _copyScan((Scan*)from);
+            break;
+        case T_Gather:
+            retval = _copyGather((Gather*)from);
             break;
         case T_BucketInfo:
             retval = _copyBucketInfo((BucketInfo*)from);

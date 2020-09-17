@@ -157,6 +157,10 @@ typedef struct PlannerGlobal {
 
     bool dependsOnRole; /* is plan specific to current role? */
 
+    bool parallelModeOK; /* parallel mode potentially OK? */
+
+    bool parallelModeNeeded; /* parallel mode actually required? */
+
     /* Added post-release, will be in a saner place in 9.3: */
     int nParamExec;       /* number of PARAM_EXEC Params used */
     bool insideRecursion; /* For sql on hdfs, internal flag. */
@@ -548,6 +552,8 @@ typedef struct RelOptInfo {
     int encodedwidth;      /* estimated avg width of encoded columns in result tuples */
     AttrNumber encodednum; /* number of encoded column */
 
+    bool consider_parallel; /* consider parallel paths? */
+
     /* materialization information */
     List* reltargetlist;   /* Vars to be output by scan of relation */
     List* distribute_keys; /* distribute key */
@@ -878,6 +884,9 @@ typedef struct Path {
     RelOptInfo* parent;        /* the relation this path can build */
     ParamPathInfo* param_info; /* parameterization info, or NULL if none */
 
+    bool parallel_aware; /* engage parallel-aware logic? */
+    bool parallel_safe; /* OK to use as part of parallel plan? */
+
     /* estimated size/costs for path (see costsize.c for more info) */
     double rows; /* estimated number of global result tuples */
     double multiple;
@@ -1172,6 +1181,18 @@ typedef struct UniquePath {
     bool hold_tlist;
     OpMemInfo mem_info; /* Memory info for hashagg or sort */
 } UniquePath;
+
+/*
+ * GatherPath runs several copies of a plan in parallel and collects the
+ * results.  The parallel leader may also execute the plan, unless the
+ * single_copy flag is set.
+ */
+typedef struct GatherPath {
+    Path path;
+    Path *subpath;    /* path for each worker */
+    int num_workers;  /* number of workers sought to help */
+    bool single_copy; /* don't execute path more than once */
+} GatherPath;
 
 /*
  * All join-type paths share these fields.

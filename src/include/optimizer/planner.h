@@ -44,6 +44,13 @@ typedef struct {
     bool has_denserank;
 } DenseRank_context;
 
+/* possible values for force_parallel_mode */
+typedef enum {
+    FORCE_PARALLEL_OFF,
+    FORCE_PARALLEL_ON,
+    FORCE_PARALLEL_REGRESS
+} ForceParallelMode;
+
 extern ExecNodes* getExecNodesByGroupName(const char* gname);
 extern PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
 extern PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo boundParams);

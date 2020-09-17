@@ -154,6 +154,7 @@ typedef struct knl_session_attr_sql {
     int acce_min_datasize_per_thread;
     int max_cn_temp_file_size;
     int default_statistics_target;
+    int min_parallel_table_scan_size;
     /* Memory Limit user could set in session */
     int FencedUDFMemoryLimit;
     int64 g_default_expthresh;
@@ -163,6 +164,8 @@ typedef struct knl_session_attr_sql {
     double allocate_mem_cost;
     double cpu_index_tuple_cost;
     double cpu_operator_cost;
+    double parallel_tuple_cost;
+    double parallel_setup_cost;
     double stream_multiple;
     double cursor_tuple_fraction;
     double Geqo_selection_bias;
@@ -198,8 +201,10 @@ typedef struct knl_session_attr_sql {
     bool enable_opfusion;
     bool enable_beta_opfusion;
     bool enable_beta_nestloop_fusion;
+    bool parallel_leader_participation;
     int opfusion_debug_mode;
     int single_shard_stmt;
+    int force_parallel_mode;
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */

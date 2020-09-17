@@ -1098,10 +1098,12 @@ void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path)
                     case COSTS_EQUAL:
                         outercmp = bms_subset_compare(PATH_REQ_OUTER(new_path), PATH_REQ_OUTER(old_path));
                         if (keyscmp == PATHKEYS_BETTER1) {
-                            if ((outercmp == BMS_EQUAL || outercmp == BMS_SUBSET1) && new_path->rows <= old_path->rows)
+                            if ((outercmp == BMS_EQUAL || outercmp == BMS_SUBSET1) &&
+                                new_path->rows <= old_path->rows && new_path->parallel_safe >= old_path->parallel_safe)
                                 remove_old = true; /* new dominates old */
                         } else if (keyscmp == PATHKEYS_BETTER2) {
-                            if ((outercmp == BMS_EQUAL || outercmp == BMS_SUBSET2) && new_path->rows >= old_path->rows)
+                            if ((outercmp == BMS_EQUAL || outercmp == BMS_SUBSET2) &&
+                                new_path->rows >= old_path->rows && new_path->parallel_safe >= old_path->parallel_safe)
                                 accept_new = false; /* old dominates new */
                         } else {
                             if (outercmp == BMS_EQUAL) {
@@ -1120,7 +1122,11 @@ void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path)
                                  * comparison decides the startup and total
                                  * costs compare differently.
                                  */
-                                if (new_path->rows < old_path->rows)
+                                if (new_path->parallel_safe > old_path->parallel_safe) {
+                                    remove_old = true;
+                                } else if (new_path->parallel_safe < old_path->parallel_safe) {
+                                    accept_new = false;
+                                } else if (new_path->rows < old_path->rows)
                                     remove_old = true; /* new dominates old */
                                 else if (new_path->rows > old_path->rows)
                                     accept_new = false; /* old dominates new */
@@ -1132,9 +1138,11 @@ void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path)
                                     else
                                         accept_new = false; /* old equals or dominates new */
                                 }
-                            } else if (outercmp == BMS_SUBSET1 && new_path->rows <= old_path->rows)
+                            } else if (outercmp == BMS_SUBSET1 && new_path->rows <= old_path->rows &&
+                                        new_path->parallel_safe >= old_path->parallel_safe)
                                 remove_old = true; /* new dominates old */
-                            else if (outercmp == BMS_SUBSET2 && new_path->rows >= old_path->rows)
+                            else if (outercmp == BMS_SUBSET2 && new_path->rows >= old_path->rows &&
+                                        new_path->parallel_safe <= old_path->parallel_safe)
                                 accept_new = false; /* old dominates new */
                                                     /* else different parameterizations, keep both */
                         }
@@ -1142,14 +1150,16 @@ void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path)
                     case COSTS_BETTER1:
                         if (keyscmp != PATHKEYS_BETTER2) {
                             outercmp = bms_subset_compare(PATH_REQ_OUTER(new_path), PATH_REQ_OUTER(old_path));
-                            if ((outercmp == BMS_EQUAL || outercmp == BMS_SUBSET1) && new_path->rows <= old_path->rows)
+                            if ((outercmp == BMS_EQUAL || outercmp == BMS_SUBSET1) &&
+                                new_path->rows <= old_path->rows && new_path->parallel_safe >= old_path->parallel_safe)
                                 remove_old = true; /* new dominates old */
                         }
                         break;
                     case COSTS_BETTER2:
                         if (keyscmp != PATHKEYS_BETTER1) {
                             outercmp = bms_subset_compare(PATH_REQ_OUTER(new_path), PATH_REQ_OUTER(old_path));
-                            if ((outercmp == BMS_EQUAL || outercmp == BMS_SUBSET2) && new_path->rows >= old_path->rows)
+                            if ((outercmp == BMS_EQUAL || outercmp == BMS_SUBSET2) &&
+                                new_path->rows >= old_path->rows && new_path->parallel_safe <= old_path->parallel_safe)
                                 accept_new = false; /* old dominates new */
                         }
                         break;
@@ -1433,7 +1443,7 @@ static void add_parameterized_path(RelOptInfo* parent_rel, Path* new_path)
  *	  Creates a path corresponding to a sequential scan, returning the
  *	  pathnode.
  */
-Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop)
+Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop, int nworkers)
 {
     Path* pathnode = makeNode(Path);
 
@@ -1442,11 +1452,14 @@ Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_ou
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->pathkeys = NIL; /* seqscan has unordered result */
     pathnode->dop = dop;
+    pathnode->parallel_aware = nworkers > 0 ? true : false;
+    pathnode->parallel_safe = rel->consider_parallel;
 
 #ifdef STREAMPLAN
+    /* We need to set locator_type for parallel query, cause we may send this value to bg worker */
+    pathnode->locator_type = rel->locator_type;
     if (IS_STREAM_PLAN) {
         pathnode->distribute_keys = rel->distribute_keys;
-        pathnode->locator_type = rel->locator_type;
 
         /* add location information for seqscan path */
         RangeTblEntry* rte = root->simple_rte_array[rel->relid];
@@ -1460,7 +1473,7 @@ Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_ou
 
     RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
     if (NULL == rte->tablesample) {
-        cost_seqscan(pathnode, root, rel, pathnode->param_info);
+        cost_seqscan(pathnode, root, rel, pathnode->param_info, nworkers);
     } else {
         AssertEreport(rte->rtekind == RTE_RELATION, MOD_OPT_JOIN, "Rel should be base relation");
         cost_samplescan(pathnode, root, rel, pathnode->param_info);
@@ -2277,6 +2290,8 @@ ResultPath* create_result_path(List* quals, Path* subpath)
         pathnode->path.total_cost = subpath->total_cost;
         pathnode->path.dop = subpath->dop;
         pathnode->path.stream_cost = subpath->stream_cost;
+        pathnode->path.parallel_aware = subpath->parallel_aware;
+        pathnode->path.parallel_safe = subpath->parallel_safe;
 #ifdef STREAMPLAN
         /* result path will inherit node group and distribute information from it's child node */
         inherit_path_locator_info((Path*)pathnode, subpath);
@@ -2705,6 +2720,37 @@ no_unique_path: /* failure exit */
     (void)MemoryContextSwitchTo(oldcontext);
 
     return NULL;
+}
+
+/*
+ * create_gather_path
+ *
+ * 	  Creates a path corresponding to a gather scan, returning the
+ * 	  pathnode.
+ */
+GatherPath *create_gather_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath, Relids required_outer, int nworkers)
+{
+    GatherPath *pathnode = makeNode(GatherPath);
+
+    pathnode->path.pathtype = T_Gather;
+    pathnode->path.parent = rel;
+    pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
+    pathnode->path.parallel_aware = false;
+    pathnode->path.pathkeys = NIL; /* Gather has unordered result */
+
+    pathnode->subpath = subpath;
+    pathnode->num_workers = nworkers;
+    pathnode->single_copy = false;
+
+    if (pathnode->num_workers == 0) {
+        pathnode->path.pathkeys = subpath->pathkeys;
+        pathnode->num_workers = 1;
+        pathnode->single_copy = true;
+    }
+
+    cost_gather(pathnode, rel, pathnode->path.param_info);
+
+    return pathnode;
 }
 
 /*

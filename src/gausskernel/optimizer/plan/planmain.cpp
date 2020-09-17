@@ -31,6 +31,7 @@
 #include "optimizer/paths.h"
 #include "optimizer/placeholder.h"
 #include "optimizer/planmain.h"
+#include "optimizer/planner.h"
 #include "optimizer/randomplan.h"
 #include "optimizer/tlist.h"
 #include "utils/selfuncs.h"
@@ -113,6 +114,9 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
     if (parse->jointree->fromlist == NIL) {
         /* We need a trivial path result */
         *cheapest_path = (Path*)create_result_path((List*)parse->jointree->quals);
+        if (root->glob->parallelModeOK && u_sess->attr.attr_sql.force_parallel_mode != FORCE_PARALLEL_OFF) {
+            (*cheapest_path)->parallel_safe = !has_parallel_hazard(parse->jointree->quals, false);
+        }
         *sorted_path = NULL;
 
         /*

@@ -107,8 +107,9 @@ static void CheckValidRowMarkRel(Relation rel, RowMarkType markType);
 static void ExecPostprocessPlan(EState *estate);
 static void ExecEndPlan(PlanState *planstate, EState *estate);
 static void ExecCollectMaterialForSubplan(EState *estate);
-static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
-    ScanDirection direction, DestReceiver *dest, JitExec::JitContext* mot_jit_context);
+static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_mode,
+    CmdType operation, bool sendTuples, long numberTuples, ScanDirection direction,
+    DestReceiver *dest, JitExec::JitContext* mot_jit_context);
 static void ExecuteVectorizedPlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples,
     long numberTuples, ScanDirection direction, DestReceiver *dest);
 static bool ExecCheckRTEPerms(RangeTblEntry *rte);
@@ -241,8 +242,20 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     /*
      * If the transaction is read-only, we need to check if any writes are
      * planned to non-temporary tables.  EXPLAIN is considered read-only.
+     *
+     * Don't allow writes in parallel mode.  Supporting UPDATE and DELETE
+     * would require (a) storing the combocid hash in shared memory, rather
+     * than synchronizing it just once at the start of parallelism, and (b) an
+     * alternative to heap_update()'s reliance on xmax for mutual exclusion.
+     * INSERT may have no such troubles, but we forbid it to simplify the
+     * checks.
+     *
+     * We have lower-level defenses in CommandCounterIncrement and elsewhere
+     * against performing unsafe operations in parallel mode, but this gives a
+     * more user-friendly error message.
      */
-    if (u_sess->attr.attr_common.XactReadOnly && !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
+    if ((u_sess->attr.attr_common.XactReadOnly || IsInParallelMode()) &&
+        !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
         ExecCheckXactReadOnly(queryDesc->plannedstmt);
     }
 
@@ -572,8 +585,8 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
         if (queryDesc->planstate->vectorized) {
             ExecuteVectorizedPlan(estate, queryDesc->planstate, operation, send_tuples, count, direction, dest);
         } else {
-            ExecutePlan(estate, queryDesc->planstate, operation, send_tuples,
-                count, direction, dest, queryDesc->mot_jit_context);
+            ExecutePlan(estate, queryDesc->planstate, queryDesc->plannedstmt->parallelModeNeeded, operation,
+                send_tuples, count, direction, dest, queryDesc->mot_jit_context);
         }
     }
 
@@ -1057,6 +1070,10 @@ void ExecCheckXactReadOnly(PlannedStmt *plannedstmt)
         }
 
         PreventCommandIfReadOnly(CreateCommandTag((Node *)plannedstmt));
+    }
+
+    if (plannedstmt->commandType != CMD_SELECT || plannedstmt->hasModifyingCTE) {
+        PreventCommandIfParallelMode(CreateCommandTag((Node*)plannedstmt));
     }
 }
 
@@ -1940,8 +1957,9 @@ static void ExecCollectMaterialForSubplan(EState *estate)
  * user can see it
  * ----------------------------------------------------------------
  */
-static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
-    ScanDirection direction, DestReceiver *dest, JitExec::JitContext* mot_jit_context)
+static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_mode,
+    CmdType operation, bool sendTuples, long numberTuples, ScanDirection direction,
+    DestReceiver *dest, JitExec::JitContext* mot_jit_context)
 {
     TupleTableSlot *slot = NULL;
     long current_tuple_count = 0;
@@ -1967,6 +1985,22 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
      * Set the direction.
      */
     estate->es_direction = direction;
+
+    /*
+     * If a tuple count was supplied, we must force the plan to run without
+     * parallelism, because we might exit early.
+     */
+    if (numberTuples != 0) {
+        use_parallel_mode = false;
+    }
+
+    /*
+     * If a tuple count was supplied, we must force the plan to run without
+     * parallelism, because we might exit early.
+     */
+    if (use_parallel_mode) {
+        EnterParallelMode();
+    }
 
     if (IS_PGXC_DATANODE) {
         /* Collect Material for Subplan first */
@@ -2035,6 +2069,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
          * process so we just end the loop...
          */
         if (TupIsNull(slot)) {
+            (void)ExecShutdownNode(planstate);
             ExecEarlyFree(planstate);
             break;
         }
@@ -2102,6 +2137,10 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
             t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks)
             << (chunkSizeInBits - BITS_IN_MB);
         u_sess->instr_cxt.global_instr->SetPeakNodeMemory(planstate->plan->plan_node_id, peak_memory);
+    }
+
+    if (use_parallel_mode) {
+        ExitParallelMode();
     }
 }
 

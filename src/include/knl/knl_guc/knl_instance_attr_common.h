@@ -76,6 +76,10 @@ typedef struct knl_instance_attr_common {
     bool enable_alarm;
     char* Alarm_component;
     char* MOTConfigFileName;
+
+    int max_worker_processes;
+    int max_parallel_workers;
+    int max_parallel_workers_per_gather;
 } knl_instance_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_COMMON_H_ */

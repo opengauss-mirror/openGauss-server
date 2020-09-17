@@ -1197,6 +1197,36 @@ bool IsInSameTransaction(PGPROC *proc1, PGPROC *proc2)
 }
 
 /*
+ * when query run as parallel mode, the parallel leader and worker thread hold differnt
+ * Procs, but we treat them as one transaction.
+ */
+static bool IsInSameParallelQuery(PGPROC *proc1, PGPROC *proc2)
+{
+    if (!IsInParallelMode()) {
+        return false;
+    }
+
+    /* Which proc is me? */
+    PGPROC *otherProc = NULL;
+    if (proc1 == t_thrd.proc) {
+        otherProc = proc2;
+    } else if (proc2 == t_thrd.proc) {
+        otherProc = proc1;
+    } else {
+        return false;
+    }
+
+    if (ParallelWorkerAmI()) {
+        /* I'm worker, so check whether other proc is my master or not */
+        return t_thrd.msqueue_cxt.pq_mq_parallel_master_pid == otherProc->pid;
+    } else if (ParallelLeaderAmI()) {
+        /* I'm leader, so check whether other proc is a worker of mine or not */
+        return GetBackgroundWorkerTypeByPid(otherProc->pid) != NULL;
+    }
+    return false;
+}
+
+/*
  * LockCheckConflicts -- test whether requested lock conflicts
  *		with those already granted
  *
@@ -1246,12 +1276,13 @@ int LockCheckConflicts(LockMethod lockMethodTable, LOCKMODE lockmode, LOCK *lock
          * thread is in one transaction, but these threads use differnt procs.
          * We need treat these procs as one proc
          */
-        if (StreamTopConsumerAmI() || StreamThreadAmI()) {
+        if (StreamTopConsumerAmI() || StreamThreadAmI() || ParallelWorkerAmI() || ParallelLeaderAmI()) {
             SHM_QUEUE *otherProcLocks = &(lock->procLocks);
             PROCLOCK *otherProcLock = (PROCLOCK *)SHMQueueNext(otherProcLocks, otherProcLocks,
                                                                offsetof(PROCLOCK, lockLink));
             while (otherProcLock != NULL) {
-                if (IsInSameTransaction(otherProcLock->tag.myProc, proc)) {
+                if (IsInSameParallelQuery(otherProcLock->tag.myProc, proc) ||
+                    IsInSameTransaction(otherProcLock->tag.myProc, proc)) {
                     if (otherProcLock->holdMask & LOCKBIT_ON((unsigned int)i))
                         ++myHolding;
                 }

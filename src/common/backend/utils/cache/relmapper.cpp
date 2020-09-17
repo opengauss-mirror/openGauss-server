@@ -195,6 +195,13 @@ void RelationMapUpdateMap(Oid relationId, Oid fileNode, bool shared, bool immedi
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("cannot change relation mapping within subtransaction")));
         }
+
+        if (IsInParallelMode()) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cannot change relation mapping in parallel mode")));
+        }
+
         if (immediate) {
             /* Make it active, but only locally */
             if (shared) {

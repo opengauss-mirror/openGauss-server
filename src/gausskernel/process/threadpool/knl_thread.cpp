@@ -1422,6 +1422,12 @@ void knl_t_bgworker_init(knl_t_bgworker_context* bgworker_cxt)
     bgworker_cxt->my_bgworker_entry = NULL;
     bgworker_cxt->is_background_worker = false;
     bgworker_cxt->background_worker_list = SLIST_STATIC_INIT(background_worker_list);
+    bgworker_cxt->ParallelMessagePending = false;
+    bgworker_cxt->InitializingParallelWorker = false;
+    bgworker_cxt->ParallelWorkerNumber = -1;
+    bgworker_cxt->pcxt_list = DLIST_STATIC_INIT(bgworker_cxt->pcxt_list);
+    bgworker_cxt->save_pgBufferUsage = NULL;
+    bgworker_cxt->hpm_context = NULL;
 }
 
 void knl_t_msqueue_init(knl_t_msqueue_context* msqueue_cxt)

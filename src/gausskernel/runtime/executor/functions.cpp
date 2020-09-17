@@ -456,7 +456,7 @@ static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr f_c
             if (query_tree->commandType == CMD_UTILITY)
                 stmt = query_tree->utilityStmt;
             else
-                stmt = (Node*)pg_plan_query(query_tree, 0, NULL);
+                stmt = (Node*)pg_plan_query(query_tree, f_cache->readonly_func ? CURSOR_OPT_PARALLEL_OK : 0, NULL);
 
             /* Precheck all commands for validity in a function */
             if (IsA(stmt, TransactionStmt))
@@ -470,6 +470,9 @@ static List* init_execution_state(List* query_tree_list, SQLFunctionCachePtr f_c
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         /* translator: %s is a SQL statement name */
                         errmsg("%s is not allowed in a non-volatile function", CreateCommandTag(stmt))));
+
+            if (IsInParallelMode() && !CommandIsReadOnly(stmt))
+                PreventCommandIfParallelMode(CreateCommandTag((Node *)stmt));
 
             /* OK, build the execution_state for this query */
             new_es = (execution_state*)palloc(sizeof(execution_state));
@@ -882,6 +885,7 @@ static void postquel_sub_params(SQLFunctionCachePtr f_cache, FunctionCallInfo fc
             param_li->parserSetupArg = NULL;
             param_li->params_need_process = false;
             param_li->numParams = n_args;
+            param_li->paramMask = NULL;
             f_cache->paramLI = param_li;
         } else {
             param_li = f_cache->paramLI;

@@ -51,6 +51,8 @@
 #define LOCAL_RECEIVE_KDATA_COST 1.3 /* The receive cost for local stream */
 #define DEFAULT_SMP_THREAD_COST 1000 /* The cost for add a new thread */
 #define DEFAULT_STREAM_MULTIPLE 1.0
+#define DEFAULT_PARALLEL_TUPLE_COST 0.1
+#define DEFAULT_PARALLEL_SETUP_COST 1000.0
 
 #define DEFAULT_EFFECTIVE_CACHE_SIZE 16384 /* measured in pages */
 
@@ -80,7 +82,8 @@ extern void cost_update(Path* path, bool vectorized, Cost input_cost, double tup
 extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(
     double tuples_fetched, BlockNumber pages, double index_pages, PlannerInfo* root, bool ispartitionedindex);
-extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
+extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel,
+    ParamPathInfo* param_info, int nworkers = 0);
 extern void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
 extern void cost_dfsscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
@@ -130,6 +133,7 @@ extern void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorks
 extern void cost_rescan(PlannerInfo* root, Path* path, Cost* rescan_startup_cost, /* output parameters */
     Cost* rescan_total_cost, OpMemInfo* mem_info);
 extern Cost cost_rescan_material(double rows, int width, OpMemInfo* mem_info, bool vectorized, int dop);
+extern void cost_gather(GatherPath *path, RelOptInfo *baserel, ParamPathInfo *param_info);
 extern void cost_subplan(PlannerInfo* root, SubPlan* subplan, Plan* plan);
 extern void cost_qual_eval(QualCost* cost, List* quals, PlannerInfo* root);
 extern void cost_qual_eval_node(QualCost* cost, Node* qual, PlannerInfo* root);

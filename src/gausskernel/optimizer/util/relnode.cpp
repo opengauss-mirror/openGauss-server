@@ -20,6 +20,7 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/print.h"
 #include "parser/parse_hint.h"
+#include "optimizer/clauses.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
@@ -169,6 +170,7 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->partflag = PARTITION_NONE;
     rel->rows = 0;
     rel->width = 0;
+    rel->consider_parallel = false; /* might get changed later */
     rel->encodedwidth = 0;
     rel->encodednum = 0;
     rel->reltargetlist = NIL;
@@ -549,6 +551,7 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->partflag = PARTITION_NONE;
     joinrel->rows = 0;
     joinrel->width = 0;
+    joinrel->consider_parallel = false;
     joinrel->encodedwidth = 0;
     joinrel->encodednum = 0;
     joinrel->reltargetlist = NIL;
@@ -623,6 +626,25 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
      * Set estimates of the joinrel's size.
      */
     set_joinrel_size_estimates(root, joinrel, outer_rel, inner_rel, sjinfo, restrictlist);
+
+    /*
+     * Set the consider_parallel flag if this joinrel could potentially be
+     * scanned within a parallel worker.  If this flag is false for either
+     * inner_rel or outer_rel, then it must be false for the joinrel also.
+     * Even if both are true, there might be parallel-restricted quals at our
+     * level.
+     *
+     * Note that if there are more than two rels in this relation, they could
+     * be divided between inner_rel and outer_rel in any arbitary way.  We
+     * assume this doesn't matter, because we should hit all the same baserels
+     * and joinclauses while building up to this joinrel no matter which we
+     * take; therefore, we should make the same decision here however we get
+     * here.
+     */
+    if (inner_rel->consider_parallel && outer_rel->consider_parallel &&
+        !has_parallel_hazard((Node *)restrictlist, false)) {
+        joinrel->consider_parallel = true;
+    }
 
     /*
      * Add the joinrel to the query's joinrel list, and store it into the

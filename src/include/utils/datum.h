@@ -45,4 +45,12 @@ extern void datumFree(Datum value, bool typByVal, int typLen);
  */
 extern bool datumIsEqual(Datum value1, Datum value2, bool typByVal, int typLen);
 
+/*
+ * Serialize and restore datums so that we can transfer them to parallel
+ * workers.
+ */
+extern Size datumEstimateSpace(Datum value, bool isnull, bool typByVal, int typLen);
+extern void datumSerialize(Datum value, bool isnull, bool typByVal, int typLen, char **start_address, Size *remainLen);
+extern Datum datumRestore(char **start_address, Size *remainLen, bool *isnull);
+
 #endif /* DATUM_H */

@@ -36,6 +36,7 @@
 #include <poll.h>
 #endif
 
+#include "access/parallel.h"
 #include "access/printtup.h"
 #include "access/xact.h"
 #include "access/dfs/dfs_am.h"
@@ -254,6 +255,16 @@ void StreamThreadIam()
 bool StreamTopConsumerAmI()
 {
     return (t_thrd.subrole == TOP_CONSUMER);
+}
+
+bool ParallelWorkerAmI()
+{
+    return t_thrd.role == BACKGROUND_WORKER;
+}
+
+bool ParallelLeaderAmI()
+{
+    return t_thrd.subrole == BACKGROUND_LEADER;
 }
 
 void EnableDoingCommandRead()
@@ -2275,7 +2286,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
             FreeExecNodes(&single_exec_node);
         }
 
-        plantree_list = pg_plan_queries(querytree_list, 0, NULL);
+        plantree_list = pg_plan_queries(querytree_list, CURSOR_OPT_PARALLEL_OK, NULL);
 
         randomPlanInfo = get_random_plan_string();
         if (was_logged != false && randomPlanInfo != NULL) {
@@ -4072,6 +4083,7 @@ void exec_bind_message(StringInfo input_message)
         params->parserSetupArg = NULL;
         params->params_need_process = false;
         params->numParams = numParams;
+        params->paramMask = NULL;
 
         for (paramno = 0; paramno < numParams; paramno++) {
             Oid ptype = psrc->param_types[paramno];
@@ -5693,6 +5705,10 @@ void ProcessInterrupts(void)
         if (IsJobSnapshotProcess()) {
             ereport(ERROR, (errcode(ERRCODE_QUERY_CANCELED), errmsg("canceling snapshot task")));
         }
+    }
+
+    if (t_thrd.bgworker_cxt.ParallelMessagePending) {
+        HandleParallelMessages();
     }
     /* If we get here, do nothing (probably, t_thrd.int_cxt.QueryCancelPending was reset) */
 }

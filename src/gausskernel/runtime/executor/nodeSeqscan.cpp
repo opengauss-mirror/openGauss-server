@@ -39,6 +39,8 @@
 #include "utils/rel_gs.h"
 #include "nodes/execnodes.h"
 
+static AbsTblScanDesc InitBeginScan(SeqScanState* node, Relation current_relation);
+
 extern void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int* quantity, int* trigger);
 /* ----------------------------------------------------------------
  *		prefetch_pages
@@ -202,6 +204,18 @@ static TupleTableSlot* SeqNext(SeqScanState* node)
     estate = node->ps.state;
     direction = estate->es_direction;
     slot = node->ss_ScanTupleSlot;
+
+    if (scanDesc == NULL) {
+        /*
+         * We reach here if the scan is not parallel, or if we're executing
+         * a scan that was intended to be parallel serially.
+         * It must be a non-partitioned table.
+         */
+        Assert(!node->isPartTbl);
+        scanDesc = InitBeginScan(node, node->ss_currentRelation);
+        node->ss_currentScanDesc = scanDesc;
+    }
+
     GetHeapScanDesc(scanDesc)->rs_ss_accessor = node->ss_scanaccessor;
 
     /*
@@ -341,10 +355,13 @@ void InitScanRelation(SeqScanState* node, EState* estate)
      * open that relation and acquire appropriate lock on it.
      */
     current_relation = ExecOpenScanRelation(estate, ((SeqScan*)node->ps.plan)->scanrelid);
-
     if (!node->isPartTbl) {
-        /* add qual for redis */
-        current_scan_desc = InitBeginScan(node, current_relation);
+        /*
+         * For non-partitioned table, we will do InitBeginScan later to check whether we can do
+         * parallel scan or not. Check ExecInitSeqScan and SeqNext for details.
+         * But we still need to add qual here, otherwise ExecScan will get no qual.
+         */
+        (void)reset_scan_qual(current_relation, node);
     } else {
         plan = (SeqScan*)node->ps.plan;
 
@@ -507,7 +524,15 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
         abs_tbl_init_parallel_seqscan(
             scanstate->ss_currentScanDesc, scanstate->ps.plan->dop, scanstate->partScanDirection);
     } else {
-        scanstate->ps.stubType = PST_Scan;
+        /*
+         * For non-partitioned table, ss_currentScanDesc may be none cause we will try to do parallel.
+         * Check InitScanRelation and SeqNext for details.
+         */
+        if (!node->isPartTbl) {
+            scanstate->ps.stubType = PST_None;
+        } else {
+            scanstate->ps.stubType = PST_Scan;
+        }
     }
 
     scanstate->ps.ps_TupFromTlist = false;
@@ -602,28 +627,88 @@ void ExecReScanSeqScan(SeqScanState* node)
     }
 
     scan = node->ss_currentScanDesc;
-    if (node->isPartTbl) {
-        if (PointerIsValid(node->partitions)) {
-            /* end scan the prev partition first, */
-            abs_tbl_endscan(scan);
 
-            /* finally init Scan for the next partition */
-            ExecInitNextPartitionForSeqScan(node);
+    if (scan != NULL) {
+        if (node->isPartTbl) {
+            if (PointerIsValid(node->partitions)) {
+                /* end scan the prev partition first, */
+                abs_tbl_endscan(scan);
 
-            scan = node->ss_currentScanDesc;
+                /* finally init Scan for the next partition */
+                ExecInitNextPartitionForSeqScan(node);
+
+                scan = node->ss_currentScanDesc;
+            }
+        } else {
+            abs_tbl_rescan(scan, NULL);
         }
-    } else {
-        abs_tbl_rescan(scan, NULL);
-    }
 
-    abs_tbl_init_parallel_seqscan(scan, node->ps.plan->dop, node->partScanDirection);
+        abs_tbl_init_parallel_seqscan(scan, node->ps.plan->dop, node->partScanDirection);
+    }
     ExecScanReScan((ScanState*)node);
 }
 
 /* ----------------------------------------------------------------
- *		ExecSeqMarkPos(node)
+ *      ExecSeqScanEstimate
  *
- *		Marks scan position.
+ *      estimates the space required to serialize seqscan node.
+ * ----------------------------------------------------------------
+ */
+void ExecSeqScanEstimate(SeqScanState *node, ParallelContext *pcxt)
+{
+    EState *estate = node->ps.state;
+    node->pscan_len = heap_parallelscan_estimate(estate->es_snapshot);
+}
+
+/* ----------------------------------------------------------------
+ *      ExecSeqScanInitializeDSM
+ *
+ *      Set up a parallel heap scan descriptor.
+ * ----------------------------------------------------------------
+ */
+void ExecSeqScanInitializeDSM(SeqScanState *node, ParallelContext *pcxt, int nodeid)
+{
+    EState *estate = node->ps.state;
+    knl_u_parallel_context *cxt = (knl_u_parallel_context *)pcxt->seg;
+
+    /* Here we can't use palloc, cause we have switch to old memctx in ExecInitParallelPlan */
+    cxt->pwCtx->pscan[nodeid] = (ParallelHeapScanDesc)MemoryContextAllocZero(cxt->memCtx, node->pscan_len);
+    heap_parallelscan_initialize(cxt->pwCtx->pscan[nodeid], node->pscan_len, node->ss_currentRelation,
+        estate->es_snapshot);
+    cxt->pwCtx->pscan[nodeid]->plan_node_id = node->ps.plan->plan_node_id;
+    node->ss_currentScanDesc =
+        (AbsTblScanDesc)heap_beginscan_parallel(node->ss_currentRelation, cxt->pwCtx->pscan[nodeid]);
+}
+
+/* ----------------------------------------------------------------
+ *      ExecSeqScanInitializeWorker
+ *
+ *      Copy relevant information from TOC into planstate.
+ * ----------------------------------------------------------------
+ */
+void ExecSeqScanInitializeWorker(SeqScanState *node, void *context)
+{
+    ParallelHeapScanDesc pscan = NULL;
+    knl_u_parallel_context *cxt = (knl_u_parallel_context *)context;
+
+    for (int i = 0; i < cxt->pwCtx->pscan_num; i++) {
+        if (node->ps.plan->plan_node_id == cxt->pwCtx->pscan[i]->plan_node_id) {
+            pscan = cxt->pwCtx->pscan[i];
+            break;
+        }
+    }
+
+    if (pscan == NULL) {
+        ereport(ERROR, (errmsg("could not find plan info, plan node id:%d", node->ps.plan->plan_node_id)));
+    }
+
+    node->ss_currentScanDesc = (AbsTblScanDesc)heap_beginscan_parallel(node->ss_currentRelation, pscan);
+}
+
+/* ----------------------------------------------------------------
+ * 		ExecSeqMarkPos(node)
+ *
+ * 		Marks scan position.
  * ----------------------------------------------------------------
  */
 void ExecSeqMarkPos(SeqScanState* node)

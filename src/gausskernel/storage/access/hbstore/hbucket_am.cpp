@@ -285,7 +285,7 @@ static HeapTuple switch_and_scan_next_tbl_hbkt(HBktTblScanDesc hp_scan, ScanDire
         (void)reset_scan_qual(next_bkt_rel, hp_scan->scanState);
         next_bkt_scan = heap_beginscan(next_bkt_rel, curr_bkt_scan->rs_snapshot,
             curr_bkt_scan->rs_nkeys, curr_bkt_scan->rs_key,
-            curr_bkt_scan->rs_isRangeScanInRedis);
+            curr_bkt_scan->rs_flags & SO_TYPE_RANGESCAN);
 
         try_init_bucket_parallel(next_bkt_scan, hp_scan->scanState);
 
@@ -347,8 +347,8 @@ bool hbkt_sampling_scan_nextbucket(HBktTblScanDesc hp_scan)
     /* Step 3. Build a HeapScan for new bucket */
     next_bkt_scan = heap_beginscan_sampling(next_bkt_rel, curr_bkt_scan->rs_snapshot,
         curr_bkt_scan->rs_nkeys, curr_bkt_scan->rs_key,
-        curr_bkt_scan->rs_allow_strat, curr_bkt_scan->rs_allow_sync,
-        curr_bkt_scan->rs_isRangeScanInRedis);
+        curr_bkt_scan->rs_flags & SO_ALLOW_STRAT, curr_bkt_scan->rs_flags & SO_ALLOW_SYNC,
+        curr_bkt_scan->rs_flags & SO_TYPE_RANGESCAN);
 
     /* Step 4. Set the parallel scan parameter */
     ScanState* sstate = hp_scan->scanState;

@@ -19,6 +19,7 @@
 
 #include <ctype.h>
 
+#include "access/parallel.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "catalog/pg_authid.h"
@@ -502,7 +503,8 @@ const char* show_log_timezone(void)
  */
 bool check_transaction_read_only(bool* newval, void** extra, GucSource source)
 {
-    if (*newval == false && u_sess->attr.attr_common.XactReadOnly && IsTransactionState()) {
+    if (*newval == false && u_sess->attr.attr_common.XactReadOnly && IsTransactionState() &&
+        !t_thrd.bgworker_cxt.InitializingParallelWorker) {
         /* Can't go to r/w mode inside a r/o transaction */
         if (IsSubTransaction()) {
             GUC_check_errcode(ERRCODE_ACTIVE_SQL_TRANSACTION);
@@ -763,6 +765,28 @@ void assign_client_encoding(const char* newval, void* extra)
 {
     int encoding = *((int*)extra);
 
+    /*
+     * Parallel workers send data to the leader, not the client.  They always
+     * send data using the database encoding.
+     */
+    if (IsParallelWorker()) {
+        /*
+         * During parallel worker startup, we want to accept the leader's
+         * client_encoding setting so that anyone who looks at the value in
+         * the worker sees the same value that they would see in the leader.
+         */
+        if (t_thrd.bgworker_cxt.InitializingParallelWorker)
+            return;
+
+        /*
+         * A change other than during startup, for example due to a SET clause
+         * attached to a function definition, should be rejected, as there is
+         * nothing we can do inside the worker to make it take effect.
+         */
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+            errmsg("cannot change client_encoding during a parallel operation")));
+    }
+
     /* We do not expect an error if PrepareClientEncoding succeeded */
     if (SetClientEncoding(encoding) < 0)
         elog(LOG, "SetClientEncoding(%d) failed", encoding);
@@ -895,9 +919,11 @@ bool check_role(char** newval, void** extra, GucSource source)
         }
 
         /*
-         * Verify that session user is allowed to become this role
+         * Verify that session user is allowed to become this role, but skip
+         * this in parallel mode, where we must blindly recreate the parallel
+         * leader's state.
          */
-        if (!is_member_of_role(GetSessionUserId(), roleid)) {
+        if (!t_thrd.bgworker_cxt.InitializingParallelWorker && !is_member_of_role(GetSessionUserId(), roleid)) {
             GUC_check_errcode(ERRCODE_INSUFFICIENT_PRIVILEGE);
             GUC_check_errmsg("permission denied to set role \"%s\"", *newval);
             return false;

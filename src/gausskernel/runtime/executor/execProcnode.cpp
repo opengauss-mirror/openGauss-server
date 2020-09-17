@@ -89,6 +89,7 @@
 #include "executor/nodeExtensible.h"
 #include "executor/nodeForeignscan.h"
 #include "executor/nodeFunctionscan.h"
+#include "executor/nodeGather.h"
 #include "executor/nodeGroup.h"
 #include "executor/nodeHash.h"
 #include "executor/nodeHashjoin.h"
@@ -116,6 +117,7 @@
 #include "executor/nodeWindowAgg.h"
 #include "executor/nodeWorktablescan.h"
 #include "executor/execStream.h"
+#include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/encoding.h"
 #include "optimizer/ml_model.h"
@@ -297,6 +299,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* e_state, int e_flags)
             return (PlanState*)ExecInitWindowAgg((WindowAgg*)node, e_state, e_flags);
         case T_Unique:
             return (PlanState*)ExecInitUnique((Unique*)node, e_state, e_flags);
+        case T_Gather:
+            return (PlanState*)ExecInitGather((Gather*)node, e_state, e_flags);
         case T_Hash:
             return (PlanState*)ExecInitHash((Hash*)node, e_state, e_flags);
         case T_SetOp:
@@ -635,6 +639,8 @@ TupleTableSlot* ExecProcNodeByType(PlanState* node)
             return ExecWindowAgg((WindowAggState*)node);
         case T_UniqueState:
             return ExecUnique((UniqueState*)node);
+        case T_GatherState:
+            return ExecGather((GatherState*)node);
         case T_HashState:
             return ExecHash();
         case T_SetOpState:
@@ -1085,6 +1091,9 @@ static void ExecEndNodeByType(PlanState* node)
         case T_TsStoreScanState:
             ExecEndCStoreScan((CStoreScanState*)node, false);
             break;
+        case T_GatherState:
+            ExecEndGather((GatherState *)node);
+            break;
         case T_IndexScanState:
             ExecEndIndexScan((IndexScanState*)node);
             break;
@@ -1339,4 +1348,30 @@ void ExecEndNode(PlanState* node)
         return;
     }
     ExecEndNodeByType(node);
+}
+
+/*
+ * ExecShutdownNode
+ *
+ * Give execution nodes a chance to stop asynchronous resource consumption
+ * and release any resources still held.  Currently, this is only used for
+ * parallel query, but we might want to extend it to other cases also (e.g.
+ * FDW).  We might also want to call it sooner, as soon as it's evident that
+ * no more rows will be needed (e.g. when a Limit is filled) rather than only
+ * at the end of ExecutorRun.
+ */
+bool ExecShutdownNode(PlanState *node)
+{
+    if (node == NULL)
+        return false;
+
+    switch (nodeTag(node)) {
+        case T_GatherState:
+            ExecShutdownGather((GatherState *)node);
+            break;
+        default:
+            break;
+    }
+
+    return planstate_tree_walker(node, (bool (*)())ExecShutdownNode, NULL);
 }

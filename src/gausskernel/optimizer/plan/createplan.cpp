@@ -94,6 +94,7 @@ static CStoreScan* create_cstorescan_plan(PlannerInfo* root, Path* best_path, Li
 static DfsScan* create_dfsscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses,
     bool indexFlag = false, List* excludedCol = NIL, bool indexOnly = false);
 static TsStoreScan* create_tsstorescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
+static Gather *create_gather_plan(PlannerInfo *root, GatherPath *best_path);
 static Scan* create_indexscan_plan(
     PlannerInfo* root, IndexPath* best_path, List* tlist, List* scan_clauses, bool indexonly);
 static BitmapHeapScan* create_bitmap_scan_plan(
@@ -130,6 +131,7 @@ static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath);
 
+static Gather *make_gather(List *qptlist, List *qpqual, int nworkers, bool single_copy, Plan *subplan);
 static IndexScan* make_indexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
     List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir);
 static IndexOnlyScan* make_indexonlyscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
@@ -385,6 +387,9 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
             plan = create_stream_plan(root, (StreamPath*)best_path);
             break;
 #endif
+        case T_Gather:
+            plan = (Plan*)create_gather_plan(root, (GatherPath*)best_path);
+            break;
         default: {
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -1809,6 +1814,34 @@ static bool relIsDeltaNode(PlannerInfo* root, RelOptInfo* relOptInfo)
 
     relation_close(rel, AccessShareLock);
     return isDelta;
+}
+
+/*
+ * create_gather_plan
+ *
+ * 	  Create a Gather plan for 'best_path' and (recursively) plans
+ * 	  for its subpaths.
+ */
+static Gather *create_gather_plan(PlannerInfo *root, GatherPath *best_path)
+{
+    Index scan_relid = best_path->path.parent->relid;
+    Plan *subplan = create_plan_recurse(root, best_path->subpath);
+
+    disuse_physical_tlist(subplan, best_path->subpath);
+
+    Gather *gather_plan = make_gather(subplan->targetlist, NIL,
+        best_path->num_workers, best_path->single_copy, subplan);
+
+    copy_path_costsize(&gather_plan->plan, &best_path->path);
+
+#ifdef STREAMPLAN
+    add_distribute_info(root, &gather_plan->plan, scan_relid, &(best_path->path), NULL);
+#endif
+
+    /* use parallel mode for parallel plans. */
+    root->glob->parallelModeNeeded = true;
+
+    return gather_plan;
 }
 
 /*
@@ -5192,6 +5225,7 @@ static void copy_path_costsize(Plan* dest, Path* src)
         dest->plan_width = src->parent->width;
         dest->innerdistinct = src->innerdistinct;
         dest->outerdistinct = src->outerdistinct;
+        dest->parallel_aware = src->parallel_aware;
     } else {
         /* init the cost field directly */
         init_plan_cost(dest);
@@ -7518,6 +7552,22 @@ Unique* make_unique(Plan* lefttree, List* distinctList)
     node->numCols = numCols;
     node->uniqColIdx = uniqColIdx;
     node->uniqOperators = uniqOperators;
+
+    return node;
+}
+
+static Gather *make_gather(List *qptlist, List *qpqual, int nworkers, bool single_copy, Plan *subplan)
+{
+    Gather *node = makeNode(Gather);
+    Plan *plan = &node->plan;
+
+    /* cost should be inserted by caller */
+    plan->targetlist = qptlist;
+    plan->qual = qpqual;
+    plan->lefttree = subplan;
+    plan->righttree = NULL;
+    node->num_workers = nworkers;
+    node->single_copy = single_copy;
 
     return node;
 }

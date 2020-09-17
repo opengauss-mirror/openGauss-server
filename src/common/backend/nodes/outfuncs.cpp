@@ -593,6 +593,7 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     }
     WRITE_BOOL_FIELD(isRowTriggerShippable);
     WRITE_BOOL_FIELD(is_stream_plan);
+    WRITE_BOOL_FIELD(parallelModeNeeded);
 }
 
 /*
@@ -609,6 +610,7 @@ static void _outPlanInfo(StringInfo str, Plan* node)
     appendStringInfo(str, " :plan_rows %.0f", PLAN_LOCAL_ROWS(node));
     WRITE_FLOAT_FIELD(multiple, "%.0f");
     WRITE_INT_FIELD(plan_width);
+    WRITE_BOOL_FIELD(parallel_aware);
     WRITE_NODE_FIELD(targetlist);
     WRITE_NODE_FIELD(qual);
     WRITE_NODE_FIELD(lefttree);
@@ -895,6 +897,16 @@ static void _outBucketInfo(StringInfo str, BucketInfo* node)
     WRITE_NODE_TYPE("BUCKETINFO");
 
     WRITE_NODE_FIELD(buckets);
+}
+
+static void _outGather(StringInfo str, Gather *node)
+{
+    WRITE_NODE_TYPE("GATHER");
+
+    _outPlanInfo(str, (Plan *)node);
+
+    WRITE_INT_FIELD(num_workers);
+    WRITE_BOOL_FIELD(single_copy);
 }
 
 static void _outScan(StringInfo str, Scan* node)
@@ -2829,6 +2841,17 @@ static void _outUniquePath(StringInfo str, UniquePath* node)
     WRITE_BOOL_FIELD(hold_tlist);
 }
 
+static void _outGatherPath(StringInfo str, GatherPath *node)
+{
+    WRITE_NODE_TYPE("GATHERPATH");
+
+    _outPathInfo(str, (Path *)node);
+
+    WRITE_NODE_FIELD(subpath);
+    WRITE_INT_FIELD(num_workers);
+    WRITE_BOOL_FIELD(single_copy);
+}
+
 static void _outNestPath(StringInfo str, NestPath* node)
 {
     WRITE_NODE_TYPE("NESTPATH");
@@ -2877,6 +2900,8 @@ static void _outPlannerGlobal(StringInfo str, PlannerGlobal* node)
     WRITE_UINT_FIELD(lastRowMarkId);
     WRITE_BOOL_FIELD(transientPlan);
     WRITE_BOOL_FIELD(dependsOnRole);
+    WRITE_BOOL_FIELD(parallelModeOK);
+    WRITE_BOOL_FIELD(parallelModeNeeded);
 }
 
 /*
@@ -2956,6 +2981,7 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_ENUM_FIELD(partflag, PartitionFlag);
     WRITE_FLOAT_FIELD(rows, "%.0f");
     WRITE_INT_FIELD(width);
+    WRITE_BOOL_FIELD(consider_parallel);
     WRITE_NODE_FIELD(reltargetlist);
     WRITE_NODE_FIELD(pathlist);
     WRITE_NODE_FIELD(ppilist);
@@ -4860,6 +4886,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_BitmapOr:
                 _outBitmapOr(str, (BitmapOr*)obj);
                 break;
+            case T_Gather:
+                _outGather(str, (Gather*)obj);
+                break;
             case T_Scan:
                 _outScan(str, (Scan*)obj);
                 break;
@@ -5188,6 +5217,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_UniquePath:
                 _outUniquePath(str, (UniquePath*)obj);
+                break;
+            case T_GatherPath:
+                _outGatherPath(str, (GatherPath*)obj);
                 break;
             case T_NestPath:
                 _outNestPath(str, (NestPath*)obj);

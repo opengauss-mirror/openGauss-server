@@ -50,7 +50,8 @@ extern void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path);
 extern bool add_path_precheck(
     RelOptInfo* parent_rel, Cost startup_cost, Cost total_cost, List* pathkeys, Relids required_outer);
 
-extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop = 1);
+extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer,
+    int dop = 1, int nworkers = 0);
 extern Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
 extern Path *create_tsstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
 extern IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* indexclauses, List* indexclausecols,
@@ -73,6 +74,8 @@ extern MergeAppendPath* create_merge_append_path(
 extern ResultPath* create_result_path(List* quals, Path* subpath = NULL);
 extern MaterialPath* create_material_path(Path* subpath, bool materialize_all = false);
 extern UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath, SpecialJoinInfo* sjinfo);
+extern GatherPath *create_gather_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath, Relids required_outer,
+    int nworkers);
 extern Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkeys, Relids required_outer);
 extern Path* create_functionscan_path(PlannerInfo* root, RelOptInfo* rel);
 extern Path* create_valuesscan_path(PlannerInfo* root, RelOptInfo* rel);

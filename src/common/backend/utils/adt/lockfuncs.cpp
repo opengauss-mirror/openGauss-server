@@ -429,6 +429,14 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
 
 #define SET_LOCKTAG_INT32_DB(tag, databaseOid, key1, key2) SET_LOCKTAG_ADVISORY(tag, databaseOid, key1, key2, 2)
 
+static void PreventAdvisoryLocksInParallelMode(void)
+{
+    if (IsInParallelMode())
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+            errmsg("cannot use advisory locks during a parallel operation")));
+}
+
+
 #ifdef PGXC
 
 #define MAXINT8LEN 25
@@ -452,7 +460,8 @@ static bool pgxc_advisory_lock(int64 key64, int32 key1, int32 key2, bool iskeybi
     LockLevel locklevel, TryType locktry, Name databaseName)
 {
     LOCKTAG locktag;
-    Oid *coOids = NULL, *dnOids = NULL;
+    Oid *coOids = NULL;
+    Oid *dnOids = NULL;
     int numdnodes, numcoords;
     StringInfoData lock_cmd, unlock_cmd, lock_funcname, unlock_funcname, args;
     char str_key[MAXINT8LEN + 1];
@@ -576,6 +585,7 @@ Datum pg_advisory_lock_int8(PG_FUNCTION_ARGS)
     int64 key = PG_GETARG_INT64(0);
     LOCKTAG tag;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         (void)pgxc_advisory_lock(key, 0, 0, true, ExclusiveLock, SESSION_LOCK, WAIT);
@@ -599,6 +609,7 @@ Datum pg_advisory_xact_lock_int8(PG_FUNCTION_ARGS)
     int64 key = PG_GETARG_INT64(0);
     LOCKTAG tag;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         (void)pgxc_advisory_lock(key, 0, 0, true, ExclusiveLock, TRANSACTION_LOCK, WAIT);
@@ -621,6 +632,7 @@ Datum pg_advisory_lock_shared_int8(PG_FUNCTION_ARGS)
     int64 key = PG_GETARG_INT64(0);
     LOCKTAG tag;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         (void)pgxc_advisory_lock(key, 0, 0, true, ShareLock, SESSION_LOCK, WAIT);
@@ -644,6 +656,7 @@ Datum pg_advisory_xact_lock_shared_int8(PG_FUNCTION_ARGS)
     int64 key = PG_GETARG_INT64(0);
     LOCKTAG tag;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         (void)pgxc_advisory_lock(key, 0, 0, true, ShareLock, TRANSACTION_LOCK, WAIT);
@@ -669,6 +682,7 @@ Datum pg_try_advisory_lock_int8(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
         PG_RETURN_BOOL(pgxc_advisory_lock(key, 0, 0, true, ExclusiveLock, SESSION_LOCK, DONT_WAIT));
@@ -693,6 +707,7 @@ Datum pg_try_advisory_xact_lock_int8(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
         PG_RETURN_BOOL(pgxc_advisory_lock(key, 0, 0, true, ExclusiveLock, TRANSACTION_LOCK, DONT_WAIT));
@@ -716,6 +731,7 @@ Datum pg_try_advisory_lock_shared_int8(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
         PG_RETURN_BOOL(pgxc_advisory_lock(key, 0, 0, true, ShareLock, SESSION_LOCK, DONT_WAIT));
@@ -740,6 +756,7 @@ Datum pg_try_advisory_xact_lock_shared_int8(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
         PG_RETURN_BOOL(pgxc_advisory_lock(key, 0, 0, true, ShareLock, TRANSACTION_LOCK, DONT_WAIT));
@@ -763,6 +780,7 @@ Datum pg_advisory_unlock_int8(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     bool res = false;
 
+    PreventAdvisoryLocksInParallelMode();
     SET_LOCKTAG_INT64(tag, key);
 
     res = LockRelease(&tag, ExclusiveLock, true);
@@ -781,6 +799,7 @@ Datum pg_advisory_unlock_shared_int8(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     bool res = false;
 
+    PreventAdvisoryLocksInParallelMode();
     SET_LOCKTAG_INT64(tag, key);
 
     res = LockRelease(&tag, ShareLock, true);
@@ -797,6 +816,7 @@ Datum pg_advisory_lock_int4(PG_FUNCTION_ARGS)
     int32 key2 = PG_GETARG_INT32(1);
     LOCKTAG tag;
 
+    PreventAdvisoryLocksInParallelMode();
     if (key1 == XC_LOCK_FOR_BACKUP_KEY_1 && key2 == XC_LOCK_FOR_BACKUP_KEY_2 && !superuser())
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("Only system admin can lock the cluster.")));
 
@@ -826,6 +846,7 @@ Datum pg_advisory_lock_sp_db_int4(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     Oid database_oid = u_sess->proc_cxt.MyDatabaseId;
 
+    PreventAdvisoryLocksInParallelMode();
     if (key1 == XC_LOCK_FOR_BACKUP_KEY_1 && key2 == XC_LOCK_FOR_BACKUP_KEY_2 && !superuser())
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("Only system admin can lock the cluster.")));
 
@@ -858,6 +879,7 @@ Datum pg_advisory_xact_lock_int4(PG_FUNCTION_ARGS)
     int32 key2 = PG_GETARG_INT32(1);
     LOCKTAG tag;
 
+    PreventAdvisoryLocksInParallelMode();
     if (key1 == XC_LOCK_FOR_BACKUP_KEY_1 && key2 == XC_LOCK_FOR_BACKUP_KEY_2 && !superuser())
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("Only system admin can lock the cluster.")));
 
@@ -884,6 +906,7 @@ Datum pg_advisory_lock_shared_int4(PG_FUNCTION_ARGS)
     int32 key2 = PG_GETARG_INT32(1);
     LOCKTAG tag;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         (void)pgxc_advisory_lock(0, key1, key2, false, ShareLock, SESSION_LOCK, WAIT);
@@ -908,6 +931,7 @@ Datum pg_advisory_xact_lock_shared_int4(PG_FUNCTION_ARGS)
     int32 key2 = PG_GETARG_INT32(1);
     LOCKTAG tag;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         (void)pgxc_advisory_lock(0, key1, key2, false, ShareLock, TRANSACTION_LOCK, WAIT);
@@ -934,6 +958,7 @@ Datum pg_try_advisory_lock_int4(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
     if (key1 == XC_LOCK_FOR_BACKUP_KEY_1 && key2 == XC_LOCK_FOR_BACKUP_KEY_2 && !superuser())
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("Only system admin can lock the cluster.")));
 
@@ -962,6 +987,7 @@ Datum pg_try_advisory_xact_lock_int4(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
     if (key1 == XC_LOCK_FOR_BACKUP_KEY_1 && key2 == XC_LOCK_FOR_BACKUP_KEY_2 && !superuser())
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("Only system admin can lock the cluster.")));
 
@@ -989,6 +1015,7 @@ Datum pg_try_advisory_lock_shared_int4(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
         PG_RETURN_BOOL(pgxc_advisory_lock(0, key1, key2, false, ShareLock, SESSION_LOCK, DONT_WAIT));
@@ -1014,6 +1041,7 @@ Datum pg_try_advisory_xact_lock_shared_int4(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
         PG_RETURN_BOOL(pgxc_advisory_lock(0, key1, key2, false, ShareLock, TRANSACTION_LOCK, DONT_WAIT));
@@ -1038,6 +1066,7 @@ Datum pg_advisory_unlock_int4(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     bool res = false;
 
+    PreventAdvisoryLocksInParallelMode();
     SET_LOCKTAG_INT32(tag, key1, key2);
 
     res = LockRelease(&tag, ExclusiveLock, true);
@@ -1059,6 +1088,7 @@ Datum pg_advisory_unlock_sp_db_int4(PG_FUNCTION_ARGS)
     bool res = false;
     Oid database_oid = u_sess->proc_cxt.MyDatabaseId;
 
+    PreventAdvisoryLocksInParallelMode();
     if (database_name != NULL) {
         database_oid = get_database_oid(database_name->data, false);
     }
@@ -1082,6 +1112,7 @@ Datum pg_advisory_unlock_shared_int4(PG_FUNCTION_ARGS)
     LOCKTAG tag;
     bool res = false;
 
+    PreventAdvisoryLocksInParallelMode();
     SET_LOCKTAG_INT32(tag, key1, key2);
 
     res = LockRelease(&tag, ShareLock, true);
@@ -1113,6 +1144,7 @@ Datum pgxc_lock_for_backup(PG_FUNCTION_ARGS)
 {
     bool lockAcquired = false;
 
+    PreventAdvisoryLocksInParallelMode();
     if (!superuser())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("only system admin can lock the cluster for backup")));
@@ -1194,6 +1226,7 @@ Datum pgxc_unlock_for_sp_database(PG_FUNCTION_ARGS)
     Name databaseName = PG_GETARG_NAME(0);
     bool result = false;
 
+    PreventAdvisoryLocksInParallelMode();
     /* try to acquire the advisory lock in exclusive mode */
     result = DatumGetBool(DirectFunctionCall3(pg_advisory_unlock_sp_db_int4,
         t_thrd.postmaster_cxt.xc_lockForBackupKey1,
@@ -1220,6 +1253,7 @@ Datum pgxc_lock_for_sp_database(PG_FUNCTION_ARGS)
     int prepared_xact_count;
     Name databaseName = PG_GETARG_NAME(0);
 
+    PreventAdvisoryLocksInParallelMode();
     if (!superuser())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("only system admin can lock the cluster for backup")));
@@ -1302,6 +1336,7 @@ void pgxc_lock_for_utility_stmt(Node* parsetree, bool is_temp)
     LOCKTAG tag;
     LockAcquireResult res;
 
+    PreventAdvisoryLocksInParallelMode();
     /*
      * Reload configuration if we got SIGHUP from the postmaster, since we want to fetch
      * latest enable_online_ddl_waitlock values.

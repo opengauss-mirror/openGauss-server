@@ -153,6 +153,9 @@ void GetPlanNodePlainText(
                 }
             }
             break;
+        case T_Gather:
+            *pname = *sname = *pt_options = "Gather";
+            break;
         case T_IndexScan:
             *pt_operation = "INDEX";
             if (((IndexScan*)plan)->scan.isPartTbl)

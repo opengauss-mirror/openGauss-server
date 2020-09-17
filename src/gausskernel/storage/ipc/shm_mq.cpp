@@ -127,7 +127,7 @@ struct shm_mq {
  */
 struct shm_mq_handle {
     shm_mq     *mqh_queue;
-    char       *mqh_segment;
+    void       *mqh_segment;
     BackgroundWorkerHandle *mqh_handle;
     char       *mqh_buffer;
     Size        mqh_buflen;
@@ -265,7 +265,7 @@ PGPROC *shm_mq_get_sender(shm_mq *mq)
  * counterpart won't get stuck waiting for us to fill or drain the queue
  * after we've already lost interest.
  */
-shm_mq_handle *shm_mq_attach(shm_mq *mq, char *seg, BackgroundWorkerHandle *handle)
+shm_mq_handle *shm_mq_attach(shm_mq *mq, void *seg, BackgroundWorkerHandle *handle)
 {
     shm_mq_handle *mqh = (shm_mq_handle*)palloc(sizeof(shm_mq_handle));
 

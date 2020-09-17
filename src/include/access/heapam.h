@@ -80,6 +80,7 @@ extern void bucketClosePartition(Partition bucket);
 
 /* struct definition appears in relscan.h */
 typedef struct HeapScanDescData* HeapScanDesc;
+typedef struct ParallelHeapScanDescData *ParallelHeapScanDesc;
 
 /*
  * HeapScanIsValid
@@ -100,6 +101,11 @@ extern void heapgetpage(HeapScanDesc scan, BlockNumber page);
 extern void heap_rescan(HeapScanDesc scan, ScanKey key);
 extern void heap_endscan(HeapScanDesc scan);
 extern HeapTuple heap_getnext(HeapScanDesc scan, ScanDirection direction);
+
+extern Size heap_parallelscan_estimate(Snapshot snapshot);
+extern void heap_parallelscan_initialize(ParallelHeapScanDesc target, Size pscan_len, Relation relation,
+    Snapshot snapshot);
+extern HeapScanDesc heap_beginscan_parallel(Relation relation, ParallelHeapScanDesc parallel_scan);
 
 extern void heap_init_parallel_seqscan(HeapScanDesc scan, int32 dop, ScanDirection dir);
 

@@ -133,6 +133,7 @@ extern void SPICleanup(void);
 
 extern void AtEOXact_SPI(bool isCommit, bool stpRollback, bool stpCommit);
 extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool stpRollback, bool stpCommit);
+extern bool SPI_inside_nonatomic_context(void);
 extern DestReceiver* createAnalyzeSPIDestReceiver(CommandDest dest);
 /* SPI execution helpers */
 extern void spi_exec_with_callback(CommandDest dest, const char* src, bool read_only, long tcount, bool direct_call,

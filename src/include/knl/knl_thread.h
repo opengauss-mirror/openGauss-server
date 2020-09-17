@@ -346,6 +346,33 @@ typedef struct knl_t_xact_context {
     struct SERIALIZABLEXACT* MySerializableXact;
     bool MyXactDidWrite;
 
+    /*
+     * When running as a parallel worker, we place only a single
+     * TransactionStateData on the parallel worker's state stack, and the XID
+     * reflected there will be that of the *innermost* currently-active
+     * subtransaction in the backend that initiated parallelism.  However,
+     * GetTopTransactionId and TransactionIdIsCurrentTransactionId
+     * need to return the same answers in the parallel worker as they would have
+     * in the user backend, so we need some additional bookkeeping.
+     *
+     * XactTopTransactionId stores the XID of our toplevel transaction, which
+     * will be the same as TopTransactionState.transactionId in an ordinary
+     * backend; but in a parallel backend, which does not have the entire
+     * transaction state, it will instead be copied from the backend that started
+     * the parallel operation.
+     *
+     * nParallelCurrentXids will be 0 and ParallelCurrentXids NULL in an ordinary
+     * backend, but in a parallel backend, nParallelCurrentXids will contain the
+     * number of XIDs that need to be considered current, and ParallelCurrentXids
+     * will contain the XIDs themselves.  This includes all XIDs that were current
+     * or sub-committed in the parent at the time the parallel operation began.
+     * The XIDs are stored sorted in numerical order (not logical order) to make
+     * lookups as fast as possible.
+     */
+    TransactionId XactTopTransactionId;
+    int nParallelCurrentXids;
+    TransactionId *ParallelCurrentXids;
+
 #ifdef PGXC
     bool useLocalSnapshot;
     /*
@@ -2724,6 +2751,23 @@ typedef struct knl_t_bgworker_context {
      * The postmaster's list of registered background workers, in private memory.
      */
     slist_head background_worker_list;
+
+    /* Is there a parallel message pending which we need to receive? */
+    volatile bool ParallelMessagePending;
+    /* Are we initializing a parallel worker? */
+    bool InitializingParallelWorker;
+    /*
+     * Our parallel worker number.  We initialize this to -1, meaning that we are
+     * not a parallel worker.  In parallel workers, it will be set to a value >= 0
+     * and < the number of workers before any user code is invoked; each parallel
+     * worker will get a different parallel worker number.
+     */
+    int ParallelWorkerNumber;
+    /* List of active parallel contexts. */
+    dlist_head pcxt_list;
+
+    BufferUsage *save_pgBufferUsage;
+    MemoryContext hpm_context;
 } knl_t_bgworker_context;
 
 struct shm_mq;

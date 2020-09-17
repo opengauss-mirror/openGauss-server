@@ -96,6 +96,7 @@ typedef struct BackgroundWorker {
     Datum       bgw_main_arg;
     char        bgw_extra[BGW_EXTRALEN];
     ThreadId    bgw_notify_pid; /* SIGUSR1 this backend on start/stop */
+    void       *bgw_parallel_context;
 } BackgroundWorker;
 
 typedef enum BgwHandleStatus {

@@ -320,6 +320,11 @@ typedef struct Instrumentation {
     RecursiveInfo recursiveInfo;
 } Instrumentation;
 
+typedef struct WorkerInstrumentation {
+    int num_workers; /* # of structures that follow */
+    Instrumentation instrument[FLEXIBLE_ARRAY_MEMBER];
+} WorkerInstrumentation;
+
 /* instrumentation data */
 typedef struct InstrStreamPlanData {
     /* whether the plannode is valid */
@@ -1000,9 +1005,14 @@ typedef struct size_info {
 extern OperatorProfileTable g_operator_table;
 
 extern Instrumentation* InstrAlloc(int n, int instrument_options);
+extern void InstrInit(Instrumentation *instr, int instrument_options);
 extern void InstrStartNode(Instrumentation* instr);
 extern void InstrStopNode(Instrumentation* instr, double nTuples);
 extern void InstrEndLoop(Instrumentation* instr);
+extern void InstrAggNode(Instrumentation *dst, Instrumentation *add);
+extern void InstrStartParallelQuery(void);
+extern void InstrEndParallelQuery(BufferUsage *result);
+extern void InstrAccumParallelQuery(BufferUsage *result);
 extern void StreamEndLoop(StreamTime* instr);
 extern void AddControlMemoryContext(Instrumentation* instr, MemoryContext context);
 extern void CalculateContextSize(MemoryContext ctx, int64* memorySize);

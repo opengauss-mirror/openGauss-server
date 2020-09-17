@@ -1192,6 +1192,7 @@ typedef struct PlanState {
                     * top-level plan */
 
     Instrumentation* instrument; /* Optional runtime stats for this node */
+    WorkerInstrumentation *worker_instrument; /* per-worker instrumentation */
 
     /*
      * Common structural data for all Plan types.  These links to subsidiary
@@ -1546,6 +1547,7 @@ typedef struct ScanState {
     bool isSampleScan;               /* identify is it table sample scan or not. */
     SampleScanParams sampleScanInfo; /* TABLESAMPLE params include type/seed/repeatable. */
     ExecScanAccessMtd ScanNextMtd;
+    Size pscan_len; /* size of parallel heap scan descriptor */
 } ScanState;
 
 /*
@@ -2284,6 +2286,24 @@ typedef struct UniqueState {
     FmgrInfo* eqfunctions;     /* per-field lookup data for equality fns */
     MemoryContext tempContext; /* short-term context for comparisons */
 } UniqueState;
+
+/* ----------------
+ * GatherState information
+ *
+ * 		Gather nodes launch 1 or more parallel workers, run a subplan
+ * 		in those workers, and collect the results.
+ * ----------------
+ */
+typedef struct GatherState {
+    PlanState ps; /* its first field is NodeTag */
+    bool initialized;
+    struct ParallelExecutorInfo *pei;
+    int nreaders;
+    int nextreader;
+    struct TupleQueueReader **reader;
+    TupleTableSlot *funnel_slot;
+    bool need_to_scan_locally;
+} GatherState;
 
 /* ----------------
  *	 HashState information

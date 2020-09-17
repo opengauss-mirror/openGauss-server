@@ -820,6 +820,45 @@ void ProcArrayInitRecovery(TransactionId initializedUptoXID)
 }
 
 /*
+ * ProcArrayInstallRestoredXmin -- install restored xmin into MyPgXact->xmin
+ *
+ * This is like ProcArrayInstallImportedXmin, but we have a pointer to the
+ * PGPROC of the transaction from which we imported the snapshot, rather than
+ * an XID.
+ *
+ * Returns TRUE if successful, FALSE if source xact is no longer running.
+ */
+bool ProcArrayInstallRestoredXmin(TransactionId xmin, PGPROC *proc)
+{
+    bool result = false;
+
+    Assert(TransactionIdIsNormal(xmin));
+    Assert(proc != NULL);
+
+    /* Get lock so source xact can't end while we're doing this */
+    LWLockAcquire(ProcArrayLock, LW_SHARED);
+
+    volatile PGXACT *pgxact = &g_instance.proc_base->allPgXact[proc->pgprocno];
+
+    /*
+     * Be certain that the referenced PGPROC has an advertised xmin which is
+     * no later than the one we're installing, so that the system-wide xmin
+     * can't go backwards.  Also, make sure it's running in the same database,
+     * so that the per-database xmin cannot go backwards.
+     */
+    TransactionId xid = pgxact->xmin; /* fetch just once */
+    if (proc->databaseId == u_sess->proc_cxt.MyDatabaseId && TransactionIdIsNormal(xid) &&
+        TransactionIdPrecedesOrEquals(xid, xmin)) {
+        t_thrd.pgxact->xmin = u_sess->utils_cxt.TransactionXmin = xmin;
+        result = true;
+    }
+
+    LWLockRelease(ProcArrayLock);
+
+    return result;
+}
+
+/*
  * GetRunningTransactionData -- returns information about running transactions.
  *
  * Similar to GetSnapshotData but returns more information. We include
@@ -2658,8 +2697,8 @@ int CountDBBackends(Oid databaseid)
         int pgprocno = arrayP->pgprocnos[index];
         volatile PGPROC* proc = g_instance.proc_base_all_procs[pgprocno];
 
-        if (proc->pid == 0)
-            continue; /* do not count prepared xacts */
+        if (proc->pid == 0 || t_thrd.bgworker_cxt.is_background_worker)
+            continue; /* do not count prepared xacts and backgroud workers */
 
         if (!OidIsValid(databaseid) || proc->databaseId == databaseid)
             count++;
@@ -2721,8 +2760,8 @@ int CountUserBackends(Oid roleid)
         int pgprocno = arrayP->pgprocnos[index];
         volatile PGPROC* proc = g_instance.proc_base_all_procs[pgprocno];
 
-        if (proc->pid == 0)
-            continue; /* do not count prepared xacts */
+        if (proc->pid == 0 || t_thrd.bgworker_cxt.is_background_worker)
+            continue; /* do not count prepared xacts and background workers */
 
         if (proc->roleId == roleid)
             count++;
