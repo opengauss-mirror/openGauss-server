@@ -355,6 +355,7 @@ class ExpansionImpl():
         self.queryPrimaryClusterDetail()
         self.setPrimaryGUCConfig()
         self.setStandbyGUCConfig()
+        self.addTrustOnExistNodes()
         self.restartSingleDbWithPrimaryMode()
         self.buildStandbyHosts()
         self.generateClusterStaticFile()
@@ -393,6 +394,32 @@ class ExpansionImpl():
         primaryHost = self.getPrimaryHostName()
         standbyHostNames = list(set(nodeList).difference(set([primaryHost])))
         self.setGUCOnClusterHosts(standbyHostNames)
+
+    def addTrustOnExistNodes(self):
+        """
+        add host trust in pg_hba.conf on existing standby node. 
+        """ 
+        self.logger.debug("Start to set host trust on existing node.")
+        allNodeNames = self.context.nodeNameList
+        newNodeIps = self.context.newHostList
+        newNodeNames = []
+        trustCmd = []
+        for node in newNodeIps:
+            nodeName = self.context.backIpNameMap[node]
+            newNodeNames.append(nodeName)
+            cmd = 'host    all    all    %s/32    trust' % node
+            trustCmd.append(cmd)
+        existNodes = list(set(allNodeNames).difference(set(newNodeNames)))
+        for node in existNodes:
+            dataNode = self.context.clusterInfoDict[node]["dataNode"]
+            cmd = ""
+            for trust in trustCmd:
+                cmd += "gs_guc set -D %s -h '%s';" % (dataNode, trust)
+            sshTool = SshTool([node])
+            resultMap, outputCollect = sshTool.getSshStatusOutput(cmd, 
+            [node], self.envFile)
+            self.cleanSshToolFile(sshTool)
+        self.logger.debug("End to set host trust on existing node.")
     
     def restartSingleDbWithPrimaryMode(self):
         """
@@ -431,8 +458,8 @@ retry for %s times" % start_retry_num)
         for host in standbyHosts:
             hostName = self.context.backIpNameMap[host]
             dataNode = self.context.clusterInfoDict[hostName]["dataNode"]
-            command += "gs_guc set -D %s -h 'host    all    all    %s/32   \
-                 trust';" % (dataNode, host)
+            command += ("gs_guc set -D %s -h 'host    all    all    %s/32    " + \
+                "trust';") % (dataNode, host)
         self.logger.debug(command)
         sshTool = SshTool([primaryHost])
         resultMap, outputCollect = sshTool.getSshStatusOutput(command, 
