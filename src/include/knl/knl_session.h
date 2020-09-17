@@ -45,7 +45,6 @@
 #include <signal.h>
 
 #include "c.h"
-#include "access/heapam.h"
 #include "datatype/timestamp.h"
 #include "gs_thread.h"
 #include "knl/knl_guc.h"
@@ -60,7 +59,6 @@
 #include "storage/backendid.h"
 #include "storage/s_lock.h"
 #include "storage/shmem.h"
-#include "storage/predicate.h"
 #include "postmaster/bgworker.h"
 #include "storage/dsm.h"
 #include "utils/palloc.h"
@@ -2042,6 +2040,8 @@ typedef struct knl_u_ext_fdw_context {
 } knl_u_ext_fdw_context;
 
 /* Info need to pass from leader to worker */
+struct ParallelHeapScanDescData;
+typedef uint64 XLogRecPtr;
 typedef struct ParallelInfoContext {
     Oid database_id;
     Oid authenticated_user_id;
@@ -2060,7 +2060,7 @@ typedef struct ParallelInfoContext {
     char *param_space;
     Size param_len;
     int pscan_num;
-    ParallelHeapScanDesc *pscan;
+    ParallelHeapScanDescData **pscan;
     int usedComboCids;
     int sizeComboCids;
     HTAB *comboHash;
