@@ -2747,6 +2747,7 @@ typedef struct knl_t_bgworker_context {
     BackgroundWorkerArray *background_worker_data;
     BackgroundWorker *my_bgworker_entry;
     bool is_background_worker;
+    bool worker_shutdown_requested;
     /*
      * The postmaster's list of registered background workers, in private memory.
      */
