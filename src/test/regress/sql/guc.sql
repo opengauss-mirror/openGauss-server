@@ -325,3 +325,15 @@ set analysis_options = "on(STREAM_DATA_CHECK)";
 show analysis_options;
 reset analysis_options;
 show analysis_options;
+
+---
+-- int64 type
+---
+show vacuum_freeze_table_age;
+set vacuum_freeze_table_age to 100;
+set vacuum_freeze_table_age to 1.3;
+set vacuum_freeze_table_age to '1DSADA';
+show vacuum_freeze_table_age;
+reset vacuum_freeze_table_age;
+show vacuum_freeze_table_age;
+
