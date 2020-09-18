@@ -2030,12 +2030,16 @@ enum knl_ext_fdw_type {
     MYSQL_TYPE_FDW,
     ORACLE_TYPE_FDW,
     POSTGRES_TYPE_FDW,
+    PLDEBUG_TYPE,
     /* Add new external FDW type before MAX_TYPE_FDW */
     MAX_TYPE_FDW
 };
 
 typedef struct knl_u_ext_fdw_context {
-    void* connList;                     /* Connection info to other DB */
+    union {
+        void* connList;                     /* Connection info to other DB */
+        void* pldbg_ctx;                    /* Pldebugger info */
+    };
     pg_on_exit_callback fdwExitFunc;    /* Exit callback, will be called when session exit */
 } knl_u_ext_fdw_context;
 

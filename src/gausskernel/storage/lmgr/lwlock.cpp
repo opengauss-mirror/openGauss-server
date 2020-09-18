@@ -155,7 +155,8 @@ static const char *BuiltinTrancheNames[] = {
     "LWTRANCHE_ACCOUNT_TABLE",
     "GeneralExtendedLock",
     /* LWTRANCHE_GTT_CTL */
-    "GlobalTempTableControl"
+    "GlobalTempTableControl",
+    "PLdebugger"
 };
 
 static void RegisterLWLockTranches(void);

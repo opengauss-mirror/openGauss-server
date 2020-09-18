@@ -745,6 +745,7 @@ enable_multiple_nodes
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
+enable_pldebugger
 enable_thread_check
 enable_shared
 default_gs_version
@@ -823,6 +824,7 @@ enable_multiple_nodes
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
+enable_pldebugger
 enable_thread_check
 enable_spinlocks
 enable_debug
@@ -2892,6 +2894,29 @@ else
   enable_oracle_fdw=no
 
 fi
+
+# Check whether --enable-pldebugger was given.
+if test "${enable_pldebugger+set}" = set; then
+  enableval=$enable_pldebugger;
+  case $enableval in
+    yes)
+      :
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-pldebugger option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-pldebugger option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_pldebugger=no
+
+fi
+
 
 # Check whether --enable-thread-check was given.
 if test "${enable_thread_check+set}" = set; then
