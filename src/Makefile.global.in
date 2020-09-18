@@ -173,6 +173,7 @@ enable_jemalloc_debug	= @enable_jemalloc_debug@
 enable_multiple_nodes		= @enable_multiple_nodes@
 enable_mysql_fdw 		= @enable_mysql_fdw@
 enable_oracle_fdw		= @enable_oracle_fdw@
+enable_pldebugger		= @enable_pldebugger@
 enable_memory_check		= @enable_memory_check@
 enable_memory_check_core	= @enable_memory_check_core@
 enable_thread_check		= @enable_thread_check@

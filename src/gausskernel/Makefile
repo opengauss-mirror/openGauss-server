@@ -36,6 +36,10 @@ ifeq ($(enable_oracle_fdw), yes)
 	SUBDIRS += $(top_builddir)/contrib/oracle_fdw
 endif
 
+ifeq ($(enable_pldebugger), yes)
+	SUBDIRS += $(top_builddir)/contrib/pldebugger-master
+endif
+
 ifeq ($(enable_multiple_nodes), yes)
 SUBDIRS +=  ../distribute/kernel ../distribute/kernel/extension/roach_api ../distribute/kernel/extension/dimsearch/main \
 	../distribute/kernel/extension/tsdb

@@ -1,0 +1,2615 @@
+diff --git Makefile Makefile
+index 321b61c..9b678ff 100644
+--- Makefile
++++ Makefile
+@@ -13,7 +13,14 @@
+ EXTENSION  = pldbgapi
+ MODULE_big = plugin_debugger
+ 
++top_builddir = ../../../..
++
++override CPPFLAGS := -I$(top_builddir)/src/common/pl/plpgsql/src -fPIC $(CPPFLAGS)
++#LDFLAGS += -pie
++CFLAGS += -Wl,-z,relro,-z,now
++
+ OBJS	   = plpgsql_debugger.o plugin_debugger.o dbgcomm.o pldbgapi.o
++
+ ifdef INCLUDE_PACKAGE_SUPPORT
+ OBJS += spl_debugger.o
+ endif
+@@ -28,7 +35,6 @@ PGXS := $(shell $(PG_CONFIG) --pgxs)
+ include $(PGXS)
+ else
+ subdir       = contrib/pldebugger
+-top_builddir = ../..
+ include $(top_builddir)/src/Makefile.global
+ include $(top_srcdir)/contrib/contrib-global.mk
+ endif
+@@ -37,7 +43,6 @@ endif
+ # it is installed into include/server, but when building without pgxs,
+ # with the pldebugger directory being directly in the server source tree's
+ # contrib directory, we need to tell the compiler where to find it.
+-plpgsql_debugger.o: CFLAGS += -I$(top_builddir)/src/pl/plpgsql/src
+ 
+ ################################################################################
+ ## If we're building against EnterpriseDB's Advanced Server, also build a
+@@ -52,7 +57,7 @@ plpgsql_debugger.o: CFLAGS += -I$(top_builddir)/src/pl/plpgsql/src
+ ## To enable this, you need to run make as "make INCLUDE_PACKAGE_SUPPORT=1"
+ ## 
+ ifdef INCLUDE_PACKAGE_SUPPORT
+-spl_debugger.c:  plpgsql_debugger.c
++spl_debugger.cpp:  plpgsql_debugger.cpp
+ 	sed -e 's/plpgsql_/spl_/g' $(module_srcdir)plpgsql_debugger.c > spl_debugger.c
+ 
+ spl_debugger.o: 	CFLAGS += -DINCLUDE_PACKAGE_SUPPORT=1 -I$(top_builddir)/src/pl/edb-spl/src
+diff --git dbgcomm.cpp dbgcomm.cpp
+index 3ad3129..e89b864 100644
+--- dbgcomm.cpp
++++ dbgcomm.cpp
+@@ -68,12 +68,12 @@
+ #define DBGCOMM_PROXY_CONNECTING	2	/* proxy is connecting to our port */
+ #define DBGCOMM_CONNECTING_TO_PROXY	3	/* target is connecting to a proxy */
+ 
+-typedef struct
+-{
+-	BackendId		backendid;
++typedef struct {
++    int proxyId;
+ 	int			status;
+-	int			pid;
++    uint64 sessionId;
+ 	int			port;
++    Oid userid;
+ } dbgcomm_target_slot_t;
+ 
+ static dbgcomm_target_slot_t *dbgcomm_slots = NULL;
+@@ -90,7 +90,7 @@ static dbgcomm_target_slot_t *dbgcomm_slots = NULL;
+ static void dbgcomm_init(void);
+ static uint32 resolveHostName(const char *hostName);
+ static int findFreeTargetSlot(void);
+-static int findTargetSlot(BackendId backendid);
++static int findTargetSlot(int proxyId);
+ 
+ /**********************************************************************
+  * Initialization routines
+@@ -118,7 +118,8 @@ dbgcomm_init(void)
+ 		return;
+ 
+ 	LWLockAcquire(getPLDebuggerLock(), LW_EXCLUSIVE);
+-	dbgcomm_slots = ShmemInitStruct("Debugger Connection slots", sizeof(dbgcomm_target_slot_t) * NumTargetSlots, &found);
++	dbgcomm_slots = (dbgcomm_target_slot_t*)ShmemInitStruct("Debugger Connection slots",
++					sizeof(dbgcomm_target_slot_t) * NumTargetSlots, &found);
+ 	if (dbgcomm_slots == NULL)
+ 		elog(ERROR, "out of shared memory");
+ 
+@@ -127,8 +128,9 @@ dbgcomm_init(void)
+ 		int i;
+ 		for (i = 0; i < NumTargetSlots; i++)
+ 		{
+-			dbgcomm_slots[i].backendid = InvalidBackendId;
++            dbgcomm_slots[i].proxyId = -1;
+ 			dbgcomm_slots[i].status = DBGCOMM_IDLE;
++            dbgcomm_slots[i].userid = GetUserId();
+ 		}
+ 	}
+ 	LWLockRelease(getPLDebuggerLock());
+@@ -153,8 +155,7 @@ dbgcomm_init(void)
+  * We assume that the proxyPort came from a breakpoint or some other reliable
+  * source, so that we don't allow connecting to any random port in the system.
+  */
+-int
+-dbgcomm_connect_to_proxy(int proxyPort)
++int dbgcomm_connect_to_proxy(int proxyId)
+ {
+ 	int			sockfd;
+ 	struct sockaddr_in   remoteaddr = {0};
+@@ -217,12 +218,12 @@ dbgcomm_connect_to_proxy(int proxyPort)
+ 	}
+ 	dbgcomm_slots[slot].port = ntohs(localaddr.sin_port);
+ 	dbgcomm_slots[slot].status = DBGCOMM_CONNECTING_TO_PROXY;
+-	dbgcomm_slots[slot].backendid = MyBackendId;
+-	dbgcomm_slots[slot].pid = MyProcPid;
++    dbgcomm_slots[slot].proxyId = slot;
++    dbgcomm_slots[slot].sessionId = MY_SESS_ID;
+ 	LWLockRelease(getPLDebuggerLock());
+ 
+ 	remoteaddr.sin_family 	   = AF_INET;
+-	remoteaddr.sin_port        = htons(proxyPort);
++    remoteaddr.sin_port        = htons(proxyId);
+ 	remoteaddr.sin_addr.s_addr = resolveHostName( "127.0.0.1" );
+ 
+ 	/* Now connect to the other end. */
+@@ -231,14 +232,14 @@ dbgcomm_connect_to_proxy(int proxyPort)
+ 	{
+ 		ereport(COMMERROR,
+ 				(errcode_for_socket_access(),
+-				 errmsg("could not connect to debugging proxy at port %d: %m", proxyPort)));
++                errmsg("could not connect to debugging proxy Id: %d", proxyId)));
+ 		/*
+ 		 * Reset our entry in the array. On success, this will be done by
+ 		 * the proxy.
+ 		 */
+ 		LWLockAcquire(getPLDebuggerLock(), LW_EXCLUSIVE);
+ 		dbgcomm_slots[slot].status = DBGCOMM_IDLE;
+-		dbgcomm_slots[slot].backendid = InvalidBackendId;
++        dbgcomm_slots[slot].proxyId = -1;
+ 		dbgcomm_slots[slot].port = 0;
+ 		LWLockRelease(getPLDebuggerLock());
+ 		return -1;
+@@ -321,12 +322,12 @@ dbgcomm_listen_for_proxy(void)
+ 	}
+ 	dbgcomm_slots[slot].port = localport;
+ 	dbgcomm_slots[slot].status = DBGCOMM_LISTENING_FOR_PROXY;
+-	dbgcomm_slots[slot].backendid = MyBackendId;
+-	dbgcomm_slots[slot].pid = MyProcPid;
++    dbgcomm_slots[slot].proxyId = slot;
++    dbgcomm_slots[slot].sessionId = MY_SESS_ID;
+ 	LWLockRelease(getPLDebuggerLock());
+ 
+ 	/* Notify the client application that this backend is waiting for a proxy. */
+-	elog(NOTICE, "PLDBGBREAK:%d", MyBackendId);
++    elog(NOTICE, "YOUR PROXY PORT ID IS:%d", slot);
+ 
+ 	/* wait for the other end to connect to us */
+ 	done = false;
+@@ -345,7 +346,7 @@ dbgcomm_listen_for_proxy(void)
+ 		if (dbgcomm_slots[slot].status == DBGCOMM_PROXY_CONNECTING &&
+ 			dbgcomm_slots[slot].port == ntohs(remoteaddr.sin_port))
+ 		{
+-			dbgcomm_slots[slot].backendid = InvalidBackendId;
++            dbgcomm_slots[slot].proxyId = -1;
+ 			dbgcomm_slots[slot].status = DBGCOMM_IDLE;
+ 			done = true;
+ 		}
+@@ -369,8 +370,7 @@ dbgcomm_listen_for_proxy(void)
+  * Connect to given target backend that's waiting for us. Returns a socket
+  * that is open for communication. Uses ereport(ERROR) on error.
+  */
+-int
+-dbgcomm_connect_to_target(BackendId targetBackend)
++int dbgcomm_connect_to_target(int targetProxyId)
+ {
+ 	int			sockfd;
+ 	struct sockaddr_in   remoteaddr = {0};
+@@ -422,9 +422,12 @@ dbgcomm_connect_to_target(BackendId targetBackend)
+ 	 * let it know we're connecting to it from this port.
+ 	 */
+ 	LWLockAcquire(getPLDebuggerLock(), LW_EXCLUSIVE);
+-	slot = findTargetSlot(targetBackend);
+-	if (slot < 0 || dbgcomm_slots[slot].status != DBGCOMM_LISTENING_FOR_PROXY)
+-	{
++    slot = findTargetSlot(targetProxyId);
++    if (slot < 0 || dbgcomm_slots[slot].status != DBGCOMM_LISTENING_FOR_PROXY) {
++        closesocket(sockfd);
++        ereport(ERROR, (errmsg("target backend is not listening for a connection")));
++    }
++    if (dbgcomm_slots[slot].userid != GetUserId() && !superuser()) {
+ 		closesocket(sockfd);
+ 		ereport(ERROR,
+ 				(errmsg("target backend is not listening for a connection")));
+@@ -455,8 +458,7 @@ dbgcomm_connect_to_target(BackendId targetBackend)
+  * Waits for one connection from a target backend to the given socket. Returns
+  * a socket that is open for communication. Uses ereport(ERROR) on error.
+  */
+-int
+-dbgcomm_accept_target(int sockfd, int *targetPid)
++int dbgcomm_accept_target(int sockfd, uint64* targetSessId)
+ {
+ 	int			serverSocket;
+ 	int			i;
+@@ -523,7 +525,7 @@ dbgcomm_accept_target(int sockfd, int *targetPid)
+ 			if (dbgcomm_slots[i].status == DBGCOMM_CONNECTING_TO_PROXY &&
+ 				dbgcomm_slots[i].port == ntohs(remoteaddr.sin_port))
+ 			{
+-				*targetPid = dbgcomm_slots[i].pid;
++                *targetSessId = dbgcomm_slots[i].sessionId;
+ 				dbgcomm_slots[i].status = DBGCOMM_IDLE;
+ 				break;
+ 			}
+@@ -615,16 +617,14 @@ findFreeTargetSlot(void)
+ 
+ 	for (i = 0; i < NumTargetSlots; i++)
+ 	{
+-		if (dbgcomm_slots[i].backendid == InvalidBackendId)
++        if (dbgcomm_slots[i].proxyId == -1)
+ 			return i;
+-		if (dbgcomm_slots[i].backendid == MyBackendId)
+-		{
++        if (dbgcomm_slots[i].sessionId == MY_SESS_ID) {
+ 			/*
+ 			 * If we've failed to deallocate our slot earlier, reuse this slot.
+ 			 * This shouldn't happen.
+ 			 */
+-			elog(LOG, "found leftover debugging target slot for backend %d",
+-				 MyBackendId);
++            elog(LOG, "found leftover debugging target slot for session %ld", MY_SESS_ID);
+ 			return i;
+ 		}
+ 	}
+@@ -637,14 +637,13 @@ findFreeTargetSlot(void)
+  *
+  * Note: Caller must be holding the lock.
+  */
+-static int
+-findTargetSlot(BackendId backendid)
++static int findTargetSlot(int proxyId)
+ {
+ 	int		i;
+ 
+ 	for (i = 0; i < NumTargetSlots; i++)
+ 	{
+-		if (dbgcomm_slots[i].backendid == backendid)
++        if (dbgcomm_slots[i].proxyId == proxyId)
+ 			return i;
+ 	}
+ 	return -1;
+@@ -674,7 +673,7 @@ static uint32 resolveHostName( const char * hostName )
+     else
+ 		hostAddress = inet_addr( hostName );
+ 
+-    if(( hostAddress == -1 ) || ( hostAddress == INADDR_NONE ))
++    if(( hostAddress == (uint32)(-1) ) || ( hostAddress == INADDR_NONE ))
+ 		return( 0 );
+ 	else
+ 		return( hostAddress );
+diff --git dbgcomm.h dbgcomm.h
+index 3503c4a..333f4b2 100644
+--- dbgcomm.h
++++ dbgcomm.h
+@@ -9,17 +9,22 @@
+  * Licensed under the Artistic License, see 
+  *		http://www.opensource.org/licenses/artistic-license.php
+  * for full details
++ *
++ * --------------------------------------------------------------------
++ * OpenGauss Modification:
++ *     We have changed the name and type of several function parameters of 'dbgcomm_target_slot_t' struct.
++ *
+  */
+ #ifndef DBGCOMM_H
+ #define DBGCOMM_H
+ 
+ extern void dbgcomm_reserve(void);
+ 
+-extern int dbgcomm_connect_to_proxy(int proxyPort);
++extern int dbgcomm_connect_to_proxy(int proxyId);
+ extern int dbgcomm_listen_for_proxy(void);
+ 
+ extern int dbgcomm_listen_for_target(int *port);
+-extern int dbgcomm_accept_target(int sockfd, int *targetPid);
+-extern int dbgcomm_connect_to_target(BackendId targetBackend);
++extern int dbgcomm_accept_target(int sockfd, uint64* targetSessId);
++extern int dbgcomm_connect_to_target(int targetProxyId);
+ 
+ #endif
+diff --git globalbp.h globalbp.h
+index eecd011..190140e 100644
+--- globalbp.h
++++ globalbp.h
+@@ -9,6 +9,12 @@
+  * Licensed under the Artistic License, see 
+  *		http://www.opensource.org/licenses/artistic-license.php
+  * for full details
++ *
++ * -----------------------------------------------------------------------------
++ * OpenGauss Modifications:
++ *     We changed the name and type of var 'targetPid' of struct BreakpointKey,
++ *     to adapt to openGauss thread pool mode.
++ *
+  */
+ #ifndef GLOBALBP_H
+ #define GLOBALBP_H
+@@ -41,7 +47,7 @@ typedef struct BreakpointKey
+ 	Oid			databaseId;
+ 	Oid			functionId;
+ 	int			lineNumber;
+-	int			targetPid;		/* -1 means any process */
++    uint64 targetSessId;   /* uint64(-1) means any process */
+ } BreakpointKey;
+ 
+ typedef struct Breakpoint
+diff --git pldbgapi--1.0.sql pldbgapi--1.0.sql
+index 5095845..46b844b 100644
+--- pldbgapi--1.0.sql
++++ pldbgapi--1.0.sql
+@@ -6,6 +6,13 @@
+ -- Licensed under the Artistic License, see 
+ --		http://www.opensource.org/licenses/artistic-license.php
+ -- for full details
++--
++-- OpenGauss Modification:
++--    We have made the following modifications on the source code to adapt to openGauss:
++--    add        pldbg_on, pldbg_off
++--    rewrite    pldbg_get_source
++--    remove     pldbg_create_listener, pldbg_deposit_value, pldbg_get_target_info, pldbg_select_frame,
++--               pldbg_set_global_breakpoint, pldbg_wait_for_breakpoint, pldbg_wait_for_target
+ 
+ \echo Installing pldebugger as unpackaged objects. If you are using PostgreSQL
+ \echo version 9.1 or above, use "CREATE EXTENSION pldbgapi" instead.
+@@ -14,8 +21,10 @@ CREATE TYPE breakpoint AS ( func OID, linenumber INTEGER, targetName TEXT );
+ CREATE TYPE frame      AS ( level INT, targetname TEXT, func OID, linenumber INTEGER, args TEXT );
+ 
+ CREATE TYPE var		   AS ( name TEXT, varClass char, lineNumber INTEGER, isUnique bool, isConst bool, isNotNull bool, dtype OID, value TEXT );
+-CREATE TYPE proxyInfo  AS ( serverVersionStr TEXT, serverVersionNum INT, proxyAPIVer INT, serverProcessID INT );
++CREATE TYPE proxyInfo AS ( serverVersionStr TEXT, serverVersionNum INT, proxyAPIVer INT, serverProcessID BIGINT );
+ 
++CREATE FUNCTION pldbg_on() RETURNS boolean AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
++CREATE FUNCTION pldbg_off() RETURNS boolean AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_oid_debug( functionOID OID ) RETURNS INTEGER AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ 
+ -- for backwards-compatibility
+@@ -24,21 +33,15 @@ CREATE FUNCTION plpgsql_oid_debug( functionOID OID ) RETURNS INTEGER AS $$ SELEC
+ CREATE FUNCTION pldbg_abort_target( session INTEGER ) RETURNS SETOF boolean AS  '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_attach_to_port( portNumber INTEGER ) RETURNS INTEGER AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_continue( session INTEGER ) RETURNS breakpoint AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+-CREATE FUNCTION pldbg_create_listener() RETURNS INTEGER AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+-CREATE FUNCTION pldbg_deposit_value( session INTEGER, varName TEXT, lineNumber INTEGER, value TEXT ) RETURNS boolean AS  '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_drop_breakpoint( session INTEGER, func OID, linenumber INTEGER ) RETURNS boolean AS  '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_get_breakpoints( session INTEGER ) RETURNS SETOF breakpoint AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+-CREATE FUNCTION pldbg_get_source( session INTEGER, func OID ) RETURNS TEXT AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
++CREATE FUNCTION pldbg_get_source( func OID ) RETURNS TEXT AS 'SELECT prosrc from pg_proc where oid=($1)' LANGUAGE SQL;
+ CREATE FUNCTION pldbg_get_stack( session INTEGER ) RETURNS SETOF frame AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_get_proxy_info( ) RETURNS proxyInfo AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_get_variables( session INTEGER ) RETURNS SETOF var AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+-CREATE FUNCTION pldbg_select_frame( session INTEGER, frame INTEGER ) RETURNS breakpoint AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_set_breakpoint( session INTEGER, func OID, linenumber INTEGER ) RETURNS boolean AS  '$libdir/plugin_debugger' LANGUAGE C STRICT;
+-CREATE FUNCTION pldbg_set_global_breakpoint( session INTEGER, func OID, linenumber INTEGER, targetPID INTEGER ) RETURNS boolean AS  '$libdir/plugin_debugger' LANGUAGE C;
+ CREATE FUNCTION pldbg_step_into( session INTEGER ) RETURNS breakpoint AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ CREATE FUNCTION pldbg_step_over( session INTEGER ) RETURNS breakpoint AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+-CREATE FUNCTION pldbg_wait_for_breakpoint( session INTEGER ) RETURNS breakpoint  AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+-CREATE FUNCTION pldbg_wait_for_target( session INTEGER ) RETURNS INTEGER AS '$libdir/plugin_debugger' LANGUAGE C STRICT;
+ 
+ /*
+  * pldbg_get_target_info() function can be used to return information about
+@@ -68,88 +71,3 @@ CREATE TYPE targetinfo AS ( target OID, schema OID, nargs INT, argTypes oidvecto
+   argDefVals TEXT[]
+ );
+ 
+--- Create the pldbg_get_target_info() function. We use an inline code block
+--- so that we can check and create it slightly differently if running on
+--- an EnterpriseDB server.
+-
+-DO $do$
+-
+-declare
+-  isedb bool;
+-  createstmt text;
+-begin
+-
+-  isedb = (SELECT version() LIKE 'EnterpriseDB%');
+-
+-  createstmt := $create_stmt$
+-
+-CREATE FUNCTION pldbg_get_target_info(signature text, targetType "char") returns targetinfo AS $$
+-  SELECT p.oid AS target,
+-         pronamespace AS schema,
+-         pronargs::int4 AS nargs,
+-         -- The returned argtypes column is of type oidvector, but unlike
+-         -- proargtypes, it's supposed to include OUT params. So we
+-         -- essentially have to return proallargtypes, converted to an
+-         -- oidvector. There is no oid[] -> oidvector cast, so we have to
+-         -- do it via text.
+-         CASE WHEN proallargtypes IS NOT NULL THEN
+-           translate(proallargtypes::text, ',{}', ' ')::oidvector
+-         ELSE
+-           proargtypes
+-         END AS argtypes,
+-         proname AS targetname,
+-         proargmodes AS argmodes,
+-         proargnames AS proargnames,
+-         prolang AS targetlang,
+-         quote_ident(nspname) || '.' || quote_ident(proname) AS fqname,
+-         proretset AS returnsset,
+-         prorettype AS returntype,
+-$create_stmt$;
+-
+--- Add the three EDB-columns to the query (as dummies if we're installing
+--- to PostgreSQL)
+-IF isedb THEN
+-  createstmt := createstmt ||
+-$create_stmt$
+-         p.protype='0' AS isfunc,
+-         CASE WHEN n.nspparent <> 0 THEN n.oid ELSE 0 END AS pkg,
+-	 edb_get_func_defvals(p.oid) AS argdefvals
+-$create_stmt$;
+-ELSE
+-  createstmt := createstmt ||
+-$create_stmt$
+-         't'::bool AS isfunc,
+-         0::oid AS pkg,
+-	 NULL::text[] AS argdefvals
+-$create_stmt$;
+-END IF;
+-  -- End of conditional part
+-
+-  createstmt := createstmt ||
+-$create_stmt$
+-  FROM pg_proc p, pg_namespace n
+-  WHERE p.pronamespace = n.oid
+-  AND p.oid = $1::oid
+-  -- We used to support querying by function name or trigger name/oid as well,
+-  -- but that was never used in the client, so the support for that has been
+-  -- removed. The targeType argument remains as a legacy of that. You're
+-  -- expected to pass 'o' as target type, but it doesn't do anything.
+-  AND $2 = 'o'
+-$$ LANGUAGE SQL;
+-$create_stmt$;
+-
+-  execute createstmt;
+-
+--- Add a couple of EDB specific functions
+-IF isedb THEN
+-   CREATE FUNCTION edb_oid_debug(functionOID oid) RETURNS integer AS $$
+-     select pldbg_oid_debug($1);
+-   $$ LANGUAGE SQL;
+-
+-   CREATE FUNCTION pldbg_get_pkg_cons(packageOID oid) RETURNS oid AS $$
+-     select oid from pg_proc where pronamespace=$1 and proname='cons';
+-   $$ LANGUAGE SQL;
+-END IF;
+-
+-end;
+-$do$;
+diff --git pldbgapi--unpackaged--1.0.sql pldbgapi--unpackaged--1.0.sql
+index 21d32df..a195443 100644
+--- pldbgapi--unpackaged--1.0.sql
++++ pldbgapi--unpackaged--1.0.sql
+@@ -6,40 +6,20 @@ ALTER EXTENSION pldbgapi ADD TYPE targetinfo;
+ ALTER EXTENSION pldbgapi ADD TYPE var;
+ ALTER EXTENSION pldbgapi ADD TYPE proxyInfo;
+ 
++ALTER EXTENSION pldbgapi ADD FUNCTION plpgsql_on();
++ALTER EXTENSION pldbgapi ADD FUNCTION plpgsql_off();
+ ALTER EXTENSION pldbgapi ADD FUNCTION plpgsql_oid_debug( functionOID OID );
+ 
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_abort_target( session INTEGER );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_attach_to_port( portNumber INTEGER );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_continue( session INTEGER );
+-ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_create_listener();
+-ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_deposit_value( session INTEGER, varName TEXT, lineNumber INTEGER, value TEXT );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_drop_breakpoint( session INTEGER, func OID, linenumber INTEGER );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_get_breakpoints( session INTEGER );
+-ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_get_source( session INTEGER, func OID );
++ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_get_source( func OID );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_get_stack( session INTEGER );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_get_proxy_info( );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_get_variables( session INTEGER );
+-ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_select_frame( session INTEGER, frame INTEGER );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_set_breakpoint( session INTEGER, func OID, linenumber INTEGER );
+-ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_set_global_breakpoint( session INTEGER, func OID, linenumber INTEGER, targetPID INTEGER );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_step_into( session INTEGER );
+ ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_step_over( session INTEGER );
+-ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_wait_for_breakpoint( session INTEGER );
+-ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_wait_for_target( session INTEGER );
+-ALTER EXTENSION pldbgapi ADD FUNCTION pldbg_get_target_info( signature TEXT, targetType "char" );
+ 
+-DO $do$
+-
+-declare
+-  isedb bool;
+-begin
+-
+-  isedb = (SELECT version() LIKE 'EnterpriseDB%');
+-
+-  -- Add a couple of EDB specific functions
+-  IF isedb THEN
+-    ALTER EXTENSION pldbgapi ADD edb_oid_debug( functionOID oid );
+-    ALTER EXTENSION pldbgapi ADD pldbg_get_pkg_cons( packageOID oid );
+-  END IF;
+-
+-$do$;
+diff --git pldbgapi.cpp pldbgapi.cpp
+index 0958779..f7aa0af 100644
+--- pldbgapi.cpp
++++ pldbgapi.cpp
+@@ -86,6 +86,12 @@
+  * Licensed under the Artistic License, see 
+  *		http://www.opensource.org/licenses/artistic-license.php
+  * for full details
++ *
++ * ----------------------------------------------------------------------------
++ * OpenGauss Modifications:
++ *     For a better system performance, we add two APIs, pldbg_on() and pldbg_off(), to start up or shut down PLDEBUGGER.
++ *     Some of the original APIs are reserved but not used in debugging process. For details, please see 
++ *     file pldbgapi--1.0.sql.
+  */
+ 
+ #include "postgres.h"
+@@ -106,10 +112,10 @@
+ #include <unistd.h>							/* For close()					*/
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+-#include <arpa/inet.h>
+ 
+ #include "globalbp.h"
+ #include "dbgcomm.h"
++#include "pldebugger.h"
+ 
+ /* Include header for GETSTRUCT */
+ #if (PG_VERSION_NUM >= 90300)
+@@ -128,6 +134,8 @@ PG_MODULE_MAGIC;
+ /*******************************************************************************
+  * Proxy functions
+  *******************************************************************************/
++PG_FUNCTION_INFO_V1( pldbg_on );					/* start pldebugger, init debug context			*/
++PG_FUNCTION_INFO_V1( pldbg_off );					/* close pldebugger, clear debug context		*/
+ 
+ PG_FUNCTION_INFO_V1( pldbg_attach_to_port );		/* Attach to debugger server at the given port	*/
+ PG_FUNCTION_INFO_V1( pldbg_wait_for_breakpoint );  	/* Wait for the target to reach a breakpoint	*/
+@@ -149,66 +157,23 @@ PG_FUNCTION_INFO_V1( pldbg_create_listener );		/* Create a listener for global b
+ PG_FUNCTION_INFO_V1( pldbg_wait_for_target );		/* Wait for a global breakpoint to fire			*/
+ PG_FUNCTION_INFO_V1( pldbg_set_global_breakpoint );	/* Create a global breakpoint					*/
+ 
+-/*******************************************************************************
+- * Structure debugSession
+- *
+- *	A debugger client may attach to many target sessions at the same time. We
+- *	keep track of each connection in a debugSession structure. When the client
+- *	makes a connection, we allocate a new debugSession structure and return 
+- *	a handle to that structure to the caller.  He gives us back the handle 
+- *	whenever he calls another proxy function. A handle is just a smallish 
+- *  integer value that we use to track each session - we use a hash to map
+- *  handles into debugSession pointers.
+- */
+-
+-typedef struct
+-{
+-	int			serverSocket;	/* Socket connected to the debugger server */
+-	int			serverPort;		/* Port number where debugger server is listening */
+-	int			listener;		/* Socket where we wait for global breakpoints */
+-	char	   *breakpointString;
+-} debugSession;
+-
+-/*******************************************************************************
+- * Stucture sessionHashEntry
+- *
+- *	As mentioned above (see debugSession), a debugger proxy can manage many
+- *	debug sessions at once.  To keep track of each session, we create a
+- *	debugSession object and return a handle to that object to the caller.  The
+- *	handle is an opaque value - it's just an integer value.  To convert a
+- *	handle into an actual debugSession pointer, we create a hash that maps
+- *	handles into debugSession pointers.
+- *
+- *  Each member of the hash is shaped like a sessionHashEntry object.
+- */
+-typedef int32  sessionHandle;
+-
+-typedef struct
+-{
+-	sessionHandle	m_handle;
+-	debugSession   *m_session;
+-} sessionHashEntry;
+-
+-static debugSession * mostRecentSession;
+-static HTAB			* sessionHash;
+ 
+ /*******************************************************************************
+  * The following symbols represent the magic strings that we send to the 
+  * debugger server running in the target process
+  */
+-
+-#define PLDBG_GET_VARIABLES		"i\n"
+-#define PLDBG_GET_BREAKPOINTS 	"l\n"
+-#define PLDBG_GET_STACK       	"$\n"
+-#define PLDBG_STEP_INTO			"s\n"
+-#define PLDBG_STEP_OVER			"o\n"
+-#define PLDBG_CONTINUE			"c\n"
+-#define PLDBG_ABORT				"x"			
+-#define PLDBG_SELECT_FRAME		"^"			/* Followed by frame number 				*/
+-#define PLDBG_SET_BREAKPOINT		"b"			/* Followed by pkgoid:funcoid:linenumber 	*/
+-#define PLDBG_CLEAR_BREAKPOINT	"f"			/* Followed by pkgoid:funcoid:linenumber 	*/
+-#define PLDBG_GET_SOURCE			"#" 		/* Followed by pkgoid:funcoid				*/
+-#define PLDBG_DEPOSIT				"d"			/* Followed by var.line=value				*/
++#define PLDBGAPI_GET_VARIABLES		"i\n"
++#define PLDBGAPI_GET_BREAKPOINTS 	"l\n"
++#define PLDBGAPI_GET_STACK       	"$\n"
++#define PLDBGAPI_STEP_INTO		"s\n"
++#define PLDBGAPI_STEP_OVER		"o\n"
++#define PLDBGAPI_CONTINUE		"c\n"
++#define PLDBGAPI_ABORT			"x"			
++#define PLDBGAPI_SELECT_FRAME		"^"			/* Followed by frame number 				*/
++#define PLDBGAPI_SET_BREAKPOINT		"b"			/* Followed by pkgoid:funcoid:linenumber 	*/
++#define PLDBGAPI_CLEAR_BREAKPOINT	"f"			/* Followed by pkgoid:funcoid:linenumber 	*/
++#define PLDBGAPI_GET_SOURCE		"#"	 		/* Followed by pkgoid:funcoid				*/
++#define PLDBGAPI_DEPOSIT		"d"			/* Followed by var.line=value				*/
+ 
+ #define PROXY_API_VERSION		3			/* API version number						*/
+ 
+@@ -224,27 +189,30 @@ static HTAB			* sessionHash;
+ #define GET_STR( textp ) 		DatumGetCString( DirectFunctionCall1( textout, PointerGetDatum( textp )))
+ #define PG_GETARG_SESSION( n )  (sessionHandle)PG_GETARG_UINT32( n )
+ 
+-Datum pldbg_select_frame( PG_FUNCTION_ARGS );
+-Datum pldbg_attach_to_port( PG_FUNCTION_ARGS );
+-Datum pldbg_get_source( PG_FUNCTION_ARGS );
+-Datum pldbg_get_breakpoints( PG_FUNCTION_ARGS );
+-Datum pldbg_get_variables( PG_FUNCTION_ARGS );
+-Datum pldbg_get_stack( PG_FUNCTION_ARGS );
+-Datum pldbg_wait_for_breakpoint( PG_FUNCTION_ARGS );
+-Datum pldbg_set_breakpoint( PG_FUNCTION_ARGS );
+-Datum pldbg_drop_breakpoint( PG_FUNCTION_ARGS );
+-Datum pldbg_step_into( PG_FUNCTION_ARGS );
+-Datum pldbg_step_over( PG_FUNCTION_ARGS );
+-Datum pldbg_continue(  PG_FUNCTION_ARGS );
+-Datum pldbg_deposit_value( PG_FUNCTION_ARGS );
+-Datum pldbg_get_proxy_info( PG_FUNCTION_ARGS );
+-Datum pldbg_get_pkg_cons( PG_FUNCTION_ARGS );
+-Datum pldbg_abort_target( PG_FUNCTION_ARGS );
+-
+-Datum pldbg_create_listener( PG_FUNCTION_ARGS );
+-Datum pldbg_wait_for_target( PG_FUNCTION_ARGS );
+-Datum pldbg_set_global_breakpoint( PG_FUNCTION_ARGS );
+ 
++extern "C" Datum pldbg_on( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_off( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_select_frame( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_attach_to_port( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_get_source( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_get_breakpoints( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_get_variables( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_get_stack( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_wait_for_breakpoint( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_set_breakpoint( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_drop_breakpoint( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_step_into( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_step_over( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_continue(  PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_deposit_value( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_get_proxy_info( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_abort_target( PG_FUNCTION_ARGS );
++
++extern "C" Datum pldbg_create_listener( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_wait_for_target( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_set_global_breakpoint( PG_FUNCTION_ARGS );
++
++Datum pldbg_get_pkg_cons(PG_FUNCTION_ARGS);
+ /************************************************************
+  * Local function forward declarations
+  ************************************************************/
+@@ -253,13 +221,12 @@ static void 		   * readn( int serverHandle, void * dst, size_t len );
+ static void 		   * writen( int serverHandle, void * dst, size_t len );
+ static void   		  	 sendBytes( debugSession * session, void * src, size_t len );
+ static void   		  	 sendUInt32( debugSession * session, uint32 val );
+-static void   		  	 sendString( debugSession * session, char * src );
++void   		  	 sendString( debugSession * session, char * src );
+ static bool   		  	 getBool( debugSession * session );
+ static uint32 		  	 getUInt32( debugSession * session );
+ static char 		   * getNString( debugSession * session );
+-static void 		  	 initializeModule( void );
++void 		  	 registCallbackInSessExit( void );
+ static void 		  	 cleanupAtExit( int code, Datum arg );
+-static void 			 initSessionHash();
+ static debugSession    * defaultSession( sessionHandle handle );
+ static sessionHandle     addSession( debugSession * session );
+ static debugSession    * findSession( sessionHandle handle );
+@@ -269,6 +236,45 @@ static TupleDesc	  	 getResultTupleDesc( FunctionCallInfo fcinfo );
+ /*******************************************************************************
+  * Exported functions
+  *******************************************************************************/
++/*******************************************************************************
++ * pldbg_on, pldbg_off
++ * start up or close the pldebugger on the target session, so we can attach the breakpoint and start debugging process.
++ *
++ * pldbg_on() is the API to start the pldebugger, it can be manually called and will also auto loaded through other APIs
++ *
++ * function added by openGauss
++ */
++Datum pldbg_on(PG_FUNCTION_ARGS)
++{
++    if (IS_PLDEBUGGER_ON) {
++        ereport(NOTICE, (errmsg("pldebugger is alreadly on.")));
++        PG_RETURN_BOOL(true);
++    }
++    init_pldebugger_role(PLDBG_SERVER);
++    PG_RETURN_BOOL(true);
++}
++
++/*
++ * pldbg_off() is the API to shut down the pldebuggre, it will be triggered when the session exits, or the pldebugger
++ * will keep running during the active session, which is not good for the proformance. So it is better to manually call
++ * pldbg_off() when debugger is not used.
++ *
++ * function added by openGauss
++ */
++Datum pldbg_off(PG_FUNCTION_ARGS)
++{
++    if (!IS_PLDEBUGGER_ON) {
++        ereport(NOTICE, (errmsg("pldebugger server or client is not on.")));
++        PG_RETURN_BOOL(true);
++    }
++    if (IS_PLDEBUGGER_SERVER) {
++        pldbg_server_shutdown();
++    } else if (IS_PLDEBUGGER_CLIENT) {
++        pldbg_client_shutdown();
++    }
++    destroy_pldebugger_context();
++    PG_RETURN_BOOL(true);
++}
+ 
+ /*******************************************************************************
+  * pldbg_attach_to_port( portNumber INTEGER ) RETURNS INTEGER
+@@ -288,13 +294,16 @@ static TupleDesc	  	 getResultTupleDesc( FunctionCallInfo fcinfo );
+ 
+ Datum pldbg_attach_to_port( PG_FUNCTION_ARGS )
+ {
++	if (!IS_PLDEBUGGER_CLIENT) {
++		init_pldebugger_role(PLDBG_CLIENT);
++	}
++
+ 	int32		targetBackend = PG_GETARG_INT32( 0 );
+ 	debugSession *session;
+ 
+-	initializeModule();
+-
+-	session = MemoryContextAllocZero( TopMemoryContext, sizeof( *session ));
++	session = (debugSession*)MemoryContextAllocZero( PldbgMemoryContext, sizeof( *session ));
+ 	session->listener   = -1;
++        session->state = DBG_SESS_ACTIVE;
+ 
+ 	session->serverSocket = dbgcomm_connect_to_target(targetBackend);
+ 
+@@ -308,7 +317,7 @@ Datum pldbg_attach_to_port( PG_FUNCTION_ARGS )
+ 	 * the local breakpoint that it hit. Read it. We will hand it to the client
+ 	 * if it calls wait_for_breakpoint().
+ 	 */
+-	session->breakpointString = MemoryContextStrdup(TopMemoryContext,
++	session->breakpointString = MemoryContextStrdup(PldbgMemoryContext,
+ 													getNString(session));
+ 
+ 	/*
+@@ -323,12 +332,14 @@ Datum pldbg_attach_to_port( PG_FUNCTION_ARGS )
+ 
+ Datum pldbg_create_listener( PG_FUNCTION_ARGS ) 
+ {
+-	debugSession * session = MemoryContextAllocZero( TopMemoryContext, sizeof( *session ));
+-
+-	initializeModule();
++    if (!IS_PLDEBUGGER_CLIENT) {
++		init_pldebugger_role(PLDBG_CLIENT);
++	}
++	debugSession * session = (debugSession*)MemoryContextAllocZero( PldbgMemoryContext, sizeof( *session ));
+ 
+ 	session->listener = dbgcomm_listen_for_target(&session->serverPort);
+ 	session->serverSocket = -1;
++	session->state = DBG_SESS_ACTIVE;
+ 
+ 	mostRecentSession = session;
+ 
+@@ -354,15 +365,15 @@ Datum pldbg_wait_for_target( PG_FUNCTION_ARGS )
+ {
+ 	debugSession *session = defaultSession(PG_GETARG_SESSION( 0 ));
+ 	int			serverSocket;
+-	int			serverPID;
++    uint64         serverSessId;
+ 
+ 	/*
+ 	 * Now mark all of our global breakpoints as 'available' (that is, not
+ 	 * busy)
+ 	 */
+-	BreakpointFreeSession( MyProc->pid );
++    BreakpointFreeSession(MY_SESS_ID);
+ 
+-	serverSocket = dbgcomm_accept_target(session->listener, &serverPID);
++    serverSocket = dbgcomm_accept_target(session->listener, &serverSessId);
+ 	if (serverSocket < 0)
+ 		ereport(ERROR,
+ 				(errmsg("could not accept a connection from debugging target")));
+@@ -374,10 +385,10 @@ Datum pldbg_wait_for_target( PG_FUNCTION_ARGS )
+ 	 * the local breakpoint that it hit. Read it. We will hand it to the client
+ 	 * if it calls wait_for_breakpoint().
+ 	 */
+-	session->breakpointString = MemoryContextStrdup(TopMemoryContext,
++	session->breakpointString = MemoryContextStrdup(PldbgMemoryContext,
+ 													getNString(session));
+ 
+-	PG_RETURN_UINT32( serverPID );
++    PG_RETURN_INT64(serverSessId);
+ }
+ 
+ /*******************************************************************************
+@@ -402,7 +413,7 @@ Datum pldbg_set_global_breakpoint( PG_FUNCTION_ARGS )
+ 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+ 				 errmsg("given session is not a listener")));
+ 
+-	breakpoint.key.databaseId = MyProc->databaseId;
++	breakpoint.key.databaseId = t_thrd.proc->databaseId;
+ 	breakpoint.key.functionId = PG_GETARG_OID( 1 );
+ 
+ 	if( PG_ARGISNULL( 2 ))
+@@ -411,13 +422,13 @@ Datum pldbg_set_global_breakpoint( PG_FUNCTION_ARGS )
+ 		breakpoint.key.lineNumber = PG_GETARG_INT32( 2 );
+ 
+ 	if( PG_ARGISNULL( 3 ))
+-		breakpoint.key.targetPid = -1;
++        breakpoint.key.targetSessId = -1;
+ 	else
+-		breakpoint.key.targetPid  = PG_GETARG_INT32( 3 );
++        breakpoint.key.targetSessId  = PG_GETARG_INT32(3);
+ 
+ 	breakpoint.data.isTmp     = TRUE;
+ 	breakpoint.data.proxyPort = session->serverPort;
+-	breakpoint.data.proxyPid  = MyProc->pid;
++    breakpoint.data.proxyPid  = MY_SESS_ID;
+ 
+ 	if( !BreakpointInsert( BP_GLOBAL, &breakpoint.key, &breakpoint.data ))
+ 		ereport(ERROR,
+@@ -427,19 +438,6 @@ Datum pldbg_set_global_breakpoint( PG_FUNCTION_ARGS )
+ 	PG_RETURN_BOOL( true );
+ }
+ 
+-/*******************************************************************************
+- * pldbg_wait_for_breakpoint( sessionID INTEGER ) RETURNS breakpoint
+- *
+- *	This function waits for the debug target to reach a breakpoint.  You should
+- *	call this function immediately after pldbg_attach_to_port() returns a
+- *	session ID.  pldbg_wait_for_breakpoint() is nearly identical to
+- *	pldbg_step_into(), pldbg_step_over(), and pldbg_continue(), (they all wait
+- *	for the target) but	this function does not send a command to the target
+- *	first.
+- *
+- *	This function returns a tuple of type 'breakpoint' - such a tuple contains
+- *	the function OID and line number where the target is currently stopped.
+- */
+ 
+ static Datum buildBreakpointDatum( char * breakpointString )
+ {
+@@ -457,6 +455,19 @@ static Datum buildBreakpointDatum( char * breakpointString )
+ 	return( HeapTupleGetDatum( result ));
+ }
+ 
++/*******************************************************************************
++ * pldbg_wait_for_breakpoint( sessionID INTEGER ) RETURNS breakpoint
++ *
++ *	This function waits for the debug target to reach a breakpoint.  You should
++ *	call this function immediately after pldbg_attach_to_port() returns a
++ *	session ID.  pldbg_wait_for_breakpoint() is nearly identical to
++ *	pldbg_step_into(), pldbg_step_over(), and pldbg_continue(), (they all wait
++ *	for the target) but	this function does not send a command to the target
++ *	first.
++ *
++ *	This function returns a tuple of type 'breakpoint' - such a tuple contains
++ *	the function OID and line number where the target is currently stopped.
++ */
+ Datum pldbg_wait_for_breakpoint( PG_FUNCTION_ARGS )
+ {
+ 	debugSession * session           = defaultSession( PG_GETARG_SESSION( 0 ));
+@@ -486,7 +497,7 @@ Datum pldbg_step_into( PG_FUNCTION_ARGS )
+ {
+ 	debugSession * session = defaultSession( PG_GETARG_SESSION( 0 ));
+ 
+-	sendString( session, PLDBG_STEP_INTO );
++	sendString( session, PLDBGAPI_STEP_INTO );
+ 
+ 	PG_RETURN_DATUM( buildBreakpointDatum( getNString( session )));
+ }
+@@ -508,7 +519,7 @@ Datum pldbg_step_over( PG_FUNCTION_ARGS )
+ {
+ 	debugSession * session = defaultSession( PG_GETARG_SESSION( 0 ));
+ 
+-	sendString( session, PLDBG_STEP_OVER );
++	sendString( session, PLDBGAPI_STEP_OVER );
+ 
+ 	PG_RETURN_DATUM( buildBreakpointDatum( getNString( session )));
+ }
+@@ -527,7 +538,7 @@ Datum pldbg_continue( PG_FUNCTION_ARGS )
+ {
+ 	debugSession * session = defaultSession( PG_GETARG_SESSION( 0 ));
+ 	
+-	sendString( session, PLDBG_CONTINUE );
++	sendString( session, PLDBGAPI_CONTINUE );
+ 
+ 	PG_RETURN_DATUM( buildBreakpointDatum( getNString( session )));
+ }
+@@ -543,7 +554,7 @@ Datum pldbg_abort_target( PG_FUNCTION_ARGS )
+ {
+ 	debugSession * session = defaultSession( PG_GETARG_SESSION( 0 ));
+ 	
+-	sendString( session, PLDBG_ABORT );
++	sendString( session, PLDBGAPI_ABORT );
+ 
+ 	PG_RETURN_BOOL( getBool( session ));
+ 
+@@ -581,8 +592,10 @@ Datum pldbg_select_frame( PG_FUNCTION_ARGS )
+ 		char		   frameString[12];		/* sign, 10 digits, '\0' */
+ 		char         * resultString;
+ 		Datum		   result;
++        errno_t       rc;
+ 
+-		sprintf( frameString, "%s %d", PLDBG_SELECT_FRAME, frameNumber );
++        rc = sprintf_s(frameString, 12, "%s %d", PLDBGAPI_SELECT_FRAME, frameNumber); // sizeof frameString.
++        securec_check_ss(rc, "\0", "\0");
+ 
+ 		sendString( session, frameString );
+ 
+@@ -608,6 +621,11 @@ Datum pldbg_select_frame( PG_FUNCTION_ARGS )
+  *  ensures that the source code that you get is the source code that the 
+  *  target is executing.
+  *
++ * OpenGauss Modifications:
++ *     This function is no longer used in openGauss, because it will cause some unexpected results, like 
++ *     if we pass in an OID that does not exist, server will throw an ERROR and then abort, so we
++ *     just do a 'get-source' action in client by a sql function 'select pg_proc' rewrited in pldbgapi--1.0.sql.
++ *
+  */
+ 
+ Datum pldbg_get_source( PG_FUNCTION_ARGS )
+@@ -617,7 +635,8 @@ Datum pldbg_get_source( PG_FUNCTION_ARGS )
+ 	char		   sourceString[13];		/* 10 digits(oid) + space + 1 command + null terminator */
+ 	char		 * source;
+ 
+-	sprintf( sourceString, "%s %d", PLDBG_GET_SOURCE, funcOID );
++    errno_t rc = sprintf_s(sourceString, 13, "%s %d", PLDBGAPI_GET_SOURCE, funcOID); // sizeof sourceString
++    securec_check_ss(rc, "\0", "\0");
+ 
+ 	sendString( session, sourceString );
+ 
+@@ -654,7 +673,7 @@ Datum pldbg_get_breakpoints( PG_FUNCTION_ARGS )
+ 		srf->attinmeta = TupleDescGetAttInMetadata( RelationNameGetTupleDesc( TYPE_NAME_BREAKPOINT ));
+ 		MemoryContextSwitchTo( oldContext );
+ 
+-		sendString( session, PLDBG_GET_BREAKPOINTS );
++		sendString( session, PLDBGAPI_GET_BREAKPOINTS );
+ 	}
+ 	else
+ 	{
+@@ -706,7 +725,7 @@ Datum pldbg_get_variables( PG_FUNCTION_ARGS )
+ 		srf->attinmeta = TupleDescGetAttInMetadata( RelationNameGetTupleDesc( TYPE_NAME_VAR ));
+ 		MemoryContextSwitchTo( oldContext );
+ 
+-		sendString( session, PLDBG_GET_VARIABLES );
++		sendString( session, PLDBGAPI_GET_VARIABLES );
+ 	}
+ 	else
+ 	{
+@@ -769,7 +788,7 @@ Datum pldbg_get_stack( PG_FUNCTION_ARGS )
+ 		srf->attinmeta = TupleDescGetAttInMetadata( RelationNameGetTupleDesc( TYPE_NAME_FRAME ));
+ 		MemoryContextSwitchTo( oldContext );
+ 
+-		sendString( session, PLDBG_GET_STACK );
++		sendString( session, PLDBGAPI_GET_STACK );
+ 	}
+ 	else
+ 	{
+@@ -787,7 +806,8 @@ Datum pldbg_get_stack( PG_FUNCTION_ARGS )
+ 		 * frameString points to a string like:
+ 		 *	targetName:funcOID:lineNumber:arguments
+ 		 */
+-		sprintf( callCount, "%d", srf->call_cntr );
++        errno_t rc = sprintf_s(callCount, 11, "%d", srf->call_cntr); /* size of callcount */
++        securec_check_ss(rc, "\0", "\0");
+ 
+ 		values[0] = callCount;
+ 		values[1] = tokenize( frameString, ":", &ctx );	/* targetName					*/
+@@ -827,7 +847,7 @@ Datum pldbg_get_proxy_info( PG_FUNCTION_ARGS )
+ 	values[0] = DirectFunctionCall1( textin, PointerGetDatum( PG_VERSION_STR ));
+ 	values[1] = Int32GetDatum( PG_VERSION_NUM );
+ 	values[2] = Int32GetDatum( PROXY_API_VERSION );
+-	values[3] = Int32GetDatum( MyProcPid );
++    values[3] = UInt64GetDatum(MY_SESS_ID);
+ 
+ 	result = heap_form_tuple( tupleDesc, values, nulls );
+ 
+@@ -847,9 +867,11 @@ Datum pldbg_set_breakpoint( PG_FUNCTION_ARGS )
+ 	Oid			   funcOID    = PG_GETARG_OID( 1 );
+ 	int			   lineNumber = PG_GETARG_INT32( 2 );
+ 	char		   breakpointString[24];	/* 20 digits + 2 delimiters + 1 command + null terminator */
++    errno_t       rc;
+ 
+-	sprintf( breakpointString, "%s %d:%d", PLDBG_SET_BREAKPOINT, funcOID, lineNumber );
+-
++    rc = sprintf_s(breakpointString, 24, "%s %d:%d",  // sizeof breakpointString
++                   PLDBGAPI_SET_BREAKPOINT, funcOID, lineNumber);
++    securec_check_ss(rc, "\0", "\0");
+ 	sendString( session, breakpointString );
+ 		
+ 	PG_RETURN_BOOL( getBool( session ));
+@@ -866,9 +888,11 @@ Datum pldbg_drop_breakpoint( PG_FUNCTION_ARGS )
+ 	Oid			   funcOID    = PG_GETARG_OID( 1 );
+ 	int			   lineNumber = PG_GETARG_INT32( 2 );
+ 	char		   breakpointString[13];	/* 10 digits + 1 delimiters + 1 command + null terminator */
++    errno_t       rc;
+ 
+-	sprintf( breakpointString, "%s %d:%d", PLDBG_CLEAR_BREAKPOINT, funcOID, lineNumber );
+-
++    rc = sprintf_s(breakpointString, 13, "%s %d:%d",  // sizeof breakpointString
++                   PLDBGAPI_CLEAR_BREAKPOINT, funcOID, lineNumber);
++    securec_check_ss(rc, "\0", "\0");
+ 	sendString( session, breakpointString );
+ 		
+ 	PG_RETURN_BOOL( getBool( session ));
+@@ -894,7 +918,7 @@ Datum pldbg_deposit_value( PG_FUNCTION_ARGS )
+ 
+ 	initStringInfo( &buf );
+ 
+-	appendStringInfo( &buf, "%s %s.%d=%s", PLDBG_DEPOSIT, varName, lineNumber, value );
++	appendStringInfo( &buf, "%s %s.%d=%s", PLDBGAPI_DEPOSIT, varName, lineNumber, value );
+ 
+ 	sendString( session, buf.data );
+ 
+@@ -909,9 +933,9 @@ Datum pldbg_deposit_value( PG_FUNCTION_ARGS )
+  *******************************************************************************/
+ 
+ /*******************************************************************************
+- * initializeModule()
++ * registCallbackInSessExit()
+  *
+- *	Initializes the debugger proxy module.  For now, we just register a callback
++ *	For now, we just register a callback
+  *	(cleanupAtExit()) that this backend will invoke on exit - we use that 
+  *	callback to gracefully close any outstanding connections.
+  *
+@@ -919,16 +943,13 @@ Datum pldbg_deposit_value( PG_FUNCTION_ARGS )
+  *		  each of the complex datatypes that we use (breakpoint, var, frame).
+  */
+ 
+-static void initializeModule( void )
++void registCallbackInSessExit( void )
+ {
+-	static bool	initialized = FALSE;
+-
+-	if( !initialized )
+-	{
+-		initialized = TRUE;
+-
+-		on_shmem_exit( cleanupAtExit, 0 );
+-	}
++    if (!g_instance.attr.attr_common.enable_thread_pool) {
++        on_proc_exit(cleanupAtExit, 0);
++    } else {
++        u_sess->ext_fdw_ctx[PLDEBUG_TYPE].fdwExitFunc = cleanupAtExit;
++    }
+ }
+ 
+ /*******************************************************************************
+@@ -944,18 +965,21 @@ static void initializeModule( void )
+  *
+  *	NOTE: If you give this function an invalid sessionHandle it will throw an
+  *		  error. A sessionHandle is valid if returned by addSession().
++ *
++ * openGauss Modification:
++ *     session state will be check here, before server close, it will send close
++ *     message to client, then client mark this session DBG_SESS_NOTCONNECT.
+  */
+ 
+ static debugSession * defaultSession( sessionHandle handle )
+ {
+-	debugSession * session;
++    MAKESURE_CLIENT_IS_ON;
++	debugSession * session = mostRecentSession;
+ 
+ 	if( handle == 0 )
+ 	{
+ 		if( mostRecentSession == NULL )
+ 			ereport( ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg( "invalid session handle" )));
+-		else
+-			return( mostRecentSession );
+ 	}
+ 	else
+ 	{
+@@ -966,11 +990,13 @@ static debugSession * defaultSession( sessionHandle handle )
+ 		else
+ 		{
+ 			mostRecentSession = session;
+-			return( session );
+ 		}
+ 	}
++        if (session->state == DBG_SESS_NOTCONNECT) {
++        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Session connect failed.")));
++        }
+ 
+-	return( NULL );	  /* keep the compiler happy */
++	return(session);	  /* keep the compiler happy */
+ }
+ 
+ /*******************************************************************************
+@@ -979,12 +1005,15 @@ static debugSession * defaultSession( sessionHandle handle )
+  *	Initialize a hash table that we use to map session handles (simple integer
+  *	values) into debugSession pointers.
+  *
+- *  You should call this function before you use the hash - you can call it 
+- *  as many times as you like, it will only initialize the hash table on the
+- *  first invocation.
++ * You should call this function before you use the hash - you can call it 
++ * as many times as you like, it will only initialize the hash table on the
++ * first invocation.
++ *
++ * OpenGauss Modifications:
++ *     session hash will be inited when client is starting up;
+  */
+ 
+-static void initSessionHash()
++void initSessionHash()
+ {
+ 	if( sessionHash )
+ 		return;
+@@ -995,8 +1024,9 @@ static void initSessionHash()
+ 		ctl.keysize   = sizeof( sessionHandle );
+ 		ctl.entrysize = sizeof( sessionHashEntry );
+ 		ctl.hash      = tag_hash;
++		ctl.hcxt	  = PldbgMemoryContext;
+ 
+-		sessionHash = hash_create( "Debugger sessions", 5, &ctl, HASH_ELEM | HASH_FUNCTION );
++		sessionHash = hash_create( "Debugger sessions", 5, &ctl, HASH_CONTEXT | HASH_ELEM | HASH_FUNCTION );
+ 	}
+ }
+ 
+@@ -1014,14 +1044,13 @@ static void initSessionHash()
+ 
+ static sessionHandle addSession( debugSession * session )
+ {
+-	static sessionHandle nextHandle;
+ 	sessionHashEntry   * entry;
+ 	bool			   	 found;
+ 	sessionHandle		 handle;
+ 
+ 	initSessionHash();
+ 
+-	handle = ++nextHandle;
++	handle = nextHandle ++;
+ 
+ 	entry = (sessionHashEntry *)hash_search( sessionHash, &handle, HASH_ENTER, &found );
+ 
+@@ -1045,7 +1074,7 @@ static debugSession * findSession( sessionHandle handle )
+ 
+ 	initSessionHash();
+ 
+-	if(( entry = hash_search( sessionHash, &handle, HASH_FIND, NULL )) != NULL )
++	if(( entry = (sessionHashEntry*)hash_search( sessionHash, &handle, HASH_FIND, NULL )) != NULL )
+ 	{
+ 		return( entry->m_session );
+ 	}
+@@ -1131,7 +1160,7 @@ static void * readn( int serverHandle, void * dst, size_t len )
+ 	char  * buffer         = (char *)dst;
+ 
+ 	if( serverHandle == -1 )
+-		ereport( ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg( "given session is not connected" )));
++        ereport(ERROR, (errcode(ERRCODE_CONNECTION_DOES_NOT_EXIST), errmsg("given session is not connected")));
+ 
+ 	while( bytesRemaining > 0 )
+ 	{
+@@ -1152,9 +1181,9 @@ static void * readn( int serverHandle, void * dst, size_t len )
+ 
+ 		FD_ZERO( &rmask );
+ 		FD_SET( serverHandle, &rmask );
+-		FD_SET( MyProcPort->sock, &rmask );
++		FD_SET( u_sess->proc_cxt.MyProcPort->sock, &rmask );
+ 
+-		switch( select(( serverHandle > MyProcPort->sock ? serverHandle : MyProcPort->sock ) + 1, &rmask, NULL, NULL, NULL ))
++		switch( select(( serverHandle > u_sess->proc_cxt.MyProcPort->sock ? serverHandle : u_sess->proc_cxt.MyProcPort->sock ) + 1, &rmask, NULL, NULL, NULL ))
+ 		{
+ 			case -1:
+ 			{
+@@ -1179,7 +1208,7 @@ static void * readn( int serverHandle, void * dst, size_t len )
+ 				 * is when the client process has killed itself...
+ 				 */
+ 
+-				if( FD_ISSET( MyProcPort->sock, &rmask ))
++				if( FD_ISSET( u_sess->proc_cxt.MyProcPort->sock, &rmask ))
+ 					ereport( ERROR, ( ERRCODE_CONNECTION_FAILURE, errmsg( "debugger connection(client side) terminated" )));
+ 				break;
+ 			}
+@@ -1266,7 +1295,7 @@ static void sendUInt32( debugSession * session, uint32 val )
+  *	don't send the null-terminator.
+  */
+ 
+-static void sendString( debugSession * session, char * src )
++void sendString( debugSession * session, char * src )
+ {
+ 	size_t	len = strlen( src );
+ 
+@@ -1328,6 +1357,10 @@ static uint32 getUInt32( debugSession * session )
+  *	enough space to hold the entire string (including the null-terminator) and
+  *	return a pointer to that space (after, of course, reading the string from
+  *	the server and tacking on the null-terminator).
++ *
++ * OpenGauss Modifications:
++ *     " : : " means that server is closed, it will be sent to client before server's shutdown,
++ *     so that client can mark this session state as DBG_SESS_NOTCONNECT;
+  */
+ 
+ static char * getNString( debugSession * session )
+@@ -1336,16 +1369,18 @@ static char * getNString( debugSession * session )
+ 
+ 	if( len == 0 )
+ 		return( NULL );
+-	else
+-	{
+-		char * result = palloc( len + 1 );
+-
+-		readn( session->serverSocket, result, len );
+ 
+-		result[len] = '\0';
++	char * result = (char*)palloc( len + 1 );
++	readn( session->serverSocket, result, len );
++	result[len] = '\0';
+ 
+-		return( result );
++	if (strcmp(result, " : : ") == 0) {
++		session->state = DBG_SESS_NOTCONNECT;
++		pfree(result);
++		ereport(ERROR, 
++		    (errcode(ERRCODE_CONNECTION_DOES_NOT_EXIST), errmsg("The pldebugger server has been shutdown.")));
+ 	}
++	return( result );
+ }
+ 
+ /*******************************************************************************
+@@ -1355,18 +1390,12 @@ static char * getNString( debugSession * session )
+  *	server.
+  */
+ 
+-static void closeSession( debugSession * session )
++void closeSession( debugSession * session )
+ {
+-	if( session->serverSocket )
+-	        closesocket( session->serverSocket );
+-
+-	if( session->listener )
+-		BreakpointCleanupProc( MyProcPid );
+-
+-	if( session->breakpointString )
+-		pfree( session->breakpointString );
++    if( session->serverSocket )
++        closesocket( session->serverSocket );
+ 
+-	pfree( session );
++    session->state = DBG_SESS_NOTCONNECT;
+ }
+ 
+ /******************************************************************************
+@@ -1375,19 +1404,14 @@ static void closeSession( debugSession * session )
+  *	This is a callback function that the backend invokes when exiting.  At exit,
+  *	we close any connections that we may still have (connections to debugger
+  *	servers, that is).
++ *
++ * OpenGauss Modifications:
++ *     We call the new function pldbg_off() instead to clean up everything.
+  */
+ 
+ static void cleanupAtExit( int code, Datum arg )
+ {
+-	/*
+-	 * FIXME: we should clean up all of the sessions stored in the
+-	 *		  sessionHash.
+-	 */
+-
+-	if( mostRecentSession )
+-		closeSession( mostRecentSession );
+-
+-	mostRecentSession = NULL;
++    pldbg_off(NULL);
+ }
+ 
+ /*******************************************************************************
+diff --git pldebugger.h pldebugger.h
+index 223ac81..d8fcf81 100644
+--- pldebugger.h
++++ pldebugger.h
+@@ -1,9 +1,23 @@
++/*
++ * OpenGauss Modification:
++ *    We have made the following modifications on the source code to adapt to openGauss:
++ *    1. 'LWLockId' is redefined to 'LWLock' by typedef method.
++ *    2. Some structs in other .cpp files have been moved to here.
++ *    3. 'debugSessionState' var is added to mark session status in client.
++ *    4. Add a message command 'PLDBG_DISCONNECT', which means the client is closed, and the server will
++ *       re-send a message to proxy and keep waiting for a new client to connect.
++ *
++ *    5. Most importantly, we split the contents of pldebugger into server and client, and each role will keep their
++ *       own vars within the struct scope. All of these vars are inited in 'init_pldebugger_role()'.
++ */
+ #ifndef PLDEBUGGER_H
+ #define PLDEBUGGER_H
+ 
+ #include "globalbp.h"
+ #include "storage/lwlock.h"
+ 
++typedef LWLock *LWLockId;
++
+ /* 
+  * We keep one per_session_ctx structure per backend. This structure holds all
+  * of the stuff that we need to track from one function call to the next.
+@@ -15,8 +29,65 @@ typedef struct
+ 	int		 client_w;				/* Write stream connected to client						 */
+ } per_session_ctx_t;
+ 
+-extern per_session_ctx_t per_session_ctx;
++/*******************************************************************************
++ * Structure debugSession
++ *
++ *	A debugger client may attach to many target sessions at the same time. We
++ *	keep track of each connection in a debugSession structure. When the client
++ *	makes a connection, we allocate a new debugSession structure and return 
++ *	a handle to that structure to the caller.  He gives us back the handle 
++ *	whenever he calls another proxy function. A handle is just a smallish 
++ *  integer value that we use to track each session - we use a hash to map
++ *  handles into debugSession pointers.
++ */
++typedef enum debugSessionState {
++    DBG_SESS_UNINIT,         // session not init
++    DBG_SESS_ACTIVE,         // session server active.
++    DBG_SESS_NOTCONNECT      // session server has been shutdown.
++} debugSessionState;
++
++typedef struct
++{
++	int			serverSocket;	/* Socket connected to the debugger server */
++	int			serverPort;		/* Port number where debugger server is listening */
++	int			listener;		/* Socket where we wait for global breakpoints */
++	char	   *breakpointString;
++        debugSessionState       state;
++} debugSession;
++
++/*******************************************************************************
++ * Stucture sessionHashEntry
++ *
++ *	As mentioned above (see debugSession), a debugger proxy can manage many
++ *	debug sessions at once.  To keep track of each session, we create a
++ *	debugSession object and return a handle to that object to the caller.  The
++ *	handle is an opaque value - it's just an integer value.  To convert a
++ *	handle into an actual debugSession pointer, we create a hash that maps
++ *	handles into debugSession pointers.
++ *
++ *  Each member of the hash is shaped like a sessionHashEntry object.
++ */
++typedef int32  sessionHandle;
++
++typedef struct
++{
++	sessionHandle	m_handle;
++	debugSession   *m_session;
++} sessionHashEntry;
+ 
++typedef struct
++{
++	void	(* initialize)(void);
++	bool	(* frame_belongs_to_me)(ErrorContextCallback *frame);
++	void	(* send_stack_frame)(ErrorContextCallback *frame);
++	void	(* send_vars)(ErrorContextCallback *frame);
++	void	(* select_frame)(ErrorContextCallback *frame);
++	void	(* print_var)(ErrorContextCallback *frame, const char *var_name, int lineno);
++	bool	(* do_deposit)(ErrorContextCallback *frame, const char *var_name,
++						   int line_number, const char *value);
++	Oid		(* get_func_oid)(ErrorContextCallback *frame);
++	void	(* send_cur_line)(ErrorContextCallback *frame);
++} debugger_language_t;
+ 
+ /*
+  * errorHandlerCtx
+@@ -26,7 +97,6 @@ extern per_session_ctx_t per_session_ctx;
+  *  wrap sigjmp_buf's - we have to do that because sigjmp_buf is defined as an 
+  *  array on some platforms (like Win32).
+  */
+-
+ typedef struct
+ {
+ 	sigjmp_buf	m_savepoint;
+@@ -49,22 +119,66 @@ extern errorHandlerCtx client_lost;
+ #define PLDBG_DEPOSIT				'd'
+ #define PLDBG_RESTART				'r'
+ #define PLDBG_STOP				'x'
++#define PLDBG_DISCONNECT        'C'
+ 
+-typedef struct
+-{
+-	void	(* initialize)(void);
+-	bool	(* frame_belongs_to_me)(ErrorContextCallback *frame);
+-	void	(* send_stack_frame)(ErrorContextCallback *frame);
+-	void	(* send_vars)(ErrorContextCallback *frame);
+-	void	(* select_frame)(ErrorContextCallback *frame);
+-	void	(* print_var)(ErrorContextCallback *frame, const char *var_name, int lineno);
+-	bool	(* do_deposit)(ErrorContextCallback *frame, const char *var_name,
+-						   int line_number, const char *value);
+-	Oid		(* get_func_oid)(ErrorContextCallback *frame);
+-	void	(* send_cur_line)(ErrorContextCallback *frame);
+-} debugger_language_t;
++/*****************************************************************************
++ * for thread pool of openGauss, we use knl_u_pldbg_context to store global var of
++ * of session-level.
++ */
++typedef enum Pldbg_Role {
++    PLDBG_NONE,         // not a pldebugger session.
++    PLDBG_SERVER,       // pldebugger server, be debugged.
++    PLDBG_CLIENT        // pldebugger client, be used to debug server.
++} Pldbg_Role;
++
++typedef struct knl_u_pldbg_client_context {
++    debugSession*     theMostRecentSession;  // the most recent session we used
++    HTAB*             my_attached_sessions;  // sessions we attached
++    sessionHandle     nextHandleNum;         // session id of next handle
++} knl_u_pldbg_client_context;
++
++typedef struct knl_u_pldbg_server_context {
++    HTAB*             breakpoints;           // local breakpoints
++    HTAB*             breakCounts;           // key and count of local breakpoints
++    per_session_ctx_t session_debug_info;    // session-level debug info
++} knl_u_pldbg_server_context;
++
++typedef struct knl_u_pldbg_context {
++    Pldbg_Role role;
++    knl_u_pldbg_client_context* client;
++    knl_u_pldbg_server_context* server;
++    void (*shutdown)();
++	MemoryContext pldbg_sess_cxt;
++} knl_u_pldbg_context;
++
++
++#define localBreakpoints ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->server->breakpoints
++#define localBreakCounts ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->server->breakCounts
++#define per_session_ctx ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->server->session_debug_info
++#define mostRecentSession ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->client->theMostRecentSession
++#define sessionHash ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->client->my_attached_sessions
++#define nextHandle ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->client->nextHandleNum
++#define PldbgMemoryContext ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->pldbg_sess_cxt
++#define IS_PLDEBUGGER_ON (u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx != NULL)
++#define IS_PLDEBUGGER_CLIENT (IS_PLDEBUGGER_ON && ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->client != NULL)
++#define IS_PLDEBUGGER_SERVER (IS_PLDEBUGGER_ON && ((knl_u_pldbg_context*)(u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx))->server != NULL)
++#define MAKESURE_CLIENT_IS_ON  \
++    do { \
++        if (!IS_PLDEBUGGER_CLIENT) {  \
++            ereport(ERROR, (errcode(ERRCODE_INITIALIZE_FAILED), errmsg("Pldebugger is not active or you are not client now.")));  \
++        }   \
++    } while (0);
++#define InvalidSessId uint64(-1)
++#define MY_SESS_ID (IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid)
++
++int LWLockNewTrancheId();
++void init_pldebugger_role(Pldbg_Role role);
++void destroy_pldebugger_context();
++void pldbg_client_shutdown();
++void pldbg_server_shutdown();
+ 
+ /* in plugin_debugger.c */
++extern void initLocalBreakpoints(void);
+ extern void initGlobalBreakpoints(void);
+ extern bool plugin_debugger_main_loop(void);
+ 
+@@ -73,6 +187,7 @@ extern bool attach_to_proxy( Breakpoint * breakpoint );
+ extern void setBreakpoint( char * command );
+ extern void clearBreakpoint( char * command );
+ extern bool breakpointsForFunction( Oid funcOid );
++extern void initSessionHash(void);
+ 
+ extern void	dbg_send( const char *fmt, ... )
+ #ifdef PG_PRINTF_ATTRIBUTE
+@@ -82,8 +197,10 @@ __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)))
+ #endif
+ ;
+ extern char 	   * dbg_read_str(void);
+-
+-extern LWLockId  getPLDebuggerLock(void);
++void sendString( debugSession * session, char * src );
++void closeSession( debugSession * session );
++void registCallbackInSessExit(void);
++extern LWLock*  getPLDebuggerLock(void);
+ 
+ /* in plpgsql_debugger.c */
+ extern void plpgsql_debugger_fini(void);
+diff --git plpgsql_debugger.cpp plpgsql_debugger.cpp
+index df52f01..5bb0580 100644
+--- plpgsql_debugger.cpp
++++ plpgsql_debugger.cpp
+@@ -24,6 +24,7 @@
+ #include "globalbp.h"
+ #include "utils/array.h"
+ #include "utils/builtins.h"
++#include "utils/memutils.h"
+ #include "utils/syscache.h"
+ #include "miscadmin.h"
+ 
+@@ -46,8 +47,7 @@
+  * each variable. 
+  */
+ 
+-typedef struct
+-{
++typedef struct var_value {
+     bool	    isnull;			/* TRUE -> this variable IS NULL */
+ 	bool		visible;		/* hidden or visible? see is_visible_datum() */
+ 	bool		duplicate_name;	/* Is this one of many vars with same name? */
+@@ -63,8 +63,7 @@ typedef struct
+  * code and display variable values
+  */
+ 
+-typedef struct
+-{
++typedef struct dbg_ctx {
+     PLpgSQL_function *	func;		/* Function definition */
+     bool				stepping;	/* If TRUE, stop at next statement */
+     var_value	     *  symbols;	/* Extra debugger-private info about variables */
+@@ -128,22 +127,127 @@ debugger_language_t plpgsql_debugger_lang =
+ 	plpgsql_send_cur_line
+ };
+ 
+-/* Install this module as an PL/pgSQL instrumentation plugin */
+-static void
+-plpgsql_debugger_init(void)
++/*
++
++ * Install this module as an PL/pgSQL instrumentation plugin when database start up;
++ * Called by: _PG_init
++ */
++static void plpgsql_debugger_init(void)
+ {
+-	PLpgSQL_plugin ** var_ptr = (PLpgSQL_plugin **) find_rendezvous_variable( plugin_name );
++	PLpgSQL_plugin ** var_ptr = (PLpgSQL_plugin **) find_rendezvous_variable(plugin_name);
+ 
+ 	*var_ptr = &plugin_funcs;
+ }
+ 
+ 
++/*
++ * Initialize the contents of 'u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx'
++ * during the debugger starting process.
++ */
++void init_pldebugger_role(Pldbg_Role role)
++{
++    if (u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx != NULL) {
++        ereport(ERROR, 
++            (errcode(ERRCODE_INVALID_ROLE_SPECIFICATION), errmsg("You already have an identity. ")));
++    }
++
++    if (t_thrd.role == THREADPOOL_WORKER &&
++        (u_sess->plsql_cxt.plugin_ptr == NULL || *u_sess->plsql_cxt.plugin_ptr == NULL)) {
++        process_shared_preload_libraries();
++    }
++
++    MemoryContext pldbg_sess_cxt = AllocSetContextCreate(u_sess->top_mem_cxt, "PldbgSessCxt",
++        ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
++
++    MemoryContext oldcontext = MemoryContextSwitchTo(pldbg_sess_cxt);
++	knl_u_pldbg_context* pldbg_cxt = (knl_u_pldbg_context*)palloc(sizeof(knl_u_pldbg_context));
++	
++    switch (role) {
++        case PLDBG_CLIENT: {
++            knl_u_pldbg_client_context* client = 
++                (knl_u_pldbg_client_context*)palloc(sizeof(knl_u_pldbg_client_context));
++            client->theMostRecentSession = NULL;
++            client->my_attached_sessions = NULL;
++            client->nextHandleNum = 1;
++
++            pldbg_cxt->server = NULL;
++            pldbg_cxt->client = client;
++            pldbg_cxt->role = PLDBG_CLIENT;
++            pldbg_cxt->pldbg_sess_cxt = pldbg_sess_cxt;
++            u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx = (void*)pldbg_cxt;
++            initSessionHash();
++            ereport(NOTICE, (errmsg("Pldebugger is started successfully, you are CLIENT now.")));
++        } break;
++        case PLDBG_SERVER: {
++            knl_u_pldbg_server_context* server = 
++                (knl_u_pldbg_server_context*)palloc(sizeof(knl_u_pldbg_server_context));
++            server->breakpoints = NULL;
++            server->breakCounts = NULL;
++            server->session_debug_info.step_into_next_func = false;
++            server->session_debug_info.client_w = 0;
++            server->session_debug_info.client_r = 0;
++
++            pldbg_cxt->server = server;
++            pldbg_cxt->client = NULL;
++            pldbg_cxt->role = PLDBG_SERVER;
++            pldbg_cxt->pldbg_sess_cxt = pldbg_sess_cxt;
++            u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx = (void*)pldbg_cxt;
++			
++            /* now we can init some pointers */
++            initLocalBreakpoints();
++            ereport(NOTICE, (errmsg("Pldebugger is started successfully, you are SERVER now.")));
++        } break;
++        default: {
++            MemoryContextSwitchTo(oldcontext);
++            ereport(ERROR, 
++                (errcode(ERRCODE_INVALID_ROLE_SPECIFICATION), errmsg("invalid pldebugger role.")));
++        }
++    }
++    MemoryContextSwitchTo(oldcontext);
++
++    // when session exits, call 'pldbg_off()'.
++    registCallbackInSessExit();
++}
++
++/*
++ * Destroy pldebugger context when the current session exits
++ */
++void destroy_pldebugger_context()
++{
++    MemoryContextDelete(PldbgMemoryContext);
++    PldbgMemoryContext = NULL;
++    u_sess->ext_fdw_ctx[PLDEBUG_TYPE].pldbg_ctx = NULL;
++    u_sess->ext_fdw_ctx[PLDEBUG_TYPE].fdwExitFunc = NULL;
++}
++void pldbg_client_shutdown()
++{
++#define PLDBGAPI_DISCONNECT "C\n"
++    // free all sessions
++    HASH_SEQ_STATUS	  scan;
++    sessionHashEntry* session = NULL;
++    if (sessionHash != NULL) {
++    hash_seq_init(&scan, sessionHash);
++    while((session = (sessionHashEntry*)hash_seq_search(&scan)) != NULL){
++        sendString(session->m_session, PLDBGAPI_DISCONNECT);
++        closeSession(session->m_session);
++    }	
++    }
++}
++/*
++ * shut down the server when do pldbg_off()
++ */
++void pldbg_server_shutdown()
++{
++    dbg_send(" :%s: ", " ");
++    per_session_ctx.client_r = 0;
++	per_session_ctx.client_w = 0;
++}
++
+ /**********************************************************************
+  * Functions implemeting the pldebugger_language_t interface
+  **********************************************************************/
+ 
+-static bool
+-plpgsql_frame_belongs_to_me(ErrorContextCallback *frame)
++static bool plpgsql_frame_belongs_to_me(ErrorContextCallback* frame)
+ {
+ 	return (frame->callback == plugin_funcs.error_callback);
+ }
+@@ -156,8 +260,7 @@ plpgsql_frame_belongs_to_me(ErrorContextCallback *frame)
+  * finds a PL/pgSQL call in the stack (remember, the call stack may contain
+  * stack frames for functions written in other languages like PL/Tcl).
+  */
+-static void
+-plpgsql_send_stack_frame(ErrorContextCallback *frame)
++static void plpgsql_send_stack_frame(ErrorContextCallback* frame)
+ {
+ 	PLpgSQL_execstate *estate = (PLpgSQL_execstate *) frame->arg;
+ #if (PG_VERSION_NUM >= 80500)
+@@ -189,8 +292,7 @@ plpgsql_send_stack_frame(ErrorContextCallback *frame)
+ 	 * Now assemble a string that shows the argument names and value for this frame
+ 	 */
+ 
+-	for( arg = 0; arg < func->fn_nargs; ++arg )
+-	{
++    for (arg = 0; arg < func->fn_nargs; ++arg) {
+ 		int					index   = func->fn_argvarnos[arg];
+ 		PLpgSQL_datum		*argDatum = (PLpgSQL_datum *)estate->datums[index];
+ 		char 				*value;
+@@ -273,35 +375,9 @@ plpgsql_send_vars(ErrorContextCallback *frame)
+ 							  var->notnull ? 't':'f', 
+ 							  var->datatype ? var->datatype->typoid : InvalidOid,
+ 							  val );
+-				  
+-					break;
+-				}
+-#if 0
+-			FIXME: implement other types
+ 
+-				case PLPGSQL_DTYPE_REC:
+-				{
+-					PLpgSQL_rec * rec = (PLpgSQL_rec *) estate->datums[i];
+-					int		      att;
+-					char        * typeName;
+-
+-					if (rec->tupdesc != NULL)
+-					{
+-						for( att = 0; att < rec->tupdesc->natts; ++att )
+-						{
+-							typeName = SPI_gettype( rec->tupdesc, att + 1 );
+-	
+-							dbg_send( "o:%s.%s:%d:%d:%d:%d:%s\n",
+-									  rec->refname, NameStr( rec->tupdesc->attrs[att]->attname ), 
+-									  0, rec->lineno, 0, rec->tupdesc->attrs[att]->attnotnull, typeName ? typeName : "" );
+-	
+-							if( typeName )
+-								pfree( typeName );
+-						}
+-					}
+ 					break;
+ 				}
+-#endif
+ 			}
+ 		}
+ 	}
+@@ -549,7 +625,9 @@ static void print_var( const PLpgSQL_execstate * frame, const char * var_name, i
+ 
+     fmgr_info( typeStruct->typoutput, &finfo_output );
+ 
+-    extval = DatumGetCString( FunctionCall3( &finfo_output, tgt->value, ObjectIdGetDatum(typeStruct->typelem), Int32GetDatum(-1)));
++    extval = DatumGetCString(FunctionCall3(&finfo_output, tgt->value, 
++                                           ObjectIdGetDatum(typeStruct->typelem),
++                                           Int32GetDatum(-1)));
+ 
+ 	/* Send the name:value to the debugger client */
+ 
+@@ -586,10 +664,10 @@ static void print_rec( const PLpgSQL_execstate * frame, const char * var_name, i
+ 	}
+ }
+ 
+-static void print_recfield( const PLpgSQL_execstate * frame, const char * var_name, int lineno, const PLpgSQL_recfield * tgt )
++static void print_recfield(const PLpgSQL_execstate* frame, const char* var_name,
++                           int lineno, const PLpgSQL_recfield* tgt)
+ {
+-
+-
++    return;
+ }
+ 
+ static void
+@@ -837,7 +915,7 @@ plpgsql_get_func_oid(ErrorContextCallback *frame)
+ 
+ static void dbg_startup( PLpgSQL_execstate * estate, PLpgSQL_function * func )
+ {
+-	if( func == NULL )
++	if( func == NULL || !IS_PLDEBUGGER_SERVER)
+ 	{
+ 		/* 
+ 		 * In general, this should never happen, but it seems to in the 
+@@ -943,13 +1021,14 @@ static void initialize_plugin_info( PLpgSQL_execstate * estate,
+ static bool plpgsql_do_deposit(ErrorContextCallback *frame, const char *var_name, int lineno, const char *value)
+ {
+ 	PLpgSQL_execstate *estate = (PLpgSQL_execstate *) frame->arg;
+-	dbg_ctx       *dbg_info   = estate->plugin_info;
++	dbg_ctx       *dbg_info   = (dbg_ctx*)estate->plugin_info;
+ 	PLpgSQL_datum *target;
+ 	char      	  *select;
+ 	PLpgSQL_expr  *expr;
+ 	MemoryContext  curContext = CurrentMemoryContext;
+-	ResourceOwner  curOwner   = CurrentResourceOwner;
++	ResourceOwner  curOwner   = t_thrd.utils_cxt.CurrentResourceOwner;
+ 	bool		retval = false;
++    errno_t rc = 0;
+ 
+ 	target = find_datum_by_name(estate, var_name, lineno, NULL);
+     if (!target)
+@@ -962,9 +1041,10 @@ static bool plpgsql_do_deposit(ErrorContextCallback *frame, const char *var_name
+ 	 *       need to later (see the retry logic below)
+ 	 */
+ 
+-	select = palloc( strlen( "SELECT " ) + strlen( value ) + 2 + 1 );
++	select = (char*)palloc( strlen( "SELECT " ) + strlen( value ) + 2 + 1 );
+ 
+-	sprintf( select, "SELECT %s", value );
++    rc = sprintf_s(select, strlen("SELECT ") + strlen(value) + 2 + 1, "SELECT %s", value);
++    securec_check_ss_c(rc, "\0", "\0");
+ 
+     /*
+ 	 * Note: we must create a dynamically allocated PLpgSQL_expr here - we 
+@@ -998,7 +1078,7 @@ static bool plpgsql_do_deposit(ErrorContextCallback *frame, const char *var_name
+ 		/* Commit the inner transaction, return to outer xact context */
+ 		ReleaseCurrentSubTransaction();
+ 		MemoryContextSwitchTo( curContext );
+-		CurrentResourceOwner = curOwner;
++		t_thrd.utils_cxt.CurrentResourceOwner = curOwner;
+ 
+ 		SPI_restore_connection();		
+ 
+@@ -1014,7 +1094,7 @@ static bool plpgsql_do_deposit(ErrorContextCallback *frame, const char *var_name
+ 		/* Abort the inner transaction */
+ 		RollbackAndReleaseCurrentSubTransaction();
+ 		MemoryContextSwitchTo( curContext );
+-		CurrentResourceOwner = curOwner;
++		t_thrd.utils_cxt.CurrentResourceOwner = curOwner;
+ 
+ 		SPI_restore_connection();
+ 
+@@ -1030,7 +1110,8 @@ static bool plpgsql_do_deposit(ErrorContextCallback *frame, const char *var_name
+ 
+ 	if (!retval)
+ 	{
+-		sprintf( select, "SELECT '%s'", value );
++        rc = sprintf_s(select, strlen("SELECT ") + strlen(value) + 2 + 1, "SELECT '%s'", value);
++        securec_check_ss_c(rc, "\0", "\0");
+ 
+ 		expr->dtype       	  = PLPGSQL_DTYPE_EXPR;
+ 		expr->dno              = -1;
+@@ -1054,7 +1135,7 @@ static bool plpgsql_do_deposit(ErrorContextCallback *frame, const char *var_name
+ 			/* Commit the inner transaction, return to outer xact context */
+ 			ReleaseCurrentSubTransaction();
+ 			MemoryContextSwitchTo( curContext );
+-			CurrentResourceOwner = curOwner;
++			t_thrd.utils_cxt.CurrentResourceOwner = curOwner;
+ 
+ 			SPI_restore_connection();		
+ 
+@@ -1069,7 +1150,7 @@ static bool plpgsql_do_deposit(ErrorContextCallback *frame, const char *var_name
+ 			/* Abort the inner transaction */
+ 			RollbackAndReleaseCurrentSubTransaction();
+ 			MemoryContextSwitchTo( curContext );
+-			CurrentResourceOwner = curOwner;
++			t_thrd.utils_cxt.CurrentResourceOwner = curOwner;
+ 
+ 			SPI_restore_connection();
+ 
+@@ -1119,7 +1200,7 @@ static bool is_datum_visible( PLpgSQL_datum * datum )
+ 		PLpgSQL_var * var = (PLpgSQL_var *)datum;
+ 		int			  i;
+ 
+-		for( i = 0; i < sizeof( hidden_variables ) / sizeof( hidden_variables[0] ); ++i )
++		for( i = 0; i < (int)(sizeof( hidden_variables ) / sizeof( hidden_variables[0] )); ++i )
+ 		{
+ 			if( strcmp( var->refname, hidden_variables[i] ) == 0 )
+ 			{
+@@ -1244,132 +1325,126 @@ static bool isFirstStmt( PLpgSQL_stmt * stmt, PLpgSQL_function * func )
+ 
+ static void dbg_newstmt( PLpgSQL_execstate * estate, PLpgSQL_stmt * stmt )
+ {
+-	PLpgSQL_execstate * frame = estate;
+-
+     /*
+-	 * If there's no debugger attached, go home as quickly as possible.
++	 * If there's no debugger attached or pldebugger is off, go home as quickly as possible.
+ 	 */
+-	if( frame->plugin_info == NULL )
++	if( !IS_PLDEBUGGER_SERVER || estate->plugin_info == NULL)
+ 		return;
+-	else
+-	{
+-		dbg_ctx 		  * dbg_info = (dbg_ctx *)frame->plugin_info;
+-		Breakpoint		  * breakpoint = NULL;
+-		eBreakpointScope	breakpointScope = 0;
++	
++	PLpgSQL_execstate * frame = estate;
++    dbg_ctx 		  * dbg_info = (dbg_ctx *)frame->plugin_info;
++	Breakpoint		  * breakpoint = NULL;
++	eBreakpointScope	breakpointScope = (BP_LOCAL);
+ 
+-		/*
+-		 * The PL compiler marks certain statements as 'invisible' to the
+-		 * debugger. In particular, the compiler may generate statements
+-		 * that do not appear in the source code. Such a statement is
+-		 * marked with a line number of -1: if we're looking at an invisible
+-		 * statement, just return to the caller.
+-		 */
++	/*
++	 * The PL compiler marks certain statements as 'invisible' to the
++	 * debugger. In particular, the compiler may generate statements
++	 * that do not appear in the source code. Such a statement is
++	 * marked with a line number of -1: if we're looking at an invisible
++	 * statement, just return to the caller.
++	 */
+ 
+-		if( stmt->lineno == -1 )
+-			return;
++	if( stmt->lineno == -1 )
++		return;
+ 
++	/*
++	 * Now set up an error handler context so we can intercept any
++	 * networking errors (errors communicating with the proxy).
++	 */
++	if( sigsetjmp( client_lost.m_savepoint, 1 ) != 0 )
++	{
+ 		/*
+-		 * Now set up an error handler context so we can intercept any
+-		 * networking errors (errors communicating with the proxy).
++		 *  The connection to the debugger client has slammed shut - 
++		 *	just pretend like there's no debugger attached and return
++		 *
++		 *	NOTE: we no longer have a connection to the debugger proxy -
++		 *		  that means that we cannot interact with the proxy, we
++		 *		  can't wait for another command, nothing.  We let the
++		 *		  executor continue execution - anything else will hang
++		 *		  this backend, waiting for a debugger command that will
++		 *		  never arrive.
++		 *
++		 *		  If, however, we hit a breakpoint again, we'll stop and
++		 *		  wait for another debugger proxy to connect to us.  If
++		 *		  that's not the behavior you're looking for, you can 
++		 *		  drop the breakpoint, or call free_function_breakpoints()
++		 *		  here to get rid of all breakpoints in this backend.
+ 		 */
++		per_session_ctx.client_w = 0; 		/* No client connection */
++		dbg_info->stepping 		 = FALSE; 	/* No longer stepping   */
++	}
+ 
+-		if( sigsetjmp( client_lost.m_savepoint, 1 ) != 0 )
+-		{
+-			/*
+-			 *  The connection to the debugger client has slammed shut - 
+-			 *	just pretend like there's no debugger attached and return
+-			 *
+-			 *	NOTE: we no longer have a connection to the debugger proxy -
+-			 *		  that means that we cannot interact with the proxy, we
+-			 *		  can't wait for another command, nothing.  We let the
+-			 *		  executor continue execution - anything else will hang
+-			 *		  this backend, waiting for a debugger command that will
+-			 *		  never arrive.
+-			 *
+-			 *		  If, however, we hit a breakpoint again, we'll stop and
+-			 *		  wait for another debugger proxy to connect to us.  If
+-			 *		  that's not the behavior you're looking for, you can 
+-			 *		  drop the breakpoint, or call free_function_breakpoints()
+-			 *		  here to get rid of all breakpoints in this backend.
+-			 */
+-			per_session_ctx.client_w = 0; 		/* No client connection */
+-			dbg_info->stepping 		 = FALSE; 	/* No longer stepping   */
+-		}
+-
+-		if(( dbg_info->stepping ) || breakAtThisLine( &breakpoint, &breakpointScope, dbg_info->func->fn_oid, isFirstStmt( stmt, dbg_info->func ) ? -1 : stmt->lineno ))
+-			dbg_info->stepping = TRUE;
+-		else
+-			return;
+-
+-		per_session_ctx.step_into_next_func = FALSE;
++    if ((dbg_info->stepping) ||
++        breakAtThisLine(&breakpoint, &breakpointScope, dbg_info->func->fn_oid,
++                        isFirstStmt(stmt, dbg_info->func) ? -1 : stmt->lineno))
++		dbg_info->stepping = TRUE;
++	else
++		return;
+ 
+-		/* We found a breakpoint for this function (or we're stepping into) */
+-		/* Make contact with the debugger client */
++	per_session_ctx.step_into_next_func = FALSE;
++	/* We found a breakpoint for this function (or we're stepping into) */
++	/* Make contact with the debugger client */
++	if( !attach_to_proxy( breakpoint ))
++	{
++		/* 
++		 * Can't attach to the proxy, maybe we found a stale breakpoint?
++		 * That can happen if you set a global breakpoint on a function,
++		 * invoke that function from a client application, debug the target
++		 * kill the debugger client, and then re-invoke the function from
++		 * the same client application - we will find the stale global
++		 * breakpoint on the second invocation.
++		 *
++		 * We want to remove that breakpoint so that we don't keep trying
++		 * to attach to a phantom proxy process.
++		 */
++		if( breakpoint )
++			BreakpointDelete( breakpointScope, &(breakpoint->key));
+ 
+-		if( !attach_to_proxy( breakpoint ))
+-		{
+-			/* 
+-			 * Can't attach to the proxy, maybe we found a stale breakpoint?
+-			 * That can happen if you set a global breakpoint on a function,
+-			 * invoke that function from a client application, debug the target
+-			 * kill the debugger client, and then re-invoke the function from
+-			 * the same client application - we will find the stale global
+-			 * breakpoint on the second invocation.
+-			 *
+-			 * We want to remove that breakpoint so that we don't keep trying
+-			 * to attach to a phantom proxy process.
+-			 */
+-			if( breakpoint )
+-				BreakpointDelete( breakpointScope, &(breakpoint->key));
++		/*
++		 * In any case, if we don't have a proxy to work with, we can't 
++		 * do any debugging so give up.
++		 */
++		pfree( frame->plugin_info );
++		frame->plugin_info       = NULL; /* No debugger context  */
++		per_session_ctx.client_w = 0; /* No client connection */
+ 
+-			/*
+-			 * In any case, if we don't have a proxy to work with, we can't 
+-			 * do any debugging so give up.
+-			 */
+-			pfree( frame->plugin_info );
+-			frame->plugin_info       = NULL; /* No debugger context  */
+-			per_session_ctx.client_w = 0; /* No client connection */
++		return;
++	}
+ 
+-			return;
+-		}
++	if( stmt->cmd_type == PLPGSQL_STMT_BLOCK )
++		return;
+ 
+-		if( stmt->cmd_type == PLPGSQL_STMT_BLOCK )
+-			return;
++	/*
++	 * The PL/pgSQL compiler inserts an automatic RETURN statement at the
++	 * end of each function (unless the last statement in the function is
++	 * already a RETURN). If we run into that statement, we don't really
++	 * want to wait for the user to STEP across it. Remember, the user won't
++	 * see the RETURN statement in the source-code listing for his function.
++	 *
++	 * Fortunately, the automatic RETURN statement has a line-number of 0 
++	 * so it's easy to spot.
++	 */
++	if( stmt->lineno == 0 )
++		return;
+ 
++	/*
++	 * If we're in step mode, tell the debugger client, read a command from the client and 
++	 * execute the command
++	 */
++	if( dbg_info->stepping )
++	{
+ 		/*
+-		 * The PL/pgSQL compiler inserts an automatic RETURN statement at the
+-		 * end of each function (unless the last statement in the function is
+-		 * already a RETURN). If we run into that statement, we don't really
+-		 * want to wait for the user to STEP across it. Remember, the user won't
+-		 * see the RETURN statement in the source-code listing for his function.
+-		 *
+-		 * Fortunately, the automatic RETURN statement has a line-number of 0 
+-		 * so it's easy to spot.
++		 * Make sure that we have all of the debug info that we need in this stack frame
+ 		 */
+-		if( stmt->lineno == 0 )
+-			return;
+-
+-		/*
+-		 * If we're in step mode, tell the debugger client, read a command from the client and 
+-		 * execute the command
++		completeFrame( frame );
++		/* 
++		 * We're in single-step mode (or at a breakpoint) 
++		 * send the current line number to the debugger client and report any
++		 * variable modifications
+ 		 */
+ 
+-		if( dbg_info->stepping )
+-		{
+-			/*
+-			 * Make sure that we have all of the debug info that we need in this stack frame
+-			 */
+-			completeFrame( frame );
+-
+-			/* 
+-			 * We're in single-step mode (or at a breakpoint) 
+-			 * send the current line number to the debugger client and report any
+-			 * variable modifications
+-			 */
+-
+-			if (!plugin_debugger_main_loop())
+-				dbg_info->stepping = FALSE;
+-		}
++		if (!plugin_debugger_main_loop())
++			dbg_info->stepping = FALSE;
+ 	}
+ 	
+ 	return;
+diff --git plugin_debugger.cpp plugin_debugger.cpp
+index 4f5f9b0..1256255 100644
+--- plugin_debugger.cpp
++++ plugin_debugger.cpp
+@@ -33,7 +33,7 @@
+ #include "parser/parser.h"
+ #include "parser/parse_func.h"
+ #include "globalbp.h"
+-#include "storage/proc.h"							/* For MyProc		   */
++#include "storage/proc.h"         /* For MyProc            */
+ #include "storage/procarray.h"						/* For BackendPidGetProc */
+ #include "utils/array.h"
+ #include "utils/builtins.h"
+@@ -86,11 +86,11 @@ typedef enum
+ /* Global breakpoint data. */
+ typedef struct
+ {
+-#if (PG_VERSION_NUM >= 90600)
+-	int		tranche_id;
++#if (PG_VERSION_NUM >= 90204)
++	int	tranche_id;
+ 	LWLock	lock;
+ #else
+-	LWLockId	lockid;
++	LWLockId     lockid;
+ #endif
+ } GlobalBreakpointData;
+ 
+@@ -98,9 +98,6 @@ typedef struct
+  * Local (static) variables
+  **********************************************************************/
+ 
+-
+-per_session_ctx_t per_session_ctx;
+-
+ errorHandlerCtx client_lost;
+ 
+ static debugger_language_t *debugger_languages[] = {
+@@ -115,13 +112,11 @@ static debugger_language_t *debugger_languages[] = {
+  * Function declarations
+  **********************************************************************/
+ 
+-void _PG_init( void );				/* initialize this module when we are dynamically loaded	*/
++extern "C" void _PG_init( void );				/* initialize this module when we are dynamically loaded	*/
+ 
+ /**********************************************************************
+  * Local (hidden) function prototypes
+  **********************************************************************/
+-
+-//static char       ** fetchArgNames( PLpgSQL_function * func, int * nameCount );
+ static void        * writen( int peer, void * src, size_t len );
+ static bool 		 connectAsServer( void );
+ static bool 		 connectAsClient( Breakpoint * breakpoint );
+@@ -159,11 +154,14 @@ void _PG_init( void )
+  * CREATE OR REPLACE FUNCTION pldbg_oid_debug( functionOID OID ) RETURNS INTEGER AS 'pldbg_oid_debug' LANGUAGE C;
+  */
+ 
+-Datum pldbg_oid_debug(PG_FUNCTION_ARGS);
++extern "C" Datum pldbg_oid_debug(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(pldbg_oid_debug);
+ 
+ Datum pldbg_oid_debug(PG_FUNCTION_ARGS)
+ {
++	if (!IS_PLDEBUGGER_SERVER) {
++        init_pldebugger_role(PLDBG_SERVER);
++	}
+ 	Oid			funcOid;
+ 	HeapTuple	tuple;
+ 	Oid			userid;
+@@ -256,7 +254,7 @@ char *dbg_read_str( void )
+ 
+ 	len = readUInt32( sock );
+ 
+-	dst = palloc(len + 1);
++	dst = (char*)palloc(len + 1);
+ 	readn( sock, dst, len );
+ 	
+ 	dst[len] = '\0';
+@@ -626,10 +624,10 @@ static bool addLocalBreakpoint( Oid funcOID, int lineNo )
+ {
+ 	Breakpoint breakpoint;
+ 	
+-	breakpoint.key.databaseId = MyProc->databaseId;
++	breakpoint.key.databaseId = t_thrd.proc->databaseId;
+ 	breakpoint.key.functionId = funcOID;
+ 	breakpoint.key.lineNumber = lineNo;
+-	breakpoint.key.targetPid  = MyProc->pid;
++    breakpoint.key.targetSessId  = MY_SESS_ID;
+ 	breakpoint.data.isTmp     = FALSE;
+ 	breakpoint.data.proxyPort = -1;
+ 	breakpoint.data.proxyPid  = -1;
+@@ -692,10 +690,10 @@ void clearBreakpoint( char * command )
+ 	{
+ 		Breakpoint breakpoint;
+ 	
+-		breakpoint.key.databaseId = MyProc->databaseId;
++		breakpoint.key.databaseId = t_thrd.proc->databaseId;
+ 		breakpoint.key.functionId = funcOID;
+ 		breakpoint.key.lineNumber = lineNo;
+-		breakpoint.key.targetPid  = MyProc->pid;
++        breakpoint.key.targetSessId  = MY_SESS_ID;
+ 
+ 		if( BreakpointDelete( BP_LOCAL, &breakpoint.key ))
+ 			dbg_send( "t" );
+@@ -712,7 +710,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+ {
+ 	BreakpointKey		key;
+ 
+-	key.databaseId = MyProc->databaseId;
++	key.databaseId = t_thrd.proc->databaseId;
+ 	key.functionId = funcOid;
+     key.lineNumber = lineNumber;
+ 
+@@ -747,7 +745,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+ 	 *		   proxy before we can tell that it's died).
+ 	 */
+ 
+-	key.targetPid = MyProc->pid;		/* Search for a global breakpoint targeted at our process ID */
++    key.targetSessId = MY_SESS_ID;     /* Search for a global breakpoint targeted at our process ID */
+   
+ 	if((( *dst = BreakpointLookup( BP_GLOBAL, &key )) != NULL ) && ((*dst)->data.busy == FALSE ))
+ 	{
+@@ -755,7 +753,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+ 		return( TRUE );
+ 	}
+ 
+-	key.targetPid = -1;					/* Search for a global breakpoint targeted at any process ID */
++    key.targetSessId = InvalidSessId;  /* Search for a global breakpoint targeted at any process ID */
+ 
+ 	if((( *dst = BreakpointLookup( BP_GLOBAL, &key )) != NULL ) && ((*dst)->data.busy == FALSE ))
+ 	{
+@@ -763,7 +761,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+ 		return( TRUE );
+ 	}
+ 
+-	key.targetPid = MyProc->pid;	 	/* Search for a local breakpoint (targeted at our process ID) */
++    key.targetSessId = MY_SESS_ID;     /* Search for a local breakpoint (targeted at our process ID) */
+ 
+ 	if(( *dst = BreakpointLookup( BP_LOCAL, &key )) != NULL )
+ 	{
+@@ -939,7 +937,7 @@ plugin_debugger_main_loop(void)
+ 
+ 	/* Initially, set focus on the topmost frame in the stack */
+ 
+-	for( frame = error_context_stack; frame; frame = frame->previous )
++	for( frame = t_thrd.log_cxt.error_context_stack; frame; frame = frame->previous )
+ 	{
+ 		/*
+ 		 * ignore unrecognized stack frames.
+@@ -1076,7 +1074,14 @@ plugin_debugger_main_loop(void)
+ 				lang->send_vars( frame );
+ 				break;
+ 			}
+-					
++			case PLDBG_DISCONNECT:
++			{
++				closesocket(per_session_ctx.client_r);
++				per_session_ctx.client_r = per_session_ctx.client_w = 0;
++				connectAsServer();
++				lang->send_cur_line(frame);
++				break;
++			}
+ 			case PLDBG_RESTART:
+ 			case PLDBG_STOP:
+ 			{
+@@ -1161,8 +1166,8 @@ send_breakpoints(Oid funcOid)
+ 
+ 	while(( breakpoint = (Breakpoint *) hash_seq_search( &scan )) != NULL )
+ 	{
+-		if(( breakpoint->key.targetPid == -1 ) || ( breakpoint->key.targetPid == MyProc->pid ))
+-			if( breakpoint->key.databaseId == MyProc->databaseId )
++        if ((breakpoint->key.targetSessId == InvalidSessId) || (breakpoint->key.targetSessId == MY_SESS_ID))
++			if( breakpoint->key.databaseId == t_thrd.proc->databaseId )
+ 				if( breakpoint->key.functionId == funcOid )
+ 					dbg_send( "%d:%d:%s", funcOid, breakpoint->key.lineNumber, "" );
+ 	}
+@@ -1173,8 +1178,8 @@ send_breakpoints(Oid funcOid)
+ 
+ 	while(( breakpoint = (Breakpoint *) hash_seq_search( &scan )) != NULL )
+ 	{
+-		if(( breakpoint->key.targetPid == -1 ) || ( breakpoint->key.targetPid == MyProc->pid ))
+-			if( breakpoint->key.databaseId == MyProc->databaseId )
++        if ((breakpoint->key.targetSessId == InvalidSessId) || (breakpoint->key.targetSessId == MY_SESS_ID))
++			if( breakpoint->key.databaseId == t_thrd.proc->databaseId )
+ 				if( breakpoint->key.functionId == funcOid )
+ 					dbg_send( "%d:%d:%s", funcOid, breakpoint->key.lineNumber, "" );
+ 	}
+@@ -1206,7 +1211,7 @@ select_frame(int frameNo, ErrorContextCallback **frame_p, debugger_language_t **
+ {
+ 	ErrorContextCallback *frame;
+ 
+-	for( frame = error_context_stack; frame; frame = frame->previous )
++	for( frame = t_thrd.log_cxt.error_context_stack; frame; frame = frame->previous )
+ 	{
+ 		debugger_language_t *lang = language_of_frame(frame);
+ 		if (!lang)
+@@ -1256,7 +1261,7 @@ send_stack( void )
+ {
+ 	ErrorContextCallback * entry;
+ 
+-	for( entry = error_context_stack; entry; entry = entry->previous )
++	for( entry = t_thrd.log_cxt.error_context_stack; entry; entry = entry->previous )
+ 	{
+ 		/*
+ 		 * ignore frames we don't recognize
+@@ -1273,32 +1278,22 @@ send_stack( void )
+ 
+ 
+ /*-------------------------------------------------------------------------------------
+- * The shared hash table for global breakpoints. It is protected by 
+- * breakpointLock
+- *-------------------------------------------------------------------------------------
+- */
+-static LWLockId  breakpointLock;
+-static HTAB    * globalBreakpoints = NULL;
+-static HTAB    * localBreakpoints  = NULL;
+-
+-/*-------------------------------------------------------------------------------------
+- * The size of Breakpoints is determined by globalBreakpointCount (should be a GUC)
+- *-------------------------------------------------------------------------------------
+- */
+-static int		globalBreakpointCount = 20;
+-static Size		breakpoint_hash_size;
+-static Size		breakcount_hash_size;
+-
+-/*-------------------------------------------------------------------------------------
++ * The shared hash table for global breakpoints. It is protected by breakpointLock
++ *
+  * Another shared hash table which tracks number of breakpoints created
+  * against each entity.
+- *
+  * It is also protected by breakpointLock, thus making operations on Breakpoints
+  * BreakCounts atomic.
++ *
++ * The size of Breakpoints is determined by globalBreakpointCount (should be a GUC)
+  *-------------------------------------------------------------------------------------
+  */
+-static HTAB *globalBreakCounts;
+-static HTAB *localBreakCounts;
++static LWLockId  breakpointLock;
++static HTAB*     globalBreakpoints = NULL;
++static HTAB*     globalBreakCounts = NULL;
++static int		 globalBreakpointCount = 20;
++static Size		 breakpoint_hash_size;
++static Size		 breakcount_hash_size;
+ 
+ typedef struct BreakCountKey
+ {
+@@ -1312,13 +1307,6 @@ typedef struct BreakCount
+ 	int				count;
+ } BreakCount;
+ 
+-/*-------------------------------------------------------------------------------------
+- * Prototypes for functions which operate on GlobalBreakCounts.
+- *-------------------------------------------------------------------------------------
+- */
+-static void initLocalBreakpoints(void);
+-static void initLocalBreakCounts(void);
+-
+ static void   breakCountInsert(eBreakpointScope scope, BreakCountKey *key);
+ static void   breakCountDelete(eBreakpointScope scope, BreakCountKey *key);
+ static int    breakCountLookup(eBreakpointScope scope, BreakCountKey *key, bool *found);
+@@ -1337,33 +1325,42 @@ static void reserveBreakpoints( void )
+ #endif
+ }
+ 
+-static void
+-initializeHashTables(void)
+-{
+-	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
+-
+-	initGlobalBreakpoints();
+-
+-	LWLockRelease(AddinShmemInitLock);
+-
+-	initLocalBreakpoints();
+-	initLocalBreakCounts();
+-}
+-
+-static void
+-initLocalBreakpoints(void)
++/*
++ * here we init:
++ * 1) local Breakpoint hatb
++ * 2) local breakpoint count hatb
++ */
++void initLocalBreakpoints(void)
+ {
+ 	HASHCTL	ctl = {0};
+-
+ 	ctl.keysize   = sizeof(BreakpointKey);
+ 	ctl.entrysize = sizeof(Breakpoint);
+ 	ctl.hash      = tag_hash;
++	ctl.hcxt      = PldbgMemoryContext;
++
++	localBreakpoints = hash_create("Local Breakpoints", 128, &ctl, HASH_CONTEXT | HASH_ELEM | HASH_FUNCTION);
++	if (!localBreakpoints)
++        elog(ERROR, "could not initialize local breakpoints hash table");
+ 
+-	localBreakpoints = hash_create("Local Breakpoints", 128, &ctl, HASH_ELEM | HASH_FUNCTION);
++   	HASHCTL ctlc = {0};
++	ctlc.keysize   = sizeof(BreakCountKey);
++	ctlc.entrysize = sizeof(BreakCount);
++	ctlc.hash 	  = tag_hash;
++	ctlc.hcxt         = PldbgMemoryContext;
++
++	localBreakCounts = hash_create("Local Breakpoint Count Table", 32, &ctlc, HASH_CONTEXT | HASH_ELEM | HASH_FUNCTION );
++	if (!localBreakCounts)
++        elog(ERROR, "could not initialize local breakpoints count hash table");
+ }
+ 
+-void
+-initGlobalBreakpoints(void)
++/*
++ * here we init:
++ *    1) Global breakpoint Lock
++ *    2) Global Breakpoint list
++ *    3) Global BreakCounts Table
++ * in share memory.
++ */
++void initGlobalBreakpoints(void)
+ {
+ 	bool   	  		found;
+ 	int				tableEntries = globalBreakpointCount;
+@@ -1371,24 +1368,17 @@ initGlobalBreakpoints(void)
+ 	HASHCTL breakpointCtl = {0};
+ 	HASHCTL breakcountCtl = {0};
+ 
+-	gbpd = ShmemInitStruct("Global Breakpoint Data",
+-						   sizeof(GlobalBreakpointData), &found);
++        LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
++	gbpd = (GlobalBreakpointData*)ShmemInitStruct("Global Breakpoint Data", sizeof(GlobalBreakpointData), &found);
++
+ 	if (gbpd == NULL)
+ 		elog(ERROR, "out of shared memory");
+ 
+-#if (PG_VERSION_NUM >= 90600)
+-	if (!found)
+-	{
+-		gbpd->tranche_id = LWLockNewTrancheId();
+-		LWLockInitialize(&gbpd->lock, gbpd->tranche_id);
+-	}
+-	{
+-		static LWLockTranche tranche;
+-
+-		tranche.name = "pldebugger";
+-		tranche.array_base = &gbpd->lock;
+-		tranche.array_stride = sizeof(LWLock);
+-		LWLockRegisterTranche(gbpd->tranche_id, &tranche);
++#if (PG_VERSION_NUM >= 90204)
++    if (!found) {
++			/* Convert to array index. */
++		LWLockRegisterTranche((int)LWTRANCHE_PLDEBUG, "pldebugger");
++		LWLockInitialize(&gbpd->lock, (int)LWTRANCHE_PLDEBUG);
+ 
+ 		breakpointLock = &gbpd->lock;
+ 	}
+@@ -1419,6 +1409,8 @@ initGlobalBreakpoints(void)
+ 
+ 	globalBreakCounts = ShmemInitHash("Global BreakCounts Table", tableEntries, tableEntries, &breakcountCtl, HASH_ELEM | HASH_FUNCTION);
+ 
++    LWLockRelease(AddinShmemInitLock);
++
+ 	if (!globalBreakCounts)
+ 		elog(FATAL, "could not initialize global breakpoints count hash table");
+ }
+@@ -1427,7 +1419,7 @@ initGlobalBreakpoints(void)
+ /* ---------------------------------------------------------
+  * getPLDebuggerLock()
+  *
+- *	Returns the lockid of the lock used to protect pldebugger shared memory
++ *	Returns the lock used to protect pldebugger shared memory
+  *  structures. The lock is called breakpointLock in this file, but it's
+  *  also shared by dbgcommm.c.
+  */
+@@ -1435,8 +1427,8 @@ initGlobalBreakpoints(void)
+ LWLockId
+ getPLDebuggerLock(void)
+ {
+-	if( localBreakpoints == NULL )
+-		initializeHashTables();
++	if( breakpointLock == NULL )
++		initGlobalBreakpoints();
+ 
+ 	return breakpointLock;
+ }
+@@ -1455,8 +1447,8 @@ getPLDebuggerLock(void)
+ static void
+ acquireLock(eBreakpointScope scope, LWLockMode mode)
+ {
+-	if( localBreakpoints == NULL )
+-		initializeHashTables();
++	if( breakpointLock == NULL )
++		initGlobalBreakpoints();
+ 
+ 	if (scope == BP_GLOBAL)
+ 		LWLockAcquire(breakpointLock, mode);
+@@ -1517,7 +1509,7 @@ BreakpointOnId(eBreakpointScope scope, Oid funcOid)
+ 	bool			found = false;
+ 	BreakCountKey	key;
+ 
+-	key.databaseId = MyProc->databaseId;
++	key.databaseId = t_thrd.proc->databaseId;
+ 	key.functionId = funcOid;
+ 
+ 	acquireLock(scope, LW_SHARED);
+@@ -1648,7 +1640,7 @@ BreakpointBusySession(int pid)
+ 			 * will ignore it)
+ 			 */
+ 
+-			localCopy.key.targetPid = MyProc->pid;
++            localCopy.key.targetSessId = t_thrd.proc->pid;
+ 
+ 			BreakpointInsertOrUpdate(BP_LOCAL, &localCopy.key, &localCopy.data );
+ 		}
+@@ -1763,11 +1755,11 @@ BreakpointShowAll(eBreakpointScope scope)
+ 
+ 	while((entry = (Breakpoint *) hash_seq_search(&status)))
+ 	{
+-		elog(INFO, "Database(%d) function(%d) lineNumber(%d) targetPid(%d) proxyPort(%d) proxyPid(%d) busy(%c) tmp(%c)",
++        elog(INFO, "Database(%d) function(%d) lineNumber(%d) targetSessId(%ld) proxyPort(%d) proxyPid(%d) busy(%c) tmp(%c)",
+ 			 entry->key.databaseId,
+ 			 entry->key.functionId,
+ 			 entry->key.lineNumber,
+-			 entry->key.targetPid,
++             entry->key.targetSessId,
+ 			 entry->data.proxyPort,
+ 			 entry->data.proxyPid,
+ 			 entry->data.busy ? 'T' : 'F',
+@@ -1823,32 +1815,6 @@ void BreakpointCleanupProc(int pid)
+ 	releaseLock(BP_GLOBAL);
+ }
+ 
+-/* ==========================================================================
+- * Function definitions for BreakCounts hash table
+- *
+- * Note: All the underneath functions assume that the caller has taken care
+- * of all concurrency issues and thus does not do any locking
+- * ==========================================================================
+- */
+-
+-static void
+-initLocalBreakCounts(void)
+-{
+-	HASHCTL ctl = {0};
+-
+-	ctl.keysize   = sizeof(BreakCountKey);
+-	ctl.entrysize = sizeof(BreakCount);
+-	ctl.hash 	  = tag_hash;
+-
+-	localBreakCounts = hash_create("Local Breakpoint Count Table",
+-								   32,
+-								  &ctl,
+-								  HASH_ELEM | HASH_FUNCTION );
+-
+-	if (!globalBreakCounts)
+-		elog(FATAL, "could not initialize global breakpoints count hash table");
+-}
+-
+ /* ---------------------------------------------------------
+  * breakCountInsert()
+  *
+@@ -1860,7 +1826,7 @@ breakCountInsert(eBreakpointScope scope, BreakCountKey *key)
+ 	BreakCount *entry;
+ 	bool		found;
+ 	
+-	entry = hash_search(getBreakCountHash(scope), key, HASH_ENTER, &found);
++	entry = (BreakCount*)hash_search(getBreakCountHash(scope), key, HASH_ENTER, &found);
+ 	
+ 	if (found)
+ 		entry->count++;
+@@ -1878,7 +1844,7 @@ breakCountDelete(eBreakpointScope scope, BreakCountKey *key)
+ {
+ 	BreakCount		*entry;
+ 	
+-	entry = hash_search(getBreakCountHash(scope), key, HASH_FIND, NULL);
++	entry = (BreakCount*)hash_search(getBreakCountHash(scope), key, HASH_FIND, NULL);
+ 	
+ 	if (entry)
+ 	{
+@@ -1900,7 +1866,7 @@ breakCountLookup(eBreakpointScope scope, BreakCountKey *key, bool *found)
+ {
+ 	BreakCount		*entry;
+ 	
+-	entry = hash_search(getBreakCountHash(scope), key, HASH_FIND, found);
++	entry = (BreakCount*)hash_search(getBreakCountHash(scope), key, HASH_FIND, found);
+ 	
+ 	if (entry)
+ 		return entry->count;
+@@ -1914,12 +1880,11 @@ breakCountLookup(eBreakpointScope scope, BreakCountKey *key, bool *found)
+  *	Returns a pointer to the global or local breakpoint hash,
+  *	depending on the given scope.
+  */
+-
+ static HTAB *
+ getBreakpointHash(eBreakpointScope scope )
+ {
+-	if( localBreakpoints == NULL )
+-		initializeHashTables();
++	if( globalBreakpoints == NULL )
++		initGlobalBreakpoints();
+ 
+ 	if (scope == BP_GLOBAL)
+ 		return globalBreakpoints;
+@@ -1933,12 +1898,11 @@ getBreakpointHash(eBreakpointScope scope )
+  *	Returns a pointer to the global or local breakcount hash,
+  *	depending on the given scope.
+  */
+-
+ static HTAB *
+ getBreakCountHash(eBreakpointScope scope)
+ {
+-	if( localBreakCounts == NULL )
+-		initializeHashTables();
++	if( globalBreakCounts == NULL )
++		initGlobalBreakpoints();
+ 
+ 	if (scope == BP_GLOBAL)
+ 		return globalBreakCounts;
+diff --git uninstall_pldbgapi.sql uninstall_pldbgapi.sql
+index 568d053..fa8ab8c 100644
+--- uninstall_pldbgapi.sql
++++ uninstall_pldbgapi.sql
+@@ -7,27 +7,22 @@
+ -- versions, however.
+ --
+ 
+-DROP FUNCTION pldbg_get_target_info(TEXT, "char");
+-DROP FUNCTION pldbg_wait_for_target(INTEGER);
+-DROP FUNCTION pldbg_wait_for_breakpoint(INTEGER);
+ DROP FUNCTION pldbg_step_over(INTEGER);
+ DROP FUNCTION pldbg_step_into(INTEGER);
+-DROP FUNCTION pldbg_set_global_breakpoint(INTEGER, OID, INTEGER, INTEGER);
+ DROP FUNCTION pldbg_set_breakpoint(INTEGER, OID, INTEGER);
+-DROP FUNCTION pldbg_select_frame(INTEGER, INTEGER);
+ DROP FUNCTION pldbg_get_variables(INTEGER);
+ DROP FUNCTION pldbg_get_proxy_info();
+ DROP FUNCTION pldbg_get_stack(INTEGER);
+ DROP FUNCTION pldbg_get_source(INTEGER, OID);
+ DROP FUNCTION pldbg_get_breakpoints(INTEGER);
+ DROP FUNCTION pldbg_drop_breakpoint(INTEGER, OID, INTEGER);
+-DROP FUNCTION pldbg_deposit_value(INTEGER, TEXT, INTEGER, TEXT);
+-DROP FUNCTION pldbg_create_listener();
+ DROP FUNCTION pldbg_continue(INTEGER);
+ DROP FUNCTION pldbg_attach_to_port(INTEGER);
+ DROP FUNCTION pldbg_abort_target(INTEGER);
+ DROP FUNCTION pldbg_oid_debug(OID);
+ DROP FUNCTION plpgsql_oid_debug(OID);
++DROP FUNCTION plpgsql_off();
++DROP FUNCTION plpgsql_on();
+ 
+ DROP TYPE proxyInfo;
+ DROP TYPE var;
