@@ -345,14 +345,14 @@ void ExplainQuery(
             es.nodes = defGetBoolean(opt);
         else if (strcmp(opt->defname, "num_nodes") == 0)
             es.num_nodes = defGetBoolean(opt);
+        else if (pg_strcasecmp(opt->defname, "detail") == 0)
+            es.detail = true;
 #endif 
         else if (strcmp(opt->defname, "timing") == 0) {
             timing_set = true;
             es.timing = defGetBoolean(opt);
         } else if (pg_strcasecmp(opt->defname, "cpu") == 0)
             es.cpu = defGetBoolean(opt);
-        else if (pg_strcasecmp(opt->defname, "detail") == 0)
-            es.detail = defGetBoolean(opt);
         else if (pg_strcasecmp(opt->defname, "performance") == 0)
             es.performance = defGetBoolean(opt);
         else if (strcmp(opt->defname, "format") == 0) {
@@ -383,11 +383,12 @@ void ExplainQuery(
         es.buffers = true;
         es.costs = true;
         es.cpu = true;
-        es.detail = true;
 #if defined(USE_ASSERT_CHECKING) || defined(ENABLE_MULTIPLE_NODES) 
+        es.detail = true;
         es.nodes = true;
         es.num_nodes = true;
 #else 
+        es.detail = false;
         es.nodes = false;
         es.num_nodes = false;
 #endif 
