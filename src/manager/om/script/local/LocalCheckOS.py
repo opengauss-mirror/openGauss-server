@@ -798,27 +798,26 @@ def disRemoveIPC():
     """
     g_logger.debug("disbale RemoveIPC.")
     distName = g_Platform.getCurrentPlatForm()[0]
-    if distName.upper() == "OPENEULER":
+    if distName.upper() in ("OPENEULER", "KYLIN"):
         cmd = "setenforce 0"
         subprocess.getstatusoutput(cmd)
         initFile = "/usr/lib/systemd/system/systemd-logind.service"
         if os.path.exists(initFile):
-            # 1.close thp
-            close_cmd = """(if [ `systemctl show systemd-logind | 
-                grep RemoveIPC` != "RemoveIPC=no" ];
-                then echo 'RemoveIPC=no' >> /usr/lib/systemd
-                /system/systemd-logind.service; 
-                sed -i '/RemoveIPC=yes/'d  
-                /usr/lib/systemd/system/systemd-logind.service;fi;)"""
+            close_cmd = "if [ `systemctl show systemd-logind | " \
+                        "grep RemoveIPC` != \"RemoveIPC=no\" ]; " \
+                        "then echo 'RemoveIPC=no' >> " \
+                        "/usr/lib/systemd/system/systemd-logind.service; " \
+                        "sed -i '/RemoveIPC=yes/'d " \
+                        "/usr/lib/systemd/system/systemd-logind.service; fi;"
             disableRemoveIPCLog(close_cmd)
         initFile = "/etc/systemd/logind.conf"
         if os.path.exists(initFile):
-            close_cmd = """(if [ `loginctl show-session | grep RemoveIPC` 
-                            != "RemoveIPC=no" ];
-                            then 
-                            echo 'RemoveIPC=no' >> /etc/systemd/logind.conf; 
-                            sed -i '/RemoveIPC=yes/'d /etc/systemd/logind.conf;
-                            fi;)"""
+            close_cmd = "if [ `loginctl show-session | " \
+                        "grep RemoveIPC` != \"RemoveIPC=no\" ]; " \
+                        "then echo 'RemoveIPC=no' >> " \
+                        "/etc/systemd/logind.conf; " \
+                        "sed -i '/RemoveIPC=yes/'d " \
+                        "/etc/systemd/logind.conf; fi;"
             disableRemoveIPCLog(close_cmd)
         cmd = "systemctl daemon-reload"
         disableRemoveIPCLog(cmd)

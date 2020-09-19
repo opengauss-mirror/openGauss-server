@@ -426,7 +426,6 @@ def doCheckOS(itemNumber):
     """
     if (itemNumber == 'A1'):
         checkOSVersion()
-        checkOSConfig()
     elif (itemNumber == 'A2'):
         checkKernelVersion()
     elif (itemNumber == 'A3'):
@@ -1408,27 +1407,6 @@ def getTmpFile():
         else:
             return tmpFile
 
-
-def checkOSConfig():
-    '''
-    function : Check the parameters in logind.conf
-    '''
-    g_logger.debug("Checking OS configuration.")
-    try:
-        cmd = "cat /etc/systemd/logind.conf | " + \
-        "grep RemoveIPC | grep -o -E '(yes|no)' | tail -1"
-        (status, output, outputMap) = getCmdOutput(cmd)
-        for hostName in outputMap:
-            result = outputMap[hostName]
-            if (result.strip() == "yes"):
-                g_logger.logExit("[%s]: \n" % hostName +
-                                 ErrorCode.GAUSS_516["GAUSS_51632"] % cmd +
-                                 " Error: \n You should set RemoveIPC=no " + \
-                                 "in /etc/systemd/logind.conf, "+ \
-								 "and restart the server")
-    except Exception as e:
-        g_logger.debug(str(e))
-    g_logger.debug("Successfully checked OS config.")
 def main():
     """
     main function
