@@ -59,4 +59,4 @@ $abs_bindir/gsql -dgs_basebackup -p$gs_basebackup_port -f "$abs_srcdir/sql/gs_ba
 
 
 #stop node
-$abs_bindir/gs_ctl stop -D $abs_bindir/../$dataNode
+$abs_bindir/gsql -dgs_basebackup -p$gs_basebackup_port -c 'SHUTDOWN IMMEDIATE'

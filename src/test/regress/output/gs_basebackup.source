@@ -55,9 +55,7 @@ INSERT 0 1
 (1 row)
 
 --?total time: *  ms
---?.*[gs_ctl]: gs_ctl stopped ,datadir is -D ".*/gs_basebackup_node_nstream_np"
---?waiting for server to shut down.* done
-server stopped
+SHUTDOWN
 \! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_stream_p  stream p
 --?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_stream_p"
 --?! gs_ctl: server is running (PID: .*)
@@ -85,9 +83,7 @@ server stopped
 (1 row)
 
 --?total time: .*  ms
---?.*[gs_ctl]: gs_ctl stopped ,datadir is -D ".*/gs_basebackup_node_stream_p"
---?waiting for server to shut down.* done
-server stopped
+SHUTDOWN
 \! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_fetch_t  fetch t
 --?! [.*][.*][][gs_ctl]: gs_ctl status,datadir is -D ".*/gs_basebackup_node_fetch_t"
 --?! gs_ctl: server is running (PID: .*)
@@ -115,6 +111,4 @@ server stopped
 (1 row)
 
 --?total time: *  ms
---?.*[gs_ctl]: gs_ctl stopped ,datadir is -D ".*/gs_basebackup_node_fetch_t"
---?waiting for server to shut down.* done
-server stopped
+SHUTDOWN
