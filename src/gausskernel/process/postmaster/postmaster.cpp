@@ -9346,6 +9346,8 @@ DbState get_local_dbstate(void)
                        Also use local info from walreceiver as a supplement. */
                     if (wal_catchup || data_catchup) {
                         db_state = CATCHUP_STATE;
+                    } else if (!WalRcvIsOnline()) {
+                        db_state = STARTING_STATE;
                     } else {
                         db_state = NORMAL_STATE;
                     }
