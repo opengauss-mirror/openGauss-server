@@ -545,6 +545,20 @@ CONTEXT:  referenced column: pg_terminate_backend
  f
 (1 row)
 
+select pg_terminate_session(0, 0);
+WARNING:  PID 0 is not a gaussdb server thread
+CONTEXT:  referenced column: pg_terminate_session
+ pg_terminate_session 
+----------------------
+ f
+(1 row)
+
+select pg_terminate_session(9999999999, 99999999999998);
+ pg_terminate_session 
+----------------------
+ f
+(1 row)
+
 select pg_partition_filenode(9999999999);
 ERROR:  OID out of range
 CONTEXT:  referenced column: pg_partition_filenode

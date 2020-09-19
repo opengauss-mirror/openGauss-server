@@ -267,6 +267,10 @@ drop table oldstyle_test;
 
 select pg_terminate_backend(9999999999);
 
+select pg_terminate_session(0, 0);
+
+select pg_terminate_session(9999999999, 99999999999998);
+
 select pg_partition_filenode(9999999999);
 
 --
