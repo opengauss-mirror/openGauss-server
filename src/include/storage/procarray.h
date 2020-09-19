@@ -22,7 +22,7 @@
 extern Size ProcArrayShmemSize(void);
 extern void CreateSharedProcArray(void);
 extern void ProcArrayAdd(PGPROC* proc);
-extern void ProcArrayRemove(PGPROC* proc, TransactionId latestXid, bool isCommit);
+extern void ProcArrayRemove(PGPROC* proc, TransactionId latestXid);
 
 extern Size RingBufferShmemSize(void);
 extern void CreateSharedRingBuffer(void);
@@ -121,7 +121,7 @@ extern CommitSeqNo getNextCSN();
 extern void SyncLocalXidWait(TransactionId xid);
 
 extern void UpdateCSNLogAtTransactionEND(
-    PGPROC* proc, TransactionId xid, uint32 nsubxids, TransactionId* subXids, CommitSeqNo csn, bool isCommit);
+    TransactionId xid, uint32 nsubxids, TransactionId* subXids, CommitSeqNo csn, bool isCommit);
 
 #endif /* PROCARRAY_H */
 

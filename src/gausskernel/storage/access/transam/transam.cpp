@@ -624,26 +624,7 @@ void TransactionIdAsyncCommitTree(TransactionId xid, int nxids, TransactionId* x
         if (csn > 0)
             CSNLogSetCommitSeqNo(xid, nxids, xids, csn);
     } else {
-#ifdef ENABLE_MULTIPLE_NODES
-        /*
-         * when the transaction does not involve GTM, set csn to commit-in-progress
-         * first here and set the true csn while procarray clear.
-         */
-        if (useLocalXid || !IsPostmasterEnvironment || GTM_FREE_MODE) {
-            /* Set CSN to commit-in-progress */
-            Assert(csn == 0);
-            CSNLogSetCommitSeqNo(xid,
-                nxids,
-                xids,
-                (COMMITSEQNO_COMMIT_INPROGRESS | t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo));
-        } else { /* for gtm transactions, set the true csn here just after the clog is set. */
-            UpdateCSNLogAtTransactionEND(NULL, xid, nxids, xids, csn, true);
-        }
-#else
-        if (!(useLocalXid || !IsPostmasterEnvironment || GTM_FREE_MODE)) {
-            UpdateCSNLogAtTransactionEND(NULL, xid, nxids, xids, csn, true);
-        }
-#endif
+        UpdateCSNLogAtTransactionEND(xid, nxids, xids, csn, true);
     }
 }
 

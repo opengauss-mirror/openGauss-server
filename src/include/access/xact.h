@@ -386,6 +386,7 @@ extern bool IsInLiveSubtransaction();
 extern void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, TransactionId* sub_xids);
 extern CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn);
 extern void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* nrelsPtr);
+extern CommitSeqNo GetLocalNextCSN();
 extern bool IsMMEngineUsed();
 extern bool IsMMEngineUsedInParentTransaction();
 extern bool IsPGEngineUsed();

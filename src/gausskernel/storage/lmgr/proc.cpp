@@ -992,7 +992,7 @@ void ProcReleaseLocks(bool isCommit)
 static void RemoveProcFromArray(int code, Datum arg)
 {
     Assert(t_thrd.proc != NULL);
-    ProcArrayRemove(t_thrd.proc, InvalidTransactionId, false);
+    ProcArrayRemove(t_thrd.proc, InvalidTransactionId);
 }
 
 /*
