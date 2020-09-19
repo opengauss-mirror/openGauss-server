@@ -1,0 +1,248 @@
+From c53717b64050b2a66d5f5af53fa79edc038b5b5d Mon Sep 17 00:00:00 2001
+From: chen******** <13*******7@qq.com>
+Date: Fri, 18 Sep 2020 19:21:43 +0800
+Subject: [PATCH] patch
+
+---
+ postgis--2.4.2.sql          |  2 +-
+ topology/postgis_topology.c | 50 ++++++++++++++++++++++-----------------------
+ 2 files changed, 26 insertions(+), 26 deletions(-)
+
+diff --git a/postgis--2.4.2.sql b/postgis--2.4.2.sql
+index 74a34bf..b48f739 100644
+--- a/postgis--2.4.2.sql
++++ b/postgis--2.4.2.sql
+@@ -1720,7 +1720,7 @@ CREATE TABLE spatial_ref_sys (
+ 	 auth_srid integer,
+ 	 srtext varchar(2048),
+ 	 proj4text varchar(2048)
+-)DISTRIBUTE BY REPLICATION;
++);
+ 
+ 
+ -----------------------------------------------------------------------
+diff --git a/topology/postgis_topology.c b/topology/postgis_topology.c
+index 5718b88..717edee 100644
+--- a/topology/postgis_topology.c
++++ b/topology/postgis_topology.c
+@@ -965,7 +965,7 @@ cb_getEdgeByFace(const LWT_BE_TOPOLOGY* topo,
+   POSTGIS_DEBUGF(1, "data_changed is %d", topo->be_data->data_changed);
+ 
+   spi_result = SPI_execute_with_args(sql->data, nargs, argtypes, values, NULL,
+-                                     !topo->be_data->data_changed, 0);
++                                     !topo->be_data->data_changed, 0, NULL);
+   pfree(array_ids); /* not needed anymore */
+   if ( gser ) pfree(gser); /* not needed anymore */
+   MemoryContextSwitchTo( oldcontext ); /* switch back */
+@@ -2557,7 +2557,7 @@ cb_getFaceContainingPoint( const LWT_BE_TOPOLOGY* topo, const LWPOINT* pt )
+   values[0] = PointerGetDatum(pts);
+   argtypes[0] = topo->geometryOID;
+   spi_result = SPI_execute_with_args(sql->data, 1, argtypes, values, NULL,
+-                                     !topo->be_data->data_changed, 1);
++                                     !topo->be_data->data_changed, 1, NULL);
+   MemoryContextSwitchTo( oldcontext ); /* switch back */
+   pfree(pts); /* not needed anymore */
+   if ( spi_result != SPI_OK_SELECT ) {
+@@ -2992,7 +2992,7 @@ _PG_fini(void)
+ }
+ 
+ /*  ST_ModEdgeSplit(atopology, anedge, apoint) */
+-Datum ST_ModEdgeSplit(PG_FUNCTION_ARGS);
++extern "C" Datum ST_ModEdgeSplit(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_ModEdgeSplit);
+ Datum ST_ModEdgeSplit(PG_FUNCTION_ARGS)
+ {
+@@ -3057,8 +3057,8 @@ Datum ST_ModEdgeSplit(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_NewEdgesSplit(atopology, anedge, apoint) */
+-Datum ST_NewEdgesSplit(PG_FUNCTION_ARGS);
+-PG_FUNCTION_INFO_V1(ST_NewEdgesSplit);
++extern "C" Datum ST_NewEdgesSplit(PG_FUNCTION_ARGS);
++extern "C" PG_FUNCTION_INFO_V1(ST_NewEdgesSplit);
+ Datum ST_NewEdgesSplit(PG_FUNCTION_ARGS)
+ {
+   text* toponame_text;
+@@ -3122,7 +3122,7 @@ Datum ST_NewEdgesSplit(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_AddIsoNode(atopology, aface, apoint) */
+-Datum ST_AddIsoNode(PG_FUNCTION_ARGS);
++extern "C" Datum ST_AddIsoNode(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_AddIsoNode);
+ Datum ST_AddIsoNode(PG_FUNCTION_ARGS)
+ {
+@@ -3198,7 +3198,7 @@ Datum ST_AddIsoNode(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_AddIsoEdge(atopology, anode, anothernode, acurve) */
+-Datum ST_AddIsoEdge(PG_FUNCTION_ARGS);
++extern "C" Datum ST_AddIsoEdge(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_AddIsoEdge);
+ Datum ST_AddIsoEdge(PG_FUNCTION_ARGS)
+ {
+@@ -3271,7 +3271,7 @@ Datum ST_AddIsoEdge(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_AddEdgeModFace(atopology, snode, enode, line) */
+-Datum ST_AddEdgeModFace(PG_FUNCTION_ARGS);
++extern "C" Datum ST_AddEdgeModFace(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_AddEdgeModFace);
+ Datum ST_AddEdgeModFace(PG_FUNCTION_ARGS)
+ {
+@@ -3337,7 +3337,7 @@ Datum ST_AddEdgeModFace(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_AddEdgeNewFaces(atopology, snode, enode, line) */
+-Datum ST_AddEdgeNewFaces(PG_FUNCTION_ARGS);
++extern "C" Datum ST_AddEdgeNewFaces(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_AddEdgeNewFaces);
+ Datum ST_AddEdgeNewFaces(PG_FUNCTION_ARGS)
+ {
+@@ -3403,7 +3403,7 @@ Datum ST_AddEdgeNewFaces(PG_FUNCTION_ARGS)
+ }
+ 
+ /* ST_GetFaceGeometry(atopology, aface) */
+-Datum ST_GetFaceGeometry(PG_FUNCTION_ARGS);
++extern "C" Datum ST_GetFaceGeometry(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_GetFaceGeometry);
+ Datum ST_GetFaceGeometry(PG_FUNCTION_ARGS)
+ {
+@@ -3470,7 +3470,7 @@ typedef struct FACEEDGESSTATE
+ FACEEDGESSTATE;
+ 
+ /* ST_GetFaceEdges(atopology, aface) */
+-Datum ST_GetFaceEdges(PG_FUNCTION_ARGS);
++extern "C" Datum ST_GetFaceEdges(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_GetFaceEdges);
+ Datum ST_GetFaceEdges(PG_FUNCTION_ARGS)
+ {
+@@ -3596,7 +3596,7 @@ Datum ST_GetFaceEdges(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_ChangeEdgeGeom(atopology, anedge, acurve) */
+-Datum ST_ChangeEdgeGeom(PG_FUNCTION_ARGS);
++extern "C" Datum ST_ChangeEdgeGeom(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_ChangeEdgeGeom);
+ Datum ST_ChangeEdgeGeom(PG_FUNCTION_ARGS)
+ {
+@@ -3667,7 +3667,7 @@ Datum ST_ChangeEdgeGeom(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_RemoveIsoNode(atopology, anode) */
+-Datum ST_RemoveIsoNode(PG_FUNCTION_ARGS);
++extern "C" Datum ST_RemoveIsoNode(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_RemoveIsoNode);
+ Datum ST_RemoveIsoNode(PG_FUNCTION_ARGS)
+ {
+@@ -3727,7 +3727,7 @@ Datum ST_RemoveIsoNode(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_RemIsoEdge(atopology, anedge) */
+-Datum ST_RemIsoEdge(PG_FUNCTION_ARGS);
++extern "C" Datum ST_RemIsoEdge(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_RemIsoEdge);
+ Datum ST_RemIsoEdge(PG_FUNCTION_ARGS)
+ {
+@@ -3787,7 +3787,7 @@ Datum ST_RemIsoEdge(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_MoveIsoNode(atopology, anode, apoint) */
+-Datum ST_MoveIsoNode(PG_FUNCTION_ARGS);
++extern "C" Datum ST_MoveIsoNode(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_MoveIsoNode);
+ Datum ST_MoveIsoNode(PG_FUNCTION_ARGS)
+ {
+@@ -3871,7 +3871,7 @@ Datum ST_MoveIsoNode(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_RemEdgeModFace(atopology, anedge) */
+-Datum ST_RemEdgeModFace(PG_FUNCTION_ARGS);
++extern "C" Datum ST_RemEdgeModFace(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_RemEdgeModFace);
+ Datum ST_RemEdgeModFace(PG_FUNCTION_ARGS)
+ {
+@@ -3922,7 +3922,7 @@ Datum ST_RemEdgeModFace(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_RemEdgeNewFace(atopology, anedge) */
+-Datum ST_RemEdgeNewFace(PG_FUNCTION_ARGS);
++extern "C" Datum ST_RemEdgeNewFace(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_RemEdgeNewFace);
+ Datum ST_RemEdgeNewFace(PG_FUNCTION_ARGS)
+ {
+@@ -3971,7 +3971,7 @@ Datum ST_RemEdgeNewFace(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_ModEdgeHeal(atopology, anedge, anotheredge) */
+-Datum ST_ModEdgeHeal(PG_FUNCTION_ARGS);
++extern "C" Datum ST_ModEdgeHeal(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_ModEdgeHeal);
+ Datum ST_ModEdgeHeal(PG_FUNCTION_ARGS)
+ {
+@@ -4021,7 +4021,7 @@ Datum ST_ModEdgeHeal(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  ST_NewEdgeHeal(atopology, anedge, anotheredge) */
+-Datum ST_NewEdgeHeal(PG_FUNCTION_ARGS);
++extern "C" Datum ST_NewEdgeHeal(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(ST_NewEdgeHeal);
+ Datum ST_NewEdgeHeal(PG_FUNCTION_ARGS)
+ {
+@@ -4071,7 +4071,7 @@ Datum ST_NewEdgeHeal(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  GetNodeByPoint(atopology, point, tolerance) */
+-Datum GetNodeByPoint(PG_FUNCTION_ARGS);
++extern "C" Datum GetNodeByPoint(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(GetNodeByPoint);
+ Datum GetNodeByPoint(PG_FUNCTION_ARGS)
+ {
+@@ -4137,7 +4137,7 @@ Datum GetNodeByPoint(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  GetEdgeByPoint(atopology, point, tolerance) */
+-Datum GetEdgeByPoint(PG_FUNCTION_ARGS);
++extern "C" Datum GetEdgeByPoint(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(GetEdgeByPoint);
+ Datum GetEdgeByPoint(PG_FUNCTION_ARGS)
+ {
+@@ -4203,7 +4203,7 @@ Datum GetEdgeByPoint(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  GetFaceByPoint(atopology, point, tolerance) */
+-Datum GetFaceByPoint(PG_FUNCTION_ARGS);
++extern "C" Datum GetFaceByPoint(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(GetFaceByPoint);
+ Datum GetFaceByPoint(PG_FUNCTION_ARGS)
+ {
+@@ -4269,7 +4269,7 @@ Datum GetFaceByPoint(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  TopoGeo_AddPoint(atopology, point, tolerance) */
+-Datum TopoGeo_AddPoint(PG_FUNCTION_ARGS);
++extern "C" Datum TopoGeo_AddPoint(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(TopoGeo_AddPoint);
+ Datum TopoGeo_AddPoint(PG_FUNCTION_ARGS)
+ {
+@@ -4343,7 +4343,7 @@ Datum TopoGeo_AddPoint(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  TopoGeo_AddLinestring(atopology, point, tolerance) */
+-Datum TopoGeo_AddLinestring(PG_FUNCTION_ARGS);
++extern "C" Datum TopoGeo_AddLinestring(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(TopoGeo_AddLinestring);
+ Datum TopoGeo_AddLinestring(PG_FUNCTION_ARGS)
+ {
+@@ -4467,7 +4467,7 @@ Datum TopoGeo_AddLinestring(PG_FUNCTION_ARGS)
+ }
+ 
+ /*  TopoGeo_AddPolygon(atopology, poly, tolerance) */
+-Datum TopoGeo_AddPolygon(PG_FUNCTION_ARGS);
++extern "C" Datum TopoGeo_AddPolygon(PG_FUNCTION_ARGS);
+ PG_FUNCTION_INFO_V1(TopoGeo_AddPolygon);
+ Datum TopoGeo_AddPolygon(PG_FUNCTION_ARGS)
+ {
+-- 
+2.6.4.windows.1
+
