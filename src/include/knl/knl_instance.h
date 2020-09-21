@@ -337,6 +337,7 @@ typedef struct knl_g_ckpt_context {
     volatile bool flush_all_dirty_page;
     volatile bool buffers_contain_hashbucket;
     volatile uint64 full_ckpt_expected_flush_loc;
+    volatile XLogRecPtr full_ckpt_redo_ptr;
     volatile uint32 current_page_writer_count;
     volatile XLogRecPtr page_writer_xlog_flush_loc;
     volatile LWLock *backend_wait_lock;
