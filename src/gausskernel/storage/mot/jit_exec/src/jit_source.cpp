@@ -84,9 +84,18 @@ extern bool InitJitSource(JitSource* jitSource, const char* queryString)
 extern void DestroyJitSource(JitSource* jitSource)
 {
     MOT_LOG_TRACE("Destroying JIT source %p with query string: %s", jitSource, jitSource->_query_string);
+    if (jitSource->m_contextList != nullptr) {
+        MOT_LOG_WARN("JIT source still contains registered JIT context objects, while destroying JIT source");
+        JitContext* jitContext = jitSource->m_contextList;
+        while (jitContext != nullptr) {
+            jitContext->m_jitSource = nullptr;  // prevent crash during DestroyJitContext()
+            jitContext = jitContext->m_nextInSource;
+        }
+    }
+
     if (jitSource->_source_jit_context != nullptr) {
         // this code is executed during shutdown, so the underlying
-        // GsCodeGen object was already destroyed the top memory context
+        // GsCodeGen object was already destroyed by the top memory context
         DestroyJitContext(jitSource->_source_jit_context);
         jitSource->_source_jit_context = NULL;
     }
@@ -288,6 +297,7 @@ static void SetJitSourceStatus(JitSource* jitSource, JitContext* readySourceJitC
             }
             jitSource->m_contextList = nullptr;
         } else {  // expired context: cleanup all related JIT context objects
+            MOT_LOG_TRACE("Purging all JIT context objects by relation id %" PRIu64, relationId);
             JitSourcePurgeContextList(jitSource, relationId);
         }
     }
@@ -344,7 +354,6 @@ static void JitSourcePurgeContextList(JitSource* jitSource, uint64_t relationId)
         PurgeJitContext(itr, relationId);
         itr = itr->m_nextInSource;
     }
-    jitSource->m_contextList = nullptr;
 }
 
 static void RemoveJitSourceContextImpl(JitSource* jitSource, JitContext* jitContext)

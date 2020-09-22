@@ -452,6 +452,7 @@ extern int JitExecQuery(
 
 extern void PurgeJitSourceCache(uint64_t relationId)
 {
+    MOT_LOG_TRACE("Purging JIT source map by relation id %" PRIu64, relationId);
     (void)PurgeJitSourceMap(relationId);
 }
 

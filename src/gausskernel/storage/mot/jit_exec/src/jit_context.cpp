@@ -506,19 +506,26 @@ extern void PurgeJitContext(JitContext* jitContext, uint64_t relationId)
 
         // cleanup keys(s)
         if ((jitContext->m_table != nullptr) && (jitContext->m_table->GetTableExId() == relationId)) {
+            MOT_LOG_TRACE("Purging JIT context %p primary keys by relation id %" PRIu64, jitContext, relationId);
             CleanupJitContextPrimary(jitContext);
         }
 
         // cleanup JOIN keys(s)
         if ((jitContext->m_innerTable != nullptr) && (jitContext->m_innerTable->GetTableExId() == relationId)) {
+            MOT_LOG_TRACE("Purging JIT context %p inner keys by relation id %" PRIu64, jitContext, relationId);
             CleanupJitContextInner(jitContext);
         }
 
         // cleanup sub-query keys
         for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
             JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
-            MOT_LOG_TRACE("Cleaning up sub-query %u data in JIT context %p", i, jitContext);
-            CleanupJitContextSubQueryData(subQueryData);
+            if ((subQueryData->m_table != nullptr) && (subQueryData->m_table->GetTableExId() == relationId)) {
+                MOT_LOG_TRACE("Purging sub-query %u data in JIT context %p by relation id %" PRIu64,
+                    i,
+                    jitContext,
+                    relationId);
+                CleanupJitContextSubQueryData(subQueryData);
+            }
         }
     }
 }
@@ -564,7 +571,9 @@ static void CleanupJitContextInner(JitContext* jitContext)
 
 static void CleanupJitContextSubQueryDataArray(JitContext* jitContext)
 {
-    MOT_LOG_TRACE("Cleaning up sub-query data array in JIT context %p", jitContext);
+    if (jitContext->m_subQueryData != nullptr) {
+        MOT_LOG_TRACE("Cleaning up sub-query data array in JIT context %p", jitContext);
+    }
     for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
         JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
         MOT_LOG_TRACE("Cleaning up sub-query %u data in JIT context %p", i, jitContext);
