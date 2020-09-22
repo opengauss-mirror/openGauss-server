@@ -41,6 +41,14 @@ else
 install_oracle_fdw:
 endif
 
+ifeq ($(enable_pldebugger), yes)
+install_pldebugger:
+	$(MAKE) -C contrib/pldebugger install
+else
+install_pldebugger:
+endif
+
+
 ifeq ($(enable_multiple_nodes), yes)
 install:
 	$(MAKE) install_mysql_fdw
@@ -58,6 +66,7 @@ else
 install:
 	$(MAKE) install_mysql_fdw
 	$(MAKE) install_oracle_fdw
+	$(MAKE) install_pldebugger
 	$(MAKE) -C contrib/postgres_fdw $@
 	$(MAKE) -C contrib/pg_stat_statements $@
 	+@echo "openGauss installation complete."

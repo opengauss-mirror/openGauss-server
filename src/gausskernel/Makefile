@@ -37,7 +37,7 @@ ifeq ($(enable_oracle_fdw), yes)
 endif
 
 ifeq ($(enable_pldebugger), yes)
-	SUBDIRS += $(top_builddir)/contrib/pldebugger-master
+	SUBDIRS += $(top_builddir)/contrib/pldebugger
 endif
 
 ifeq ($(enable_multiple_nodes), yes)
