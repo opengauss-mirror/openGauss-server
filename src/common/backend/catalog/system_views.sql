@@ -192,7 +192,7 @@ CREATE VIEW pg_indexes AS
          JOIN pg_class I ON (I.oid = X.indexrelid)
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
          LEFT JOIN pg_tablespace T ON (T.oid = I.reltablespace)
-    WHERE C.relkind IN ('r', 'm') AND I.relkind = 'i';
+    WHERE C.relkind IN ('r', 'm') AND I.relkind IN ('i', 'I');
 
 -- For global temporary table
 CREATE VIEW pg_gtt_relstats WITH (security_barrier) AS
