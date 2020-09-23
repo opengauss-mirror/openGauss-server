@@ -497,7 +497,9 @@ public:
         Table* t = r->GetTable();
         MOT_ASSERT(t != nullptr);
         size += t->GetRowSizeFromPool();
-        t->DestroyRow(r);
+        if (!dropIndex) {
+            t->DestroyRow(r);
+        }
         return size;
     }
 
