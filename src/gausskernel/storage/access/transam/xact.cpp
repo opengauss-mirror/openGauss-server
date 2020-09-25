@@ -1404,6 +1404,11 @@ static void AtSubStart_ResourceOwner(void)
     t_thrd.utils_cxt.CurrentResourceOwner = s->curTransactionOwner;
 }
 
+CommitSeqNo GetLocalNextCSN()
+{
+    return pg_atomic_fetch_add_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo, 1);
+}
+
 /* ----------------------------------------------------------------
  *						CommitTransaction stuff
  * ----------------------------------------------------------------

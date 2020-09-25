@@ -2112,7 +2112,7 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
             abortLibraryLen);
     }
 
-    ProcArrayRemove(proc, latestXid, isCommit);
+    ProcArrayRemove(proc, latestXid);
 
     /*
      * In case we fail while running the callbacks, mark the gxact invalid so
@@ -3401,7 +3401,7 @@ void RemoveStaleTwophaseState(TransactionId xid)
      * it to ProcArrayRemove. Don't calculate new local snapshot.
      */
     latestCompletedXid = t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid;
-    ProcArrayRemove(g_instance.proc_base_all_procs[gxact->pgprocno], latestCompletedXid, false);
+    ProcArrayRemove(g_instance.proc_base_all_procs[gxact->pgprocno], latestCompletedXid);
 
     /*
      * And now we can clean up any files we may have left.
