@@ -154,6 +154,7 @@ void GetPlanNodePlainText(
             }
             break;
         case T_Gather:
+            *pt_operation = "Gather";
             *pname = *sname = *pt_options = "Gather";
             break;
         case T_IndexScan:
