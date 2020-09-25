@@ -2061,7 +2061,7 @@ index df52f01..5bb0580 100644
  	
  	return;
 diff --git plugin_debugger.cpp plugin_debugger.cpp
-index 4f5f9b0..1256255 100644
+index 4f5f9b0..2593f4f 100644
 --- plugin_debugger.cpp
 +++ plugin_debugger.cpp
 @@ -33,7 +33,7 @@
@@ -2138,9 +2138,12 @@ index 4f5f9b0..1256255 100644
  	readn( sock, dst, len );
  	
  	dst[len] = '\0';
-@@ -626,10 +624,10 @@ static bool addLocalBreakpoint( Oid funcOID, int lineNo )
+@@ -625,11 +623,13 @@ static bool parseBreakpoint( Oid * funcOID, int * lineNumber, char * breakpointS
+ static bool addLocalBreakpoint( Oid funcOID, int lineNo )
  {
  	Breakpoint breakpoint;
++	errno_t rc = memset_s(&breakpoint.key, sizeof(BreakpointKey), 0, sizeof(BreakpointKey));
++	securec_check(rc, "", "");
  	
 -	breakpoint.key.databaseId = MyProc->databaseId;
 +	breakpoint.key.databaseId = t_thrd.proc->databaseId;
@@ -2151,9 +2154,12 @@ index 4f5f9b0..1256255 100644
  	breakpoint.data.isTmp     = FALSE;
  	breakpoint.data.proxyPort = -1;
  	breakpoint.data.proxyPid  = -1;
-@@ -692,10 +690,10 @@ void clearBreakpoint( char * command )
+@@ -691,11 +691,13 @@ void clearBreakpoint( char * command )
+ 	if( parseBreakpoint( &funcOID, &lineNo, command + 2 ))
  	{
  		Breakpoint breakpoint;
++		errno_t rc = memset_s(&breakpoint.key, sizeof(BreakpointKey), 0, sizeof(BreakpointKey));
++		securec_check(rc, "", "");
  	
 -		breakpoint.key.databaseId = MyProc->databaseId;
 +		breakpoint.key.databaseId = t_thrd.proc->databaseId;
@@ -2164,16 +2170,19 @@ index 4f5f9b0..1256255 100644
  
  		if( BreakpointDelete( BP_LOCAL, &breakpoint.key ))
  			dbg_send( "t" );
-@@ -712,7 +710,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+@@ -711,8 +713,10 @@ void clearBreakpoint( char * command )
+ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid, int lineNumber )
  {
  	BreakpointKey		key;
++	errno_t rc = memset_s(&key, sizeof(BreakpointKey), 0, sizeof(BreakpointKey));
++	securec_check(rc, "", "");
  
 -	key.databaseId = MyProc->databaseId;
 +	key.databaseId = t_thrd.proc->databaseId;
  	key.functionId = funcOid;
      key.lineNumber = lineNumber;
  
-@@ -747,7 +745,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+@@ -747,7 +751,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
  	 *		   proxy before we can tell that it's died).
  	 */
  
@@ -2182,7 +2191,7 @@ index 4f5f9b0..1256255 100644
    
  	if((( *dst = BreakpointLookup( BP_GLOBAL, &key )) != NULL ) && ((*dst)->data.busy == FALSE ))
  	{
-@@ -755,7 +753,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+@@ -755,7 +759,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
  		return( TRUE );
  	}
  
@@ -2191,7 +2200,7 @@ index 4f5f9b0..1256255 100644
  
  	if((( *dst = BreakpointLookup( BP_GLOBAL, &key )) != NULL ) && ((*dst)->data.busy == FALSE ))
  	{
-@@ -763,7 +761,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+@@ -763,7 +767,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
  		return( TRUE );
  	}
  
@@ -2200,7 +2209,7 @@ index 4f5f9b0..1256255 100644
  
  	if(( *dst = BreakpointLookup( BP_LOCAL, &key )) != NULL )
  	{
-@@ -939,7 +937,7 @@ plugin_debugger_main_loop(void)
+@@ -939,7 +943,7 @@ plugin_debugger_main_loop(void)
  
  	/* Initially, set focus on the topmost frame in the stack */
  
@@ -2209,7 +2218,7 @@ index 4f5f9b0..1256255 100644
  	{
  		/*
  		 * ignore unrecognized stack frames.
-@@ -1076,7 +1074,14 @@ plugin_debugger_main_loop(void)
+@@ -1076,7 +1080,14 @@ plugin_debugger_main_loop(void)
  				lang->send_vars( frame );
  				break;
  			}
@@ -2225,7 +2234,7 @@ index 4f5f9b0..1256255 100644
  			case PLDBG_RESTART:
  			case PLDBG_STOP:
  			{
-@@ -1161,8 +1166,8 @@ send_breakpoints(Oid funcOid)
+@@ -1161,8 +1172,8 @@ send_breakpoints(Oid funcOid)
  
  	while(( breakpoint = (Breakpoint *) hash_seq_search( &scan )) != NULL )
  	{
@@ -2236,7 +2245,7 @@ index 4f5f9b0..1256255 100644
  				if( breakpoint->key.functionId == funcOid )
  					dbg_send( "%d:%d:%s", funcOid, breakpoint->key.lineNumber, "" );
  	}
-@@ -1173,8 +1178,8 @@ send_breakpoints(Oid funcOid)
+@@ -1173,8 +1184,8 @@ send_breakpoints(Oid funcOid)
  
  	while(( breakpoint = (Breakpoint *) hash_seq_search( &scan )) != NULL )
  	{
@@ -2247,7 +2256,7 @@ index 4f5f9b0..1256255 100644
  				if( breakpoint->key.functionId == funcOid )
  					dbg_send( "%d:%d:%s", funcOid, breakpoint->key.lineNumber, "" );
  	}
-@@ -1206,7 +1211,7 @@ select_frame(int frameNo, ErrorContextCallback **frame_p, debugger_language_t **
+@@ -1206,7 +1217,7 @@ select_frame(int frameNo, ErrorContextCallback **frame_p, debugger_language_t **
  {
  	ErrorContextCallback *frame;
  
@@ -2256,7 +2265,7 @@ index 4f5f9b0..1256255 100644
  	{
  		debugger_language_t *lang = language_of_frame(frame);
  		if (!lang)
-@@ -1256,7 +1261,7 @@ send_stack( void )
+@@ -1256,7 +1267,7 @@ send_stack( void )
  {
  	ErrorContextCallback * entry;
  
@@ -2265,7 +2274,7 @@ index 4f5f9b0..1256255 100644
  	{
  		/*
  		 * ignore frames we don't recognize
-@@ -1273,32 +1278,22 @@ send_stack( void )
+@@ -1273,32 +1284,22 @@ send_stack( void )
  
  
  /*-------------------------------------------------------------------------------------
@@ -2308,7 +2317,7 @@ index 4f5f9b0..1256255 100644
  
  typedef struct BreakCountKey
  {
-@@ -1312,13 +1307,6 @@ typedef struct BreakCount
+@@ -1312,13 +1313,6 @@ typedef struct BreakCount
  	int				count;
  } BreakCount;
  
@@ -2322,7 +2331,7 @@ index 4f5f9b0..1256255 100644
  static void   breakCountInsert(eBreakpointScope scope, BreakCountKey *key);
  static void   breakCountDelete(eBreakpointScope scope, BreakCountKey *key);
  static int    breakCountLookup(eBreakpointScope scope, BreakCountKey *key, bool *found);
-@@ -1337,33 +1325,42 @@ static void reserveBreakpoints( void )
+@@ -1337,33 +1331,42 @@ static void reserveBreakpoints( void )
  #endif
  }
  
@@ -2384,7 +2393,7 @@ index 4f5f9b0..1256255 100644
  {
  	bool   	  		found;
  	int				tableEntries = globalBreakpointCount;
-@@ -1371,24 +1368,17 @@ initGlobalBreakpoints(void)
+@@ -1371,24 +1374,17 @@ initGlobalBreakpoints(void)
  	HASHCTL breakpointCtl = {0};
  	HASHCTL breakcountCtl = {0};
  
@@ -2417,7 +2426,7 @@ index 4f5f9b0..1256255 100644
  
  		breakpointLock = &gbpd->lock;
  	}
-@@ -1419,6 +1409,8 @@ initGlobalBreakpoints(void)
+@@ -1419,6 +1415,8 @@ initGlobalBreakpoints(void)
  
  	globalBreakCounts = ShmemInitHash("Global BreakCounts Table", tableEntries, tableEntries, &breakcountCtl, HASH_ELEM | HASH_FUNCTION);
  
@@ -2426,7 +2435,7 @@ index 4f5f9b0..1256255 100644
  	if (!globalBreakCounts)
  		elog(FATAL, "could not initialize global breakpoints count hash table");
  }
-@@ -1427,7 +1419,7 @@ initGlobalBreakpoints(void)
+@@ -1427,7 +1425,7 @@ initGlobalBreakpoints(void)
  /* ---------------------------------------------------------
   * getPLDebuggerLock()
   *
@@ -2435,7 +2444,7 @@ index 4f5f9b0..1256255 100644
   *  structures. The lock is called breakpointLock in this file, but it's
   *  also shared by dbgcommm.c.
   */
-@@ -1435,8 +1427,8 @@ initGlobalBreakpoints(void)
+@@ -1435,8 +1433,8 @@ initGlobalBreakpoints(void)
  LWLockId
  getPLDebuggerLock(void)
  {
@@ -2446,7 +2455,7 @@ index 4f5f9b0..1256255 100644
  
  	return breakpointLock;
  }
-@@ -1455,8 +1447,8 @@ getPLDebuggerLock(void)
+@@ -1455,8 +1453,8 @@ getPLDebuggerLock(void)
  static void
  acquireLock(eBreakpointScope scope, LWLockMode mode)
  {
@@ -2457,7 +2466,7 @@ index 4f5f9b0..1256255 100644
  
  	if (scope == BP_GLOBAL)
  		LWLockAcquire(breakpointLock, mode);
-@@ -1517,7 +1509,7 @@ BreakpointOnId(eBreakpointScope scope, Oid funcOid)
+@@ -1517,7 +1515,7 @@ BreakpointOnId(eBreakpointScope scope, Oid funcOid)
  	bool			found = false;
  	BreakCountKey	key;
  
@@ -2466,7 +2475,7 @@ index 4f5f9b0..1256255 100644
  	key.functionId = funcOid;
  
  	acquireLock(scope, LW_SHARED);
-@@ -1648,7 +1640,7 @@ BreakpointBusySession(int pid)
+@@ -1648,7 +1646,7 @@ BreakpointBusySession(int pid)
  			 * will ignore it)
  			 */
  
@@ -2475,7 +2484,7 @@ index 4f5f9b0..1256255 100644
  
  			BreakpointInsertOrUpdate(BP_LOCAL, &localCopy.key, &localCopy.data );
  		}
-@@ -1763,11 +1755,11 @@ BreakpointShowAll(eBreakpointScope scope)
+@@ -1763,11 +1761,11 @@ BreakpointShowAll(eBreakpointScope scope)
  
  	while((entry = (Breakpoint *) hash_seq_search(&status)))
  	{
@@ -2489,7 +2498,7 @@ index 4f5f9b0..1256255 100644
  			 entry->data.proxyPort,
  			 entry->data.proxyPid,
  			 entry->data.busy ? 'T' : 'F',
-@@ -1823,32 +1815,6 @@ void BreakpointCleanupProc(int pid)
+@@ -1823,32 +1821,6 @@ void BreakpointCleanupProc(int pid)
  	releaseLock(BP_GLOBAL);
  }
  
@@ -2522,7 +2531,7 @@ index 4f5f9b0..1256255 100644
  /* ---------------------------------------------------------
   * breakCountInsert()
   *
-@@ -1860,7 +1826,7 @@ breakCountInsert(eBreakpointScope scope, BreakCountKey *key)
+@@ -1860,7 +1832,7 @@ breakCountInsert(eBreakpointScope scope, BreakCountKey *key)
  	BreakCount *entry;
  	bool		found;
  	
@@ -2531,7 +2540,7 @@ index 4f5f9b0..1256255 100644
  	
  	if (found)
  		entry->count++;
-@@ -1878,7 +1844,7 @@ breakCountDelete(eBreakpointScope scope, BreakCountKey *key)
+@@ -1878,7 +1850,7 @@ breakCountDelete(eBreakpointScope scope, BreakCountKey *key)
  {
  	BreakCount		*entry;
  	
@@ -2540,7 +2549,7 @@ index 4f5f9b0..1256255 100644
  	
  	if (entry)
  	{
-@@ -1900,7 +1866,7 @@ breakCountLookup(eBreakpointScope scope, BreakCountKey *key, bool *found)
+@@ -1900,7 +1872,7 @@ breakCountLookup(eBreakpointScope scope, BreakCountKey *key, bool *found)
  {
  	BreakCount		*entry;
  	
@@ -2549,7 +2558,7 @@ index 4f5f9b0..1256255 100644
  	
  	if (entry)
  		return entry->count;
-@@ -1914,12 +1880,11 @@ breakCountLookup(eBreakpointScope scope, BreakCountKey *key, bool *found)
+@@ -1914,12 +1886,11 @@ breakCountLookup(eBreakpointScope scope, BreakCountKey *key, bool *found)
   *	Returns a pointer to the global or local breakpoint hash,
   *	depending on the given scope.
   */
@@ -2564,7 +2573,7 @@ index 4f5f9b0..1256255 100644
  
  	if (scope == BP_GLOBAL)
  		return globalBreakpoints;
-@@ -1933,12 +1898,11 @@ getBreakpointHash(eBreakpointScope scope )
+@@ -1933,12 +1904,11 @@ getBreakpointHash(eBreakpointScope scope )
   *	Returns a pointer to the global or local breakcount hash,
   *	depending on the given scope.
   */
