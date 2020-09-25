@@ -464,7 +464,17 @@ RC TxnManager::RollbackInsert(Access* ac)
 #endif
         outputSen = index_->IndexRemove(&m_key, GetThdId());
         MOT_ASSERT(outputSen != nullptr);
-        GcSessionRecordRcu(index_->GetIndexId(), outputSen, nullptr, index_->SentinelDtor, SENTINEL_SIZE);
+        GcSessionRecordRcu(index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
+        // If we are the owner of the key and insert on top of a deleted row,
+        // lets check if we can reclaim the deleted row
+        if (ac->m_params.IsUpgradeInsert() and index_->IsPrimaryKey()) {
+            MOT_ASSERT(sentinel->GetData() != nullptr);
+            GcSessionRecordRcu(index_->GetIndexId(),
+                sentinel->GetData(),
+                nullptr,
+                Row::RowDtor,
+                ROW_SIZE_FROM_POOL(ac->GetTxnRow()->GetTable()));
+        }
     }
     return rc;
 }
@@ -623,21 +633,6 @@ void TxnManager::CleanDDLChanges()
     }
 }
 
-Row* TxnManager::RemoveRow(Row* row)
-{
-    Table* table = row->GetTable();
-
-    Row* outputRow = nullptr;
-    if (row->GetStable() == nullptr) {
-        outputRow = table->RemoveRow(row, m_threadId, GetGcSession());
-        m_accessMgr->IncreaseTableStat(table);
-    } else {
-        outputRow = row;
-    }
-
-    return outputRow;
-}
-
 Row* TxnManager::RemoveKeyFromIndex(Row* row, Sentinel* sentinel)
 {
     Table* table = row->GetTable();
@@ -646,6 +641,10 @@ Row* TxnManager::RemoveKeyFromIndex(Row* row, Sentinel* sentinel)
     if (row->GetStable() == nullptr) {
         outputRow = table->RemoveKeyFromIndex(row, sentinel, m_threadId, GetGcSession());
     } else {
+        // Checkpoint works on primary-sentinel only!
+        if (sentinel->IsPrimaryIndex() == false) {
+            outputRow = table->RemoveKeyFromIndex(row, sentinel, m_threadId, GetGcSession());
+        }
         outputRow = row;
     }
 
@@ -924,8 +923,15 @@ RC TxnInsertAction::ExecuteOptimisticInsert(Row* row)
         } else if (res == true or pIndexInsertResult->IsCommited() == false) {
             // tag all the sentinels the insert metadata
             MOT_ASSERT(pIndexInsertResult->GetCounter() != 0);
-            // Insert succeeded Sentinel was not committed before!
-            accessRow = m_manager->m_accessMgr->AddInsertToLocalAccess(pIndexInsertResult, row, rc);
+            // Reuse the row connected to header
+            if (unlikely(pIndexInsertResult->GetData() != nullptr)) {
+                if (pIndexInsertResult->GetData()->IsAbsentRow()) {
+                    accessRow = m_manager->m_accessMgr->AddInsertToLocalAccess(pIndexInsertResult, row, rc, true);
+                }
+            } else {
+                // Insert succeeded Sentinel was not committed before!
+                accessRow = m_manager->m_accessMgr->AddInsertToLocalAccess(pIndexInsertResult, row, rc);
+            }
             if (accessRow == nullptr) {
                 ReportError(rc, currentItem);
                 goto end;
@@ -954,7 +960,7 @@ end:
                     Sentinel* outputSen = index_->IndexRemove(currentItem->m_key, m_manager->GetThdId());
                     MOT_ASSERT(outputSen != nullptr);
                     m_manager->GcSessionRecordRcu(
-                        index_->GetIndexId(), outputSen, nullptr, index_->SentinelDtor, SENTINEL_SIZE);
+                        index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
                     m_manager->m_accessMgr->IncreaseTableStat(table);
                 }
             }

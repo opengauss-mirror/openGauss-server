@@ -366,7 +366,7 @@ bool OccTransactionManager::WriteChanges(TxnManager* txMan)
                     txMan->GetGcSession()->GcRecordObject(row->GetTable()->GetPrimaryIndex()->GetIndexId(),
                         row,
                         nullptr,
-                        row->RowDtor,
+                        Row::RowDtor,
                         ROW_SIZE_FROM_POOL(row->GetTable()));
                 } else {
                     // Set Sentinel for

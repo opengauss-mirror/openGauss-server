@@ -370,9 +370,11 @@ RC RedoLog::SerializeTransaction()
                 case INS:
                     if (access->m_params.IsPrimarySentinel()) {
                         if (access->m_params.IsUpgradeInsert()) {
-                            status = DeleteRow(access->m_localRow);
-                            if (status != RC_OK) {
-                                return status;
+                            if (access->m_params.IsDummyDeletedRow() == false) {
+                                status = DeleteRow(access->m_localRow);
+                                if (status != RC_OK) {
+                                    return status;
+                                }
                             }
                         }
                         status = InsertRow(access->GetTxnRow());
