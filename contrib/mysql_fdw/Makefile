@@ -27,7 +27,7 @@ install:install-data
 top_builddir ?= ../../
 MYSQL_FDW_DIR=$(top_builddir)/third_party/dependency/mysql_fdw
 MYSQL_FDW_PACKAGE=mysql_fdw-REL-2_5_3
-MYSQL_FDW_PATCH=huawei_mysql_fdw-2.5.3_patch
+MYSQL_FDW_PATCH=openGauss_mysql_fdw-2.5.3_patch
 MYSQL_FDW_MEGRED_SOURCES_DIR=$(MYSQL_FDW_DIR)/code
 
 .PHONY: mysql_fdw_target
