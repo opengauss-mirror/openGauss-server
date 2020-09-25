@@ -69,6 +69,14 @@ struct TupleQueueReader {
 
 #define TUPLE_QUEUE_MODE_CONTROL 'c'
 #define TUPLE_QUEUE_MODE_DATA 'd'
+#define CHECK_MESSAGE_LEN(remainLen, pos, readSize) \
+    do {\
+        if (unlikely((remainLen) < (readSize))) {\
+            ereport(ERROR, (errmsg("Invalid message length")));\
+        }\
+        (remainLen) -= (readSize);\
+        (pos) += (readSize);\
+    } while (0)
 
 static void tqueueWalk(TQueueDestReceiver *tqueue, RemapClass walktype, Datum value);
 static void tqueueWalkRecord(TQueueDestReceiver *tqueue, Datum value);
@@ -719,45 +727,29 @@ static Datum TupleQueueRemapRecord(TupleQueueReader *reader, Datum value)
  */
 static void TupleQueueHandleControlMessage(TupleQueueReader *reader, Size nbytes, char *data)
 {
-    int natts;
-    int remotetypmod;
-    bool hasoid = false;
-    char *buf = data;
     Size rc = 0;
-    int i;
-    Form_pg_attribute *attrs;
-    MemoryContext oldcontext;
-    TupleDesc tupledesc;
-    RecordTypemodMap *mapent;
-    bool found;
+    bool found = false;
 
     /* Extract remote typmod. */
-    int errorno = memcpy_s(&remotetypmod, nbytes, &buf[rc], sizeof(int));
-    securec_check_c(errorno, "", "");
-    nbytes -= sizeof(int);
-    rc += sizeof(int);
+    int remotetypmod = (int)data[rc];
+    CHECK_MESSAGE_LEN(nbytes, rc, sizeof(int));
 
     /* Extract attribute count. */
-    errorno = memcpy_s(&natts, nbytes, &buf[rc], sizeof(int));
-    securec_check_c(errorno, "", "");
-    nbytes -= sizeof(int);
-    rc += sizeof(int);
+    int natts = (int)data[rc];
+    CHECK_MESSAGE_LEN(nbytes, rc, sizeof(int));
 
     /* Extract hasoid flag. */
-    errorno = memcpy_s(&hasoid, nbytes, &buf[rc], sizeof(bool));
-    securec_check_c(errorno, "", "");
-    nbytes -= sizeof(bool);
-    rc += sizeof(bool);
+    bool hasoid = (bool)data[rc];
+    CHECK_MESSAGE_LEN(nbytes, rc, sizeof(bool));
 
     /* Extract attribute details. */
-    oldcontext = MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
-    attrs = (Form_pg_attribute *)palloc(natts * sizeof(Form_pg_attribute));
-    for (i = 0; i < natts; ++i) {
+    MemoryContext oldcontext = MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
+    Form_pg_attribute *attrs = (Form_pg_attribute *)palloc(natts * sizeof(Form_pg_attribute));
+    for (int i = 0; i < natts; ++i) {
         attrs[i] = (Form_pg_attribute)palloc(sizeof(FormData_pg_attribute));
-        errorno = memcpy_s(attrs[i], nbytes, &buf[rc], sizeof(FormData_pg_attribute));
+        int errorno = memcpy_s(attrs[i], sizeof(FormData_pg_attribute), &data[rc], sizeof(FormData_pg_attribute));
         securec_check_c(errorno, "", "");
-        nbytes -= sizeof(FormData_pg_attribute);
-        rc += sizeof(FormData_pg_attribute);
+        CHECK_MESSAGE_LEN(nbytes, rc, sizeof(FormData_pg_attribute));
     }
     (void)MemoryContextSwitchTo(oldcontext);
 
@@ -765,7 +757,7 @@ static void TupleQueueHandleControlMessage(TupleQueueReader *reader, Size nbytes
     Assert(rc == nbytes);
 
     /* Construct TupleDesc. */
-    tupledesc = CreateTupleDesc(natts, hasoid, attrs);
+    TupleDesc tupledesc = CreateTupleDesc(natts, hasoid, attrs);
     tupledesc = BlessTupleDesc(tupledesc);
 
     /* Create map if it doesn't exist already. */
@@ -779,9 +771,10 @@ static void TupleQueueHandleControlMessage(TupleQueueReader *reader, Size nbytes
     }
 
     /* Create map entry. */
-    mapent = (RecordTypemodMap *)hash_search(reader->typmodmap, &remotetypmod, HASH_ENTER, &found);
-    if (found)
+    RecordTypemodMap *mapent = (RecordTypemodMap *)hash_search(reader->typmodmap, &remotetypmod, HASH_ENTER, &found);
+    if (found) {
         ereport(ERROR, (errmsg("duplicate message for typmod %d", remotetypmod)));
+    }
     mapent->localtypmod = tupledesc->tdtypmod;
     ereport(DEBUG3, (errmsg("mapping remote typmod %d to local typmod %d", remotetypmod, tupledesc->tdtypmod)));
 }

@@ -608,8 +608,8 @@ shm_mq_result shm_mq_receive(shm_mq_handle *mqh, Size *nbytesp, void **datap, bo
                 lengthbytes = sizeof(Size) - mqh->mqh_partial_bytes;
             else
                 lengthbytes = rb;
-            errno_t rc = memcpy_s(&mqh->mqh_buffer[mqh->mqh_partial_bytes], lengthbytes,
-                                  rawdata, lengthbytes);
+            errno_t rc = memcpy_s(&mqh->mqh_buffer[mqh->mqh_partial_bytes],
+                                  mqh->mqh_buflen - mqh->mqh_partial_bytes, rawdata, lengthbytes);
             securec_check(rc, "\0", "\0");
             mqh->mqh_partial_bytes += lengthbytes;
             mqh->mqh_consume_pending += MAXALIGN(lengthbytes);
@@ -671,7 +671,8 @@ shm_mq_result shm_mq_receive(shm_mq_handle *mqh, Size *nbytesp, void **datap, bo
         /* Copy as much as we can. */
         Assert(mqh->mqh_partial_bytes + rb <= nbytes);
         if (rb != 0) {
-            errno_t rc = memcpy_s(&mqh->mqh_buffer[mqh->mqh_partial_bytes], rb, rawdata, rb);
+            errno_t rc = memcpy_s(&mqh->mqh_buffer[mqh->mqh_partial_bytes],
+                                  mqh->mqh_buflen - mqh->mqh_partial_bytes, rawdata, rb);
             securec_check(rc, "\0", "\0");
             mqh->mqh_partial_bytes += rb;
 
@@ -897,8 +898,8 @@ static shm_mq_result shm_mq_send_bytes(shm_mq_handle *mqh, Size nbytes, const vo
              * subsequent write to mq_ring, we need a full barrier here.)
              */
             pg_memory_barrier();
-            errno_t rc = memcpy_s(&mq->mq_ring[mq->mq_ring_offset + offset], sendnow,
-                                  (char*)data + sent, sendnow);
+            errno_t rc = memcpy_s(&mq->mq_ring[mq->mq_ring_offset + offset],
+                                  ringsize - offset, (char*)data + sent, sendnow);
             securec_check(rc, "\0", "\0");
             sent += sendnow;
 

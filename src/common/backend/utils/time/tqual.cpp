@@ -898,17 +898,19 @@ bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer)
     TransactionIdStatus hintstatus;
     Page page = BufferGetPage(buffer);
 
-    ereport(DEBUG1,
-        (errmsg("HeapTupleSatisfiesMVCC self(%u,%u) ctid(%u,%u) cur_xid " XID_FMT " xmin " XID_FMT
-                " xmax " XID_FMT " csn " CSN_FMT,
-            ItemPointerGetBlockNumber(&htup->t_self),
-            ItemPointerGetOffsetNumber(&htup->t_self),
-            ItemPointerGetBlockNumber(&tuple->t_ctid),
-            ItemPointerGetOffsetNumber(&tuple->t_ctid),
-            GetCurrentTransactionIdIfAny(),
-            HeapTupleHeaderGetXmin(page, tuple),
-            HeapTupleHeaderGetXmax(page, tuple),
-            snapshot->snapshotcsn)));
+    if (SHOW_DEBUG_MESSAGE()) {
+        ereport(DEBUG1,
+            (errmsg("HeapTupleSatisfiesMVCC self(%u,%u) ctid(%u,%u) cur_xid " XID_FMT " xmin " XID_FMT
+                    " xmax " XID_FMT " csn " CSN_FMT,
+                ItemPointerGetBlockNumber(&htup->t_self),
+                ItemPointerGetOffsetNumber(&htup->t_self),
+                ItemPointerGetBlockNumber(&tuple->t_ctid),
+                ItemPointerGetOffsetNumber(&tuple->t_ctid),
+                GetCurrentTransactionIdIfAny(),
+                HeapTupleHeaderGetXmin(page, tuple),
+                HeapTupleHeaderGetXmax(page, tuple),
+                snapshot->snapshotcsn)));
+    }
 
     /*
      * Just valid for read-only transaction when u_sess->attr.attr_common.XactReadOnly is true.

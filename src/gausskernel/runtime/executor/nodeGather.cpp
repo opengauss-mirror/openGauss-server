@@ -137,7 +137,6 @@ TupleTableSlot *ExecGather(GatherState *node)
     if (!node->initialized) {
         EState *estate = node->ps.state;
         Gather *gather = (Gather *)node->ps.plan;
-        t_thrd.subrole = BACKGROUND_LEADER;
 
         /*
          * Sometimes we might have to run without parallelism; but if
@@ -174,8 +173,11 @@ TupleTableSlot *ExecGather(GatherState *node)
             }
 
             /* No workers?  Then never mind. */
-            if (!got_any_worker)
+            if (!got_any_worker) {
                 ExecShutdownGatherWorkers(node);
+            } else {
+                t_thrd.subrole = BACKGROUND_LEADER;
+            }
         }
 
         /* Run plan locally if no workers or not single-copy. */

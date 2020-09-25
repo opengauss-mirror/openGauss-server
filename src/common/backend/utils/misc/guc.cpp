@@ -9231,29 +9231,13 @@ static void init_configure_names_int()
         },
         {
             {
-                "max_parallel_workers",
-                PGC_USERSET,
-                RESOURCES_ASYNCHRONOUS,
-                gettext_noop("Sets the maximum number of parallel workers that can be active at one time."),
-                NULL
-            },
-            &g_instance.attr.attr_common.max_parallel_workers,
-            8,
-            0,
-            MAX_PARALLEL_WORKER_LIMIT,
-            NULL,
-            NULL,
-            NULL
-        },
-        {
-            {
                 "max_parallel_workers_per_gather",
                 PGC_USERSET,
                 RESOURCES_ASYNCHRONOUS,
                 gettext_noop("Sets the maximum number of parallel processes per executor node."),
                 NULL
             },
-            &g_instance.attr.attr_common.max_parallel_workers_per_gather,
+            &u_sess->attr.attr_sql.max_parallel_workers_per_gather,
             2,
             0,
             MAX_PARALLEL_WORKER_LIMIT,

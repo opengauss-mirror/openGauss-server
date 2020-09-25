@@ -683,7 +683,7 @@ void StartBackgroundWorker(void* bgWorkerSlotShmAddr)
     BackgroundWorker *worker = t_thrd.bgworker_cxt.my_bgworker_entry;
     bgworker_main_type entrypt;
 
-    t_thrd.proc_cxt.MyProgName = "BackgroundWorker";
+    knl_thread_set_name("BgWorker");
     /*
      * Create memory context and buffer used for RowDescription messages. As
      * SendRowDescriptionMessage(), via exec_describe_statement_message(), is

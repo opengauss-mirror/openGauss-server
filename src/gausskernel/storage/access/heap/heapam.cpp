@@ -366,9 +366,11 @@ void heapgetpage(HeapScanDesc scan, BlockNumber page)
                 scan->rs_vistuples[ntup++] = line_off;
             }
 
-            ereport(DEBUG1,
-                (errmsg(
-                    "heapgetpage xid %lu ctid(%u,%d) valid %d", GetCurrentTransactionIdIfAny(), page, line_off, valid)));
+            if (SHOW_DEBUG_MESSAGE()) {
+                ereport(DEBUG1,
+                    (errmsg(
+                        "heapgetpage xid %lu ctid(%u,%d) valid %d", GetCurrentTransactionIdIfAny(), page, line_off, valid)));
+            }
         }
     }
 

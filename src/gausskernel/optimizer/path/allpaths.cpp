@@ -899,7 +899,7 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
                      * sophisticated, but we need something here for now.
                      */
                     while (rel->pages > parallel_threshold * 3 &&
-                        parallel_degree < g_instance.attr.attr_common.max_parallel_workers_per_gather) {
+                        parallel_degree < u_sess->attr.attr_sql.max_parallel_workers_per_gather) {
                         parallel_degree++;
                         parallel_threshold *= 3;
                         if (parallel_threshold >= PG_INT32_MAX / 3)

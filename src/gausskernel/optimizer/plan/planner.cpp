@@ -462,7 +462,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
      */
     glob->parallelModeOK = (cursorOptions & CURSOR_OPT_PARALLEL_OK) != 0 && IsUnderPostmaster &&
         parse->commandType == CMD_SELECT && !parse->hasModifyingCTE && parse->utilityStmt == NULL &&
-        g_instance.attr.attr_common.max_parallel_workers_per_gather > 0 && !IsParallelWorker() &&
+        u_sess->attr.attr_sql.max_parallel_workers_per_gather > 0 && !IsParallelWorker() &&
         !IsolationIsSerializable() && !has_parallel_hazard((Node *)parse, true);
 
     /*
