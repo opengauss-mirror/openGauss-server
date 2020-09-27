@@ -81,7 +81,11 @@ class ExpansionImpl():
 
         self.logger = self.context.logger
 
-        self.envFile = DefaultValue.getEnv("MPPDB_ENV_SEPARATE_PATH")
+        envFile = DefaultValue.getEnv("MPPDB_ENV_SEPARATE_PATH")
+        if envFile:
+            self.envFile = envFile
+        else:
+            self.envFile = "/etc/profile"
 
         currentTime = str(datetime.datetime.now()).replace(" ", "_").replace(
             ".", "_")
@@ -91,8 +95,7 @@ class ExpansionImpl():
         self.logger.debug("tmp expansion dir is %s ." % self.tempFileDir)
 
         self._finalizer = weakref.finalize(self, self.clearTmpFile)
-        
-        
+
     def sendSoftToHosts(self):
         """
         create software dir and send it on each nodes
@@ -237,7 +240,7 @@ class ExpansionImpl():
         install database on each standby node
         """
         hostList = self.context.newHostList
-        envfile = DefaultValue.getEnv(DefaultValue.MPPRC_FILE_ENV)
+        envfile = self.envFile
         tempXmlFile = "%s/clusterconfig.xml" % self.tempFileDir
         installCmd = "source {envfile} ; gs_install -X {xmlfile} \
             2>&1".format(envfile=envfile,xmlfile=tempXmlFile)
@@ -323,8 +326,14 @@ class ExpansionImpl():
         envfile = self.envFile
         tempXmlFile = "%s/clusterconfig.xml" % self.tempFileDir
 
-        preinstallCmd = "{softpath}/script/gs_preinstall -U {user} -G {group} \
-            -X {xmlfile} --sep-env-file={envfile} \
+        if envfile == "/etc/profile":
+            preinstallCmd = "{softpath}/script/gs_preinstall -U {user} -G {group} \
+            -X {xmlfile} --non-interactive 2>&1\
+                    ".format(softpath=self.context.packagepath,user=self.user,
+                    group=self.group,xmlfile=tempXmlFile)
+        else:
+            preinstallCmd = "{softpath}/script/gs_preinstall -U {user} -G {group} \
+                -X {xmlfile} --sep-env-file={envfile} \
                 --non-interactive 2>&1\
                     ".format(softpath=self.context.packagepath,user=self.user,
                     group=self.group,xmlfile=tempXmlFile,envfile=envfile)
@@ -414,7 +423,8 @@ class ExpansionImpl():
             dataNode = self.context.clusterInfoDict[node]["dataNode"]
             cmd = ""
             for trust in trustCmd:
-                cmd += "gs_guc set -D %s -h '%s';" % (dataNode, trust)
+                cmd += "source %s; gs_guc set -D %s -h '%s';" % \
+                    (self.envFile, dataNode, trust)
             sshTool = SshTool([node])
             resultMap, outputCollect = sshTool.getSshStatusOutput(cmd, 
             [node], self.envFile)
@@ -458,8 +468,8 @@ retry for %s times" % start_retry_num)
         for host in standbyHosts:
             hostName = self.context.backIpNameMap[host]
             dataNode = self.context.clusterInfoDict[hostName]["dataNode"]
-            command += ("gs_guc set -D %s -h 'host    all    all    %s/32    " + \
-                "trust';") % (dataNode, host)
+            command += ("source %s; gs_guc set -D %s -h 'host    all    all    %s/32    " + \
+                "trust';") % (self.envFile, dataNode, host)
         self.logger.debug(command)
         sshTool = SshTool([primaryHost])
         resultMap, outputCollect = sshTool.getSshStatusOutput(command, 
@@ -680,7 +690,7 @@ retry for %s times" % start_retry_num)
             
             localeHostInfo = nodeDict[hostName]
             index = 1
-            guc_tempate_str = ""
+            guc_tempate_str = "source %s; " % self.envFile
             for remoteHost in hostNames:
                 if(remoteHost == hostName):
                     continue
@@ -952,6 +962,7 @@ class GsCtlCommon:
         """
         """
         self.logger = expansion.logger
+        self.user = expansion.user
     
     def queryInstanceStatus(self, host, datanode, env):
         """
@@ -1036,6 +1047,10 @@ class GsCtlCommon:
         [host], env)
         self.logger.debug(host)
         self.logger.debug(outputCollect)
+        if resultMap[host] == STATUS_FAIL:
+            GaussLog.exitWithError("Query cluster failed. Please check " \
+                "the cluster status or " \
+                "source the environmental variables of user [%s]." % self.user)
         self.cleanSshToolTmpFile(sshTool)
         return outputCollect
 
