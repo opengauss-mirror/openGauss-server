@@ -250,15 +250,10 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
     pei->finished = false;
     pei->planstate = planstate;
 
-    /* Fix up and serialize plan to be sent to workers. */
-    char *pstmt_data = ExecSerializePlan(planstate->plan, estate);
-
     /* Create a parallel context. */
     ParallelContext *pcxt = CreateParallelContext("postgres", "ParallelQueryMain", nworkers);
     pei->pcxt = pcxt;
 
-    /* Estimate space for serialized PlannedStmt. */
-    Size pstmt_len = strlen(pstmt_data) + 1;
     /* Estimate space for serialized ParamListInfo. */
     Size param_len = EstimateParamListSpace(estate->es_param_list_info);
 
@@ -292,9 +287,7 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
     MemoryContext oldcontext = MemoryContextSwitchTo(cxt->memCtx);
 
     /* Store serialized PlannedStmt. */
-    cxt->pwCtx->pstmt_space = (char *)palloc0(pstmt_len);
-    int rc = memcpy_s(cxt->pwCtx->pstmt_space, pstmt_len, pstmt_data, pstmt_len);
-    securec_check(rc, "", "");
+    cxt->pwCtx->pstmt_space = ExecSerializePlan(planstate->plan, estate);
 
     /* Store serialized ParamListInfo. */
     cxt->pwCtx->param_space = (char *)palloc0(param_len);

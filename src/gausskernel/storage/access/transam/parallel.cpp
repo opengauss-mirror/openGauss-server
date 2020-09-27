@@ -42,7 +42,9 @@
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
 #include "utils/typcache.h"
-
+#ifdef __USE_NUMA
+#include <numa.h>
+#endif
 
 /*
  * We don't want to waste a lot of memory on an error queue which, most of
@@ -71,6 +73,10 @@ static void HandleParallelMessage(ParallelContext *pcxt, int i, StringInfo msg);
 static void WaitForParallelWorkersToExit(ParallelContext *pcxt);
 static parallel_worker_main_type LookupParallelWorkerFunction(const char *libraryname, const char *funcname);
 static void ParallelWorkerShutdown(int code, Datum arg);
+#ifdef __USE_NUMA
+static bool SaveCpuAffinity(cpu_set_t **cpuset);
+static void GetCurrentNumaNode(ParallelInfoContext *pcxt);
+#endif
 
 /*
  * Establish a new parallel context.  This should be done after entering
@@ -186,6 +192,9 @@ void InitializeParallelDSM(ParallelContext *pcxt)
         /* Allocate space for worker information. */
         pcxt->worker = (ParallelWorkerInfo *)palloc0(sizeof(ParallelWorkerInfo) * pcxt->nworkers);
 
+#ifdef __USE_NUMA
+        GetCurrentNumaNode(cxt->pwCtx);
+#endif
         /*
          * Establish error queues in dynamic shared memory.
          *
@@ -902,6 +911,20 @@ void ParallelWorkerMain(Datum main_arg)
         t_thrd.bgworker_cxt.my_bgworker_entry->bgw_extra, sizeof(int));
     securec_check(rc, "", "");
 
+    char bgWorkerName[MAX_THREAD_NAME_LENGTH];
+    rc = sprintf_s(bgWorkerName, MAX_THREAD_NAME_LENGTH, "BgWorker%d", t_thrd.bgworker_cxt.ParallelWorkerNumber);
+    securec_check_ss(rc, "", "");
+    knl_thread_set_name(bgWorkerName);
+
+#ifdef __USE_NUMA
+    if (ctx->pwCtx->numaNode != -1) {
+        rc = numa_run_on_node(ctx->pwCtx->numaNode);
+        if (rc != 0) {
+            ereport(WARNING, (errmsg("numa_run_on_node failed, %m")));
+        }
+    }
+#endif
+
     /* Set up a memory context to work in, just for cleanliness. */
     CurrentMemoryContext = AllocSetContextCreate(TopMemoryContext, "Parallel worker", ALLOCSET_DEFAULT_SIZES);
 
@@ -1053,6 +1076,56 @@ static void ParallelWorkerShutdown(int code, Datum arg)
     (void)SendProcSignal(t_thrd.msqueue_cxt.pq_mq_parallel_master_pid, PROCSIG_PARALLEL_MESSAGE,
         t_thrd.msqueue_cxt.pq_mq_parallel_master_backend_id);
 }
+
+#ifdef __USE_NUMA
+static bool SaveCpuAffinity(cpu_set_t **cpuset)
+{
+    *cpuset = (cpu_set_t*)palloc(sizeof(cpu_set_t));
+    int rc = pthread_getaffinity_np(t_thrd.proc->pid, sizeof(cpu_set_t), *cpuset);
+    if (rc != 0) {
+        pfree_ext(*cpuset);
+        ereport(WARNING, (errmsg("pthread_getaffinity_np failed:%d", rc)));
+        return false;
+    }
+    return true;
+}
+
+static void GetCurrentNumaNode(ParallelInfoContext *pcxt)
+{
+    pcxt->numaNode = -1;
+    pcxt->cpuset = NULL;
+    int cpu = sched_getcpu();
+    if (cpu < 0) {
+        ereport(WARNING, (errmsg("sched_getcpu failed, %m")));
+        return;
+    }
+
+    int numaNode = numa_node_of_cpu(cpu);
+    if (numaNode < 0) {
+        ereport(WARNING, (errmsg("numa_node_of_cpu failed, %m")));
+        return;
+    }
+
+    /* Save current CPU affinity, then we can restore it's value after the query is done */
+    if (!SaveCpuAffinity(&pcxt->cpuset)) {
+        return;
+    }
+
+    /*
+     * Set thread to current numa node, then it won't schedule to other numa node
+     * during query(in most cases). We should reset the affinity after the query is done.
+     */
+    int rc = numa_run_on_node(numaNode);
+    if (rc < 0) {
+        pfree_ext(pcxt->cpuset);
+        ereport(WARNING, (errmsg("numa_run_on_node failed, %m")));
+        return;
+    }
+
+    pcxt->numaNode = numaNode;
+}
+#endif
+
 
 /*
  * Look up (and possibly load) a parallel worker entry point function.

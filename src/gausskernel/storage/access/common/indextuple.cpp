@@ -398,18 +398,16 @@ IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, i
     TupleDesc itupdesc = CreateTupleDescCopyConstr(tupleDescriptor);
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
-    IndexTuple newitup;
-    int indnatts = tupleDescriptor->natts;
 
-    Assert(indnatts <= INDEX_MAX_KEYS);
+    Assert(tupleDescriptor->natts <= INDEX_MAX_KEYS);
     Assert(new_indnatts > 0);
-    Assert(new_indnatts < indnatts);
+    Assert(new_indnatts < tupleDescriptor->natts);
 
     index_deform_tuple(olditup, tupleDescriptor, values, isnull);
 
     /* form new tuple that will contain only key attributes */
     itupdesc->natts = new_indnatts;
-    newitup = index_form_tuple(itupdesc, values, isnull);
+    IndexTuple newitup = index_form_tuple(itupdesc, values, isnull);
     newitup->t_tid = olditup->t_tid;
 
     FreeTupleDesc(itupdesc);

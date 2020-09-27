@@ -27,7 +27,7 @@ install:install-data
 top_builddir ?= ../../
 ORACLE_FDW_DIR=$(top_builddir)/third_party/dependency/oracle_fdw
 ORACLE_FDW_PACKAGE=oracle_fdw-ORACLE_FDW_2_2_0
-ORACLE_FDW_PATCH=huawei_oracle_fdw-2.2.0_patch
+ORACLE_FDW_PATCH=openGauss_oracle_fdw-2.2.0_patch
 ORACLE_FDW_MEGRED_SOURCES_DIR=$(ORACLE_FDW_DIR)/code
 
 .PHONY: oracle_fdw_target

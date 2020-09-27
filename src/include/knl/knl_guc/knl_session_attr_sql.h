@@ -205,6 +205,7 @@ typedef struct knl_session_attr_sql {
     int opfusion_debug_mode;
     int single_shard_stmt;
     int force_parallel_mode;
+    int max_parallel_workers_per_gather;
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */

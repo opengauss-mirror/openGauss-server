@@ -31,10 +31,26 @@
 #include "utils/memutils.h"
 #include "postmaster/bgworker_internals.h"
 
+#ifdef __USE_NUMA
+static void RestoreCpuAffinity(cpu_set_t *cpuset)
+{
+    /* Resotre CPU affinity after parallel query is done. */
+    if (cpuset != NULL) {
+        int rc = pthread_setaffinity_np(t_thrd.proc->pid, sizeof(cpu_set_t), cpuset);
+        if (rc != 0) {
+            ereport(WARNING, (errmsg("pthread_setaffinity_np failed:%d", rc)));
+        }
+    }
+}
+#endif
+
 void dsm_detach(void **seg)
 {
     Assert(*seg != NULL);
     knl_u_parallel_context *ctx = (knl_u_parallel_context *)*seg;
+#ifdef __USE_NUMA
+    RestoreCpuAffinity(ctx->pwCtx->cpuset);
+#endif
     MemoryContextDelete(ctx->memCtx);
     ctx->memCtx = NULL;
     ctx->pwCtx = NULL;

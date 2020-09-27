@@ -595,5 +595,8 @@ test: create_procedure create_function pg_compatibility postgres_fdw
 # autonomous transaction Test
 test: autonomous_transaction
 
+# parallel query
+test: parallel_query
+
 # gs_basebackup
 test: gs_basebackup

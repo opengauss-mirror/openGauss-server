@@ -2089,7 +2089,10 @@ typedef struct ParallelInfoContext {
     char *tupleQueue;
     struct SharedExecutorInstrumentation *instrumentation;
     char *namespace_search_path;
-
+#ifdef __USE_NUMA
+    int numaNode;
+    cpu_set_t *cpuset;
+#endif
     /* Mutex protects remaining fields. */
     slock_t mutex;
     /* Maximum XactLastRecEnd of any worker. */
