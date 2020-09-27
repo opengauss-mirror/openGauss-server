@@ -715,6 +715,14 @@ void MOTConfiguration::LoadConfig()
 
     // Checkpoint configuration
     UPDATE_BOOL_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
+
+    if (!m_enableCheckpoint && m_enableRedoLog) {
+        if (m_suppressLog == 0) {
+            MOT_LOG_WARN("Disabling redo_log forcibly as the checkpoint is disabled");
+        }
+        UpdateBoolConfigItem(m_enableRedoLog, false, "enable_redo_log");
+    }
+
     UPDATE_STRING_CFG(m_checkpointDir, "checkpoint_dir", DEFAULT_CHECKPOINT_DIR);
     UPDATE_ABS_MEM_CFG(m_checkpointSegThreshold,
         "checkpoint_segsize",
