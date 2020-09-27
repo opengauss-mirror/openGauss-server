@@ -1486,7 +1486,7 @@ index 223ac81..d8fcf81 100644
  /* in plpgsql_debugger.c */
  extern void plpgsql_debugger_fini(void);
 diff --git plpgsql_debugger.cpp plpgsql_debugger.cpp
-index df52f01..5bb0580 100644
+index df52f01..ace2806 100644
 --- plpgsql_debugger.cpp
 +++ plpgsql_debugger.cpp
 @@ -24,6 +24,7 @@
@@ -1826,6 +1826,15 @@ index df52f01..5bb0580 100644
  		{
  			if( strcmp( var->refname, hidden_variables[i] ) == 0 )
  			{
+@@ -1200,7 +1281,7 @@ plpgsql_send_cur_line(ErrorContextCallback *frame)
+ 
+ 	dbg_send( "%d:%d:%s",
+ 			  func->fn_oid,
+-			  stmt->lineno+1,
++			  stmt->lineno,
+ #if (PG_VERSION_NUM >= 90200)
+ 			  func->fn_signature
+ #else
 @@ -1244,132 +1325,126 @@ static bool isFirstStmt( PLpgSQL_stmt * stmt, PLpgSQL_function * func )
  
  static void dbg_newstmt( PLpgSQL_execstate * estate, PLpgSQL_stmt * stmt )
