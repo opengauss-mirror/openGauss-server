@@ -1,0 +1,24 @@
+create table table_function_export_def_base (
+	id integer primary key,
+	name varchar(100)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "table_function_export_def_base_pkey" for table "table_function_export_def_base"
+create table table_function_export_def (
+	id integer primary key,
+	fid integer,
+	constraint table_export_base_fkey foreign key (fid) references table_function_export_def_base(id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "table_function_export_def_pkey" for table "table_function_export_def"
+select * from pg_get_tabledef('table_function_export_def');
+                                            pg_get_tabledef                                            
+-------------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                            +
+ CREATE  TABLE table_function_export_def (                                                            +
+         id integer NOT NULL,                                                                         +
+         fid integer,                                                                                 +
+     CONSTRAINT table_export_base_fkey FOREIGN KEY (fid) REFERENCES table_function_export_def_base(id)+
+ )                                                                                                    +
+ WITH (orientation=row, compression=no);                                                              +
+ ALTER TABLE table_function_export_def ADD CONSTRAINT table_function_export_def_pkey PRIMARY KEY (id);
+(1 row)
+

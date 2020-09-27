@@ -1774,7 +1774,7 @@ static char* pg_get_tabledef_worker(Oid table_oid)
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
 
-        if (con->contype == 'c') {
+        if (con->contype == 'c' || con->contype == 'f') {
             if (!con->convalidated) {
                 has_not_valid_check = true;
                 continue;
