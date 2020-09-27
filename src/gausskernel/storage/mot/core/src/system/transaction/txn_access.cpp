@@ -528,7 +528,11 @@ Row* TxnAccess::AddInsertToLocalAccess(Sentinel* org_sentinel, Row* org_row, RC&
                 return nullptr;
             }
             curr_access->m_params.SetUpgradeInsert();
-            // row to be commited
+            // First row in the transaction, updrade is on deleted commited row
+            // Deleter did not remove the row due to checkpoint or concurrent inserter
+            // DummyDeletedRow - No need to serialize the row
+            curr_access->m_params.SetDummyDeletedRow();
+            // First Insert in the transaction
             curr_access->m_auxRow = org_row;
         } else {
             curr_access = GetNewRowAccess(org_row, INS, rc);

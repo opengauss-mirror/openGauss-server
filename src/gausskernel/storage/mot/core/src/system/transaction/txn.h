@@ -335,8 +335,6 @@ public:
 
     void CommitSecondaryItems();
 
-    Row* RemoveRow(Row* row);
-
     Row* RemoveKeyFromIndex(Row* row, Sentinel* sentinel);
 
     void UndoInserts();

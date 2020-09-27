@@ -582,10 +582,10 @@ Row* Table::RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcMan
         if (likely(gc != nullptr)) {
             if (ix->GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
                 OutputRow = currSentinel->GetData();
-                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, ix->SentinelDtor, SENTINEL_SIZE);
-                gc->GcRecordObject(ix->GetIndexId(), OutputRow, nullptr, OutputRow->RowDtor, ROW_SIZE_FROM_POOL(this));
+                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
+                gc->GcRecordObject(ix->GetIndexId(), OutputRow, nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
             } else {
-                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, ix->SentinelDtor, SENTINEL_SIZE);
+                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
             }
         }
     }
