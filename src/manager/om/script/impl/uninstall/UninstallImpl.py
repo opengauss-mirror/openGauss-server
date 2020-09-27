@@ -353,10 +353,10 @@ class UninstallImpl:
             self.UninstallApp()
             self.ReCleanEtcdPath()
             self.ReKillEtcdProcess()
-            self.logger.log("Uninstallation succeeded.")
             self.logger.closeLog()
             self.CleanStaticConfFile()
             self.CleanRackFile()
             self.CleanLog()
+            self.logger.log("Uninstallation succeeded.")
         except Exception as e:
             self.logger.logExit(str(e))
