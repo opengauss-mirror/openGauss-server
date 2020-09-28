@@ -20,8 +20,8 @@ ifeq ($(PLAT_FORM_STR), Failed)
         exit 1;
 endif
 
-override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
-override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -Wl,-z,relro,-z,now
+override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -Wl,-z,relro,-z,now
 
 # file with extra config for temp build
 TEMP_CONF = --temp-config=$(srcdir)/make_check_postgresql.conf
