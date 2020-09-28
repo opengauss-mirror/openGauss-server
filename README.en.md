@@ -397,7 +397,7 @@ https://opengauss.org/zh/
 
 From the following website, you can obtain the binarylibs we have compiled. Please unzip it and rename to **binarylibs** after you download.
 
-https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.0/openGauss-third_party_binarylibs.tar.gz
+https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.1/openGauss-third_party_binarylibs.tar.gz
 
 
 Now we have completed openGauss code. For example, we store it in following directories.

@@ -22,7 +22,7 @@ usergroup="dbgrp"
 envfilepath="${workdir}/om/env1"
 logfilesavepath=/home/OM/log
 upgradefilepath=${workdir}/openGauss/package/${upgradepackage}
-package_path=/home/openGauss-1.0.0-CentOS-b109-64bit.tar.gz 
+package_path=/home/openGauss-1.0.1-CentOS-b109-64bit.tar.gz 
 shellfilepath=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 # 用户校验
 checkUser()

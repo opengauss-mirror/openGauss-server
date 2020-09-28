@@ -2651,7 +2651,7 @@ else
   if test "$enable_multiple_nodes" = yes; then
       default_gs_version="(GaussDB Kernel V500R001C00 build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
   else
-      default_gs_version="(openGauss 1.0.0 build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
+      default_gs_version="(openGauss 1.0.1 build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
   fi
 fi
 

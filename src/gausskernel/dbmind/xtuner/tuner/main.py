@@ -22,7 +22,7 @@ from algorithms.pso import Pso
 from db_env import DB_Env
 from utils import SysLogger, Recorder
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 
 """The following are preset parameters, 
 and it is not recommended to modify for green hands unless you have any special purpose."""
