@@ -1127,8 +1127,9 @@ static void describeDumpableObject(DumpableObject* obj, char* buf, int bufsize)
             securec_check_ss_c(nRet, "\0", "\0");
             return;
         case DO_REFRESH_MATVIEW:
-            nRet = snprintf(
-                buf, bufsize, "REFRESH MATERIALIZED VIEW %s  (ID %d OID %u)", obj->name, obj->dumpId, obj->catId.oid);
+            nRet = snprintf_s(
+                buf, bufsize, bufsize - 1, "REFRESH MATERIALIZED VIEW %s  (ID %d OID %u)",
+                obj->name, obj->dumpId, obj->catId.oid);
             securec_check_ss_c(nRet, "\0", "\0");
             return;
         case DO_RULE:

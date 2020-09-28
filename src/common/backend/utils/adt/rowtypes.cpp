@@ -990,9 +990,9 @@ Datum record_eq(PG_FUNCTION_ARGS)
 
     if (my_extra->record1_type != tupType1 || my_extra->record1_typmod != tupTypmod1 ||
         my_extra->record2_type != tupType2 || my_extra->record2_typmod != tupTypmod2) {
-        errno_t rc = EOK;
-        rc = memset_s(my_extra->columns, ncols * sizeof(ColumnCompareData), 0, ncols * sizeof(ColumnCompareData));
-        securec_check(rc, "\0", "\0");
+        errno_t rc = memset_s(my_extra->columns, ncols * sizeof(ColumnCompareData), 0,
+            ncols * sizeof(ColumnCompareData));
+        securec_check(rc, "", "");
         my_extra->record1_type = tupType1;
         my_extra->record1_typmod = tupTypmod1;
         my_extra->record2_type = tupType2;
@@ -1226,7 +1226,9 @@ static int record_image_cmp(PG_FUNCTION_ARGS)
 
     if (my_extra->record1_type != tupType1 || my_extra->record1_typmod != tupTypmod1 ||
         my_extra->record2_type != tupType2 || my_extra->record2_typmod != tupTypmod2) {
-        MemSet(my_extra->columns, 0, ncols * sizeof(ColumnCompareData));
+        errno_t rc = memset_s(my_extra->columns, ncols * sizeof(ColumnCompareData), 0,
+            ncols * sizeof(ColumnCompareData));
+        securec_check(rc, "", "");
         my_extra->record1_type = tupType1;
         my_extra->record1_typmod = tupTypmod1;
         my_extra->record2_type = tupType2;
@@ -1429,7 +1431,9 @@ Datum record_image_eq(PG_FUNCTION_ARGS)
 
     if (my_extra->record1_type != tupType1 || my_extra->record1_typmod != tupTypmod1 ||
         my_extra->record2_type != tupType2 || my_extra->record2_typmod != tupTypmod2) {
-        MemSet(my_extra->columns, 0, ncols * sizeof(ColumnCompareData));
+        errno_t rc = memset_s(my_extra->columns, ncols * sizeof(ColumnCompareData), 0,
+            ncols * sizeof(ColumnCompareData));
+        securec_check(rc, "", "");
         my_extra->record1_type = tupType1;
         my_extra->record1_typmod = tupTypmod1;
         my_extra->record2_type = tupType2;
@@ -1593,7 +1597,7 @@ void record_set_extra(RecordIOData **my_extra, int ncolumns, Oid tupType, int32 
         errno_t rc = memset_s((*my_extra), 
             sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData), 0,
             sizeof(RecordIOData) - sizeof(ColumnIOData) + ncolumns * sizeof(ColumnIOData));
-        securec_check(rc, "\0", "\0");
+        securec_check(rc, "", "");
         (*my_extra)->record_type = tupType;
         (*my_extra)->record_typmod = tupTypmod;
         (*my_extra)->ncolumns = ncolumns;

@@ -13829,7 +13829,7 @@ static bool read_tablespace_map(List** tablespaces)
     while ((ch = fgetc(lfp)) != EOF) {
         if ((ch == '\n' || ch == '\r') && prevCh != '\\') {
             str[i] = '\0';
-            if (sscanf(str, "%s %n", tbsoid, &n) != 1)
+            if (sscanf_s(str, "%s %n", tbsoid, MAXPGPATH, &n) != 1)
                 ereport(FATAL,
                     (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("invalid data in file \"%s\"", TABLESPACE_MAP)));
