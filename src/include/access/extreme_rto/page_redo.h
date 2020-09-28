@@ -35,17 +35,11 @@
 
 #include "access/extreme_rto/posix_semaphore.h"
 #include "access/extreme_rto/spsc_blocking_queue.h"
+#include "access/xlogproc.h"
 
 namespace extreme_rto {
 
 static const uint32 PAGE_WORK_QUEUE_SIZE = 8192;
-
-static const uint32 MAX_REDO_DISTRUBUTE_MAP_NUM = 2;
-
-struct SafeRestartPoint {
-    SafeRestartPoint* next;
-    XLogRecPtr restartPoint;
-};
 
 typedef enum {
     REDO_BATCH,
@@ -54,19 +48,10 @@ typedef enum {
     REDO_TRXN_MNG,
     REDO_TRXN_WORKER,
     REDO_READ_WORKER,
+    REDO_READ_PAGE_WORKER,
     REDO_READ_MNG,
     REDO_ROLE_NUM,
 } RedoRole;
-
-typedef struct {
-    HTAB* redoItemHash;
-    slock_t rwlock;
-} RedoDistributeMap;
-
-typedef struct {
-    uint32 curMapNum;
-    RedoDistributeMap mapList[MAX_REDO_DISTRUBUTE_MAP_NUM];
-} RedoItemMap;
 
 struct PageRedoWorker {
     /*
@@ -122,12 +107,6 @@ struct PageRedoWorker {
      */
 
     /*
-     * A list of safe recovery restart point seen by this worker.
-     * The restart points are listed in reverse LSN order to ease the
-     * lock-free implementation.
-     */
-    SafeRestartPoint* safePointHead;
-    /*
      * The last recovery restart point seen by the txn worker.  Restart
      * points before this is useless and can be removed.
      */
@@ -165,9 +144,6 @@ struct PageRedoWorker {
      * These values are collected by each redo worker at redo end and
      * are used by the dispatcher.
      */
-
-    /* B-Tree incomplete actions. */
-    void* btreeIncompleteActions;
     /* XLog invalid pages. */
     void* xlogInvalidPages;
 
@@ -180,23 +156,20 @@ struct PageRedoWorker {
 
     /* Semaphore marking the completion of the current phase. */
     PosixSemaphore phaseMarker;
-
-    uint32 statMulpageCnt;
-    uint64 statWaitReach;
-    uint64 statWaitReplay;
-    pg_atomic_uint32 readyStatus;
     MemoryContext oldCtx;
 
- 	HTAB * redoItemHash;
-	uint64 curbatchcount;
-	TimeLineID recoveryTargetTLI;
-	bool ArchiveRecoveryRequested;
+    HTAB *redoItemHash;
+    TimeLineID recoveryTargetTLI;
+    bool ArchiveRecoveryRequested;
     bool StandbyModeRequested;
     bool InArchiveRecovery;
     bool ArchiveRestoreRequested;
     bool InRecovery;
 
-    int bufferPinWaitBufId;
+    uint32 fullSyncFlag;
+    RedoParseManager parseManager;
+    RedoBufferManager bufferManager;
+	int bufferPinWaitBufId;
 };
 
 extern THR_LOCAL PageRedoWorker* g_redoWorker;
@@ -228,16 +201,14 @@ bool ProcessPendingPageRedoItems(PageRedoWorker* worker);
 
 /* Run-time worker states. */
 uint64 GetCompletedRecPtr(PageRedoWorker* worker);
-bool IsRecoveryRestartPointSafe(PageRedoWorker* worker, XLogRecPtr restartPoint);
 void SetWorkerRestartPoint(PageRedoWorker* worker, XLogRecPtr restartPoint);
 
 void UpdatePageRedoWorkerStandbyState(PageRedoWorker* worker, HotStandbyState newState);
 
 /* Redo end states. */
-void* GetBTreeIncompleteActions(PageRedoWorker* worker);
-void ClearBTreeIncompleteActions(PageRedoWorker* worker);
-void* GetXLogInvalidPages(PageRedoWorker* worker);
-bool RedoWorkerIsIdle(PageRedoWorker* worker);
+void ClearBTreeIncompleteActions(PageRedoWorker *worker);
+void *GetXLogInvalidPages(PageRedoWorker *worker);
+bool RedoWorkerIsIdle(PageRedoWorker *worker);
 void PageRedoSetAffinity(uint32 id);
 
 void DumpPageRedoWorker(PageRedoWorker* worker);
@@ -247,13 +218,13 @@ extern void UpdateRecordGlobals(RedoItem* item, HotStandbyState standbyState);
 void ReferenceRedoItem(void *item);
 void DereferenceRedoItem(void *item);
 void PushToWorkerLsn(bool force);
-void WaitLsnUpdate(bool force);
 void GetCompletedReadEndPtr(PageRedoWorker *worker, XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 void UpdateReadBufferForExtRto(XLogReaderState* state);
 bool SetReadBufferForExtRto(XLogReaderState* state, XLogRecPtr pageptr, int reqLen);
 bool XLogPageReadForExtRto(XLogRecPtr targetPagePtr, int reqLen, char* readBuf);
 void DumpExtremeRtoReadBuf();
-
+void PutRecordToReadQueue(XLogReaderState *recordreader);
+bool LsnUpdate();
 
 }  // namespace extreme_rto
 #endif

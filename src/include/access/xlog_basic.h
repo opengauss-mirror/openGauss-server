@@ -313,6 +313,7 @@ struct XLogReaderState {
     // For parallel recovery
     bool isPRProcess;
     bool isDecode;
+    bool isFullSyncCheckpoint;
 };
 
 #define SizeOfXLogRecord (offsetof(XLogRecord, xl_crc) + sizeof(pg_crc32c))

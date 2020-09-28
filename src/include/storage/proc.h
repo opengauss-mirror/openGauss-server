@@ -377,6 +377,8 @@ extern void InitProcessPhase2(void);
 extern void InitAuxiliaryProcess(void);
 
 extern void PublishStartupProcessInformation(void);
+extern void SetStartupBufferPinWaitBufId(int bufid);
+extern int GetStartupBufferPinWaitBufId(void);
 extern bool HaveNFreeProcs(int n);
 extern void ProcReleaseLocks(bool isCommit);
 extern int GetUsedConnectionCount(void);

@@ -6854,8 +6854,10 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
      */
     if (TransactionIdFollowsOrEquals(max_xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
         (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-        t_thrd.xact_cxt.ShmemVariableCache->nextXid = max_xid;
-        TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+        if (TransactionIdFollowsOrEquals(max_xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+            t_thrd.xact_cxt.ShmemVariableCache->nextXid = max_xid;
+            TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+        }
         LWLockRelease(XidGenLock);
     }
 
@@ -7145,8 +7147,10 @@ static void xact_redo_abort(xl_xact_abort* xlrec, TransactionId xid, XLogRecPtr 
      */
     if (TransactionIdFollowsOrEquals(max_xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
         (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-        t_thrd.xact_cxt.ShmemVariableCache->nextXid = max_xid;
-        TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+        if (TransactionIdFollowsOrEquals(max_xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+            t_thrd.xact_cxt.ShmemVariableCache->nextXid = max_xid;
+            TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+        }
         LWLockRelease(XidGenLock);
     }
 
@@ -7192,8 +7196,10 @@ static void xact_redo_prepare(TransactionId xid)
 {
     if (TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
         (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-        t_thrd.xact_cxt.ShmemVariableCache->nextXid = xid;
-        TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+        if (TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+            t_thrd.xact_cxt.ShmemVariableCache->nextXid = xid;
+            TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+        }
         LWLockRelease(XidGenLock);
     }
 }

@@ -20,6 +20,7 @@
 #include "datatype/timestamp.h"
 #include "lib/stringinfo.h"
 #include "access/parallel_recovery/redo_item.h"
+#include "knl/knl_instance.h"
 #include "access/htup.h"
 
 /* Sync methods */
@@ -381,6 +382,8 @@ extern void load_server_mode(void);
 extern void WaitCheckpointSync(void);
 void GetRecoveryLatch();
 void ReLeaseRecoveryLatch();
+void ExtremRtoUpdateMinCheckpoint();
+bool IsRecoveryDone();
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 

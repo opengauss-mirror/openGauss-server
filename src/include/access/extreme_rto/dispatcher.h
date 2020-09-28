@@ -33,7 +33,7 @@
 #include "access/xlogreader.h"
 #include "nodes/pg_list.h"
 #include "storage/proc.h"
-
+#include "access/redo_statistic.h"
 #include "access/extreme_rto/redo_item.h"
 #include "access/extreme_rto/page_redo.h"
 #include "access/extreme_rto/txn_redo.h"
@@ -55,8 +55,9 @@ typedef struct {
 } TrxnRedoPipeline;
 
 typedef struct ReadPipeline {
-	PageRedoWorker*  managerThd;     /* readthrd */
-    PageRedoWorker*  readThd;     /* readthrd */    
+    PageRedoWorker *managerThd;  /* readthrd */
+    PageRedoWorker *readPageThd; /* readthrd */
+    PageRedoWorker *readThd;     /* readthrd */
 } ReadPipeline;
 
 #define MAX_XLOG_READ_BUFFER  (0xFFFFF)  /* 8k uint*/
@@ -65,20 +66,22 @@ typedef struct ReadPipeline {
 
 
 typedef enum {
-    READ_WORKER_STOP = 0,
-	READ_WORKER_RUN,
-	READ_WORKER_EXIT,
-	READ_NOTIFY_EXIT,
-}Enum_ReadWorkerState;
+    WORKER_STATE_STOP = 0,
+    WORKER_STATE_RUN,
+    WORKER_STATE_STOPPING,
+    WORKER_STATE_EXIT,
+    WORKER_STATE_EXITING,
+} ReadWorkersState;
 
 
 typedef enum {
 	TRIGGER_NORMAL = 0,
     TRIGGER_PRIMARY,
-	TRIGGER_STADNBY,
-	TRIGGER_FAILOVER,
-	TRIGGER_SWITCHOVER,
-}Enum_TriggeredState;
+    TRIGGER_STADNBY,
+    TRIGGER_FAILOVER,
+    TRIGGER_SWITCHOVER,
+    TRIGGER_SMARTSHUTDOWN,
+} Enum_TriggeredState;
 
 typedef enum {
     NONE,
@@ -86,6 +89,10 @@ typedef enum {
 	APPLIED,
 }ReadBufState;
 
+typedef enum {
+    READ_MANAGER_STOP,
+    READ_MANAGER_RUN,
+} XLogReadManagerState;
 
 typedef struct RecordBufferAarray {	
 	XLogSegNo  segno;
@@ -96,15 +103,23 @@ typedef struct RecordBufferAarray {
 } RecordBufferAarray;
 
 typedef struct RecordBufferState {
-	XLogReaderState* initreader;
-	uint32 startreadworker;
-	uint32 applyindex;
-	uint32 readindex;	
-	RecordBufferAarray xlogsegarray[MAX_ALLOC_SEGNUM];
-	char *readsegbuf;
-	char *readBuf;
-	char *errormsg_buf;
-	void *readprivate;
+    XLogReaderState *initreader;
+    uint32 readWorkerState;
+    uint32 readPageWorkerState;
+    uint32 readSource;
+    uint32 failSource;
+    uint32 xlogReadManagerState;
+    uint32 applyindex;
+    uint32 readindex;
+    RecordBufferAarray xlogsegarray[MAX_ALLOC_SEGNUM];
+    char *readsegbuf;
+    char *readBuf;
+    char *errormsg_buf;
+    void *readprivate;
+    XLogRecPtr latestValidRecord;
+    XLogRecPtr targetRecPtr;
+    XLogRecPtr expectLsn;
+    pg_crc32 latestRecordCrc;
 } RecordBufferState;
 
 
@@ -115,17 +130,14 @@ typedef struct {
     uint32* chosedPageLineIds; /* chosedPageLineIds */
     uint32 chosedPLCnt;        /* chosedPageLineCount */
     TrxnRedoPipeline trxnLine;
-    ReadPipeline        readLine;
-    RecordBufferState   recordstate;
-    PageRedoWorker** allWorkers; /* Array of page redo workers. */
-    TxnRedoWorker* txnWorker;    /* Txn redo worker. */
+    ReadPipeline readLine;
+    RecordBufferState recordstate;
+    PageRedoWorker **allWorkers; /* Array of page redo workers. */
     uint32 allWorkersCnt;
-    RedoItem* freeHead; /* Head of freed-item list. */
-    RedoItem* freeStateHead;
-    RedoItem* allocatedRedoItem;
-    int32 pendingCount; /* Number of records pending. */
-    int32 pendingMax;   /* The max. pending count per batch. */
-    int exitCode;       /* Thread exit code. */
+    RedoItem *freeHead; /* Head of freed-item list. */
+    RedoItem *freeStateHead;
+    RedoItem *allocatedRedoItem;
+    int exitCode; /* Thread exit code. */
     uint64 totalCostTime;
     uint64 txnCostTime; /* txn cost time */
     uint64 pprCostTime;
@@ -136,6 +148,10 @@ typedef struct {
     uint32 syncExitCount;
 
     pg_atomic_uint32 standbyState; /* sync standbyState from trxn worker to startup */
+
+    bool needImmediateCheckpoint;
+    bool needFullSyncCheckpoint;
+    volatile sig_atomic_t smartShutdown;
 } LogDispatcher;
 
 typedef struct {
@@ -157,8 +173,8 @@ const static XLogRecPtr MAX_XLOG_REC_PTR = (XLogRecPtr)0xFFFFFFFFFFFFFFFF;
 const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
 const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
 extern RedoItem g_redoEndMark;
-extern uint32 g_triggeredstate;
-
+extern uint32 g_startupTriggerState;
+extern uint32 g_readManagerTriggerFlag;
 
 inline int get_batch_redo_num()
 {
@@ -200,7 +216,6 @@ PGPROC* StartupPidGetProc(ThreadId pid);
 extern void SetStartupBufferPinWaitBufId(int bufid);
 extern void GetStartupBufferPinWaitBufId(int *bufids, uint32 len);
 extern uint32 GetStartupBufferPinWaitBufLen();
-
 void UpdateStandbyState(HotStandbyState newState);
 
 /* Redo end state saved by each page worker. */
@@ -216,7 +231,9 @@ List* CheckImcompleteAction(List* imcompleteActionList);
 void SetPageWorkStateByThreadId(uint32 threadState);
 void UpdateDispatcherStandbyState(HotStandbyState* state);
 void GetReplayedRecPtr(XLogRecPtr *startPtr, XLogRecPtr *endPtr);
-void StartupSendLsnFowarder();
+void StartupSendFowarder(RedoItem *item);
+RedoWaitInfo redo_get_io_event(int32 event_id);
+void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen);
 
 }  // namespace extreme_rto
 

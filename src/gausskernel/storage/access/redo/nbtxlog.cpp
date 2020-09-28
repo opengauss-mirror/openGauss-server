@@ -938,16 +938,18 @@ static void btree_xlog_newroot_block(
     if (XLogBlockDataGetBlockId(datadecode) == BTREE_NEWROOT_ORIG_BLOCK_NUM) {
         char* maindata = XLogBlockDataGetMainData(datadecode, NULL);
         btree_xlog_newroot_operator_page(bufferinfo, (void*)maindata, (void*)blkdata, blkdatalen, &downlink);
+        MakeRedoBufferDirty(bufferinfo);
     } else if (XLogBlockDataGetBlockId(datadecode) == BTREE_NEWROOT_LEFT_BLOCK_NUM) {
         XLogRedoAction action;
         action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
         if (action == BLK_NEEDS_REDO) {
             btree_xlog_clear_incomplete_split(bufferinfo);
+            MakeRedoBufferDirty(bufferinfo);
         }
     } else {
         btree_restore_meta_operator_page(bufferinfo, (void*)blkdata, blkdatalen);
+        MakeRedoBufferDirty(bufferinfo);
     }
-    MakeRedoBufferDirty(bufferinfo);
 }
 
 void btree_redo_data_block(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo)

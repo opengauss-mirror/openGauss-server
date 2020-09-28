@@ -464,16 +464,13 @@ void RequestXLogStreaming(XLogRecPtr* recptr, const char* conninfo, ReplConnTarg
     walrcv->receiveStart = Lcrecptr;
 
     walrcv->latestValidRecord = latestValidRecord;
-    walrcv->latestRecordCrc = t_thrd.xlog_cxt.latestRecordCrc;
+    walrcv->latestRecordCrc = latestRecordCrc;
     SpinLockRelease(&walrcv->mutex);
-    WalRcvSetPercentCountStartLsn(t_thrd.xlog_cxt.latestRecordCrc);
+    WalRcvSetPercentCountStartLsn(walrcv->latestValidRecord);
     if (XLByteLT(latestValidRecord, Lcrecptr))
-        ereport(LOG,
-            (errmsg("latest valid record at %X/%X, wal receiver start point at %X/%X",
-                (uint32)(latestValidRecord >> 32),
-                (uint32)latestValidRecord,
-                (uint32)(Lcrecptr >> 32),
-                (uint32)Lcrecptr)));
+        ereport(LOG, (errmsg("latest valid record at %X/%X, wal receiver start point at %X/%X",
+                             (uint32)(latestValidRecord >> 32), (uint32)latestValidRecord, (uint32)(Lcrecptr >> 32),
+                             (uint32)Lcrecptr)));
 
     SendPostmasterSignal(PMSIGNAL_START_WALRECEIVER);
 }

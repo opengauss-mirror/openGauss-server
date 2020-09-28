@@ -43,24 +43,6 @@
 
 namespace extreme_rto {
 
-extern void FreeRedoItem(RedoItem* item);
-
-static const uint32 LSN_MARKER = 0;
-
-inline void InitNextByWorker(RedoItem** nextByWorker)
-{
-    for (uint32 i = 0; i < GetAllWorkerCount(); i++) {
-        nextByWorker[i] = NULL;
-    }
-}
-
-inline void InitIsInWorker(bool* isInWorker)
-{
-    for (uint32 i = 0; i < GetAllWorkerCount(); i++) {
-        isInWorker[i] = false;
-    }
-}
-
 /* Run from the dispatcher thread. */
 RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 designatedWorker, List* expectedTLIs,
     TimestampTz recordXTime, bool buseoriginal, bool isForceAll)
@@ -85,16 +67,13 @@ RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 desi
     }
 
     item->oldVersion = t_thrd.xlog_cxt.redo_oldversion_xlog;
-    item->sharewithtrxn = false;
-    item->blockbytrxn = false;
-    item->imcheckpoint = false;
+    item->needImmediateCheckpoint = false;
+    item->needFullSyncCheckpoint = false;
     item->shareCount = shareCount;
-    item->rdsCnt = 0;
     item->designatedWorker = designatedWorker;
     item->expectedTLIs = expectedTLIs;
     item->recordXTime = recordXTime;
     item->freeNext = NULL;
-    item->contextUpdateOp.inUse = false;
     item->syncXLogReceiptTime = t_thrd.xlog_cxt.XLogReceiptTime;
     item->syncXLogReceiptSource = t_thrd.xlog_cxt.XLogReceiptSource;
     item->RecentXmin = u_sess->utils_cxt.RecentXmin;
@@ -102,59 +81,9 @@ RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 desi
     item->isForceAll = isForceAll;
     pg_atomic_init_u32(&item->refCount, shareCount);
     pg_atomic_init_u32(&item->replayed, 0);
-    item->nextByWorker = (RedoItem**)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)));
     pg_atomic_init_u32(&item->blkShareCount, 0);
     pg_atomic_init_u32(&item->distributeCount, shareCount);
-
-    InitNextByWorker(item->nextByWorker);
-    item->isInWorker =
-        (bool*)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)) + sizeof(RedoItem*) * GetAllWorkerCount());
-    InitIsInWorker(item->isInWorker);
     return item;
-}
-
-/* Run from the dispatcher thread. */
-RedoItem* CreateLSNMarker(XLogReaderState* record, List* expectedTLIs, bool buseoriginal)
-{
-    RedoItem* item = NULL;
-
-    if (buseoriginal && (t_thrd.xlog_cxt.redoItemIdx == 0)) {
-        item = GetRedoItemPtr(record);
-        t_thrd.xlog_cxt.redoItemIdx++;
-    } else {
-        /* don't need to copy data, only need copy state */
-        item = GetRedoItemPtr(NewReaderState(record, false));
-    }
-    item->oldVersion = t_thrd.xlog_cxt.redo_oldversion_xlog;
-    item->sharewithtrxn = false;
-    item->blockbytrxn = false;
-    item->imcheckpoint = false;
-    item->shareCount = LSN_MARKER;
-    item->rdsCnt = 0;
-    item->expectedTLIs = expectedTLIs;
-    item->freeNext = NULL;
-    item->contextUpdateOp.inUse = false;
-    item->syncXLogReceiptTime = t_thrd.xlog_cxt.XLogReceiptTime;
-    item->syncXLogReceiptSource = t_thrd.xlog_cxt.XLogReceiptSource;
-    item->RecentXmin = u_sess->utils_cxt.RecentXmin;
-    item->syncServerMode = GetServerMode();
-
-    item->isForceAll = false;
-    pg_atomic_init_u32(&item->refCount, 1);
-
-    item->nextByWorker = (RedoItem**)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)));
-    InitNextByWorker(item->nextByWorker);
-    item->isInWorker =
-        (bool*)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)) + sizeof(RedoItem*) * GetAllWorkerCount());
-    InitIsInWorker(item->isInWorker);
-
-    return item;
-}
-
-/* Run from each page worker thread. */
-bool IsLSNMarker(const RedoItem* item)
-{
-    return item->shareCount == LSN_MARKER;
 }
 
 void ApplyRedoRecord(XLogReaderState* record, bool bOld)

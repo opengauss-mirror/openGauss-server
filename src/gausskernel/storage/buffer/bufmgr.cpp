@@ -4043,14 +4043,13 @@ void GetFlushBufferInfo(void* buf, RedoBufferInfo *bufferinfo, uint32 *buf_state
 		 */
 		/* To check if block content changes while flushing. - vadim 01/17/97 */
 		*buf_state &= ~BM_JUST_DIRTIED;
+        bufferinfo->lsn = (flushmethod == WITH_LOCAL_CACHE) ? LocalBufGetLSN(bufdesc) : BufferGetLSN(bufdesc);
         UnlockBufHdr(bufdesc, *buf_state);
-		bufferinfo->lsn = (flushmethod == WITH_LOCAL_CACHE) ? LocalBufGetLSN(bufdesc) : BufferGetLSN(bufdesc);
-		bufferinfo->buf = BufferDescriptorGetBuffer(bufdesc);
-		bufferinfo->pageinfo.page = (flushmethod == WITH_LOCAL_CACHE) ? (Page)LocalBufHdrGetBlock(bufdesc) : (Page)BufHdrGetBlock(bufdesc);;
-		bufferinfo->pageinfo.pagesize = BufferGetPageSize(bufferinfo->buf);
-    }
-    else
-    {
+        bufferinfo->buf = BufferDescriptorGetBuffer(bufdesc);
+        bufferinfo->pageinfo.page = (flushmethod == WITH_LOCAL_CACHE) ? (Page)LocalBufHdrGetBlock(bufdesc)
+                                                                        : (Page)BufHdrGetBlock(bufdesc);
+        bufferinfo->pageinfo.pagesize = BufferGetPageSize(bufferinfo->buf);
+    } else {
         *bufferinfo = *((RedoBufferInfo *)buf);
     }	
 }

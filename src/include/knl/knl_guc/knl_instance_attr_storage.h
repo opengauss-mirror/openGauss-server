@@ -82,6 +82,11 @@ typedef struct knl_instance_attr_storage {
     int advance_xlog_file_num;
     int gtm_option;
     int max_keep_log_seg;
+#ifdef EXTREME_RTO_DEBUG_AB
+    int extreme_rto_ab_pos;
+    int extreme_rto_ab_type;
+    int extreme_rto_ab_count;
+#endif
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */
