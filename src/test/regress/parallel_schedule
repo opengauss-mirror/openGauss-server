@@ -600,3 +600,5 @@ test: parallel_query
 
 # gs_basebackup
 test: gs_basebackup
+
+test: function_get_table_def
