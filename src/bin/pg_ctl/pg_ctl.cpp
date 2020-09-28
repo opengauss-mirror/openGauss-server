@@ -5065,4 +5065,10 @@ static void free_ctl()
     }
     FREE_AND_RESET(register_password);
     FREE_AND_RESET(pgha_str);
+    if (pgdata_opt != NULL && strcmp(pgdata_opt, "") != 0) {
+        FREE_AND_RESET(pgdata_opt);
+    }
+    if (pgha_opt != NULL && strcmp(pgha_opt, "") != 0) {
+        FREE_AND_RESET(pgha_opt);
+    }
 }
