@@ -3900,6 +3900,7 @@ static void do_incremental_build(uint32 term)
     }
     if (status == BUILD_SUCCESS) {
         /* pg_ctl start -M standby */
+        FREE_AND_RESET(pgha_opt);
         pgha_opt = (char*)pg_malloc(sizeof(standbymode_str));
         tnRet = snprintf_s(pgha_opt, sizeof(standbymode_str), sizeof(standbymode_str) - 1, "%s", standbymode_str);
         securec_check_ss_c(tnRet, "\0", "\0");
@@ -4013,6 +4014,7 @@ static void do_actual_build(uint32 term)
      */
     if (conn_str == NULL) {
         /* pg_ctl start -M standby  */
+        FREE_AND_RESET(pgha_opt);
         pgha_opt = (char*)pg_malloc(sizeof(standbymode_str));
         tnRet = snprintf_s(pgha_opt, sizeof(standbymode_str), sizeof(standbymode_str) - 1, "%s", standbymode_str);
         securec_check_ss_c(tnRet, "\0", "\0");
