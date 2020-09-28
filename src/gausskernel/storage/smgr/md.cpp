@@ -26,6 +26,7 @@
 #include "catalog/catalog.h"
 #include "portability/instr_time.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/pagewriter.h"
 #include "storage/fd.h"
 #include "storage/bufmgr.h"
 #include "storage/relfilenode.h"
@@ -2199,7 +2200,7 @@ static MdfdVec* _mdfd_getseg(
                  * it will failed at next time, so we should PANIC to
                  * avoid repeated ERROR.
                  */
-                if (FILE_POSSIBLY_DELETED(errno) && IsBgwriterProcess()) {
+                if (FILE_POSSIBLY_DELETED(errno) && (IsBgwriterProcess() || IsPagewriterProcess())) {
                     elevel = PANIC;
                 }
                 

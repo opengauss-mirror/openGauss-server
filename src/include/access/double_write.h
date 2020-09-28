@@ -83,15 +83,14 @@ static const uint16 DW_DIRTY_PAGE_MAX_FOR_NOHBK = (DW_BATCH_DATA_PAGE_MAX_FOR_NO
 static const uint16 DW_BUF_MAX_FOR_NOHBK = (DW_DIRTY_PAGE_MAX_FOR_NOHBK + DW_EXTRA_FOR_TWO_BATCH);
 
 
-#define GET_DW_BATCH_DATA_PAGE_MAX (!g_instance.ckpt_cxt_ctl->buffers_contain_hashbucket ? DW_BATCH_DATA_PAGE_MAX_FOR_NOHBK : DW_BATCH_DATA_PAGE_MAX)
+#define GET_DW_BATCH_DATA_PAGE_MAX(contain_hashbucket) (!contain_hashbucket ? DW_BATCH_DATA_PAGE_MAX_FOR_NOHBK : DW_BATCH_DATA_PAGE_MAX)
 
-#define GET_DW_BATCH_MAX (!g_instance.ckpt_cxt_ctl->buffers_contain_hashbucket ? DW_BATCH_MAX_FOR_NOHBK : DW_BATCH_MAX)
+#define GET_DW_BATCH_MAX(contain_hashbucket) (!contain_hashbucket ? DW_BATCH_MAX_FOR_NOHBK : DW_BATCH_MAX)
 
-#define GET_DW_BUF_MAX (!g_instance.ckpt_cxt_ctl->buffers_contain_hashbucket ? DW_BUF_MAX_FOR_NOHBK : DW_BUF_MAX)
 
-#define GET_DW_DIRTY_PAGE_MAX (!g_instance.ckpt_cxt_ctl->buffers_contain_hashbucket ? DW_DIRTY_PAGE_MAX_FOR_NOHBK : DW_DIRTY_PAGE_MAX)
+#define GET_DW_DIRTY_PAGE_MAX(contain_hashbucket) (!contain_hashbucket ? DW_DIRTY_PAGE_MAX_FOR_NOHBK : DW_DIRTY_PAGE_MAX)
 
-#define GET_DW_MEM_CTX_MAX_BLOCK_SIZE (!g_instance.ckpt_cxt_ctl->buffers_contain_hashbucket ? DW_MEM_CTX_MAX_BLOCK_SIZE_FOR_NOHBK : DW_MEM_CTX_MAX_BLOCK_SIZE)
+#define GET_DW_MEM_CTX_MAX_BLOCK_SIZE(contain_hashbucket) (!contain_hashbucket ? DW_MEM_CTX_MAX_BLOCK_SIZE_FOR_NOHBK : DW_MEM_CTX_MAX_BLOCK_SIZE)
 
 /*
  * 1 block for alignment, 1 for file_head, 1 for reading data_page during recovery
@@ -228,7 +227,7 @@ inline bool dw_enabled()
  * @param buf_id_arr the buffer id array which is used to get page from global buffer
  * @param size the array size
  */
-void dw_perform(uint32 size);
+void dw_perform(uint32 size, CkptSortItem *dirty_buf_list, ThrdDwCxt* thrd_dw_cxt);
 
 /**
  * truncate the pages in double write file after ckpt or before exit

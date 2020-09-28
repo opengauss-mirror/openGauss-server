@@ -330,6 +330,7 @@ typedef enum {
      * used as the array index, where id is the 0-based worker id.  This
      * trick works only if PageRedoProcess is the second to last entry.
      */
+    MultiBgWriterProcess,
     PageRedoProcess,
     TpoolListenerProcess,
     TpoolSchdulerProcess,
@@ -341,7 +342,7 @@ typedef enum {
 #define AmStartupProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == StartupProcess)
 #define AmPageRedoProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess)
 #define AmBackgroundWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == BgWriterProcess)
-#define AmPageWriterWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess)
+#define AmMulitBackgroundWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == MultiBgWriterProcess)
 #define AmCheckpointerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CheckpointerProcess)
 #define AmWalWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalWriterProcess)
 #define AmWalReceiverProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalReceiverProcess)

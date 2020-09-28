@@ -889,6 +889,8 @@ typedef enum WaitStatePhase {
 typedef enum WaitEventIO {
     WAIT_EVENT_BUFFILE_READ = PG_WAIT_IO,
     WAIT_EVENT_BUFFILE_WRITE,
+    WAIT_EVENT_BUF_HASH_SEARCH,
+    WAIT_EVENT_BUF_STRATEGY_GET,
     WAIT_EVENT_CONTROL_FILE_READ,
     WAIT_EVENT_CONTROL_FILE_SYNC,
     WAIT_EVENT_CONTROL_FILE_SYNC_UPDATE,
@@ -920,9 +922,6 @@ typedef enum WaitEventIO {
     WAIT_EVENT_SLRU_READ,
     WAIT_EVENT_SLRU_SYNC,
     WAIT_EVENT_SLRU_WRITE,
-    WAIT_EVENT_TIMELINE_HISTORY_READ,
-    WAIT_EVENT_TIMELINE_HISTORY_SYNC,
-    WAIT_EVENT_TIMELINE_HISTORY_WRITE,
     WAIT_EVENT_TWOPHASE_FILE_READ,
     WAIT_EVENT_TWOPHASE_FILE_SYNC,
     WAIT_EVENT_TWOPHASE_FILE_WRITE,
@@ -937,7 +936,6 @@ typedef enum WaitEventIO {
     WAIT_EVENT_WAL_SYNC_METHOD_ASSIGN,
     WAIT_EVENT_WAL_WRITE,
     WAIT_EVENT_DW_READ,
-    WAIT_EVENT_DW_SYNC,
     WAIT_EVENT_DW_WRITE,
     WAIT_EVENT_PREDO_PROCESS_PENDING,
     WAIT_EVENT_PREDO_APPLY,
@@ -2323,6 +2321,7 @@ extern TableDistributionInfo* getTableStat(
     TupleDesc tuple_desc, int dirty_pecent, int n_tuples, char* schema_name = NULL);
 extern TableDistributionInfo* get_remote_stat_pagewriter(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_ckpt(TupleDesc tuple_desc);
+extern TableDistributionInfo* get_remote_stat_bgwriter(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_double_write(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_redo(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_rto_stat(TupleDesc tuple_desc);

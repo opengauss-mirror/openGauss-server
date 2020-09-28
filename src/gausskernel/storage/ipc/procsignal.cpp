@@ -64,9 +64,10 @@ typedef struct ProcSignalSlot {
  * possible auxiliary process type.  (This scheme assumes there is not
  * more than one of any auxiliary process type at a time.)
  */
-#define NumProcSignalSlots                                                                                             \
-    (g_instance.shmem_cxt.MaxBackends + NUM_AUXPROCTYPES + MAX_RECOVERY_THREAD_NUM + MAX_PAGE_WRITER_THREAD_NUM - 1 + \
-        g_instance.shmem_cxt.ThreadPoolGroupNum)
+#define NumProcSignalSlots \
+    (g_instance.shmem_cxt.MaxBackends + NUM_AUXPROCTYPES + MAX_RECOVERY_THREAD_NUM + \
+        MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM - 1 + \
+            g_instance.shmem_cxt.ThreadPoolGroupNum)
 
 static ProcSignalSlot* g_libcomm_proc_signal_slots = NULL;
 bool CheckProcSignal(ProcSignalReason reason);

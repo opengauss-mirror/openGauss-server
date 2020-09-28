@@ -1004,6 +1004,7 @@ static void knl_t_bgwriter_init(knl_t_bgwriter_context* bgwriter_cxt)
 {
     bgwriter_cxt->got_SIGHUP = false;
     bgwriter_cxt->shutdown_requested = false;
+    bgwriter_cxt->thread_id = -1;
 }
 
 static void knl_t_pagewriter_init(knl_t_pagewriter_context* pagewriter_cxt)

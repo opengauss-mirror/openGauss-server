@@ -2672,16 +2672,19 @@ static int GetAuxProcStatEntryIndex(void)
     Assert(
         t_thrd.bootstrap_cxt.MyAuxProcType > NotAnAuxProcess && t_thrd.bootstrap_cxt.MyAuxProcType < NUM_AUXPROCTYPES);
     int index = MAX_BACKEND_SLOT + t_thrd.bootstrap_cxt.MyAuxProcType;
-    int pagewriter_thread_num = g_instance.attr.attr_storage.pagewriter_thread_num;
 
     if (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess) {
         index += get_pagewriter_thread_id();
+	} else if (t_thrd.bootstrap_cxt.MyAuxProcType == MultiBgWriterProcess) {
+        index += get_bgwriter_thread_id() + MAX_PAGE_WRITER_THREAD_NUM;
     } else if (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess) {
-        index += MultiRedoGetWorkerId() + pagewriter_thread_num - 1;
+        index += MultiRedoGetWorkerId() + MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM;
         SetPageRedoWorkerIndex(index);
     } else if (t_thrd.bootstrap_cxt.MyAuxProcType == TpoolListenerProcess) {
         /* thread pool listerner slots follow page redo threads */
-        index += t_thrd.threadpool_cxt.listener->GetGroup()->GetGroupId() + (pagewriter_thread_num - 1) +
+        index += t_thrd.threadpool_cxt.listener->GetGroup()->GetGroupId() + 
+		 MAX_PAGE_WRITER_THREAD_NUM + 
+	         MAX_BG_WRITER_THREAD_NUM  +
                  (MAX_RECOVERY_THREAD_NUM - 1);
     }
 
@@ -4125,6 +4128,12 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_BUFFILE_WRITE:
             event_name = "BufFileWrite";
             break;
+        case WAIT_EVENT_BUF_HASH_SEARCH:
+            event_name = "BufHashTableSearch";
+            break;
+        case WAIT_EVENT_BUF_STRATEGY_GET:
+            event_name = "StrategyGetBuffer";
+            break;
         case WAIT_EVENT_CONTROL_FILE_READ:
             event_name = "ControlFileRead";
             break;
@@ -4218,15 +4227,6 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_SLRU_WRITE:
             event_name = "SLRUWrite";
             break;
-        case WAIT_EVENT_TIMELINE_HISTORY_READ:
-            event_name = "TimelineHistoryRead";
-            break;
-        case WAIT_EVENT_TIMELINE_HISTORY_SYNC:
-            event_name = "TimelineHistorySync";
-            break;
-        case WAIT_EVENT_TIMELINE_HISTORY_WRITE:
-            event_name = "TimelineHistoryWrite";
-            break;
         case WAIT_EVENT_TWOPHASE_FILE_READ:
             event_name = "TwophaseFileRead";
             break;
@@ -4268,9 +4268,6 @@ const char* pgstat_get_wait_io(WaitEventIO w)
             break;
         case WAIT_EVENT_DW_READ:
             event_name = "DoubleWriteFileRead";
-            break;
-        case WAIT_EVENT_DW_SYNC:
-            event_name = "DoubleWriteFileSync";
             break;
         case WAIT_EVENT_DW_WRITE:
             event_name = "DoubleWriteFileWrite";
@@ -8927,6 +8924,29 @@ TableDistributionInfo* get_remote_stat_ckpt(TupleDesc tuple_desc)
         "node_name,ckpt_redo_point,ckpt_clog_flush_num,ckpt_csnlog_flush_num,       "
         "ckpt_multixact_flush_num,ckpt_predicate_flush_num,ckpt_twophase_flush_num  "
         "from local_ckpt_stat();                                                    ");
+
+    /* send sql and parallel fetch distribution info from all data nodes */
+    distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);
+    distribuion_info->slot = MakeSingleTupleTableSlot(tuple_desc);
+
+    return distribuion_info;
+}
+
+TableDistributionInfo* get_remote_stat_bgwriter(TupleDesc tuple_desc)
+{
+    StringInfoData buf;
+    TableDistributionInfo* distribuion_info = NULL;
+
+    /* the memory palloced here should be free outside where it was called. */
+    distribuion_info = (TableDistributionInfo*)palloc0(sizeof(TableDistributionInfo));
+
+    initStringInfo(&buf);
+
+    appendStringInfo(&buf,
+        "select                                                                     "
+        "node_name,bgwr_actual_flush_total_num,bgwr_last_flush_num,candidate_slots, "
+        "get_buffer_from_list,get_buf_clock_sweep                                   "
+        "from local_bgwriter_stat();                                                ");
 
     /* send sql and parallel fetch distribution info from all data nodes */
     distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);

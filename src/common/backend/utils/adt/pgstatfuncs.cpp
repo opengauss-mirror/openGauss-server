@@ -11816,7 +11816,7 @@ Datum pg_stat_bad_block_clear(PG_FUNCTION_ARGS)
     PG_RETURN_VOID();
 }
 
-typedef enum FuncName { PAGEWRITER_FUNC, INCRE_CKPT_FUNC } FuncName;
+typedef enum FuncName { PAGEWRITER_FUNC, INCRE_CKPT_FUNC, INCRE_BGWRITER_FUNC} FuncName;
 
 HeapTuple form_function_tuple(int col_num, FuncName name)
 {
@@ -11855,6 +11855,14 @@ HeapTuple form_function_tuple(int col_num, FuncName name)
                 nulls[i] = false;
             }
             break;
+        case INCRE_BGWRITER_FUNC:
+            for (i = 0; i < col_num; i++) {
+                TupleDescInitEntry(
+                    tup_desc, (AttrNumber)(i + 1), g_bgwriter_view_col[i].name, g_bgwriter_view_col[i].data_type, -1, 0);
+                values[i] = g_bgwriter_view_col[i].get_val();
+                nulls[i] = false;
+            }
+            break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("unknow func name")));
             break;
@@ -11874,6 +11882,12 @@ Datum local_pagewriter_stat(PG_FUNCTION_ARGS)
 Datum local_ckpt_stat(PG_FUNCTION_ARGS)
 {
     HeapTuple tuple = form_function_tuple(INCRE_CKPT_VIEW_COL_NUM, INCRE_CKPT_FUNC);
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+Datum local_bgwriter_stat(PG_FUNCTION_ARGS)
+{
+    HeapTuple tuple = form_function_tuple(INCRE_CKPT_BGWRITER_VIEW_COL_NUM, INCRE_BGWRITER_FUNC);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
@@ -11904,6 +11918,12 @@ void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
                     tup_desc, (AttrNumber)(i + 1), g_ckpt_view_col[i].name, g_ckpt_view_col[i].data_type, -1, 0);
             }
             break;
+        case INCRE_BGWRITER_FUNC:
+            for (i = 0; i < col_num; i++) {
+                TupleDescInitEntry(
+                    tup_desc, (AttrNumber)(i + 1), g_bgwriter_view_col[i].name, g_bgwriter_view_col[i].data_type, -1, 0);
+            }
+            break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("unknow func name")));
             break;
@@ -11918,6 +11938,9 @@ void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
             break;
         case INCRE_CKPT_FUNC:
             funcctx->user_fctx = get_remote_stat_ckpt(funcctx->tuple_desc);
+            break;
+        case INCRE_BGWRITER_FUNC:
+            funcctx->user_fctx = get_remote_stat_bgwriter(funcctx->tuple_desc);
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("unknow func name")));
@@ -12032,6 +12055,62 @@ Datum remote_ckpt_stat(PG_FUNCTION_ARGS)
     }
 
     SRF_RETURN_DONE(func_ctx);
+#endif
+}
+
+Datum remote_bgwriter_stat(PG_FUNCTION_ARGS)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    FuncCallContext* funcctx = NULL;
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        errmsg("unsupported view in single node mode.")));
+
+    SRF_RETURN_DONE(funcctx);
+#else
+    FuncCallContext* funcctx = NULL;
+    HeapTuple tuple = NULL;
+    Datum values[INCRE_CKPT_BGWRITER_VIEW_COL_NUM];
+    bool nulls[INCRE_CKPT_BGWRITER_VIEW_COL_NUM] = {false};
+    int i;
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 1, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        xc_stat_view(funcctx, INCRE_CKPT_BGWRITER_VIEW_COL_NUM, INCRE_BGWRITER_FUNC);
+
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
+        }
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
+            ExecDropSingleTupleTableSlot(slot);
+            pfree_ext(funcctx->user_fctx);
+            SRF_RETURN_DONE(funcctx);
+        }
+        for (i = 0; i < INCRE_CKPT_BGWRITER_VIEW_COL_NUM; i++) {
+            values[i] = slot_getattr(slot, (i + 1), &nulls[i]);
+        }
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        (void)ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+
+    SRF_RETURN_DONE(funcctx);
 #endif
 }
 

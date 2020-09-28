@@ -2470,6 +2470,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4368 | remote_pagewriter_stat
  4371 | local_ckpt_stat
  4372 | remote_ckpt_stat
+ 4373 | local_bgwriter_stat
+ 4374 | remote_bgwriter_stat
  4384 | local_double_write_stat
  4385 | remote_double_write_stat
  4388 | local_redo_stat

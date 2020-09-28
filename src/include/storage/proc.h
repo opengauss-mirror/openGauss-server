@@ -341,13 +341,14 @@ typedef struct PROC_HDR {
  * PGXC needs another slot for the pool manager process
  */
 const int MAX_PAGE_WRITER_THREAD_NUM = 8;
+const int MAX_BG_WRITER_THREAD_NUM = 8;
 #ifdef PGXC
 #define NUM_AUXILIARY_PROCS                                       \
-    (10 + MAX_RECOVERY_THREAD_NUM + MAX_PAGE_WRITER_THREAD_NUM + \
+    (10 + MAX_RECOVERY_THREAD_NUM + MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM + \
         g_instance.shmem_cxt.ThreadPoolGroupNum) /* number of InitAuxiliaryProcess */
 #else
 #define NUM_AUXILIARY_PROCS \
-    (8 + MAX_RECOVERY_THREAD_NUM + MAX_PAGE_WRITER_THREAD_NUM + g_instance.shmem_cxt.ThreadPoolGroupNum)
+    (8 + MAX_RECOVERY_THREAD_NUM + MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM + g_instance.shmem_cxt.ThreadPoolGroupNum)
 #endif
 
 #define GLOBAL_ALL_PROCS \
@@ -360,7 +361,7 @@ const int MAX_PAGE_WRITER_THREAD_NUM = 8;
 #define MAX_SESSION_TIMEOUT 24 * 60 * 60 /* max session timeout value. */
 
 #define BackendStatusArray_size                                                                        \
-    (MAX_BACKEND_SLOT + NUM_AUXPROCTYPES + MAX_RECOVERY_THREAD_NUM + MAX_PAGE_WRITER_THREAD_NUM - 1 + \
+    (MAX_BACKEND_SLOT + NUM_AUXPROCTYPES + MAX_RECOVERY_THREAD_NUM + MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM -1 +\
         g_instance.shmem_cxt.ThreadPoolGroupNum)
 
 extern AlarmCheckResult ConnectionOverloadChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam);

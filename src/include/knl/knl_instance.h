@@ -46,6 +46,7 @@
 #include "hotpatch/hotpatch.h"
 #include "hotpatch/hotpatch_backend.h"
 #include "utils/atomic.h"
+#include "postmaster/bgwriter.h"
 #include "postmaster/pagewriter.h"
 #include "replication/heartbeat.h"
 #include "access/multi_redo_settings.h"
@@ -53,7 +54,6 @@
 #include "portability/instr_time.h"
 #include "replication/rto_statistic.h"
 
-typedef struct CkptSortItem CkptSortItem;
 
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
@@ -111,6 +111,7 @@ typedef struct knl_g_pid_context {
     ThreadId TwoPhaseCleanerPID;
     ThreadId FaultMonitorPID;
     ThreadId BgWriterPID;
+    ThreadId* CkptBgWriterPID;
     ThreadId* PageWriterPID;
     ThreadId CheckpointerPID;
     ThreadId WalWriterPID;
@@ -330,13 +331,15 @@ typedef struct knl_g_ckpt_context {
     DirtyPageQueueSlot* dirty_page_queue;
     uint64 dirty_page_queue_size;
     pg_atomic_uint64 dirty_page_queue_head;
+    pg_atomic_uint32 actual_dirty_page_num;
 
     /* pagewriter thread */
     PageWriterProcs page_writer_procs;
     uint64 page_writer_actual_flush;
     volatile uint64 page_writer_last_flush;
+
+    /* full checkpoint infomation */
     volatile bool flush_all_dirty_page;
-    volatile bool buffers_contain_hashbucket;
     volatile uint64 full_ckpt_expected_flush_loc;
     volatile XLogRecPtr full_ckpt_redo_ptr;
     volatile uint32 current_page_writer_count;
@@ -353,10 +356,23 @@ typedef struct knl_g_ckpt_context {
     int64 ckpt_multixact_flush_num;
     int64 ckpt_predicate_flush_num;
     int64 ckpt_twophase_flush_num;
-    XLogRecPtr ckpt_current_redo_point;
+    volatile XLogRecPtr ckpt_current_redo_point;
 
     uint64 pad[TWO_UINT64_SLOT];
 } knl_g_ckpt_context;
+
+typedef struct knl_g_bgwriter_context {
+    BgWriterProc *bgwriter_procs;
+    int bgwriter_num;                   /* bgwriter thread num*/
+    pg_atomic_uint32 curr_bgwriter_num; 
+    int *candidate_buffers;
+    bool *candidate_free_map;
+
+    /* bgwriter view information*/
+    volatile uint64 bgwriter_actual_total_flush;
+    volatile uint64 get_buf_num_candidate_list;
+    volatile uint64 get_buf_num_clock_sweep;
+}knl_g_bgwriter_context;
 
 typedef struct {
     ThreadId threadId;
@@ -585,6 +601,7 @@ typedef struct knl_instance_context {
     struct knl_g_wlm_context* wlm_cxt;
     knl_g_ckpt_context ckpt_cxt;
     knl_g_ckpt_context* ckpt_cxt_ctl;
+    knl_g_bgwriter_context bgwriter_cxt;
     struct knl_g_dw_context dw_cxt;
     knl_g_shmem_context shmem_cxt;
     knl_g_executor_context exec_cxt;
@@ -611,3 +628,4 @@ extern bool knl_g_get_is_local_redo();
                         g_instance.attr.attr_storage.gtm_option == GTMOPTION_GTMLITE)
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_H_ */
+

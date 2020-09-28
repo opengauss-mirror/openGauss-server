@@ -39,6 +39,7 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgworker_internals.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/pagewriter.h"
 #include "postmaster/postmaster.h"
 #include "replication/slot.h"
 #include "postmaster/startup.h"
@@ -350,16 +351,25 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 
     LsnXlogFlushChkShmInit();
 
-    if (g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc == NULL) {
+    if (g_instance.pid_cxt.PageWriterPID == NULL) {
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
         g_instance.pid_cxt.PageWriterPID =
-            (ThreadId*)palloc0(sizeof(ThreadId) * (size_t)g_instance.attr.attr_storage.pagewriter_thread_num);
-        g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc =
-            (PageWriterProc*)palloc0(sizeof(PageWriterProc) * (size_t)g_instance.attr.attr_storage.pagewriter_thread_num);
-        g_instance.ckpt_cxt_ctl->page_writer_procs.num = g_instance.attr.attr_storage.pagewriter_thread_num;
-
-        g_instance.ckpt_cxt_ctl->page_writer_procs.running_num = 0;
+            (ThreadId*)palloc0(sizeof(ThreadId) * g_instance.attr.attr_storage.pagewriter_thread_num);
+        if (g_instance.attr.attr_storage.bgwriter_thread_num > 0) {
+            g_instance.pid_cxt.CkptBgWriterPID =
+                (ThreadId*)palloc0(sizeof(ThreadId) * g_instance.attr.attr_storage.bgwriter_thread_num);
+        }
         (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
+        g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc == NULL) {
+        incre_ckpt_pagewriter_cxt_init();
+    }
+    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
+        g_instance.attr.attr_storage.bgwriter_thread_num > 0 &&
+        g_instance.bgwriter_cxt.bgwriter_procs == NULL) {
+        incre_ckpt_bgwriter_cxt_init();
     }
 
     /*

@@ -144,6 +144,7 @@ typedef struct knl_session_attr_storage {
     int gtm_conn_check_interval;
     int dfs_max_parsig_length;
     int plog_merge_age;
+    int max_redo_log_size;
     int64 vacuum_freeze_min_age;
     int64 vacuum_freeze_table_age;
     int64 vacuum_defer_cleanup_age;
@@ -152,6 +153,8 @@ typedef struct knl_session_attr_storage {
     double autovacuum_vac_scale;
     double autovacuum_anl_scale;
     double CheckPointCompletionTarget;
+    double candidate_buf_percent_target;
+    double dirty_page_percent_max;
     char* XLogArchiveCommand;
     char* default_tablespace;
     char* temp_tablespaces;

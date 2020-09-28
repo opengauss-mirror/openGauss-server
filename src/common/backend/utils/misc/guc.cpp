@@ -6806,7 +6806,7 @@ static void init_configure_names_int()
                 GUC_UNIT_MS
             },
             &u_sess->attr.attr_storage.BgWriterDelay,
-            10000,
+            2000,
             10,
             10000,
             NULL,
@@ -9069,7 +9069,7 @@ static void init_configure_names_int()
                 GUC_UNIT_MS
             },
             &u_sess->attr.attr_storage.pageWriterSleep,
-            100,
+            2000,
             0,
             3600 * 1000,
             NULL,
@@ -9121,6 +9121,23 @@ static void init_configure_names_int()
                 0
             },
             &g_instance.attr.attr_storage.pagewriter_thread_num,
+            2,
+            1,
+            8,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+		"bgwriter_thread_num",
+            	PGC_POSTMASTER,
+            	WAL_CHECKPOINTS,
+            	gettext_noop("Sets the number of background writer threads with incremental checkpoint on."),
+           	NULL,
+            	0
+            },
+            &g_instance.attr.attr_storage.bgwriter_thread_num,
             2,
             1,
             8,
@@ -9227,6 +9244,23 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
+	{
+	    {
+		"max_redo_log_size",
+            	PGC_SIGHUP,
+            	WAL,
+            	gettext_noop("max redo log size."),
+            	NULL,
+            	GUC_UNIT_KB
+            },
+            &u_sess->attr.attr_storage.max_redo_log_size,
+            1048576,    /* 1GB */
+            163840,    /* 160MB */
+            INT_MAX,
+	    NULL,
+	    NULL,
+	    NULL
+	},
         {
             {
                 "max_parallel_workers_per_gather",
@@ -9261,6 +9295,7 @@ static void init_configure_names_int()
             NULL
         }
     };
+
 
     Size bytes = sizeof(local_configure_names_int);
     u_sess->utils_cxt.ConfigureNamesInt = (struct config_int*)MemoryContextAlloc(u_sess->top_mem_cxt, bytes);
@@ -9569,6 +9604,40 @@ static void init_configure_names_real()
             0.1,
             0.0,
             100.0,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+		"candidate_buf_percent_target",
+                PGC_SIGHUP,
+                RESOURCES_KERNEL,
+                gettext_noop(
+                "Sets the candidate buffers percent."),
+                NULL
+            },
+            &u_sess->attr.attr_storage.candidate_buf_percent_target,
+            0.3,
+            0.1,
+            0.85,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+		"dirty_page_percent_max",
+                PGC_SIGHUP,
+                RESOURCES_KERNEL,
+                gettext_noop(
+                "Sets the dirty buffers percent."),
+                NULL
+            },
+            &u_sess->attr.attr_storage.dirty_page_percent_max,
+            0.9,
+            0.1,
+            1,
             NULL,
             NULL,
             NULL
@@ -12722,13 +12791,6 @@ void InitializePostmasterGUC()
     g_instance.attr.attr_network.PoolerPort = g_instance.attr.attr_network.PostPortNumber + 1;
 }
 
-static void AdjustDefaultGUC()
-{
-    if (g_instance.attr.attr_storage.enable_double_write == false) {
-        u_sess->attr.attr_storage.pagewriter_threshold = g_instance.attr.attr_storage.NBuffers;
-    }
-}
-
 /*
  * Initialize GUC options during program startup.
  *
@@ -12779,7 +12841,6 @@ void InitializeGUCOptions(void)
      * environment variables.  Process those settings.
      */
     InitializeGUCOptionsFromEnvironment();
-    AdjustDefaultGUC();
 }
 
 /*

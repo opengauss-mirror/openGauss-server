@@ -9874,6 +9874,7 @@ void ShutdownXLOG(int code, Datum arg)
     }
 
     /* Shutdown all the page writer threads. */
+    ckpt_shutdown_bgwriter();
     ckpt_shutdown_pagewriter();
     free(g_instance.ckpt_cxt_ctl->dirty_page_queue);
     g_instance.ckpt_cxt_ctl->dirty_page_queue = NULL;
@@ -10221,8 +10222,11 @@ void CreateCheckPoint(int flags)
          * full checkpoint.
          */
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
-        g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
-
+        g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = curInsert;
+        pg_write_barrier();
+        if (get_dirty_page_num() > 0) {
+            g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
+        }
         ereport(LOG, (errmsg("will do full checkpoint, need flush %ld pages.", get_dirty_page_num())));
     }
 
@@ -10917,8 +10921,12 @@ bool CreateRestartPoint(int flags)
 
     if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
         update_dirty_page_queue_rec_lsn(lastCheckPoint.redo, true);
+        g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
-        g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
+        pg_write_barrier();
+        if (get_dirty_page_num() > 0) {
+            g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
+        }
         ereport(LOG, (errmsg("CreateRestartPoint, need flush %ld pages.", get_dirty_page_num())));
     }
     CheckPointGuts(lastCheckPoint.redo, flags, true);
@@ -10948,6 +10956,7 @@ bool CreateRestartPoint(int flags)
         t_thrd.shemem_ptr_cxt.ControlFile->checkPoint = lastCheckPointRecPtr;
         t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy = lastCheckPoint;
         t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
+        g_instance.ckpt_cxt_ctl->ckpt_current_redo_point = lastCheckPoint.redo;
         if ((unsigned int)flags & CHECKPOINT_IS_SHUTDOWN) {
             t_thrd.shemem_ptr_cxt.ControlFile->state = DB_SHUTDOWNED_IN_RECOVERY;
         }
