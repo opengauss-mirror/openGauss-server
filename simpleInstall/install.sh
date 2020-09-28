@@ -274,7 +274,7 @@ function fn_install_demoDB()
     input=$1
     if [ "$input"X = X ]
     then
-        read -p "Are you sure you want to create a demo database (yes/no)? " input
+        read -p "Would you like to create a demo database (yes/no)? " input
     fi
     if [ $input == "yes" ]
     then
@@ -363,7 +363,7 @@ function main()
     local returnFlag=$?
     if [ $returnFlag -eq 0 ]
     then
-        echo "Load demoDB success."
+        echo "Load demoDB [school,finance] success."
         return 1
     elif [ $returnFlag -eq 1 ]
     then
