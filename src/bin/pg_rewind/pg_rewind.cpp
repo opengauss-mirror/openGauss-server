@@ -188,11 +188,13 @@ BuildErrorCode gs_increment_build(char* pgdata, const char* connstr, const uint3
      * information we need from both clusters.
      */
     buffer = slurpFile(datadir_target, "global/pg_control", &size);
+    PG_CHECKBUILD_AND_RETURN();
     digestControlFile(&ControlFile_target, (const char*)buffer, size);
     pg_free(buffer);
     PG_CHECKBUILD_AND_RETURN();
 
     buffer = fetchFile("global/pg_control", &size);
+    PG_CHECKBUILD_AND_RETURN();
     digestControlFile(&ControlFile_source, buffer, size);
     pg_free(buffer);
     PG_CHECKBUILD_AND_RETURN();
@@ -716,9 +718,6 @@ static void checkControlFile(ControlFileData* ControlFile)
 static void digestControlFile(ControlFileData* ControlFile, const char* src, size_t size)
 {
     errno_t errorno = EOK;
-
-    if (size != PG_CONTROL_SIZE)
-        pg_fatal("unexpected control file size %d, expected %d\n", (int)size, PG_CONTROL_SIZE);
 
     errorno = memcpy_s(ControlFile, sizeof(ControlFileData), src, sizeof(ControlFileData));
     securec_check_c(errorno, "\0", "\0");
