@@ -937,9 +937,11 @@ static char **PsqlCompletion(const char *text, int start, int end)
 
             COMPLETE_WITH_LIST(listAlterAgg);
         } else {
-            char *tmpBuf = (char *)malloc(strlen(Query_for_list_of_arguments) + strlen(PREV2_WD));
+            size_t tmpLength = strlen(Query_for_list_of_arguments) + strlen(PREV2_WD);
+            char *tmpBuf = (char *)pg_malloc(tmpLength);
 
-            sprintf(tmpBuf, Query_for_list_of_arguments, PREV2_WD);
+            int rc = sprintf_s(tmpBuf, tmpLength, Query_for_list_of_arguments, PREV2_WD);
+            securec_check_c(rc, "", "");
             COMPLETE_WITH_QUERY(tmpBuf);
             free(tmpBuf);
         }
@@ -1971,9 +1973,11 @@ static char **PsqlCompletion(const char *text, int start, int end)
     } else if (pg_strcasecmp(PREV4_WD, "DROP") == 0 &&
         (pg_strcasecmp(PREV3_WD, "AGGREGATE") == 0 || pg_strcasecmp(PREV3_WD, "FUNCTION") == 0) &&
         pg_strcasecmp(PREV_WD, "(") == 0) {
-        char *tmpBuf = (char *)malloc(strlen(Query_for_list_of_arguments) + strlen(PREV2_WD));
+        size_t tmpLength = strlen(Query_for_list_of_arguments) + strlen(PREV2_WD);
+        char *tmpBuf = (char *)pg_malloc(tmpLength);
 
-        sprintf(tmpBuf, Query_for_list_of_arguments, PREV2_WD);
+        int rc = sprintf_s(tmpBuf, tmpLength, Query_for_list_of_arguments, PREV2_WD);
+        securec_check_c(rc,"","");
         COMPLETE_WITH_QUERY(tmpBuf);
         free(tmpBuf);
     }
