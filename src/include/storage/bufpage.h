@@ -179,6 +179,11 @@ typedef HeapPageHeaderData* HeapPageHeader;
 
 #define SizeOfHeapPageUpgradeData MAXALIGN(offsetof(HeapPageHeaderData, pd_linp) - offsetof(PageHeaderData, pd_linp))
 
+#define PageXLogRecPtrGet(val) \
+	((uint64) (val).xlogid << 32 | (val).xrecoff)
+#define PageXLogRecPtrSet(ptr, lsn) \
+	((ptr).xlogid = (uint32) ((lsn) >> 32), (ptr).xrecoff = (uint32) (lsn))
+
 /*
  * pd_flags contains the following flag bits.  Undefined bits are initialized
  * to zero and may be used in the future.

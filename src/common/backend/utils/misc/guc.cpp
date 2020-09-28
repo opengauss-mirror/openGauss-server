@@ -4321,7 +4321,6 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
-#ifdef ENABLE_MULTIPLE_NODES
         {
             {
                 "enable_cbm_tracking",
@@ -4336,7 +4335,6 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
-#endif
         {
             {
                 "enable_copy_server_files",
@@ -12347,7 +12345,6 @@ static void init_single_node_unsupport_guc()
     u_sess->attr.attr_sql.enable_agg_pushdown_for_cooperation_analysis = true;
     u_sess->attr.attr_common.enable_tsdb = false;
     u_sess->attr.attr_sql.acceleration_with_compute_pool = false;
-    u_sess->attr.attr_storage.enable_cbm_tracking = false;
     u_sess->attr.attr_sql.enable_constraint_optimization = true;
     u_sess->attr.attr_sql.enable_csqual_pushdown = true;
     u_sess->attr.attr_sql.enable_hadoop_env = false;

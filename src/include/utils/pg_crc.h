@@ -49,7 +49,8 @@ typedef uint32 pg_crc32;
  *
  * using CRC32C instead
  */
-
+#define INIT_TRADITIONAL_CRC32(crc) ((crc) = 0xFFFFFFFF)
+#define FIN_TRADITIONAL_CRC32(crc)  ((crc) ^= 0xFFFFFFFF)
 /* Initialize a CRC accumulator */
 #define INIT_CRC32(crc) ((crc) = 0xFFFFFFFF)
 
@@ -58,7 +59,7 @@ typedef uint32 pg_crc32;
 
 /* Check for equality of two CRCs */
 #define EQ_CRC32(c1, c2) ((c1) == (c2))
-
+#define EQ_TRADITIONAL_CRC32(c1, c2) ((c1) == (c2))
 /* Accumulate some (more) bytes into a CRC */
 #define COMP_CRC32(crc, data, len)                                     \
     do {                                                               \
@@ -73,6 +74,23 @@ typedef uint32 pg_crc32;
 
 /* Constant table for CRC calculation */
 extern CRCDLLIMPORT uint32 pg_crc32_table[];
+
+#define COMP_TRADITIONAL_CRC32(crc, data, len)	\
+	COMP_CRC32_NORMAL_TABLE(crc, data, len, pg_crc32_table)
+
+/* Sarwate's algorithm, for use with a "normal" lookup table */
+#define COMP_CRC32_NORMAL_TABLE(crc, data, len, table)			  \
+do {															  \
+	const unsigned char *__data = (const unsigned char *) (data); \
+	uint32		__len = (len); \
+\
+	while (__len-- > 0) \
+	{ \
+		int		__tab_index = ((int) (crc) ^ *__data++) & 0xFF; \
+		(crc) = table[__tab_index] ^ ((crc) >> 8); \
+	} \
+} while (0)
+
 
 #ifdef PROVIDE_64BIT_CRC
 

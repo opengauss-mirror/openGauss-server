@@ -22,7 +22,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS = guc.o help_config.o pg_rusage.o ps_status.o superuser.o tzparser.o \
-       rbtree.o anls_opt.o sec_rls_utils.o
+       rbtree.o anls_opt.o sec_rls_utils.o pg_controldata.o
 
 # This location might depend on the installation directories. Therefore
 # we can't subsitute it into pg_config.h.

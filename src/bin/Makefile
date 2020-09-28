@@ -32,7 +32,8 @@ SUBDIRS = \
 	gs_cgroup \
 	gsqlerr \
 	pg_upgrade \
-	pg_basebackup 
+	pg_basebackup \
+	pg_probackup
 
 ifeq ($(PORTNAME), win32)
 SUBDIRS += pgevent
@@ -51,7 +52,8 @@ SUBDIRS = \
 	pg_resetxlog \
 	gs_guc \
 	gsqlerr \
-	pg_basebackup 
+	pg_basebackup \
+	pg_probackup 
 
 
 endif

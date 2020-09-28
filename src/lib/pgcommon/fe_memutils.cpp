@@ -46,6 +46,12 @@ void* pg_malloc(size_t size)
     return pg_malloc_internal(size, 0);
 }
 
+void *
+pg_malloc0(size_t size)
+{
+	return pg_malloc_internal(size, MCXT_ALLOC_ZERO);
+}
+
 void* pg_realloc(void* ptr, size_t size)
 {
     void* tmp = NULL;
