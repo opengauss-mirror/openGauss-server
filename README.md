@@ -398,7 +398,7 @@ https://opengauss.org/zh/
 
 可以通过以下网站获取编译好的binarylibs。下载后请解压缩并重命名为**binarylibs**。
 
-https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.0/openGauss-third_party_binarylibs.tar.gz
+https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.1/openGauss-third_party_binarylibs.tar.gz
 
 
 现在我们已经拥有完整的openGauss代码，把它存储在以下目录中（以sda为例）。

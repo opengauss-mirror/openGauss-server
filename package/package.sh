@@ -116,12 +116,12 @@ SCRIPT_DIR=$(cd $(dirname $SCRIPT_PATH) && pwd)
 package_path=$SCRIPT_DIR
 
 #######################################################################
-##version 1.0.0
+##version 1.0.1
 #######################################################################
 function read_srv_version()
 {
     cd $SCRIPT_DIR
-    version_number='1.0.0'
+    version_number='1.0.1'
     echo "${server_name_for_package}-${version_number}">version.cfg
     #auto read the number from kernal globals.cpp, no need to change it here
 }
