@@ -132,6 +132,7 @@ static double calc_joinrel_size_estimate(PlannerInfo* root, double outer_rows, d
     SpecialJoinInfo* sjinfo, List* restrictlist, bool varratio_cached);
 static int calc_distributekey_width(Path* path, int* width, bool vectorized, bool aligned);
 static Cost get_subqueryscan_stream_cost(Plan* subplan);
+static double get_parallel_divisor(Path *path);
 
 extern int getDataMinLen(Oid typeOid, int typeMod);
 extern bool isExprSonicEnable(Expr* node);
@@ -672,7 +673,7 @@ static void set_parallel_path_rows(Path* path)
  * 'baserel' is the relation to be scanned
  * 'param_info' is the ParamPathInfo if this is a parameterized path, else NULL
  */
-void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info, int nworkers)
+void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info)
 {
     Cost startup_cost = 0;
     Cost run_cost = 0;
@@ -713,10 +714,12 @@ void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathI
      * This is almost certainly not exactly the right way to model this, so
      * this will probably need to be changed at some point...
      */
-    if (nworkers > 0) {
-        run_cost = run_cost / (nworkers + 0.5);
-    }
+    if (path->parallel_degree > 0) {
+        double parallel_divisor = get_parallel_divisor(path);
 
+        run_cost = run_cost / parallel_divisor;
+        path->rows = clamp_row_est(path->rows / parallel_divisor);
+    }
     path->startup_cost = startup_cost;
     path->total_cost = startup_cost + run_cost;
     path->stream_cost = 0;
@@ -5671,6 +5674,37 @@ double relation_byte_size(double tuples, int width, bool vectorized, bool aligne
 double page_size(double tuples, int width)
 {
     return ceil(relation_byte_size(tuples, width, false) / BLCKSZ);
+}
+
+/*
+ * Estimate the fraction of the work that each worker will do given the
+ * number of workers budgeted for the path.
+ */
+static double get_parallel_divisor(Path* path)
+{
+    double parallel_divisor = path->parallel_degree;
+
+    /*
+     * Early experience with parallel query suggests that when there is only
+     * one worker, the leader often makes a very substantial contribution to
+     * executing the parallel portion of the plan, but as more workers are
+     * added, it does less and less, because it's busy reading tuples from the
+     * workers and doing whatever non-parallel post-processing is needed.  By
+     * the time we reach 4 workers, the leader no longer makes a meaningful
+     * contribution.  Thus, for now, estimate that the leader spends 30% of
+     * its time servicing each worker, and the remainder executing the
+     * parallel plan.
+     */
+    if (u_sess->attr.attr_sql.parallel_leader_participation) {
+        double leader_contribution;
+
+        leader_contribution = 1.0 - (0.3 * path->parallel_degree);
+        if (leader_contribution > 0) {
+            parallel_divisor += leader_contribution;
+        }
+    }
+
+    return parallel_divisor;
 }
 
 /* it used to compute page_size in createplan.cpp */

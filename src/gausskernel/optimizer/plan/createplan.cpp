@@ -1737,6 +1737,9 @@ List* reassign_nodelist(RangeTblEntry* rte, List* ori_node_list)
  */
 static void add_distribute_info(PlannerInfo* root, Plan* scanPlan, Index relIndex, Path* bestPath, List* scanClauses)
 {
+    if (relIndex == 0) {
+        return;
+    }
     ExecNodes* execNodes = NULL;
     RangeTblEntry* rte = root->simple_rte_array[relIndex];
 
@@ -1822,15 +1825,15 @@ static bool relIsDeltaNode(PlannerInfo* root, RelOptInfo* relOptInfo)
  * 	  Create a Gather plan for 'best_path' and (recursively) plans
  * 	  for its subpaths.
  */
-static Gather *create_gather_plan(PlannerInfo *root, GatherPath *best_path)
+static Gather* create_gather_plan(PlannerInfo* root, GatherPath* best_path)
 {
     Index scan_relid = best_path->path.parent->relid;
     Plan *subplan = create_plan_recurse(root, best_path->subpath);
 
     disuse_physical_tlist(subplan, best_path->subpath);
 
-    Gather *gather_plan = make_gather(subplan->targetlist, NIL,
-        best_path->num_workers, best_path->single_copy, subplan);
+    Gather* gather_plan =
+        make_gather(subplan->targetlist, NIL, best_path->path.parallel_degree, best_path->single_copy, subplan);
 
     copy_path_costsize(&gather_plan->plan, &best_path->path);
 

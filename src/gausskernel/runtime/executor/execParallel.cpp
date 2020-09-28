@@ -144,13 +144,15 @@ static bool ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateConte
     e->nnodes++;
 
     /* Call estimators for parallel-aware nodes. */
-    switch (nodeTag(planstate)) {
-        case T_SeqScanState:
-            ExecSeqScanEstimate((SeqScanState *)planstate, e->pcxt);
-            break;
-        default:
-            break;
-    }
+    if (planstate->plan->parallel_aware) {
+		switch (nodeTag(planstate)) {
+			case T_SeqScanState:
+				ExecSeqScanEstimate((SeqScanState *)planstate, e->pcxt);
+				break;
+			default:
+				break;
+		}
+	}
 
     return planstate_tree_walker(planstate, (bool (*)())ExecParallelEstimate, e);
 }
@@ -177,14 +179,16 @@ static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitiali
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)d->pcxt->seg;
 
     /* Call initializers for parallel-aware plan nodes. */
-    switch (nodeTag(planstate)) {
-        case T_SeqScanState:
-            ExecSeqScanInitializeDSM((SeqScanState *)planstate, d->pcxt, cxt->pwCtx->pscan_num);
-            cxt->pwCtx->pscan_num++;
-            break;
-        default:
-            break;
-    }
+	if (planstate->plan->parallel_aware) {
+		switch (nodeTag(planstate)) {
+			case T_SeqScanState:
+				ExecSeqScanInitializeDSM((SeqScanState *)planstate, d->pcxt, cxt->pwCtx->pscan_num);
+				cxt->pwCtx->pscan_num++;
+				break;
+			default:
+				break;
+		}
+	}
 
     return planstate_tree_walker(planstate, (bool (*)())ExecParallelInitializeDSM, d);
 }

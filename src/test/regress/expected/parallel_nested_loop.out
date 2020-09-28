@@ -1,0 +1,53 @@
+create table parallel_nested_loop_test_a (id int);
+create table parallel_nested_loop_test_b (id int);
+insert into parallel_nested_loop_test_a select n from generate_series(1,2) n;
+insert into parallel_nested_loop_test_b select n from generate_series(1,5) n;
+explain (costs off) select * from parallel_nested_loop_test_a left outer join parallel_nested_loop_test_b on parallel_nested_loop_test_a.id = 1;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Nested Loop Left Join
+   Join Filter: (parallel_nested_loop_test_a.id = 1)
+   ->  Seq Scan on parallel_nested_loop_test_a
+   ->  Materialize
+         ->  Seq Scan on parallel_nested_loop_test_b
+(5 rows)
+
+select * from parallel_nested_loop_test_a left outer join parallel_nested_loop_test_b on parallel_nested_loop_test_a.id = 1;
+ id | id 
+----+----
+  1 |  1
+  1 |  2
+  1 |  3
+  1 |  4
+  1 |  5
+  2 |   
+(6 rows)
+
+set parallel_setup_cost = 0;
+set min_parallel_table_scan_size=0;
+explain (costs off) select * from parallel_nested_loop_test_a left outer join parallel_nested_loop_test_b on parallel_nested_loop_test_a.id = 1;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Gather
+   Number of Workers: 2
+   ->  Nested Loop Left Join
+         Join Filter: (parallel_nested_loop_test_a.id = 1)
+         ->  Parallel Seq Scan on parallel_nested_loop_test_a
+         ->  Seq Scan on parallel_nested_loop_test_b
+(6 rows)
+
+select * from parallel_nested_loop_test_a left outer join parallel_nested_loop_test_b on parallel_nested_loop_test_a.id = 1;
+ id | id 
+----+----
+  1 |  1
+  1 |  2
+  1 |  3
+  1 |  4
+  1 |  5
+  2 |   
+(6 rows)
+
+drop table parallel_nested_loop_test_a;
+drop table parallel_nested_loop_test_b;
+reset parallel_setup_cost;
+reset min_parallel_table_scan_size;

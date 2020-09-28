@@ -2654,6 +2654,9 @@ static void _outPathInfo(StringInfo str, Path* node)
     } else {
         _outBitmapset(str, NULL);
     }
+    WRITE_BOOL_FIELD(parallel_aware);
+    WRITE_BOOL_FIELD(parallel_safe);
+    WRITE_INT_FIELD(parallel_degree);
     WRITE_FLOAT_FIELD(rows, "%.0f");
     WRITE_FLOAT_FIELD(multiple, "%.0f");
     WRITE_FLOAT_FIELD(startup_cost, "%.2f");
@@ -2848,7 +2851,6 @@ static void _outGatherPath(StringInfo str, GatherPath *node)
     _outPathInfo(str, (Path *)node);
 
     WRITE_NODE_FIELD(subpath);
-    WRITE_INT_FIELD(num_workers);
     WRITE_BOOL_FIELD(single_copy);
 }
 
@@ -2985,6 +2987,7 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_NODE_FIELD(reltargetlist);
     WRITE_NODE_FIELD(pathlist);
     WRITE_NODE_FIELD(ppilist);
+    WRITE_NODE_FIELD(partial_pathlist);
     WRITE_NODE_FIELD(cheapest_startup_path);
     WRITE_NODE_FIELD(cheapest_total_path);
     WRITE_NODE_FIELD(cheapest_unique_path);

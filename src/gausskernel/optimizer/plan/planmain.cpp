@@ -102,6 +102,7 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
     /* local distinct and global distinct */
     double numdistinct[2] = {1, 1};
     bool has_groupby = true;
+    bool consider_parallel = false;
 
     /* Make tuple_fraction, limit_tuples accessible to lower-level routines */
     root->tuple_fraction = tuple_fraction;
@@ -113,7 +114,13 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
      */
     if (parse->jointree->fromlist == NIL) {
         /* We need a trivial path result */
-        *cheapest_path = (Path*)create_result_path((List*)parse->jointree->quals);
+        RelOptInfo* rel = build_empty_join_rel(root);
+        if (root->glob->parallelModeOK) {
+            consider_parallel = !has_parallel_hazard(parse->jointree->quals, false);
+        }
+        rel->consider_parallel = consider_parallel;
+
+        *cheapest_path = (Path*)create_result_path(rel, (List*)parse->jointree->quals);
         if (root->glob->parallelModeOK && u_sess->attr.attr_sql.force_parallel_mode != FORCE_PARALLEL_OFF) {
             (*cheapest_path)->parallel_safe = !has_parallel_hazard(parse->jointree->quals, false);
         }
@@ -262,7 +269,7 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
      * Ready to do the primary planning.
      */
     final_rel = make_one_rel(root, joinlist);
-
+    final_rel->consider_parallel = consider_parallel;
     if (final_rel == NULL || final_rel->cheapest_total_path == NIL) {
         ereport(ERROR,
             (errmodule(MOD_OPT),

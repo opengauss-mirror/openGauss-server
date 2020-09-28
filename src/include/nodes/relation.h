@@ -557,6 +557,7 @@ typedef struct RelOptInfo {
     /* materialization information */
     List* reltargetlist;   /* Vars to be output by scan of relation */
     List* distribute_keys; /* distribute key */
+    List* partial_pathlist; /* partial Paths */
     List* pathlist;        /* Path structures */
     List* ppilist;         /* ParamPathInfos used in pathlist */
     struct Path* cheapest_startup_path;
@@ -885,7 +886,8 @@ typedef struct Path {
     ParamPathInfo* param_info; /* parameterization info, or NULL if none */
 
     bool parallel_aware; /* engage parallel-aware logic? */
-    bool parallel_safe; /* OK to use as part of parallel plan? */
+    bool parallel_safe;  /* OK to use as part of parallel plan? */
+    int parallel_degree; /* desired parallel degree; 0 = not parallel */
 
     /* estimated size/costs for path (see costsize.c for more info) */
     double rows; /* estimated number of global result tuples */
@@ -1190,7 +1192,6 @@ typedef struct UniquePath {
 typedef struct GatherPath {
     Path path;
     Path *subpath;    /* path for each worker */
-    int num_workers;  /* number of workers sought to help */
     bool single_copy; /* don't execute path more than once */
 } GatherPath;
 
@@ -1868,6 +1869,25 @@ typedef struct SemiAntiJoinFactors {
     Selectivity outer_match_frac;
     Selectivity match_count;
 } SemiAntiJoinFactors;
+
+/*
+ * Struct for extra information passed to subroutines of add_paths_to_joinrel
+ *
+ * restrictlist contains all of the RestrictInfo nodes for restriction
+ *		clauses that apply to this join
+ * mergeclause_list is a list of RestrictInfo nodes for available
+ *		mergejoin clauses in this join
+ * sjinfo is extra info about special joins for selectivity estimation
+ * semifactors is as shown above (only valid for SEMI or ANTI joins)
+ * param_source_rels are OK targets for parameterization of result paths
+ */
+typedef struct JoinPathExtraData {
+    List* restrictlist;
+    List* mergeclause_list;
+    SpecialJoinInfo* sjinfo;
+    SemiAntiJoinFactors semifactors;
+    Relids param_source_rels;
+} JoinPathExtraData;
 
 /*
  * For speed reasons, cost estimation for join paths is performed in two
