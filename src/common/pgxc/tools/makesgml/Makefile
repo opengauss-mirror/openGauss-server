@@ -15,7 +15,7 @@ subdir = src/common/pgxc/tools/makesgml
 top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global
 
-override CPPFLAGS := -I. -I$(srcdir) $(CPPFLAGS)
+override CPPFLAGS := -I. -I$(srcdir) $(CPPFLAGS) -Wl,-z,relro,-z,now
 
 ifeq ($(enable_memory_check), yes)
   LDFLAGS += -l$(MEMCHECK_LIB_NAME_ASAN) -lpthread -ldl -lm -lrt
