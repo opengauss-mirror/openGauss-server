@@ -489,6 +489,7 @@ void GinRedoCreateIndexBlock(XLogBlockHead* blockhead, XLogBlockDataParse* block
     } else {
         ginRedoCreateIndexOperatorRootPage(bufferinfo);
     }
+    MakeRedoBufferDirty(bufferinfo);
 }
 
 void GinRedoCreatePTreeBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo)
@@ -497,6 +498,7 @@ void GinRedoCreatePTreeBlock(XLogBlockHead* blockhead, XLogBlockDataParse* block
     if (XLogBlockDataGetBlockId(datadecode) == GIN_CREATE_P_TREE_BLOCK_NUM) {
         char* maindata = XLogBlockDataGetMainData(datadecode, NULL);
         ginRedoCreatePTreeOperatorPage(bufferinfo, maindata);
+        MakeRedoBufferDirty(bufferinfo);
     }
 }
 

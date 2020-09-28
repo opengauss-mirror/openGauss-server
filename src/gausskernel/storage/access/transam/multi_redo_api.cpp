@@ -57,13 +57,38 @@ bool IsExtremeRtoRunning()
             extreme_rto::g_dispatcher->pageLineNum > 0);
 }
 
+
+bool IsExtremeRtoSmartShutdown()
+{
+    if (!IsExtremeRtoRunning()) {
+        return false;
+    }
+
+    if (extreme_rto::g_dispatcher->smartShutdown) {
+        extreme_rto::g_dispatcher->smartShutdown =false;
+        return true;
+    }
+    return false;
+}
+
+void ExtremeRtoRedoManagerSendEndToStartup()
+{
+    if (!IsExtremeRtoRunning()) {
+        return;
+    }
+
+    extreme_rto::g_redoEndMark.record.isDecode = true;
+    extreme_rto::PutRecordToReadQueue((XLogReaderState *)&extreme_rto::g_redoEndMark.record);
+}
+
 bool IsExtremeRtoReadWorkerRunning()
 {
     if (!IsExtremeRtoRunning()) {
         return false;
     }
 
-    if (pg_atomic_read_u32(&extreme_rto::g_dispatcher->recordstate.startreadworker) != extreme_rto::READ_WORKER_RUN) {
+    uint32 readWorkerState = pg_atomic_read_u32(&extreme_rto::g_dispatcher->recordstate.readWorkerState);
+    if (readWorkerState == extreme_rto::WORKER_STATE_STOP || readWorkerState == extreme_rto::WORKER_STATE_EXIT) {
         return false;
     }
 
@@ -309,5 +334,23 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
 
     } else if (IsParallelRedo()) {
         return parallel_recovery::SendRecoveryEndMarkToWorkersAndWaitForFinish(code);
+    }
+}
+
+RedoWaitInfo GetRedoIoEvent(int32 event_id)
+{
+    if (IsExtremeRedo()) {
+        return extreme_rto::redo_get_io_event(event_id);
+    } else {
+        return parallel_recovery::redo_get_io_event(event_id);
+    }
+}
+
+void GetRedoWrokerStatistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen)
+{
+    if (IsExtremeRedo()) {
+        extreme_rto::redo_get_wroker_statistic(realNum, worker, workerLen);
+    } else {
+        parallel_recovery::redo_get_wroker_statistic(realNum, worker, workerLen);
     }
 }

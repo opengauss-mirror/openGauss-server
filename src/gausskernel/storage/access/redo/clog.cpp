@@ -45,7 +45,7 @@ XLogRecParseState* clog_xlog_ddl_parse_to_block(XLogReaderState* record, uint32*
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     errno_t rc = EOK;
-    int64 pageno;
+    int64 pageno = 0;
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
     XLogRecParseState* recordstatehead = NULL;

@@ -1122,6 +1122,19 @@ static void WalDataRcvReceive(char* buf, Size nbytes, XLogRecPtr recptr)
     wakeupWalRcvWriter();
 }
 
+void UpdateWalRcvCtl(struct WalRcvCtlBlock* walRcvCtlBlock, const XLogRecPtr recptr, const int segbytes)
+{
+    const int64 recBufferSize = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
+    SpinLockAcquire(&walRcvCtlBlock->mutex);
+    walRcvCtlBlock->walFreeOffset += segbytes;
+    if (walRcvCtlBlock->walFreeOffset == recBufferSize && walRcvCtlBlock->walReadOffset > 0 &&
+        walRcvCtlBlock->walReadOffset > 0) {
+        walRcvCtlBlock->walFreeOffset = 0;
+    }
+    walRcvCtlBlock->receivePtr = recptr;
+    SpinLockRelease(&walRcvCtlBlock->mutex);
+}
+
 /*
  * Receive XLOG data into receiver buffer.
  */
@@ -1145,7 +1158,8 @@ static void XLogWalRcvReceiveInBuf(char* buf, Size nbytes, XLogRecPtr recptr)
             // no data to be flushed
             t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart = recptr;
         } else if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset == recBufferSize &&
-                   t_thrd.walreceiver_cxt.walRcvCtlBlock->walReadOffset > 0) {
+                   t_thrd.walreceiver_cxt.walRcvCtlBlock->walReadOffset > 0 &&
+                   t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset > 0) {
             t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset = 0;
         }
         walfreeoffset = t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset;
@@ -1155,16 +1169,10 @@ static void XLogWalRcvReceiveInBuf(char* buf, Size nbytes, XLogRecPtr recptr)
         startptr = t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart;
         SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
 
-        ereport(DEBUG5,
-            (errmsg("XLogWalRcvReceive: recptr(%X:%X),nbytes(%d),"
-                    "walfreeoffset(%ld),walwriteoffset(%ld),startptr(%X:%X)",
-                (uint32)(recptr >> 32),
-                (uint32)recptr,
-                (int)nbytes,
-                walfreeoffset,
-                walwriteoffset,
-                (uint32)(startptr >> 32),
-                (uint32)startptr)));
+        ereport(DEBUG5, (errmsg("XLogWalRcvReceive: recptr(%X:%X),nbytes(%d),"
+                                "walfreeoffset(%ld),walwriteoffset(%ld),startptr(%X:%X)",
+                                (uint32)(recptr >> 32), (uint32)recptr, (int)nbytes, walfreeoffset, walwriteoffset,
+                                (uint32)(startptr >> 32), (uint32)startptr)));
 
         XLogWalRcvSendReply(false, false);
 
@@ -1175,6 +1183,127 @@ static void XLogWalRcvReceiveInBuf(char* buf, Size nbytes, XLogRecPtr recptr)
 
         if (walfreeoffset < walreadoffset) {
             endPoint = walreadoffset - 1;
+        }
+
+        if (endPoint == walfreeoffset) {
+            if (WalRcvWriterInProgress()) {
+                wakeupWalRcvWriter();
+                /* Process any requests or signals received recently */
+                ProcessWalRcvInterrupts();
+                /* Keepalived with primary when waiting flush wal data */
+                XLogWalRcvSendReply(false, false);
+                pg_usleep(1000);
+            } else {
+                walRcvDataCleanup();
+                ProcessWalRcvInterrupts();
+            }
+            continue;
+        }
+
+        segbytes = ((walfreeoffset + (int)nbytes > endPoint) ? (endPoint - walfreeoffset) : (int)nbytes);
+
+        /* Need to seek in the buffer? */
+        if (walfreeoffset != walwriteoffset) {
+            if (walfreeoffset > walwriteoffset) {
+                XLByteAdvance(startptr, (uint32)(walfreeoffset - walwriteoffset));
+            } else {
+                XLByteAdvance(startptr, (uint32)(recBufferSize - walwriteoffset + walfreeoffset));
+            }
+            if (!XLByteEQ(startptr, recptr)) {
+                /* wait for finishing flushing all wal data */
+                while (true) {
+                    SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+                    if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset ==
+                        t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset) {
+                        t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart = recptr;
+                        SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+                        break;
+                    }
+                    SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+
+                    if (WalRcvWriterInProgress()) {
+                        wakeupWalRcvWriter();
+                        /* Process any requests or signals received recently */
+                        ProcessWalRcvInterrupts();
+                        /* Keepalived with primary when waiting flush wal data */
+                        XLogWalRcvSendReply(false, false);
+                        pg_usleep(1000); /* 1ms */
+                    } else {
+                        walRcvDataCleanup();
+                        ProcessWalRcvInterrupts();
+                    }
+                }
+
+                ereport(FATAL,
+                        (errmsg("Unexpected seek in the walreceiver buffer. "
+                                "xlogrecptr is (%X:%X) but local xlogptr is (%X:%X)."
+                                "nbyte is %lu, walfreeoffset is %ld walwriteoffset is %ld walreadoffset is %ld",
+                                (uint32)(recptr >> 32), (uint32)recptr, (uint32)(startptr >> 32), (uint32)startptr,
+                                nbytes, walfreeoffset, walwriteoffset, walreadoffset)));
+            }
+        }
+
+        /* OK to receive the logs */
+        Assert(walfreeoffset + segbytes <= recBufferSize);
+        errorno = memcpy_s(walrecvbuf + walfreeoffset, recBufferSize - walfreeoffset, buf, segbytes);
+        securec_check(errorno, "\0", "\0");
+
+        XLByteAdvance(recptr, (uint32)segbytes);
+
+        nbytes -= segbytes;
+        buf += segbytes;
+
+        // update shared memory
+        UpdateWalRcvCtl(t_thrd.walreceiver_cxt.walRcvCtlBlock, recptr, segbytes);
+    }
+
+    wakeupWalRcvWriter();
+}
+
+/*
+ * Receive XLOG data into receiver buffer.
+ */
+static void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
+{
+    int walfreeoffset;
+    int walwriteoffset;
+    char *walrecvbuf = NULL;
+    XLogRecPtr startptr;
+    int recBufferSize = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
+
+    while (nbytes > 0) {
+        int segbytes;
+        int endPoint = recBufferSize;
+        errno_t errorno = EOK;
+
+        SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+        if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset ==
+            t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset) {
+            // no data to be flushed
+            t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart = recptr;
+        } else if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset == recBufferSize &&
+                   t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset > 0) {
+            t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset = 0;
+        }
+        walfreeoffset = t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset;
+        walwriteoffset = t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset;
+        walrecvbuf = t_thrd.walreceiver_cxt.walRcvCtlBlock->walReceiverBuffer;
+        startptr = t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart;
+        SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
+
+        ereport(DEBUG5, (errmsg("XLogWalRcvReceive: recptr(%u:%X),nbytes(%d),"
+                                "walfreeoffset(%d),walwriteoffset(%d),startptr(%u:%X)",
+                                (uint32)(recptr >> 32), (uint32)recptr, (int)nbytes, walfreeoffset, walwriteoffset,
+                                (uint32)(startptr >> 32), (uint32)startptr)));
+
+        XLogWalRcvSendReply(false, false);
+
+        Assert(walrecvbuf != NULL);
+        Assert(walfreeoffset <= recBufferSize);
+        Assert(walwriteoffset <= recBufferSize);
+
+        if (walfreeoffset < walwriteoffset) {
+            endPoint = walwriteoffset - 1;
         }
 
         if (endPoint == walfreeoffset) {
@@ -1207,7 +1336,7 @@ static void XLogWalRcvReceiveInBuf(char* buf, Size nbytes, XLogRecPtr recptr)
                 while (true) {
                     SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
                     if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset ==
-                        t_thrd.walreceiver_cxt.walRcvCtlBlock->walReadOffset) {
+                        t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset) {
                         t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart = recptr;
                         SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
                         break;
@@ -1226,18 +1355,15 @@ static void XLogWalRcvReceiveInBuf(char* buf, Size nbytes, XLogRecPtr recptr)
                 }
 
                 ereport(FATAL,
-                    (errmsg("Unexpected seek in the walreceiver buffer. "
-                            "xlogrecptr is (%X:%X) but local xlogptr is (%X:%X).",
-                        (uint32)(recptr >> 32),
-                        (uint32)recptr,
-                        (uint32)(startptr >> 32),
-                        (uint32)startptr)));
+                        (errmsg("Unexpected seek in the walreceiver buffer. "
+                                "xlogrecptr is (%X:%X) but local xlogptr is (%X:%X).",
+                                (uint32)(recptr >> 32), (uint32)recptr, (uint32)(startptr >> 32), (uint32)startptr)));
             }
         }
 
         /* OK to receive the logs */
         Assert(walfreeoffset + segbytes <= recBufferSize);
-        errorno = memcpy_s(walrecvbuf + walfreeoffset, recBufferSize - walfreeoffset, buf, segbytes);
+        errorno = memcpy_s(walrecvbuf + walfreeoffset, recBufferSize, buf, segbytes);
         securec_check(errorno, "\0", "\0");
 
         XLByteAdvance(recptr, (uint32)segbytes);
@@ -1249,7 +1375,7 @@ static void XLogWalRcvReceiveInBuf(char* buf, Size nbytes, XLogRecPtr recptr)
         SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
         t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset += segbytes;
         if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset == recBufferSize &&
-            t_thrd.walreceiver_cxt.walRcvCtlBlock->walReadOffset > 0) {
+            t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset > 0) {
             t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset = 0;
         }
         t_thrd.walreceiver_cxt.walRcvCtlBlock->receivePtr = recptr;
@@ -1258,158 +1384,6 @@ static void XLogWalRcvReceiveInBuf(char* buf, Size nbytes, XLogRecPtr recptr)
 
     wakeupWalRcvWriter();
 }
-
-
-
-/*
- * Receive XLOG data into receiver buffer.
- */ 
-static void
-XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
-{
-	int			walfreeoffset;
-	int			walwriteoffset;
-	char	   *walrecvbuf = NULL;
-	XLogRecPtr	startptr;
-	int			recBufferSize = g_instance.attr.attr_storage.WalReceiverBufSize * 1024;
-
-	while (nbytes > 0)
-	{
-		int		segbytes;
-		int		endPoint = recBufferSize;
-		errno_t errorno = EOK;
-
-		SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-		if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset == t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset)
-		{
-			// no data to be flushed
-			t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart = recptr;
-		}
-		else if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset == recBufferSize && 
-			t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset > 0)
-		{
-			t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset = 0;
-		}
-		walfreeoffset = t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset;
-		walwriteoffset = t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset;
-		walrecvbuf = t_thrd.walreceiver_cxt.walRcvCtlBlock->walReceiverBuffer;
-		startptr = t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart;
-		SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-
-		ereport(DEBUG5,
-				(errmsg("XLogWalRcvReceive: recptr(%u:%X),nbytes(%d),"
-						"walfreeoffset(%d),walwriteoffset(%d),startptr(%u:%X)",
-						(uint32) (recptr >> 32), (uint32) recptr, (int)nbytes, walfreeoffset,
-						walwriteoffset, (uint32) (startptr >> 32), (uint32) startptr)));
-
-		XLogWalRcvSendReply(false, false);
-
-		Assert(walrecvbuf != NULL);
-		Assert(walfreeoffset <= recBufferSize);
-		Assert(walwriteoffset <= recBufferSize);
-
-		if (walfreeoffset < walwriteoffset)
-		{
-			endPoint = walwriteoffset - 1;
-		}
-
-		if (endPoint == walfreeoffset)
-		{
-			if (WalRcvWriterInProgress())
-			{
-				wakeupWalRcvWriter();
-				/* Process any requests or signals received recently */
-				ProcessWalRcvInterrupts();
-				/* Keepalived with primary when waiting flush wal data */
-				XLogWalRcvSendReply(false, false);
-				pg_usleep(1000);
-			}
-			else
-				walRcvDataCleanup();
-			continue;
-
-		}
-
-		if (walfreeoffset + (int)nbytes > endPoint)
-			segbytes = endPoint - walfreeoffset;
-		else
-			segbytes = nbytes;
-
-		/* Need to seek in the buffer? */
-		if (walfreeoffset != walwriteoffset)
-		{
-			if (walfreeoffset > walwriteoffset)
-			{
-				XLByteAdvance(startptr, (uint32)(walfreeoffset - walwriteoffset));
-			}
-			else
-			{
-				XLByteAdvance(startptr, (uint32)(recBufferSize - walwriteoffset + walfreeoffset));
-			}
-			if (!XLByteEQ(startptr, recptr))
-			{
-				/* wait for finishing flushing all wal data */
-				while (true)
-				{
-					SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-					if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset == t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset)
-					{
-						t_thrd.walreceiver_cxt.walRcvCtlBlock->walStart = recptr;
-						SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-						break;
-					}
-					SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-
-					if (WalRcvWriterInProgress())
-					{
-						wakeupWalRcvWriter();
-						/* Process any requests or signals received recently */
-						ProcessWalRcvInterrupts();
-						/* Keepalived with primary when waiting flush wal data */
-						XLogWalRcvSendReply(false, false);
-						pg_usleep(1000);
-					}
-					else
-						walRcvDataCleanup();
-				}
-
-				ereport(FATAL,
-					(errmsg("Unexpected seek in the walreceiver buffer. "
-							"xlogrecptr is (%X:%X) but local xlogptr is (%X:%X).",
-							(uint32) (recptr >> 32),
-							(uint32) recptr,
-							(uint32) (startptr >> 32),
-							(uint32) startptr)));
-			}
-
-		}
-
-		/* OK to receive the logs */
-		Assert(walfreeoffset + segbytes <= recBufferSize);
-		errorno = memcpy_s(walrecvbuf + walfreeoffset, recBufferSize - walfreeoffset, buf, segbytes);
-		securec_check(errorno, "\0", "\0");
-
-		XLByteAdvance(recptr, (uint32)segbytes);
-
-		nbytes -= segbytes;
-		buf += segbytes;
-
-		// update shared memory
-		SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-		t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset += segbytes;
-		if (t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset == recBufferSize && 
-			t_thrd.walreceiver_cxt.walRcvCtlBlock->walWriteOffset > 0)
-		{
-			t_thrd.walreceiver_cxt.walRcvCtlBlock->walFreeOffset = 0;
-		}
-		t_thrd.walreceiver_cxt.walRcvCtlBlock->receivePtr = recptr;
-		SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
-
-	}
-
-	wakeupWalRcvWriter();
-}
-
 
 /*
  * Send reply message to primary, indicating our current XLOG positions, oldest

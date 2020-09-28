@@ -38,6 +38,7 @@ void gist_desc(StringInfo buf, XLogReaderState* record)
             out_gistxlogPageSplit(buf, (gistxlogPageSplit*)rec);
             break;
         case XLOG_GIST_CREATE_INDEX:
+            appendStringInfo(buf, "create_index: ");
             break;
         default:
             appendStringInfo(buf, "unknown gist op code %hhu", info);

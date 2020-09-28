@@ -204,6 +204,7 @@ typedef struct {
     uint32 blockddltype;
     uint32 columnrel;
     Oid ownerid;
+    char *mainData;
 } XLogBlockDdlParse;
 
 /* ********BLOCK DDL END ***************** */
@@ -477,6 +478,9 @@ typedef struct
     Buffer			buf_id;
 	Buffer			freeNext;
 } RedoMemSlot;
+
+typedef void (*InterruptFunc)();
+
 typedef struct
 {
 	int    totalblknum;    /* total slot */
@@ -486,6 +490,7 @@ typedef struct
 	Buffer firstreleaseslot;  /* first release slot */
 	RedoMemSlot *memslot;  /* slot itme */
 	bool  isInit;
+	InterruptFunc doInterrupt;
 }RedoMemManager;
 
 typedef void (*RefOperateFunc)(void *record);
@@ -519,6 +524,7 @@ typedef struct {
     RedoParseManager* manager;
     void* refrecord; /* origin dataptr, for mem release */
 	uint64 batchcount;
+	bool isFullSyncCheckpoint;
 } XLogRecParseState;
 
 typedef struct XLogBlockRedoExtreRto {
@@ -581,14 +587,15 @@ typedef enum {
     HEAP_PAGE_UPDATE_ORIG_BLOCK_NUM = 0
 } XLogHeapPageUpdateBlockEnum;
 
-extern THR_LOCAL RedoParseManager g_parseManager;
-extern THR_LOCAL RedoBufferManager g_bufferManager;
+extern THR_LOCAL RedoParseManager* g_parseManager;
+extern THR_LOCAL RedoBufferManager* g_bufferManager;
 
 extern void* XLogMemCtlInit(RedoMemManager* memctl, Size itemsize, int itemnum);
 extern RedoMemSlot* XLogMemAlloc(RedoMemManager* memctl);
 extern void XLogMemRelease(RedoMemManager* memctl, Buffer bufferid);
 
-extern void XLogRedoBufferInit(RedoBufferManager* buffermanager, int buffernum, RefOperate *refOperate);
+extern void XLogRedoBufferInit(RedoBufferManager* buffermanager, int buffernum, RefOperate *refOperate, 
+    InterruptFunc interruptOperte);
 extern void XLogRedoBufferDestory(RedoBufferManager* buffermanager);
 extern RedoMemSlot* XLogRedoBufferAlloc(
     RedoBufferManager* buffermanager, RelFileNode relnode, ForkNumber forkNum, BlockNumber blockNum);
@@ -599,44 +606,39 @@ extern Block XLogRedoBufferGetBlk(RedoBufferManager* buffermanager, RedoMemSlot*
 extern Block XLogRedoBufferGetPage(RedoBufferManager* buffermanager, Buffer bufferid);
 extern void XLogRedoBufferSetState(RedoBufferManager* buffermanager, RedoMemSlot* bufferslot, uint32 state);
 
-#define XLogRedoBufferInitFunc(buffernum, defOperate) do { \
-    XLogRedoBufferInit(&(g_bufferManager), buffernum, defOperate); \
+#define XLogRedoBufferInitFunc(bufferManager, buffernum, defOperate, interruptOperte) do { \
+    XLogRedoBufferInit(bufferManager, buffernum, defOperate, interruptOperte); \
 } while (0)
-#define XLogRedoBufferDestoryFunc() do { \
-    XLogRedoBufferDestory(&(g_bufferManager)); \
+#define XLogRedoBufferDestoryFunc(bufferManager) do { \
+    XLogRedoBufferDestory(bufferManager); \
 } while (0)
 #define XLogRedoBufferAllocFunc(relnode, forkNum, blockNum, bufferslot) do { \
-    *bufferslot = XLogRedoBufferAlloc(&(g_bufferManager), relnode, forkNum, blockNum); \
+    *bufferslot = XLogRedoBufferAlloc(g_bufferManager, relnode, forkNum, blockNum); \
 } while (0)
 #define XLogRedoBufferIsValidFunc(bufferid, isvalid) do { \
-    *isvalid = XLogRedoBufferIsValid(&(g_bufferManager), bufferid); \
+    *isvalid = XLogRedoBufferIsValid(g_bufferManager, bufferid); \
 } while (0)
 #define XLogRedoBufferReleaseFunc(bufferid) do { \
-    XLogRedoBufferRelease(&(g_bufferManager), bufferid); \
+    XLogRedoBufferRelease(g_bufferManager, bufferid); \
 } while (0)
 
 #define XLogRedoBufferGetBlkNumberFunc(bufferid, blknumber) do { \
-    *blknumber = XLogRedoBufferGetBlkNumber(&(g_bufferManager), bufferid); \
+    *blknumber = XLogRedoBufferGetBlkNumber(g_bufferManager, bufferid); \
 } while (0)
 
 #define XLogRedoBufferGetBlkFunc(bufferslot, blockdata) do { \
-    *blockdata = XLogRedoBufferGetBlk(&(g_bufferManager), bufferslot); \
+    *blockdata = XLogRedoBufferGetBlk(g_bufferManager, bufferslot); \
 } while (0)
 
 #define XLogRedoBufferGetPageFunc(bufferid, blockdata) do { \
-    *blockdata = (Page)XLogRedoBufferGetPage(&(g_bufferManager), bufferid); \
+    *blockdata = (Page)XLogRedoBufferGetPage(g_bufferManager, bufferid); \
 } while (0)
 #define XLogRedoBufferSetStateFunc(bufferslot, state) do { \
-    XLogRedoBufferSetState(&(g_bufferManager), bufferslot, state); \
+    XLogRedoBufferSetState(g_bufferManager, bufferslot, state); \
 } while (0)
 
-#define Inc_ReaderState_RefCount(readstate) (++((readstate)->refcount))
-
-#define DecAndGet_ReaderState_RefCount(readstate) (--(((XLogReaderState*)(readstate))->refcount))
-
-
-
-extern void XLogParseBufferInit(RedoParseManager* parsemanager, int buffernum, RefOperate *refOperate);
+extern void XLogParseBufferInit(RedoParseManager* parsemanager, int buffernum, RefOperate *refOperate, 
+    InterruptFunc interruptOperte);
 extern void XLogParseBufferDestory(RedoParseManager* parsemanager);
 extern void XLogParseBufferRelease(XLogRecParseState* recordstate);
 extern XLogRecParseState* XLogParseBufferAllocList(RedoParseManager* parsemanager, XLogRecParseState* blkstatehead, void *record);
@@ -645,12 +647,12 @@ extern void XLogInitBufferForRedo(XLogReaderState* record, uint8 block_id, RedoB
 extern XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState* record, uint8 buffer_id, ReadBufferMode mode,
     bool get_cleanup_lock, RedoBufferInfo* bufferinfo, ReadBufferMethod readmethod = WITH_NORMAL_CACHE);
 
-#define XLogParseBufferInitFunc(buffernum, defOperate) do { \
-    XLogParseBufferInit(&(g_parseManager), buffernum, defOperate); \
+#define XLogParseBufferInitFunc(parseManager, buffernum, defOperate, interruptOperte) do { \
+    XLogParseBufferInit(parseManager, buffernum, defOperate, interruptOperte); \
 } while (0)
 
-#define XLogParseBufferDestoryFunc() do { \
-    XLogParseBufferDestory(&(g_parseManager)); \
+#define XLogParseBufferDestoryFunc(parseManager) do { \
+    XLogParseBufferDestory(parseManager); \
 } while (0)
 
 #define XLogParseBufferReleaseFunc(recordstate) do { \
@@ -658,18 +660,45 @@ extern XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState* record, uin
 } while (0)
 
 #define XLogParseBufferAllocListFunc(record, newblkstate, blkstatehead) do { \
-    *newblkstate = XLogParseBufferAllocList(&(g_parseManager), blkstatehead, record); \
+    *newblkstate = XLogParseBufferAllocList(g_parseManager, blkstatehead, record); \
 } while (0)
 
 #define XLogParseBufferAllocListStateFunc(record, newblkstate, blkstatehead) do { \
     if (*blkstatehead == NULL) {                                                   \
-        *newblkstate = XLogParseBufferAllocList(&(g_parseManager), NULL, record);          \
+        *newblkstate = XLogParseBufferAllocList(g_parseManager, NULL, record);          \
         *blkstatehead = *newblkstate;                                              \
     } else {                                                                       \
-        *newblkstate = XLogParseBufferAllocList(&(g_parseManager), *blkstatehead, record); \
+        *newblkstate = XLogParseBufferAllocList(g_parseManager, *blkstatehead, record); \
     }                                                                              \
 } while (0)
 
+
+
+#ifdef EXTREME_RTO_DEBUG_AB
+typedef void (*AbnormalProcFunc)(void);
+typedef enum {
+    A_THREAD_EXIT,
+    ALLOC_FAIL,
+    OPEN_FILE_FAIL,
+    ABNORMAL_NUM,
+}AbnormalType;
+extern AbnormalProcFunc g_AbFunList[ABNORMAL_NUM];
+
+
+#define ADD_ABNORMAL_POSITION(pos) do {                                                         \
+    static int __count##pos = 0;                                                                \
+    __count##pos++;                                                                                  \
+    if (g_instance.attr.attr_storage.extreme_rto_ab_pos == pos) {                        \
+        if (g_instance.attr.attr_storage.extreme_rto_ab_count == __count##pos) {                \
+            ereport(LOG, (errmsg("extreme rto debug abnormal stop pos:%d, type:%d, count:%d", pos, \
+                g_instance.attr.attr_storage.extreme_rto_ab_type, __count##pos)));                \
+            g_AbFunList[g_instance.attr.attr_storage.extreme_rto_ab_type % ABNORMAL_NUM]();     \
+        }                                                                                       \
+    }                                                                                           \
+} while(0)
+#else
+#define ADD_ABNORMAL_POSITION(pos)
+#endif
 void heap_xlog_clean_operator_page(
     RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen, Size* freespace, bool repair_fragmentation);
 void heap_xlog_freeze_operator_page(RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen);
@@ -870,5 +899,5 @@ extern void SyncOneBufferForExtremRto(RedoBufferInfo *bufferinfo);
 extern void XLogBlockInitRedoBlockInfo(XLogBlockHead* blockhead, RedoBufferTag* blockinfo);
 extern void XLogBlockDdlDoRealAction(XLogBlockHead* blockhead, void* blockrecbody, RedoBufferInfo* bufferinfo);
 extern void GinRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
-
+extern void GistRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo);
 #endif

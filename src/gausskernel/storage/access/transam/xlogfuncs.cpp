@@ -793,6 +793,7 @@ Datum pg_resume_bkp_flag(PG_FUNCTION_ARGS)
     resultHeapTuple = heap_form_tuple(resultTupleDesc, values, isnull);
     if (0 != pg_strcasecmp(rewindTime, "")) {
         pfree(rewindTime);
+        rewindTime = NULL;
     }
 
     result = HeapTupleGetDatum(resultHeapTuple);

@@ -598,9 +598,10 @@ int walRcvWrite(WalRcvCtlBlock* walrcb)
     SpinLockAcquire(&walrcb->mutex);
 
     if (walrcb->walFreeOffset == walrcb->walWriteOffset) {
-        if ((IsExtremeRtoReadWorkerRunning()) && (walrcb->walFreeOffset !=  walrcb->walReadOffset))
-        {
-            nbytes = 1;
+        if (IsExtremeRtoReadWorkerRunning()) {
+            if (walrcb->walFreeOffset != walrcb->walReadOffset) {
+                nbytes = 1;
+            }
         }
 
         SpinLockRelease(&walrcb->mutex);
@@ -627,14 +628,10 @@ int walRcvWrite(WalRcvCtlBlock* walrcb)
     walrcb->walWriteOffset += nbytes;
     walrcb->walStart = startptr;
     if (IsExtremeRedo()) {
-        if (walrcb->walReadOffset == recBufferSize) {
-            walrcb->walReadOffset = 0;
-        }
-        if (walrcb->walFreeOffset == recBufferSize && walrcb->walReadOffset > 0) {
-            walrcb->walFreeOffset = 0;
-        }
-        if (walrcb->walWriteOffset == recBufferSize && (walrcb->walFreeOffset != recBufferSize)) {
+        if (walrcb->walWriteOffset == recBufferSize && (walrcb->walReadOffset > 0)) {
             walrcb->walWriteOffset = 0;
+            if (walrcb->walFreeOffset == recBufferSize)
+                walrcb->walFreeOffset = 0;
             
         }
     } else {

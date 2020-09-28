@@ -204,7 +204,7 @@ void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo)
                     pfree_ext(parentdir);
 
                     /* Create database directory */
-                    if (mkdir(dir, S_IRWXU) < 0)
+                    if (mkdir(dir, S_IRWXU) < 0 && errno != EEXIST)
                         ereport(
                             ERROR, (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", dir)));
                 }
@@ -2606,6 +2606,41 @@ void xlog_create_tblspc(Oid ts_id, char* ts_path, bool isRelativePath)
 
     if (isRelativePath) {
         pfree_ext(location);
+    }
+}
+void xlog_drop_tblspc(Oid tsId)
+{
+     /*
+     * If we issued a WAL record for a drop tablespace it implies that
+     * there were no files in it at all when the DROP was done. That means
+     * that no permanent objects can exist in it at this point.
+     *
+     * It is possible for standby users to be using this tablespace as a
+     * location for their temporary files, so if we fail to remove all
+     * files then do conflict processing and try again, if currently
+     * enabled.
+     *
+     * Other possible reasons for failure include bollixed file
+     * permissions on a standby server when they were okay on the primary,
+     * etc etc. There's not much we can do about that, so just remove what
+     * we can and press on.
+     */
+    if (!destroy_tablespace_directories(tsId, true)) {
+        ResolveRecoveryConflictWithTablespace(tsId);
+
+        /*
+         * If we did recovery processing then hopefully the backends who
+         * wrote temp files should have cleaned up and exited by now.  So
+         * retry before complaining.  If we fail again, this is just a LOG
+         * condition, because it's not worth throwing an ERROR for (as
+         * that would crash the database and require manual intervention
+         * before we could get past this WAL record on restart).
+         */
+        if (!destroy_tablespace_directories(tsId, true))
+            ereport(LOG,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("directories for tablespace %u could not be removed", tsId),
+                    errhint("You can remove the directories manually if necessary.")));
     }
 }
 

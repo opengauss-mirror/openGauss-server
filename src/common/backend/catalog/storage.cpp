@@ -875,6 +875,7 @@ void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum)
         CFileNode cFileNode(rnode, ColForkNum2ColumnId(forkNum), MAIN_FORKNUM);
         CUStorage* cuStorage = New(CurrentMemoryContext) CUStorage(cFileNode);
         Assert(cuStorage);
+        TablespaceCreateDbspace(rnode.spcNode, rnode.dbNode, true);
         cuStorage->CreateStorage(0, true);
         DELETE_EX(cuStorage);
     }

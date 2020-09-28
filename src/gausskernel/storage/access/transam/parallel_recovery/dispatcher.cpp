@@ -504,12 +504,14 @@ static void StopRecoveryWorkers(int code, Datum arg)
 static void DestroyRecoveryWorkers()
 {
     if (g_dispatcher != NULL) {
+        SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
         for (uint32 i = 0; i < g_dispatcher->totalWorkerCount; i++)
             DestroyPageRedoWorker(g_dispatcher->pageWorkers[i]);
         if (g_dispatcher->txnWorker != NULL)
             DestroyTxnRedoWorker(g_dispatcher->txnWorker);
         if (g_dispatcher->chosedWorkerIds != NULL) {
             pfree(g_dispatcher->chosedWorkerIds);
+            g_dispatcher->chosedWorkerIds = NULL;
         }
         if (get_real_recovery_parallelism() > 1) {
             MemoryContextSwitchTo(g_dispatcher->oldCtx);
@@ -517,6 +519,7 @@ static void DestroyRecoveryWorkers()
             g_instance.comm_cxt.predo_cxt.parallelRedoCtx = NULL;
         }
         g_dispatcher = NULL;
+        SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     }
 }
 
@@ -1781,7 +1784,9 @@ void redo_get_wroker_statistic(uint32* realNum, RedoWorkerStatsData* worker, uin
 {
     PageRedoWorker* redoWorker = NULL;
     Assert(workerLen == MAX_RECOVERY_THREAD_NUM);
+    SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     if (g_dispatcher == NULL) {
+        SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
         *realNum = 0;
         return;
     }
@@ -1793,6 +1798,7 @@ void redo_get_wroker_statistic(uint32* realNum, RedoWorkerStatsData* worker, uin
         worker[i].queue_max_usage = (uint32)(pg_atomic_read_u32(&((redoWorker->queue)->maxUsage)));
         worker[i].redo_rec_count = (uint32)(pg_atomic_read_u64(&((redoWorker->queue)->totalCnt)));
     }
+    SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
 }
 
 RedoWaitInfo redo_get_io_event(int32 event_id)
@@ -1802,26 +1808,28 @@ RedoWaitInfo redo_get_io_event(int32 event_id)
     PgBackendStatus* beentry = NULL;
     int index = MAX_BACKEND_SLOT + StartupProcess;
 
-    if (IS_PGSTATE_TRACK_UNDEFINE || PgBackendStatusArray == NULL) {
+    if (IS_PGSTATE_TRACK_UNDEFINE || t_thrd.shemem_ptr_cxt.BackendStatusArray == NULL) {
         return result_info;
     }
 
-    beentry = &(PgBackendStatusArray[index]);
+    beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + index;
     tmp_io = beentry->waitInfo.event_info.io_info[event_id - WAIT_EVENT_BUFFILE_READ];
     result_info.total_duration = tmp_io.total_duration;
     result_info.counter = tmp_io.counter;
+    SpinLockAcquire(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     if (g_dispatcher == NULL || event_id == WAIT_EVENT_WAL_READ || event_id == WAIT_EVENT_PREDO_PROCESS_PENDING) {
+        SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
         return result_info;
     }
 
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
         index = g_dispatcher->pageWorkers[i]->index;
-        beentry = &(PgBackendStatusArray[index]);
+        beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + index;
         tmp_io = beentry->waitInfo.event_info.io_info[event_id - WAIT_EVENT_BUFFILE_READ];
         result_info.total_duration += tmp_io.total_duration;
         result_info.counter += tmp_io.counter;
     }
-
+    SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
     return result_info;
 }
 
