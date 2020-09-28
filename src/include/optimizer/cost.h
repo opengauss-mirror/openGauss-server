@@ -82,8 +82,7 @@ extern void cost_update(Path* path, bool vectorized, Cost input_cost, double tup
 extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(
     double tuples_fetched, BlockNumber pages, double index_pages, PlannerInfo* root, bool ispartitionedindex);
-extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel,
-    ParamPathInfo* param_info, int nworkers = 0);
+extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
 extern void cost_dfsscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);

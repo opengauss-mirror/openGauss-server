@@ -47,11 +47,13 @@ extern void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root = NULL);
 extern Path* get_cheapest_path(PlannerInfo* root, RelOptInfo* rel, const double* agg_groups, bool has_groupby);
 extern Path* find_hinted_path(Path* current_path);
 extern void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path);
+extern void add_partial_path(RelOptInfo* parent_rel, Path* new_path);
+extern bool add_partial_path_precheck(RelOptInfo* parent_rel, Cost total_cost, List* pathkeys);
 extern bool add_path_precheck(
     RelOptInfo* parent_rel, Cost startup_cost, Cost total_cost, List* pathkeys, Relids required_outer);
 
 extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer,
-    int dop = 1, int nworkers = 0);
+    int dop = 1, int parallel_degree = 0);
 extern Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
 extern Path *create_tsstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
 extern IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* indexclauses, List* indexclausecols,
@@ -68,14 +70,14 @@ extern BitmapHeapPath* create_bitmap_heap_path(
 extern BitmapAndPath* create_bitmap_and_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern BitmapOrPath* create_bitmap_or_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals);
-extern AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpaths, Relids required_outer);
+extern AppendPath* create_append_path(
+    PlannerInfo* root, RelOptInfo* rel, List* subpaths, Relids required_outer, int parallel_degree);
 extern MergeAppendPath* create_merge_append_path(
     PlannerInfo* root, RelOptInfo* rel, List* subpaths, List* pathkeys, Relids required_outer);
-extern ResultPath* create_result_path(List* quals, Path* subpath = NULL);
+extern ResultPath* create_result_path(RelOptInfo* rel, List* quals, Path* subpath = NULL);
 extern MaterialPath* create_material_path(Path* subpath, bool materialize_all = false);
 extern UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath, SpecialJoinInfo* sjinfo);
-extern GatherPath *create_gather_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath, Relids required_outer,
-    int nworkers);
+extern GatherPath* create_gather_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath, Relids required_outer);
 extern Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkeys, Relids required_outer);
 extern Path* create_functionscan_path(PlannerInfo* root, RelOptInfo* rel);
 extern Path* create_valuesscan_path(PlannerInfo* root, RelOptInfo* rel);
@@ -109,6 +111,9 @@ extern RelOptInfo* find_base_rel(PlannerInfo* root, int relid);
 extern RelOptInfo* find_join_rel(PlannerInfo* root, Relids relids);
 extern RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* outer_rel, RelOptInfo* inner_rel,
     SpecialJoinInfo* sjinfo, List** restrictlist_ptr);
+extern Relids min_join_parameterization(
+    PlannerInfo* root, Relids joinrelids, RelOptInfo* outer_rel, RelOptInfo* inner_rel);
+extern RelOptInfo* build_empty_join_rel(PlannerInfo* root);
 extern AppendRelInfo* find_childrel_appendrelinfo(PlannerInfo* root, RelOptInfo* rel);
 extern ParamPathInfo* get_baserel_parampathinfo(PlannerInfo* root, RelOptInfo* baserel, Relids required_outer);
 extern ParamPathInfo* get_joinrel_parampathinfo(PlannerInfo* root, RelOptInfo* joinrel, Path* outer_path,
