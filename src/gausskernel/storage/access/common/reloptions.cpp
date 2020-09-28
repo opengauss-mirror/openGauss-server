@@ -393,8 +393,10 @@ static void initialize_reloptions(void)
         j++;
     j += t_thrd.relopt_cxt.num_custom_options;
 
-    if (t_thrd.relopt_cxt.relOpts)
+    if (t_thrd.relopt_cxt.relOpts) {
         pfree(t_thrd.relopt_cxt.relOpts);
+        t_thrd.relopt_cxt.relOpts = NULL;
+    }
     t_thrd.relopt_cxt.relOpts = (relopt_gen**)MemoryContextAlloc(t_thrd.top_mem_cxt, (j + 1) * sizeof(relopt_gen*));
 
     j = 0;

@@ -135,6 +135,7 @@ extern uint64 pg_cal_tablespace_size_oid(Oid tblspcOid);
 extern Oid ConvertToPgclassRelTablespaceOid(Oid tblspc);
 extern Oid ConvertToRelfilenodeTblspcOid(Oid tblspc);
 extern void xlog_create_tblspc(Oid ts_id, char* ts_path, bool isRelativePath);
+extern void xlog_drop_tblspc(Oid tsId);
 
 #endif /* TABLESPACE_H */
 

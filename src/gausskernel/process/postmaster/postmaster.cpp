@@ -213,6 +213,7 @@ int bbox_handler_exit = 0;
 
 extern int S3_init();
 extern void TermMOT();
+static const int RECOVERY_PARALLELISM_DEFAULT = 1;
 
 /* flag to get logic cluster name for dn alarm */
 static bool isNeedGetLCName = true;
@@ -2447,19 +2448,36 @@ static void checkDataDir(void)
 
 static void CheckExtremeRtoGUCConflicts(void)
 {
+    const int minReceiverBufSize = 32 * 1024;
     if ((g_instance.attr.attr_storage.recovery_parse_workers > 1) && IS_DN_DUMMY_STANDYS_MODE()) {
         ereport(ERROR,
             (errcode(ERRCODE_SYSTEM_ERROR),
                 errmsg("when starting as dummy_standby mode, we couldn't support extreme rto."),
                 errhint("Either turn off extreme rto, or set \"replication_type\" to 1.")));
     }
-
     if ((g_instance.attr.attr_storage.recovery_parse_workers > 1) && g_instance.attr.attr_storage.EnableHotStandby) {
         ereport(ERROR,
             (errcode(ERRCODE_SYSTEM_ERROR),
                 errmsg("extreme rto could not support hot standby."),
                 errhint("Either turn off extreme rto, or turn off hot_standby.")));
     }
+    if ((g_instance.attr.attr_storage.recovery_parse_workers > 1) && 
+        g_instance.attr.attr_storage.WalReceiverBufSize < minReceiverBufSize) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SYSTEM_ERROR),
+                errmsg("when starting extreme rto, wal receiver buf should not smaller than %dMB", 
+                    minReceiverBufSize / 1024),
+                errhint("recommend config \"wal_receiver_buffer_size=64MB\"")));
+    }
+}
+static void CheckRecoveryParaConflict()
+{
+	if (g_instance.attr.attr_storage.max_recovery_parallelism > RECOVERY_PARALLELISM_DEFAULT 
+	    && IS_DN_DUMMY_STANDYS_MODE()) {
+		ereport(WARNING,
+		    (errmsg("when starting as dummy_standby mode, we couldn't support parallel redo, down it")));
+		g_instance.attr.attr_storage.max_recovery_parallelism = RECOVERY_PARALLELISM_DEFAULT;
+	}
 }
 
 /*
@@ -2515,7 +2533,7 @@ static void CheckGUCConflicts(void)
         ereport(LOG, (errmsg("when starting as multi_standby mode, we couldn't support data replicaton.")));
         u_sess->attr.attr_storage.enable_data_replicate = false;
     }
-    
+    CheckRecoveryParaConflict();
     if (g_instance.attr.attr_storage.enable_mix_replication &&
         g_instance.attr.attr_storage.MaxSendSize >= g_instance.attr.attr_storage.DataQueueBufSize) {
         write_stderr("%s: the data queue buffer size must be larger than the wal sender max send size for the "
@@ -7024,6 +7042,7 @@ static void handle_promote_signal()
                 }
                 t_thrd.postmaster_cxt.audit_primary_failover = true;
                 /* Tell startup process to finish recovery */
+               ereport(LOG, (errmsg("Instance to do failover.")));
                 SendNotifySignal(NOTIFY_FAILOVER, g_instance.pid_cxt.StartupPID);
             }
         }
@@ -10767,6 +10786,7 @@ Datum disable_conn(PG_FUNCTION_ARGS)
      */
     if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
         if(!knl_g_get_is_local_redo()) {
+            g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node = true;
             ereport(ERROR, (errcode_for_file_access(),
                 errmsg("could not add lock when DN is not redo all xlog, redo done flag is false")));
         }

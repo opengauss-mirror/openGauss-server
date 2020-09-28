@@ -869,6 +869,26 @@ void PublishStartupProcessInformation(void)
 }
 
 /*
+ * Used from bufgr to share the value of the buffer that Startup waits on,
+ * or to reset the value to "not waiting" (-1). This allows processing
+ * of recovery conflicts for buffer pins. Set is made before backends look
+ * at this value, so locking not required, especially since the set is
+ * an atomic integer set operation.
+ */
+void SetStartupBufferPinWaitBufId(int bufid)
+{
+    g_instance.proc_base->startupBufferPinWaitBufId = bufid;
+}
+
+/*
+ * Used by backends when they receive a request to check for buffer pin waits.
+ */
+int GetStartupBufferPinWaitBufId(void)
+{
+    return g_instance.proc_base->startupBufferPinWaitBufId;
+}
+
+/*
  * Check whether there are at least N free PGPROC objects.
  *
  * Note: this is designed on the assumption that N will generally be small.

@@ -43,7 +43,7 @@
 #include "storage/smgr.h"
 #include "storage/buf_internals.h"
 #include "storage/freespace.h"
-
+#include "storage/ipc.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/rel.h"
@@ -53,8 +53,8 @@
 #include "access/twophase.h"
 #include "access/redo_common.h"
 
-THR_LOCAL RedoParseManager g_parseManager;
-THR_LOCAL RedoBufferManager g_bufferManager;
+THR_LOCAL RedoParseManager *g_parseManager = NULL;
+THR_LOCAL RedoBufferManager *g_bufferManager = NULL;
 
 #ifdef BUILD_ALONE
 THR_LOCAL bool assert_enabled = true;
@@ -590,6 +590,11 @@ RedoMemSlot* XLogMemAlloc(RedoMemManager* memctl)
             memctl->usedblknum++;
             nextfreeslot->freeNext = InvalidBuffer;
         }
+
+        if (memctl->doInterrupt != NULL) {
+            memctl->doInterrupt();
+        }
+        
     } while (nextfreeslot == NULL);
 
     return nextfreeslot;
@@ -613,18 +618,26 @@ void XLogMemRelease(RedoMemManager* memctl, Buffer bufferid)
     } while (!AtomicCompareExchangeBuffer(&memctl->firstreleaseslot, &oldFirst, bufferid));
 }
 
-void XLogRedoBufferInit(RedoBufferManager* buffermanager, int buffernum, RefOperate* refOperate)
+void XLogRedoBufferInit(RedoBufferManager *buffermanager, int buffernum, RefOperate *refOperate, 
+    InterruptFunc interruptOperte)
 {
-    void* allocdata = NULL;
-    allocdata = XLogMemCtlInit(&(buffermanager->memctl), (BLCKSZ + sizeof(RedoBufferDesc)), buffernum);
+    void *allocdata = XLogMemCtlInit(&(buffermanager->memctl), (BLCKSZ + sizeof(RedoBufferDesc)), buffernum);
     buffermanager->BufferBlockPointers = allocdata;
     buffermanager->refOperate = refOperate;
+    buffermanager->memctl.doInterrupt = interruptOperte;
+    buffermanager->memctl.isInit = true;
+    g_bufferManager = buffermanager;
     return;
 }
 
 void XLogRedoBufferDestory(RedoBufferManager* buffermanager)
 {
-    pfree(buffermanager->BufferBlockPointers);
+    g_bufferManager = NULL;
+    buffermanager->memctl.isInit = false;
+    if (buffermanager->BufferBlockPointers != NULL) {
+        pfree(buffermanager->BufferBlockPointers);
+        buffermanager->BufferBlockPointers = NULL;
+    }
 }
 
 RedoMemSlot* XLogRedoBufferAlloc(
@@ -763,20 +776,28 @@ void XLogRedoBufferSetState(RedoBufferManager* buffermanager, RedoMemSlot* buffe
     bufferdesc->state |= state;
 }
 
-void XLogParseBufferInit(RedoParseManager* parsemanager, int buffernum, RefOperate* refOperate)
+void XLogParseBufferInit(RedoParseManager *parsemanager, int buffernum, RefOperate *refOperate, 
+    InterruptFunc interruptOperte)
 {
-    void* allocdata = NULL;
-    allocdata =
-        XLogMemCtlInit(&(parsemanager->memctl), (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc)), buffernum);
+    void *allocdata = NULL;
+    allocdata = XLogMemCtlInit(&(parsemanager->memctl), (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc)),
+                               buffernum);
     parsemanager->parsebuffers = allocdata;
+    parsemanager->refOperate = refOperate;
+    parsemanager->memctl.doInterrupt = interruptOperte;
     parsemanager->memctl.isInit = true;
     parsemanager->refOperate = refOperate;
+    g_parseManager = parsemanager;
     return;
 }
 
 void XLogParseBufferDestory(RedoParseManager* parsemanager)
 {
-    pfree(parsemanager->parsebuffers);
+    g_parseManager = NULL;
+    if (parsemanager->parsebuffers != NULL) {
+        pfree(parsemanager->parsebuffers);
+        parsemanager->parsebuffers = NULL;
+    }
     parsemanager->memctl.isInit = false;
 }
 
@@ -881,6 +902,7 @@ void XLogBlockDataCommonRedo(XLogBlockHead* blockhead, void* blockrecbody, RedoB
             GinRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
         case RM_GIST_ID:
+            GistRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
         case RM_SPGIST_ID:
             break;
@@ -993,6 +1015,12 @@ void XLogBlockDdlDoRealAction(XLogBlockHead* blockhead, void* blockrecbody, Redo
         case BLOCK_DDL_TRUNCATE_RELNODE:
             XLogBlockSmgrRedoTruncate(rnode, blockhead->blkno, blockhead->end_ptr);
             break;
+        case BLOCK_DDL_DROP_RELNODE: {
+            SMgrRelation reln =
+                smgropen(bufferinfo->blockinfo.rnode, InvalidBackendId, GetColumnNum(bufferinfo->blockinfo.forknum));
+            smgrclose(reln);
+            break;
+        }
         default:
             break;
     }
@@ -1094,11 +1122,11 @@ void UpdateFsm(RedoBufferTag* blockInfo, Size freespace)
     }
 }
 
-void ExtremeRtoFlushBuffer(RedoBufferInfo* bufferinfo, bool updateFsm)
+void ExtremeRtoFlushBuffer(RedoBufferInfo *bufferinfo, bool updateFsm)
 {
+    Size freespace;
     if (updateFsm) {
-        Size freespace = PageGetHeapFreeSpace(bufferinfo->pageinfo.page);
-        UpdateFsm(&bufferinfo->blockinfo, freespace);
+        freespace = PageGetHeapFreeSpace(bufferinfo->pageinfo.page);   
     }
 
     if (ParseStateWithoutCache()) {
@@ -1115,6 +1143,10 @@ void ExtremeRtoFlushBuffer(RedoBufferInfo* bufferinfo, bool updateFsm)
             }
             UnlockReleaseBuffer(bufferinfo->buf); /* release buffer */
         }
+    }
+ 
+    if (updateFsm) {
+        UpdateFsm(&bufferinfo->blockinfo, freespace);
     }
 }
 

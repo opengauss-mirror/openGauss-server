@@ -2045,8 +2045,10 @@ void multixact_redo(XLogReaderState* record)
          */
         if (TransactionIdFollowsOrEquals(max_xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
             (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-            t_thrd.xact_cxt.ShmemVariableCache->nextXid = max_xid;
-            TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+            if (TransactionIdFollowsOrEquals(max_xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+                t_thrd.xact_cxt.ShmemVariableCache->nextXid = max_xid;
+                TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+            }
             LWLockRelease(XidGenLock);
         }
     } else

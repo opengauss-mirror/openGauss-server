@@ -250,6 +250,7 @@ typedef struct knl_g_localinfo_context {
     volatile uint32 term = 1;
     bool set_term = true;
     knl_g_disconn_node_context disable_conn_node;
+    volatile bool need_disable_connection_node = false;
 } knl_g_localinfo_context;
 
 typedef struct knl_g_counters_context {
@@ -396,6 +397,7 @@ typedef struct knl_g_parallel_redo_context {
     volatile PageRedoWorkerStatus pageRedoThreadStatusList[MAX_RECOVERY_THREAD_NUM];
     RedoPerf redoPf; /* redo Performance statistics */
     pg_atomic_uint32 isLocalRedoFinish;
+    slock_t destroy_lock; /* redo worker destroy lock */
     pg_atomic_uint64 endRecPtr;
 } knl_g_parallel_redo_context;
 

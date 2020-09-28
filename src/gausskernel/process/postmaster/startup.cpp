@@ -291,7 +291,7 @@ bool IsFailoverTriggered(void)
 	else
 	{
 	    /* check for primary */
-	    uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_triggeredstate));
+        uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
 		if (tgigger == (uint32)extreme_rto::TRIGGER_FAILOVER)
 	        return true;	
 	}
@@ -306,7 +306,7 @@ bool IsSwitchoverTriggered(void)
     else
 	{
 	    /* check for primary */
-	    uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_triggeredstate));
+        uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
 		if (tgigger == (uint32)extreme_rto::TRIGGER_SWITCHOVER)
 	        return true;
 	}
@@ -320,7 +320,7 @@ bool IsPrimaryTriggered(void)
     else
 	{
 	    /* check for primary */
-	    uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_triggeredstate));
+        uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
 		if (tgigger == (uint32)extreme_rto::TRIGGER_PRIMARY)
 	        return true;
 	}
@@ -334,7 +334,7 @@ bool IsStandbyTriggered(void)
     else
 	{
 	    /* check for primary */
-	    uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_triggeredstate));
+        uint32 tgigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
 		if (tgigger == (uint32)extreme_rto::TRIGGER_STADNBY)
 	        return true;
 	}

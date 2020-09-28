@@ -1059,7 +1059,9 @@ void ProcArrayApplyRecoveryInfo(RunningTransactions running)
 
     if (TransactionIdFollows(nextXid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
         LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-        t_thrd.xact_cxt.ShmemVariableCache->nextXid = nextXid;
+        if (TransactionIdFollows(nextXid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+            t_thrd.xact_cxt.ShmemVariableCache->nextXid = nextXid;
+        }
         LWLockRelease(XidGenLock);
     }
 

@@ -498,10 +498,12 @@ XLogRecord* XLogReadRecord(
     if (doDecode) {
         if (DecodeXLogRecord(state, record, errormsg, readoldversion)) {
             return record;
-        } else
+        } else {
             return NULL;
-    } else
+        }
+    } else {
         return record;
+    }
 
 err:
 

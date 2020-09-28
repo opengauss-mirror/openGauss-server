@@ -174,6 +174,7 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
     predo_cxt->redoPf.local_max_lsn = 0;
     knl_g_set_is_local_redo_finish(false);
     predo_cxt->redoType = DEFAULT_REDO;
+    SpinLockInit(&(predo_cxt->destroy_lock));
 }
 
 static void knl_g_cache_init(knl_g_cache_context* cache_cxt)

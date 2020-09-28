@@ -172,26 +172,30 @@ void gistRedoCreateIndexOperatorPage(RedoBufferInfo* buffer)
 static XLogRecParseState* GistXlogUpdateParseBlock(XLogReaderState* record, uint32* blocknum)
 {
     XLogRecParseState* recordstatehead = NULL;
+    *blocknum = 1;
 
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
 
     XLogRecSetBlockDataState(record, GIST_UPDATE_ORIG_BLOCK_NUM, recordstatehead);
 
-    XLogRecParseState* blockstate = NULL;
-    XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (XLogRecHasBlockRef(record, GIST_UPDATE_LEFT_CHILD_BOCK_NUM)) {
+        XLogRecParseState *blockstate = NULL;
+        XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
 
-    XLogRecSetBlockDataState(record, GIST_UPDATE_LEFT_CHILD_BOCK_NUM, blockstate);
-    *blocknum = 2;
-
+        XLogRecSetBlockDataState(record, GIST_UPDATE_LEFT_CHILD_BOCK_NUM, blockstate);
+        *blocknum += 1;
+    }
     return recordstatehead;
 }
 
-static XLogRecParseState* GistXlogPageSplitParse(XLogReaderState* record, uint32* blocknum)
+static XLogRecParseState *GistXlogPageSplitParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
     XLogRecParseState* recordstatehead = NULL;
     XLogRecParseState* blockstate = NULL;
 
     gistxlogPageSplit* xldata = (gistxlogPageSplit*)XLogRecGetData(record);
+    *blocknum = xldata->npage;
+    bool isrootsplit = false;
     for (uint16 i = 0; i < xldata->npage; i++) {
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         if (recordstatehead == NULL) {
@@ -201,13 +205,15 @@ static XLogRecParseState* GistXlogPageSplitParse(XLogReaderState* record, uint32
 
         BlockNumber blkno;
         XLogRecGetBlockTag(record, i + 1, NULL, NULL, &blkno);
-        if (blkno == GIST_ROOT_BLKNO)
+        if (blkno == GIST_ROOT_BLKNO) {
             XLogRecSetAuxiBlkNumState(
                 &blockstate->blockparse.extra_rec.blockdatarec, InvalidForkNumber, InvalidForkNumber);
-        else {
+            isrootsplit = true;
+        }
+        if (blkno != GIST_ROOT_BLKNO) {
             uint32 flag;
-            if ((i < xldata->npage - 1) && xldata->markfollowright)
-                flag = F_FOLLOW_RIGHT;
+            if ((i < xldata->npage - 1) && !isrootsplit && xldata->markfollowright)
+                flag = 1;
             else
                 flag = 0;
 
@@ -220,8 +226,7 @@ static XLogRecParseState* GistXlogPageSplitParse(XLogReaderState* record, uint32
         }
     }
 
-    *blocknum = xldata->npage;
-    if (XLogRecHasBlockRef(record, 0)) {
+    if (XLogRecHasBlockRef(record, GIST_SPLIT_FOLLOW_WRITE_BLOCK_NUM)) {
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         XLogRecSetBlockDataState(record, GIST_SPLIT_FOLLOW_WRITE_BLOCK_NUM, blockstate);
         ++(*blocknum);
@@ -229,7 +234,7 @@ static XLogRecParseState* GistXlogPageSplitParse(XLogReaderState* record, uint32
     return recordstatehead;
 }
 
-static XLogRecParseState* GistXlogCreateIndex(XLogReaderState* record, uint32* blocknum)
+static XLogRecParseState *GistXlogCreateIndexParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
     XLogRecParseState* recordstatehead = NULL;
 
@@ -251,14 +256,83 @@ XLogRecParseState* GistRedoParseToBlock(XLogReaderState* record, uint32* blocknu
             recordblockstate = GistXlogUpdateParseBlock(record, blocknum);
             break;
         case XLOG_GIST_PAGE_SPLIT:
-            recordblockstate = GistXlogPageSplitParse(record, blocknum);
+            recordblockstate = GistXlogPageSplitParseBlock(record, blocknum);
             break;
         case XLOG_GIST_CREATE_INDEX:
-            recordblockstate = GistXlogCreateIndex(record, blocknum);
+            recordblockstate = GistXlogCreateIndexParseBlock(record, blocknum);
             break;
         default:
-            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("gist_redo: unknown op code %u", info)));
+            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("gist parse: unknown op code %u", info)));
     }
 
     return recordblockstate;
 }
+
+void GistPageUpdateRedoBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+{
+    XLogBlockDataParse *datadecode = blockdatarec;
+
+    if (XLogBlockDataGetBlockId(datadecode) == GIST_UPDATE_ORIG_BLOCK_NUM) {
+        XLogRedoAction action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
+        if (action == BLK_NEEDS_REDO) {
+            Size blkdatalen = 0;
+            char *blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
+            gistRedoPageUpdateOperatorPage(bufferinfo, datadecode->main_data, blkdata, blkdatalen);
+            MakeRedoBufferDirty(bufferinfo);
+        }
+    } else {
+        XLogRedoAction action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
+        if (action == BLK_NEEDS_REDO || action == BLK_RESTORED) {
+            gistRedoClearFollowRightOperatorPage(bufferinfo);
+            MakeRedoBufferDirty(bufferinfo);
+        }
+    }
+}
+
+
+void GistPageSplitRedoBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+{
+    XLogBlockDataParse *datadecode = blockdatarec;
+
+    if (XLogBlockDataGetBlockId(datadecode) == GIST_SPLIT_FOLLOW_WRITE_BLOCK_NUM) {
+        XLogRedoAction action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
+        if (action == BLK_NEEDS_REDO || action == BLK_RESTORED) {
+            gistRedoClearFollowRightOperatorPage(bufferinfo);
+            MakeRedoBufferDirty(bufferinfo);
+        }
+    } else {
+        Size blkdatalen = 0;
+        char *blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
+        BlockNumber nextblkno = XLogBlockDataGetAuxiBlock1(datadecode);
+        bool markflag = (XLogBlockDataGetAuxiBlock2(datadecode) > 0);
+        char *maindata = XLogBlockDataGetMainData(datadecode, NULL);
+        gistRedoPageSplitOperatorPage(bufferinfo, (void *)maindata, blkdata, blkdatalen, markflag, nextblkno);
+        MakeRedoBufferDirty(bufferinfo);
+    }
+}
+
+void GistCreateIndexRedoBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+{
+    gistRedoCreateIndexOperatorPage(bufferinfo);
+    MakeRedoBufferDirty(bufferinfo);
+}
+
+
+void GistRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+{
+    uint8 info = XLogBlockHeadGetInfo(blockhead) & ~XLR_INFO_MASK;
+    switch (info) {
+        case XLOG_GIST_PAGE_UPDATE:
+            GistPageUpdateRedoBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        case XLOG_GIST_PAGE_SPLIT:
+            GistPageSplitRedoBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        case XLOG_GIST_CREATE_INDEX:
+            GistCreateIndexRedoBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        default:
+            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("gist redo: unknown op code %u", info)));
+    }
+}
+

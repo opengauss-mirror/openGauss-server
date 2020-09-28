@@ -235,7 +235,7 @@ extern Datum pg_xlog_location_diff(PG_FUNCTION_ARGS);
 int XLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
     char* readBuf, TimeLineID* readTLI);
 bool XLogReadFromWriteBufferForFirst(XLogRecPtr targetPagePtr,              int reqLen, char* readBuf);
-int XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr,            int reqLen, char* readBuf, uint32 *rereadlen);
+bool XLogReadFromWriteBuffer(XLogRecPtr targetStartPtr,            int reqLen, char* readBuf, uint32 *rereadlen);
 
 
 #endif /* XLOG_INTERNAL_H */

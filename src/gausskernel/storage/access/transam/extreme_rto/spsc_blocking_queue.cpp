@@ -92,6 +92,7 @@ bool SPSCBlockingQueuePut(SPSCBlockingQueue* queue, void* element)
     do {
         tail = pg_atomic_read_u32(&queue->readTail);
         cnt++;
+        HandlePageRedoInterrupts();
     } while (SPACE(head, tail, queue->mask) == 0);
 
     /*

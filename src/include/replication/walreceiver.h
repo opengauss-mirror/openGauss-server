@@ -185,6 +185,7 @@ typedef struct WalRcvData {
 } WalRcvData;
 
 extern XLogRecPtr latestValidRecord;
+extern pg_crc32 latestRecordCrc;
 
 extern bool ws_dummy_data_writer_use_file;
 extern THR_LOCAL uint32 ws_dummy_data_read_file_num;
