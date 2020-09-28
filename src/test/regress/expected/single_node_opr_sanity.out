@@ -1972,6 +1972,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3332 | get_local_prepared_xact
  3333 | get_remote_prepared_xacts
  3334 | global_clean_prepared_xacts
+ 3441 | pg_control_system
+ 3442 | pg_control_checkpoint
  3452 | bytea_sortsupport
  3454 | pg_filenode_relation
  3464 | gs_encrypt_aes128
@@ -2678,7 +2680,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
  9999 | pg_test_err_contain_err
-(2277 rows)
+(2279 rows)
 
 -- Check prokind
 select count(*) from pg_proc where prokind = 'a';
@@ -2696,7 +2698,7 @@ select count(*) from pg_proc where prokind = 'w';
 select count(*) from pg_proc where prokind = 'f';
  count 
 -------
-  3151
+  3153
 (1 row)
 
 select count(*) from pg_proc where prokind = 'p';

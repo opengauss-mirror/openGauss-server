@@ -1268,6 +1268,10 @@ extern Datum show_config_by_name(PG_FUNCTION_ARGS);
 extern Datum set_config_by_name(PG_FUNCTION_ARGS);
 extern Datum show_all_settings(PG_FUNCTION_ARGS);
 
+/* pg_controldata.cpp */
+extern Datum pg_control_system(PG_FUNCTION_ARGS);
+extern Datum pg_control_checkpoint(PG_FUNCTION_ARGS);
+
 /* lockfuncs.c */
 extern Datum pg_lock_status(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_lock_int8(PG_FUNCTION_ARGS);

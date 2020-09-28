@@ -62,6 +62,26 @@
         securec_check_ss(nRet, "\0", "\0");                \
     } while (0)
 #else
+#define XLOG_FNAME_LEN	   24
+#define IsXLogFileName(fname) \
+	(strlen(fname) == XLOG_FNAME_LEN && \
+	 strspn(fname, "0123456789ABCDEF") == XLOG_FNAME_LEN)
+
+#define IsPartialXLogFileName(fname)	\
+	(strlen(fname) == XLOG_FNAME_LEN + strlen(".partial") &&	\
+	 strspn(fname, "0123456789ABCDEF") == XLOG_FNAME_LEN &&		\
+	 strcmp((fname) + XLOG_FNAME_LEN, ".partial") == 0)
+
+#define IsTLHistoryFileName(fname)	\
+	(strlen(fname) == 8 + strlen(".history") &&		\
+	 strspn(fname, "0123456789ABCDEF") == 8 &&		\
+	 strcmp((fname) + 8, ".history") == 0)
+
+#define IsBackupHistoryFileName(fname) \
+	(strlen(fname) > XLOG_FNAME_LEN && \
+	 strspn(fname, "0123456789ABCDEF") == XLOG_FNAME_LEN && \
+	 strcmp((fname) + strlen(fname) - strlen(".backup"), ".backup") == 0)
+
 #define XLogFileName(fname, tli, logSegNo)                 \
     do {                                                   \
         int nRet;                                          \

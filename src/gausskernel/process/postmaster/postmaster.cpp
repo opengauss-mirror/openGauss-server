@@ -3631,6 +3631,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
         int channel_adapt = 0, i = 0;
 
         if (!IS_PGXC_COORDINATOR) {
+#ifdef ENABLE_MULTIPLE_NODES
             if (NORMAL_MODE == hashmdata->current_mode) {
                 if (!u_sess->proc_cxt.clientIsGsBasebackup && !AM_WAL_DB_SENDER) {
                     ereport(elevel,
@@ -3638,6 +3639,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                                 "could not accept HA connection.")));
                 }
             }
+#endif
 
             for (i = 1; i < MAX_REPLNODE_NUM; i++) {
                 if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL &&
