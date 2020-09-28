@@ -15922,6 +15922,8 @@ static bool CheckRangePartitionKeyType(Oid typoid)
             break;
 
         case TEXTOID:
+        /* fall through */
+        case CLOBOID:
             result = true;
             break;
 
