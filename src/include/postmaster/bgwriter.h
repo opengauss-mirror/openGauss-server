@@ -17,14 +17,14 @@
 
 #include "storage/block.h"
 #include "storage/relfilenode.h"
-
+#include "postmaster/pagewriter.h"
 typedef enum {
     EVENT_CHECKPOINT_CREATE_SNAPSHOT,
     EVENT_CHECKPOINT_SNAPSHOT_READY,
     EVENT_CHECKPOINT_BEGIN_CHECKPOINT,
     EVENT_CHECKPOINT_ABORT
 } CheckpointEvent;
-
+typedef struct CkptSortItem CkptSortItem;
 typedef void (*CheckpointCallback)(CheckpointEvent checkpointEvent, XLogRecPtr lsn, void* arg);
 
 extern void BackgroundWriterMain(void);
@@ -45,4 +45,29 @@ extern bool IsBgwriterProcess(void);
 extern void RegisterCheckpointCallback(CheckpointCallback callback, void* arg);
 extern void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn);
 
+/*incremental checkpoint bgwriter thread */
+const int INCRE_CKPT_BGWRITER_VIEW_COL_NUM = 6;
+extern const incre_ckpt_view_col g_bgwriter_view_col[INCRE_CKPT_BGWRITER_VIEW_COL_NUM];
+extern void candidate_buf_init(void);
+extern void incre_ckpt_bgwriter_cxt_init();
+extern void incre_ckpt_background_writer_main(void);
+extern void ckpt_shutdown_bgwriter();
+extern int get_bgwriter_thread_id(void);
+extern bool candidate_buf_pop(int *bufId, int threadId);
+
+typedef struct BgWriterProc {
+    PGPROC *proc;
+    CkptSortItem *dirty_buf_list;
+    uint32 dirty_list_size;
+    int *cand_buf_list;   /* thread candidate buffer list */
+    volatile int cand_list_size;     /* thread candidate list max size */
+    volatile int buf_id_start;     /* buffer id start loc */
+    pg_atomic_uint64 head;
+    pg_atomic_uint64 tail;
+    bool need_flush;
+    volatile bool is_hibernating;  /* the thread is hibernating */
+    ThrdDwCxt thrd_dw_cxt;         /* thread double writer cxt */
+    volatile uint32 thread_last_flush;
+    int32 next_scan_loc;
+} BgWriterProc;
 #endif /* _BGWRITER_H */

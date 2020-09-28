@@ -4162,6 +4162,13 @@ CREATE OR REPLACE VIEW DBE_PERF.global_double_write_status AS
            total_pages, low_threshold_pages, high_threshold_pages
     FROM pg_catalog.local_double_write_stat();
 
+CREATE VIEW DBE_PERF.global_get_bgwriter_status AS
+        SELECT node_name,bgwr_actual_flush_total_num,bgwr_last_flush_num,candidate_slots,get_buffer_from_list,get_buf_clock_sweep
+        FROM pg_catalog.remote_bgwriter_stat()
+        UNION ALL
+        SELECT node_name,bgwr_actual_flush_total_num,bgwr_last_flush_num,candidate_slots,get_buffer_from_list,get_buf_clock_sweep
+        FROM pg_catalog.local_bgwriter_stat();
+
 CREATE VIEW DBE_PERF.global_pagewriter_status AS
         SELECT node_name,pgwr_actual_flush_total_num,pgwr_last_flush_num,remain_dirty_page_num,queue_head_page_rec_lsn,queue_rec_lsn,current_xlog_insert_lsn,ckpt_redo_point
         FROM pg_catalog.local_pagewriter_stat();

@@ -73,12 +73,8 @@ void InitBufferPool(void)
     t_thrd.storage_cxt.BufferDescriptors = (BufferDescPadded*)CACHELINEALIGN(ShmemInitStruct("Buffer Descriptors",
         g_instance.attr.attr_storage.NBuffers * sizeof(BufferDescPadded) + PG_CACHE_LINE_SIZE,
         &found_descs));
-    /* full checkpoint mode only need one free list. */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
-        InitBufFreeTable(NUM_BUFFER_FREE_LIST);
-    } else {
-        InitBufFreeTable(1);
-    }
+    /* Init candidate buffer list and candidate buffer free map */
+    candidate_buf_init();
 
 #ifdef __aarch64__
     t_thrd.storage_cxt.BufferBlocks = (char*)CACHELINEALIGN(ShmemInitStruct(
@@ -131,7 +127,6 @@ void InitBufferPool(void)
             CLEAR_BUFFERTAG(buf->tag);
 
             pg_atomic_init_u32(&buf->state, 0);
-            buf->free_list_idx = -1;
             buf->wait_backend_pid = 0;
 
             buf->buf_id = i;
@@ -140,8 +135,6 @@ void InitBufferPool(void)
             pg_atomic_init_u64(&buf->rec_lsn, InvalidXLogRecPtr);
             buf->dirty_queue_loc = PG_UINT64_MAX;
         }
-
-        InitBufFreeList();
     }
 
     /* Init other shared buffer-management stuff */

@@ -95,6 +95,18 @@ static void knl_g_ckpt_init(knl_g_ckpt_context* ckpt_cxt)
     memset_s(ckpt_cxt, sizeof(knl_g_ckpt_context), 0, sizeof(knl_g_ckpt_context));
 }
 
+static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
+{
+    Assert(bgwriter_cxt != NULL);
+    bgwriter_cxt->bgwriter_procs = NULL;
+    bgwriter_cxt->bgwriter_num = 0;
+    bgwriter_cxt->curr_bgwriter_num = 0;
+    bgwriter_cxt->candidate_buffers = NULL;
+    bgwriter_cxt->candidate_free_map = NULL;
+    bgwriter_cxt->bgwriter_actual_total_flush = 0;
+    bgwriter_cxt->get_buf_num_candidate_list = 0;
+    bgwriter_cxt->get_buf_num_clock_sweep = 0;
+}
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)
 {
     Assert(tests_cxt != NULL);
@@ -274,6 +286,7 @@ static void knl_g_pid_init(knl_g_pid_context* pid_cxt)
     errno_t rc;
     rc = memset_s(pid_cxt, sizeof(knl_g_pid_context), 0, sizeof(knl_g_pid_context));
     pid_cxt->PageWriterPID = NULL;
+    pid_cxt->CkptBgWriterPID = NULL;
     pid_cxt->CommReceiverPIDS = NULL;
     securec_check(rc, "\0", "\0");
 }
@@ -364,6 +377,7 @@ void knl_instance_init()
     knl_g_stat_init(&g_instance.stat_cxt);
     knl_g_wlm_init(g_instance.wlm_cxt);
     knl_g_ckpt_init(&g_instance.ckpt_cxt);
+    knl_g_bgwriter_init(&g_instance.bgwriter_cxt);
     knl_g_shmem_init(&g_instance.shmem_cxt);
     g_instance.ckpt_cxt_ctl = &g_instance.ckpt_cxt;
     g_instance.ckpt_cxt_ctl = (knl_g_ckpt_context*)TYPEALIGN(SIZE_OF_TWO_UINT64, g_instance.ckpt_cxt_ctl);

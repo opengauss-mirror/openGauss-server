@@ -1407,6 +1407,7 @@ typedef struct knl_t_twophasecleaner_context {
 typedef struct knl_t_bgwriter_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
+    int thread_id;
 } knl_t_bgwriter_context;
 
 typedef struct knl_t_pagewriter_context {

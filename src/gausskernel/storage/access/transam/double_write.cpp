@@ -31,6 +31,7 @@
 #include "utils/palloc.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
+#include "postmaster/bgwriter.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -231,7 +232,7 @@ static bool dw_verify_pg_checksum(PageHeader page_header, BlockNumber blockNum)
 
 inline void dw_prepare_page(dw_batch_t* batch, uint16 page_num, uint16 page_id, uint16 dwn)
 {
-    if (g_instance.ckpt_cxt_ctl->buffers_contain_hashbucket == true) {
+    if (g_instance.dw_cxt.contain_hashbucket == true) {
         page_num = page_num | IS_HASH_BKT_MASK;
     }
     batch->page_num = page_num;
@@ -409,6 +410,53 @@ static void dw_recover_pages(T1* batch, T2* buf_tag, PageHeader data_page, bool 
     }
 }
 
+void wait_all_dw_page_finish_flush()
+{
+    if (g_instance.bgwriter_cxt.bgwriter_procs != NULL) {
+        for (int i = 0; i < g_instance.bgwriter_cxt.bgwriter_num;) {
+            if (g_instance.bgwriter_cxt.bgwriter_procs[i].thrd_dw_cxt.dw_page_idx == -1) {
+                i++;
+                continue;
+            } else {
+                (void)sched_yield();
+            }
+        }
+    }
+    if (g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc != NULL) {
+        while (g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.dw_page_idx != -1) {
+            (void)sched_yield();
+        }
+    }
+    return;
+}
+
+int get_dw_page_min_idx()
+{
+    uint16 min_idx = 0;
+    int dw_page_idx;
+
+    if (g_instance.bgwriter_cxt.bgwriter_procs != NULL) {
+        for (int i = 0; i < g_instance.bgwriter_cxt.bgwriter_num; i++) {
+            dw_page_idx = g_instance.bgwriter_cxt.bgwriter_procs[i].thrd_dw_cxt.dw_page_idx;
+            if (dw_page_idx != -1) {
+                if (min_idx == 0 || (uint16)dw_page_idx < min_idx) {
+                    min_idx = dw_page_idx;
+                }
+            }
+        }
+    }
+    if (g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc != NULL) {
+        dw_page_idx = g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.dw_page_idx;
+        if (dw_page_idx != -1) {
+            if (min_idx == 0 || (uint16)dw_page_idx < min_idx) {
+                min_idx = dw_page_idx;
+            }
+        }
+    }
+	
+    return min_idx;
+}
+
 /*
  * Basically, dw_reset_if_need calls smgrsync and then reuse dw file to some extent:
  * 1. truncate dw file start position to last flush postition, before which all dirty buffers are garanteed
@@ -440,12 +488,29 @@ static bool dw_reset_if_need(dw_context_t* ctx, uint16 pages_to_write, bool trun
     }
 
     if (trunc_file) {
-        /* record last flush position for truncate because flush lock is not held during smgrsync */
-        last_flush_page = ctx->last_flush_page;
+        Assert(AmStartupProcess() || AmCheckpointerProcess() || AmBootstrapProcess() || !IsUnderPostmaster);
+        /*
+         * Record min flush position for truncate because flush lock is not held during smgrsync.
+         */
+        uint16 min_idx = get_dw_page_min_idx();
+        if (min_idx == 0) {
+            file_head->start += ctx->flush_page;
+            org_start = file_head->start;
+            ctx->flush_page = 0;
+        } else {
+            last_flush_page = min_idx - file_head->start;
+            file_head->start = min_idx;
+            org_start = file_head->start;
+            ctx->flush_page = ctx->flush_page - last_flush_page;
+        }
         LWLockRelease(ctx->flush_lock);
     } else {
-        /* no need to reserve last flush position for full recycle */
-        last_flush_page = ctx->flush_page;
+        Assert(AmStartupProcess() || AmPageWriterProcess() || AmMulitBackgroundWriterProcess());
+        /* reset start position and flush page num for full recycle */
+        file_head->start = DW_BATCH_FILE_START;
+        ctx->last_flush_page = 0;
+        ctx->flush_page = 0;
+        wait_all_dw_page_finish_flush();
     }
 
     smgrsync_for_dw();
@@ -482,23 +547,6 @@ static bool dw_reset_if_need(dw_context_t* ctx, uint16 pages_to_write, bool trun
                 file_full,
                 trunc_file,
                 pages_to_write)));
-
-    if (file_full) {
-        Assert(AmStartupProcess() || AmPageWriterProcess());
-        file_head->start = DW_BATCH_FILE_START;
-        ctx->last_flush_page = ctx->flush_page;
-    } else {
-        Assert(AmStartupProcess() || AmCheckpointerProcess() || AmBootstrapProcess() || !IsUnderPostmaster);
-        /*
-         * we can only discard all the batches till last dw flush.
-         * For pages recorded in current dw flush, they may be concurrently
-         * flushed by pagewriters and we might have not absorbed their fsync request.
-         */
-        file_head->start += last_flush_page;
-    }
-
-    ctx->flush_page -= last_flush_page;
-    ctx->last_flush_page -= last_flush_page;
 
     /*
      * if truncate file and flush_page is not 0, the dwn can not plus,
@@ -643,9 +691,9 @@ static void dw_recover_partial_write(dw_context_t* ctx)
     read_asst.file_capacity = DW_FILE_PAGE;
     read_asst.buf_start = 0;
     read_asst.buf_end = 0;
-    read_asst.buf_capacity = GET_DW_BUF_MAX;
+    read_asst.buf_capacity = DW_BUF_MAX;
     read_asst.buf = ctx->buf;
-    reading_pages = Min(GET_DW_BATCH_MAX, (DW_FILE_PAGE - ctx->file_head->start));
+    reading_pages = Min(DW_BATCH_MAX_FOR_NOHBK, (DW_FILE_PAGE - ctx->file_head->start));
 
     old_mem_ctx = MemoryContextSwitchTo(ctx->mem_ctx);
     data_page = (char*)palloc0(BLCKSZ);
@@ -688,8 +736,8 @@ static void dw_recover_partial_write(dw_context_t* ctx)
     /* Truncate to all flushed page is safe since there is no concurrent flush-buffer at this stage */
     ctx->last_flush_page = ctx->flush_page;
     /* if free space not enough for one batch, reuse file. Otherwise, just do a truncate */
-    if ((ctx->file_head->start + ctx->flush_page + GET_DW_BUF_MAX) >= DW_FILE_PAGE) {
-        (void)dw_reset_if_need(ctx, GET_DW_BUF_MAX, false);
+    if ((ctx->file_head->start + ctx->flush_page + DW_BUF_MAX) >= DW_FILE_PAGE) {
+        (void) dw_reset_if_need(ctx, DW_BUF_MAX, false);
     } else if (ctx->flush_page > 0) {
         if (!dw_reset_if_need(ctx, 0, true)) {
             ereport(PANIC,
@@ -878,7 +926,7 @@ static void dw_encrypt_page(char* dest_addr)
     }
 }
 
-static XLogRecPtr dw_copy_page(dw_context_t* dw_ctx, int buf_desc_id, bool* is_skipped)
+static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is_skipped)
 {
     /* we write different struct depend on hashbucket */
     dw_batch_t* batch = NULL;
@@ -895,6 +943,7 @@ static XLogRecPtr dw_copy_page(dw_context_t* dw_ctx, int buf_desc_id, bool* is_s
     buf_desc = GetBufferDescriptor(buf_desc_id);
     buf_state = LockBufHdr(buf_desc);
     if (!dw_buf_ckpt_needed(buf_state)) {
+        buf_state &= (~BM_CHECKPOINT_NEEDED);
         UnlockBufHdr(buf_desc, buf_state);
         return page_lsn;
     }
@@ -917,15 +966,16 @@ static XLogRecPtr dw_copy_page(dw_context_t* dw_ctx, int buf_desc_id, bool* is_s
         *is_skipped = true;
         return page_lsn;
     }
-    dw_ctx->write_pos++;
-    if (dw_ctx->write_pos <= GET_DW_BATCH_DATA_PAGE_MAX) {
-        batch = (dw_batch_t*)dw_ctx->buf;
-        page_num = dw_ctx->write_pos;
+    thrd_dw_cxt->write_pos++;
+    if (thrd_dw_cxt->write_pos <= GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->contain_hashbucket)) {
+        batch = (dw_batch_t*)thrd_dw_cxt->dw_buf;
+        page_num = thrd_dw_cxt->write_pos;
     } else {
-        batch = (dw_batch_t*)(dw_ctx->buf + (GET_DW_BATCH_DATA_PAGE_MAX + 1) * BLCKSZ);
-        page_num = dw_ctx->write_pos - GET_DW_BATCH_DATA_PAGE_MAX;
+        batch = (dw_batch_t*)(thrd_dw_cxt->dw_buf + 
+            (GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->contain_hashbucket) + 1) * BLCKSZ);
+        page_num = thrd_dw_cxt->write_pos - GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->contain_hashbucket);
     }
-    if (g_instance.ckpt_cxt_ctl->buffers_contain_hashbucket) {
+    if (thrd_dw_cxt->contain_hashbucket) {
         batch->buf_tag[page_num - 1] = buf_desc->tag;
     } else {
         /* change struct to nohash bucket */
@@ -953,9 +1003,9 @@ static XLogRecPtr dw_copy_page(dw_context_t* dw_ctx, int buf_desc_id, bool* is_s
 
 inline uint16 dw_batch_add_extra(uint16 page_num)
 {
-
-    Assert(page_num <= GET_DW_DIRTY_PAGE_MAX);
-    if (page_num <= GET_DW_BATCH_DATA_PAGE_MAX) {
+    bool contain_hashbucket = g_instance.dw_cxt.contain_hashbucket;
+    Assert(page_num <= GET_DW_DIRTY_PAGE_MAX(contain_hashbucket));
+    if (page_num <= GET_DW_BATCH_DATA_PAGE_MAX(contain_hashbucket)) {
         return page_num + DW_EXTRA_FOR_ONE_BATCH;
     } else {
         return page_num + DW_EXTRA_FOR_TWO_BATCH;
@@ -968,9 +1018,9 @@ static void dw_assemble_batch(dw_context_t* dw_ctx, uint16 page_id, uint16 dwn)
     uint16 first_batch_pages;
     uint16 second_batch_pages;
 
-    if (dw_ctx->write_pos > GET_DW_BATCH_DATA_PAGE_MAX) {
-        first_batch_pages = GET_DW_BATCH_DATA_PAGE_MAX;
-        second_batch_pages = dw_ctx->write_pos - GET_DW_BATCH_DATA_PAGE_MAX;
+    if (dw_ctx->write_pos > GET_DW_BATCH_DATA_PAGE_MAX(dw_ctx->contain_hashbucket)) {
+        first_batch_pages = GET_DW_BATCH_DATA_PAGE_MAX(dw_ctx->contain_hashbucket);
+        second_batch_pages = dw_ctx->write_pos - GET_DW_BATCH_DATA_PAGE_MAX(dw_ctx->contain_hashbucket);
     } else {
         first_batch_pages = dw_ctx->write_pos;
         second_batch_pages = 0;
@@ -1000,23 +1050,10 @@ static inline void dw_stat_flush(dw_stat_info* stat_info, uint32 page_to_write)
     if (page_to_write < DW_WRITE_STAT_LOWER_LIMIT) {
         (void)pg_atomic_add_fetch_u64(&stat_info->low_threshold_writes, 1);
         (void)pg_atomic_add_fetch_u64(&stat_info->low_threshold_pages, page_to_write);
-    } else if (page_to_write > GET_DW_BATCH_MAX) {
+    } else if (page_to_write > GET_DW_BATCH_MAX(g_instance.dw_cxt.contain_hashbucket)) {
         (void)pg_atomic_add_fetch_u64(&stat_info->high_threshold_writes, 1);
         (void)pg_atomic_add_fetch_u64(&stat_info->high_threshold_pages, page_to_write);
     }
-}
-
-static inline void dw_log_perform(dw_context_t* ctx, const char* phase, uint32 write_id, uint16 size)
-{
-    ereport(DW_LOG_LEVEL,
-        (errmodule(MOD_DW),
-            errmsg("DW perform %s: write_id %u, file_head[dwn %hu, start %hu], total_pages %hu, size %hu",
-                phase,
-                write_id,
-                ctx->file_head->head.dwn,
-                ctx->file_head->start,
-                ctx->flush_page,
-                size)));
 }
 
 /**
@@ -1024,19 +1061,25 @@ static inline void dw_log_perform(dw_context_t* ctx, const char* phase, uint32 w
  * @param dw_ctx double write context
  * @param latest_lsn the latest lsn in the copied pages
  */
-static void dw_flush(dw_context_t* dw_ctx, XLogRecPtr latest_lsn)
+static void dw_flush(dw_context_t* dw_ctx, XLogRecPtr latest_lsn, ThrdDwCxt* thrd_dw_cxt)
 {
     uint16 offset_page;
     uint16 pages_to_write = 0;
-    uint16 write_pos = 0;
     dw_file_head_t* file_head = NULL;
+    errno_t rc;
 
     (void)LWLockAcquire(dw_ctx->flush_lock, LW_EXCLUSIVE);
 
+    if (thrd_dw_cxt->contain_hashbucket) {
+        dw_ctx->contain_hashbucket = true;
+    }
+    dw_ctx->write_pos = thrd_dw_cxt->write_pos;
     Assert(dw_ctx->write_pos > 0);
 
     file_head = dw_ctx->file_head;
     pages_to_write = dw_batch_add_extra(dw_ctx->write_pos);
+    rc = memcpy_s(dw_ctx->buf, pages_to_write * BLCKSZ, thrd_dw_cxt->dw_buf, pages_to_write * BLCKSZ);
+    securec_check(rc, "\0", "\0");
     (void)dw_reset_if_need(dw_ctx, pages_to_write, false);
 
     /* calculate it after checking file space, in case of updated by sync */
@@ -1055,28 +1098,24 @@ static void dw_flush(dw_context_t* dw_ctx, XLogRecPtr latest_lsn)
     dw_ctx->last_flush_page = dw_ctx->flush_page;
     /* the tail of this flushed batch is the head of the next batch */
     dw_ctx->flush_page += (pages_to_write - 1);
-    write_pos = dw_ctx->write_pos;
     dw_ctx->write_pos = 0;
-
+    dw_ctx->contain_hashbucket = false;
+    thrd_dw_cxt->dw_page_idx = offset_page;
     LWLockRelease(dw_ctx->flush_lock);
 
     ereport(DW_LOG_LEVEL,
-        (errmodule(MOD_DW),
-            errmsg("DW flush: file_head[dwn %hu, start %hu], total_pages %hu, data_pages %hu, flushed_pages %hu",
-                dw_ctx->file_head->head.dwn,
-                dw_ctx->file_head->start,
-                dw_ctx->flush_page,
-                write_pos,
-                pages_to_write)));
+            (errmodule(MOD_DW),
+             errmsg("DW flush: file_head[dwn %hu, start %hu], total_pages %hu, data_pages %hu, flushed_pages %hu",
+                    dw_ctx->file_head->head.dwn, dw_ctx->file_head->start, dw_ctx->flush_page, dw_ctx->write_pos,
+                    pages_to_write)));
 }
 
-void dw_perform(uint32 size)
+void dw_perform(uint32 size, CkptSortItem *dirty_buf_list, ThrdDwCxt* thrd_dw_cxt)
 {
     uint16 batch_size;
     dw_context_t* dw_ctx = &g_instance.dw_cxt;
     XLogRecPtr latest_lsn = InvalidXLogRecPtr;
     XLogRecPtr page_lsn;
-    uint32 write_id;
 
     if (!dw_enabled()) {
         /* Double write is not enabled, nothing to do. */
@@ -1091,27 +1130,31 @@ void dw_perform(uint32 size)
         ereport(ERROR, (errmodule(MOD_DW), errmsg("Double write already closed")));
     }
 
-    Assert(size > 0 && size <= GET_DW_DIRTY_PAGE_MAX);
+    Assert(size > 0 && size <= GET_DW_DIRTY_PAGE_MAX(thrd_dw_cxt->contain_hashbucket));
     batch_size = (uint16)size;
-
-    write_id = dw_ctx->stat_info.total_writes;
-
-    dw_log_perform(dw_ctx, "start", write_id, batch_size);
-
-    if (dw_ctx->write_pos != 0) {
-        ereport(WARNING, (errmodule(MOD_DW), errmsg("Double write exception ignored")));
-    }
-    dw_ctx->write_pos = 0;
+    thrd_dw_cxt->write_pos = 0;
 
     for (uint16 i = 0; i < batch_size; i++) {
         bool is_skipped = false;
-        page_lsn = dw_copy_page(dw_ctx, g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id, &is_skipped);
+        if (dirty_buf_list == NULL) {
+            page_lsn = dw_copy_page(thrd_dw_cxt, g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id, &is_skipped);
+        } else {
+            page_lsn = dw_copy_page(thrd_dw_cxt, dirty_buf_list[i].buf_id, &is_skipped);
+        }
         if (is_skipped) {
             /*
              * We couldn't acquire conditional lock on the buffer content_lock.
              * So we mark it in buf_id_arr.
              */
-            g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id = DW_INVALID_BUFFER_ID;
+            BufferDesc *buf_desc = NULL;
+            if (dirty_buf_list == NULL) {
+                buf_desc = GetBufferDescriptor(g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id);
+                g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id = DW_INVALID_BUFFER_ID;
+            } else {
+                buf_desc = GetBufferDescriptor(dirty_buf_list[i].buf_id);
+                dirty_buf_list[i].buf_id = DW_INVALID_BUFFER_ID;
+            }
+            clean_buf_need_flush_flag(buf_desc);
             continue;
         }
 
@@ -1120,11 +1163,9 @@ void dw_perform(uint32 size)
         }
     }
 
-    if (dw_ctx->write_pos > 0) {
-        dw_flush(dw_ctx, latest_lsn);
+    if (thrd_dw_cxt->write_pos > 0) {
+        dw_flush(dw_ctx, latest_lsn, thrd_dw_cxt);
     }
-
-    dw_log_perform(dw_ctx, "end", write_id, batch_size);
 }
 
 void dw_truncate()

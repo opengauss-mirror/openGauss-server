@@ -101,6 +101,11 @@ struct WritebackContext;
 /* special block number for ReadBuffer() */
 #define P_NEW InvalidBlockNumber /* grow the file to get a new page */
 
+/* Bits in SyncOneBuffer's return value */
+#define BUF_WRITTEN 0x01
+#define BUF_REUSABLE 0x02
+#define BUF_SKIPPED 0x04
+
 /*
  * Buffer content lock modes (mode argument for LockBuffer())
  */
@@ -279,7 +284,11 @@ extern void FreeAccessStrategy(BufferAccessStrategy strategy);
 
 /* dirty page manager */
 extern int ckpt_buforder_comparator(const void* pa, const void* pb);
-extern void ckpt_flush_dirty_page(int thread_id);
+extern void clean_buf_need_flush_flag(BufferDesc *buf_desc);
+extern void ckpt_flush_dirty_page(int thread_id, WritebackContext wb_context);
+
+extern uint32 SyncOneBuffer(
+    int buf_id, bool skip_recently_used, WritebackContext* flush_context, bool get_candition_lock = false);
 
 extern Buffer ReadBuffer_common_for_direct(RelFileNode rnode, char relpersistence, ForkNumber forkNum,
 	  BlockNumber blockNum, ReadBufferMode mode);

@@ -1437,8 +1437,9 @@ void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn)
  */
 void smgrsync_for_dw(void)
 {
-    Assert(!IsUnderPostmaster || AmStartupProcess() || AmCheckpointerProcess() || AmPageWriterProcess());
-    if (!AmPageWriterProcess()) {
+    Assert(!IsUnderPostmaster || AmStartupProcess() || AmCheckpointerProcess() || AmPageWriterProcess() ||
+        AmMulitBackgroundWriterProcess());
+    if (!AmPageWriterProcess() && !AmMulitBackgroundWriterProcess()) {
         smgrsync();
     } else {
         volatile CheckpointerShmemStruct* cps = t_thrd.checkpoint_cxt.CheckpointerShmem;

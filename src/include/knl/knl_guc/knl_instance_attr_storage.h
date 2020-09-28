@@ -76,6 +76,7 @@ typedef struct knl_instance_attr_storage {
     int recovery_parse_workers;
     int recovery_redo_workers_per_paser_worker;
     int pagewriter_thread_num;
+    int bgwriter_thread_num;
     int real_recovery_parallelism;
     int batch_redo_num;
     int remote_read_mode;

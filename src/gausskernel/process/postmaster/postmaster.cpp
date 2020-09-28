@@ -2920,10 +2920,16 @@ static int ServerLoop(void)
                 g_instance.pid_cxt.CBMWriterPID = initialize_util_thread(CBMWRITER);
 
             if (!dummyStandbyMode && g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
-                int i;
-                for (i = 0; i < g_instance.attr.attr_storage.pagewriter_thread_num; i++) {
+                for (int i = 0; i < g_instance.attr.attr_storage.pagewriter_thread_num; i++) {
                     if (g_instance.pid_cxt.PageWriterPID[i] == 0) {
                         g_instance.pid_cxt.PageWriterPID[i] = initialize_util_thread(PAGEWRITER_THREAD);
+                    }
+                }
+                if (g_instance.attr.attr_storage.bgwriter_thread_num > 0) {
+                    for (int i = 0; i < g_instance.attr.attr_storage.bgwriter_thread_num; i++) {
+                        if (g_instance.pid_cxt.CkptBgWriterPID[i] == 0) {
+                            g_instance.pid_cxt.CkptBgWriterPID[i] = initialize_util_thread(BGWRITER);
+                        }
                     }
                 }
             }
@@ -4309,6 +4315,15 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             }
         }
 
+        if (g_instance.pid_cxt.CkptBgWriterPID != NULL) {
+            for (int i = 0; i < g_instance.attr.attr_storage.bgwriter_thread_num; i++) {
+                if (g_instance.pid_cxt.CkptBgWriterPID[i] != 0) {
+                    Assert(!dummyStandbyMode);
+                    signal_child(g_instance.pid_cxt.CkptBgWriterPID[i], SIGHUP);
+                }
+            }
+        }
+
         if (g_instance.pid_cxt.WalWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterPID, SIGHUP);
 
@@ -5064,10 +5079,15 @@ static void reaper(SIGNAL_ARGS)
             }
 
             if (!dummyStandbyMode && g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
-                int i;
-                for (i = 0; i < g_instance.attr.attr_storage.pagewriter_thread_num; i++) {
+                for (int i = 0; i < g_instance.attr.attr_storage.pagewriter_thread_num; i++) {
                     if (g_instance.pid_cxt.PageWriterPID[i] == 0) {
                         g_instance.pid_cxt.PageWriterPID[i] = initialize_util_thread(PAGEWRITER_THREAD);
+                    }
+                }
+
+                for (int i = 0; i < g_instance.attr.attr_storage.bgwriter_thread_num; i++) {
+                    if (g_instance.pid_cxt.CkptBgWriterPID[i] == 0) {
+                        g_instance.pid_cxt.CkptBgWriterPID[i] = initialize_util_thread(BGWRITER);
                     }
                 }
             }
@@ -5178,6 +5198,23 @@ static void reaper(SIGNAL_ARGS)
                 HandleChildCrash(pid, exitstatus, _("background writer process"));
 
             continue;
+        }
+
+        /*
+         * Was it the bgwriter?
+         */
+        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+            int i;
+            for (i = 0; i < g_instance.attr.attr_storage.bgwriter_thread_num; i++) {
+                if (pid == g_instance.pid_cxt.CkptBgWriterPID[i]) {
+                    Assert(!dummyStandbyMode);
+                    g_instance.pid_cxt.CkptBgWriterPID[i] = 0;
+                    if (!EXIT_STATUS_0(exitstatus)) {
+                        HandleChildCrash(pid, exitstatus, _("incre ckpt background writer process"));
+                    }
+                    continue;
+                }
+            }
         }
 
         /*
@@ -5958,6 +5995,16 @@ static void LogChildExit(int lev, const char* procname, ThreadId pid, int exitst
     }
 }
 
+static bool ckpt_all_flush_buffer_thread_exit()
+{
+    if (g_instance.pid_cxt.PageWriterPID[0] == 0 &&
+        (g_instance.pid_cxt.CkptBgWriterPID == NULL || g_instance.pid_cxt.CkptBgWriterPID[0] == 0)){
+        return true;
+    }else {
+        return false;
+    }
+}
+
 /*
  * Advance the postmaster's state machine and take actions as appropriate
  *
@@ -6078,12 +6125,19 @@ static void PostmasterStateMachine(void)
                     g_instance.pid_cxt.CheckpointerPID = initialize_util_thread(CHECKPOINT_THREAD);
 
                 if (g_instance.pid_cxt.PageWriterPID != NULL) {
-                    int i;
                     g_instance.ckpt_cxt_ctl->page_writer_can_exit = false;
 
-                    for (i = 0; i < g_instance.attr.attr_storage.pagewriter_thread_num; i++) {
-                        if (g_instance.pid_cxt.PageWriterPID[0] != 0) {
+                    for (int i = 0; i < g_instance.attr.attr_storage.pagewriter_thread_num; i++) {
+                        if (g_instance.pid_cxt.PageWriterPID[i] != 0) {
                             signal_child(g_instance.pid_cxt.PageWriterPID[i], SIGTERM);
+                        }
+                    }
+                }
+
+                if (g_instance.pid_cxt.CkptBgWriterPID != NULL) {
+                    for (int i = 0; i < g_instance.attr.attr_storage.bgwriter_thread_num; i++) {
+                        if (g_instance.pid_cxt.CkptBgWriterPID[i] != 0) {
+                            signal_child(g_instance.pid_cxt.CkptBgWriterPID[i], SIGTERM);
                         }
                     }
                 }
@@ -6155,7 +6209,7 @@ static void PostmasterStateMachine(void)
          */
         if (DLGetHead(g_instance.backend_list) == NULL && g_instance.pid_cxt.PgArchPID == 0 &&
             g_instance.pid_cxt.PgStatPID == 0 && g_instance.pid_cxt.PgAuditPID == 0 &&
-            g_instance.pid_cxt.PageWriterPID[0] == 0) {
+            ckpt_all_flush_buffer_thread_exit()) {
             /* These other guys should be dead already */
             Assert(g_instance.pid_cxt.TwoPhaseCleanerPID == 0);
             Assert(g_instance.pid_cxt.FaultMonitorPID == 0);
@@ -6983,6 +7037,10 @@ static void handle_recovery_started()
             for (int i = 0; i < g_instance.attr.attr_storage.pagewriter_thread_num; i++) {
                 Assert(g_instance.pid_cxt.PageWriterPID[i] == 0);
                 g_instance.pid_cxt.PageWriterPID[i] = initialize_util_thread(PAGEWRITER_THREAD);
+            }
+            for (int i = 0; i < g_instance.attr.attr_storage.bgwriter_thread_num; i++) {
+                Assert(g_instance.pid_cxt.CkptBgWriterPID[i] == 0);
+                g_instance.pid_cxt.CkptBgWriterPID[i] = initialize_util_thread(BGWRITER);
             }
         }
         Assert(g_instance.pid_cxt.CBMWriterPID == 0);
@@ -9811,7 +9869,11 @@ static void SetAuxType()
             t_thrd.bootstrap_cxt.MyAuxProcType = FaultMonitorProcess;
             break;
         case BGWRITER:
-            t_thrd.bootstrap_cxt.MyAuxProcType = BgWriterProcess;
+            if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+                t_thrd.bootstrap_cxt.MyAuxProcType = MultiBgWriterProcess;
+            } else {
+                t_thrd.bootstrap_cxt.MyAuxProcType = BgWriterProcess;
+            }
             break;
         case CHECKPOINT_THREAD:
             t_thrd.bootstrap_cxt.MyAuxProcType = CheckpointerProcess;
@@ -9977,19 +10039,18 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
          * indexed in the range from 1 to g_instance.shmem_cxt.MaxBackends (inclusive), so we use
          * g_instance.shmem_cxt.MaxBackends + AuxProcType + 1 as the index of the slot for an
          * auxiliary process.
-         *
-         * This will need rethinking if we ever want more than one of a
-         * particular auxiliary process type.
          */
         int index = g_instance.shmem_cxt.MaxBackends + t_thrd.bootstrap_cxt.MyAuxProcType + 1;
         if (thread_role == PAGEWRITER_THREAD) {
             index += get_pagewriter_thread_id();
+	} else if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && thread_role == BGWRITER) {
+            index += get_bgwriter_thread_id() + MAX_PAGE_WRITER_THREAD_NUM;
         } else if (thread_role == PAGEREDO) {
             SetMyPageRedoWorker(arg);
-            index += MultiRedoGetWorkerId() + g_instance.attr.attr_storage.pagewriter_thread_num - 1;
+            index += MultiRedoGetWorkerId() + MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM;
         } else if (thread_role == THREADPOOL_LISTENER) {
             index += t_thrd.threadpool_cxt.listener->GetGroup()->GetGroupId() +
-                     (g_instance.attr.attr_storage.pagewriter_thread_num - 1) + (MAX_RECOVERY_THREAD_NUM - 1);
+                     MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM + (MAX_RECOVERY_THREAD_NUM - 1);
         }
 
         ProcSignalInit(index);
@@ -10032,10 +10093,16 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             break;
 
         case BGWRITER:
-            /* don't set signals, bgwriter has its own agenda */
-            BackgroundWriterMain();
-            proc_exit(1); /* should never return */
-            break;
+            if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+                incre_ckpt_background_writer_main();
+                proc_exit(1);
+                break;
+            } else {
+                /* don't set signals, bgwriter has its own agenda */
+                BackgroundWriterMain();
+                proc_exit(1); /* should never return */
+                break;
+            }
 
         case CHECKPOINT_THREAD:
             /* don't set signals, checkpointer has its own agenda */

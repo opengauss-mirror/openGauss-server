@@ -177,11 +177,8 @@ typedef struct buftagnohbkt {
  */
 typedef struct BufferDesc {
     BufferTag tag; /* ID of page contained in buffer */
-
-    /* The data before state must be 8-byte-aligned. */
     /* state of the tag, containing flags, refcount and usagecount */
     pg_atomic_uint32 state;
-    volatile int32 free_list_idx;  /*index of buffer free list */
 
     int buf_id;    /* buffer's index number (from 0) */
 
@@ -304,12 +301,6 @@ typedef struct BufListElem{
     int buf_id;
 }BufListElem;
 
-#define INIT_BUF_FREE_LIST_ENTRY(a) 		    \
-    do {                                        \
-        DLInitList(&((a)->buf_free_Dllist));    \
-        (a)->buf_free_num = 0;		            \
-        (a)->lock = LWLockAssign(LWTRANCHE_BUFFER_FREELIST); \
-    }while(0)
 
 /*
  * Internal routines: only called by bufmgr
@@ -320,8 +311,7 @@ extern void IssuePendingWritebacks(WritebackContext* context);
 extern void ScheduleBufferTagForWriteback(WritebackContext* context, BufferTag* tag);
 
 /* freelist.c */
-extern BufferDesc *StrategyGetBuffer(BufferAccessStrategy strategy,
-				  uint32 *buf_state, Dlelem **elt, BufFreeListHash **buf_list_entry);
+extern BufferDesc *StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state);
 
 extern void StrategyFreeBuffer(volatile BufferDesc* buf);
 extern bool StrategyRejectBuffer(BufferAccessStrategy strategy, BufferDesc* buf);
@@ -348,12 +338,6 @@ extern void DropRelFileNodeLocalBuffers(const RelFileNode& rnode, ForkNumber for
 extern void DropRelFileNodeAllLocalBuffers(const RelFileNode& rnode);
 extern void AtEOXact_LocalBuffers(bool isCommit);
 extern void update_wait_lockid(LWLock* lock);
-extern void InitBufFreeTable(int size);
-extern void InitBufFreeList();
-extern void RemoveBufFromFreeList(BufferDesc *buf, BufFreeListHash *buf_list_entry, Dlelem *elt);
-extern void AddBufToFreeList(BufferDesc *buf);
-extern void AddBatchBufToFreeList(int thread_id);
 extern void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod = WITH_NORMAL_CACHE);
 extern void LocalBufferFlushAllBuffer();
-
 #endif /* BUFMGR_INTERNALS_H */

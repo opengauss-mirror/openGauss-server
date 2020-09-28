@@ -151,7 +151,6 @@ static const char *BuiltinTrancheNames[] = {
     "OldSerXid SLRU Ctl",
     "WALInsertLock",
     "DoubleWriteLock",
-    "BufFreeListLock",
     "LWTRANCHE_ACCOUNT_TABLE",
     "GeneralExtendedLock",
     /* LWTRANCHE_GTT_CTL */

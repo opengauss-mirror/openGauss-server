@@ -84,11 +84,6 @@ const int TEN_MICROSECOND = 10;
 const int MILLISECOND_TO_MICROSECOND = 1000;
 const float PAGE_QUEUE_SLOT_USED_MAX_PERCENTAGE = 0.8;
 
-/* Bits in SyncOneBuffer's return value */
-#define BUF_WRITTEN 0x01
-#define BUF_REUSABLE 0x02
-#define BUF_SKIPPED 0x04
-
 /*
  * Status of buffers to checkpoint for a particular tablespace, used
  * internally in BufferSync.
@@ -339,16 +334,13 @@ static Buffer ReadBuffer_common(SMgrRelation reln, char relpersistence, ForkNumb
 static bool PinBuffer(BufferDesc* buf, BufferAccessStrategy strategy);
 static void BufferSync(int flags);
 static uint32 WaitBufHdrUnlocked(BufferDesc* buf);
-static uint32 SyncOneBuffer(
-    int buf_id, bool skip_recently_used, WritebackContext* flush_context, bool is_page_writer = false);
 static void WaitIO(BufferDesc* buf);
 static bool StartBufferIO(BufferDesc* buf, bool forInput);
 static void TerminateBufferIO_common(BufferDesc* buf, bool clear_dirty, uint32 set_flag_bits);
 static void shared_buffer_write_error_callback(void* arg);
 static BufferDesc* BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
-    BufferAccessStrategy strategy, bool* foundPtr);
+                               BufferAccessStrategy strategy, bool* foundPtr);
 static void AtProcExit_Buffers(int code, Datum arg);
-
 static int rnode_comparator(const void* p1, const void* p2);
 
 static int buffertag_comparator(const void* p1, const void* p2);
@@ -358,7 +350,7 @@ extern void PageRangeBackWrite(
 extern void PageListBackWrite(
     uint32* bufList, int32 n, uint32 flags, SMgrRelation reln, int32* bufs_written, int32* bufs_reusable);
 static volatile BufferDesc* PageListBufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
-    BlockNumber blockNum, BufferAccessStrategy strategy, bool* foundPtr);
+                                                BlockNumber blockNum, BufferAccessStrategy strategy, bool* foundPtr);
 static bool ConditionalStartBufferIO(BufferDesc* buf, bool forInput);
 
 /*
@@ -587,17 +579,14 @@ static volatile BufferDesc* PageListBufferAlloc(SMgrRelation smgr, char relpersi
      *
      * Loop here in case we have to try another victim buffer
      */
-    Dlelem *buf_elt = NULL;
-    BufFreeListHash *buf_list_entry = NULL;
     for (;;) {
         /*
          * Select a victim buffer.
          * The buffer is returned with its header spinlock still held!
          */
-        /* Every time choose the buffer, need reset the buf_elt and buf_list_entry. */
-        buf_elt = NULL;
-        buf_list_entry = NULL;
-        buf = (BufferDesc*)StrategyGetBuffer(strategy, &buf_state, &buf_elt, &buf_list_entry);
+        pgstat_report_waitevent(WAIT_EVENT_BUF_STRATEGY_GET);
+        buf = (BufferDesc*)StrategyGetBuffer(strategy, &buf_state);
+        pgstat_report_waitevent(WAIT_EVENT_END);
 
         Assert(BUF_STATE_GET_REFCOUNT(buf_state) == 0);
 
@@ -606,14 +595,6 @@ static volatile BufferDesc* PageListBufferAlloc(SMgrRelation smgr, char relpersi
 
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf);
-
-        /*
-         * If the buf is obtained the buffer free list, after release the buffer spinlock, 
-         * remove the buf.
-         */
-        if (buf_elt != NULL) {
-            RemoveBufFromFreeList(buf, buf_list_entry, buf_elt);
-        }
 
         /*
          * At this point, the victim buffer is pinned
@@ -2300,7 +2281,9 @@ static BufferDesc* BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
 
     /* see if the block is in the buffer pool already */
     (void)LWLockAcquire(new_partition_lock, LW_SHARED);
+    pgstat_report_waitevent(WAIT_EVENT_BUF_HASH_SEARCH);
     buf_id = BufTableLookup(&new_tag, new_hash);
+    pgstat_report_waitevent(WAIT_EVENT_END);
     if (buf_id >= 0) {
         /*
          * Found it.  Now, pin the buffer so no one can steal it from the
@@ -2342,18 +2325,15 @@ static BufferDesc* BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
      */
     LWLockRelease(new_partition_lock);
 
-    Dlelem *buf_elt = NULL;
-    BufFreeListHash *buf_list_entry = NULL;
     /* Loop here in case we have to try another victim buffer */
     for (;;) {
         /*
          * Select a victim buffer.	The buffer is returned with its header
          * spinlock still held!
          */
-        /* Every time choose the buffer, need reset the buf_elt and buf_list_entry. */
-        buf_elt = NULL;
-        buf_list_entry = NULL;
-        buf = (BufferDesc *)StrategyGetBuffer(strategy, &buf_state, &buf_elt, &buf_list_entry);
+        pgstat_report_waitevent(WAIT_EVENT_BUF_STRATEGY_GET);
+        buf = (BufferDesc *)StrategyGetBuffer(strategy, &buf_state);
+        pgstat_report_waitevent(WAIT_EVENT_END);
 
         Assert(BUF_STATE_GET_REFCOUNT(buf_state) == 0);
 
@@ -2362,13 +2342,6 @@ static BufferDesc* BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
 
         /* Pin the buffer and then release the buffer spinlock */
         PinBuffer_Locked(buf);
-        /*
-         * If the buf is obtained the buffer free list, after release the buffer spinlock, 
-         * remove the buf.
-         */
-        if (buf_elt != NULL) {
-            RemoveBufFromFreeList(buf, buf_list_entry, buf_elt);
-        }
 
         /*
          * If the buffer was dirty, try to write it out.  There is a race
@@ -2707,7 +2680,6 @@ retry:
     old_flags = buf_state & BUF_FLAG_MASK;
     CLEAR_BUFFERTAG(buf->tag);
     buf_state &= ~(BUF_FLAG_MASK | BUF_USAGECOUNT_MASK);
-    buf->free_list_idx = 1;
     UnlockBufHdr(buf, buf_state);
 
     /*
@@ -2721,11 +2693,6 @@ retry:
      * Done with mapping lock.
      */
     LWLockRelease(old_partition_lock);
-
-    /*
-	 * Insert the buffer at the head of the first buffer free list.
-	 */
-	AddBufToFreeList(buf);
 }
 
 /*
@@ -3642,7 +3609,7 @@ bool BgBufferSync(WritebackContext* wb_context)
  * Note: caller must have done ResourceOwnerEnlargeBuffers.
  */
 const int CONDITION_LOCK_RETRY_TIMES = 5;
-static uint32 SyncOneBuffer(int buf_id, bool skip_recently_used, WritebackContext* wb_context, bool is_page_writer)
+uint32 SyncOneBuffer(int buf_id, bool skip_recently_used, WritebackContext* wb_context, bool get_condition_lock)
 {
     BufferDesc* buf_desc = GetBufferDescriptor(buf_id);
     uint32 result = 0;
@@ -3679,7 +3646,7 @@ static uint32 SyncOneBuffer(int buf_id, bool skip_recently_used, WritebackContex
      */
     PinBuffer_Locked(buf_desc);
 
-    if (dw_enabled() && is_page_writer) {
+    if (dw_enabled() && get_condition_lock) {
         /*
          * We must use a conditional lock acquisition here to avoid deadlock. If
          * page_writer and double_write are enabled, only page_writer is allowed to
@@ -4096,7 +4063,7 @@ void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod)
      * Set up error traceback if we are not pagewriter.
      * If we are a page writer, let thread's own callback handles the error.
      */
-    if (t_thrd.role != PAGEWRITER_THREAD) {
+    if (t_thrd.role != PAGEWRITER_THREAD && t_thrd.role != BGWRITER) {
         /* Setup error traceback support for ereport() */
         errcontext.callback = shared_buffer_write_error_callback;
         errcontext.arg = buf;
@@ -4185,7 +4152,7 @@ void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod)
         bufferinfo.blockinfo.rnode.relNode);
 
     /* Pop the error context stack, if it was set before */
-    if (t_thrd.role != PAGEWRITER_THREAD) {
+    if (t_thrd.role != PAGEWRITER_THREAD && t_thrd.role != BGWRITER) {
         t_thrd.log_cxt.error_context_stack = errcontext.previous;
     }
 }
@@ -5389,6 +5356,7 @@ static void TerminateBufferIO_common(BufferDesc* buf, bool clear_dirty, uint32 s
 
             /* The page is dirty again and needs to be re-inserted into the dirty page list. */
             if ((buf_state & BM_JUST_DIRTIED)) {
+                buf_state &= ~BM_CHECKPOINT_NEEDED;
                 if (!push_pending_flush_queue(BufferDescriptorGetBuffer(buf))) {
                     ereport(PANIC,
                         (errmodule(MOD_INCRE_CKPT),
@@ -5934,21 +5902,39 @@ retry:
     }
 }
 
+void clean_buf_need_flush_flag(BufferDesc *buf_desc)
+{
+    uint32 old_buf_state;
+    uint32 buf_state;
+
+    old_buf_state = pg_atomic_read_u32(&buf_desc->state);
+    for (;;) {
+        if (old_buf_state & BM_LOCKED) {
+            old_buf_state = WaitBufHdrUnlocked(buf_desc);
+        }
+        buf_state = old_buf_state;
+        buf_state &= ~BM_CHECKPOINT_NEEDED;
+
+        if (pg_atomic_compare_exchange_u32(&buf_desc->state, &old_buf_state, buf_state)) {
+            break;
+        }
+    }
+
+    return;
+}
+
 /**
  * @Description: pagewriter thread flush dirty pages to data file.
  * @in          number of pagewriter need flush dirty page.
  * @return      number of dirty pages actually flushed
  */
-void ckpt_flush_dirty_page(int thread_id)
+void ckpt_flush_dirty_page(int thread_id, WritebackContext wb_context)
 {
     uint32 i;
     uint32 actual_written = 0;
     int buf_id;
-    WritebackContext wb_context;
     BufferDesc* buf_desc = NULL;
     uint32 buf_state;
-
-    WritebackContextInit(&wb_context, &t_thrd.pagewriter_cxt.page_writer_after);
 
     for (i = g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].start_loc;
          i <= g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].end_loc; i++) {
@@ -5964,22 +5950,18 @@ void ckpt_flush_dirty_page(int thread_id)
             uint32 ret = SyncOneBuffer(buf_id, false, &wb_context, true);
             if (ret & BUF_WRITTEN) {
                 actual_written++;
-            } else if (ret & BUF_SKIPPED) {
-                /*
-                 * We could not flush the buffer as we couldn't acquire conditional
-                 * lock on the buffer content_lock. So we mark it in buf_id_arr.
-                 */
-                g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id = DW_INVALID_BUFFER_ID;
+            } else {
+                clean_buf_need_flush_flag(buf_desc);
             }
         } else {
+            buf_state &= (~BM_CHECKPOINT_NEEDED);
             UnlockBufHdr(buf_desc, buf_state);
         }
     }
 
-    /* issue all pending flushes */
-    IssuePendingWritebacks(&wb_context);
     g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].need_flush = false;
     g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].actual_flush_num = actual_written;
     (void)pg_atomic_fetch_sub_u32(&g_instance.ckpt_cxt_ctl->page_writer_procs.running_num, 1);
-    AddBatchBufToFreeList(thread_id);
+    smgrcloseall();
 }
+

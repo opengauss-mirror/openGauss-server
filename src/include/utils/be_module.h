@@ -88,6 +88,7 @@ enum ModuleId {
     MOD_PARSER,     /* parser module */
     MOD_INSTR,      /* Instrumentation */
     MOD_INCRE_CKPT, /* incremental checkpoint */
+    MOD_INCRE_BG,   /* incremental checkpoint bgwriter */
     MOD_DW,         /* double write */
     MOD_RTO,        /* log control */
     MOD_HEARTBEAT,  /* heartbeat */

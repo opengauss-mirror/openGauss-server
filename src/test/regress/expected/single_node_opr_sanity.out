@@ -2507,6 +2507,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4368 | remote_pagewriter_stat
  4371 | local_ckpt_stat
  4372 | remote_ckpt_stat
+ 4373 | local_bgwriter_stat
+ 4374 | remote_bgwriter_stat
  4384 | local_double_write_stat
  4385 | remote_double_write_stat
  4388 | local_redo_stat
@@ -2678,7 +2680,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
  9999 | pg_test_err_contain_err
-(2277 rows)
+(2279 rows)
 
 -- Check prokind
 select count(*) from pg_proc where prokind = 'a';
@@ -2696,7 +2698,7 @@ select count(*) from pg_proc where prokind = 'w';
 select count(*) from pg_proc where prokind = 'f';
  count 
 -------
-  3151
+  3153
 (1 row)
 
 select count(*) from pg_proc where prokind = 'p';

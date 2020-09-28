@@ -29,6 +29,13 @@
 typedef struct PGPROC PGPROC;
 typedef struct BufferDesc BufferDesc;
 
+typedef struct ThrdDwCxt {
+    char* dw_buf;
+    uint16 write_pos;
+    volatile int dw_page_idx;      /* -1 means data files have been flushed. */
+    bool contain_hashbucket;
+} ThrdDwCxt;
+
 typedef struct PageWriterProc {
     PGPROC* proc;
     volatile uint32 start_loc;
@@ -41,6 +48,7 @@ typedef struct PageWriterProcs {
     PageWriterProc* writer_proc;
     volatile int num;             /* number of pagewriter thread */
     pg_atomic_uint32 running_num; /* number of pagewriter thread which flushing dirty page */
+    ThrdDwCxt thrd_dw_cxt;
 } PageWriterProcs;
 
 typedef struct DirtyPageQueueSlot {
@@ -64,6 +72,9 @@ typedef struct incre_ckpt_view_col {
  * the dirty page head, need set the slot state is invalid.
  */
 const int SLOT_VALID = 1;
+
+extern bool IsPagewriterProcess(void);
+extern void incre_ckpt_pagewriter_cxt_init();
 extern void ckpt_pagewriter_main(void);
 
 extern bool push_pending_flush_queue(Buffer buffer);

@@ -152,6 +152,7 @@ typedef struct knl_g_dw_context {
     uint16 unused;
 
     char* buf;
+    bool contain_hashbucket; /* */
     dw_file_head_t* file_head;
     char* unaligned_buf;
     dw_stat_info stat_info;

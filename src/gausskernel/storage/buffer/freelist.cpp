@@ -22,6 +22,8 @@
 #include "storage/bufmgr.h"
 #include "storage/proc.h"
 #include "postmaster/aiocompleter.h" /* this is for the function AioCompltrIsReady() */
+#include "postmaster/pagewriter.h"
+#include "postmaster/postmaster.h"
 #include "access/double_write.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/storage_gstrace.h"
@@ -64,6 +66,7 @@ typedef struct
 
 const int MIN_DELAY_RETRY = 100;
 const int MAX_DELAY_RETRY = 1000;
+const int MAX_RETRY_TIMES = 1000;
 const float NEED_DELAY_RETRY_GET_BUF = 0.8;
 
 /* Prototypes for internal functions */
@@ -75,13 +78,12 @@ void PageListBackWrite(uint32* bufList, int32 n,
     SMgrRelation use_smgrReln = NULL, /* opt relation */
     int32* bufs_written = NULL,       /* opt written count returned */
     int32* bufs_reusable = NULL);     /* opt reusable count returned */
-static BufferDesc* getBufferFromFreeList(BufferAccessStrategy strategy, Dlelem **elt, uint32 *buf_state,
-    BufFreeListHash **buf_list_entry);
+static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint32* buf_state);
 
 static void perform_delay(StrategyDelayStatus *status)
 {
-    if (++(status->retry_times) > u_sess->attr.attr_storage.pagewriter_threshold &&
-        get_dirty_page_num() > g_instance.attr.attr_storage.NBuffers * NEED_DELAY_RETRY_GET_BUF){
+    if (++(status->retry_times) > MAX_RETRY_TIMES &&
+        get_dirty_page_num() > g_instance.attr.attr_storage.NBuffers * NEED_DELAY_RETRY_GET_BUF) {
         if (status->cur_delay_time == 0) {
             status->cur_delay_time = MIN_DELAY_RETRY;
         }
@@ -173,8 +175,7 @@ static inline uint32 ClockSweepTick(int max_nbuffer_can_use)
  *  If the fraction is too small, we will increase dynamiclly to avoid elog(ERROR)
  *  in `Startup' process because of ERROR will promote to FATAL.
  */
-BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state, Dlelem **buf_elt,
-    BufFreeListHash **buf_list_entry)
+BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state)
 {
     BufferDesc* buf = NULL;
     int bgwproc_no;
@@ -231,10 +232,14 @@ BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state, 
      */
     (void)pg_atomic_fetch_add_u32(&t_thrd.storage_cxt.StrategyControl->numBufferAllocs, 1);
 
-    buf = getBufferFromFreeList(strategy, buf_elt, buf_state, buf_list_entry);
-    if (buf != NULL) {
-        gstrace_exit(GS_TRC_ID_StrategyGetBuffer);
-        return buf;
+    /* Check the Candidate list */
+    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
+        g_instance.attr.attr_storage.bgwriter_thread_num > 0) {
+        buf = get_buf_from_candidate_list(strategy, buf_state);
+        if (buf != NULL) {
+            (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_candidate_list, 1);
+            return buf;
+        }
     }
 
 retry:
@@ -268,7 +273,7 @@ retry:
             if (strategy != NULL)
                 AddBufferToRing(strategy, buf);
             *buf_state = local_buf_state;
-            gstrace_exit(GS_TRC_ID_StrategyGetBuffer);
+            (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_clock_sweep, 1);
             return buf;
         } else if (--try_counter == 0) {
             /*
@@ -285,8 +290,7 @@ retry:
                 u_sess->attr.attr_storage.shared_buffers_fraction =
                     Min(u_sess->attr.attr_storage.shared_buffers_fraction + 0.1, 1.0);
                 goto retry;
-            } else if (dw_page_writer_running() &&
-                       pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->page_writer_last_flush) > 0) {
+            } else if (dw_page_writer_running()) {
                 /*
                  * If the page_writer is still able to flush some buffers, we better
                  * retry (instead of giving up and throwing error).
@@ -667,317 +671,41 @@ void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, in
     }
 }
 
-static inline void getKeyAndListNum(int *buf_free_list_num, int *key)
+static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint32* buf_state)
 {
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
-        *buf_free_list_num = NUM_BUFFER_FREE_LIST;
-        *key = free_list_random() % *buf_free_list_num;
-    } else {
-        *key = 0;
-        *buf_free_list_num = 1;
-    }
-}
+    BufferDesc* buf = NULL;
+    int bgwriter_num = g_instance.bgwriter_cxt.bgwriter_num;
+    uint32 local_buf_state;
 
-/**
- * @Description: Get one buffer from buffer free list. To ensure that no one else can pin the buffer before we do,
- *            we must return the buffer with the buffer header spinlock still held.
- */
-static BufferDesc* getBufferFromFreeList(BufferAccessStrategy strategy, Dlelem **buf_elt, uint32 *buf_state,
-    BufFreeListHash **buf_list_entry_find)
-{
-    BufFreeListHash *buf_list_entry = NULL;
-    BufListElem     *buf_entry = NULL;
-    BufferDesc      *buf = NULL;
-    int             key = 0;
-    bool            found = false;
-    int             retry_times = 0;
-    int             buf_free_list_num = 0;
+    int list_num = bgwriter_num;
+    int list_id = random() % list_num;
+    for (int i = 0; i < list_num; i++) {
+        int thread_id = (list_id + i) % list_num;
+        int buf_id = 0;
+        BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
 
-    getKeyAndListNum(&buf_free_list_num, &key);
+        while (candidate_buf_pop(&buf_id, thread_id)) {
+            buf = GetBufferDescriptor(buf_id);
+            local_buf_state = LockBufHdr(buf);
 
-    while (retry_times++ < buf_free_list_num) {
-        buf_list_entry =
-                    (BufFreeListHash*)hash_search(t_thrd.storage_cxt.BufFreeListHash, (void*)&key, HASH_FIND, &found);
-        /* If this buffer free list does not have any buffer, choose the next free list except the first free list. */
-        if (buf_list_entry->buf_free_num <= 0) {
-            key = free_list_random() % buf_free_list_num;
-            continue;
-        }
-        Dlelem *buf_elt_next = NULL;
-
-        (void)LWLockAcquire(buf_list_entry->lock, LW_SHARED);
-        for (*buf_elt = DLGetHead(&buf_list_entry->buf_free_Dllist); *buf_elt; *buf_elt = buf_elt_next) {
-            buf_elt_next = DLGetSucc(*buf_elt);
-
-            buf_entry = (BufListElem*)DLE_VAL(*buf_elt);
-            buf = GetBufferDescriptor(buf_entry->buf_id);
-            if (!retryLockBufHdr(buf, buf_state)) {
-                continue;
-            }
-
-            if (BUF_STATE_GET_REFCOUNT(*buf_state) == 0 &&
-                (!dw_page_writer_running() || !(*buf_state & BM_DIRTY))) {
-                LWLockRelease(buf_list_entry->lock);
-
-                buf->free_list_idx = -1;
-                if (strategy != NULL) {
-                    AddBufferToRing(strategy, buf);
+            if (g_instance.bgwriter_cxt.candidate_free_map[buf_id]) {
+                g_instance.bgwriter_cxt.candidate_free_map[buf_id] = false;
+                if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && !(local_buf_state & BM_DIRTY)) {
+                    if (strategy != NULL) {
+                        AddBufferToRing(strategy, buf);
+                    }
+                    *buf_state = local_buf_state;
+                    return buf;
                 }
-                /* return this buffer to BufferAlloc, after release the buffer spinlock, remove the buf form list. */
-                *buf_list_entry_find = buf_list_entry;
-                return buf;
             }
 
-            UnlockBufHdr(buf, *buf_state);
+            UnlockBufHdr(buf, local_buf_state);
         }
-        LWLockRelease(buf_list_entry->lock);
-        key = free_list_random() % buf_free_list_num;
-    }
 
-    return NULL;
-}
-
-void InitBufFreeTable(int size)
-{
-    HASHCTL hashctl; 
-
-    hashctl.keysize = sizeof(int);
-    hashctl.entrysize = sizeof(BufFreeListHash);
-    hashctl.hash = tag_hash;
-
-    t_thrd.storage_cxt.BufFreeListHash = ShmemInitHash("Shared Buffer Free Table", size, size, &hashctl,
-        HASH_ELEM | HASH_FUNCTION);
-}
-
-static void pushBufFreeList(BufFreeListHash *buf_list_entry, int buf_id, int list_idx)
-{
-    BufListElem *buf_entry = NULL;
-    BufferDesc  *buf = NULL;
-    Dlelem      *elt = NULL;
-
-    buf_entry = (BufListElem *)palloc(sizeof(BufListElem));
-    buf_entry->buf_id = buf_id;
-    buf = GetBufferDescriptor(buf_id);
-    buf->free_list_idx = list_idx;
-    elt = DLNewElem((void*)buf_entry);
-    DLAddTail(&buf_list_entry->buf_free_Dllist, elt);
-    buf_list_entry->buf_free_num++;
-
-    return;
-}
-
-/**
- * @Description: Add all buffer to the buffer free list evenly.
- */
-void InitBufFreeList()
-{
-    bool    found = false;
-    int     list_idx;
-    int     buf_id;
-    BufFreeListHash *buf_list_entry = NULL;
-    int     list_num = g_instance.attr.attr_storage.enableIncrementalCheckpoint ? NUM_BUFFER_FREE_LIST : 1;
-    int     avg_buf_num = g_instance.attr.attr_storage.NBuffers / list_num;
-
-    MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
-
-    for (list_idx = 0; list_idx < list_num; list_idx++) {
-        buf_list_entry = 
-            (BufFreeListHash*)hash_search(t_thrd.storage_cxt.BufFreeListHash, (void*)&list_idx, HASH_ENTER, &found);
-        INIT_BUF_FREE_LIST_ENTRY(buf_list_entry);
-
-        (void)LWLockAcquire(buf_list_entry->lock, LW_EXCLUSIVE);
-        for (buf_id = list_idx * avg_buf_num; buf_id < (list_idx + 1) * avg_buf_num; buf_id++) {
-            pushBufFreeList(buf_list_entry, buf_id, list_idx);
-        }
-        LWLockRelease(buf_list_entry->lock);
-    }
-
-    /* If there are remaining pages in the buffer pool, put them to first freelist. */
-    list_idx = 0;
-    buf_list_entry = 
-            (BufFreeListHash*)hash_search(t_thrd.storage_cxt.BufFreeListHash, (void*)&list_idx, HASH_FIND, &found);
-
-    (void)LWLockAcquire(buf_list_entry->lock, LW_EXCLUSIVE);
-    for (buf_id = list_num * avg_buf_num; buf_id < g_instance.attr.attr_storage.NBuffers; buf_id++) {
-        pushBufFreeList(buf_list_entry, buf_id, list_idx);
-    }
-    LWLockRelease(buf_list_entry->lock);
-    (void)MemoryContextSwitchTo(oldcontext);
-}
-
-bool need_push_buffer_free_list(BufferDesc *bufhdr, int32 key)
-{
-    __uint64_t compare = 0;
-    __uint64_t exchange = 0;
-    __uint64_t current = 0;
-    int32 free_list_idx = 0;
-    uint32 state;
-    errno_t rc;
-
-    compare = __sync_val_compare_and_swap((__uint64_t*)&bufhdr->state, compare, exchange);
-loop:
-    rc = memcpy_s(&free_list_idx, sizeof(int32), (char*)&compare + sizeof(uint32), sizeof(int32));
-    securec_check(rc, "", "");
-    if (free_list_idx != -1) {
-        return false;
-    }
-    pg_read_barrier();
-    rc = memcpy_s(&state, sizeof(uint32), (char*)&compare, sizeof(uint32));
-    securec_check(rc, "", "");
-    if (state & BM_LOCKED) {
-        current = __sync_val_compare_and_swap((__uint64_t*)&bufhdr->state, compare, compare);
-        compare = current;
-        goto loop;
-    }
-    free_list_idx = key;
-    rc = memcpy_s(&exchange, sizeof(uint32), &compare, sizeof(uint32));
-    securec_check(rc, "", "");
-    rc = memcpy_s((char*)&exchange + sizeof(uint32), sizeof(int32), &free_list_idx, sizeof(int32));
-    securec_check(rc, "", "");
-
-    current = __sync_val_compare_and_swap((__uint64_t*)&bufhdr->state, compare, exchange);
-    if (compare != current) {
-        compare = current;
-        goto loop;
-    }
-    return true;
-}
-
-/**
- * @Description: After InvalidateBuffer, add the buffer to the first buffer free list.
- * @in: buffer header
- */
-void AddBufToFreeList(BufferDesc *buf)
-{
-    Dlelem* elt = NULL;
-    BufFreeListHash *buf_list_entry = NULL;
-    BufListElem *buf_entry = NULL;
-    bool found = false;
-    int key = 0;
-
-    MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
-
-    buf_list_entry = (BufFreeListHash*)hash_search(t_thrd.storage_cxt.BufFreeListHash, (void*)&key, HASH_ENTER, &found);
-    if (buf_list_entry->buf_free_num > g_instance.attr.attr_storage.NBuffers) {
-        return;
-    }
-
-    if (need_push_buffer_free_list(buf, 0)) {
-        buf_entry = (BufListElem *)palloc(sizeof(BufListElem));
-        buf_entry->buf_id = buf->buf_id;
-        elt = DLNewElem((void*)buf_entry);
-
-        (void)LWLockAcquire(buf_list_entry->lock, LW_EXCLUSIVE);
-        DLAddTail(&buf_list_entry->buf_free_Dllist, elt);
-        buf_list_entry->buf_free_num++;
-        LWLockRelease(buf_list_entry->lock);
-    }
-    (void)MemoryContextSwitchTo(oldcontext);
-}
-
-static BufFreeListHash* getNextFreeList()
-{
-    uint64  key;
-    bool    found = false;
-    BufFreeListHash *buf_list_entry = NULL;
-
-    key = free_list_random() % NUM_BUFFER_FREE_LIST;
-    buf_list_entry =
-        (BufFreeListHash*)hash_search(t_thrd.storage_cxt.BufFreeListHash, (void*)&key, HASH_FIND, &found);
-    return buf_list_entry;
-}
-
-const int RETRY_GET_NEXT_LIST = 10;
-const int RETRY_GET_LIST_LOCK = 5;
-
-void pushBufToList(BufFreeListHash *buf_list_entry, int start_loc, int end_loc)
-{
-    BufListElem     *buf_entry = NULL;
-    int             buf_id;
-    Dlelem          *elt = NULL;
-    BufferDesc      *bufhdr = NULL;
-    int             retry_times = 0;
-
-    buf_list_entry = getNextFreeList();
-    while (buf_list_entry->buf_free_num >= g_instance.attr.attr_storage.NBuffers / NUM_BUFFER_FREE_LIST
-        && retry_times++ < RETRY_GET_NEXT_LIST) {
-        buf_list_entry = getNextFreeList();
-    }
-
-    retry_times = 0;
-
-    while (!LWLockConditionalAcquire(buf_list_entry->lock, LW_EXCLUSIVE)) {
-        if (retry_times++ >= RETRY_GET_LIST_LOCK) {
-            buf_list_entry = getNextFreeList();
-            retry_times = 0;
+        /* The current candidate list is empty, wake up the buffer writer. */
+        if (bgwriter->proc != NULL && bgwriter->is_hibernating) {
+            SetLatch(&bgwriter->proc->procLatch);
         }
     }
-
-    for (int i = start_loc; i <= end_loc; i++) {
-        buf_id = g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id;
-        if (buf_id == DW_INVALID_BUFFER_ID) {
-            continue;
-        }
-        bufhdr = GetBufferDescriptor(buf_id);
-        if (need_push_buffer_free_list(bufhdr, buf_list_entry->key)) {
-            buf_entry = (BufListElem *)palloc(sizeof(BufListElem));
-            buf_entry->buf_id = buf_id;
-            elt = DLNewElem((void*)buf_entry);
-            DLAddTail(&buf_list_entry->buf_free_Dllist, elt);
-            buf_list_entry->buf_free_num++;
-        }
-    }
-    LWLockRelease(buf_list_entry->lock);
-}
-
-const int BATCH_ADD_FREE_LIST_NUM = 5;
-/**
- * @Description: pagewriter thread flush the buffer to data file, add these buffer to free list,
- *            except for the first one.
- */
-void AddBatchBufToFreeList(int thread_id)
-{
-    BufFreeListHash *buf_list_entry = NULL;
-    MemoryContext   oldcontext = NULL;
-    int start = g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].start_loc;
-    int end = g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].end_loc;
-    int avg_num = (end - start) / BATCH_ADD_FREE_LIST_NUM;
-    int remain_num = (end - start) % BATCH_ADD_FREE_LIST_NUM;
-    int temp_start;
-    int temp_end;
-
-    oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
-
-    for (int i = 0; i < BATCH_ADD_FREE_LIST_NUM; i++) {
-        if (i == 0) {
-            temp_start = start;
-            temp_end = start + avg_num + remain_num - 1;
-        } else {
-            temp_start = start + avg_num * i + remain_num;
-            temp_end = temp_start + avg_num - 1;
-        }
-        pushBufToList(buf_list_entry, temp_start, temp_end);
-    }
-    
-    (void)MemoryContextSwitchTo(oldcontext);
-}
-
-/**
- * @Description: Remove the buf from the buffer free list after release buffer desc spinlock.
- * @in: buffer free list
- * @in: list element need remove.
- */
-void RemoveBufFromFreeList(BufferDesc *buf, BufFreeListHash *buf_list_entry, Dlelem *elt)
-{
-    MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
-
-    (void)LWLockAcquire(buf_list_entry->lock, LW_EXCLUSIVE);
-    if (elt != NULL) {
-        DLRemove(elt);
-        buf_list_entry->buf_free_num--;
-        pfree(DLE_VAL(elt));
-        DLFreeElem(elt);
-    }
-    LWLockRelease(buf_list_entry->lock);
-    (void)MemoryContextSwitchTo(oldcontext);
+	return NULL;
 }
