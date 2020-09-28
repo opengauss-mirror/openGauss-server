@@ -119,20 +119,11 @@ static DH* genDHKeyPair(DHKeyLength dhType);
 extern THR_LOCAL unsigned char disable_pqlocking;
 
 /* security ciphers suites in SSL connection */
-static const char* ssl_ciphers_map[] = {TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,
-    TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,
-    TLS1_TXT_DHE_DSS_WITH_AES_256_GCM_SHA384,
-    TLS1_TXT_DHE_DSS_WITH_AES_128_GCM_SHA256,
-    TLS1_TXT_DHE_RSA_WITH_AES_256_SHA256,
-    TLS1_TXT_DHE_RSA_WITH_AES_128_SHA256,
-    TLS1_TXT_DHE_DSS_WITH_AES_256_SHA256,
-    TLS1_TXT_DHE_DSS_WITH_AES_128_SHA256,
-    TLS1_TXT_DHE_RSA_WITH_AES_256_CCM,
-    TLS1_TXT_DHE_RSA_WITH_AES_128_CCM,
-    TLS1_TXT_DHE_RSA_WITH_AES_256_SHA,
-    TLS1_TXT_DHE_RSA_WITH_AES_128_SHA,
-    TLS1_TXT_DHE_DSS_WITH_AES_256_SHA,
-    TLS1_TXT_DHE_DSS_WITH_AES_128_SHA,
+static const char* ssl_ciphers_map[] = {
+    TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,   /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256 */
+    TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,   /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
+    TLS1_TXT_DHE_RSA_WITH_AES_128_CCM,          /* TLS_DHE_RSA_WITH_AES_128_CCM */
+    TLS1_TXT_DHE_RSA_WITH_AES_256_CCM,          /* TLS_DHE_RSA_WITH_AES_256_CCM */
     NULL};
 
 #endif
@@ -524,7 +515,6 @@ static void set_user_config_ssl_ciphers(const char* sslciphers)
     char* cipherStr = NULL;
     char* cipherStr_tmp = NULL;
     char* token = NULL;
-    char errormessage[32] = {0};
     int counter = 1;
     char** ciphers_list = NULL;
     bool find_ciphers_in_list = false;
@@ -568,15 +558,19 @@ static void set_user_config_ssl_ciphers(const char* sslciphers)
             }
             if (!find_ciphers_in_list) {
                 errno_t errorno = EOK;
+                const int maxCipherStrLen = 64;
+                char errormessage[maxCipherStrLen] = {0};
                 errorno = strncpy_s(errormessage, sizeof(errormessage), token, sizeof(errormessage) - 1);
                 securec_check(errorno, cipherStr_tmp, ciphers_list, "\0");
-                errormessage[31] = '\0';
-                if (cipherStr_tmp != NULL)
+                errormessage[maxCipherStrLen - 1] = '\0';
+                if (cipherStr_tmp != NULL) {
                     pfree(cipherStr_tmp);
-                cipherStr_tmp = NULL;
-                if (ciphers_list != NULL)
+                    cipherStr_tmp = NULL;
+                }
+                if (ciphers_list != NULL) {
                     pfree(ciphers_list);
-                ciphers_list = NULL;
+                    ciphers_list = NULL;
+                }
                 ereport(ERROR, (errmsg("unrecognized ssl ciphers name: \"%s\"", errormessage)));
             }
             token = strtok_r(NULL, ";", &ptok);
@@ -585,12 +579,14 @@ static void set_user_config_ssl_ciphers(const char* sslciphers)
         }
     }
     if (SSL_CTX_set_cipher_list_ex(u_sess->libpq_cxt.SSL_server_context, (const char**)ciphers_list, counter) != 1) {
-        if (cipherStr_tmp != NULL)
+        if (cipherStr_tmp != NULL) {
             pfree(cipherStr_tmp);
-        cipherStr_tmp = NULL;
-        if (ciphers_list != NULL)
+            cipherStr_tmp = NULL;
+        }
+        if (ciphers_list != NULL) {
             pfree(ciphers_list);
-        ciphers_list = NULL;
+            ciphers_list = NULL;
+        }
         ereport(FATAL, (errmsg("could not set the cipher list (no valid ciphers available)")));
     }
     if (cipherStr_tmp != NULL) {
@@ -736,9 +732,9 @@ static void initialize_SSL(void)
     SSL_CTX_set_tmp_dh(u_sess->libpq_cxt.SSL_server_context, dhkey);
     DH_free(dhkey);
 
-    /* SSL2.0/SSL3.0/TLS1.0 is forbidden here. */
+    /* SSL2.0/SSL3.0/TLS1.0/TLS1.1 is forbidden here. */
     SSL_CTX_set_options(u_sess->libpq_cxt.SSL_server_context,
-        SSL_OP_SINGLE_DH_USE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
+        SSL_OP_SINGLE_DH_USE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
 
     /* set up the allowed cipher list */
     if (strncmp(g_instance.attr.attr_security.SSLCipherSuites, "ALL", 3) == 0) {
