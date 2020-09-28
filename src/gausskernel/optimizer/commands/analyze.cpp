@@ -926,7 +926,7 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
                 *numrows = (tableFdwRoutine->AcquireSampleRows)(
                     onerel, elevel, rows, target_rows, totalrows, totaldeadrows, 0, estimate_table_rownum);
             }
-            totaldeadrows = 0; /* set totaldeadrows to zero. It is no means to foreign table. */
+            *totaldeadrows = 0; /* set totaldeadrows to zero. It is no means to foreign table. */
         }
     } else {
         if (RelationIsColStore(onerel)) {
