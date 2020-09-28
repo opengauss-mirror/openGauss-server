@@ -10776,6 +10776,23 @@ bool IsRestartPointSafe(const XLogRecPtr checkPoint)
     return true;
 }
 
+void wait_all_dirty_page_flush(int flags, XLogRecPtr redo)
+{
+    /* need wait all dirty page finish flush */
+    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+        update_dirty_page_queue_rec_lsn(redo, true);
+        g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = redo;
+        g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
+        pg_write_barrier();
+        if (get_dirty_page_num() > 0) {
+            g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
+            ereport(LOG, (errmsg("CreateRestartPoint, need flush %ld pages.", get_dirty_page_num())));
+            CheckPointBuffers(flags, true);
+        }
+    }
+    return;
+}
+
 /*
  * Establish a restartpoint if possible.
  *
@@ -10848,6 +10865,7 @@ bool CreateRestartPoint(int flags)
 
         UpdateMinRecoveryPoint(InvalidXLogRecPtr, true);
         if ((unsigned int)flags & CHECKPOINT_IS_SHUTDOWN) {
+            wait_all_dirty_page_flush(flags, lastCheckPoint.redo);
             LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
             t_thrd.shemem_ptr_cxt.ControlFile->state = DB_SHUTDOWNED_IN_RECOVERY;
             t_thrd.shemem_ptr_cxt.ControlFile->time = (pg_time_t)time(NULL);
