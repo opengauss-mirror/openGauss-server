@@ -31,6 +31,20 @@ CREATE TABLE "S 1"."T 2" (
 	CONSTRAINT t2_pkey PRIMARY KEY (c1)
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "T 2"
+CREATE TABLE "S 1"."T 3" (
+	c1 int NOT NULL,
+	c2 int NOT NULL,
+	c3 text,
+	CONSTRAINT t3_pkey PRIMARY KEY (c1)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t3_pkey" for table "T 3"
+CREATE TABLE "S 1"."T 4" (
+	c1 int NOT NULL,
+	c2 int NOT NULL,
+	c3 text,
+	CONSTRAINT t4_pkey PRIMARY KEY (c1)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t4_pkey" for table "T 4"
 INSERT INTO "S 1"."T 1"
 	SELECT id,
 	       id % 10,
@@ -45,8 +59,22 @@ INSERT INTO "S 1"."T 2"
 	SELECT id,
 	       'AAA' || to_char(id, 'FM000')
 	FROM generate_series(1, 100) id;
+INSERT INTO "S 1"."T 3"
+	SELECT id,
+	       id + 1,
+	       'AAA' || to_char(id, 'FM000')
+	FROM generate_series(1, 100) id;
+DELETE FROM "S 1"."T 3" WHERE c1 % 2 != 0;	-- delete for outer join tests
+INSERT INTO "S 1"."T 4"
+	SELECT id,
+	       id + 1,
+	       'AAA' || to_char(id, 'FM000')
+	FROM generate_series(1, 100) id;
+DELETE FROM "S 1"."T 4" WHERE c1 % 3 != 0;	-- delete for outer join tests
 ANALYZE "S 1"."T 1";
 ANALYZE "S 1"."T 2";
+ANALYZE "S 1"."T 3";
+ANALYZE "S 1"."T 4";
 -- ===================================================================
 -- create local tables to check whether the grammer is support
 -- ===================================================================
@@ -99,6 +127,16 @@ CREATE FOREIGN TABLE ft2 (
 	c8 user_enum
 ) SERVER loopback;
 ALTER FOREIGN TABLE ft2 DROP COLUMN cx;
+CREATE FOREIGN TABLE ft4 (
+	c1 int NOT NULL,
+	c2 int NOT NULL,
+	c3 text
+) SERVER loopback OPTIONS (schema_name 'S 1', table_name 'T 3');
+CREATE FOREIGN TABLE ft5 (
+	c1 int NOT NULL,
+	c2 int NOT NULL,
+	c3 text
+) SERVER loopback OPTIONS (schema_name 'S 1', table_name 'T 4');
 -- ===================================================================
 -- tests for validator
 -- ===================================================================
@@ -145,7 +183,9 @@ ALTER FOREIGN TABLE ft2 ALTER COLUMN c1 OPTIONS (column_name 'C 1');
 --------+-------+----------+---------------------------------------+-------------
  public | ft1   | loopback | (schema_name 'S 1', table_name 'T 1') | 
  public | ft2   | loopback | (schema_name 'S 1', table_name 'T 1') | 
-(2 rows)
+ public | ft4   | loopback | (schema_name 'S 1', table_name 'T 3') | 
+ public | ft5   | loopback | (schema_name 'S 1', table_name 'T 4') | 
+(4 rows)
 
 -- Test that alteration of server options causes reconnection
 -- Remote's errors might be non-English, so hide them to ensure stable results
@@ -189,6 +229,8 @@ SELECT c3, c4 FROM ft1 ORDER BY c3, c1 LIMIT 1;  -- should work again
 -- To exercise multiple code paths, we use local stats on ft1
 -- and remote-estimate mode on ft2.
 ANALYZE ft1;
+ANALYZE ft4;
+ANALYZE ft5;
 ALTER FOREIGN TABLE ft2 OPTIONS (use_remote_estimate 'true');
 -- ===================================================================
 -- simple queries
@@ -2410,6 +2452,108 @@ ERROR:  column "tableoid" does not exist
 LINE 1: DELETE FROM ft2 WHERE c1 = 9999 RETURNING tableoid::regclass...
                                                   ^
 CONTEXT:  referenced column: tableoid
+-- Test UPDATE/DELETE with RETURNING on a three-table join
+INSERT INTO ft2 (c1,c2,c3)
+  SELECT id, id - 1200, to_char(id, 'FM00000') FROM generate_series(1201, 1300) id;
+EXPLAIN (verbose, costs off)
+UPDATE ft2 SET c3 = 'foo'
+  FROM ft4 INNER JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 1200 AND ft2.c2 = ft4.c1
+  RETURNING ft2, ft2.*, ft4, ft4.*;       -- can be pushed down
+                                                                     QUERY PLAN                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ Update on public.ft2
+   Output: ft2.*, ft2.c1, ft2.c2, ft2.c3, ft2.c4, ft2.c5, ft2.c6, ft2.c7, ft2.c8, ft4.*, ft4.c1, ft4.c2, ft4.c3
+   ->  Hash Join
+         Output: ft2.c1, ft2.c2, NULL::integer, 'foo'::text, ft2.c4, ft2.c5, ft2.c6, ft2.c7, ft2.c8, ft2.ctid, ft4.*, ft5.*, ft4.c1, ft4.c2, ft4.c3
+         Hash Cond: (ft2.c2 = ft4.c1)
+         ->  Foreign Scan on public.ft2
+               Output: ft2.c1, ft2.c2, ft2.c4, ft2.c5, ft2.c6, ft2.c7, ft2.c8, ft2.ctid
+               Remote SQL: SELECT "C 1", c2, c4, c5, c6, c7, c8, ctid FROM "S 1"."T 1" WHERE (("C 1" > 1200)) FOR UPDATE
+         ->  Hash
+               Output: ft4.*, ft4.c1, ft4.c2, ft4.c3, ft5.*, ft5.c1
+               ->  Hash Join
+                     Output: ft4.*, ft4.c1, ft4.c2, ft4.c3, ft5.*, ft5.c1
+                     Hash Cond: (ft4.c1 = ft5.c1)
+                     ->  Foreign Scan on public.ft4
+                           Output: ft4.*, ft4.c1, ft4.c2, ft4.c3
+                           Remote SQL: SELECT c1, c2, c3 FROM "S 1"."T 3"
+                     ->  Hash
+                           Output: ft5.*, ft5.c1
+                           ->  Foreign Scan on public.ft5
+                                 Output: ft5.*, ft5.c1
+                                 Remote SQL: SELECT c1, c2, c3 FROM "S 1"."T 4"
+(21 rows)
+
+UPDATE ft2 SET c3 = 'foo'
+  FROM ft4 INNER JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 1200 AND ft2.c2 = ft4.c1
+  RETURNING ft2, ft2.*, ft4, ft4.*;
+              ft2               |  c1  | c2 | c3  | c4 | c5 | c6 |     c7     | c8 |      ft4       | c1 | c2 |   c3   
+--------------------------------+------+----+-----+----+----+----+------------+----+----------------+----+----+--------
+ (1206,6,foo,,,,"ft2       ",)  | 1206 |  6 | foo |    |    |    | ft2        |    | (6,7,AAA006)   |  6 |  7 | AAA006
+ (1212,12,foo,,,,"ft2       ",) | 1212 | 12 | foo |    |    |    | ft2        |    | (12,13,AAA012) | 12 | 13 | AAA012
+ (1218,18,foo,,,,"ft2       ",) | 1218 | 18 | foo |    |    |    | ft2        |    | (18,19,AAA018) | 18 | 19 | AAA018
+ (1224,24,foo,,,,"ft2       ",) | 1224 | 24 | foo |    |    |    | ft2        |    | (24,25,AAA024) | 24 | 25 | AAA024
+ (1230,30,foo,,,,"ft2       ",) | 1230 | 30 | foo |    |    |    | ft2        |    | (30,31,AAA030) | 30 | 31 | AAA030
+ (1236,36,foo,,,,"ft2       ",) | 1236 | 36 | foo |    |    |    | ft2        |    | (36,37,AAA036) | 36 | 37 | AAA036
+ (1242,42,foo,,,,"ft2       ",) | 1242 | 42 | foo |    |    |    | ft2        |    | (42,43,AAA042) | 42 | 43 | AAA042
+ (1248,48,foo,,,,"ft2       ",) | 1248 | 48 | foo |    |    |    | ft2        |    | (48,49,AAA048) | 48 | 49 | AAA048
+ (1254,54,foo,,,,"ft2       ",) | 1254 | 54 | foo |    |    |    | ft2        |    | (54,55,AAA054) | 54 | 55 | AAA054
+ (1260,60,foo,,,,"ft2       ",) | 1260 | 60 | foo |    |    |    | ft2        |    | (60,61,AAA060) | 60 | 61 | AAA060
+ (1266,66,foo,,,,"ft2       ",) | 1266 | 66 | foo |    |    |    | ft2        |    | (66,67,AAA066) | 66 | 67 | AAA066
+ (1272,72,foo,,,,"ft2       ",) | 1272 | 72 | foo |    |    |    | ft2        |    | (72,73,AAA072) | 72 | 73 | AAA072
+ (1278,78,foo,,,,"ft2       ",) | 1278 | 78 | foo |    |    |    | ft2        |    | (78,79,AAA078) | 78 | 79 | AAA078
+ (1284,84,foo,,,,"ft2       ",) | 1284 | 84 | foo |    |    |    | ft2        |    | (84,85,AAA084) | 84 | 85 | AAA084
+ (1290,90,foo,,,,"ft2       ",) | 1290 | 90 | foo |    |    |    | ft2        |    | (90,91,AAA090) | 90 | 91 | AAA090
+ (1296,96,foo,,,,"ft2       ",) | 1296 | 96 | foo |    |    |    | ft2        |    | (96,97,AAA096) | 96 | 97 | AAA096
+(16 rows)
+
+EXPLAIN (verbose, costs off)
+DELETE FROM ft2
+  USING ft4 LEFT JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 1200 AND ft2.c1 % 10 = 0 AND ft2.c2 = ft4.c1
+  RETURNING 100;                          -- can be pushed down
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Delete on public.ft2
+   Output: 100
+   ->  Nested Loop Left Join
+         Output: ft2.ctid, ft4.*, ft5.*
+         Join Filter: (ft4.c1 = ft5.c1)
+         ->  Nested Loop
+               Output: ft2.ctid, ft4.*, ft4.c1
+               Join Filter: (ft2.c2 = ft4.c1)
+               ->  Foreign Scan on public.ft2
+                     Output: ft2.ctid, ft2.c2
+                     Remote SQL: SELECT c2, ctid FROM "S 1"."T 1" WHERE (("C 1" > 1200)) AND ((("C 1" % 10) = 0)) FOR UPDATE
+               ->  Foreign Scan on public.ft4
+                     Output: ft4.*, ft4.c1
+                     Remote SQL: SELECT c1, c2, c3 FROM "S 1"."T 3"
+         ->  Foreign Scan on public.ft5
+               Output: ft5.*, ft5.c1
+               Remote SQL: SELECT c1, c2, c3 FROM "S 1"."T 4"
+(17 rows)
+
+DELETE FROM ft2
+  USING ft4 LEFT JOIN ft5 ON (ft4.c1 = ft5.c1)
+  WHERE ft2.c1 > 1200 AND ft2.c1 % 10 = 0 AND ft2.c2 = ft4.c1
+  RETURNING 100;
+ ?column? 
+----------
+      100
+      100
+      100
+      100
+      100
+      100
+      100
+      100
+      100
+      100
+(10 rows)
+
+DELETE FROM ft2 WHERE ft2.c1 > 1200;
 -- Test that trigger on remote table works as expected
 CREATE OR REPLACE FUNCTION "S 1".F_BRTRIG() RETURNS trigger AS $$
 BEGIN
