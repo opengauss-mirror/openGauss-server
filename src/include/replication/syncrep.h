@@ -76,7 +76,7 @@ extern void SyncRepUpdateSyncStandbysDefined(void);
 extern void SyncRepCheckSyncStandbyAlive(void);
 
 /* called by wal sender and user backend */
-extern List* SyncRepGetSyncStandbys(bool* am_sync);
+extern List* SyncRepGetSyncStandbys(bool* am_sync, List** catchup_standbys = NULL);
 
 extern bool check_synchronous_standby_names(char** newval, void** extra, GucSource source);
 extern void assign_synchronous_standby_names(const char* newval, void* extra);
