@@ -61,7 +61,7 @@ checkDockerVersion() {
 ##############
 
 # Parameters
-VERSION="1.0.0"
+VERSION="1.0.1"
 SKIPMD5=0
 DOCKEROPS=""
 MIN_DOCKER_VERSION="17.09"
