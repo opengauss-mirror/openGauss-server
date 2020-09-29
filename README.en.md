@@ -67,7 +67,7 @@ When the Xlog is transferred to the standby node, the standby node flushs the Xl
 
 **MOT Engine (beta release)**
 
-The Memory-Optimized Tables (MOT) storage engine is a transactional rowstore optimized for many-core and large memory and delivering extreme OLTP performance and high resources utilization. With data and indexes stored totally in-memory, a NUMA-aware design, algorithms that eliminate lock and latch contention and query native compilation (JIT), MOT provides low latency data access and more efficient transaction execution. See [MOT Engine documentation](https://opengauss.org/en/docs/1.0.0/docs/Developerguide/mot.html).
+The Memory-Optimized Tables (MOT) storage engine is a transactional rowstore optimized for many-core and large memory and delivering extreme OLTP performance and high resources utilization. With data and indexes stored totally in-memory, a NUMA-aware design, algorithms that eliminate lock and latch contention and query native compilation (JIT), MOT provides low latency data access and more efficient transaction execution. See [MOT Engine documentation](https://opengauss.org/en/docs/1.0.1/docs/Developerguide/mot.html).
 
 **Security**
 
@@ -572,7 +572,7 @@ Installation package packaging log: **./package/make_package.log**
 
 ## Quick Start
 
-See the [Quick Start](https://opengauss.org/en/docs/1.0.0/docs/Quickstart/Quickstart.html).
+See the [Quick Start](https://opengauss.org/en/docs/1.0.1/docs/Quickstart/Quickstart.html).
 
 ## Docs
 
@@ -596,7 +596,7 @@ Welcome contributions. See our [Contributor](https://opengauss.org/en/contributi
 
 ## Release Notes
 
-For the release notes, see our [RELEASE](https://opengauss.org/en/docs/1.0.0/docs/Releasenotes/Releasenotes.html).
+For the release notes, see our [RELEASE](https://opengauss.org/en/docs/1.0.1/docs/Releasenotes/Releasenotes.html).
 
 ## License
 

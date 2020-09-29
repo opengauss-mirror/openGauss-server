@@ -69,7 +69,7 @@ openGauss突破了多核CPU的瓶颈，实现两路鲲鹏128核150万tpmC，内�
 
 **MOT引擎（Beta发布）**
 
-内存优化表（MOT）存储引擎是一个专为多核大内存优化的存储引擎，具有极高的联机事务处理（OLTP）性能和资源利用率。MOT的数据和索引完全存储在内存中，通过NUMA感知执行，算法消除闩锁争用以及查询JIT本地编译，提供低时延数据访问及高效事务执行。更多请参考[MOT引擎文档](https://opengauss.org/zh/docs/1.0.0/docs/Developerguide/%E5%86%85%E5%AD%98%E8%A1%A8%E7%89%B9%E6%80%A7.html)。
+内存优化表（MOT）存储引擎是一个专为多核大内存优化的存储引擎，具有极高的联机事务处理（OLTP）性能和资源利用率。MOT的数据和索引完全存储在内存中，通过NUMA感知执行，算法消除闩锁争用以及查询JIT本地编译，提供低时延数据访问及高效事务执行。更多请参考[MOT引擎文档](https://opengauss.org/zh/docs/1.0.1/docs/Developerguide/%E5%86%85%E5%AD%98%E8%A1%A8%E7%89%B9%E6%80%A7.html)。
 
 **安全**
 
@@ -577,7 +577,7 @@ sh build.sh -m debug -3rd /sdc/binarylibs -pkg           # 生成debug版本的o
 
 ## 快速入门
 
-参考[快速入门](https://opengauss.org/zh/docs/1.0.0/docs/Quickstart/Quickstart.html)。
+参考[快速入门](https://opengauss.org/zh/docs/1.0.1/docs/Quickstart/Quickstart.html)。
 
 ## 文档
 
@@ -601,7 +601,7 @@ sh build.sh -m debug -3rd /sdc/binarylibs -pkg           # 生成debug版本的o
 
 ## 发行说明
 
-请参见[发行说明](https://opengauss.org/zh/docs/1.0.0/docs/Releasenotes/Releasenotes.html)。
+请参见[发行说明](https://opengauss.org/zh/docs/1.0.1/docs/Releasenotes/Releasenotes.html)。
 
 ## 许可证
 
