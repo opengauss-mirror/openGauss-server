@@ -956,6 +956,10 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
 #endif
             return NULL;
         }
+
+        if (slot->tts_isempty) {
+            (void)ExecStoreAllNullTuple(slot);
+        }
     } else {
         /*
          * delete the tuple
