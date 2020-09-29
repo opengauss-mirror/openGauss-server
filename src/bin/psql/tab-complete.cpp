@@ -941,7 +941,7 @@ static char **PsqlCompletion(const char *text, int start, int end)
             char *tmpBuf = (char *)pg_malloc(tmpLength);
 
             int rc = sprintf_s(tmpBuf, tmpLength, Query_for_list_of_arguments, PREV2_WD);
-            securec_check_c(rc, "", "");
+            securec_check_ss_c(rc, "", "");
             COMPLETE_WITH_QUERY(tmpBuf);
             free(tmpBuf);
         }
@@ -1977,7 +1977,7 @@ static char **PsqlCompletion(const char *text, int start, int end)
         char *tmpBuf = (char *)pg_malloc(tmpLength);
 
         int rc = sprintf_s(tmpBuf, tmpLength, Query_for_list_of_arguments, PREV2_WD);
-        securec_check_c(rc,"","");
+        securec_check_ss_c(rc,"","");
         COMPLETE_WITH_QUERY(tmpBuf);
         free(tmpBuf);
     }
