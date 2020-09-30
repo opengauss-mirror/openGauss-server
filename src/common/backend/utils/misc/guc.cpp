@@ -9287,7 +9287,7 @@ static void init_configure_names_int()
                 NULL
             },
             &u_sess->attr.attr_sql.max_parallel_workers_per_gather,
-            0,
+            2,
             0,
             MAX_PARALLEL_WORKER_LIMIT,
             NULL,

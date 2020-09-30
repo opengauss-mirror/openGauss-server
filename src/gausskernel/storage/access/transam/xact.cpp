@@ -1147,6 +1147,17 @@ bool TransactionIdIsCurrentTransactionId(TransactionId xid)
         return false;
 
     /*
+     * In parallel workers, the XIDs we must consider as current are stored in
+     * ParallelCurrentXids rather than the transaction-state stack.  Note that
+     * the XIDs in this array are sorted numerically rather than according to
+     * transactionIdPrecedes order.
+     */
+    if (t_thrd.xact_cxt.nParallelCurrentXids > 0) {
+        return bsearch(&xid, t_thrd.xact_cxt.ParallelCurrentXids, (uint32)t_thrd.xact_cxt.nParallelCurrentXids,
+            sizeof(TransactionId), xidComparator) != NULL ? true : false;
+    }
+
+    /*
      * We will return true for the Xid of the current subtransaction, any of
      * its subcommitted children, any of its parents, or any of their
      * previously subcommitted children.  However, a transaction being aborted
@@ -3004,7 +3015,6 @@ static void CommitTransaction(bool stpCommit)
     s->maxChildXids = 0;
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
-    t_thrd.xact_cxt.XactTopTransactionId = InvalidTransactionId;
     t_thrd.xact_cxt.nParallelCurrentXids = 0;
 
 #ifdef PGXC
@@ -3560,6 +3570,8 @@ static void PrepareTransaction(bool stpCommit)
     s->maxChildXids = 0;
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
+    t_thrd.xact_cxt.nParallelCurrentXids = 0;
+
     /*
      * done with 1st phase commit processing, set current transaction state
      * back to default
@@ -4014,6 +4026,8 @@ static void CleanupTransaction(void)
     s->nChildXids = 0;
     s->maxChildXids = 0;
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
+
+    t_thrd.xact_cxt.nParallelCurrentXids = 0;
 
     /* done with abort processing, set current transaction state back to default */
     s->state = TRANS_DEFAULT;
@@ -6572,6 +6586,86 @@ void SetParallelStartTimestamps(TimestampTz xact_ts, TimestampTz stmt_ts)
     Assert(IsParallelWorker());
     t_thrd.xact_cxt.xactStartTimestamp = xact_ts;
     t_thrd.xact_cxt.stmtStartTimestamp = stmt_ts;
+}
+
+/*
+ * SerializeTransactionState
+ *      Write out relevant details of our transaction state that will be
+ *      needed by a parallel worker.
+ *
+ * We need to save and restore XactDeferrable, XactIsoLevel, and the XIDs
+ * associated with this transaction. We emit the XIDs in sorted order for
+ * the convenience of the receiving process.
+ */
+void SerializeTransactionState(ParallelInfoContext *cxt)
+{
+    Assert(cxt != NULL);
+    int rc;
+    int i;
+    int nxids = 0;
+    Size transSize;
+    TransactionState s = NULL;
+    cxt->xactIsoLevel = u_sess->utils_cxt.XactIsoLevel;
+    cxt->xactDeferrable = u_sess->attr.attr_storage.XactDeferrable;
+    cxt->topTransactionId = GetTopTransactionIdIfAny();
+    cxt->currentTransactionId = GetCurrentTransactionIdIfAny();
+    cxt->currentCommandId = t_thrd.xact_cxt.currentCommandId;
+    cxt->RecentGlobalXmin = u_sess->utils_cxt.RecentGlobalXmin;
+    cxt->TransactionXmin = u_sess->utils_cxt.TransactionXmin;
+    cxt->RecentXmin = u_sess->utils_cxt.RecentXmin;
+    cxt->nParallelCurrentXids = 0;
+    cxt->ParallelCurrentXids = NULL;
+
+    /*
+     * If we're running in a parallel worker and launching a parallel worker
+     * of our own, we can just pass along the information that was passed to
+     * us.
+     */
+    if (t_thrd.xact_cxt.nParallelCurrentXids > 0) {
+        cxt->nParallelCurrentXids = t_thrd.xact_cxt.nParallelCurrentXids;
+        transSize = sizeof(TransactionId) * (uint32)t_thrd.xact_cxt.nParallelCurrentXids;
+        cxt->ParallelCurrentXids = (TransactionId*)palloc(transSize);
+        rc = memcpy_s(cxt->ParallelCurrentXids, transSize, t_thrd.xact_cxt.ParallelCurrentXids, transSize);
+        securec_check_c(rc, "", "");
+        return;
+    }
+
+    /*
+     * OK, we need to generate a sorted list of XIDs that our workers should
+     * view as current. First, figure out how many there are.
+     */
+    for (s = CurrentTransactionState; s != NULL; s = s->parent) {
+        if (TransactionIdIsValid(s->transactionId)) {
+            nxids++;
+        }
+        nxids += s->nChildXids;
+    }
+
+    if (nxids <= 0) {
+        return;
+    }
+
+    /* Copy them to our scratch space. */
+    cxt->nParallelCurrentXids = nxids;
+    transSize = sizeof(TransactionId) * (uint32)nxids;
+    cxt->ParallelCurrentXids = (TransactionId*)palloc(transSize);
+
+    for (i = 0, s = CurrentTransactionState; s != NULL; s = s->parent) {
+        if (TransactionIdIsValid(s->transactionId)) {
+            cxt->ParallelCurrentXids[i++] = s->transactionId;
+        }
+
+        if (s->childXids != NULL && s->nChildXids > 0) {
+            rc = memcpy_s(&cxt->ParallelCurrentXids[i], transSize - (i * sizeof(TransactionId)),
+                            s->childXids, (uint32)s->nChildXids * sizeof(TransactionId));
+            securec_check_c(rc, "", "");
+            i += s->nChildXids;
+        }
+    }
+    Assert(i == nxids);
+
+    /* Sort them. */
+    qsort(cxt->ParallelCurrentXids, nxids, sizeof(TransactionId), xidComparator);
 }
 
 /*

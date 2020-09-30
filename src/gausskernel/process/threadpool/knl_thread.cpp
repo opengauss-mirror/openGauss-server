@@ -360,7 +360,10 @@ static void knl_t_xact_init(knl_t_xact_context* xact_cxt)
 
     xact_cxt->PGXCBucketMap = NULL;
     xact_cxt->PGXCNodeId = -1;
-	xact_cxt->inheritFileNode = false;	
+	xact_cxt->inheritFileNode = false;
+
+    xact_cxt->nParallelCurrentXids = 0;
+    xact_cxt->ParallelCurrentXids = NULL;
 }
 
 static void knl_t_mem_init(knl_t_mem_context* mem_cxt)

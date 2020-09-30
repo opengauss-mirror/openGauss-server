@@ -348,3 +348,39 @@ void StreamTxnContextRestoreComboCid(void* stc)
     Assert((u_sess->utils_cxt.sizeComboCids > 0 && u_sess->utils_cxt.comboHash) ||
            (u_sess->utils_cxt.sizeComboCids == 0 && !u_sess->utils_cxt.comboHash));
 }
+
+void SerializeComboCIDState(void *parallelCtx)
+{
+    ParallelInfoContext *ctx = (ParallelInfoContext*)parallelCtx;
+    ctx->usedComboCids = u_sess->utils_cxt.usedComboCids;
+    if (ctx->usedComboCids > 0) {
+        Size comboCidSize = sizeof(ComboCidKeyData) * (uint32)ctx->usedComboCids;
+        ctx->comboCids = (ComboCidKeyData*)palloc(comboCidSize);
+        int rc = memcpy_s(ctx->comboCids, comboCidSize, u_sess->utils_cxt.comboCids, comboCidSize);
+        securec_check(rc, "", "");
+    }
+}
+
+/*
+ * Read the ComboCID state at the specified address and initialize this
+ * backend with the same ComboCIDs.  This is only valid in a backend that
+ * currently has no ComboCIDs (and only makes sense if the transaction state
+ * is serialized and restored as well).
+ */
+void RestoreComboCIDState(void *parallelCtx)
+{
+    ParallelInfoContext *ctx = (ParallelInfoContext*)parallelCtx;
+
+    Assert(u_sess->utils_cxt.comboCids == NULL);
+    Assert(u_sess->utils_cxt.comboHash == NULL);
+
+    /* Use GetComboCommandId to restore each ComboCID. */
+    for (int i = 0; i < ctx->usedComboCids ; i++) {
+        CommandId cid = GetComboCommandId(ctx->comboCids[i].cmin, ctx->comboCids[i].cmax);
+        /* Verify that we got the expected answer. */
+        if (cid != (uint32)i) {
+            ereport(ERROR, (errmsg("unexpected command ID while restoring combo CIDs")));
+        }
+    }
+}
+

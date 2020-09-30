@@ -2066,8 +2066,6 @@ typedef struct ParallelInfoContext {
     int pscan_num;
     ParallelHeapScanDescData **pscan;
     int usedComboCids;
-    int sizeComboCids;
-    HTAB *comboHash;
     struct ComboCidKeyData *comboCids;
     char *tsnapspace;
     Size tsnapspace_len;
@@ -2080,6 +2078,15 @@ typedef struct ParallelInfoContext {
     bool xactDeferrable;
     TransactionId topTransactionId;
     TransactionId currentTransactionId;
+    TransactionId RecentGlobalXmin;
+    TransactionId TransactionXmin;
+    TransactionId RecentXmin;
+    /* CurrentSnapshot */
+    TransactionId xmin;
+    TransactionId xmax;
+    CommandId curcid;
+    uint32 timeline;
+    CommitSeqNo snapshotcsn;
     CommandId currentCommandId;
     int nParallelCurrentXids;
     TransactionId *ParallelCurrentXids;

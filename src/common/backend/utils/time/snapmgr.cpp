@@ -1519,7 +1519,7 @@ void SerializeSnapshot(Snapshot snapshot, char *start_address, Size len)
      * snapshot taken during recovery; all the top-level XIDs are in subxip as
      * well in that case, so we mustn't lose them.
      */
-    if (snapshot->subxcnt > 0) {
+    if (serialized_snapshot->subxcnt > 0) {
         Size subxipoff = sizeof(SerializedSnapshotData) + snapshot->xcnt * sizeof(TransactionId);
 
         rc = memcpy_s(((char *)serialized_snapshot + subxipoff), len - subxipoff, snapshot->subxip,
@@ -1573,7 +1573,7 @@ Snapshot RestoreSnapshot(char *start_address, Size len)
 
     /* Copy SubXIDs, if present. */
     if (serialized_snapshot->subxcnt > 0) {
-        snapshot->subxip = snapshot->xip + serialized_snapshot->xcnt;
+        snapshot->subxip = ((TransactionId*)(snapshot + 1)) + serialized_snapshot->xcnt;
         rc = memcpy_s(snapshot->subxip, remainLen, serialized_xids + serialized_snapshot->xcnt,
             serialized_snapshot->subxcnt * sizeof(TransactionId));
         securec_check_c(rc, "", "");
