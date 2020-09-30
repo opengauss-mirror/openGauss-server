@@ -428,3 +428,1028 @@ select (select a1.smgwname from aaaa a1 where a1.seid = ( select a2.seid from aa
 
 drop table aaaa;
 drop table bbbb;
+
+--test query plan after optimizing
+create table student(id int, stuname varchar(10) );
+insert into student values(1, 'stu1');
+insert into student values(2, 'stu2');
+insert into student values(3, 'stu3');
+insert into student values(4, 'stu4');
+insert into student values(5, 'stu5');
+insert into student values(6, 'stu6');
+insert into student values(7, 'stu7');
+insert into student values(8, 'stu8');
+insert into student values(9, 'stu9');
+insert into student values(10, 'stu10');
+
+create table test(id int, testchar varchar(10));
+insert into test values(1, 'test1');
+insert into test values(2, 'test2');
+insert into test values(3, 'test3');
+insert into test values(4, 'test4');
+insert into test values(5, 'test5');
+insert into test values(6, 'test6');
+insert into test values(7, 'test7');
+insert into test values(8, 'test8');
+insert into test values(9, 'test9');
+insert into test values(10, 'test10');
+
+-- operator '<' (with 'and')
+-- n > 1 
+explain select * from student where rownum < 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.08 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < 5 and id > 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit  (cost=0.00..0.26 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+         Filter: (id > 5)
+(3 rows)
+
+explain select * from student where rownum < 5 and id > 5 and id < 9;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit  (cost=0.00..18.01 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..27.01 rows=6 width=42)
+         Filter: ((id > 5) AND (id < 9))
+(3 rows)
+
+explain select * from student where rownum < 5 and rownum < 6;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.08 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < 5 and rownum < 6 and rownum < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.08 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < 5 and rownum < 6 and rownum < 9 and rownum < 12;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.08 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- n <= 1 
+explain select * from student where rownum < 1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < -5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < -5 and id > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < -5 and id > 5 and id < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < -5 and rownum < 6;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < -5 and rownum < 6 and rownum < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < -5 and rownum < 6 and rownum < 9 and rownum < 12;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- operator '<=' (with 'and')
+-- n >= 1
+explain select * from student where rownum <= 1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.09 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= 5 and id > 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit  (cost=0.00..0.32 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+         Filter: (id > 5)
+(3 rows)
+
+explain select * from student where rownum <= 5 and id > 5 and id < 9;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit  (cost=0.00..22.51 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.00..27.01 rows=6 width=42)
+         Filter: ((id > 5) AND (id < 9))
+(3 rows)
+
+explain select * from student where rownum <= 5 and rownum < 6;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.09 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= 5 and rownum < 6 and rownum < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.09 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= 5 and rownum < 6 and rownum < 9 and rownum < 12;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.09 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- n < 1
+explain select * from student where rownum <= -5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= -5 and id > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= -5 and id > 5 and id < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= -5 and rownum < 6;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= -5 and rownum < 6 and rownum < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= -5 and rownum < 6 and rownum < 9 and rownum < 12;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+
+-- operator '=' (with 'and')
+-- n = 1
+explain select * from student where rownum = 1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum = 1 and id > 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit  (cost=0.00..0.06 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+         Filter: (id > 5)
+(3 rows)
+
+explain select * from student where rownum = 1 and rownum = 2 and id > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- n != 1
+explain select * from student where rownum = 2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum = 2 and id > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- operator '!=' (with 'and')
+-- n = 1
+explain select * from student where rownum != 1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum != 1 and id > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum != 1 and rownum != 2 and id > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- n > 1
+explain select * from student where rownum != 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.08 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum != 5 and id > 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit  (cost=0.00..0.26 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+         Filter: (id > 5)
+(3 rows)
+
+explain select * from student where rownum != 5 and rownum != 8 and id > 5;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit  (cost=0.00..0.26 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+         Filter: (id > 5)
+(3 rows)
+
+
+-- n < 1
+explain select * from student where rownum != -5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+explain select * from student where rownum != -5 and id > 5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+   Filter: (id > 5)
+(2 rows)
+
+explain select * from student where rownum != -5 and rownum != -8 and id > 5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+   Filter: (id > 5)
+(2 rows)
+
+
+-- operator '>' (with 'and')
+-- n >= 1
+explain select * from student where rownum > 1;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum > 5 and id > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum > 5 and id > 5 and id < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum > 5 and rownum > 6;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum > 5 and rownum > 6 and rownum > 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum > 5 and rownum < 6 and rownum < 9 and rownum < 12;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+--n < 1
+explain select * from student where rownum > -5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+explain select * from student where rownum > -5 and id > 5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+   Filter: (id > 5)
+(2 rows)
+
+explain select * from student where rownum > -5 and id > 5 and id < 9;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=6 width=42)
+   Filter: ((id > 5) AND (id < 9))
+(2 rows)
+
+explain select * from student where rownum > -5 and rownum > 6;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum > -5 and rownum > 6 and rownum < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum > -5 and rownum > 6 and rownum < 9 and rownum < 12;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- operator '>=' (with 'and')
+-- n > 1
+explain select * from student where rownum >= 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum >= 5 and id > 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum >= 5 and id > 5 and id < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum >= 5 and rownum > 6;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum >= 5 and rownum > 6 and rownum > 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum >= 5 and rownum < 6 and rownum < 9 and rownum < 12;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- n <= 1
+explain select * from student where rownum >= 1;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+explain select * from student where rownum >= -5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+explain select * from student where rownum >= -5 and id > 5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+   Filter: (id > 5)
+(2 rows)
+
+explain select * from student where rownum >= -5 and id > 5 and id < 9;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=6 width=42)
+   Filter: ((id > 5) AND (id < 9))
+(2 rows)
+
+explain select * from student where rownum >= -5 and rownum > 6;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum >= -5 and rownum > 6 and rownum < 9;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum >= -5 and rownum > 6 and rownum < 9 and rownum < 12;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- operator '<' with 'or'
+-- n > 1
+-- can not be optimized
+explain select * from student where rownum < 5 or id > 5;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=630 width=42)
+   Filter: ((ROWNUM OPERATOR(pg_catalog.<) 5::bigint) OR (id > 5))
+(2 rows)
+
+
+-- n <= 1
+explain select * from student where rownum < -5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < -5 or id > 5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+   Filter: (id > 5)
+(2 rows)
+
+explain select * from student where rownum < -5 or id > 5 or id < 9;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=630 width=42)
+   Filter: ((id > 5) OR (id < 9))
+(2 rows)
+
+
+-- operator '<=' with 'or'
+-- n >= 1
+-- can not be optimized
+explain select * from student where rownum <= 5 or id > 5;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=630 width=42)
+   Filter: ((ROWNUM OPERATOR(pg_catalog.<=) 5::bigint) OR (id > 5))
+(2 rows)
+
+
+-- n < 1
+explain select * from student where rownum <= -5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= -5 or id > 5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+   Filter: (id > 5)
+(2 rows)
+
+explain select * from student where rownum <= -5 or id > 5 or id < 9;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=630 width=42)
+   Filter: ((id > 5) OR (id < 9))
+(2 rows)
+
+
+-- operator '=' with 'or'
+-- n > 0
+-- can not be optimized
+explain select * from student where rownum = 5 or id > 5;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=382 width=42)
+   Filter: ((ROWNUM OPERATOR(pg_catalog.=) 5::bigint) OR (id > 5))
+(2 rows)
+
+
+-- n <= 0
+explain select * from student where rownum = 0 or id > 5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+   Filter: (id > 5)
+(2 rows)
+
+explain select * from student where rownum = -1 or id > 5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+   Filter: (id > 5)
+(2 rows)
+
+
+-- operator '!=' with 'or'
+-- n >= 1
+-- can not be optimized
+explain select * from student where rownum != 6 or id > 5;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=1130 width=42)
+   Filter: ((ROWNUM OPERATOR(pg_catalog.<>) 6::bigint) OR (id > 5))
+(2 rows)
+
+
+-- n<1
+explain select * from student where rownum != 0 or id > 5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+
+-- operator '>' with 'or'
+-- n >= 1  
+-- can not be optimized
+explain select * from student where rownum > 5 or id > 5;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=630 width=42)
+   Filter: ((ROWNUM OPERATOR(pg_catalog.>) 5::bigint) OR (id > 5))
+(2 rows)
+
+
+-- n < 1
+explain select * from student where rownum > -5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+explain select * from student where rownum > -5 or id > 5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+explain select * from student where rownum > -5 or id > 5 or id < 9;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+-- operator '>=' with 'or'
+-- n > 1  
+-- can not be optimized
+explain select * from student where rownum >= 5 or id > 5;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=630 width=42)
+   Filter: ((ROWNUM OPERATOR(pg_catalog.>=) 5::bigint) OR (id > 5))
+(2 rows)
+
+
+-- n <= 1
+explain select * from student where rownum >= -5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+explain select * from student where rownum >= -5 or id > 5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+explain select * from student where rownum >= -5 or id > 5 or id < 9;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(1 row)
+
+
+-- limit
+explain select * from student where rownum < 5 limit 3;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.06 rows=3 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum < 3 limit 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.04 rows=2 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= 5 limit 3;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.06 rows=3 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum <= 3 limit 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.06 rows=3 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+-- subqueries
+explain select * from (select * from student where rownum < 5);
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.08 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from (select * from student where rownum < 5) where rownum < 9;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Limit  (cost=0.00..0.12 rows=4 width=42)
+   ->  Limit  (cost=0.00..0.08 rows=4 width=42)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(3 rows)
+
+explain select * from (select * from student where rownum < 5 and id < 7);
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Limit  (cost=0.00..0.26 rows=4 width=42)
+   ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+         Filter: (id < 7)
+(3 rows)
+
+explain select * from (select * from student where rownum < 3 and id < 10) where rownum < 5;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Limit  (cost=0.00..0.15 rows=2 width=42)
+   ->  Limit  (cost=0.00..0.13 rows=2 width=42)
+         ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+               Filter: (id < 10)
+(4 rows)
+
+explain select * from (select * from student where rownum < 3 and id < 10) where rownum < 2 and stuname = 'stu1';
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Limit  (cost=0.00..13.51 rows=1 width=42)
+   ->  Limit  (cost=0.00..27.01 rows=2 width=42)
+         ->  Seq Scan on student  (cost=0.00..27.01 rows=2 width=42)
+               Filter: ((id < 10) AND ((stuname)::text = 'stu1'::text))
+(4 rows)
+
+
+--sublink
+explain select * from student where id in (select id from test where rownum < 4);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Hash Join  (cost=0.16..24.51 rows=567 width=42)
+   Hash Cond: (student.id = test.id)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+   ->  Hash  (cost=0.12..0.12 rows=3 width=4)
+         ->  HashAggregate  (cost=0.09..0.12 rows=3 width=4)
+               Group By Key: test.id
+               ->  Limit  (cost=0.00..0.06 rows=3 width=4)
+                     ->  Seq Scan on test  (cost=0.00..21.34 rows=1134 width=4)
+(8 rows)
+
+explain select * from student where id in (select id from test where rownum < 4) and rownum < 6;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Limit  (cost=0.06..0.28 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.06..24.24 rows=567 width=42)
+         Filter: (hashed SubPlan 1)
+         SubPlan 1
+           ->  Limit  (cost=0.00..0.06 rows=3 width=4)
+                 ->  Seq Scan on test  (cost=0.00..21.34 rows=1134 width=4)
+(6 rows)
+
+explain select * from student where id in (select id from test where rownum < 4) and stuname in (select stuname from student where rownum < 6);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Hash Join  (cost=0.43..26.34 rows=284 width=42)
+   Hash Cond: ((public.student.stuname)::text = ("ANY_subquery".stuname)::text)
+   ->  Hash Join  (cost=0.16..24.51 rows=567 width=42)
+         Hash Cond: (public.student.id = test.id)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+         ->  Hash  (cost=0.12..0.12 rows=3 width=4)
+               ->  HashAggregate  (cost=0.09..0.12 rows=3 width=4)
+                     Group By Key: test.id
+                     ->  Limit  (cost=0.00..0.06 rows=3 width=4)
+                           ->  Seq Scan on test  (cost=0.00..21.34 rows=1134 width=4)
+   ->  Hash  (cost=0.21..0.21 rows=5 width=38)
+         ->  HashAggregate  (cost=0.16..0.21 rows=5 width=38)
+               Group By Key: ("ANY_subquery".stuname)::text
+               ->  Subquery Scan on "ANY_subquery"  (cost=0.00..0.14 rows=5 width=38)
+                     ->  Limit  (cost=0.00..0.09 rows=5 width=38)
+                           ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=38)
+(16 rows)
+
+explain select * from student where id in (select id from test where rownum < 4 and id < 7);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Hash Join  (cost=0.30..24.64 rows=567 width=42)
+   Hash Cond: (student.id = test.id)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+   ->  Hash  (cost=0.26..0.26 rows=3 width=4)
+         ->  HashAggregate  (cost=0.23..0.26 rows=3 width=4)
+               Group By Key: test.id
+               ->  Limit  (cost=0.00..0.19 rows=3 width=4)
+                     ->  Seq Scan on test  (cost=0.00..24.18 rows=378 width=4)
+                           Filter: (id < 7)
+(9 rows)
+
+explain select * from student where id in (select id from test where rownum < 4) and rownum < 6 and id > 3;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Limit  (cost=0.06..0.78 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.06..27.07 rows=189 width=42)
+         Filter: ((hashed SubPlan 1) AND (id > 3))
+         SubPlan 1
+           ->  Limit  (cost=0.00..0.06 rows=3 width=4)
+                 ->  Seq Scan on test  (cost=0.00..21.34 rows=1134 width=4)
+(6 rows)
+
+
+-- insert 
+explain insert into test select * from student where rownum < 5;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Insert on test  (cost=0.00..0.12 rows=4 width=42)
+   ->  Limit  (cost=0.00..0.08 rows=4 width=42)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(3 rows)
+
+explain insert into test select * from student where rownum < 5 and id > 3;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Insert on test  (cost=0.00..0.30 rows=4 width=42)
+   ->  Limit  (cost=0.00..0.26 rows=4 width=42)
+         ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=42)
+               Filter: (id > 3)
+(4 rows)
+
+
+-- between
+explain select * from student where rownum between 1 and 5;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.09 rows=5 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum between 2 and 8;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum between -5 and 8;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.15 rows=8 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+explain select * from student where rownum between -5 and -2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Limit  (cost=0.00..0.02 rows=1 width=42)
+   ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=42)
+(2 rows)
+
+
+--update
+explain update student set id = 5 where rownum < 3;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Update on student  (cost=0.00..0.04 rows=2 width=44)
+   ->  Limit  (cost=0.00..0.04 rows=2 width=44)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=44)
+(3 rows)
+
+explain update student set id = 5 where rownum < 3 and rownum < 5;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Update on student  (cost=0.00..0.04 rows=2 width=44)
+   ->  Limit  (cost=0.00..0.04 rows=2 width=44)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=44)
+(3 rows)
+
+explain update student set id = 5 where rownum > 3;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Update on student  (cost=0.00..0.02 rows=1 width=44)
+   ->  Limit  (cost=0.00..0.02 rows=1 width=44)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=44)
+(3 rows)
+
+
+--delete
+explain delete from student where rownum < 3;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Delete on student  (cost=0.00..0.04 rows=2 width=6)
+   ->  Limit  (cost=0.00..0.04 rows=2 width=6)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=6)
+(3 rows)
+
+explain delete from student where rownum < 3 and rownum < 5;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Delete on student  (cost=0.00..0.04 rows=2 width=6)
+   ->  Limit  (cost=0.00..0.04 rows=2 width=6)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=6)
+(3 rows)
+
+explain delete from student where rownum > 3;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Delete on student  (cost=0.00..0.02 rows=1 width=6)
+   ->  Limit  (cost=0.00..0.02 rows=1 width=6)
+         ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=6)
+(3 rows)
+
+
+-- have not been optimized yet
+explain select * from student where rownum < 6.5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=378 width=42)
+   Filter: ((ROWNUM)::numeric < 6.5)
+(2 rows)
+
+explain select * from student where rownum <= 6.5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=378 width=42)
+   Filter: ((ROWNUM)::numeric <= 6.5)
+(2 rows)
+
+explain select * from student where rownum = 6.5;
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=6 width=42)
+   Filter: ((ROWNUM)::numeric = 6.5)
+(2 rows)
+
+explain select * from student where rownum != 6.5;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=1128 width=42)
+   Filter: ((ROWNUM)::numeric <> 6.5)
+(2 rows)
+
+explain select * from student where rownum > 6.5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=378 width=42)
+   Filter: ((ROWNUM)::numeric > 6.5)
+(2 rows)
+
+explain select * from student where rownum >= 6.5;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on student  (cost=0.00..27.01 rows=378 width=42)
+   Filter: ((ROWNUM)::numeric >= 6.5)
+(2 rows)
+
+
+explain delete from student where 3 > rownum;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Delete on student  (cost=0.00..24.18 rows=378 width=6)
+   ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=6)
+         Filter: (3 > ROWNUM)
+(3 rows)
+
+explain delete from student where 3 < rownum;
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Delete on student  (cost=0.00..24.18 rows=378 width=6)
+   ->  Seq Scan on student  (cost=0.00..24.18 rows=378 width=6)
+         Filter: (3 < ROWNUM)
+(3 rows)
+
+
+explain delete from student where rownum < 5 or rownum < 6;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Delete on student  (cost=0.00..27.01 rows=630 width=6)
+   ->  Seq Scan on student  (cost=0.00..27.01 rows=630 width=6)
+         Filter: ((ROWNUM OPERATOR(pg_catalog.<) 5::bigint) OR (ROWNUM OPERATOR(pg_catalog.<) 6::bigint))
+(3 rows)
+
+explain delete from student where rownum > 5 or rownum > 6;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Delete on student  (cost=0.00..27.01 rows=630 width=6)
+   ->  Seq Scan on student  (cost=0.00..27.01 rows=630 width=6)
+         Filter: ((ROWNUM OPERATOR(pg_catalog.>) 5::bigint) OR (ROWNUM OPERATOR(pg_catalog.>) 6::bigint))
+(3 rows)
+
+
+drop table student;
+drop table test;
