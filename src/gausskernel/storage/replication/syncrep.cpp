@@ -81,6 +81,7 @@ static void SyncRepNotifyComplete();
 
 static int SyncRepGetStandbyPriority(void);
 static bool SyncRepGetSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr, bool* am_sync);
+static bool SyncRepGetCatchupRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr);
 static void SyncRepGetOldestSyncRecPtr(
     XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr, List* sync_standbys);
 static void SyncRepGetNthLatestSyncRecPtr(
@@ -90,9 +91,69 @@ static void SyncRepGetNthLatestSyncRecPtr(
 static bool SyncRepQueueIsOrderedByLSN(int mode);
 #endif
 
-static List* SyncRepGetSyncStandbysPriority(bool* am_sync);
-static List* SyncRepGetSyncStandbysQuorum(bool* am_sync);
+static List* SyncRepGetSyncStandbysPriority(bool* am_sync, List** catchup_standbys = NULL);
+static List* SyncRepGetSyncStandbysQuorum(bool* am_sync, List** catchup_standbys = NULL);
 static int cmp_lsn(const void* a, const void* b);
+
+/*
+ * Time for synchronous each lsn, which is an empirical value. 
+ * Unit is microsecond.
+ */
+#define SYN_TIME_PER_XLOG 0.00225
+
+/*
+ * Determine whether to wait for standby catching up, if requested by user.
+ * 
+ * Return true if it is need to wait for catching up(synchronous replication),
+ * return false if don't wait for catching up.
+ */
+bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN, int mode)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    /* When most_available_sync is off and num_sync > 1, return. */
+    if (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync ||
+        t_thrd.syncrep_cxt.SyncRepConfig->num_sync > 1 ||
+        g_instance.attr.attr_storage.catchup2normal_wait_time < 0) {
+        return true;
+    }
+
+    static const uint64 max_xlog_diff_amount =
+        (uint64)floor(g_instance.attr.attr_storage.catchup2normal_wait_time * 1000 / SYN_TIME_PER_XLOG);
+    XLogRecPtr receivePtr;
+    XLogRecPtr writePtr;
+    XLogRecPtr flushPtr;
+    XLogRecPtr replayPtr;
+
+    /* 
+     * if the numberof sync standbys is more than synchronous_standby_names
+     * specifies or there is no sync standbys in catching up, wait for
+     * synchronous replication.
+     */
+    if (!SyncRepGetCatchupRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr)) {
+        return true;
+    }
+
+    if (max_xlog_diff_amount == 0) {
+        return false;
+    }
+
+    /* if catchup will be finished soon, wait for synchronous replication. */
+    switch (mode) {
+        case SYNC_REP_WAIT_RECEIVE:
+            return XLByteDifference(XactCommitLSN, receivePtr) < max_xlog_diff_amount;
+        case SYNC_REP_WAIT_WRITE:
+            return XLByteDifference(XactCommitLSN, writePtr) < max_xlog_diff_amount;
+        case SYNC_REP_WAIT_FLUSH:
+            return XLByteDifference(XactCommitLSN, flushPtr) < max_xlog_diff_amount;
+        case SYNC_REP_WAIT_REPALY:
+            return XLByteDifference(XactCommitLSN, replayPtr) < max_xlog_diff_amount;
+        default:
+            return true;
+    }
+#endif
+
+    return true;
+}
 
 /*
  * Wait for synchronous replication, if requested by user.
@@ -134,10 +195,13 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN)
      * Also check that the standby hasn't already replied. Unlikely race
      * condition but we'll be fetching that cache line anyway so its likely to
      * be a low cost check. We don't wait for sync rep if no sync standbys alive
+     *
+     * Determine whether to wait for standbys catching up.
      */
     if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined ||
         XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode]) ||
-        t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone) {
+        t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone ||
+        !SynRepWaitCatchup(XactCommitLSN, mode)) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return;
@@ -590,6 +654,50 @@ static bool SyncRepGetSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, X
 }
 
 /*
+ * Calculate the synced Write, Flush and Apply positions among sync standbys
+ * in catching up.
+ * 
+ * Return false if the numberof sync standbys is more than synchronous_standby_names
+ * specifies or there is no sync standbys in catching up. Otherwise return true and
+ * store the positions into *writePtr, *flushPtr and *applyPtr.
+ */
+static bool SyncRepGetCatchupRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr)
+{
+    List* sync_standbys = NIL;
+    List* catchup_standbys = NIL;
+    bool am_sync = false;
+
+    *receivePtr = InvalidXLogRecPtr;
+    *writePtr = InvalidXLogRecPtr;
+    *flushPtr = InvalidXLogRecPtr;
+    *replayPtr = InvalidXLogRecPtr;
+
+    /* Get standbys that are considered as synchronous at this moment. */
+    sync_standbys = SyncRepGetSyncStandbys(&am_sync, &catchup_standbys);
+
+    /* Quick exit if there are enough synchronous standbys or no standby in catching up. */
+    if ((t_thrd.syncrep_cxt.SyncRepConfig != NULL &&
+        t_thrd.syncrep_cxt.SyncRepConfig->num_sync <= list_length(sync_standbys)) ||
+        list_length(catchup_standbys) == 0) {
+        list_free(sync_standbys);
+        list_free(catchup_standbys);
+        return false;
+    }
+
+    if (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY) {
+        SyncRepGetOldestSyncRecPtr(receivePtr, writePtr, flushPtr, replayPtr, catchup_standbys);
+    } else {
+        SyncRepGetNthLatestSyncRecPtr(
+            receivePtr, writePtr, flushPtr, replayPtr, catchup_standbys,
+            t_thrd.syncrep_cxt.SyncRepConfig->num_sync - list_length(sync_standbys));
+    }
+
+    list_free(sync_standbys);
+    list_free(catchup_standbys);
+    return true;
+}
+
+/*
  * Calculate the oldest Write, Flush and Apply positions among sync standbys.
  */
 static void SyncRepGetOldestSyncRecPtr(
@@ -743,7 +851,7 @@ static int SyncRepGetStandbyPriority(void)
 }
 
 /*
- * Walk the specified queue from head. Set the state of any backends that
+ * Wake the specified queue from head. Set the state of any backends that
  * need to be woken, remove them from the queue, and then wake them.
  * Pass all = true to wake whole queue; otherwise, just wake up to
  * the walsender's LSN.
@@ -946,7 +1054,7 @@ void SyncRepUpdateSyncStandbysDefined(void)
  * On return, *am_sync is set to true if this walsender is connecting to
  * sync standby. Otherwise it's set to false.
  */
-List* SyncRepGetSyncStandbys(bool* am_sync)
+List* SyncRepGetSyncStandbys(bool* am_sync, List** catchup_standbys)
 {
     /* Set default result */
     if (am_sync != NULL)
@@ -957,8 +1065,8 @@ List* SyncRepGetSyncStandbys(bool* am_sync)
         return NIL;
 
     return (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY) ?
-        SyncRepGetSyncStandbysPriority(am_sync) :
-        SyncRepGetSyncStandbysQuorum(am_sync);
+        SyncRepGetSyncStandbysPriority(am_sync, catchup_standbys) :
+        SyncRepGetSyncStandbysQuorum(am_sync, catchup_standbys);
 }
 
 /*
@@ -971,7 +1079,7 @@ List* SyncRepGetSyncStandbys(bool* am_sync)
  * On return, *am_sync is set to true if this walsender is connecting to
  * sync standby. Otherwise it's set to false.
  */
-static List* SyncRepGetSyncStandbysQuorum(bool* am_sync)
+static List* SyncRepGetSyncStandbysQuorum(bool* am_sync, List** catchup_standbys)
 {
     List* result = NIL;
     int i;
@@ -986,10 +1094,6 @@ static List* SyncRepGetSyncStandbysQuorum(bool* am_sync)
         if (walsnd->pid == 0)
             continue;
 
-        /* Must be streaming */
-        if (walsnd->state != WALSNDSTATE_STREAMING)
-            continue;
-
         /* Must be synchronous */
         if (walsnd->sync_standby_priority == 0)
             continue;
@@ -997,6 +1101,13 @@ static List* SyncRepGetSyncStandbysQuorum(bool* am_sync)
         /* Must have a valid flush position */
         if (XLogRecPtrIsInvalid(walsnd->flush))
             continue;
+
+        /* Must be streaming */
+        if (walsnd->state != WALSNDSTATE_STREAMING) {
+            *catchup_standbys = 
+                walsnd->state == WALSNDSTATE_CATCHUP ? lappend_int(*catchup_standbys, i) : *catchup_standbys;
+            continue;
+        }
 
         /*
          * Consider this standby as a candidate for quorum sync standbys
@@ -1023,7 +1134,7 @@ static List* SyncRepGetSyncStandbysQuorum(bool* am_sync)
  * On return, *am_sync is set to true if this walsender is connecting to
  * sync standby. Otherwise it's set to false.
  */
-static List* SyncRepGetSyncStandbysPriority(bool* am_sync)
+static List* SyncRepGetSyncStandbysPriority(bool* am_sync, List** catchup_standbys)
 {
     List* result = NIL;
     List* pending = NIL;
@@ -1052,10 +1163,6 @@ static List* SyncRepGetSyncStandbysPriority(bool* am_sync)
         if (walsnd->pid == 0)
             continue;
 
-        /* Must be streaming */
-        if (walsnd->state != WALSNDSTATE_STREAMING)
-            continue;
-
         /* Must be synchronous */
         this_priority = walsnd->sync_standby_priority;
         if (this_priority == 0)
@@ -1064,6 +1171,13 @@ static List* SyncRepGetSyncStandbysPriority(bool* am_sync)
         /* Must have a valid flush position */
         if (XLogRecPtrIsInvalid(walsnd->flush))
             continue;
+
+        /* Must be streaming */
+        if (walsnd->state != WALSNDSTATE_STREAMING) {
+            *catchup_standbys = 
+                walsnd->state == WALSNDSTATE_CATCHUP ? lappend_int(*catchup_standbys, i) : *catchup_standbys;
+            continue;
+        }
 
         /*
          * If the priority is equal to 1, consider this standby as sync and

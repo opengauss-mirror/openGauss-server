@@ -4875,6 +4875,23 @@ static void init_configure_names_int()
         },
         {
             {
+                "catchup2normal_wait_time",
+                PGC_POSTMASTER,
+                REPLICATION_STANDBY,
+                gettext_noop("The maximal allowed duration for waiting from catchup to normal state."),
+                NULL,
+                GUC_UNIT_MS
+            },
+            &g_instance.attr.attr_storage.catchup2normal_wait_time,
+            -1,
+            -1,
+            10000,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
                 "max_recursive_times",
                 PGC_USERSET,
                 QUERY_TUNING_OTHER,
