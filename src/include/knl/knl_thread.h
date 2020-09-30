@@ -369,7 +369,6 @@ typedef struct knl_t_xact_context {
      * The XIDs are stored sorted in numerical order (not logical order) to make
      * lookups as fast as possible.
      */
-    TransactionId XactTopTransactionId;
     int nParallelCurrentXids;
     TransactionId *ParallelCurrentXids;
 

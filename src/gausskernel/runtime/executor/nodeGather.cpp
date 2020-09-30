@@ -373,6 +373,10 @@ static HeapTuple gather_readnext(GatherState *gatherstate)
  */
 static void ExecShutdownGatherWorkers(GatherState *node)
 {
+    /* wait for the workers to finish first */
+    if (node->pei != NULL)
+        ExecParallelFinish(node->pei);
+
     /* Shut down tuple queue readers before shutting down workers. */
     if (node->reader != NULL) {
         for (int i = 0; i < node->nreaders; ++i)
@@ -381,10 +385,6 @@ static void ExecShutdownGatherWorkers(GatherState *node)
         pfree(node->reader);
         node->reader = NULL;
     }
-
-    /* Now shut down the workers. */
-    if (node->pei != NULL)
-        ExecParallelFinish(node->pei);
 }
 
 /* ----------------------------------------------------------------

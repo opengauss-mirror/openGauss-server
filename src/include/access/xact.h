@@ -328,6 +328,7 @@ extern void BeginInternalSubTransaction(const char* name);
 extern void ReleaseCurrentSubTransaction(void);
 extern void RollbackAndReleaseCurrentSubTransaction(void);
 extern bool IsSubTransaction(void);
+extern void SerializeTransactionState(ParallelInfoContext *cxt);
 extern void StartParallelWorkerTransaction(ParallelInfoContext *cxt);
 extern void EndParallelWorkerTransaction(void);
 extern void SetParallelStartTimestamps(TimestampTz xact_ts, TimestampTz stmt_ts);

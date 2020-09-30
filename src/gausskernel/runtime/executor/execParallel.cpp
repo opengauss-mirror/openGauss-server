@@ -278,7 +278,7 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
     }
 
     /* Everyone's had a chance to ask for space, so now create the DSM. */
-    InitializeParallelDSM(pcxt);
+    InitializeParallelDSM(pcxt, estate->es_snapshot);
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)pcxt->seg;
 
     /*
