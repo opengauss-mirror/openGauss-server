@@ -1,0 +1,17 @@
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "create table gin_getbitmap_table (c_int int,c_bigint bigint,c_varchar varchar,c_text text)with(orientation=row);";
+CREATE TABLE
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "\copy gin_getbitmap_table from '@abs_srcdir@/data/gin_@.txt' delimiter ',';";
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "create text search configuration tscp_utf8_003(parser=pound) with(split_flag='@');";
+CREATE TEXT SEARCH CONFIGURATION
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "alter text search configuration tscp_utf8_003 add mapping for zh_words, en_word, multisymbol,numeric, alnum, grapsymbol with simple;";
+ALTER TEXT SEARCH CONFIGURATION
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "create index gin_getbitmap_table_idx1 on gin_getbitmap_table using gin(to_tsvector('tscp_utf8_003',c_varchar));";
+CREATE INDEX
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "create index gin_getbitmap_table_idx2 on gin_getbitmap_table using gin(to_tsvector('tscp_utf8_003',c_text));";
+CREATE INDEX
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "select count(*) from gin_getbitmap_table where to_tsvector('tscp_utf8_003',c_text) @@ to_tsquery('tscp_utf8_003','////') and to_tsvector('tscp_utf8_003',c_text) @@ to_tsquery('tscp_utf8_003','\$\$\$\$\$\$') and to_tsvector('tscp_utf8_003',c_text) @@ to_tsquery('tscp_utf8_003','#####') and to_tsvector('tscp_utf8_003',c_text) @@ to_tsquery('tscp_utf8_003','%%%%%') and to_tsvector('tscp_utf8_003',c_text) @@ plainto_tsquery('tscp_utf8_003','……&**%') and to_tsvector('tscp_utf8_003',c_text) @@ plainto_tsquery('tscp_utf8_003',' ') and to_tsvector('tscp_utf8_003',c_text) @@ plainto_tsquery('tscp_utf8_003',' ') order by 1;"
+ count 
+-------
+  575
+(1 row)
+
