@@ -23,7 +23,10 @@ function fn_get_param()
     system_arch=`uname -p`
     system_name=`cat /etc/os-release | grep '^ID=".*' | grep -o -E '(openEuler|centos)'`
     install_tar="/home/$user_name/openGaussTar"     #安装包所在路径(可修改)
-    install_location="/opt/$user_name"              #数据库安装位置(可修改)
+    if [ ! $install_location ]
+    then
+        install_location="/opt/$user_name"          #数据库安装位置(可修改)
+    fi
 }
 
 function fn_prase_input_param()
