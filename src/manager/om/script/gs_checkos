@@ -89,11 +89,12 @@ g_OSCheckOpts = {
     'B5': ['Setting items', '[ Set network card configuration value ]',
            'Normal', 'OK', 'OK'],
     'B6': ['Setting items', '[ Set THP service ]', 'Normal', 'OK', 'OK'],
-    'B7': ['Setting items', '[ Set RemoveIPC value ]', 'Normal', 'OK', 'OK']}
+    'B7': ['Setting items', '[ Set RemoveIPC value ]', 'Normal', 'OK', 'OK'],
+    'B8': ['Setting items', '[ Set Session Process ]', 'Normal', 'OK', 'OK']}
 DEFAULT_INTERVAL = 60
 CHECK_ITEMNUMLIST = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9',
                      'A10', 'A11', 'A12', 'A13', 'A14']
-SET_ITEMNUMLIST = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7']
+SET_ITEMNUMLIST = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8']
 LOG_DIR = "/tmp/gs_checkos"
 Local_CheckOs = ""
 Local_Check = ""
@@ -123,6 +124,7 @@ ACTION_SET_FILESYSTEM_CONFIGURE = "Set_FileSystem_Configure"
 ACTION_SET_NETWORK_CONFIGURE = "Set_Network_Configure"
 ACTION_SET_THP_SERVICE = "Set_THP_Service"
 ACTION_SET_REMOVEIPC_VALUE = "Set_RemoveIPC_Value"
+ACTION_SET_SESSION_PROCESS = "Set_Session_Process"
 ACTION_SET_BLOCKDEV_CONFIGURE = "Set_BlockDev_Configure"
 ACTION_SET_LOGICAL_BLOCK = "Set_Logical_Block"
 ACTION_SET_IO_CONFIGURE = "Set_IO_Configure"
@@ -220,6 +222,7 @@ Item number description:
   'B5':[ Set network card configuration value ]
   'B6':[ Set THP service ]
   'B7':[Set RemoveIPC value]
+  'B8':[Set Session Process]
     """
     print(usage.__doc__)
 
@@ -477,6 +480,8 @@ def doSetOS(itemNumber):
         setTHPService()
     elif (itemNumber == 'B7'):
         setRemoveIPCValue()
+    elif (itemNumber == 'B8'):
+        setSessionProcess()
 
 
 def checkOSVersion():
@@ -1044,6 +1049,50 @@ def getSetRemoveIPCValue(action_item, flag_str, flag_error, success_mesg,
         g_OSCheckOpts[item_num][2] = '%s' % warning_level
         g_OSCheckOpts[item_num][3] = "\n        %s" % str(e)
 
+def getSetSessionProcess(action_item, flag_str, flag_error, success_mesg,
+                      item_num, warning_level, configFile="", command=""):
+    """
+       get the print information that is from setting session process
+       """
+    try:
+        if command == "":
+            command = Local_CheckOs
+
+        if (configFile != ""):
+            cmd = "%s -t %s -X '%s' -l '%s'"\
+                  % (command, action_item, configFile, g_opts.localLog)
+        else:
+            cmd = "%s -t %s -l '%s'" % (command, action_item, g_opts.localLog)
+        (status, output, outputMap) = getCmdOutput(cmd)
+        message = ""
+        parRes = ""
+        for node in list(status.keys()):
+            if (status[node] != DefaultValue.SUCCESS):
+                g_logger.logExit("[%s]: \n" % node +
+                                 ErrorCode.GAUSS_516["GAUSS_51632"] % cmd +
+                                 " Error: \n%s" % outputMap[node].strip())
+
+            if (outputMap[node].find(flag_error) >= 0):
+                parRes += "[%s]\n%s\n" % (node, outputMap[node])
+
+            if (outputMap[node].find(flag_str) >= 0):
+                message += "        [%s]\n%s\n" % (node, outputMap[node])
+
+        if (parRes != ""):
+            raise Exception("%s" % parRes)
+
+        if (g_OSCheckOpts[item_num][2] != warning_level):
+            if (message != ""):
+                g_OSCheckOpts[item_num][3] = "\n%s        %s" % (
+                message, success_mesg)
+            else:
+                g_OSCheckOpts[item_num][3] = "\n        %s" % success_mesg
+
+    except Exception as e:
+        g_logger.debug(str(e))
+        g_OSCheckOpts[item_num][2] = '%s' % warning_level
+        g_OSCheckOpts[item_num][3] = "\n        %s" % str(e)
+
 
 def getSetOSPrintInfo(action_item, flag_str, flag_error, success_mesg,
                       item_num, warning_level, configFile="", command=""):
@@ -1138,8 +1187,17 @@ def setRemoveIPCValue():
         """
     g_logger.debug("Setting RemoveIPC value.")
     getSetRemoveIPCValue(ACTION_SET_REMOVEIPC_VALUE, "Set", "Failed", "Setting sysctl \
-        parameter values succeed.", "B1", "Abnormal", g_opts.confFile, Local_CheckOs)
+        parameter values succeed.", "B7", "Abnormal", g_opts.confFile, Local_CheckOs)
     g_logger.debug("Sucessfully setted RemoveIPC value.")
+
+def setSessionProcess():
+    """
+        Setting Session Process
+        """
+    g_logger.debug("Setting Session Process.")
+    getSetSessionProcess(ACTION_SET_SESSION_PROCESS, "Set", "Failed", "Setting sysctl \
+        parameter values succeed.", "B8", "Abnormal", g_opts.confFile, Local_CheckOs)
+    g_logger.debug("Sucessfully Setted Session Process.")
 
 def setIOConfigure():
     """

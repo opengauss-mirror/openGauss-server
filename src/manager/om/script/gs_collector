@@ -129,12 +129,12 @@ General options:
   COLLECT_INFO_MAP
   {
         "System" : "HardWareInfo,RunTimeInfo",
-        "Database" : "pg_catalog.pg_stat_activity,dbe_perf.wait_events",
-        "Log" : "Coordinator,DataNode,Gtm,ClusterManager,FFDC,AWRReport",
-        "XLog": "Coordinator,DataNode",
-        "Config" : "Coordinator,DataNode,Gtm",
-        "Gstack" : "Coordinator,DataNode,Gtm",
-        "CoreDump": "gaussdb,gs_gtm,gs_rewind,cm_server,cm_agent,gs_ctl"
+        "Database" : "pg_locks,pg_stat_activity,pg_thread_wait_status",
+        "Log" : "DataNode,ClusterManager",
+        "XLog": "DataNode",
+        "Config" : "DataNode",
+        "Gstack" : "DataNode",
+        "CoreDump": "gaussdb,GaussMaster,gs_ctl"
         "Trace": "Dump"
         "Plan": "*"    # Any database name or character "*"
    }
