@@ -233,7 +233,7 @@ test: copyselect copy_error_log copy_eol
 test: create_index
 
 #this case of gin_test is dispatched, for more details u can look for schedule23
-#test: gin_test
+#test: gin_test gin_getbitmap
 
 # Postgres-XC : Removed this test from the parallel group of tests since it used to give inconsistent plan outputs.
 #test: inherit
