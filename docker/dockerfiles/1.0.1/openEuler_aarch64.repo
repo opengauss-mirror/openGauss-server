@@ -1,0 +1,50 @@
+#generic-repos is licensed under the Mulan PSL v2.
+#You can use this software according to the terms and conditions of the Mulan PSL v2.
+#You may obtain a copy of Mulan PSL v2 at:
+#    http://license.coscl.org.cn/MulanPSL2
+#THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
+#IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
+#PURPOSE.
+#See the Mulan PSL v2 for more details.
+
+[OS]
+name=OS
+baseurl=http://repo.openeuler.org/openEuler-20.03-LTS/OS/$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=http://repo.openeuler.org/openEuler-20.03-LTS/OS/$basearch/RPM-GPG-KEY-openEuler
+
+[everything]
+name=everything
+baseurl=http://repo.openeuler.org/openEuler-20.03-LTS/everything/$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=http://repo.openeuler.org/openEuler-20.03-LTS/everything/$basearch/RPM-GPG-KEY-openEuler
+
+[EPOL]
+name=EPOL
+baseurl=http://repo.openeuler.org/openEuler-20.03-LTS/EPOL/$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=http://repo.openeuler.org/openEuler-20.03-LTS/OS/$basearch/RPM-GPG-KEY-openEuler
+
+[debuginfo]
+name=debuginfo
+baseurl=http://repo.openeuler.org/openEuler-20.03-LTS/debuginfo/$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=http://repo.openeuler.org/openEuler-20.03-LTS/debuginfo/$basearch/RPM-GPG-KEY-openEuler
+
+[source]
+name=source
+baseurl=http://repo.openeuler.org/openEuler-20.03-LTS/source/
+enabled=1
+gpgcheck=1
+gpgkey=http://repo.openeuler.org/openEuler-20.03-LTS/source/RPM-GPG-KEY-openEuler
+
+[update]
+name=update
+baseurl=http://repo.openeuler.org/openEuler-20.03-LTS/update/$basearch/
+enabled=0
+gpgcheck=1
+gpgkey=http://repo.openeuler.org/openEuler-20.03-LTS/OS/$basearch/RPM-GPG-KEY-openEuler

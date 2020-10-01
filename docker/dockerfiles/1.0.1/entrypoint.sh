@@ -99,12 +99,21 @@ docker_init_database_dir() {
 docker_verify_minimum_env() {
         # check password first so we can output the warning before postgres
         # messes it up
-        if [ "${#GS_PASSWORD}" -ge 100 ]; then
+        if [[ "$GS_PASSWORD" =~  ^(.{8,}).*$ ]] &&  [[ "$GS_PASSWORD" =~ ^(.*[a-z]+).*$ ]] && [[ "$GS_PASSWORD" =~ ^(.*[A-Z]).*$ ]] &&  [[ "$GS_PASSWORD" =~ ^(.*[0-9]).*$ ]] && [[ "$GS_PASSWORD" =~ ^(.*[#?!@$%^&*-]).*$ ]]; then
                 cat >&2 <<-'EOWARN'
 
-                        WARNING: The supplied GS_PASSWORD is 100+ characters.
+                        Message: The supplied GS_PASSWORD is meet requirements.
 
 EOWARN
+        else
+                 cat >&2 <<-'EOWARN'
+
+                        Error: The supplied GS_PASSWORD is not meet requirements.
+                        Please Check if the password contains uppercase, lowercase, numbers, special characters, and password length(8).
+                        At least one uppercase, lowercase, numeric, special character.
+                        Example: Enmo@123
+EOWARN
+       exit 1
         fi
         if [ -z "$GS_PASSWORD" ] && [ 'trust' != "$GS_HOST_AUTH_METHOD" ]; then
                 # The - option suppresses leading tabs but *not* spaces. :)
@@ -172,13 +181,15 @@ docker_process_sql() {
         if [ -n "$GS_DB" ]; then
                 query_runner+=( --dbname "$GS_DB" )
         fi
-
+        
+        echo "Execute SQL: ${query_runner[@]} $@"
         "${query_runner[@]}" "$@"
 }
 
 # create initial database
 # uses environment variables for input: GS_DB
 docker_setup_db() {
+        echo "GS_DB = $GS_DB"
         if [ "$GS_DB" != 'postgres' ]; then
                 GS_DB= docker_process_sql --dbname postgres --set db="$GS_DB" --set passwd="$GS_PASSWORD" --set passwd="$GS_PASSWORD" <<-'EOSQL'
                         CREATE DATABASE :"db" ;
@@ -199,6 +210,15 @@ EOSQL
         fi
 }
 
+docker_setup_rep_user() {
+        if [ -n "$SERVER_MODE" ] && [ "$SERVER_MODE" = "primary" ]; then
+                GS_DB= docker_process_sql --dbname postgres --set passwd="RepUser@2020" --set user="repuser" <<-'EOSQL'
+                        create user :"user" SYSADMIN REPLICATION password :"passwd" ;
+EOSQL
+        else           
+                echo " default no repuser created"
+        fi
+}
 
 # Loads various settings that are used elsewhere in the script
 # This should be called before any other functions
@@ -227,6 +247,9 @@ opengauss_setup_hba_conf() {
                         echo '# warning trust is enabled for all connections'
                 fi
                 echo "host all all 0.0.0.0/0 $GS_HOST_AUTH_METHOD"
+                if [ -n "$SERVER_MODE" ]; then
+                    echo "host replication repuser $OG_SUBNET trust"
+                fi
         } >> "$PGDATA/pg_hba.conf"
 }
 
@@ -236,13 +259,34 @@ opengauss_setup_postgresql_conf() {
                 echo
                 if [ -n "$GS_PORT" ]; then
                     echo "password_encryption_type = 0"
-                    echo "listen_addresses = '*'"
                     echo "port = $GS_PORT"
                 else
                     echo '# use default port 5432'
                     echo "password_encryption_type = 0"
+                fi
+                
+                if [ -n "$SERVER_MODE" ]; then
+                    echo "listen_addresses = '0.0.0.0'"
+                    echo "most_available_sync = on"
+                    echo "remote_read_mode = non_authentication"
+                    echo "pgxc_node_name = '$NODE_NAME'"
+                    # echo "application_name = '$NODE_NAME'"
+                    if [ "$SERVER_MODE" = "primary" ]; then
+                        echo "max_connections = 100"
+                    else
+                        echo "max_connections = 100"
+                    fi
+                    echo -e "$REPL_CONN_INFO"
+                    if [ -n "$SYNCHRONOUS_STANDBY_NAMES" ]; then
+                        echo "synchronous_standby_names=$SYNCHRONOUS_STANDBY_NAMES"
+                    fi
+                else
                     echo "listen_addresses = '*'"
                 fi
+
+                if [ -n "$OTHER_PG_CONF" ]; then
+                    echo -e "$OTHER_PG_CONF"
+                fi 
         } >> "$PGDATA/postgresql.conf"
 }
 
@@ -273,10 +317,15 @@ docker_temp_server_stop() {
         gs_ctl -D "$PGDATA" -m fast -w stop
 }
 
+docker_slave_full_backup() {
+        gs_ctl build -D "$PGDATA" -b full
+}
+
 # check arguments for an option that would cause opengauss to stop
 # return true if there is one
 _opengauss_want_help() {
         local arg
+        count=1
         for arg; do
                 case "$arg" in
                         # postgres --help | grep 'then exit'
@@ -286,6 +335,12 @@ _opengauss_want_help() {
                                 return 0
                                 ;;
                 esac
+                if [ "$arg" == "-M" ]; then
+                        SERVER_MODE=${@:$count+1:1}
+                        echo "openGauss DB SERVER_MODE = $SERVER_MODE"
+                        shift
+                fi
+                count=$[$count + 1]
         done
         return 1
 }
@@ -322,10 +377,18 @@ _main() {
                         export PGPASSWORD="${PGPASSWORD:-$GS_PASSWORD}"
                         docker_temp_server_start "$@"
 
+                        if [ -z "$SERVER_MODE" ] || [ "$SERVER_MODE" = "primary" ]; then
                         docker_setup_db
                         docker_setup_user
+                        docker_setup_rep_user
                         docker_process_init_files /docker-entrypoint-initdb.d/*
+                        
+                        fi
 
+                        if [ -n "$SERVER_MODE" ] && [ "$SERVER_MODE" != "primary" ]; then
+                            docker_slave_full_backup
+                        fi
+                        
                         docker_temp_server_stop
                         unset PGPASSWORD
 
