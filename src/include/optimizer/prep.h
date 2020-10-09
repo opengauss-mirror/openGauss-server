@@ -76,60 +76,14 @@ extern Bitmapset *translate_col_privs(const Bitmapset *parent_privs, List *trans
 
 extern Node *adjust_appendrel_attrs(PlannerInfo *root, Node *node, AppendRelInfo *appinfo);
 
-inline void free_quals(Query *parse)
+/* judge if it is possible to optimize ROWNUM */
+static inline bool contain_rownum_qual(Query *parse)
 {
-    pfree(parse->jointree->quals);
-    parse->jointree->quals = NULL;
+    if (!IsA(parse->jointree, FromExpr)) {
+        return false;
+    }
+
+    return contain_rownum_walker(((FromExpr *)parse->jointree)->quals, NULL);
 }
-
-/* judge if it is possible to optimize rownum */
-inline bool verify_rownum_optimization_possibility(Query *parse)
-{
-    if (parse == NULL) {
-        return false;
-    }
-
-    if ((parse->commandType != CMD_SELECT) && (parse->commandType != CMD_INSERT) &&
-        (parse->commandType != CMD_UPDATE) && (parse->commandType != CMD_DELETE)) {
-        return false;
-    }
-
-    if (!IsA((Node *)parse->jointree, FromExpr)) {
-        return false;
-    }
-
-    if (!contain_rownum_walker(((FromExpr *)parse->jointree)->quals, NULL)) {
-        return false;
-    }
-
-    return true;
-}
-
-inline bool contain_optimizable_rownum_opexpr(OpExpr *expr)
-{
-    if (!IsA((Node *)linitial(expr->args), Rownum))
-        return false;
-
-    if (!IsA((Node *)llast(expr->args), Const))
-        return false;
-
-    if (((Const *)llast(expr->args))->consttype != INT8OID && ((Const *)llast(expr->args))->consttype != INT4OID) {
-        return false;
-    }
-
-    return true;
-}
-
-inline void rewrite_rownum_to_limit(Query *parse, Node *valueNode, int num)
-{
-    ((Const *)valueNode)->constvalue = num;
-    if (parse->limitCount != NULL) {
-        Const *Orin = (Const *)parse->limitCount;
-        parse->limitCount = (Orin->constvalue < ((Const *)valueNode)->constvalue) ? (Node *)Orin : valueNode;
-    } else {
-        parse->limitCount = valueNode;
-    }
-}
-
 
 #endif /* PREP_H */

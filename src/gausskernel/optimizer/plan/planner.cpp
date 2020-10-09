@@ -1206,12 +1206,12 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     /* Change ROWNUM to LIMIT if possible */
     preprocess_rownum(root, parse);
     DEBUG_QRW("After preprocess rownum");
+
     /*
      * Check to see if any subqueries in the jointree can be merged into this
      * query.
      */
     parse->jointree = (FromExpr*)pull_up_subqueries(root, (Node*)parse->jointree, NULL, NULL);
-
     DEBUG_QRW("After simple subquery pull up");
 
     /*
