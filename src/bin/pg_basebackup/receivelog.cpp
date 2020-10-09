@@ -586,6 +586,8 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
         PQclear(res);
     }
 
+    fprintf(stderr, "%100s", "");
+    fprintf(stderr, "\r");
     pg_log(PG_PROGRESS, _(" check identify system success\n"));
 
     /* Initiate the replication stream at specified location */
@@ -605,6 +607,8 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
     }
     PQclear(res);
 
+    fprintf(stderr, "%100s", "");
+    fprintf(stderr, "\r");
     pg_log(PG_PROGRESS, _(" send %s success\n"), query);
     /* Set the last reply timestamp */
     last_recv_timestamp = localGetCurrentTimestamp();
@@ -729,6 +733,8 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
                 pg_log(PG_WARNING, _(" keepalive message is incorrect size: %d\n"), r);
                 goto error;
             }
+            fprintf(stderr, "%100s", "");
+            fprintf(stderr, "\r");
             pg_log(PG_PRINT, _(" keepalive message is received\n"));
             /* copy the received buffer to keepalive */
             ret = memcpy_s(&keepalive, sizeof(PrimaryKeepaliveMessage), copybuf + 1, sizeof(PrimaryKeepaliveMessage));
