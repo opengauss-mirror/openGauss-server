@@ -54,6 +54,7 @@
 
 #include "bin/elog.h"
 #include "openssl/rand.h"
+#include "miscadmin.h"
 
 #if defined(__CYGWIN__)
 #include <sys/cygwin.h>
@@ -68,6 +69,7 @@
 #define TRY_TIMES 3
 #define LARGE_INSTANCE_NUM 2
 
+const int PASSWORD_PARAMETER_COUNT = 2;
 /* PID can be negative for standalone backend */
 typedef long pgpid_t;
 
@@ -292,6 +294,10 @@ int check_config_file_status();
 char** backup_config_file(const char* read_file, char* write_file, FileLock filelock, int reserve_num_lines);
 int do_parameter_value_write(char** opt_lines, UpdateOrAddParameter updateoradd);
 static void checkCMParameter(const char* dataDir, const char* nodeName, const char* instName);
+
+static int getPasswordLength(char* password_option);
+static bool isPasswordLengthValid(char** lines);
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -461,6 +467,81 @@ static pgpid_t get_pgpid(void)
     return (pgpid_t)pid;
 }
 
+static int getPasswordLength(char* password_option) 
+{
+    const int buffer_length = 1024;
+    if (!password_option) {
+        return 0;
+    }
+    char* c = password_option;
+    
+    /* skipping the character that is not a number */
+    while (*c != '\0' && !(*c >= '0' && *c <= '9')) {
+        c++;
+    }
+
+    if (*c == '\0') {
+        return 0;
+    }
+
+    char head[buffer_length];
+    (void)strcpy_s(head, buffer_length, c);
+    char* tail = head;
+    while (*tail >= '0' && *tail <= '9') {
+        tail++;
+    }
+    *tail = '\0';
+    return atoi(head);
+}
+
+static bool isPasswordLengthValid(char** lines) 
+{
+    char** line = NULL;
+    const char* min_length_name = "password_min_length";
+    const char* max_length_name = "password_max_length";
+
+    int count = 0;
+    char* password_min_length_option = NULL;
+    char* password_max_length_option = NULL;
+    int min_length = DEFAULT_PASSWORD_MIN_LENGTH;
+    int max_length = DEFAULT_PASSWORD_MAX_LENGTH;
+    for (line = lines; *line && count < PASSWORD_PARAMETER_COUNT; line++) {
+        char* option = *line;
+        while (*option == ' ') {
+            option++;
+        }
+
+        if (*option == '#') {
+            continue;
+        }
+        if (strstr(option, min_length_name) != NULL) {
+            password_min_length_option = option;
+            count++;
+            continue;
+        } else if (strstr(option, max_length_name) != NULL) {
+            password_max_length_option = option;
+            count++;
+            continue;
+        }
+    }
+
+    if (password_min_length_option != NULL) {
+        int len = getPasswordLength(password_min_length_option);
+        min_length = len == 0 ? min_length : len;
+    }
+
+    if (password_max_length_option != NULL) {
+        int len = getPasswordLength(password_max_length_option);
+        max_length = len == 0 ? max_length : len;
+    }
+
+    if (min_length > max_length) {
+        write_stderr(_("password_min_length:%d cannot longer than password_max_length:%d.\n"), min_length, max_length);
+        return false;
+    }
+    return true;
+}
+
 /*
 * @@GaussDB@@
 * Brief            : static ErrCode writefile(char *path, char **lines,
@@ -472,6 +553,7 @@ ErrCode writefile(char* path, char** lines, UpdateOrAddParameter isAddorUpdate)
 {
     FILE* out_file = NULL;
     char** line = NULL;
+
     if (UPDATE_PARAMETER == isAddorUpdate) {
         canonicalize_path(path);
         if ((out_file = fopen(path, "w")) == NULL) {
@@ -935,6 +1017,10 @@ int do_parameter_value_write(char** opt_lines, UpdateOrAddParameter updateoradd)
     newlines = readfile(tempguc_file, 0);
     if (NULL == newlines) {
         write_stderr(_("read file \"%s\" failed: %s\n"), tempguc_file, gs_strerror(errno));
+        return FAILURE;
+    }
+
+    if (!isPasswordLengthValid(newlines)) {
         return FAILURE;
     }
     ret = writefile(newtempfile, newlines, UPDATE_PARAMETER);
