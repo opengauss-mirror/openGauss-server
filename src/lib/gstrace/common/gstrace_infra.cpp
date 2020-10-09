@@ -282,40 +282,40 @@ static void getSharedMemName(char* name, size_t len_name, const char* prefix, in
  * process address space.
  * This function will NOT create the shared memory if it does not exist.
  */
-static int attachTraceSharedMemLow(void** pTrcMem, const char* sMemName, uint64_t size)
+static trace_msg_code attachTraceSharedMemLow(void** pTrcMem, const char* sMemName, uint64_t size)
 {
     int fd;
     if (size == 0) {
-        return TRACE_COMMON_ERROR;
+	return TRACE_BUFFER_SIZE_ERR;
     }
 
     fd = shm_open(sMemName, O_RDWR, S_IRWXU);
     if (fd == -1) {
         // Failed to attach to shared memory
-        return TRACE_COMMON_ERROR;
+        return TRACE_OPEN_SHARE_MEMORY_ERR;
     }
 
     *pTrcMem = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (*pTrcMem == MAP_FAILED) {
         // failed to map memory
-        return TRACE_COMMON_ERROR;
+        return TRACE_MMAP_ERR;
     }
 
     return TRACE_OK;
 }
 
-static int detachTraceSharedMemLow(trace_infra* pTrcMem)
+static trace_msg_code detachTraceSharedMemLow(trace_infra* pTrcMem)
 {
     if (pTrcMem != NULL && munmap(pTrcMem, pTrcMem->total_size) == -1) {
-        return TRACE_COMMON_ERROR;
+        return TRACE_MUNMAP_ERR;
     }
     return TRACE_OK;
 }
 
-static int attachTraceBufferSharedMem(int key)
+static trace_msg_code attachTraceBufferSharedMem(int key)
 {
-    int rc;
+    trace_msg_code rc;
     void* ptr = NULL;
     char sBufMemName[TRC_SHARED_MEM_NAME_MAX] = {0};
     uint64_t bufferSize;
@@ -332,11 +332,11 @@ static int attachTraceBufferSharedMem(int key)
     return rc;
 }
 
-static int attachTraceCfgSharedMem(int key)
+static trace_msg_code attachTraceCfgSharedMem(int key)
 {
     char sCfgMemName[TRC_SHARED_MEM_NAME_MAX] = {0};
     trace_context* pTrcCxt = getTraceContext();
-    int rc;
+    trace_msg_code rc;
     void* ptr = NULL;
 
     getSharedMemName(sCfgMemName, sizeof(sCfgMemName), TRC_CFG_SHARED_MEM_NAME, key);
@@ -505,7 +505,7 @@ trace_msg_code gstrace_start(int key, const char* mask, uint64_t bufferSize, con
     }
     bufferSize = bTrcToFile ? MIN_BUF_SIZE : roundToNearestPowerOfTwo(bufferSize);
 
-    if (attachTraceCfgSharedMem(key) != 0) {
+    if (attachTraceCfgSharedMem(key) != TRACE_OK) {
         /* Failed to attached to shared memory. */
         return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
     }
@@ -977,7 +977,6 @@ trace_msg_code gstrace_config(int key)
 
     rc = attachTraceCfgSharedMem(key);
     if (rc != TRACE_OK) {
-        printf("Failed to attached to shared memory.\n");
         return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
     }
 

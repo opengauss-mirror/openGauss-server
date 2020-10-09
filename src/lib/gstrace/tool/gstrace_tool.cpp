@@ -615,80 +615,79 @@ DumpFileParser::~DumpFileParser()
     close(fdInput);
 }
 
-void DumpFileParser::parseCfg(trace_config* pCfg)
+trace_msg_code DumpFileParser::parseCfg(trace_config* pCfg)
 {
     size_t bytesRead = read(fdInput, (void*)pCfg, sizeof(trace_config));
     if (bytesRead != sizeof(trace_config)) {
-        printf("[ERROR] Failed to read trace config.\n");
-        exit(TRACE_COMMON_ERROR);
+        return TRACE_READ_CFG_FROM_FILE_ERR;
     }
 
     if (pCfg->trc_cfg_magic_no != GS_TRC_CFG_MAGIC_N) {
-        printf("[ERROR] invalid magic number in trace file.\n");
-        exit(TRACE_COMMON_ERROR);
+        return TRACE_MAGIC_FROM_FILE_ERR;
     }
 
     if (pCfg->version != TRACE_VERSION) {
-        printf("[ERROR] trace version not match.\n");
-        exit(TRACE_COMMON_ERROR);
+        return TRACE_VERSION_ERR;
     }
 
     const char* hash_trace_config_file = getTraceConfigHash();
     if (memcmp(pCfg->hash_trace_config_file, hash_trace_config_file, LENGTH_TRACE_CONFIG_HASH) != 0) {
-        printf("[ERROR] the version of dumped data and trace tool are not matched!\n");
-        exit(TRACE_COMMON_ERROR);
+        return TRACE_VERSION_ERR;
     }
 
     if ((pCfg->size & (pCfg->size - 1)) != 0) {
-        printf("[ERROR] invalid buffer size in trace file.\n");
-        exit(TRACE_COMMON_ERROR);
+        return TRACE_CONFIG_SIZE_ERR;
     }
+
+    return TRACE_OK;
 }
 
-void DumpFileParser::parseInfra(trace_infra* pInfra)
+trace_msg_code DumpFileParser::parseInfra(trace_infra* pInfra)
 {
     size_t bytesRead = read(fdInput, (void*)pInfra, sizeof(trace_infra));
     if (sizeof(trace_infra) != bytesRead) {
-        perror("Failed to read trace infra.");
-        exit(TRACE_COMMON_ERROR);
+        perror("read err");
+        return TRACE_READ_INFRA_FROM_FILE_ERR;
     }
+
+    return TRACE_OK;
 }
 
 // get header (the first slot)
 // so the first slot contains header or the record
-void* DumpFileParser::parseHeader(void* pSlotHeader, size_t hdr_len)
+trace_msg_code DumpFileParser::parseHeader(void* pSlotHeader, size_t hdr_len)
 {
     size_t bytesRead = read(fdInput, (void*)pSlotHeader, hdr_len);
     if (hdr_len != bytesRead) {
-        perror("Invalid trace file - faild to read trace slot header");
-        exit(TRACE_COMMON_ERROR);
+        perror("read err");
+        return TRACE_READ_SLOT_HEADER_ERR;
     }
 
     // since slots for one record is contiguous, we can do following check.
     trace_slot_head* pHdr = (trace_slot_head*)pSlotHeader;
     if (pHdr->num_slots_in_area == 0 || pHdr->num_slots_in_area > MAX_TRC_SLOTS) {
-        perror("Invalid trace file - num slot in header is zero.");
-        exit(TRACE_COMMON_ERROR);
+        return TRACE_NUM_SLOT_ERR;
     }
 
     if (pHdr->hdr_magic_number != SLOT_AREAD_HEADER_MAGIC_NO) {
-        perror("Invalid trace file - num slot in header is zero.");
-        exit(TRACE_COMMON_ERROR);
+        return TRACE_SLOT_MAGIC_ERR;
     }
 
-    return pSlotHeader;
+    return TRACE_OK;
 }
 
-void DumpFileParser::parseData(void* pData, size_t data_len)
+trace_msg_code DumpFileParser::parseData(void* pData, size_t data_len)
 {
     size_t bytesRead = read(fdInput, pData, data_len);
     if (data_len != bytesRead) {
-        perror("Invalid trace file - faild to read trace slot data.");
-        exit(TRACE_COMMON_ERROR);
+        perror("read err");
+        return TRACE_READ_SLOT_DATA_ERR;
     }
+
+    return TRACE_OK;
 }
 
-int DumpFileParser::parseOneRecord(const char rec_tmp_buf[MAX_TRC_RC_SZ], size_t bufSize, bool hasdata)
+trace_msg_code DumpFileParser::parseOneRecord(const char rec_tmp_buf[MAX_TRC_RC_SZ], size_t bufSize, bool hasdata)
 {
     int ret;
     trace_record recCopy;
@@ -697,7 +696,7 @@ int DumpFileParser::parseOneRecord(const char rec_tmp_buf[MAX_TRC_RC_SZ], size_t
 
     recOffset = sizeof(trace_slot_head);
     if (recOffset >= bufSize) {
-        return 0;
+        return TRACE_BUFFER_SIZE_ERR;
     }
 
     pRec = (trace_record*)&rec_tmp_buf[recOffset];
@@ -707,16 +706,16 @@ int DumpFileParser::parseOneRecord(const char rec_tmp_buf[MAX_TRC_RC_SZ], size_t
     if (this->processForOverlap == true) {
         if (this->firstTimestamp == 0) {
             this->firstTimestamp = recCopy.timestamp;
-            return 0;
+            return TRACE_OK;
         } else if (this->firstTimestamp < pRec->timestamp) {
-            return 0;
+            return TRACE_OK;
         } else {
             if (hasdata) {
                 this->lenFirstNotOverlaped = pRec->user_data_len + SLOT_SIZE;
             } else {
                 this->lenFirstNotOverlaped = SLOT_SIZE;
             }
-            return 0;
+            return TRACE_OK;
         }
     }
 
@@ -734,10 +733,10 @@ int DumpFileParser::parseOneRecord(const char rec_tmp_buf[MAX_TRC_RC_SZ], size_t
         this->pVisitor->visit(&recCopy, NULL, 0);
     }
 
-    return 1;
+    return TRACE_OK;
 }
 
-int DumpFileParser::readAndParseOneRecord(void)
+trace_msg_code DumpFileParser::readAndParseOneRecord(void)
 {
     uint64_t hdrSeq, tailSeq;
     uint32_t num_slots_in_area;
@@ -745,21 +744,29 @@ int DumpFileParser::readAndParseOneRecord(void)
     trace_slot_tail* pTail = NULL;
     char rec_tmp_buf[MAX_TRC_RC_SZ] = {'\0'};
     bool hasdata = false;
+    trace_msg_code ret;
 
-    pHdr = (trace_slot_head*)parseHeader(&rec_tmp_buf, SLOT_SIZE);
+    ret = parseHeader(&rec_tmp_buf, SLOT_SIZE);
+    if (ret != TRACE_OK) {
+        return ret;
+    }
+    pHdr = (trace_slot_head*)(&rec_tmp_buf);
     hdrSeq = pHdr->hdr_sequence;
     num_slots_in_area = pHdr->num_slots_in_area;
 
     if (num_slots_in_area > 1 && num_slots_in_area <= MAX_TRC_SLOTS) {
         /* read following data slots */
-        parseData(&rec_tmp_buf[SLOT_SIZE], (num_slots_in_area - 1) * SLOT_SIZE);
+        ret = parseData(&rec_tmp_buf[SLOT_SIZE], (num_slots_in_area - 1) * SLOT_SIZE);
+        if (ret != TRACE_OK) {
+            return ret;
+        }
         hasdata = true;
     }
 
     /* get tail seq */
     int tail_offset = (num_slots_in_area * SLOT_SIZE) - sizeof(trace_slot_tail);
     if (tail_offset >= MAX_TRC_RC_SZ || tail_offset < 0) {
-        return 0;
+        return TRACE_TAIL_OFFSET_ERR;
     }
     pTail = (trace_slot_tail*)&rec_tmp_buf[tail_offset];
     tailSeq = pTail->tail_sequence;
@@ -768,18 +775,24 @@ int DumpFileParser::readAndParseOneRecord(void)
         return this->parseOneRecord(rec_tmp_buf, MAX_TRC_RC_SZ, hasdata);
     }
 
-    return 0;
+    return TRACE_SEQ_ERR;
 }
 
-uint64_t DumpFileParser::readAndParseDump(uint64_t counter)
+trace_msg_code DumpFileParser::readAndParseDump(uint64_t counter, uint64_t* totNumRecsFormatted)
 {
-    uint64_t totNumRecsFormatted = 0;
+    trace_msg_code parse_result;
 
+    *totNumRecsFormatted = 0;
     for (uint64_t i = 0; i < counter; ++i) {
-        totNumRecsFormatted += readAndParseOneRecord();
+        parse_result = readAndParseOneRecord();
+        if (parse_result != TRACE_OK) {
+            break;
+        } else {
+            *totNumRecsFormatted += 1;
+        }
     }
 
-    return totNumRecsFormatted;
+    return parse_result;
 }
 
 uint64_t DumpFileParser::findStartSlot(uint64_t maxSeq, uint64_t maxSlots, off_t* firstRecordOffset)
@@ -801,7 +814,8 @@ uint64_t DumpFileParser::findStartSlot(uint64_t maxSeq, uint64_t maxSlots, off_t
     }
 
     do {
-        readAndParseOneRecord();
+        (void)readAndParseOneRecord();
+        /* if first record is not valid, just skip it and find next */
         i++;
     } while ((this->firstTimestamp == 0) && (i < maxSlots - startSlot));
 
@@ -817,7 +831,8 @@ uint64_t DumpFileParser::findStartSlot(uint64_t maxSeq, uint64_t maxSlots, off_t
     /* when dump trace, because not stop, there maybe more records after dump finish */
     i = 0;
     do {
-        readAndParseOneRecord();
+        (void)readAndParseOneRecord();
+        /* skip invalid record until a valid record is found. */
         i++;
     } while ((this->lenFirstNotOverlaped == 0) && (i < maxSlots - startSlot));
 
@@ -839,21 +854,30 @@ uint64_t DumpFileParser::findStartSlot(uint64_t maxSeq, uint64_t maxSlots, off_t
 }
 
 // Parse the whole dmp file.
-void DumpFileParser::parse()
+trace_msg_code DumpFileParser::parse()
 {
     trace_config trc_cfg;
     trace_infra trc_infra;
-    uint64_t maxSeq, maxSlots, totNumRecsFormatted, slotNumberBeforeReverse;
+    uint64_t maxSeq, maxSlots, slotNumberBeforeReverse;
+    uint64_t totNumRecsFormatted = 0;
+    uint64_t reversedNumRecsFormatted = 0;
     off_t firstRecordOffset;
     uint64_t startSlot = 0;
+    trace_msg_code ret = TRACE_OK;
 
-    parseCfg(&trc_cfg);
-    parseInfra(&trc_infra);
+    ret = parseCfg(&trc_cfg);
+    if (ret != TRACE_OK) {
+        return ret;
+    }
+
+    ret = parseInfra(&trc_infra);
+    if (ret != TRACE_OK) {
+        return ret;
+    }
 
     maxSeq = (uint64_t)trc_infra.g_Counter;
     if (maxSeq == 0) {
-        printf("No trace records were captured.");
-        return;
+        return TRACE_NO_RECORDS_ERR;
     }
     maxSlots = trc_cfg.size / SLOT_SIZE;
 
@@ -865,20 +889,23 @@ void DumpFileParser::parse()
     /* start parse from the first not overlaped record, the number should be min of max -start
      * and max seq, if not overlap, the startSlot is 0 */
     if (startSlot > maxSlots) {
-        printf("startSlot should never big than maxSlot.");
-        return;
+        return TRACE_STATR_SLOT_ERR;
     }
     slotNumberBeforeReverse = maxSlots - startSlot;
-    totNumRecsFormatted = readAndParseDump(MIN(slotNumberBeforeReverse, maxSeq));
-    if (startSlot != 0) {
+    ret = readAndParseDump(MIN(slotNumberBeforeReverse, maxSeq), &totNumRecsFormatted);
+    if (startSlot != 0 && (ret == TRACE_OK)) {
         /* if reverse happen this part will parse first record to the first not overlaped slot */
+        /* if totNumRecsFormatted is 0, means header or data is invalid, we just handle records before invalid */
         off_t first = lseek(this->fdInput, firstRecordOffset, SEEK_SET);
         if (first == -1) {
             perror("lseek to first record error!");
         }
-        totNumRecsFormatted += readAndParseDump(startSlot);
+        ret = readAndParseDump(startSlot, &reversedNumRecsFormatted);
+        totNumRecsFormatted += reversedNumRecsFormatted;
     }
-    printf("Found and formatted a total number of %lu trace flow records\n", totNumRecsFormatted);
+    printf("Found %lu trace records and formatted %lu of them\n", (maxSeq % maxSlots), totNumRecsFormatted);
+
+    return ret;
 }
 
 // out_buf must be at least HEX_DUMP_BUF_SZ
@@ -1137,6 +1164,7 @@ static trace_msg_code readAndCheckTrcMeta(int fdInput, trace_config* trc_cfg, tr
 static trace_msg_code readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t counter)
 {
     uint64_t totalNumRecs = 0;
+    trace_msg_code ret = TRACE_OK;
     char rec_tmp_buf[MAX_TRC_RC_SZ] = {'\0'};
     char rec_out_buf[MAX_TRC_RC_SZ] = {'\0'};
 
@@ -1151,11 +1179,13 @@ static trace_msg_code readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t co
 
         // since slots for one record is contiguous, we can do following check.
         if (pHdr->num_slots_in_area == 0 || pHdr->num_slots_in_area > MAX_TRC_SLOTS) {
-            return TRACE_NUM_SLOT_ERR;
+            ret = TRACE_NUM_SLOT_ERR;
+            break;
         }
 
         if (pHdr->hdr_magic_number != SLOT_AREAD_HEADER_MAGIC_NO) {
-            return TRACE_SLOT_MAGIC_ERR;
+            ret = TRACE_SLOT_MAGIC_ERR;
+            break;
         }
 
         if (pHdr->num_slots_in_area > 1 && pHdr->num_slots_in_area <= MAX_TRC_SLOTS) {
@@ -1192,8 +1222,8 @@ static trace_msg_code readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t co
         }
     }
 
-    printf("Found and formatted a total number of %lu trace records\n", totalNumRecs);
-    return TRACE_OK;
+    printf("Found %lu trace records and formatted %lu of them\n", counter, totalNumRecs);
+    return ret;
 }
 
 // This function will format the trace
@@ -1242,24 +1272,32 @@ static trace_msg_code formatTrcDumpFile(const char* inputPath, const char* outpu
 }
 
 // Format dump file as a control flow
-static void formatDumpFileToFlow(const char* inputFile, size_t input_len, const char* outputFile, size_t output_len)
+static trace_msg_code formatDumpFileToFlow(const char* inputFile, size_t input_len, const char* outputFile, size_t output_len)
 {
+    trace_msg_code ret;
+
     DumpFileParser parser(inputFile, input_len);
     DumpFileFlowVisitor visitor(false);
     parser.acceptVisitor(&visitor);
-    parser.parse();
+    ret = parser.parse();
     visitor.flushThreadFlows();
     visitor.mergeFiles(outputFile, output_len);
+
+    return ret;
 }
 
-static void anlyzeDumpFile(
+static trace_msg_code anlyzeDumpFile(
     const char* inputFile, size_t input_len, const char* outputFile, size_t output_len, int stepSize)
 {
+    trace_msg_code ret;
+
     DumpFileParser parser(inputFile, input_len);
     DumpFileFlowVisitor visitor(true, stepSize, outputFile, output_len);
     parser.acceptVisitor(&visitor);
-    parser.parse();
+    ret = parser.parse();
     visitor.mergeFiles(outputFile, output_len);
+
+    return ret;
 }
 
 // Get the index of an option in argv array
@@ -1397,44 +1435,51 @@ static void printUsage(int argc, char** argv)
     printf("\t-t  get statistics for every n seconds, file name will be {global file name}.step\n");
 }
 
+/* The order of msg in trace_message should be same with the order of msgcode in trace_msg_code */
 trace_msg_t trace_message[] = {
-    {TRACE_OK, "Success!\n"},
-    {TRACE_ALREADY_START, "Trace has already been activated.\n"},
-    {TRACE_ALREADY_STOP, "Trace has already been deactived.\n"},
-    {TRACE_PARAMETER_ERR, "Parameter not correct.\n"},
-    {TRACE_BUFFER_SIZE_ERR, "Invalid share memory buffer size.\n"},
-    {TRACE_ATTACH_CFG_SHARE_MEMORY_ERR, "Attached to trace config failed.\n"},
-    {TRACE_ATTACH_BUFFER_SHARE_MEMORY_ERR, "Attached to trace buffer failed.\n"},
-    {TRACE_OPEN_SHARE_MEMORY_ERR, "Failed to initialize trace buffer.\n"},
-    {TRACE_TRUNCATE_ERR, "Failed to set size of trace buffer.\n"},
-    {TRACE_MMAP_ERR, "Failed to map memory for trace buffer.\n"},
-    {TRACE_UNLINK_SHARE_MEMORY_ERR, "Failed to delete trace buffer.\n"},
-    {TRACE_DISABLE_ERR, "Trace is disable.\n"},
-    {TRACE_OPEN_OUTPUT_FILE_ERR, "Failed to open trace output file.\n"},
-    {TRACE_OPEN_INPUT_FILE_ERR, "Failed to open trace input file.\n"},
-    {TRACE_WRITE_BUFFER_HEADER_ERR, "Failed to write trace buffer header.\n"},
-    {TRACE_WRITE_CFG_HEADER_ERR, "Failed to write trace config header.\n"},
-    {TRACE_WRITE_BUFFER_ERR, "Failed to write trace buffer.\n"},
-    {TRACE_READ_CFG_FROM_FILE_ERR, "Failed to read trace config.\n"},
-    {TRACE_BUFFER_SIZE_FROM_FILE_ERR, "Invalid buffer size in trace file.\n"},
-    {TRACE_MAGIC_FROM_FILE_ERR, "Invalid magic number in trace file.\n"},
-    {TRACE_READ_INFRA_FROM_FILE_ERR, "Failed to read trace infra.\n"},
-    {TRACE_NO_RECORDS_ERR, "No trace records were captured.\n"},
-    {TRACE_READ_SLOT_HEADER_ERR, "Faild to read trace slot header.\n"},
-    {TRACE_NUM_SLOT_ERR, "Invalid trace file, num slot in header is zero.\n"},
-    {TRACE_SLOT_MAGIC_ERR, "Invalid trace file, magic number is not correct.\n"},
-    {TRACE_READ_SLOT_DATA_ERR, "Faild to read trace slot data.\n"},
-    {TRACE_WRITE_FORMATTED_RECORD_ERR, "Failed to write formatted trace record.\n"},
-    {TRACE_MSG_MAX, "Failed!\n"},
+    {TRACE_OK, "Success!"},
+    {TRACE_ALREADY_START, "Trace has already been activated."},
+    {TRACE_ALREADY_STOP, "Trace has already been deactived."},
+    {TRACE_PARAMETER_ERR, "Parameter is not correct."},
+    {TRACE_BUFFER_SIZE_ERR, "Invalid share memory buffer size."},
+    {TRACE_ATTACH_CFG_SHARE_MEMORY_ERR, "Attach to trace config failed."},
+    {TRACE_ATTACH_BUFFER_SHARE_MEMORY_ERR, "Attach to trace buffer failed."},
+    {TRACE_OPEN_SHARE_MEMORY_ERR, "Failed to initialize trace buffer."},
+    {TRACE_TRUNCATE_ERR, "Failed to set size of trace buffer."},
+    {TRACE_MMAP_ERR, "Failed to map memory for trace buffer."},
+    {TRACE_MUNMAP_ERR, "Failed to unmap memory for trace buffer."},
+    {TRACE_UNLINK_SHARE_MEMORY_ERR, "Failed to delete trace buffer."},
+    {TRACE_DISABLE_ERR, "Trace is disable."},
+    {TRACE_OPEN_OUTPUT_FILE_ERR, "Failed to open trace output file."},
+    {TRACE_OPEN_INPUT_FILE_ERR, "Failed to open trace input file."},
+    {TRACE_WRITE_BUFFER_HEADER_ERR, "Failed to write trace buffer header."},
+    {TRACE_WRITE_CFG_HEADER_ERR, "Failed to write trace config header."},
+    {TRACE_WRITE_BUFFER_ERR, "Failed to write trace buffer."},
+    {TRACE_READ_CFG_FROM_FILE_ERR, "Failed to read trace config."},
+    {TRACE_BUFFER_SIZE_FROM_FILE_ERR, "Invalid buffer size in trace file."},
+    {TRACE_MAGIC_FROM_FILE_ERR, "Invalid magic number in trace file."},
+    {TRACE_READ_INFRA_FROM_FILE_ERR, "Failed to read trace infra."},
+    {TRACE_NO_RECORDS_ERR, "No trace records was captured."},
+    {TRACE_READ_SLOT_HEADER_ERR, "Failed to read trace slot header."},
+    {TRACE_NUM_SLOT_ERR, "Concurrent write occurred during dump, some slot header is invalid."},
+    {TRACE_SLOT_MAGIC_ERR, "Invalid trace file, magic number is not correct."},
+    {TRACE_READ_SLOT_DATA_ERR, "Failed to read trace slot data."},
+    {TRACE_WRITE_FORMATTED_RECORD_ERR, "Failed to write formatted trace record."},
+    {TRACE_STATR_SLOT_ERR, "Start slot should never big than max slot."},
+    {TRACE_TAIL_OFFSET_ERR, "Trace tail offset is invalid."},
+    {TRACE_SEQ_ERR, "Trace sequence check failed."},
+    {TRACE_VERSION_ERR, "trace version not match."},
+    {TRACE_CONFIG_SIZE_ERR, "invalid config size in trace file."},
+    {TRACE_MSG_MAX, "Failed!"},
 };
 
 static void print_result_message(trace_msg_code rc, int argc, char** argv)
 {
     if (rc == TRACE_OK) {
-        (void)printf("[GAUSS-TRACE] %s %s", argv[1], trace_message[rc].msg_string);
+        (void)printf("[GAUSS-TRACE] %s %s\n", argv[1], trace_message[rc].msg_string);
     } else if ((rc > TRACE_OK) && (rc < TRACE_MSG_MAX)) {
         if (rc == trace_message[rc].msg_code) {
-            (void)printf("[GAUSS-TRACE] %s", trace_message[rc].msg_string);
+            (void)printf("[GAUSS-TRACE] %s\n", trace_message[rc].msg_string);
         } else {
             (void)printf("[GAUSS-TRACE] Trace failed for error %05d.\n", rc);
         }
@@ -1489,13 +1534,13 @@ int main(int argc, char** argv)
         // detail will format the binary file to a human readable file
         rc = formatTrcDumpFile(trcFile, outputFile);
     } else if (argc == two_paras && (0 == strcmp(argv[1], "codepath")) && trcFile != NULL && outputFile != NULL) {
-        formatDumpFileToFlow(trcFile, strlen(trcFile), outputFile, strlen(outputFile));
+        rc = formatDumpFileToFlow(trcFile, strlen(trcFile), outputFile, strlen(outputFile));
     } else if (argc == two_paras && (0 == strcmp(argv[1], "analyze")) && trcFile != NULL && outputFile != NULL) {
-        anlyzeDumpFile(trcFile, strlen(trcFile), outputFile, strlen(outputFile), 0);
+        rc = anlyzeDumpFile(trcFile, strlen(trcFile), outputFile, strlen(outputFile), 0);
     } else if (argc == three_paras && (0 == strcmp(argv[1], "analyze")) && trcFile != NULL && outputFile != NULL &&
                stepSize != -1) {
         /* step stats file will be {outputFile}.step */
-        anlyzeDumpFile(trcFile, strlen(trcFile), outputFile, strlen(outputFile), stepSize);
+        rc = anlyzeDumpFile(trcFile, strlen(trcFile), outputFile, strlen(outputFile), stepSize);
     } else {
         rc = TRACE_PARAMETER_ERR;
     }
