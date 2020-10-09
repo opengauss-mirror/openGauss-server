@@ -46,6 +46,9 @@
 #include "parser/parse_oper.h"
 #include "utils/lsyscache.h"
 #include "access/transam.h"
+#include "catalog/pg_operator.h"
+#include "nodes/pg_list.h"
+#include "optimizer/planner.h"
 
 typedef struct pullup_replace_vars_context {
     PlannerInfo* root;
@@ -88,8 +91,17 @@ static void fix_append_rel_relids(List* append_rel_list, int varno, Relids subre
 static Node* find_jointree_node_for_rel(Node* jtnode, int relid);
 static Node* deleteRelatedNullTest(Node* node, PlannerInfo* root);
 static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Node* jtnode);
-
 static bool find_rownum_in_quals(PlannerInfo *root);
+static bool process_rownum_opexpr(Query *parse, OpExpr *expr, bool isOrExpr);
+static Node *process_rownum_boolexpr(Query *parse, BoolExpr *quals, BoolExprType type);
+static bool process_rownum_opexpr_lessthan(Query *parse, Node *qual, int64 var, bool isOrExpr);
+static bool process_rownum_opexpr_lessthanEqual(Query *parse, Node *qual, int64 var, bool isOrExpr);
+static bool process_rownum_opexpr_Equal(Query *parse, Node *qual, int64 var, bool isOrExpr);
+static bool process_rownum_opexpr_greaterthan(Query *parse, Node *qual, int64 var, bool isOrExpr);
+static bool process_rownum_opexpr_greaterEqualthan(Query *parse, Node *qual, int64 var, bool isOrExpr);
+static bool process_rownum_opexpr_notEqual(Query *parse, Node *qual, int64 var, bool isOrExpr);
+static int64 get_constvalue_from_opexpr(OpExpr *expr);
+
 
 /*
  * pull_up_sublinks
@@ -1377,6 +1389,9 @@ static bool is_simple_subquery(Query* subquery)
      * that case the locking was originally declared in the upper query
      * anyway.
      */
+    if (verify_rownum_optimization_possibility(subquery)) {
+        return false;
+    }
     if (subquery->hasAggs || subquery->hasWindowFuncs || subquery->groupClause || subquery->groupingSets ||
         subquery->havingQual || subquery->sortClause || subquery->distinctClause || subquery->limitOffset ||
         subquery->limitCount || subquery->hasForUpdate || subquery->cteList)
@@ -1443,6 +1458,9 @@ static bool is_simple_union_all(Query* subquery)
     AssertEreport(
         IsA(topop, SetOperationStmt), MOD_OPT_REWRITE, "subquery's setOperations mismatch in is_simple_union_all");
 
+    if (verify_rownum_optimization_possibility(subquery)) {
+        return false;
+    }
     /* Can't handle ORDER BY, LIMIT/OFFSET, locking, or WITH */
     if (subquery->sortClause || subquery->limitOffset || subquery->limitCount || subquery->rowMarks ||
         subquery->cteList)
@@ -2930,4 +2948,260 @@ static bool find_rownum_in_quals(PlannerInfo *root)
     }
 
     return hasRownum;
+}
+
+/*
+ * preprocess_rownum
+ * change ROWNUM to LIMIT in parse tree if possible
+ */
+void preprocess_rownum(PlannerInfo *root, Query *parse)
+{
+    if (!verify_rownum_optimization_possibility(parse)) {
+        return;
+    }
+    if (parse->limitCount != NULL && !IsA(parse->limitCount, Const)) {
+        parse->limitCount = eval_const_expressions(root, parse->limitCount);
+    }
+    Node *node = (Node *)parse->jointree->quals;
+    if (node == NULL) {
+        return;
+    }
+
+    switch (nodeTag(node)) {
+        case T_OpExpr: {
+            bool canBeOptimized = process_rownum_opexpr(parse, (OpExpr *)node, false);
+            if (canBeOptimized) {
+                free_quals(parse);
+            }
+            break;
+        }
+        case T_BoolExpr: {
+            parse->jointree->quals = process_rownum_boolexpr(parse, (BoolExpr *)node, ((BoolExpr *)node)->boolop);
+            break;
+        }
+        default: {
+            break;
+        }
+    }
+}
+
+Node *process_rownum_boolexpr(Query *parse, BoolExpr *quals, BoolExprType type)
+{
+    ListCell *qualCell = list_head(quals->args);
+    ListCell *next = NULL;
+    ListCell *prev = NULL;
+
+    while (qualCell != NULL) {
+        Node *clause = (Node *)lfirst(qualCell);
+        next = lnext(qualCell);
+
+        if (!IsA(clause, OpExpr)) {
+            prev = qualCell;
+            qualCell = next;
+            continue;
+        }
+
+        OpExpr *expr = (OpExpr *)clause;
+        bool canBeOptimized = false;
+        if (type == AND_EXPR) {
+            canBeOptimized = process_rownum_opexpr(parse, expr, false);
+        } else {
+            canBeOptimized = process_rownum_opexpr(parse, expr, true);
+        }
+
+        if (parse->jointree->quals == NULL) {
+            return NULL;
+        }
+        if (canBeOptimized) {
+            quals->args = list_delete_cell(quals->args, qualCell, prev);
+            qualCell = next;
+            continue;
+        }
+        prev = qualCell;
+        qualCell = next;
+    }
+    return (Node *)quals;
+}
+
+static bool process_rownum_opexpr(Query *parse, OpExpr *expr, bool isOrExpr)
+{
+    if (!contain_optimizable_rownum_opexpr(expr)) {
+        return false;
+    }
+    int64 var = get_constvalue_from_opexpr(expr);
+    Node *valueNode = (Node *)llast(expr->args);
+    if (expr->opno == INT84LTOID) {
+        /* operator '<' */
+        return process_rownum_opexpr_lessthan(parse, valueNode, var, isOrExpr);
+    } else if (expr->opno == INT84LEOID) {
+        /* operator '<=' */
+        return process_rownum_opexpr_lessthanEqual(parse, valueNode, var, isOrExpr);
+    } else if (expr->opno == INT84EQOID) {
+        /* operator '=' */
+        return process_rownum_opexpr_Equal(parse, valueNode, var, isOrExpr);
+    } else if (expr->opno == INT84GTOID) {
+        /* operator '>' */
+        return process_rownum_opexpr_greaterthan(parse, valueNode, var, isOrExpr);
+    } else if (expr->opno == INT84GEOID) {
+        /* operator '>=' */
+        return process_rownum_opexpr_greaterEqualthan(parse, valueNode, var, isOrExpr);
+    } else if (expr->opno == INT84NEOID) {
+        /* operator '!=' */
+        return process_rownum_opexpr_notEqual(parse, valueNode, var, isOrExpr);
+    } else {
+        return false;
+    }
+}
+
+/* process operator '<' in rownum expr like {rownum < 5}
+ * if it can be rewrited to LIMIT, return TRUE
+ */
+static bool process_rownum_opexpr_lessthan(Query *parse, Node *valueNode, int64 var, bool isOrExpr)
+{
+    if (isOrExpr == false) {
+        if (var > 1) {
+            rewrite_rownum_to_limit(parse, valueNode, var - 1);
+        } else {
+            rewrite_rownum_to_limit(parse, valueNode, 0);
+            free_quals(parse);
+            return false;
+        }
+    } else {
+        if (var > 1) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* process operator '<=' in rownum expr like {rownum <= 5}
+ * if it can be rewrited to LIMIT, return TRUE
+ */
+static bool process_rownum_opexpr_lessthanEqual(Query *parse, Node *valueNode, int64 var, bool isOrExpr)
+{
+    if (isOrExpr == false) {
+        if (var >= 1) {
+            rewrite_rownum_to_limit(parse, valueNode, var);
+        } else {
+            rewrite_rownum_to_limit(parse, valueNode, 0);
+            free_quals(parse);
+            return false;
+        }
+    } else {
+        if (var >= 1) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* process operator '=' in rownum expr like {rownum = 5}
+ * if it can be rewrited to LIMIT, return TRUE
+ */
+static bool process_rownum_opexpr_Equal(Query *parse, Node *valueNode, int64 var, bool isOrExpr)
+{
+    if (isOrExpr == false) {
+        if (var == 1) {
+            rewrite_rownum_to_limit(parse, valueNode, 1);
+        } else {
+            rewrite_rownum_to_limit(parse, valueNode, 0);
+            free_quals(parse);
+            return false;
+        }
+    } else {
+        if (var > 0) {
+            return false;
+            ;
+        }
+    }
+
+    return true;
+}
+
+/* process operator '>' in rownum expr like {rownum > 5}
+ * if it can be rewrited to LIMIT, return TRUE
+ */
+static bool process_rownum_opexpr_greaterthan(Query *parse, Node *valueNode, int64 var, bool isOrExpr)
+{
+    if (isOrExpr == false) {
+        if (var >= 1) {
+            rewrite_rownum_to_limit(parse, valueNode, 0);
+            free_quals(parse);
+            return false;
+        }
+    } else {
+        if (var < 1) {
+            free_quals(parse);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+/* process operator '>=' in rownum expr like {rownum >= 5}
+ * if it can be rewrited to LIMIT, return TRUE
+ */
+static bool process_rownum_opexpr_greaterEqualthan(Query *parse, Node *valueNode, int64 var, bool isOrExpr)
+{
+    if (isOrExpr == false) {
+        if (var > 1) {
+            rewrite_rownum_to_limit(parse, valueNode, 0);
+            free_quals(parse);
+            return false;
+        }
+    } else {
+        if (var <= 1) {
+            free_quals(parse);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+/* process operator '!=' in rownum expr like {rownum != 5}
+ * if it can be rewrited to LIMIT, return TRUE
+ */
+static bool process_rownum_opexpr_notEqual(Query *parse, Node *valueNode, int64 var, bool isOrExpr)
+{
+    if (isOrExpr == false) {
+        if (var == 1) {
+            rewrite_rownum_to_limit(parse, valueNode, 0);
+            free_quals(parse);
+            return false;
+        } else if (var > 1) {
+            rewrite_rownum_to_limit(parse, valueNode, var - 1);
+        } else {
+            /* nothing to do here */
+        }
+    } else {
+        if (var < 1) {
+            free_quals(parse);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+/* extract const value from OpExpr like {rownum < Const} */
+static int64 get_constvalue_from_opexpr(OpExpr *expr)
+{
+    Node *valueNode = (Node *)llast(expr->args);
+    Oid type = ((Const *)valueNode)->consttype;
+    Datum value = ((Const *)valueNode)->constvalue;
+    int64 result;
+    if (type == INT8OID) {
+        result = DatumGetInt64(value);
+    } else {
+        result = (int64)DatumGetInt32(value);
+        ((Const *)valueNode)->consttype = INT8OID;
+        ((Const *)valueNode)->constlen = sizeof(int64);
+        ((Const *)valueNode)->constbyval = FLOAT8PASSBYVAL;
+    }
+
+    return result;
 }

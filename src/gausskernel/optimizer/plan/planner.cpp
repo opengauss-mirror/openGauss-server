@@ -108,7 +108,6 @@ extern RangeTblEntry* make_dummy_remote_rte(char* relname, Alias* alias);
 extern List* reassign_nodelist(RangeTblEntry* rte, List* ori_node_list);
 extern Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind);
 
-void preprocess_qual_conditions(PlannerInfo* root, Node* jtnode);
 static Plan* inheritance_planner(PlannerInfo* root);
 static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 static void preprocess_rowmarks(PlannerInfo* root);
@@ -1203,7 +1202,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     if (parse->commandType == CMD_SELECT && checkSelectStmtForPlanTable(parse->rtable)) {
         OnlySelectFromPlanTable = true;
     }
-
+    
+    /* Change ROWNUM to LIMIT if possible */
+    preprocess_rownum(root, parse);
+    DEBUG_QRW("After preprocess rownum");
     /*
      * Check to see if any subqueries in the jointree can be merged into this
      * query.
@@ -1364,7 +1366,9 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     }
 
     parse->limitOffset = preprocess_expression(root, parse->limitOffset, EXPRKIND_LIMIT);
-    parse->limitCount = preprocess_expression(root, parse->limitCount, EXPRKIND_LIMIT);
+    if (parse->limitCount != NULL && !IsA(parse->limitCount, Const)) {
+        parse->limitCount = preprocess_expression(root, parse->limitCount, EXPRKIND_LIMIT);
+    }
 
     foreach (l, parse->mergeActionList) {
         MergeAction* action = (MergeAction*)lfirst(l);
