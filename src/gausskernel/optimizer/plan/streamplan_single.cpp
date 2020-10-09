@@ -83,6 +83,7 @@ static bool is_execute_on_multinodes(Plan* plan);
 static List* get_max_nodeList(List** nodeList, Plan* lefttree);
 static void set_bucketmap_index(Plan* plan, NodeGroupInfoContext* node_group_info_context);
 static void set_bucketmap_index(ExecNodes* exec_node, NodeGroupInfoContext* node_group_info_context);
+static Oid get_hash_type(Oid type_in);
 
 static bool remove_local_plan(Plan* stream_plan, Plan* parent, ListCell* lc, bool is_left)
 {
@@ -1233,8 +1234,74 @@ bool check_stream_support()
 
 bool is_compatible_type(Oid type1, Oid type2)
 {
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return false;
+    if (type1 == type2) {
+        return true;
+    }
+
+    Oid hash_type1, hash_type2;
+    hash_type1 = get_hash_type(type1);
+    hash_type2 = get_hash_type(type2);
+
+    /*
+     * If hash types are the same, we regard types are compatible
+     * BUT, in TIMEOID case, time zone may be added during data type cast,
+     *     so, we regard TIMEOID types are incompatible
+     */
+    if (hash_type1 == hash_type2 && TIMEOID != hash_type1 && TIMEOID != hash_type2)
+        return true;
+    else
+        return false;
+}
+
+static Oid get_hash_type(Oid type_in)
+{
+    switch (type_in) {
+        /* Int8 hash arithmetic is compatible in int4, so we return same type.*/
+        case INT8OID:
+        case CASHOID:
+        case INT1OID:
+        case INT2OID:
+        case OIDOID:
+        case INT4OID:
+        case BOOLOID:
+        case CHAROID:
+        case ABSTIMEOID:
+        case RELTIMEOID:
+        case DATEOID:
+            return INT4OID;
+        case INT2VECTOROID:
+        case OIDVECTOROID:
+            return OIDVECTOROID;
+        case NVARCHAR2OID:
+        case VARCHAROID:
+        case TEXTOID:
+            return TEXTOID;
+        case RAWOID:
+        case BYTEAOID:
+            return RAWOID;
+        case TIMEOID:
+        case TIMESTAMPOID:
+        case TIMESTAMPTZOID:
+        case SMALLDATETIMEOID:
+            return TIMEOID;
+        case FLOAT4OID:
+        case FLOAT8OID:
+            return FLOAT4OID;
+        case NAMEOID:
+        case INTERVALOID:
+        case TIMETZOID:
+        case NUMERICOID:
+            return type_in;
+        case BPCHAROID:
+#ifdef PGXC
+            if (g_instance.attr.attr_sql.string_hash_compatible)
+                return TEXTOID;
+            else
+#endif
+                return type_in;
+        default:
+            return type_in;
+    }
 }
 
 bool is_args_type_compatible(OpExpr* op_expr)

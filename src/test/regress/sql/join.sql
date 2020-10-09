@@ -1208,3 +1208,18 @@ select * from hash_right_anti_y where not exists (select hash_right_anti_x.y fro
 
 drop table hash_right_anti_x;
 drop table hash_right_anti_y;
+
+-- test datatype varchar in left join
+create table testa (id varchar);
+create table testb (id varchar);
+
+insert into testa values('1');
+insert into testa values('2');
+
+insert into testb values('1');
+insert into testb values('2');
+
+select a.id from testa as a left join (select distinct id from testb) as b on a.id = b.id;
+
+drop table testa;
+drop table testb;
