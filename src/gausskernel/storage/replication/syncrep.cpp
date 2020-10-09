@@ -1104,8 +1104,9 @@ static List* SyncRepGetSyncStandbysQuorum(bool* am_sync, List** catchup_standbys
 
         /* Must be streaming */
         if (walsnd->state != WALSNDSTATE_STREAMING) {
-            *catchup_standbys = 
-                walsnd->state == WALSNDSTATE_CATCHUP ? lappend_int(*catchup_standbys, i) : *catchup_standbys;
+            if (catchup_standbys != NULL && walsnd->state == WALSNDSTATE_CATCHUP) {
+                *catchup_standbys = lappend_int(*catchup_standbys, i);
+            }
             continue;
         }
 
@@ -1174,8 +1175,9 @@ static List* SyncRepGetSyncStandbysPriority(bool* am_sync, List** catchup_standb
 
         /* Must be streaming */
         if (walsnd->state != WALSNDSTATE_STREAMING) {
-            *catchup_standbys = 
-                walsnd->state == WALSNDSTATE_CATCHUP ? lappend_int(*catchup_standbys, i) : *catchup_standbys;
+            if (catchup_standbys != NULL && walsnd->state == WALSNDSTATE_CATCHUP) {
+                *catchup_standbys = lappend_int(*catchup_standbys, i);
+            }
             continue;
         }
 
