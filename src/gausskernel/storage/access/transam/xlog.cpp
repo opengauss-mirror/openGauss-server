@@ -12402,6 +12402,7 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
             }
             pfree(labelfbuf.data);
 
+#ifdef ENABLE_MULTIPLE_NODES
             /* Write backup tablespace_map file. */
             if (tblspc_mapfbuf.len > 0) {
                 if (stat(TABLESPACE_MAP, &stat_buf) != 0) {
@@ -12425,6 +12426,7 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
                     ereport(
                         ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %m", TABLESPACE_MAP)));
             }
+#endif
             pfree(tblspc_mapfbuf.data);
         } else {
             *labelfile = labelfbuf.data;
