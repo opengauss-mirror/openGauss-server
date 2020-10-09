@@ -1103,41 +1103,38 @@ static void gsTrcFormatOneTraceRecord(
     }
 }
 
-static int readAndCheckTrcMeta(int fdInput, trace_config* trc_cfg, trace_infra* trc_infra)
+static trace_msg_code readAndCheckTrcMeta(int fdInput, trace_config* trc_cfg, trace_infra* trc_infra)
 {
     size_t bytesRead;
 
     bytesRead = read(fdInput, (void*)trc_cfg, sizeof(trace_config));
     if (bytesRead != sizeof(trace_config)) {
-        perror("Failed to read trace config.");
-        return TRACE_COMMON_ERROR;
+        perror("read err.");
+        return TRACE_READ_CFG_FROM_FILE_ERR;
     }
 
     if ((trc_cfg->size & (trc_cfg->size - 1)) != 0) {
-        perror("invalid buffer size in trace file.");
-        return TRACE_COMMON_ERROR;
+        return TRACE_BUFFER_SIZE_FROM_FILE_ERR;
     }
 
     if (trc_cfg->trc_cfg_magic_no != GS_TRC_CFG_MAGIC_N) {
-        perror("invalid magic number in trace file.");
-        return TRACE_COMMON_ERROR;
+        return TRACE_MAGIC_FROM_FILE_ERR;
     }
 
     bytesRead = read(fdInput, (void*)trc_infra, sizeof(trace_infra));
     if (bytesRead != sizeof(trace_infra)) {
-        perror("Failed to read trace infra.");
-        return TRACE_COMMON_ERROR;
+        perror("read err.");
+        return TRACE_READ_INFRA_FROM_FILE_ERR;
     }
 
     if (trc_infra->g_Counter == 0) {
-        perror("No trace records were captured");
-        return TRACE_COMMON_ERROR;
+        return TRACE_NO_RECORDS_ERR;
     }
 
     return TRACE_OK;
 }
 
-static int readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t counter)
+static trace_msg_code readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t counter)
 {
     uint64_t totalNumRecs = 0;
     char rec_tmp_buf[MAX_TRC_RC_SZ] = {'\0'};
@@ -1147,20 +1144,18 @@ static int readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t counter)
         // Read the contents of a the header slot
         size_t bytesRead = read(fdInput, (void*)&rec_tmp_buf, SLOT_SIZE);
         if (bytesRead != SLOT_SIZE) {
-            perror("Invalid trace file - faild to read trace slot header");
-            return TRACE_COMMON_ERROR;
+            perror("Invalid trace file");
+            return TRACE_READ_SLOT_HEADER_ERR;
         }
         trace_slot_head* pHdr = (trace_slot_head*)rec_tmp_buf;
 
         // since slots for one record is contiguous, we can do following check.
         if (pHdr->num_slots_in_area == 0 || pHdr->num_slots_in_area > MAX_TRC_SLOTS) {
-            perror("Invalid trace file - num slot in header is zero.");
-            return TRACE_COMMON_ERROR;
+            return TRACE_NUM_SLOT_ERR;
         }
 
         if (pHdr->hdr_magic_number != SLOT_AREAD_HEADER_MAGIC_NO) {
-            perror("Invalid trace file - num slot in header is zero.");
-            return TRACE_COMMON_ERROR;
+            return TRACE_SLOT_MAGIC_ERR;
         }
 
         if (pHdr->num_slots_in_area > 1 && pHdr->num_slots_in_area <= MAX_TRC_SLOTS) {
@@ -1169,8 +1164,8 @@ static int readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t counter)
 
             bytesRead = read(fdInput, (void*)&rec_tmp_buf[SLOT_SIZE], size_to_read);
             if (bytesRead != size_to_read) {
-                perror("Invalid trace file - faild to read trace slot data.");
-                return TRACE_COMMON_ERROR;
+                perror("Invalid trace file.");
+                return TRACE_READ_SLOT_DATA_ERR;
             }
         }
 
@@ -1190,8 +1185,8 @@ static int readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t counter)
             // now write the buffer to the file
             size_t bytesWritten = write(fdOutput, rec_out_buf, strlen(rec_out_buf));
             if (bytesWritten != strlen(rec_out_buf)) {
-                perror("Error while writing formatted trace record");
-                return TRACE_COMMON_ERROR;
+                perror("write error");
+                return TRACE_WRITE_FORMATTED_RECORD_ERR;
             }
             totalNumRecs++;
         }
@@ -1209,9 +1204,9 @@ static int readAndFormatTrcRec(int fdInput, int fdOutput, uint64_t counter)
 // the formatted file will be the same name
 // as the binary file with the extension .fmt
 // -------------------------------------------
-static int formatTrcDumpFile(const char* inputPath, const char* outputPath)
+static trace_msg_code formatTrcDumpFile(const char* inputPath, const char* outputPath)
 {
-    int ret;
+    trace_msg_code ret;
     trace_infra trc_infra;
     trace_config trc_cfg;
 
@@ -1219,7 +1214,7 @@ static int formatTrcDumpFile(const char* inputPath, const char* outputPath)
     int fdInput = trace_open_filedesc(inputPath, O_RDONLY, 0);
     if (fdInput == -1) {
         perror("Failed to open input file");
-        return TRACE_COMMON_ERROR;
+        return TRACE_OPEN_INPUT_FILE_ERR;
     }
 
     /* Read config header to validate the file and buffer size */
@@ -1230,7 +1225,7 @@ static int formatTrcDumpFile(const char* inputPath, const char* outputPath)
         if (fdOutput == -1) {
             close(fdInput);
             perror("Failed to open output file");
-            return TRACE_COMMON_ERROR;
+            return TRACE_OPEN_OUTPUT_FILE_ERR;
         }
 
         uint64_t maxSlots = trc_cfg.size / SLOT_SIZE;
@@ -1402,9 +1397,61 @@ static void printUsage(int argc, char** argv)
     printf("\t-t  get statistics for every n seconds, file name will be {global file name}.step\n");
 }
 
+trace_msg_t trace_message[] = {
+    {TRACE_OK, "Success!\n"},
+    {TRACE_ALREADY_START, "Trace has already been activated.\n"},
+    {TRACE_ALREADY_STOP, "Trace has already been deactived.\n"},
+    {TRACE_PARAMETER_ERR, "Parameter not correct.\n"},
+    {TRACE_BUFFER_SIZE_ERR, "Invalid share memory buffer size.\n"},
+    {TRACE_ATTACH_CFG_SHARE_MEMORY_ERR, "Attached to trace config failed.\n"},
+    {TRACE_ATTACH_BUFFER_SHARE_MEMORY_ERR, "Attached to trace buffer failed.\n"},
+    {TRACE_OPEN_SHARE_MEMORY_ERR, "Failed to initialize trace buffer.\n"},
+    {TRACE_TRUNCATE_ERR, "Failed to set size of trace buffer.\n"},
+    {TRACE_MMAP_ERR, "Failed to map memory for trace buffer.\n"},
+    {TRACE_UNLINK_SHARE_MEMORY_ERR, "Failed to delete trace buffer.\n"},
+    {TRACE_DISABLE_ERR, "Trace is disable.\n"},
+    {TRACE_OPEN_OUTPUT_FILE_ERR, "Failed to open trace output file.\n"},
+    {TRACE_OPEN_INPUT_FILE_ERR, "Failed to open trace input file.\n"},
+    {TRACE_WRITE_BUFFER_HEADER_ERR, "Failed to write trace buffer header.\n"},
+    {TRACE_WRITE_CFG_HEADER_ERR, "Failed to write trace config header.\n"},
+    {TRACE_WRITE_BUFFER_ERR, "Failed to write trace buffer.\n"},
+    {TRACE_READ_CFG_FROM_FILE_ERR, "Failed to read trace config.\n"},
+    {TRACE_BUFFER_SIZE_FROM_FILE_ERR, "Invalid buffer size in trace file.\n"},
+    {TRACE_MAGIC_FROM_FILE_ERR, "Invalid magic number in trace file.\n"},
+    {TRACE_READ_INFRA_FROM_FILE_ERR, "Failed to read trace infra.\n"},
+    {TRACE_NO_RECORDS_ERR, "No trace records were captured.\n"},
+    {TRACE_READ_SLOT_HEADER_ERR, "Faild to read trace slot header.\n"},
+    {TRACE_NUM_SLOT_ERR, "Invalid trace file, num slot in header is zero.\n"},
+    {TRACE_SLOT_MAGIC_ERR, "Invalid trace file, magic number is not correct.\n"},
+    {TRACE_READ_SLOT_DATA_ERR, "Faild to read trace slot data.\n"},
+    {TRACE_WRITE_FORMATTED_RECORD_ERR, "Failed to write formatted trace record.\n"},
+    {TRACE_MSG_MAX, "Failed!\n"},
+};
+
+static void print_result_message(trace_msg_code rc, int argc, char** argv)
+{
+    if (rc == TRACE_OK) {
+        (void)printf("[GAUSS-TRACE] %s %s", argv[1], trace_message[rc].msg_string);
+    } else if ((rc > TRACE_OK) && (rc < TRACE_MSG_MAX)) {
+        if (rc == trace_message[rc].msg_code) {
+            (void)printf("[GAUSS-TRACE] %s", trace_message[rc].msg_string);
+        } else {
+            (void)printf("[GAUSS-TRACE] Trace failed for error %05d.\n", rc);
+        }
+    } else {
+        (void)printf("[GAUSS-TRACE] %s %s\n", argv[1], trace_message[TRACE_MSG_MAX].msg_string);
+    }
+
+    if (rc == TRACE_PARAMETER_ERR) {
+        printUsage(argc, argv);
+    }
+
+    return;
+}
+
 int main(int argc, char** argv)
 {
-    int rc = TRACE_OK;
+    trace_msg_code rc = TRACE_OK;
     int pid;
     char* trcFile = NULL;
     char* outputFile = NULL;
@@ -1414,8 +1461,7 @@ int main(int argc, char** argv)
     char* mask = NULL;
 
     if (argc < 2) {
-        printUsage(argc, argv);
-        rc = TRACE_COMMON_ERROR;
+        rc = TRACE_PARAMETER_ERR;
         goto exit;
     }
 
@@ -1433,7 +1479,7 @@ int main(int argc, char** argv)
         rc = gstrace_start(pid, mask, uBufferSize, trcFile);
     } else if (0 == strcmp(argv[1], "stop") && pid != -1) {
         // Stop will disable tracing and delete the shared memory buffer
-        gstrace_stop(pid);
+        rc = gstrace_stop(pid);
     } else if (0 == strcmp(argv[1], "config") && pid != -1) {
         rc = gstrace_config(pid);
     } else if (0 == strcmp(argv[1], "dump") && pid != -1 && outputFile != NULL) {
@@ -1451,10 +1497,10 @@ int main(int argc, char** argv)
         /* step stats file will be {outputFile}.step */
         anlyzeDumpFile(trcFile, strlen(trcFile), outputFile, strlen(outputFile), stepSize);
     } else {
-        printUsage(argc, argv);
-        rc = TRACE_COMMON_ERROR;
+        rc = TRACE_PARAMETER_ERR;
     }
 
 exit:
-    return rc;
+    print_result_message(rc, argc, argv);
+    return (int)rc;
 }

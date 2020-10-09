@@ -59,7 +59,43 @@
 #define GS_TRC_FUNC_MASK_SZ (GS_TRC_FUNC_MAX / GS_TRC_NUM_BITS)  // 8192
 
 #define TRACE_COMMON_ERROR (-1)
-#define TRACE_OK (0)
+
+typedef enum trace_msg_code {
+    TRACE_OK,
+    TRACE_ALREADY_START,
+    TRACE_ALREADY_STOP,
+    TRACE_PARAMETER_ERR,
+    TRACE_BUFFER_SIZE_ERR,
+    TRACE_ATTACH_CFG_SHARE_MEMORY_ERR,
+    TRACE_ATTACH_BUFFER_SHARE_MEMORY_ERR,
+    TRACE_OPEN_SHARE_MEMORY_ERR,
+    TRACE_TRUNCATE_ERR,
+    TRACE_MMAP_ERR,
+    TRACE_UNLINK_SHARE_MEMORY_ERR,
+    TRACE_DISABLE_ERR,
+    TRACE_OPEN_OUTPUT_FILE_ERR,
+    TRACE_OPEN_INPUT_FILE_ERR,
+    TRACE_WRITE_BUFFER_HEADER_ERR,
+    TRACE_WRITE_CFG_HEADER_ERR,
+    TRACE_WRITE_BUFFER_ERR,
+    TRACE_READ_CFG_FROM_FILE_ERR,
+    TRACE_BUFFER_SIZE_FROM_FILE_ERR,
+    TRACE_MAGIC_FROM_FILE_ERR,
+    TRACE_READ_INFRA_FROM_FILE_ERR,
+    TRACE_NO_RECORDS_ERR,
+    TRACE_READ_SLOT_HEADER_ERR,
+    TRACE_NUM_SLOT_ERR,
+    TRACE_SLOT_MAGIC_ERR,
+    TRACE_READ_SLOT_DATA_ERR,
+    TRACE_WRITE_FORMATTED_RECORD_ERR,
+    TRACE_MSG_MAX,
+} trace_msg_code;
+
+typedef struct trace_msg {
+    trace_msg_code msg_code;
+    const char* msg_string;
+} trace_msg_t;
+
 
 #define securec_check(errno, charList, ...)                                         \
     do {                                                                            \
@@ -190,10 +226,10 @@ typedef struct trace_record {
     uint32_t user_data_len;
 } trace_record;
 
-extern int gstrace_start(int pid, const char* mask, uint64_t bufferSize, const char* trcFile);
-extern int gstrace_stop(int pid);
-extern int gstrace_dump(int pid, const char* outPath);
-extern int gstrace_config(int pid);
+extern trace_msg_code gstrace_start(int pid, const char* mask, uint64_t bufferSize, const char* trcFile);
+extern trace_msg_code gstrace_stop(int pid);
+extern trace_msg_code gstrace_dump(int pid, const char* outPath);
+extern trace_msg_code gstrace_config(int pid);
 extern bool isNumeric(const char* str);
 
 extern uint32_t getFunctionIdxByName(const char* funcName, uint32_t* comp);
