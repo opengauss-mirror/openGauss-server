@@ -896,15 +896,22 @@ static trace_msg_code dump_trace_context(int fd)
 static trace_msg_code dump_trace_buffer(int fd, const char* outPath)
 {
     trace_context* pTrcCxt = getTraceContext();
-    size_t bytesWritten, bytesToWrite;
+    size_t bytesToWrite;
 
     /* get the address of the beginning of trace data */
-    void* pBuf = (char*)pTrcCxt->pTrcInfra + sizeof(trace_infra);
-
+    char* pBuf = (char*)pTrcCxt->pTrcInfra + sizeof(trace_infra);
     /* Write the remainder of the buffer */
     bytesToWrite = pTrcCxt->pTrcInfra->total_size - sizeof(trace_infra);
-    bytesWritten = write(fd, pBuf, bytesToWrite);
-    if (bytesWritten != bytesToWrite) {
+    while (bytesToWrite > 0) {
+        int64_t nbyte = write(fd, (void*)pBuf, bytesToWrite); 
+        if (nbyte < 0) {
+            break;
+        }
+        pBuf += nbyte;
+        bytesToWrite -= nbyte; 
+    }
+
+    if (bytesToWrite != 0) {
         return TRACE_WRITE_BUFFER_ERR;
     } else {
         printf("Shared memory buffer has been dumped to file: %s.\n", outPath);
