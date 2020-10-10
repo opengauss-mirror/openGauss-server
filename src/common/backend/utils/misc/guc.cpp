@@ -142,6 +142,7 @@
 #include "utils/xml.h"
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
+#include "miscadmin.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -188,6 +189,7 @@
 #define MS_PER_D (1000 * 60 * 60 * 24)
 #define H_PER_D 24
 
+
 /* max reuse time interval and times */
 #define MAX_PASSWORD_REUSE_TIME 3650
 #define MAX_PASSWORD_REUSE_MAX 1000
@@ -197,8 +199,6 @@
 #define MAX_PASSWORD_NOTICE_TIME 999
 /* max num of assign character in password */
 #define MAX_PASSWORD_ASSIGNED_CHARACTER 999
-/* max length of password */
-#define MAX_PASSWORD_LENGTH 999
 /*
  * Precision with which REAL type guc values are to be printed for GUC
  * serialization.
@@ -7528,8 +7528,8 @@ static void init_configure_names_int()
                 GUC_SUPERUSER_ONLY
             },
             &u_sess->attr.attr_security.Password_min_length,
-            8,
-            6,
+            DEFAULT_PASSWORD_MIN_LENGTH,
+            MIN_PASSWORD_LENGTH,
             MAX_PASSWORD_LENGTH,
             check_int_parameter,
             NULL,
@@ -7545,8 +7545,8 @@ static void init_configure_names_int()
                 GUC_SUPERUSER_ONLY
             },
             &u_sess->attr.attr_security.Password_max_length,
-            32,
-            6,
+            DEFAULT_PASSWORD_MAX_LENGTH,
+            MIN_PASSWORD_LENGTH,
             MAX_PASSWORD_LENGTH,
             check_int_parameter,
             NULL,

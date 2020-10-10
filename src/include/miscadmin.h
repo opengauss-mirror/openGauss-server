@@ -53,6 +53,12 @@ extern const uint32 GRAND_VERSION_NUM;
 #define OPT_CONVERT_TO_NUMERIC 1024
 #define OPT_MAX 11
 
+/* length of password */
+#define MAX_PASSWORD_LENGTH 999
+#define MIN_PASSWORD_LENGTH 6
+#define DEFAULT_PASSWORD_MIN_LENGTH 8
+#define DEFAULT_PASSWORD_MAX_LENGTH 32
+
 #define DISPLAY_LEADING_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_DISPLAY_LEADING_ZERO)
 #define END_MONTH_CALCULATE (u_sess->utils_cxt.behavior_compat_flags & OPT_END_MONTH_CALCULATE)
 #define SUPPORT_PRETTY_ANALYZE (!(u_sess->utils_cxt.behavior_compat_flags & OPT_COMPAT_ANALYZE_SAMPLE))
