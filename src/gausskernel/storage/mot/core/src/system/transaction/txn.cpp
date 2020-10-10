@@ -1111,6 +1111,13 @@ RC TxnManager::TruncateTable(Table* table)
         }
     }
 
+    // clean all GC elements for the table, this call should actually release
+    // all elements into an appropriate object pool
+    for (uint16_t i = 0; i < table->GetNumIndexes(); i++) {
+        MOT::Index* index = table->GetIndex(i);
+        GcManager::ClearIndexElements(index->GetIndexId(), false);
+    }
+
     TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(table->GetTableExId());
     if (ddl_access == nullptr) {
         MOTIndexArr* indexesArr = nullptr;
