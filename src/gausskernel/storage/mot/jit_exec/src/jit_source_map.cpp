@@ -135,18 +135,22 @@ extern bool ContainsReadyCachedJitSource(const char* queryString)
     return result;
 }
 
-extern void PurgeJitSourceMap(uint64_t relationId)
+extern void PurgeJitSourceMap(uint64_t relationId, bool purgeOnly)
 {
     LockJitSourceMap();
     JitSourceMapType::iterator itr = g_jitSourceMap.m_sourceMap.begin();
     while (itr != g_jitSourceMap.m_sourceMap.end()) {
         JitSource* jitSource = itr->second;
-        if ((jitSource->_relation_id == relationId) || (jitSource->_inner_relation_id == relationId)) {
+        if (JitSourceRefersRelation(jitSource, relationId)) {
             MOT_LOG_TRACE("Purging cached jit-source %p by relation id %" PRIu64 " with query: %s",
                 jitSource,
                 relationId,
                 jitSource->_query_string);
-            SetJitSourceExpired(jitSource, relationId);  // (containing jit-source deleted during db shutdown)
+            if (purgeOnly) {
+                PurgeJitSource(jitSource, relationId);
+            } else {
+                SetJitSourceExpired(jitSource, relationId);  // (containing jit-source deleted during db shutdown)
+            }
         }
         ++itr;
     }

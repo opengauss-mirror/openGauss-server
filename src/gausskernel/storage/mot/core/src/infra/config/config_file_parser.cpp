@@ -204,14 +204,17 @@ bool ConfigFileParser::Split(const char* str, char sep, mot_string_list& tokens)
             str++;
         }
 
-        mot_string token;
-        if (!token.assign(begin, str - begin)) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to push a token");
-            return false;
-        } else {
-            if (!tokens.push_back(token)) {
+        // skip empty items
+        if (str != begin) {
+            mot_string token;
+            if (!token.assign(begin, str - begin)) {
                 MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to push a token");
                 return false;
+            } else {
+                if (!tokens.push_back(token)) {
+                    MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to push a token");
+                    return false;
+                }
             }
         }
     } while (*str++ != 0);

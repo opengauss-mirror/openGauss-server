@@ -78,8 +78,10 @@ extern bool ContainsReadyCachedJitSource(const char* queryString);
 /**
  * @brief Marks all entries associated with a relation identifier as expired.
  * @param relationId The envelope identifier of modified relation.
+ * @param purgeOnly Specifies whether to just purge all keys/indexes referring to the given relation, or should the JIT
+ * context also be set as expired (which triggers re-compilation of the JIT function).
  */
-extern void PurgeJitSourceMap(uint64_t relationId);
+extern void PurgeJitSourceMap(uint64_t relationId, bool purgeOnly);
 }  // namespace JitExec
 
 #endif

@@ -103,9 +103,14 @@ extern void MemSessionAllocatorDestroy(MemSessionAllocator* sessionAllocator)
     while (sessionAllocator->m_chunkList != NULL) {
         MemSessionChunkHeader* chunk = sessionAllocator->m_chunkList;
         sessionAllocator->m_chunkList = chunk->m_next;
-        MemRawChunkStoreFreeLocal((void*)chunk, sessionAllocator->m_nodeId);
+        // chunk can come from a node different than the node of the session allocator, both in local and global
+        // allocations, so we use the node specified in the chunk, and not the node specified in the allocator
+        if (sessionAllocator->m_allocType == MEM_ALLOC_LOCAL) {
+            MemRawChunkStoreFreeLocal((void*)chunk, chunk->m_node);
+        } else {
+            MemRawChunkStoreFreeGlobal((void*)chunk, chunk->m_node);
+        }
     }
-
     sessionAllocator->m_chunkList = NULL;
 
     // 2. Return all large buffers into the reserved large buffer pool of the local numa node.
@@ -125,7 +130,7 @@ extern void MemSessionAllocatorDestroy(MemSessionAllocator* sessionAllocator)
         sessionAllocator->m_largeBufferList = NULL;
     }
 
-    // 3. Return all huge chunks to local numa node.
+    // 3. Deallocate all huge chunks
     if (sessionAllocator->m_hugeChunkList != NULL) {
         MOT_LOG_WARN(
             "Session %u: There are still some huge chunks need to be released.", sessionAllocator->m_sessionId);
@@ -143,7 +148,7 @@ extern void MemSessionAllocatorDestroy(MemSessionAllocator* sessionAllocator)
         sessionAllocator->m_hugeChunkList = NULL;
     }
 
-    // 4. Nullify the session allocator and make _session_allocators[thread_id] to be NULL.
+    // 4. Reset the session allocator members
     errno_t erc =
         memset_s(sessionAllocator, L1_ALIGNED_SIZEOF(MemSessionAllocator), 0, L1_ALIGNED_SIZEOF(MemSessionAllocator));
     securec_check(erc, "\0", "\0");

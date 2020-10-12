@@ -54,7 +54,6 @@ static void VerifyJitSourceStateTrans(JitSource* jitSource, JitContext* readySou
 extern bool InitJitSource(JitSource* jitSource, const char* queryString)
 {
     jitSource->_query_string = NULL;
-    jitSource->_hash_value = ComputeJitQueryHash(queryString);
     jitSource->_source_jit_context = NULL;
     jitSource->_initialized = 0;
 
@@ -91,6 +90,7 @@ extern void DestroyJitSource(JitSource* jitSource)
             jitContext->m_jitSource = nullptr;  // prevent crash during DestroyJitContext()
             jitContext = jitContext->m_nextInSource;
         }
+        jitSource->m_contextList = nullptr;
     }
 
     if (jitSource->_source_jit_context != nullptr) {
@@ -113,7 +113,6 @@ extern void DestroyJitSource(JitSource* jitSource)
 extern void ReInitJitSource(JitSource* jitSource, const char* queryString)
 {
     jitSource->_query_string = ReallocQueryString(jitSource->_query_string, queryString);
-    jitSource->_hash_value = ComputeJitQueryHash(queryString);
     jitSource->_source_jit_context = NULL;
     jitSource->_status = JIT_CONTEXT_UNAVAILABLE;
     jitSource->_next = NULL;
@@ -136,17 +135,30 @@ extern JitContextStatus WaitJitContextReady(JitSource* jitSource, JitContext** r
         // special case: we return to caller status-expired and change internal status to unavailable
         jitSource->_status = JIT_CONTEXT_UNAVAILABLE;
     } else if (jitSource->_status == JIT_CONTEXT_READY) {
-        *readySourceJitContext = CloneJitContext(jitSource->_source_jit_context);
-        if (*readySourceJitContext != nullptr) {
-            ++u_sess->mot_cxt.jit_context_count;
-            (*readySourceJitContext)->m_nextInSource = jitSource->m_contextList;
-            jitSource->m_contextList = *readySourceJitContext;
-            (*readySourceJitContext)->m_jitSource = jitSource;
-            MOT_LOG_TRACE("Registered JIT context %p in JIT source %p for cleanup", *readySourceJitContext, jitSource);
-            JitStatisticsProvider::GetInstance().AddCodeCloneQuery();
-        } else {
-            MOT_LOG_TRACE("Failed to clone ready source context %p", jitSource->_source_jit_context);
-            JitStatisticsProvider::GetInstance().AddCodeCloneErrorQuery();
+        // we need to re-fetch index objects in case TRUNCATE TABLE was issued
+        if ((jitSource->_source_jit_context->m_index == nullptr) &&
+            (jitSource->_source_jit_context->m_commandType != JIT_COMMAND_INSERT)) {
+            if (!ReFetchIndices(jitSource->_source_jit_context)) {
+                MOT_LOG_TRACE("Failed to re-fetch index objects for source %p with query: %s",
+                    jitSource,
+                    jitSource->_query_string);
+                result = JIT_CONTEXT_ERROR;
+            }
+        }
+        if (result != JIT_CONTEXT_ERROR) {
+            *readySourceJitContext = CloneJitContext(jitSource->_source_jit_context);
+            if (*readySourceJitContext != nullptr) {
+                ++u_sess->mot_cxt.jit_context_count;
+                (*readySourceJitContext)->m_nextInSource = jitSource->m_contextList;
+                jitSource->m_contextList = *readySourceJitContext;
+                (*readySourceJitContext)->m_jitSource = jitSource;
+                MOT_LOG_TRACE(
+                    "Registered JIT context %p in JIT source %p for cleanup", *readySourceJitContext, jitSource);
+                JitStatisticsProvider::GetInstance().AddCodeCloneQuery();
+            } else {
+                MOT_LOG_TRACE("Failed to clone ready source context %p", jitSource->_source_jit_context);
+                JitStatisticsProvider::GetInstance().AddCodeCloneErrorQuery();
+            }
         }
     }
     pthread_mutex_unlock(&jitSource->_lock);
@@ -159,20 +171,6 @@ extern JitContextStatus WaitJitContextReady(JitSource* jitSource, JitContext** r
         JitContextStatusToString(jitSource->_status),
         jitSource->_source_jit_context);
     return result;
-}
-
-extern uint64_t ComputeJitQueryHash(const char* str)
-{
-    uint64_t hash = 5381; /* 5381 is the seed. */
-    unsigned char c = (unsigned char)*str;
-
-    while (c != 0) {
-        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-        ++str;
-        c = (unsigned char)*str;
-    }
-
-    return hash;
 }
 
 extern void SetJitSourceError(JitSource* jitSource, int errorCode)
@@ -290,14 +288,8 @@ static void SetJitSourceStatus(JitSource* jitSource, JitContext* readySourceJitC
         if (jitSource->_source_jit_context != nullptr) {
             // copy query string from source to context
             jitSource->_source_jit_context->m_queryString = jitSource->_query_string;
-            // get relation id from context
-            jitSource->_relation_id = readySourceJitContext->m_table->GetTableExId();
-            if (readySourceJitContext->m_innerTable != nullptr) {
-                jitSource->_inner_relation_id = readySourceJitContext->m_innerTable->GetTableExId();
-            }
             jitSource->m_contextList = nullptr;
         } else {  // expired context: cleanup all related JIT context objects
-            MOT_LOG_TRACE("Purging all JIT context objects by relation id %" PRIu64, relationId);
             JitSourcePurgeContextList(jitSource, relationId);
         }
     }
@@ -347,8 +339,40 @@ extern void RemoveJitSourceContext(JitSource* jitSource, JitContext* cleanupCont
     pthread_mutex_unlock(&jitSource->_lock);
 }
 
+extern bool JitSourceRefersRelation(JitSource* jitSource, uint64_t relationId)
+{
+    bool result = false;
+    JitContext* srcContext = jitSource->_source_jit_context;
+    if (srcContext != nullptr) {  // context not expired
+        if ((srcContext->m_table != nullptr) && (srcContext->m_table->GetTableExId() == relationId)) {
+            result = true;
+        } else if ((srcContext->m_innerTable != nullptr) && (srcContext->m_innerTable->GetTableExId() == relationId)) {
+            result = true;
+        } else if (srcContext->m_subQueryCount > 0) {
+            for (uint32_t i = 0; i < srcContext->m_subQueryCount; ++i) {
+                if ((srcContext->m_subQueryData[i].m_table != nullptr) &&
+                    (srcContext->m_subQueryData[i].m_table->GetTableExId() == relationId)) {
+                    result = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+extern void PurgeJitSource(JitSource* jitSource, uint64_t relationId)
+{
+    pthread_mutex_lock(&jitSource->_lock);
+    PurgeJitContext(jitSource->_source_jit_context, relationId);
+    JitSourcePurgeContextList(jitSource, relationId);
+    pthread_mutex_unlock(&jitSource->_lock);
+}
+
 static void JitSourcePurgeContextList(JitSource* jitSource, uint64_t relationId)
 {
+    MOT_LOG_TRACE("Purging all JIT context objects by relation id %" PRIu64, relationId);
     JitContext* itr = jitSource->m_contextList;
     while (itr != nullptr) {
         PurgeJitContext(itr, relationId);
@@ -399,13 +423,8 @@ static void VerifyJitSourceStateTrans(JitSource* jitSource, JitContext* readySou
     // now verify state transition
     if (jitSource->_status == JIT_CONTEXT_UNAVAILABLE) {
         MOT_ASSERT((status == JIT_CONTEXT_READY) || (status == JIT_CONTEXT_ERROR));
-    } else if (jitSource->_status == JIT_CONTEXT_READY) {
-        MOT_ASSERT(status == JIT_CONTEXT_EXPIRED);
-    } else if (jitSource->_status == JIT_CONTEXT_ERROR) {
-        MOT_ASSERT(status == JIT_CONTEXT_EXPIRED);
     } else {
-        // there is no other possible source state
-        MOT_ASSERT(false);
+        MOT_ASSERT(status == JIT_CONTEXT_EXPIRED);
     }
 }
 #endif

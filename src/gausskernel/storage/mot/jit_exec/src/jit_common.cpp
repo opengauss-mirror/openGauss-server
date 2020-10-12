@@ -530,6 +530,8 @@ extern bool PrepareSubQueryData(JitContext* jitContext, JitCompoundPlan* plan)
                         JitSelectPlan* selectPlan = (JitSelectPlan*)subPlan;
                         subQueryData->m_table = selectPlan->_query._table;
                         subQueryData->m_index = subQueryData->m_table->GetPrimaryIndex();
+                        subQueryData->m_indexId = subQueryData->m_index->GetExtId();
+                        MOT_LOG_TRACE("Installed sub-query %d index id: %" PRIu64, i, subQueryData->m_indexId);
                     } else {
                         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                             "Generate JIT code",

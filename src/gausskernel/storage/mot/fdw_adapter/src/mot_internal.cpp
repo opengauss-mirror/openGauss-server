@@ -70,8 +70,6 @@
 #include "mm_cfg.h"
 #include "jit_statistics.h"
 
-#define MOT_MIN_MEMORY_USAGE_MB 128
-
 #define IS_CHAR_TYPE(oid) (oid == VARCHAROID || oid == BPCHAROID || oid == TEXTOID || oid == CLOBOID || oid == BYTEAOID)
 #define IS_INT_TYPE(oid)                                                                                           \
     (oid == BOOLOID || oid == CHAROID || oid == INT8OID || oid == INT2OID || oid == INT4OID || oid == FLOAT4OID || \
@@ -334,10 +332,10 @@ private:
         uint64_t maxReserveMemoryMb = globalMemoryMb + localMemoryMb + sessionLargeStoreMb;
 
         // if the total memory is less than the required minimum, then issue a warning, fix it and return
-        if (maxReserveMemoryMb < MOT_MIN_MEMORY_USAGE_MB) {
+        if (maxReserveMemoryMb < motCfg.MOT_MIN_MEMORY_USAGE_MB) {
             MOT_LOG_WARN("MOT memory limits are too low, adjusting values");
             // we use current total as zero to force session large store zero value
-            result = ConfigureMemoryLimits(MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+            result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
             return result;
         }
 
@@ -393,14 +391,14 @@ private:
                 // this can happen only if system memory is less than 2GB, we still allow minor breach
                 MOT_LOG_WARN("Using minimal memory limits in MOT Engine due to system total memory restrictions");
                 // we use current total as zero to force session large store zero value
-                result = ConfigureMemoryLimits(MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+                result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
             } else {
                 newTotalMemoryMb = upperLimitMb - dynamicGapMb;
-                if (newTotalMemoryMb < MOT_MIN_MEMORY_USAGE_MB) {
+                if (newTotalMemoryMb < motCfg.MOT_MIN_MEMORY_USAGE_MB) {
                     // in extreme cases we allow a minor breach of the dynamic gap
                     MOT_LOG_TRACE("Using minimal memory limits in MOT Engine due to GaussDB memory usage restrictions");
                     // we use current total as zero to force session large store zero value
-                    result = ConfigureMemoryLimits(MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+                    result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
                 } else {
                     MOT_LOG_TRACE("Adjusting memory limits in MOT Engine due to GaussDB memory usage restrictions");
                     result = ConfigureMemoryLimits(newTotalMemoryMb, maxReserveMemoryMb, globalMemoryMb, localMemoryMb);
@@ -421,23 +419,37 @@ private:
         uint64_t newSessionLargeStoreMemoryMb = 0;
 
         // compute new configuration values
+        MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
         if (currentTotalMemoryMb > 0) {
             // we preserve the existing ratio between global and local memory, but reduce the total sum as required
             double ratio = ((double)newTotalMemoryMb) / ((double)currentTotalMemoryMb);
             newGlobalMemoryMb = (uint64_t)(currentGlobalMemoryMb * ratio);
-            if (MOT::GetGlobalConfiguration().m_sessionLargeBufferStoreSizeMB > 0) {
+            if (motCfg.m_sessionLargeBufferStoreSizeMB > 0) {
                 newLocalMemoryMb = (uint64_t)(currentLocalMemoryMb * ratio);
-                newSessionLargeStoreMemoryMb = newTotalMemoryMb - newGlobalMemoryMb - newLocalMemoryMb;
+                newSessionLargeStoreMemoryMb = newTotalMemoryMb - (newGlobalMemoryMb + newLocalMemoryMb);
             } else {
                 // if the user configured zero for the session large store, then we want to keep it this way
                 newSessionLargeStoreMemoryMb = 0;
                 newLocalMemoryMb = newTotalMemoryMb - newGlobalMemoryMb;
             }
-        } else {
-            // when current total memory is zero we split the new total between global and local in ratio of 4:1
-            newGlobalMemoryMb = (uint64_t)(newTotalMemoryMb * 0.8f);  // 80% to global memory
-            newLocalMemoryMb = newTotalMemoryMb - newGlobalMemoryMb;  // 20% to local memory
-            //  session large store remains zero!
+
+            MOT_LOG_TRACE("Attempting to use adjusted values for MOT memory limits: global = %" PRIu64
+                          " MB, local = %" PRIu64 " MB, session large store = %" PRIu64 " MB, total = %" PRIu64 " MB",
+                newGlobalMemoryMb,
+                newLocalMemoryMb,
+                newSessionLargeStoreMemoryMb,
+                newGlobalMemoryMb + newLocalMemoryMb + newSessionLargeStoreMemoryMb);
+        }
+
+        // when current total memory is zero we use the minimum allowed, and also when minimum values are breached
+        if ((newGlobalMemoryMb < motCfg.MIN_MAX_MOT_GLOBAL_MEMORY_MB) ||
+            (newLocalMemoryMb < motCfg.MIN_MAX_MOT_LOCAL_MEMORY_MB)) {
+            if (currentTotalMemoryMb > 0) {
+                MOT_LOG_TRACE("Adjusted values breach minimum restrictions, falling back to minimum values");
+            }
+            newGlobalMemoryMb = motCfg.MIN_MAX_MOT_GLOBAL_MEMORY_MB;
+            newLocalMemoryMb = motCfg.MIN_MAX_MOT_LOCAL_MEMORY_MB;
+            newSessionLargeStoreMemoryMb = 0;
         }
 
         MOT_LOG_WARN("Adjusting MOT memory limits: global = %" PRIu64 " MB, local = %" PRIu64
@@ -445,7 +457,7 @@ private:
             newGlobalMemoryMb,
             newLocalMemoryMb,
             newSessionLargeStoreMemoryMb,
-            newTotalMemoryMb);
+            newGlobalMemoryMb + newLocalMemoryMb + newSessionLargeStoreMemoryMb);
 
         // stream into MOT new definitions
         MOT::mot_string memCfg;
@@ -718,7 +730,8 @@ void MOTAdaptor::Init()
         elog(FATAL, "Failed to create MOT engine");
     }
 
-    MOT::GetGlobalConfiguration().SetTotalMemoryMb(g_instance.attr.attr_memory.max_process_memory / KILO_BYTE);
+    MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
+    motCfg.SetTotalMemoryMb(g_instance.attr.attr_memory.max_process_memory / KILO_BYTE);
 
     gaussdbConfigLoader = new (std::nothrow) GaussdbConfigLoader();
     if (gaussdbConfigLoader == nullptr) {
@@ -741,17 +754,18 @@ void MOTAdaptor::Init()
         elog(FATAL, "Failed to load configuration for MOT engine.");
     }
 
-    // check max process memory here - we do it anyway to protect ourselves from miscalculations
+    // Check max process memory here - we do it anyway to protect ourselves from miscalculations.
+    // Attention: the following values are configured during the call to MOTEngine::LoadConfig() just above
     uint64_t globalMemoryKb = MOT::g_memGlobalCfg.m_maxGlobalMemoryMb * KILO_BYTE;
     uint64_t localMemoryKb = MOT::g_memGlobalCfg.m_maxLocalMemoryMb * KILO_BYTE;
     uint64_t maxReserveMemoryKb = globalMemoryKb + localMemoryKb;
 
+    // check whether the 2GB gap between MOT and envelope is still kept
     if ((g_instance.attr.attr_memory.max_process_memory < (int32)maxReserveMemoryKb) ||
         ((g_instance.attr.attr_memory.max_process_memory - maxReserveMemoryKb) < MIN_DYNAMIC_PROCESS_MEMORY)) {
         // we allow one extreme case: GaussDB is configured to its limit, and zero memory is left for us
-        if ((g_instance.attr.attr_memory.max_process_memory == MIN_DYNAMIC_PROCESS_MEMORY) &&
-            (maxReserveMemoryKb <= MOT_MIN_MEMORY_USAGE_MB * KILO_BYTE)) {
-            MOT_LOG_INFO("Allowing MOT to work in minimal memory mode");
+        if (maxReserveMemoryKb <= motCfg.MOT_MIN_MEMORY_USAGE_MB * KILO_BYTE) {
+            MOT_LOG_WARN("Allowing MOT to work in minimal memory mode");
         } else {
             m_engine->RemoveConfigLoader(gaussdbConfigLoader);
             delete gaussdbConfigLoader;
@@ -787,8 +801,7 @@ void MOTAdaptor::Init()
     // make sure current thread is cleaned up properly when thread pool is enabled
     EnsureSafeThreadAccessInline();
 
-    if (MOT::GetGlobalConfiguration().m_enableRedoLog &&
-        MOT::GetGlobalConfiguration().m_loggerType == MOT::LoggerType::EXTERNAL_LOGGER) {
+    if (motCfg.m_enableRedoLog && motCfg.m_loggerType == MOT::LoggerType::EXTERNAL_LOGGER) {
         m_engine->GetRedoLogHandler()->SetLogger(&xlogger);
         m_engine->GetRedoLogHandler()->SetWalWakeupFunc(WakeupWalWriter);
     }
@@ -1929,7 +1942,7 @@ MOT::RC MOTAdaptor::DropIndex(DropForeignStmt* stmt, ::TransactionId tid)
         } else {
             MOT::Table* table = index->GetTable();
             uint64_t table_relid = table->GetTableExId();
-            JitExec::PurgeJitSourceCache(table_relid);
+            JitExec::PurgeJitSourceCache(table_relid, false);
             table->WrLock();
             res = txn->DropIndex(index);
             table->Unlock();
@@ -1954,7 +1967,7 @@ MOT::RC MOTAdaptor::DropTable(DropForeignStmt* stmt, ::TransactionId tid)
             elog(LOG, "Drop table %s error, table oid %u not found.", stmt->name, stmt->reloid);
         } else {
             uint64_t table_relid = tab->GetTableExId();
-            JitExec::PurgeJitSourceCache(table_relid);
+            JitExec::PurgeJitSourceCache(table_relid, false);
             res = txn->DropTable(tab);
         }
     } while (0);
@@ -1980,6 +1993,7 @@ MOT::RC MOTAdaptor::TruncateTable(Relation rel, ::TransactionId tid)
             break;
         }
 
+        JitExec::PurgeJitSourceCache(rel->rd_id, true);
         tab->WrLock();
         res = txn->TruncateTable(tab);
         tab->Unlock();

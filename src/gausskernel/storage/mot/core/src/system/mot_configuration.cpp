@@ -126,6 +126,7 @@ constexpr const char* MOTConfiguration::DEFAULT_MIN_MOT_LOCAL_MEMORY;
 constexpr uint64_t MOTConfiguration::DEFAULT_MIN_MOT_LOCAL_MEMORY_MB;
 constexpr uint64_t MOTConfiguration::MIN_MIN_MOT_LOCAL_MEMORY_MB;
 constexpr uint64_t MOTConfiguration::MAX_MIN_MOT_LOCAL_MEMORY_MB;
+constexpr uint64_t MOTConfiguration::MOT_MIN_MEMORY_USAGE_MB;
 constexpr const char* MOTConfiguration::DEFAULT_MAX_MOT_SESSION_MEMORY;
 constexpr uint64_t MOTConfiguration::DEFAULT_MAX_MOT_SESSION_MEMORY_KB;
 constexpr uint64_t MOTConfiguration::MIN_MAX_MOT_SESSION_MEMORY_KB;
