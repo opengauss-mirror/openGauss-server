@@ -417,5 +417,32 @@ explain delete from student where 3 < rownum;
 explain delete from student where rownum < 5 or rownum < 6;
 explain delete from student where rownum > 5 or rownum > 6;
 
+-- ROWNUM with type cast
+explain select * from student where rownum < 3::bigint;
+explain select * from student where rownum < 3::int4;
+explain select * from student where rownum < 3::int2;
+explain select * from student where rownum < 3::int1;
+
+-- ROWNUM with LIMIT ALL
+explain select * from student where rownum <= 3 limit all;
+explain select * from student where rownum <= 18 limit 3.14;
+
+-- ROWNUM with constant expression
+explain select * from student where rownum > 3 + 2;
+explain select * from student where rownum < 3 + 2;
+explain select * from student where rownum < 9 + (-1 * 5);
+explain select * from student where rownum <= 9 + (-1 * 5) and id = 4;
+explain select * from student where rownum > -3 + 100 or id = 4;
+explain select * from student where rownum > -3 + 100.1 or id = 4;  -- not optimized
+
+explain select * from student where rownum < -2 and id = (select id from student where rownum = 1);
+
+-- ROWNUM and NOT expression
+explain select * from student where not(rownum < -2);
+explain select * from student where not(rownum > 3);
+explain select * from student where not(rownum < 3 + 2);
+explain select * from student where not(rownum < 3 and id = 1);
+explain select * from student where not(rownum > 3 or id = 1);
+
 drop table student;
 drop table test;
