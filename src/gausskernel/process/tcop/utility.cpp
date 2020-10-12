@@ -156,9 +156,6 @@ static void attatch_global_info(char** query_string_with_info, VacuumStmt* stmt,
 static char* get_hybrid_message(ForeignTableDesc* table_desc, VacuumStmt* stmt, char* foreign_tbl_schedul_message);
 static bool need_full_dn_execution(const char* group_name);
 int SetGTMVacuumFlag(GTM_TransactionKey txn_key, bool is_vacuum);
-#ifdef ENABLE_MULTIPLE_NODES
-extern void BumpPGXCGlobalVersion();
-#endif
 
 extern void check_log_ft_definition(CreateForeignTableStmt* stmt);
 extern void ts_check_feature_disable();
@@ -4142,7 +4139,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             IndexStmt* stmt = (IndexStmt*)parse_tree;
             Oid rel_id;
             LOCKMODE lockmode;
-            Oid indexRelOid;
 
             if (stmt->concurrent) {
                 PreventTransactionChain(is_top_level, "CREATE INDEX CONCURRENTLY");
@@ -4240,7 +4236,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             pgstat_set_io_state(IOSTATE_WRITE);
             /* ... and do it */
             WaitState oldStatus = pgstat_report_waitstatus(STATE_CREATE_INDEX);
-            indexRelOid = DefineIndex(rel_id,
+            Oid indexRelOid = DefineIndex(rel_id,
                 stmt,
                 InvalidOid,                                /* no predefined OID */
                 false,                                     /* is_alter_table */
@@ -11010,9 +11006,6 @@ static void analyze_tmptbl_debug_cn(Oid rel_id, Oid main_relid, VacuumStmt* stmt
  */
 static bool need_full_dn_execution(const char* group_name)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    BumpPGXCGlobalVersion();    /* force re-fetch of redistribution and installation groups */
-#endif
     if (in_logic_cluster()) {
         return false;
     }

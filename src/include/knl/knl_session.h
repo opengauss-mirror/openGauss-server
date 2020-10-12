@@ -1961,16 +1961,6 @@ typedef struct knl_u_regex_context {
     struct pg_ctype_cache* pg_ctype_cache_list;
 } knl_u_regex_context;
 
-typedef struct knl_u_pgxccache_context {
-    void* grpname_to_grpid;
-    void* pgxc_global_version;
-    void* grpid_to_nodeids;
-    void* relid_to_loc;
-    void* nodename_to_id;
-    void* relid_version;
-    void* relid_to_groupid;
-} knl_u_pgxccache_context;
-
 namespace MOT {
   class SessionContext;
   class TxnManager;
@@ -2194,7 +2184,6 @@ typedef struct knl_session_context {
     knl_u_typecache_context tycache_cxt;
     knl_u_upgrade_context upg_cxt;
     knl_u_utils_context utils_cxt;
-    knl_u_pgxccache_context pgxccache_cxt;
     knl_u_mot_context mot_cxt;
 
     /* instrumentation */

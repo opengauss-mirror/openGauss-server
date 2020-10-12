@@ -40,7 +40,7 @@ bool IsValidEntry(uint8 code)
     return code == MOT_REDO_DATA;
 }
 
-void RedoTransactionCommit(TransactionId xid)
+void RedoTransactionCommit(TransactionId xid, void* arg)
 {
     MOT::GetRecoveryManager()->CommitRecoveredTransaction((uint64_t)xid);
 }

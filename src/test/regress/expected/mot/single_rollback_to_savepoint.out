@@ -3,7 +3,7 @@ BEGIN;
 INSERT INTO mm_table VALUES (1), (2);
 SAVEPOINT p1;
 INSERT INTO mm_table VALUES (3), (4);
-ERROR:  SubTransaction is not supported for memory table.
+ERROR:  SubTransaction is not supported for memory table
 ROLLBACK TO SAVEPOINT p1;
 COMMIT;
 -- Transaction should abort due to error, so now tables are empty:

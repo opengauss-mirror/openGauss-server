@@ -144,7 +144,7 @@ uint32 generate_unique_id(IdGen* gen)
     seed = pg_atomic_add_fetch_u32(&gen->seed, 1);
     timeLineId = get_controlfile_timeline();
     timeLineId = timeLineId & 0x03;
-    id = (id << 24)| (timeLineId << 22 ) | ((seed)& 0x03fffff);
+    id = (id << 24) | (timeLineId << 22) | ((seed) & 0x03fffff);
     return id;
 }
 

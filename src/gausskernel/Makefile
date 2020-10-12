@@ -144,8 +144,8 @@ LIBPLJAVA = libpljava.so
 JARPLJAVA = pljava.jar
 
 ##############################################################################
-# numa and MOT component
-# # ###############################################################################
+# MOT component
+##############################################################################
 LIBS += -latomic -lmot_engine
 LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin
 CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)

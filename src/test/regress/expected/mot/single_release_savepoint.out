@@ -3,7 +3,7 @@ BEGIN;
 INSERT INTO mm_table VALUES (1), (2);
 SAVEPOINT p1;
 INSERT INTO mm_table VALUES (3), (4);
-ERROR:  SubTransaction is not supported for memory table.
+ERROR:  SubTransaction is not supported for memory table
 COMMIT;
 -- Transaction should abort, so now tables are empty:
 SELECT * FROM mm_table;
@@ -21,7 +21,7 @@ SAVEPOINT p1;
 INSERT INTO pg_table VALUES (5);
 SAVEPOINT p2;
 INSERT INTO mm_table VALUES (3);
-ERROR:  SubTransaction is not supported for memory table.
+ERROR:  SubTransaction is not supported for memory table
 rollback to savepoint p2;
 COMMIT;
 SELECT * FROM mm_table order by k;

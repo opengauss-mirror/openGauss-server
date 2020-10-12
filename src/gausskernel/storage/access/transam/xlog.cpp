@@ -10931,10 +10931,6 @@ bool CreateRestartPoint(int flags)
     }
     CheckPointGuts(lastCheckPoint.redo, flags, true);
 
-    /*
-     * call the external checkpoint
-     *
-     */
     CallCheckpointCallback(EVENT_CHECKPOINT_BEGIN_CHECKPOINT, 0);
 
     /*

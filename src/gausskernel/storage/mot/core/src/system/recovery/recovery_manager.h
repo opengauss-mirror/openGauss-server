@@ -560,7 +560,7 @@ public:
     bool IsInProcessTx(uint64_t id);
 
     /**
-     * @brief performs a commit or abort on an in-prcoess transaction
+     * @brief performs a commit or abort on an in-process transaction
      * @param id the transaction id.
      * @param isCommit specifies commit or abort.
      * @return Int indicates the internal transaction id or 0 in case

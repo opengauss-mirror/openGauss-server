@@ -3180,10 +3180,10 @@ static void send_message_to_frontend(ErrorData* edata)
         if (edata->elevel >= ERROR) {
             if (edata->internalerrcode == 0 && edata->filename && edata->lineno > 0) {
                 /*
-                 * In case of error from MM module we skip getting the internal error code,
+                 * In case of error from MOT module we skip getting the internal error code,
                  * since fdw classes are not scanned by scanEreport.cpp.
                  */
-                if (IsMMEngineUsed()) {
+                if (IsMOTEngineUsed()) {
                     edata->internalerrcode = ERRCODE_SUCCESSFUL_COMPLETION;
                 } else {
                     edata->internalerrcode = pg_geterrcode_byerrmsg(edata);

@@ -821,27 +821,17 @@ int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber fo
     return totalsize;
 }
 
-/*
- * calculate size of (one fork of) a relation
- *
- * Note: we can safely apply this to temp tables of other sessions, so there
- * is no check here or at the call sites for that.
- */
-uint64 calculate_mm_relation_size(Relation rel, Oid relOid, Oid idxOid)
+uint64 calculate_mot_relation_size(Relation rel, Oid idxOid)
 {
     uint64  totalSize = 0;
-    FdwRoutine *fdwroutine = NULL;
-    if (relOid == InvalidOid) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Could not find relation with OID %u.", relOid)));
-    }
-
-    fdwroutine = GetFdwRoutineForRelation(rel, false);
+    FdwRoutine *fdwroutine = GetFdwRoutineForRelation(rel, false);
     if (fdwroutine != NULL) {
-        totalSize = fdwroutine->GetForeignRelationMemSize(relOid, idxOid);
+        totalSize = fdwroutine->GetForeignRelationMemSize(RelationGetRelid(rel), idxOid);
     }
 
     return totalSize;
 }
+
 int64 calculate_CStore_relation_size(Relation rel, ForkNumber fork_num)
 {
     int64 totalsize = 0;
@@ -1054,15 +1044,12 @@ static int64 calculate_table_file_size(Relation rel, bool isCStore, int fork_num
 static int64 calculate_table_size(Relation rel, int fork_num_option)
 {
     int64 size = 0;
-    Oid relOid = rel->rd_id;
 
     if (!RelationIsIndex(rel)) {
-        bool bMMTable = RelationIsForeignTable(rel) ? RelationIsMMTableByOid(relOid) : false;
-        if (!RelationIsPartitioned(rel)) {
-            if (bMMTable)
-                size = calculate_mm_relation_size(rel, relOid, InvalidOid);
-            else
-                size = calculate_table_file_size(rel, RelationIsColStore(rel), fork_num_option);
+        if (RelationIsForeignTable(rel) && RelationIsMOTTableByOid(RelationGetRelid(rel))) {
+            size = calculate_mot_relation_size(rel, InvalidOid);
+        } else if (!RelationIsPartitioned(rel)) {
+            size = calculate_table_file_size(rel, RelationIsColStore(rel), fork_num_option);
         } else {
             List* partitions = NIL;
             ListCell* cell = NULL;
@@ -1083,22 +1070,18 @@ static int64 calculate_table_size(Relation rel, int fork_num_option)
         }
     } else {
         Relation base_rel = relation_open(rel->rd_index->indrelid, AccessShareLock);
-        Oid baseRelOid = rel->rd_index->indrelid;
-        bool bMMTable = RelationIsForeignTable(base_rel) ? RelationIsMMTableByOid(baseRelOid) : false;
         bool b_cstore = RelationIsColStore(base_rel) && (rel->rd_rel->relam == PSORT_AM_OID);
 
-        if (!RelationIsPartitioned(rel)) {
-            if (bMMTable) {
-                size = calculate_mm_relation_size(base_rel, baseRelOid, relOid);
-            } else {
-                if (!b_cstore)
-                    size = calculate_table_file_size(rel, false, fork_num_option);
-                else {
-                    Relation cstoreIdxRel = relation_open(rel->rd_rel->relcudescrelid, AccessShareLock);
-                    if (cstoreIdxRel != NULL) {
-                        size = calculate_table_file_size(cstoreIdxRel, true, fork_num_option);
-                        relation_close(cstoreIdxRel, AccessShareLock);
-                    }
+        if (RelationIsForeignTable(base_rel) && RelationIsMOTTableByOid(RelationGetRelid(base_rel))) {
+            size = calculate_mot_relation_size(base_rel, RelationGetRelid(rel));
+        } else if (!RelationIsPartitioned(rel)) {
+            if (!b_cstore)
+                size = calculate_table_file_size(rel, false, fork_num_option);
+            else {
+                Relation cstoreIdxRel = relation_open(rel->rd_rel->relcudescrelid, AccessShareLock);
+                if (cstoreIdxRel != NULL) {
+                    size = calculate_table_file_size(cstoreIdxRel, true, fork_num_option);
+                    relation_close(cstoreIdxRel, AccessShareLock);
                 }
             }
         } else {

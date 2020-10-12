@@ -3808,7 +3808,7 @@ void heap_truncate_one_rel(Relation rel)
         lockmode = RowExclusiveLock;
     }
 
-    if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(RelationGetRelid(rel))) {
+    if (RelationIsForeignTable(rel) && isMOTFromTblOid(RelationGetRelid(rel))) {
         FdwRoutine* fdwroutine = GetFdwRoutineByRelId(RelationGetRelid(rel));
 
         if (fdwroutine->TruncateForeignTable != NULL) {
@@ -5842,12 +5842,6 @@ void SetRelHasClusterKey(Relation rel, bool has)
  */
 List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
 {
-    if (RelationIsForeignTable(rel)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("partial cluster key constraint does not support foreign table")));
-    }
-
     if (!RelationIsColStore(rel)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),

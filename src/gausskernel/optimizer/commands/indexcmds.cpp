@@ -911,12 +911,12 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                         &extra);
                 heap_close(rel, NoLock);
                 return indexRelationId;
-            } else
-                return buildInformationalConstraint(stmt, indexRelationId,
-                        indexRelationName, rel, indexInfo, namespaceId);
-        } else {
+            }
+
             return buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
         }
+
+        return buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
     }
 
     /* workload client manager */

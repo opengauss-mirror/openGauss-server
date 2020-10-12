@@ -609,10 +609,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
     } else if (result_rel_info->ri_FdwRoutine) {
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
-                if (state->mt_insert_constr_slot == NULL)
+                if (state->mt_insert_constr_slot == NULL) {
                     ExecConstraints(result_rel_info, slot, estate);
-                else
+                } else {
                     ExecConstraints(result_rel_info, state->mt_insert_constr_slot, estate);
+                }
             }
         }
 #ifdef PGXC
@@ -626,9 +627,8 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
              * the other INSERT commands.
              */
             new_id = InvalidOid;
-        } else
+        } else {
 #endif
-        {
             /*
              * insert into foreign table: let the FDW do it
              */
@@ -643,7 +643,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
             tuple = ExecMaterializeSlot(slot);
 
             new_id = InvalidOid;
+#ifdef PGXC
         }
+#endif
     } else {
         /*
          * Check the constraints of the tuple
@@ -937,21 +939,23 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
             ExecSetSlotDescriptor(slot, RelationGetDescr(result_relation_desc));
 
 #ifdef PGXC
-            if (IS_PGXC_COORDINATOR && result_remote_rel && result_rel_info->ri_FdwRoutine->GetFdwType &&
-                    result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
-                slot = ExecProcNodeDMLInXC(estate, planSlot, slot);
-            }
-            else
+        if (IS_PGXC_COORDINATOR && result_remote_rel && result_rel_info->ri_FdwRoutine->GetFdwType &&
+                result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
+            slot = ExecProcNodeDMLInXC(estate, planSlot, slot);
+        } else {
 #endif
-
-        slot = result_rel_info->ri_FdwRoutine->ExecForeignDelete(estate, result_rel_info, slot, planSlot);
+            slot = result_rel_info->ri_FdwRoutine->ExecForeignDelete(estate, result_rel_info, slot, planSlot);
+#ifdef PGXC
+        }
+#endif
 
         if (slot == NULL) {
             /* "do nothing" */
 #ifdef PGXC
             if (canSetTag) {
-                if (IS_PGXC_COORDINATOR && result_remote_rel)
+                if (IS_PGXC_COORDINATOR && result_remote_rel) {
                     estate->es_processed += result_remote_rel->rqs_processed;
+                }
             }
 #endif
             return NULL;
@@ -1317,27 +1321,31 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
          */
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
-                if (node->mt_insert_constr_slot == NULL)
+                if (node->mt_insert_constr_slot == NULL) {
                     ExecConstraints(result_rel_info, slot, estate);
-                else
+                } else {
                     ExecConstraints(result_rel_info, node->mt_insert_constr_slot, estate);
+                }
             }
         }
 #ifdef PGXC
         if (IS_PGXC_COORDINATOR && result_remote_rel && result_rel_info->ri_FdwRoutine->GetFdwType &&
                 result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             slot = ExecProcNodeDMLInXC(estate, planSlot, slot);
-        }
-        else
+        } else {
 #endif
-        slot = result_rel_info->ri_FdwRoutine->ExecForeignUpdate(estate, result_rel_info, slot, planSlot);
+            slot = result_rel_info->ri_FdwRoutine->ExecForeignUpdate(estate, result_rel_info, slot, planSlot);
+#ifdef PGXC
+        }
+#endif
 
         if (slot == NULL) {
             /* "do nothing" */
 #ifdef PGXC
             if (canSetTag) {
-                if (IS_PGXC_COORDINATOR && result_remote_rel)
+                if (IS_PGXC_COORDINATOR && result_remote_rel) {
                     estate->es_processed += result_remote_rel->rqs_processed;
+                }
             }
 #endif
             return NULL;
@@ -2470,8 +2478,9 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex && operation != CMD_DELETE &&
             result_rel_info->ri_IndexRelationDescs == NULL) {
             if (result_rel_info->ri_FdwRoutine == NULL || result_rel_info->ri_FdwRoutine->GetFdwType == NULL ||
-                    result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC)
+                result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
                 ExecOpenIndices(result_rel_info, node->upsertAction != UPSERT_NONE);
+            }
         }
         init_gtt_storage(operation, result_rel_info);
         /* Now init the plan for this result rel */
@@ -2500,13 +2509,11 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         /* Also let FDWs init themselves for foreign-table result rels */
         if (result_rel_info->ri_FdwRoutine != NULL && result_rel_info->ri_FdwRoutine->BeginForeignModify != NULL) {
             if (IS_PGXC_DATANODE || result_rel_info->ri_FdwRoutine->GetFdwType == NULL ||
-                    result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
+                result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
                 List* fdw_private = (List*)list_nth(node->fdwPrivLists, i);
-
                 result_rel_info->ri_FdwRoutine->BeginForeignModify(mt_state, result_rel_info, fdw_private, i, eflags);
             }
         }
-
 
         result_rel_info++;
         i++;
@@ -2870,11 +2877,10 @@ void ExecEndModifyTable(ModifyTableState* node)
 
         if (result_rel_info->ri_FdwRoutine != NULL && result_rel_info->ri_FdwRoutine->EndForeignModify != NULL) {
             if (IS_PGXC_DATANODE || result_rel_info->ri_FdwRoutine->GetFdwType == NULL ||
-                    result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
+                result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
                 result_rel_info->ri_FdwRoutine->EndForeignModify(node->ps.state, result_rel_info);
             }
         }
-
     }
 
     if (IsA(node, DistInsertSelectState)) {

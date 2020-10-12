@@ -1504,6 +1504,7 @@ static void checkUpdateOnDistributeKey(RangeTblEntry* rte, List* targetlist)
         /* Bad relation type */
         return;
     }
+
     /* See if we have the partitioned case. */
     rel_loc_info = GetRelationLocInfo(rte->relid);
     /* Any column updation on local relations is fine */

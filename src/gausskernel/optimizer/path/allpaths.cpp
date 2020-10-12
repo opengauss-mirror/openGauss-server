@@ -1205,8 +1205,9 @@ static void set_foreign_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEnt
     if (!isrp && rel->fdwroutine->GetFdwType && rel->fdwroutine->GetFdwType() == MOT_ORC) {
         /* Consider index scans */
         create_index_paths(root, rel);
-        if (rel->orientation == REL_ROW_ORIENTED)
+        if (rel->orientation == REL_ROW_ORIENTED) {
             create_tidscan_paths(root, rel);
+        }
     }
 
     if (!isrp) {
@@ -1215,8 +1216,9 @@ static void set_foreign_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEnt
     }
 
     /* Select cheapest path */
-    if (!(rel->fdwroutine->GetFdwType && rel->fdwroutine->GetFdwType() == MOT_ORC) || isrp)
+    if (!(rel->fdwroutine->GetFdwType && rel->fdwroutine->GetFdwType() == MOT_ORC) || isrp) {
         set_cheapest(rel);
+    }
 }
 
 /*

@@ -894,8 +894,6 @@ static void knl_t_pgxc_init(knl_t_pgxc_context* pgxc_cxt)
     securec_check(rc, "\0", "\0");
     rc = memset_s(pgxc_cxt->begin_cmd, BEGIN_CMD_BUFF_SIZE, 0, BEGIN_CMD_BUFF_SIZE);
     securec_check(rc, "\0", "\0");
-
-    pgxc_cxt->pgxc_cache_master_switch = false;
 }
 
 static void knl_t_conn_init(knl_t_conn_context* conn_cxt)

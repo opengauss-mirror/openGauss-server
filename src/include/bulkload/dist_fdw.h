@@ -47,7 +47,6 @@ extern "C" Datum hdfs_fdw_validator(PG_FUNCTION_ARGS);
 extern "C" Datum mot_fdw_validator(PG_FUNCTION_ARGS);
 extern "C" Datum mot_fdw_handler(PG_FUNCTION_ARGS);
 
-
 extern void encryptOBSForeignTableOption(List **options);
 
 /*

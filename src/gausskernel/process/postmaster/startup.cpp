@@ -252,7 +252,7 @@ void StartupProcessMain(void)
         InitMOT();
 
         /*
-         * Mot recovery is part of StartupXlog
+         * MOT recovery is part of StartupXlog
          */
         StartupXLOG();
     }

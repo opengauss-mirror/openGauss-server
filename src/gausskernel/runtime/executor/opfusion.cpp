@@ -43,7 +43,7 @@
 #include "utils/snapmgr.h"
 #include "storage/mot/jit_exec.h"
 
-OpFusion::OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, FusionType ftype)
+OpFusion::OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list)
 {
     bool is_share = (ENABLE_DN_GPC && psrc != NULL && psrc->gpc.is_insert == true);
 
@@ -204,11 +204,11 @@ void OpFusion::executeInit()
     if (u_sess->attr.attr_common.XactReadOnly) {
         ExecCheckXactReadOnly(m_planstmt);
     }
+
     if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan &&
-          u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MM)) {
+            u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
         PushActiveSnapshot(GetTransactionSnapshot());
     }
-
 }
 
 void OpFusion::auditRecord()
@@ -247,10 +247,9 @@ void OpFusion::auditRecord()
 void OpFusion::executeEnd()
 {
     if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan &&
-          u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MM)) {
+            u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
         PopActiveSnapshot();
     }
-
 
 #ifdef MEMORY_CONTEXT_CHECKING
     /* Check all memory contexts when executor starts */
@@ -274,7 +273,6 @@ void OpFusion::executeEnd()
         report_qps_type(m_planstmt->commandType);
         report_qps_type(CMD_DML);
     }
-
 }
 
 bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLevel)
@@ -779,7 +777,7 @@ void OpFusion::bindClearPosition()
 }
 
 SelectFusion::SelectFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, SELECT_FUSION)
+    : OpFusion(context, psrc, plantree_list)
 {
     m_tmpvals = NULL;
     m_values = NULL;
@@ -891,8 +889,9 @@ void SelectFusion::close()
     }
 }
 
-MotJitSelectFusion::MotJitSelectFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, MOT_JIT_SELECT_FUSION)
+MotJitSelectFusion::MotJitSelectFusion(
+    MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
+    : OpFusion(context, psrc, plantree_list)
 {
     MemoryContext oldContext = MemoryContextSwitchTo(m_context);
     Node* node = NULL;
@@ -957,7 +956,7 @@ bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
 }
 
 InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, INSERT_FUSION)
+    : OpFusion(context, psrc, plantree_list)
 {
     m_tmpisnull = NULL;
     m_tmpvals = NULL;
@@ -1142,15 +1141,15 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     return success;
 }
 
-MotJitModifyFusion::MotJitModifyFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, MOT_JIT_MODIFY_FUSION)
+MotJitModifyFusion::MotJitModifyFusion(
+    MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
+    : OpFusion(context, psrc, plantree_list)
 {
     MemoryContext oldContext = MemoryContextSwitchTo(m_context);
     ModifyTable* node = (ModifyTable*)m_planstmt->planTree;
-    m_cmdType = node->operation;    
+    m_cmdType = node->operation;
 
     m_reloid = getrelid(linitial_int(m_planstmt->resultRelations), m_planstmt->rtable);
-
 
     m_estate = CreateExecutorState();
     m_estate->es_range_table = m_planstmt->rtable;
@@ -1239,7 +1238,7 @@ HeapTuple UpdateFusion::heapModifyTuple(HeapTuple tuple)
 }
 
 UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, UPDATE_FUSION)
+    : OpFusion(context, psrc, plantree_list)
 {
     m_attrno = NULL;
     m_paramLoc = NULL;
@@ -1527,7 +1526,7 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
 }
 
 DeleteFusion::DeleteFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, DELETE_FUSION)
+    : OpFusion(context, psrc, plantree_list)
 {
     m_paramLoc = NULL;
     m_tmpvals = NULL;
@@ -1693,7 +1692,7 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
 
 SelectForUpdateFusion::SelectForUpdateFusion(
     MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, SELECT_FOR_UPDATE_FUSION)
+    : OpFusion(context, psrc, plantree_list)
 {
     m_paramLoc = NULL;
 
@@ -1989,7 +1988,7 @@ void SelectForUpdateFusion::close()
 }
 
 AggFusion::AggFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, AGG_INDEX_FUSION)
+    : OpFusion(context, psrc, plantree_list)
 {
     m_tmpvals = NULL;
     m_values = NULL;
@@ -2264,7 +2263,7 @@ void AggFusion::agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal,
 }
 
 SortFusion::SortFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, SORT_INDEX_FUSION)
+    : OpFusion(context, psrc, plantree_list)
 {
     m_tmpvals = NULL;
     m_values = NULL;
@@ -2401,7 +2400,7 @@ bool SortFusion::execute(long max_rows, char *completionTag)
 
 #if 0
 NestLoopFusion::NestLoopFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list, NESTLOOP_INDEX_FUSION)
+    : OpFusion(context, psrc, plantree_list)
 {
     m_tmpvals = NULL;
     m_values = NULL;
