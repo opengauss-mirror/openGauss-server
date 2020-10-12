@@ -10642,11 +10642,11 @@ static void init_configure_names_string()
         {
             {
                 "mot_config_file",
-                 PGC_POSTMASTER,
-                 FILE_LOCATIONS,
-                 gettext_noop("Sets mot main configuration file."),
-                 NULL,
-                 GUC_DISALLOW_IN_FILE | GUC_SUPERUSER_ONLY
+                PGC_POSTMASTER,
+                FILE_LOCATIONS,
+                gettext_noop("Sets mot main configuration file."),
+                NULL,
+                GUC_DISALLOW_IN_FILE | GUC_SUPERUSER_ONLY
             },
             &g_instance.attr.attr_common.MOTConfigFileName,
             NULL,

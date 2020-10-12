@@ -210,9 +210,10 @@ int bbox_handler_exit = 0;
 #include "utils/distribute_test.h"
 
 #include "commands/user.h"
+#include "storage/mot/mot_fdw.h"
 
 extern int S3_init();
-extern void TermMOT();
+
 static const int RECOVERY_PARALLELISM_DEFAULT = 1;
 
 /* flag to get logic cluster name for dn alarm */

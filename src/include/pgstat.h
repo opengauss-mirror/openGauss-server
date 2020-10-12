@@ -1902,25 +1902,8 @@ extern void getSessionID(char* sessid, pg_time_t startTime, ThreadId Threadid);
 extern void getThrdID(char* thrdid, pg_time_t startTime, ThreadId Threadid);
 
 #define NUM_SESSION_MEMORY_DETAIL_ELEM 8
+
 #define NUM_MOT_SESSION_MEMORY_DETAIL_ELEM 4
-
-typedef struct ThreadMemoryDetail {
-    char contextName[MEMORY_CONTEXT_NAME_LEN];
-    char parent[MEMORY_CONTEXT_NAME_LEN];
-    int64 totalSize;
-    int64 freeSize;
-    int64 usedSize;
-    int level;
-    char threadType[PROC_NAME_LEN];
-    pg_time_t threadStartTime;
-    ThreadId threadId;
-    ThreadMemoryDetail *next;
-} ThreadMemoryDetail;
-
-typedef struct ThreadMemoryDetailPad {
-    uint32 nelements;
-    ThreadMemoryDetail* threadMemoryDetail;
-} ThreadMemoryDetailPad;
 
 typedef struct MotSessionMemoryDetail {
     ThreadId threadid;
@@ -1946,7 +1929,27 @@ typedef struct MotMemoryDetailPad {
     MotMemoryDetail* memoryDetail;
 } MotMemoryDetailPad;
 
-extern void getMemoryContextDetailForEachThread(volatile PGPROC *proc, SessionMemoryDetailPad *data);
+extern MotSessionMemoryDetail* getMotSessionMemoryDetail(uint32* num);
+extern MotMemoryDetail* getMotMemoryDetail(uint32* num, bool isGlobal);
+
+typedef struct ThreadMemoryDetail {
+    char contextName[MEMORY_CONTEXT_NAME_LEN];
+    char parent[MEMORY_CONTEXT_NAME_LEN];
+    int64 totalSize;
+    int64 freeSize;
+    int64 usedSize;
+    int level;
+    char threadType[PROC_NAME_LEN];
+    pg_time_t threadStartTime;
+    ThreadId threadId;
+    ThreadMemoryDetail *next;
+} ThreadMemoryDetail;
+
+typedef struct ThreadMemoryDetailPad {
+    uint32 nelements;
+    ThreadMemoryDetail* threadMemoryDetail;
+} ThreadMemoryDetailPad;
+
 extern void getMemoryContextDetailForEachThread(volatile PGPROC* proc, ThreadMemoryDetailPad* data);
 #ifdef MEMORY_CONTEXT_CHECKING
 typedef enum { STANDARD_DUMP, SHARED_DUMP } DUMP_TYPE;
@@ -1957,8 +1960,6 @@ extern void DumpMemoryContext(DUMP_TYPE type);
 extern SessionMemoryDetail* getSessionMemoryDetail(uint32* num);
 extern ThreadMemoryDetail* getThreadMemoryDetail(uint32* num);
 extern ThreadMemoryDetail* getSharedMemoryDetail(uint32* num);
-extern MotSessionMemoryDetail* getMotSessionMemoryDetail(uint32* num);
-extern MotMemoryDetail* getMotMemoryDetail(uint32* num, bool isGlobal);
 
 typedef enum TimeInfoType {
     DB_TIME = 0, /* total elapsed time while dealing user command. */

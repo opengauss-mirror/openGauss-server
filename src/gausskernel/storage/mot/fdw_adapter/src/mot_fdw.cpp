@@ -84,7 +84,7 @@
 #include "ext_config_loader.h"
 #include "utilities.h"
 
-// allow MM Engine logging facilities
+// allow MOT Engine logging facilities
 DECLARE_LOGGER(ExternalWrapper, FDW);
 
 /*
@@ -1621,7 +1621,7 @@ static void MOTXactCallback(XactEvent event, void* arg)
             }
             PG_CATCH();
             {
-                elog(FATAL, "Error during MM commit prepared, could not write to WAL. Aborting transaction");
+                elog(FATAL, "Error during MOT commit prepared, could not write to WAL. Aborting transaction");
                 return;
             }
             PG_END_TRY();
@@ -1945,7 +1945,7 @@ static void InitMOTHandler()
                 elog(WARNING, "MOT Checkpoint is disabled");
             }
 
-            RegisterRedoCommitCallback(RedoTransactionCommit);
+            RegisterRedoCommitCallback(RedoTransactionCommit, NULL);
         }
 
         // Register CLOG callback to our recovery manager.

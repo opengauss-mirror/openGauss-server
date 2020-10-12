@@ -36,7 +36,7 @@
 const int MOT_REDO_DATA = 0x10;
 
 MOT::TxnCommitStatus GetTransactionStateCallback(uint64_t transactionId);
-void RedoTransactionCommit(TransactionId xid);
+void RedoTransactionCommit(TransactionId xid, void* arg);
 
 class XLOGLogger : public MOT::ILogger {
 public:

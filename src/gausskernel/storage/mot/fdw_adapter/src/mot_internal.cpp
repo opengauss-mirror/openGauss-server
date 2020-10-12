@@ -202,7 +202,7 @@ static void GetSessionDetails(MOT::SessionId sessionId, ::ThreadId* gaussSession
 // This mechanism relies on the fact that when a session ends, eventually its thread is terminated
 // ATTENTION: in thread-pooled envelopes this assumption no longer holds true, since the container thread keeps
 // running after the session ends, and a session might run each time on a different thread, so we
-// disable this feature, instead we use this mechanism to generate thread-ended event into the MM Engine
+// disable this feature, instead we use this mechanism to generate thread-ended event into the MOT Engine
 static pthread_key_t sessionCleanupKey;
 
 static void SessionCleanup(void* key)
@@ -475,7 +475,7 @@ private:
 
 static GaussdbConfigLoader* gaussdbConfigLoader = nullptr;
 
-// Error code mapping array from MM to PG
+// Error code mapping array from MOT to PG
 static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
     // RC_OK
     {ERRCODE_SUCCESSFUL_COMPLETION, "Success", nullptr},
@@ -553,7 +553,7 @@ static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr}};
 
 static_assert(sizeof(MM_ERRCODE_TO_PG) / sizeof(MotErrToPGErrSt) == MOT::RC_MAX_VALUE + 1,
-    "Not all MM engine error codes (RC) is mapped to PG error codes");
+    "Not all MOT engine error codes (RC) is mapped to PG error codes");
 
 void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5)
 {

@@ -148,8 +148,6 @@ typedef struct CheckpointCallbackItem {
     void* arg;
 } CheckpointCallbackItem;
 
-static CheckpointCallbackItem* checkpoint_callback = NULL;
-
 /* interval for calling AbsorbFsyncRequests in CheckpointWriteDelay */
 #define WRITES_PER_ABSORB 1000
 
@@ -1415,15 +1413,15 @@ void RegisterCheckpointCallback(CheckpointCallback callback, void* arg)
     item = (CheckpointCallbackItem*)MemoryContextAlloc(g_instance.instance_context, sizeof(CheckpointCallbackItem));
     item->callback = callback;
     item->arg = arg;
-    item->next = checkpoint_callback;
-    checkpoint_callback = item;
+    item->next = g_instance.ckpt_cxt_ctl->ckptCallback;
+    g_instance.ckpt_cxt_ctl->ckptCallback = item;
 }
 
 void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn)
 {
     CheckpointCallbackItem* item;
 
-    for (item = checkpoint_callback; item; item = item->next) {
+    for (item = g_instance.ckpt_cxt_ctl->ckptCallback; item; item = item->next) {
         (*item->callback) (checkpointEvent, lsn, item->arg);
     }
 }

@@ -29,9 +29,6 @@
 /* Maximum number of preferred Datanodes that can be defined in cluster */
 #define MAX_PREFERRED_NODES 64
 
-/* Temp Solution for caching location of MM tables */
-#define MAX_LOCATION_CACHE 999
-
 #define HASH_SIZE 4096
 #define HASH_MASK 0x00000FFF;
 
@@ -109,7 +106,6 @@ typedef struct DfsPrivateItem {
 
 typedef struct {
     Oid relid;                /* OID of relation */
-    char relkind;
     char locatorType;         /* locator type, see above */
     List* partAttrNum;        /* Distribution column attribute */
     List* nodeList;           /* Node indices where data is located */
@@ -136,7 +132,6 @@ typedef struct {
 typedef struct Distribution {
     Oid group_oid;
     Bitmapset* bms_data_nodeids;
-    bool cached;
 } Distribution;
 
 /*

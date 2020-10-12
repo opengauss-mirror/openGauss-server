@@ -2020,7 +2020,10 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId)
 
     if ((!u_sess->attr.attr_common.IsInplaceUpgrade || !IsSystemNamespace(namespaceId)) &&
         (IS_PGXC_COORDINATOR || (isRestoreMode && stmt->distributeby != NULL && !isInitdbOnDN)) &&
-        (relkind == RELKIND_RELATION || (relkind == RELKIND_FOREIGN_TABLE))) {
+        (relkind == RELKIND_RELATION ||
+            (relkind == RELKIND_FOREIGN_TABLE && (stmt->distributeby != NULL ||
+                (IsA(stmt, CreateForeignTableStmt) &&
+                    isMOTTableFromSrvName(((CreateForeignTableStmt*)stmt)->servername)))))) {
         char* logic_cluster_name = NULL;
         PGXCSubCluster* subcluster = stmt->subcluster;
         bool isinstallationgroup = (dfsTablespace || relkind == RELKIND_FOREIGN_TABLE);
@@ -3161,12 +3164,12 @@ void ExecuteTruncate(TruncateStmt* stmt)
             continue;
         }
 
-        if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(RelationGetRelid(rel))) {
+        if (RelationIsForeignTable(rel) && isMOTFromTblOid(RelationGetRelid(rel))) {
             FdwRoutine* fdwroutine = GetFdwRoutineByRelId(RelationGetRelid(rel));
             if (fdwroutine->TruncateForeignTable != NULL) {
                 fdwroutine->TruncateForeignTable(stmt, rel);
             }
-		} else if (!RELATION_IS_PARTITIONED(rel)) {
+        } else if (!RELATION_IS_PARTITIONED(rel)) {
             /*
 			 * non partitioned table
              * Need the full transaction-safe pushups.
@@ -3408,7 +3411,7 @@ static void truncate_check_rel(Relation rel)
 {
     AclResult aclresult;
 
-    /* Only allow truncate on regular tables */
+    /* Only allow truncate on regular tables or MOT tables */
     /* @hdfs
      * Add error msg for a foreign table
      */
@@ -15660,7 +15663,7 @@ static void RangeVarCallbackForAlterRelation(
     if (reltype != OBJECT_FOREIGN_TABLE && relkind == RELKIND_FOREIGN_TABLE) {
         if (isMOTFromTblOid(relid)) {
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("\"%s\" is a mot, which does not support alter table.", rv->relname))); 
+                errmsg("\"%s\" is a mot, which does not support alter table.", rv->relname)));
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),

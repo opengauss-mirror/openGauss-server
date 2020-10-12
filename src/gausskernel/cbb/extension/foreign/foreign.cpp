@@ -921,8 +921,9 @@ DefElem* HdfsGetOptionDefElem(Oid foreignTableId, const char* optionName)
         }
     }
 
-    if (optionList != NULL)
+    if (optionList != NIL) {
         pfree(optionList);
+    }
 
     return returnOptDef;
 }

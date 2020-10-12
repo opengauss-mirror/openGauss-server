@@ -70,6 +70,8 @@
 #include "utils/syscache.h"
 #include "utils/globalplancache.h"
 #include "instruments/instr_unique_sql.h"
+#include "storage/mot/jit_exec.h"
+
 #ifdef PGXC
 #include "commands/prepare.h"
 #include "pgxc/execRemote.h"
@@ -79,7 +81,6 @@ static void DropDataNodeStatements(Plan* planNode);
 #endif
 
 const float GROWTH_FACTOR = 1.1;
-#include "storage/mot/jit_exec.h"
 
 
 /*
@@ -213,7 +214,6 @@ CachedPlanSource* CreateCachedPlan(Node* rawParseTree, const char* queryString,
     planSource->query_context = NULL;
     planSource->gplan = NULL;
     planSource->is_oneshot = false;
-    planSource->storageEngineType = SE_TYPE_UNSPECIFIED;
     planSource->is_complete = false;
     planSource->is_saved = false;
     planSource->is_valid = false;
@@ -222,9 +222,11 @@ CachedPlanSource* CreateCachedPlan(Node* rawParseTree, const char* queryString,
     planSource->generic_cost = -1;
     planSource->total_custom_cost = 0;
     planSource->num_custom_plans = 0;
-    planSource->mot_jit_context = NULL;
     planSource->opFusionObj = NULL;
     planSource->is_checked_opfusion = false;
+
+    planSource->storageEngineType = SE_TYPE_UNSPECIFIED;
+    planSource->mot_jit_context = NULL;
 
     planSource->gpc.is_share = false;
     planSource->gpc.is_insert = false;
@@ -297,7 +299,6 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* rawParseTree, const char* queryS
     planSource->query_context = NULL;
     planSource->gplan = NULL;
     planSource->is_oneshot = true;
-    planSource->storageEngineType = SE_TYPE_UNSPECIFIED;
     planSource->is_complete = false;
     planSource->is_saved = false;
     planSource->is_valid = false;
@@ -306,6 +307,8 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* rawParseTree, const char* queryS
     planSource->generic_cost = -1;
     planSource->total_custom_cost = 0;
     planSource->num_custom_plans = 0;
+
+    planSource->storageEngineType = SE_TYPE_UNSPECIFIED;
     planSource->mot_jit_context = NULL;
 
     planSource->gpc.is_share = false;
@@ -1019,10 +1022,11 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* planSource, List* qList, Pa
     /*
      * If a snapshot is already set (the normal case), we can just use that
      * for planning.  But if it isn't, and we need one, install one (unless
-     * it is a MM table query).
+     * it is a MOT query).
      */
     snapshot_set = false;
-    if (!ActiveSnapshotSet() && !(planSource->storageEngineType == SE_TYPE_MM) &&
+    if (!ActiveSnapshotSet() &&
+        !(planSource->storageEngineType == SE_TYPE_MOT) &&
         analyze_requires_snapshot(planSource->raw_parse_tree)) {
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;
@@ -1195,9 +1199,10 @@ static bool ChooseCustomPlan(CachedPlanSource* planSource, ParamListInfo boundPa
         return false;
     }
 
-    /* Don't choose custom plan if using pbe optimization */
-    if (u_sess->attr.attr_sql.enable_pbe_optimization && IsMMEngineUsed())
+    /* Don't choose custom plan if using pbe optimization and MOT engine. */
+    if (u_sess->attr.attr_sql.enable_pbe_optimization && IsMOTEngineUsed()) {
         return false;
+    }
 
     /* One-shot plans will always be considered custom */
     if (planSource->is_oneshot)
@@ -1681,6 +1686,9 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* planSource, bool isShare)
     newSource->generic_cost = planSource->generic_cost;
     newSource->total_custom_cost = planSource->total_custom_cost;
     newSource->num_custom_plans = planSource->num_custom_plans;
+
+    newSource->storageEngineType = SE_TYPE_UNSPECIFIED;
+    newSource->mot_jit_context = NULL;
 
 #ifdef PGXC
     newSource->stream_enabled = planSource->stream_enabled;

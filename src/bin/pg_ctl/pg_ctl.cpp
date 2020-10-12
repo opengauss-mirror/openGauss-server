@@ -3878,7 +3878,7 @@ static void do_incremental_build(uint32 term)
             }
         }
         pg_log(PG_PROGRESS, "fetch MOT checkpoint\n");
-        /* see if we have an mot ini file configured */
+        /* see if we have an mot conf file configured */
         tnRet = sprintf_s(pgconfPath, sizeof(pgconfPath), "%s/%s", pg_data, "postgresql.conf");
         securec_check_ss_c(tnRet, "\0", "\0");
         motIniPath = GetOptionValueFromFile(pgconfPath, "mot_config_file");

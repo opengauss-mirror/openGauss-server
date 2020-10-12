@@ -3822,7 +3822,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
      * ModifyTable node instead.)
      */
     if (parse->rowMarks) {
-        if (!IsMMEngineUsed()) {
+        if (!IsMOTEngineUsed()) {
             result_plan = (Plan*)make_lockrows(root, result_plan);
         }
 

@@ -1738,10 +1738,8 @@ void index_drop(Oid indexId, bool concurrent)
     }
 
     /* Call FDW drop */
-    if (userHeapRelation->rd_rel->relkind == RELKIND_FOREIGN_TABLE &&
-        isMOTFromTblOid(RelationGetRelid(userHeapRelation))) {
+    if (RelationIsForeignTable(userHeapRelation) && isMOTFromTblOid(RelationGetRelid(userHeapRelation))) {
         FdwRoutine* fdwroutine = GetFdwRoutineByRelId(userHeapRelation->rd_id);
-
         if (fdwroutine->ValidateTableDef != NULL) {
             DropForeignStmt stmt;
             stmt.type = T_DropForeignStmt;
@@ -3861,10 +3859,8 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot reindex temporary tables of other sessions")));
 
-    if (heapRelation->rd_rel->relkind == RELKIND_FOREIGN_TABLE &&
-        isMOTFromTblOid(RelationGetRelid(heapRelation))) {
+    if (RelationIsForeignTable(heapRelation) && isMOTFromTblOid(RelationGetRelid(heapRelation))) {
         FdwRoutine* fdwroutine = GetFdwRoutineByRelId(heapRelation->rd_id);
-
         if (fdwroutine->ValidateTableDef != NULL) {
             ReindexForeignStmt stmt;
             stmt.type = T_ReindexStmt;

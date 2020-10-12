@@ -48,8 +48,7 @@
  */
 THR_LOCAL Portal ActivePortal = NULL;
 
-static void process_query(
-    PlannedStmt* plan, const char* source_text, ParamListInfo params, bool isMMTable,
+static void process_query(PlannedStmt* plan, const char* source_text, ParamListInfo params, bool isMOTTable,
     JitExec::JitContext* mot_jit_context, DestReceiver* dest, char* completion_tag);
 static void fill_portal_store(Portal portal, bool is_top_level);
 static uint32 run_from_store(Portal portal, ScanDirection direction, long count, DestReceiver* dest);
@@ -67,11 +66,13 @@ extern bool StreamTopConsumerAmI();
 
 extern void report_qps_type(CmdType command_type);
 extern CmdType set_cmd_type(const char* command_tag);
+
 /*
  * CreateQueryDesc
  */
 QueryDesc* CreateQueryDesc(PlannedStmt* plannedstmt, const char* source_text, Snapshot snapshot,
-    Snapshot crosscheck_snapshot, DestReceiver* dest, ParamListInfo params, int instrument_options)
+    Snapshot crosscheck_snapshot, DestReceiver* dest, ParamListInfo params, int instrument_options,
+    JitExec::JitContext* mot_jit_context /* = nullptr */)
 {
     QueryDesc* qd = (QueryDesc*)palloc(sizeof(QueryDesc));
 
@@ -96,7 +97,7 @@ QueryDesc* CreateQueryDesc(PlannedStmt* plannedstmt, const char* source_text, Sn
     qd->planstate = NULL;
     qd->totaltime = NULL;
     qd->executed = false;
-    qd->mot_jit_context = NULL;
+    qd->mot_jit_context = mot_jit_context;
 
     return qd;
 }
@@ -125,6 +126,7 @@ QueryDesc* CreateUtilityQueryDesc(
     qd->planstate = NULL;
     qd->totaltime = NULL;
     qd->executed = false;
+    qd->mot_jit_context = nullptr;
 
     return qd;
 }
@@ -162,24 +164,24 @@ void FreeQueryDesc(QueryDesc* qdesc)
  * Must be called in a memory context that will be reset or deleted on
  * error; otherwise the executor's memory usage will be leaked.
  */
-static void process_query(
-    PlannedStmt* plan, const char* source_text, ParamListInfo params, bool isMMTable,
-    JitExec::JitContext* mot_jit_context,DestReceiver* dest, char* completion_tag)
+static void process_query(PlannedStmt* plan, const char* source_text, ParamListInfo params, bool isMOTTable,
+    JitExec::JitContext* mot_jit_context, DestReceiver* dest, char* completion_tag)
 {
     QueryDesc* query_desc = NULL;
-    Snapshot snap = NULL;
 
     elog(DEBUG3, "ProcessQuery");
 
+    Snapshot snap = InvalidSnapshot;
+
     /******************************* MOT LLVM *************************************/
-    if (isMMTable && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled() && mot_jit_context) {
+    if (isMOTTable && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled() && mot_jit_context) {
         Oid lastOid = InvalidOid;
-        uint64 tp_processed = 0;
-        int scan_ended = 0;
+        uint64 tuplesProcessed = 0;
+        int scanEnded = 0;
         if (JitExec::IsMotCodegenPrintEnabled()) {
             elog(DEBUG1, "Invoking jitted mot query and query string: %s\n", source_text);
         }
-        int rc = JitExec::JitExecQuery(mot_jit_context, params, NULL, &tp_processed, &scan_ended);
+        int rc = JitExec::JitExecQuery(mot_jit_context, params, NULL, &tuplesProcessed, &scanEnded);
         if (JitExec::IsMotCodegenPrintEnabled()) {
             elog(DEBUG1, "jitted mot query returned: %d\n", rc);
         }
@@ -190,17 +192,17 @@ static void process_query(
             switch (plan->commandType) {
                 case CMD_INSERT:
                     ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                            "INSERT %u %lu", lastOid, tp_processed);
+                            "INSERT %u %lu", lastOid, tuplesProcessed);
                     securec_check_ss(ret,"\0","\0");
                     break;
                 case CMD_UPDATE:
                     ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                            "UPDATE %lu", tp_processed);
+                            "UPDATE %lu", tuplesProcessed);
                     securec_check_ss(ret,"\0","\0");
                     break;
                 case CMD_DELETE:
                     ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                            "DELETE %lu", tp_processed);
+                            "DELETE %lu", tuplesProcessed);
                     securec_check_ss(ret,"\0","\0");
                     break;
                 default:
@@ -211,17 +213,14 @@ static void process_query(
     }
     /******************************* MOT LLVM *************************************/
 
-    if (!isMMTable) {
+    if (!isMOTTable) {
         snap = GetActiveSnapshot();
     }
 
     /*
      * Create the QueryDesc object
      */
-    query_desc = CreateQueryDesc(plan, source_text, snap, InvalidSnapshot, dest, params, 0);
-
-    // save MOT JIT context
-    query_desc->mot_jit_context = mot_jit_context;
+    query_desc = CreateQueryDesc(plan, source_text, snap, InvalidSnapshot, dest, params, 0, mot_jit_context);
 
     if (ENABLE_WORKLOAD_CONTROL && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
         WLMTopSQLReady(query_desc);
@@ -617,7 +616,6 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
     QueryDesc* query_desc = NULL;
     int myeflags;
     PlannedStmt* ps = NULL;
-    Snapshot snap = NULL;
     int instrument_option = 0;
 
     AssertArg(PortalIsValid(portal));
@@ -652,11 +650,11 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
          * Fire her up according to the strategy
          */
         switch (portal->strategy) {
-            case PORTAL_ONE_SELECT:
+            case PORTAL_ONE_SELECT: {
                 ps = (PlannedStmt*)linitial(portal->stmts);
 
-                /* Must set snapshot before starting executor, unless it is a query with only MM Tables. */
-                if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM)) {
+                /* Must set snapshot before starting executor, unless it is a query with only MOT Tables. */
+                if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT)) {
                     if (snapshot) {
                         PushActiveSnapshot(snapshot);
                     } else {
@@ -683,20 +681,20 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
                     instrument_option |= INSTRUMENT_BUFFERS;
                 }
 
-                if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM)) {
-                    snap = GetActiveSnapshot();
+                Snapshot tempSnap = InvalidSnapshot;
+                if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT)) {
+                    tempSnap = GetActiveSnapshot();
                 }
+
+                JitExec::JitContext* mot_jit_context =
+                    (portal->cplan != NULL) ? portal->cplan->mot_jit_context : nullptr;
 
                 /*
                  * Create QueryDesc in portal's context; for the moment, set
                  * the destination to DestNone.
                  */
-                query_desc = CreateQueryDesc(ps, portal->sourceText, snap, InvalidSnapshot, None_Receiver, params, 0);
-
-                // save MOT JIT context
-                if (portal->cplan != NULL) {
-                    query_desc->mot_jit_context = portal->cplan->mot_jit_context;
-                }
+                query_desc = CreateQueryDesc(
+                    ps, portal->sourceText, tempSnap, InvalidSnapshot, None_Receiver, params, 0, mot_jit_context);
 
                 /* means on CN of the compute pool. */
                 if (((IS_PGXC_COORDINATOR && StreamTopConsumerAmI()) || IS_SINGLE_NODE) && ps->instrument_option) {
@@ -764,11 +762,11 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
                 portal->portalPos = 0;
                 portal->posOverflow = false;
 
-                if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM)) {
+                if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT)) {
                     PopActiveSnapshot();
                 }
                 break;
-
+            }
             case PORTAL_ONE_RETURNING:
             case PORTAL_ONE_MOD_WITH:
 
@@ -1308,7 +1306,7 @@ static uint64 portal_run_select(Portal portal, bool forward, long count, DestRec
             else
                 nprocessed = run_from_store(portal, direction, count, dest);
         } else {
-            if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM)) {
+            if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT)) {
                 PushActiveSnapshot(query_desc->snapshot);
             }
 
@@ -1344,7 +1342,7 @@ static uint64 portal_run_select(Portal portal, bool forward, long count, DestRec
             }
 
             nprocessed = query_desc->estate->es_processed;
-            if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM)) {
+            if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT)) {
                 PopActiveSnapshot();
             }
         }
@@ -1378,12 +1376,12 @@ static uint64 portal_run_select(Portal portal, bool forward, long count, DestRec
         if (portal->holdStore)
             nprocessed = run_from_store(portal, direction, count, dest);
         else {
-            if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM)) {
+            if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT)) {
                 PushActiveSnapshot(query_desc->snapshot);
             }
             ExecutorRun(query_desc, direction, count);
             nprocessed = query_desc->estate->es_processed;
-            if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM)) {
+            if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT)) {
                 PopActiveSnapshot();
             }
         }
@@ -1608,7 +1606,7 @@ static void portal_run_utility(Portal portal, Node* utility_stmt, bool is_top_le
      * say, it has to update an index with expressions that invoke
      * user-defined functions, then it had better have a snapshot.
      */
-    if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM) &&
+    if (!(portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT) &&
             !(IsA(utility_stmt, TransactionStmt) || IsA(utility_stmt, LockStmt) || IsA(utility_stmt, VariableSetStmt) ||
             IsA(utility_stmt, VariableShowStmt) || IsA(utility_stmt, ConstraintsSetStmt) ||
             /* efficiency hacks from here down */
@@ -1710,8 +1708,8 @@ static void portal_run_multi(
      */
     foreach (stmtlist_item, portal->stmts) {
         Node* stmt = (Node*)lfirst(stmtlist_item);
-        bool isMMTable = false;
-        JitExec::JitContext* mot_jit_context = NULL;
+        bool isMOTTable = false;
+        JitExec::JitContext* mot_jit_context = nullptr;
 
         /*
          * If we got a cancel signal in prior command, quit
@@ -1732,17 +1730,17 @@ static void portal_run_multi(
             PGSTAT_START_TIME_RECORD();
 
             /*
-             * Must always have a snapshot for plannable queries, unless it is a MM query.
+             * Must always have a snapshot for plannable queries, unless it is a MOT query.
              * First time through, take a new snapshot; for subsequent queries in the
              * same portal, just update the snapshot's copy of the command
              * counter.
              */
-            if ((portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MM)) {
-                isMMTable = true;
+            if ((portal->cplan != NULL && portal->cplan->storageEngineType == SE_TYPE_MOT)) {
+                isMOTTable = true;
                 mot_jit_context = portal->cplan->mot_jit_context;
             }
 
-            if (!isMMTable) {
+            if (!isMOTTable) {
                 if (!active_snapshot_set) {
                     PushActiveSnapshot(GetTransactionSnapshot(force_local_snapshot));
                     active_snapshot_set = true;
@@ -1755,8 +1753,8 @@ static void portal_run_multi(
 
             if (pstmt->canSetTag) {
                 /* statement can set tag string */
-                process_query(pstmt, portal->sourceText, portal->portalParams, 
-                    isMMTable, mot_jit_context, dest, completion_tag);
+                process_query(pstmt, portal->sourceText, portal->portalParams,
+                    isMOTTable, mot_jit_context, dest, completion_tag);
 #ifdef PGXC
                 /* it's special for INSERT */
                 if (IS_PGXC_COORDINATOR && pstmt->commandType == CMD_INSERT)
@@ -1764,8 +1762,8 @@ static void portal_run_multi(
 #endif
             } else {
                 /* stmt added by rewrite cannot set tag */
-                process_query(pstmt, portal->sourceText, portal->portalParams, 
-                    isMMTable, mot_jit_context, altdest, NULL);
+                process_query(pstmt, portal->sourceText, portal->portalParams,
+                    isMOTTable, mot_jit_context, altdest, NULL);
             }
 
             PGSTAT_END_TIME_RECORD(EXECUTION_TIME);

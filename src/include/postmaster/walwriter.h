@@ -14,8 +14,9 @@
 
 typedef void (*WALCallback)(void* arg);
 
-extern void WalWriterMain(void);
 extern void RegisterWALCallback(WALCallback callback, void* arg);
 extern void CallWALCallback();
+
+extern void WalWriterMain(void);
 
 #endif /* _WALWRITER_H */

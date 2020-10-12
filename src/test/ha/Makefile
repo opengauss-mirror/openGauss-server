@@ -7,6 +7,6 @@
 # GNU make uses a make file named "GNUmakefile" in preference to "Makefile"
 # if it exists.  Postgres is shipped with a "GNUmakefile".
 
-all hacheck_single hacheck_multi_single hacheck_all:
+all hacheck_single hacheck_multi_single hacheck_multi_single_mot hacheck_all:
 	@echo "You must use GNU make to use Postgres.  It may be installed"
 	@echo "on your system with the name 'gmake'."

@@ -1662,8 +1662,6 @@ typedef struct knl_t_pgxc_context {
      */
     char* current_installation_nodegroup;
     char* current_redistribution_nodegroup;
-    uint64_t current_installation_nodegroup_version;
-	uint64_t current_redistribution_nodegroup_version;
 
     /* Global number of nodes. Point to a shared memory block */
     int* shmemNumCoords;
@@ -1692,8 +1690,6 @@ typedef struct knl_t_pgxc_context {
      * Flag to track if a temporary object is accessed by the current transaction
      */
     bool temp_object_included;
-
-    bool pgxc_cache_master_switch;
 
 #ifdef PGXC
     struct abort_callback_type* dbcleanup_info;
@@ -2735,7 +2731,7 @@ typedef struct knl_t_mot_context {
     // misc
     uint8_t log_level;
     bool init_codegen_once;
-    
+
     uint16_t currentThreadId;
     int currentNumaNodeId;
 

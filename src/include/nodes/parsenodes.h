@@ -3050,6 +3050,7 @@ typedef struct VacuumStmt {
     bool isForeignTables;      /* @hdfs This parameter is true when we run "analyze [verbose] foreign table;" command */
     bool isPgFdwForeignTables; /* This parameter is true when the fdw of foreign table is gc_fdw */
     bool isMOTForeignTable;
+
     /*
      * @hdfs
      * parameter totalFileCnt and nodeNo is set by CNSchedulingForAnalyze

@@ -898,9 +898,10 @@ void lightProxy::runMsg(StringInfo exec_message)
     /* Set after start transaction in case there is no CurrentResourceOwner */
     SetUniqueSQLIdFromCachedPlanSource(this->m_cplan);
 
-    /* Must set snapshot before starting executor, unless it is a MM tables transaction. */
-    if (!IsMMEngineUsed())
+    /* Must set snapshot before starting executor, unless it is a MOT tables transaction. */
+    if (!IsMOTEngineUsed()) {
         PushActiveSnapshot(GetTransactionSnapshot(GTM_LITE_MODE));
+    }
 
     proxyNodeBegin(m_cplan->is_read_only);
 
@@ -941,8 +942,10 @@ void lightProxy::runMsg(StringInfo exec_message)
     m_msgctl->hasResult = (m_cplan->resultDesc != NULL) ? true : false;
     handleResponse();
 
-    if (!IsMMEngineUsed())
+    if (!IsMOTEngineUsed()) {
         PopActiveSnapshot();
+    }
+
     /*
      * We need a CommandCounterIncrement after every query, except
      * those that start or end a transaction block.

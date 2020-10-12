@@ -6793,10 +6793,14 @@ Datum pv_session_memory_detail(PG_FUNCTION_ARGS)
 }
 
 /*
- * Description	: Collect each thread main memory engine's memory usage statistics.
+ * Description: Collect each session MOT engine's memory usage statistics.
  */
 Datum mot_session_memory_detail(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("This function is not supported in cluster mode.")));
+    PG_RETURN_NULL();
+#else
     FuncCallContext* funcctx = NULL;
     MotSessionMemoryDetail* entry = NULL;
     MemoryContext oldcontext;
@@ -6864,15 +6868,18 @@ Datum mot_session_memory_detail(PG_FUNCTION_ARGS)
         /* do when there is no more left */
         SRF_RETURN_DONE(funcctx);
     }
+#endif
 }
 
 /*
- * mot_global_memory_detail
- *		Produce a view to show all global memory usage on node
- *
+ * Description: Produce a view to show all global memory usage on node
  */
 Datum mot_global_memory_detail(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("This function is not supported in cluster mode.")));
+    PG_RETURN_NULL();
+#else
     FuncCallContext* funcctx = NULL;
     MotMemoryDetail* entry = NULL;
     MemoryContext oldcontext;
@@ -6936,15 +6943,18 @@ Datum mot_global_memory_detail(PG_FUNCTION_ARGS)
         /* do when there is no more left */
         SRF_RETURN_DONE(funcctx);
     }
+#endif
 }
 
 /*
- * mot_local_memory_detail
- *		Produce a view to show all local memory usage on node
- *
+ * Description: Produce a view to show all local memory usage on node
  */
 Datum mot_local_memory_detail(PG_FUNCTION_ARGS)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("This function is not supported in cluster mode.")));
+    PG_RETURN_NULL();
+#else
     FuncCallContext* funcctx = NULL;
     MotMemoryDetail* entry = NULL;
     MemoryContext oldcontext;
@@ -7008,6 +7018,7 @@ Datum mot_local_memory_detail(PG_FUNCTION_ARGS)
         /* do when there is no more left */
         SRF_RETURN_DONE(funcctx);
     }
+#endif
 }
 
 /*

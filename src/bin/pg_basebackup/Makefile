@@ -82,9 +82,12 @@ $(top_builddir)/src/lib/build_query/libbuildquery.a:
 
 $(top_builddir)/src/lib/elog/elog.a:
 		$(MAKE) -C $(top_builddir)/src/lib/elog elog.a
-		
+
 $(top_builddir)/src/lib/pgcommon/libpgcommon.a:
 		$(MAKE) -C $(top_builddir)/src/lib/pgcommon libpgcommon.a
+
+$(top_builddir)/src/bin/pg_ctl/fetchmot.o:
+		$(MAKE) -C $(top_builddir)/src/bin/pg_ctl fetchmot.o
 
 $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a:
 		$(MAKE) -C $(top_builddir)/src/lib/hotpatch/client libhotpatchclient.a

@@ -48,6 +48,7 @@
 #include "utils/plog.h"
 #include "threadpool/threadpool.h"
 #include "instruments/instr_user.h"
+#include "storage/mot/mot_fdw.h"
 
 #ifdef ENABLE_MEMORY_CHECK
 extern "C" {
@@ -61,22 +62,25 @@ extern void __lsan_do_leak_check();
 
 volatile unsigned int alive_threads_waitted = NUMWAITTHREADS;
 
-extern void MOTOnSessionClose();
-static void MOTCleanupSession(int code, Datum arg) {
-    MOTOnSessionClose();
-}
 extern void ShutdownPostgres(int code, Datum arg);
 extern void pq_close(int code, Datum arg);
 extern void AtProcExit_Files(int code, Datum arg);
 extern void audit_processlogout(int code, Datum arg);
 extern void CancelAutoAnalyze();
 
+static void MOTCleanupSession(int code, Datum arg) {
+    MOTOnSessionClose();
+}
+
 static const pg_on_exit_callback on_sess_exit_list[] = {
     ShutdownPostgres,
     PGXCNodeCleanAndRelease,
-    // must come after ShutdownPostgres(), in case there is abort/rollback callback
-    // must come after PGXCNodeCleanAndRelease(), due to prepared statement cleanup (which cleans also all session JIT context objects)
-    MOTCleanupSession, 
+    /*
+     * 1. Must come after ShutdownPostgres(), in case there is abort/rollback callback.
+     * 2. Must come after PGXCNodeCleanAndRelease(), due to prepared statement cleanup
+     *    (which cleans also all session JIT context objects).
+     */
+    MOTCleanupSession,
     pq_close,
     AtProcExit_Files,
     audit_processlogout

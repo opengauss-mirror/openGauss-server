@@ -777,7 +777,6 @@ void dropDatabaseDependencies(Oid databaseId)
                 fdwRoutine->ValidateTableDef((Node*)&stmt);
             }
         }
-
         simple_heap_delete(sdepRel, &tup->t_self);
     }
 

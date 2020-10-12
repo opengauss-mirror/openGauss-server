@@ -47,7 +47,7 @@ extern FusionType getUpdateFusionType(List* stmt_list, ParamListInfo params);
 extern FusionType getDeleteFusionType(List* stmt_list, ParamListInfo params);
 class OpFusion : public BaseObject {
 public:
-    OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, FusionType ftype);
+    OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list);
 
     virtual ~OpFusion(){};
 
@@ -256,18 +256,15 @@ private:
 
 class MotJitSelectFusion: public OpFusion {
 public:
-
     MotJitSelectFusion(MemoryContext context, CachedPlanSource *psrc, List *plantree_list, ParamListInfo params);
 
     ~MotJitSelectFusion() {};
 
     bool execute(long max_rows, char *completionTag);
-    
 };
 
 class MotJitModifyFusion: public OpFusion {
 public:
-
     MotJitModifyFusion(MemoryContext context, CachedPlanSource *psrc, List *plantree_list, ParamListInfo params);
 
     ~MotJitModifyFusion() {};
@@ -275,9 +272,8 @@ public:
     bool execute(long max_rows, char *completionTag);
 
 private:
-    
-    EState*              m_estate;  
-    CmdType              m_cmdType;
+    EState* m_estate;
+    CmdType m_cmdType;
 };
 
 class SelectForUpdateFusion : public OpFusion {

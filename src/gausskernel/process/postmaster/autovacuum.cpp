@@ -3224,6 +3224,7 @@ static void fill_in_vac_stmt(VacuumStmt& vacstmt, const autovac_table& tab, Rang
         vacstmt.options = (unsigned int)vacstmt.options | VACOPT_VACUUM;
     if (tab.at_doanalyze)
         vacstmt.options = (unsigned int)vacstmt.options | VACOPT_ANALYZE;
+    vacstmt.options |= VACOPT_AUTOVAC;
     vacstmt.flags = tab.at_flags;
     vacstmt.rely_oid = InvalidOid; /* we just simple set it invalid, maybe change */
     vacstmt.freeze_min_age = tab.at_freeze_min_age;

@@ -35,7 +35,6 @@ namespace JitExec
     struct JitContext;
 }
 
-
 /* struct for utility statement mem usage */
 typedef struct UtilityDesc {
     double cost;      /* cost of utility statement */

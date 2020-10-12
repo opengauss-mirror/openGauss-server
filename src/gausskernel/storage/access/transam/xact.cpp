@@ -121,13 +121,6 @@ typedef enum TransState {
     TRANS_PREPARE     /* prepare in progress */
 } TransState;
 
-static RedoCommitCallback redoCommitCallback = NULL;
-
-void RegisterRedoCommitCallback(RedoCommitCallback callback)
-{
-    redoCommitCallback = callback;
-}
-
 /*
  *	transaction block states - transaction state of client queries
  *
@@ -278,6 +271,12 @@ typedef struct GTMCallbackItem {
     void* arg;
 } GTMCallbackItem;
 #endif
+
+typedef struct RedoCommitCallbackItem {
+    struct RedoCommitCallbackItem* next;
+    RedoCommitCallback callback;
+    void* arg;
+} RedoCommitCallbackItem;
 
 /* local function prototypes */
 static void AssignTransactionId(TransactionState s);
@@ -1577,8 +1576,9 @@ static TransactionId RecordTransactionCommit(void)
                 xlrec.xinfo |= XACT_COMPLETION_UPDATE_RELCACHE_FILE;
             if (t_thrd.xact_cxt.forceSyncCommit)
                 xlrec.xinfo |= XACT_COMPLETION_FORCE_SYNC_COMMIT;
-            if (IsMMEngineUsed() || IsMixedEngineUsed())
-                xlrec.xinfo |= XACT_MMENGINE_USED;
+            if (IsMOTEngineUsed() || IsMixedEngineUsed()) {
+                xlrec.xinfo |= XACT_MOT_ENGINE_USED;
+            }
 
             xlrec.dbId = u_sess->proc_cxt.MyDatabaseId;
             xlrec.tsId = u_sess->proc_cxt.MyDatabaseTableSpace;
@@ -2782,9 +2782,11 @@ static void CommitTransaction(bool stpCommit)
     }
 
     /*
-     * Commit MM Table Engine - do this as late as possible
-     * to allow atomic cross transaction between PG tables and MM tables
-     * in the future
+     * For MOT, CallXactCallbacks should be called be called before RecordTransactionCommit.
+     *
+     * Commit MOT Engine - do this as late as possible to allow
+     * atomic cross transaction between PG tables and MOT tables
+     * in the future.
      */
     CallXactCallbacks(XACT_EVENT_COMMIT);
 
@@ -2892,7 +2894,7 @@ static void CommitTransaction(bool stpCommit)
 
     TRACE_POSTGRESQL_TRANSACTION_COMMIT(t_thrd.proc->lxid);
 
-    /* release MM Table locks */
+    /* Release MOT locks */
     CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
 
     /*
@@ -2917,7 +2919,6 @@ static void CommitTransaction(bool stpCommit)
      * the ResourceOwner mechanism.  The other calls here are for backend-wide
      * state.
      */
-    // CallXactCallbacks(XACT_EVENT_COMMIT);
     instr_report_workload_xact_info(true);
 #ifdef PGXC
     /*
@@ -3364,8 +3365,7 @@ static void PrepareTransaction(bool stpCommit)
     PreCommit_CheckForSerializationFailure();
 
     /*
-     * Prepare MM Table Engine - Check for Serialization
-     * Failures in FDW
+     * Prepare MOT Engine - Check for Serialization failures in FDW
      */
     CallXactCallbacks(XACT_EVENT_PREPARE);
 
@@ -3736,8 +3736,8 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
         }
     }
 
-    /* If it is MM transaction reserve the connection */
-    if (IsMMEngineUsed()) {
+    /* If it is MOT transaction reserve the connection. */
+    if (IsMOTEngineUsed()) {
         PerfectRollback = true;
     }
 
@@ -3874,7 +3874,9 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
      * do abort processing
      */
     AfterTriggerEndXact(false); /* 'false' means it's abort */
+
     CallXactCallbacks(XACT_EVENT_PREROLLBACK_CLEANUP);
+
     AtAbort_Portals(stpRollback);
     AtEOXact_LargeObject(false);
     AtAbort_Notify();
@@ -4025,6 +4027,7 @@ static void CleanupTransaction(void)
     s->childXids = NULL;
     s->nChildXids = 0;
     s->maxChildXids = 0;
+
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
     t_thrd.xact_cxt.nParallelCurrentXids = 0;
@@ -6440,6 +6443,7 @@ static void CleanupSubTransaction(void)
     AtSubCleanup_Memory();
 
     s->state = TRANS_DEFAULT;
+
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
     PopTransaction();
@@ -6956,15 +6960,14 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
     }
 
     if (t_thrd.xlog_cxt.standbyState == STANDBY_DISABLED) {
-        if (redoCommitCallback != NULL)  // && XactMMEngineUsed(xinfo)) // this is an optimization
-                                         // to avoid calling MOT redo commit callbacks
-                                         // in case of commit does not have MOT records
-                                         // it is disabled for the time being since
-                                         // data used to identify storage engine type
-                                         // is cleared in 2phase commit prepare phase.
-                                         // this should be implemented in the future to
-                                         // improve recovery time
-            redoCommitCallback(xid);
+        /*
+         * Report committed transaction to MOT Engine.
+         * If (XactMOTEngineUsed(xinfo)) - This is an optimization to avoid calling
+         * MOT redo commit callbacks in case of commit does not have MOT records.
+         * It is disabled for the time being since data used to identify storage
+         * engine type is cleared in 2phase commit prepare phase.
+         */
+        CallRedoCommitCallback(xid);
 
         /*
          * Mark the transaction committed in pg_xact. We don't bother updating
@@ -7004,16 +7007,14 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
          */
         // RecordKnownAssignedTransactionIds(max_xid);
 
-        // report commited transaction to MMEngine
-        if (redoCommitCallback != NULL)  // && XactMMEngineUsed(xinfo)) // this is an optimization
-                                         // to avoid calling MOT redo commit callbacks
-                                         // in case of commit does not have MOT records
-                                         // it is disabled for the time being since
-                                         // data used to identify storage engine type
-                                         // is cleared in 2phase commit prepare phase.
-                                         // this should be implemented in the future to
-                                         // improve recovery time
-            redoCommitCallback(xid);
+        /*
+         * Report committed transaction to MOT Engine.
+         * If (XactMOTEngineUsed(xinfo)) - This is an optimization to avoid calling
+         * MOT redo commit callbacks in case of commit does not have MOT records.
+         * It is disabled for the time being since data used to identify storage
+         * engine type is cleared in 2phase commit prepare phase.
+         */
+        CallRedoCommitCallback(xid);
 
         /*
          * Mark the transaction committed in pg_clog. We use async commit
@@ -7741,11 +7742,11 @@ TransactionState CopyTxnStateByCurrentMcxt(TransactionState state)
 }
 
 /*
- * Check if we are using MM storage engine in current transaction.
+ * Check if we are using MOT storage engine in current transaction.
  */
-bool IsMMEngineUsed()
+bool IsMOTEngineUsed()
 {
-    return (CurrentTransactionState->storageEngineType == SE_TYPE_MM);
+    return (CurrentTransactionState->storageEngineType == SE_TYPE_MOT);
 }
 
 /*
@@ -7759,19 +7760,20 @@ bool IsPGEngineUsed()
 /*
  * Check if we are using PG storage engine in parent transaction.
  */
-bool IsMMEngineUsedInParentTransaction()
+bool IsMOTEngineUsedInParentTransaction()
 {
     TransactionState s = CurrentTransactionState;
     while (s->parent != NULL) {
         s = s->parent;
-        if (s->storageEngineType == SE_TYPE_MM)
+        if (s->storageEngineType == SE_TYPE_MOT) {
             return true;
+        }
     }
     return false;
 }
 
 /*
- * Check if we are using both PG and MM storage engines in current transaction.
+ * Check if we are using both PG and MOT storage engines in current transaction.
  */
 bool IsMixedEngineUsed()
 {
@@ -7784,15 +7786,36 @@ bool IsMixedEngineUsed()
  */
 void SetCurrentTransactionStorageEngine(StorageEngineType storageEngineType)
 {
-    if (storageEngineType == SE_TYPE_UNSPECIFIED)
+    if (storageEngineType == SE_TYPE_UNSPECIFIED) {
         return;
-    else if (storageEngineType == SE_TYPE_MM &&
-             (CurrentTransactionState->storageEngineType == SE_TYPE_UNSPECIFIED || IsMMEngineUsed()))
-        CurrentTransactionState->storageEngineType = SE_TYPE_MM;
-    else if (storageEngineType == SE_TYPE_PAGE_BASED &&
-             (CurrentTransactionState->storageEngineType == SE_TYPE_UNSPECIFIED || IsPGEngineUsed()))
+    } else if (storageEngineType == SE_TYPE_MOT &&
+        (CurrentTransactionState->storageEngineType == SE_TYPE_UNSPECIFIED || IsMOTEngineUsed())) {
+        CurrentTransactionState->storageEngineType = SE_TYPE_MOT;
+    } else if (storageEngineType == SE_TYPE_PAGE_BASED &&
+        (CurrentTransactionState->storageEngineType == SE_TYPE_UNSPECIFIED || IsPGEngineUsed())) {
         CurrentTransactionState->storageEngineType = SE_TYPE_PAGE_BASED;
-    else if (storageEngineType == SE_TYPE_MIXED || (storageEngineType == SE_TYPE_PAGE_BASED && IsMMEngineUsed()) ||
-             (storageEngineType == SE_TYPE_MM && IsPGEngineUsed()))
+    } else if (storageEngineType == SE_TYPE_MIXED || (storageEngineType == SE_TYPE_PAGE_BASED && IsMOTEngineUsed()) ||
+        (storageEngineType == SE_TYPE_MOT && IsPGEngineUsed())) {
         CurrentTransactionState->storageEngineType = SE_TYPE_MIXED;
+    }
+}
+
+void RegisterRedoCommitCallback(RedoCommitCallback callback, void* arg)
+{
+    RedoCommitCallbackItem* item;
+
+    item = (RedoCommitCallbackItem*)MemoryContextAlloc(g_instance.instance_context, sizeof(RedoCommitCallbackItem));
+    item->callback = callback;
+    item->arg = arg;
+    item->next = g_instance.xlog_cxt.redoCommitCallback;
+    g_instance.xlog_cxt.redoCommitCallback = item;
+}
+
+void CallRedoCommitCallback(TransactionId xid)
+{
+    RedoCommitCallbackItem* item;
+
+    for (item = g_instance.xlog_cxt.redoCommitCallback; item; item = item->next) {
+        (*item->callback) (xid, item->arg);
+    }
 }
