@@ -66,32 +66,23 @@ struct __attribute__((packed)) JitSource {
     /** @var Keep noisy condition variable in its own cache line. */
     uint8_t _padding2[16];  // L1 offset 48
 
-    /** @var The hash value computed for the query string. */
-    uint64_t _hash_value;  // L1 offset 0
-
     /** @var The compiled function. */
-    JitContext* _source_jit_context;  // L1 offset 8
+    JitContext* _source_jit_context;  // L1 offset 0
 
     /** @var Tells whether the object was initialized successfully. */
-    uint32_t _initialized;  // L1 offset 16
+    uint32_t _initialized;  // L1 offset 8
 
     /** @var The status of the context. */
-    JitContextStatus _status;  // L1 offset 20
+    JitContextStatus _status;  // L1 offset 12
 
     /** @var Manage a list of cached context source objects for each session. */
-    JitSource* _next;  // L1 offset 24
+    JitSource* _next;  // L1 offset 16
 
     /** @var The source query string. */
-    char* _query_string;  // L1 offset 32
-
-    /** @var The external relation id of the table on which the query is to be executed. */
-    uint64_t _relation_id;  // L1 offset 40
-
-    /** @var The external relation id of the inner table on which the query is to be executed. */
-    uint64_t _inner_relation_id;  // L1 offset 48
+    char* _query_string;  // L1 offset 24
 
     /** @var Jit context list for cleanup during relation modification. */
-    JitContext* m_contextList;  // L1 offset 56
+    JitContext* m_contextList;  // L1 offset 32
 };
 
 /**
@@ -148,13 +139,6 @@ extern void SetJitSourceExpired(JitSource* jitSource, uint64_t relationId);
 extern bool SetJitSourceReady(JitSource* jitSource, JitContext* readySourceJitContext);
 
 /**
- * @brief Computes a hash value for a string (djb2).
- * @param str The string for which a hash value is to be computed.
- * @return The computed hash value.
- */
-extern uint64_t ComputeJitQueryHash(const char* str);
-
-/**
  * @brief Registers JIT context for cleanup when its JIT source gets purged due to relation modification.
  * @param jitSource The originating JIT source.
  * @param jitContext The JIT context to register.
@@ -167,6 +151,12 @@ extern void AddJitSourceContext(JitSource* jitSource, JitContext* jitContext);
  * @param jitContext The JIT context to un-register.
  */
 extern void RemoveJitSourceContext(JitSource* jitSource, JitContext* cleanupContext);
+
+/** @brief Queries whether a JIT source refers to a given relation. */
+extern bool JitSourceRefersRelation(JitSource* jitSource, uint64_t relationId);
+
+/** @brief Purges the JIT source from all key/index references to the given relation. */
+extern void PurgeJitSource(JitSource* jitSource, uint64_t relationId);
 }  // namespace JitExec
 
 #endif

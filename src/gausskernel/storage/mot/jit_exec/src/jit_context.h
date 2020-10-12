@@ -68,87 +68,93 @@ struct JitContext {
     MOT::Table* m_table;  // L1 offset 40 (constant)
 
     /** @var The index on which the query is to be executed . */
-    MOT::Index* m_index;  // L1 offset 48 (constant)
+    MOT::Index* m_index;  // L1 offset 48 (may vary during TRUNCATE TABLE)
+
+    /** @var The index identifier for re-fetching it after TRUNCATE TABLE. */
+    uint64_t m_indexId;  // L1 offset 56 (constant)
 
     /**
      * @var The key object used to search a row for update/select/delete. This object can be reused
      * in each query.
      */
-    MOT::Key* m_searchKey;  // L1 offset 56 (reusable)
+    MOT::Key* m_searchKey;  // L1 offset 0 (reusable)
 
     /** @var bitmap set used for incremental redo (only during update) */
-    MOT::BitmapSet* m_bitmapSet;  // L1 offset 0 (reusable)
+    MOT::BitmapSet* m_bitmapSet;  // L1 offset 8 (reusable)
 
     /**
      * @var The key object used to set the end iterator for range scans. This object can be reused
      * in each query.
      */
-    MOT::Key* m_endIteratorKey;  // L1 offset 8 (reusable)
+    MOT::Key* m_endIteratorKey;  // L1 offset 16 (reusable)
 
     /** @var Execution context used for pseudo-LLVM. */
-    tvm::ExecContext* m_execContext;  // L1 offset 16
+    tvm::ExecContext* m_execContext;  // L1 offset 24
 
     /** @var Chain all JIT contexts in the same thread for cleanup during session end. */
-    struct JitContext* m_next;  // L1 offset 24
+    struct JitContext* m_next;  // L1 offset 32
 
     /** @var The source query string. */
-    const char* m_queryString;  // L1 offset 32 (constant)
+    const char* m_queryString;  // L1 offset 40 (constant)
 
     /*---------------------- Range Scan execution state -------------------*/
     /** @var Begin iterator for range select (stateful execution). */
-    MOT::IndexIterator* m_beginIterator;  // L1 offset 40
+    MOT::IndexIterator* m_beginIterator;  // L1 offset 48
 
     /** @var End iterator for range select (stateful execution). */
-    MOT::IndexIterator* m_endIterator;  // L1 offset 48
+    MOT::IndexIterator* m_endIterator;  // L1 offset 56
 
     /** @var Row for range select (stateful execution). */
-    MOT::Row* m_row;  // L1 offset 56
+    MOT::Row* m_row;  // L1 offset 0
 
     /** @var Stateful counter for limited range scans. */
-    uint32_t m_limitCounter;  // L1 offset 0
+    uint32_t m_limitCounter;  // L1 offset 8
 
     /** @var Scan ended flag (stateful execution). */
-    uint32_t m_scanEnded;  // L1 offset 4
+    uint32_t m_scanEnded;  // L1 offset 12
 
     /** @var Aggregated value used for SUM/MAX/MIN/COUNT() operators. */
-    Datum m_aggValue;  // L1 offset 8
+    Datum m_aggValue;  // L1 offset 16
 
     /** @var Specifies no value was aggregated yet for MAX/MIN() operators. */
-    uint64_t m_maxMinAggNull;  // L1 offset 16
+    uint64_t m_maxMinAggNull;  // L1 offset 24
 
     /** @var Aggregated array used for AVG() operators. */
-    Datum m_avgArray;  // L1 offset 24
+    Datum m_avgArray;  // L1 offset 32
 
     /** @var A set of distinct items. */
-    void* m_distinctSet;  // L1 offset 32
+    void* m_distinctSet;  // L1 offset 40
 
     /*---------------------- JOIN execution state -------------------*/
     /** @var The table used for inner scan in JOIN queries. */
-    MOT::Table* m_innerTable;  // L1 offset 40 (constant)
+    MOT::Table* m_innerTable;  // L1 offset 48 (constant)
 
     /** @var The index used for inner scan in JOIN queries. */
-    MOT::Index* m_innerIndex;  // L1 offset 48 (constant)
+    MOT::Index* m_innerIndex;  // L1 offset 56 (may vary during TRUNCATE TABLE)
+
+    /** @var The index identifier for re-fetching it after TRUNCATE TABLE. */
+    uint64_t m_innerIndexId;  // L1 offset 0 (constant)
 
     /** @var The key object used to search row or iterator in the inner scan in JOIN queries. */
-    MOT::Key* m_innerSearchKey;  // L1 offset 56 (reusable)
+    MOT::Key* m_innerSearchKey;  // L1 offset 8 (reusable)
 
     /** @var The key object used to search end iterator in the inner scan in JOIN queries. */
-    MOT::Key* m_innerEndIteratorKey;  // L1 offset 0 (reusable)
+    MOT::Key* m_innerEndIteratorKey;  // L1 offset 16 (reusable)
 
     /** @var Begin iterator for inner scan in JOIN queries (stateful execution). */
-    MOT::IndexIterator* m_innerBeginIterator;  // L1 offset 8
+    MOT::IndexIterator* m_innerBeginIterator;  // L1 offset 24
 
     /** @var End iterator for inner scan in JOIN queries (stateful execution). */
-    MOT::IndexIterator* m_innerEndIterator;  // L1 offset 16
+    MOT::IndexIterator* m_innerEndIterator;  // L1 offset 32
 
     /** @var Row for inner scan in JOIN queries (stateful execution). */
-    MOT::Row* m_innerRow;  // L1 offset 24
+    MOT::Row* m_innerRow;  // L1 offset 40
 
     /** @var Copy of the outer row (SILO overrides it in the inner scan). */
-    MOT::Row* m_outerRowCopy;  // L1 offset 32
+    MOT::Row* m_outerRowCopy;  // L1 offset 48
 
     /** @var Scan ended flag (stateful execution). */
-    uint64_t m_innerScanEnded;  // L1 offset 40
+    uint64_t m_innerScanEnded;  // L1 offset 56
 
     /*---------------------- Compound Query Execution -------------------*/
     struct SubQueryData {
@@ -170,43 +176,43 @@ struct JitContext {
         /** @var The index used by the sub-query. */
         MOT::Index* m_index;  // L1 offset 32
 
+        /** @var The index identifier for re-fetching it after TRUNCATE TABLE. */
+        uint64_t m_indexId;  // L1 offset 40
+
         /** @var The search key used by the sub-query. */
-        MOT::Key* m_searchKey;  // L1 offset 40
+        MOT::Key* m_searchKey;  // L1 offset 48
 
         /** @var The search key used by a range select sub-query (whether aggregated or limited). */
-        MOT::Key* m_endIteratorKey;  // L1 offset 48
-
-        /** @var Align whole struct size to one cache line. */
-        uint8_t m_padding2[8];  // L1 offset 56
+        MOT::Key* m_endIteratorKey;  // L1 offset 56
     };
 
     /** @var Array of tuple descriptors for each sub-query. */
-    SubQueryData* m_subQueryData;  // L1 offset 48
+    SubQueryData* m_subQueryData;  // L1 offset 0
 
     /** @var The number of sub-queries used. */
-    uint64_t m_subQueryCount;  // L1 offset 56
+    uint64_t m_subQueryCount;  // L1 offset 8
 
     /*---------------------- Cleanup -------------------*/
     /** @var Chain all context objects related to the same source, for cleanup during relation modification. */
-    JitContext* m_nextInSource;  // L1 offset 0
+    JitContext* m_nextInSource;  // L1 offset 16
 
     /** @var The JIT source from which this context originated. */
-    JitSource* m_jitSource;  // L1 offset 8
+    JitSource* m_jitSource;  // L1 offset 24
 
     /*---------------------- Batch Execution -------------------*/
     /**
      * @var The number of times (iterations) a single stateful query was invoked. Used for distinguishing query
      * boundaries in a stateful query execution when client uses batches.
      */
-    uint64_t m_iterCount;  // L1 offset 16
+    uint64_t m_iterCount;  // L1 offset 32
 
     /** @var The number of full query executions. */
-    uint64_t m_queryCount;  // L1 offset 24
+    uint64_t m_queryCount;  // L1 offset 40
 
     /*---------------------- Debug execution state -------------------*/
     /** @var The number of times this context was invoked for execution. */
 #ifdef MOT_JIT_DEBUG
-    uint64_t m_execCount;  // L1 offset 32
+    uint64_t m_execCount;  // L1 offset 48
 #endif
 };
 
@@ -238,6 +244,13 @@ extern void FreeJitContext(JitContext* jitContext);
  * @return The cloned context or NULL if failed.
  */
 extern JitContext* CloneJitContext(JitContext* sourceJitContext);
+
+/**
+ * @brief Re-fetches all index objects in a JIT context.
+ * @param jitContext The JIT context for which index objects should be re-fetched.
+ * @return True if the operation succeeded, otherwise false.
+ */
+extern bool ReFetchIndices(JitContext* jitContext);
 
 /**
  * @brief Prepares a JIT context object for execution. All internal members are allocated and

@@ -4112,10 +4112,16 @@ static JitContext* FinalizeCodegen(JitTvmCodeGenContext* ctx, int max_arg, JitCo
     // setup execution details
     jit_context->m_table = ctx->_table_info.m_table;
     jit_context->m_index = ctx->_table_info.m_index;
+    jit_context->m_indexId = jit_context->m_index->GetExtId();
+    MOT_LOG_TRACE("Installed index id: %" PRIu64, jit_context->m_indexId);
     jit_context->m_tvmFunction = ctx->m_jittedQuery;
     jit_context->m_argCount = max_arg + 1;
     jit_context->m_innerTable = ctx->m_innerTable_info.m_table;
     jit_context->m_innerIndex = ctx->m_innerTable_info.m_index;
+    if (jit_context->m_innerIndex != nullptr) {
+        jit_context->m_innerIndexId = jit_context->m_innerIndex->GetExtId();
+        MOT_LOG_TRACE("Installed inner index id: %" PRIu64, jit_context->m_indexId);
+    }
     jit_context->m_commandType = command_type;
     jit_context->m_subQueryCount = 0;
 
@@ -4150,9 +4156,9 @@ static bool buildScanExpression(JitTvmCodeGenContext* ctx, JitColumnExpr* expr, 
 }
 
 static bool buildPointScan(JitTvmCodeGenContext* ctx, JitColumnExprArray* expr_array, int* max_arg,
-    JitRangeScanType range_scan_type, Instruction* outer_row, int expr_count = 0, int subQueryIndex = -1)
+    JitRangeScanType range_scan_type, Instruction* outer_row, int expr_count = -1, int subQueryIndex = -1)
 {
-    if (expr_count == 0) {
+    if (expr_count == -1) {
         expr_count = expr_array->_count;
     }
     AddInitSearchKey(ctx, range_scan_type, subQueryIndex);
@@ -4175,7 +4181,7 @@ static bool buildPointScan(JitTvmCodeGenContext* ctx, JitColumnExprArray* expr_a
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                     "Generate TVM JIT Code",
                     "Invalid expression table (expected main/outer table %s, got %s)",
-                    ctx->m_innerTable_info.m_table->GetTableName().c_str(),
+                    ctx->_table_info.m_table->GetTableName().c_str(),
                     expr->_table->GetTableName().c_str());
                 return false;
             }
@@ -4254,7 +4260,7 @@ static bool buildClosedRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexS
     JitRangeScanType rangeScanType, Instruction* outerRow, int subQueryIndex)
 {
     // a closed range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
-    bool result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, 0, subQueryIndex);
+    bool result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, -1, subQueryIndex);
     if (result) {
         AddCopyKey(ctx, rangeScanType, subQueryIndex);
 
@@ -4601,7 +4607,7 @@ static bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, i
 
     // if this is a point scan we generate two identical keys for the iterators
     if (indexScan->_scan_type == JIT_INDEX_SCAN_POINT) {
-        result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, 0, subQueryIndex);
+        result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, -1, subQueryIndex);
         if (result) {
             AddCopyKey(ctx, rangeScanType, subQueryIndex);
             *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
@@ -6028,6 +6034,9 @@ static JitContext* JitPointOuterJoinCodegen(const Query* query, const char* quer
     // clear tuple even if row is not found later
     AddExecClearTuple(ctx);
 
+    // emit code to cleanup previous scan in case this is a new scan
+    AddCleanupOldScan(ctx);
+
     // we first check if outer state row was already searched
     Instruction* outer_row_copy = AddGetOuterStateRowCopy(ctx);
     JIT_IF_BEGIN(check_outer_row_ready)
@@ -6133,6 +6142,9 @@ static JitContext* JitPointInnerJoinCodegen(const Query* query, const char* quer
     // clear tuple even if row is not found later
     AddExecClearTuple(ctx);
 
+    // emit code to cleanup previous scan in case this is a new scan
+    AddCleanupOldScan(ctx);
+
     // prepare stateful scan if not done so already, if row not found then emit code to return from function (since this
     // is an outer scan)
     int max_arg = 0;
@@ -6177,6 +6189,9 @@ static JitContext* JitPointInnerJoinCodegen(const Query* query, const char* quer
 
     AddExecStoreVirtualTuple(ctx);
     buildIncrementRowsProcessed(ctx);
+
+    // make sure that next iteration find an empty state row, so scan makes a progress
+    AddResetStateRow(ctx, JIT_RANGE_SCAN_MAIN);
 
     // if a limit clause exists, then increment limit counter and check if reached limit
     buildCheckLimit(ctx, plan->_limit_count);
@@ -6483,7 +6498,7 @@ static bool JitSubSelectCodegen(JitTvmCodeGenContext* ctx, JitCompoundPlan* plan
     // begin the WHERE clause
     int maxArg = 0;
     if (!buildPointScan(
-            ctx, &subPlan->_query._search_exprs, &maxArg, JIT_RANGE_SCAN_SUB_QUERY, nullptr, 0, subQueryIndex)) {
+            ctx, &subPlan->_query._search_exprs, &maxArg, JIT_RANGE_SCAN_SUB_QUERY, nullptr, -1, subQueryIndex)) {
         MOT_LOG_TRACE("Failed to generate jitted code for SELECT sub-query: unsupported WHERE clause type");
         return false;
     }

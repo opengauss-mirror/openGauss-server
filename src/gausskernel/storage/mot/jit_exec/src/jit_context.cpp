@@ -248,6 +248,58 @@ static List* GetSubQueryTargetList(const char* queryString, int subQueryIndex)
     return targetList;
 }
 
+extern bool ReFetchIndices(JitContext* jitContext)
+{
+    // re-fetch main index
+    if ((jitContext->m_commandType != JIT_COMMAND_INSERT) && (jitContext->m_index == nullptr)) {
+        if (jitContext->m_indexId == 0) {
+            MOT_LOG_TRACE("Cannot re-fetch index: missing index identifier");
+            return false;
+        }
+        jitContext->m_index = jitContext->m_table->GetIndexByExtId(jitContext->m_indexId);
+        if (jitContext->m_index == nullptr) {
+            MOT_LOG_TRACE("Failed to fetch index by extern id %" PRIu64, jitContext->m_indexId);
+            return false;
+        }
+    }
+
+    // re-fetch inner index (JOIN commands only)
+    if (IsJoinCommand(jitContext->m_commandType)) {
+        if (jitContext->m_innerIndex == nullptr) {
+            if (jitContext->m_innerIndexId == 0) {
+                MOT_LOG_TRACE("Cannot re-fetch inner index: missing index identifier");
+                return false;
+            }
+            jitContext->m_innerIndex = jitContext->m_innerTable->GetIndexByExtId(jitContext->m_innerIndexId);
+            if (jitContext->m_innerIndex == nullptr) {
+                MOT_LOG_TRACE("Failed to fetch inner index by extern id %" PRIu64, jitContext->m_innerIndexId);
+                return false;
+            }
+        }
+    }
+
+    // re-fetch sub-query indices (COMPOUND commands only)
+    if (jitContext->m_commandType == JIT_COMMAND_COMPOUND_SELECT) {
+        for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
+            JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
+            if (subQueryData->m_index == nullptr) {
+                if (subQueryData->m_indexId == 0) {
+                    MOT_LOG_TRACE("Cannot re-fetch sub-query %u index: missing index identifier", i);
+                    return false;
+                }
+                subQueryData->m_index = subQueryData->m_table->GetIndexByExtId(subQueryData->m_indexId);
+                if (subQueryData->m_index == nullptr) {
+                    MOT_LOG_TRACE(
+                        "Failed to fetch sub-query %u index by extern id %" PRIu64, i, subQueryData->m_indexId);
+                    return false;
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
 extern bool PrepareJitContext(JitContext* jitContext)
 {
     // allocate argument-is-null array
@@ -260,8 +312,15 @@ extern bool PrepareJitContext(JitContext* jitContext)
         }
     }
 
+    // re-fetch all index objects in case they were removed after TRUNCATE TABLE
+    if (jitContext->m_commandType != JIT_COMMAND_INSERT) {
+        if (!ReFetchIndices(jitContext)) {
+            return false;  // safe cleanup during destroy
+        }
+    }
+
     // allocate search key (except when executing INSERT command)
-    if ((jitContext->m_searchKey == NULL) && (jitContext->m_commandType != JIT_COMMAND_INSERT)) {
+    if ((jitContext->m_searchKey == nullptr) && (jitContext->m_commandType != JIT_COMMAND_INSERT)) {
         MOT_LOG_TRACE("Preparing search key from index %s", jitContext->m_index->GetName().c_str());
         jitContext->m_searchKey = PrepareJitSearchKey(jitContext, jitContext->m_index);
         if (jitContext->m_searchKey == NULL) {
@@ -360,7 +419,7 @@ extern bool PrepareJitContext(JitContext* jitContext)
     }
 
     // prepare sub-query data for COMPOUND commands
-    if (jitContext->m_subQueryCount > 0) {
+    if (jitContext->m_commandType == JIT_COMMAND_COMPOUND_SELECT) {
         // allocate sub-query search keys and generate tuple table slot array using session top memory context
         MemoryContext oldCtx = CurrentMemoryContext;
         CurrentMemoryContext = u_sess->top_mem_cxt;
@@ -520,10 +579,8 @@ extern void PurgeJitContext(JitContext* jitContext, uint64_t relationId)
         for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
             JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
             if ((subQueryData->m_table != nullptr) && (subQueryData->m_table->GetTableExId() == relationId)) {
-                MOT_LOG_TRACE("Purging sub-query %u data in JIT context %p by relation id %" PRIu64,
-                    i,
-                    jitContext,
-                    relationId);
+                MOT_LOG_TRACE(
+                    "Purging sub-query %u data in JIT context %p by relation id %" PRIu64, i, jitContext, relationId);
                 CleanupJitContextSubQueryData(subQueryData);
             }
         }
@@ -543,6 +600,7 @@ static void CleanupJitContextPrimary(JitContext* jitContext)
                 jitContext->m_index->DestroyKey(jitContext->m_endIteratorKey);
                 jitContext->m_endIteratorKey = NULL;
             }
+            jitContext->m_index = nullptr;
         }
 
         // cleanup JOIN outer row copy
@@ -565,6 +623,7 @@ static void CleanupJitContextInner(JitContext* jitContext)
                 jitContext->m_innerIndex->DestroyKey(jitContext->m_innerEndIteratorKey);
                 jitContext->m_innerEndIteratorKey = NULL;
             }
+            jitContext->m_innerIndex = nullptr;
         }
     }
 }
@@ -604,6 +663,7 @@ static void CleanupJitContextSubQueryData(JitContext::SubQueryData* subQueryData
             subQueryData->m_index->DestroyKey(subQueryData->m_endIteratorKey);
             subQueryData->m_endIteratorKey = nullptr;
         }
+        subQueryData->m_index = nullptr;
     }
 }
 

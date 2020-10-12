@@ -299,14 +299,36 @@ private:
     }
 
     /**
-     * @brief Helper function for building a configuration tree.
-     * @detail Creates a section. If its parent sections are missing, create them too, recursively up to the root.
-     * @param sectionMap The map of sections containing all parsed sections.
-     * @param fullPathName The full path name of the section.
-     * @param depth The call depth. Used for preventing endless recurrence.
-     * @return The configuration section.
+     * @brief Consolidates the parsed section list into a section map, while merging all duplicate sections.
+     * @param parsedSections The parsed section list.
+     * @param[out] sectionMap The resulting consolidated section map.
+     * @return True if the operations succeeded, otherwise false.
      */
-    ConfigSection* CreateSectionPath(ConfigSectionMap& sectionMap, const char* fullPathName, int depth) const;
+    bool ConsolidateParsedSections(mot_list<ConfigSection*>& parsedSections, ConfigSectionMap& sectionMap);
+
+    /**
+     * @brief Builds the configuration tree from a consolidated configuration section map.
+     * @param sectionMap The section map.
+     * @return True if the operations succeeded, otherwise false.
+     */
+    bool LinkConsolidatedSectionMap(ConfigSectionMap& sectionMap);
+
+    /**
+     * @brief Retrieves the parent of a section or creates it (recursively).
+     * @param section The section whose parent is to be retrieved or created.
+     * @param depth The call depth. Used for preventing endless recurrence.
+     * @param created Specifies whether the parent section was created.
+     * @return The parent section or null if failed.
+     */
+    ConfigSection* GetOrCreateParent(ConfigSection* section, int depth, bool& created);
+
+    /**
+     * @brief Creates the parent of a section (recursively).
+     * @param section The section whose parent is to be created.
+     * @param depth The call depth. Used for preventing endless recurrence.
+     * @return The parent section or null if failed.
+     */
+    ConfigSection* CreateParent(ConfigSection* section, int depth);
 
     DECLARE_CLASS_LOGGER()
 };

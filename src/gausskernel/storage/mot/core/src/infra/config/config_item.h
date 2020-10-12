@@ -143,10 +143,10 @@ public:
     }
 
     /** @var Constant denoting the character separating configuration item path names. */
-    static constexpr char PATH_SEP = '/';
+    static constexpr char PATH_SEP = '.';
 
     /** @var Constant denoting the string separating configuration item path names. */
-    static constexpr const char* PATH_SEP_STR = "/";
+    static constexpr const char* PATH_SEP_STR = ".";
 
     /** @var The maximum size in characters of a configuration path. */
     static constexpr size_t CFG_MAX_PATH_LEN = 4096;

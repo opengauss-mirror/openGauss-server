@@ -96,8 +96,10 @@ extern int JitExecQuery(
 /**
  * @brief Purges the global cache of JIT source stencils from all entries that refer the given relation id.
  * @param relationId The external identifier of the relation to be purged.
+ * @param purgeOnly Specifies whether to just purge all keys/indexes referring to the given relation, or should the JIT
+ * context also be set as expired (which triggers re-compilation of the JIT function).
  */
-extern void PurgeJitSourceCache(uint64_t relationId);
+extern void PurgeJitSourceCache(uint64_t relationId, bool purgeOnly);
 
 // externalize functions defined elsewhere
 
