@@ -2046,6 +2046,26 @@ typedef struct knl_u_ext_fdw_context {
 /* Info need to pass from leader to worker */
 struct ParallelHeapScanDescData;
 typedef uint64 XLogRecPtr;
+typedef struct ParallelQueryInfo {
+    struct SharedExecutorInstrumentation *instrumentation;
+    BufferUsage *bufUsage;
+    char *tupleQueue;
+    char *pstmt_space;
+    char *param_space;
+    Size param_len;
+    int pscan_num;
+    ParallelHeapScanDescData **pscan;
+} ParallelQueryInfo;
+
+struct BTShared;
+struct SharedSort;
+typedef struct ParallelBtreeInfo {
+    char *queryText;
+    BTShared *btShared;
+    SharedSort *sharedSort;
+    SharedSort *sharedSort2;
+} ParallelBtreeInfo;
+
 typedef struct ParallelInfoContext {
     Oid database_id;
     Oid authenticated_user_id;
@@ -2060,11 +2080,6 @@ typedef struct ParallelInfoContext {
     BackendId parallel_master_backend_id;
     TimestampTz xact_ts;
     TimestampTz stmt_ts;
-    char *pstmt_space;
-    char *param_space;
-    Size param_len;
-    int pscan_num;
-    ParallelHeapScanDescData **pscan;
     int usedComboCids;
     struct ComboCidKeyData *comboCids;
     char *tsnapspace;
@@ -2092,14 +2107,17 @@ typedef struct ParallelInfoContext {
     TransactionId *ParallelCurrentXids;
     char *library_name;
     char *function_name;
-    BufferUsage *bufUsage;
-    char *tupleQueue;
-    struct SharedExecutorInstrumentation *instrumentation;
     char *namespace_search_path;
 #ifdef __USE_NUMA
     int numaNode;
     cpu_set_t *cpuset;
 #endif
+
+    union {
+        ParallelQueryInfo queryInfo; /* parameters for parallel query only */
+        ParallelBtreeInfo btreeInfo; /* parameters for parallel create index(btree) only */
+    };
+
     /* Mutex protects remaining fields. */
     slock_t mutex;
     /* Maximum XactLastRecEnd of any worker. */
@@ -2108,8 +2126,9 @@ typedef struct ParallelInfoContext {
 
 typedef struct knl_u_parallel_context {
     ParallelInfoContext *pwCtx;
-    MemoryContext memCtx;
-    bool used;
+    MemoryContext memCtx; /* memory context used to malloc memory */
+    slist_head on_detach; /* On-detach callbacks. */
+    bool used; /* used or not */
 } knl_u_parallel_context;
 
 enum knl_session_status {

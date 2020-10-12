@@ -672,12 +672,12 @@ void ExecSeqScanInitializeDSM(SeqScanState *node, ParallelContext *pcxt, int nod
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)pcxt->seg;
 
     /* Here we can't use palloc, cause we have switch to old memctx in ExecInitParallelPlan */
-    cxt->pwCtx->pscan[nodeid] = (ParallelHeapScanDesc)MemoryContextAllocZero(cxt->memCtx, node->pscan_len);
-    heap_parallelscan_initialize(cxt->pwCtx->pscan[nodeid], node->pscan_len, node->ss_currentRelation,
+    cxt->pwCtx->queryInfo.pscan[nodeid] = (ParallelHeapScanDesc)MemoryContextAllocZero(cxt->memCtx, node->pscan_len);
+    heap_parallelscan_initialize(cxt->pwCtx->queryInfo.pscan[nodeid], node->pscan_len, node->ss_currentRelation,
         estate->es_snapshot);
-    cxt->pwCtx->pscan[nodeid]->plan_node_id = node->ps.plan->plan_node_id;
+    cxt->pwCtx->queryInfo.pscan[nodeid]->plan_node_id = node->ps.plan->plan_node_id;
     node->ss_currentScanDesc =
-        (AbsTblScanDesc)heap_beginscan_parallel(node->ss_currentRelation, cxt->pwCtx->pscan[nodeid]);
+        (AbsTblScanDesc)heap_beginscan_parallel(node->ss_currentRelation, cxt->pwCtx->queryInfo.pscan[nodeid]);
 }
 
 /* ----------------------------------------------------------------
@@ -691,9 +691,9 @@ void ExecSeqScanInitializeWorker(SeqScanState *node, void *context)
     ParallelHeapScanDesc pscan = NULL;
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)context;
 
-    for (int i = 0; i < cxt->pwCtx->pscan_num; i++) {
-        if (node->ps.plan->plan_node_id == cxt->pwCtx->pscan[i]->plan_node_id) {
-            pscan = cxt->pwCtx->pscan[i];
+    for (int i = 0; i < cxt->pwCtx->queryInfo.pscan_num; i++) {
+        if (node->ps.plan->plan_node_id == cxt->pwCtx->queryInfo.pscan[i]->plan_node_id) {
+            pscan = cxt->pwCtx->queryInfo.pscan[i];
             break;
         }
     }

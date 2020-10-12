@@ -31,6 +31,13 @@
 #include "utils/memutils.h"
 #include "postmaster/bgworker_internals.h"
 
+/* Backend-local tracking for on-detach callbacks. */
+typedef struct __dsm_segment_detach_callback {
+    on_dsm_detach_callback function;
+    Datum arg;
+    slist_node node;
+} dsm_segment_detach_callback;
+
 #ifdef __USE_NUMA
 static void RestoreCpuAffinity(cpu_set_t *cpuset)
 {
@@ -44,17 +51,44 @@ static void RestoreCpuAffinity(cpu_set_t *cpuset)
 }
 #endif
 
-void dsm_detach(void **seg)
+/*
+ * newMemCtx means whether the memctx is new created or not.
+ * When newMemCtx is true, we just need to call pfree to free the mem,
+ * or we can call MemoryContextDelete to jsut delete the whole new created
+ * memctx.
+ */
+void dsm_detach(void **seg, bool newMemCtx)
 {
+    Assert(seg != NULL);
     Assert(*seg != NULL);
     knl_u_parallel_context *ctx = (knl_u_parallel_context *)*seg;
+    /*
+     * Invoke registered callbacks.  Just in case one of those callbacks
+     * throws a further error that brings us back here, pop the callback
+     * before invoking it, to avoid infinite error recursion.
+     */
+    while (!slist_is_empty(&ctx->on_detach)) {
+        slist_node *node = slist_pop_head_node(&ctx->on_detach);
+        dsm_segment_detach_callback *cb = slist_container(dsm_segment_detach_callback, node, node);
+        on_dsm_detach_callback function = cb->function;
+        Datum arg = cb->arg;
+        pfree(cb);
+
+        function(seg, arg);
+    }
+
+    if (newMemCtx) {
 #ifdef __USE_NUMA
-    RestoreCpuAffinity(ctx->pwCtx->cpuset);
+        RestoreCpuAffinity(ctx->pwCtx->cpuset);
 #endif
-    MemoryContextDelete(ctx->memCtx);
-    ctx->memCtx = NULL;
-    ctx->pwCtx = NULL;
-    ctx->used = false;
+        MemoryContextDelete(ctx->memCtx);
+        ctx->memCtx = NULL;
+        ctx->pwCtx = NULL;
+        ctx->used = false;
+    } else {
+        pfree(ctx->pwCtx);
+        pfree(ctx);
+    }
 }
 
 void *dsm_create(void)
@@ -69,11 +103,24 @@ void *dsm_create(void)
             (void)MemoryContextSwitchTo(oldContext);
 
             u_sess->parallel_ctx[i].used = true;
+            slist_init(&u_sess->parallel_ctx[i].on_detach);
             return &(u_sess->parallel_ctx[i]);
         }
     }
 
-    ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("too many dynamic shared memory segments")));
+    ereport(WARNING, (errmsg("too many dynamic shared memory segments")));
     return NULL;
 }
 
+/*
+ * Register an on-detach callback for a dynamic shared memory segment.
+ */
+void on_dsm_detach(void *seg, on_dsm_detach_callback function, Datum arg)
+{
+    dsm_segment_detach_callback *cb =
+        (dsm_segment_detach_callback*)MemoryContextAlloc(TopMemoryContext, sizeof(dsm_segment_detach_callback));
+    cb->function = function;
+    cb->arg = arg;
+    knl_u_parallel_context *ctx = (knl_u_parallel_context *)seg;
+    slist_push_head(&ctx->on_detach, &cb->node);
+}

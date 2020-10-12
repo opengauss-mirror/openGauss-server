@@ -145,14 +145,14 @@ static bool ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateConte
 
     /* Call estimators for parallel-aware nodes. */
     if (planstate->plan->parallel_aware) {
-		switch (nodeTag(planstate)) {
-			case T_SeqScanState:
-				ExecSeqScanEstimate((SeqScanState *)planstate, e->pcxt);
-				break;
-			default:
-				break;
-		}
-	}
+        switch (nodeTag(planstate)) {
+            case T_SeqScanState:
+                ExecSeqScanEstimate((SeqScanState *)planstate, e->pcxt);
+                break;
+            default:
+                break;
+        }
+    }
 
     return planstate_tree_walker(planstate, (bool (*)())ExecParallelEstimate, e);
 }
@@ -179,16 +179,16 @@ static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitiali
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)d->pcxt->seg;
 
     /* Call initializers for parallel-aware plan nodes. */
-	if (planstate->plan->parallel_aware) {
-		switch (nodeTag(planstate)) {
-			case T_SeqScanState:
-				ExecSeqScanInitializeDSM((SeqScanState *)planstate, d->pcxt, cxt->pwCtx->pscan_num);
-				cxt->pwCtx->pscan_num++;
-				break;
-			default:
-				break;
-		}
-	}
+    if (planstate->plan->parallel_aware) {
+        switch (nodeTag(planstate)) {
+            case T_SeqScanState:
+                ExecSeqScanInitializeDSM((SeqScanState *)planstate, d->pcxt, cxt->pwCtx->queryInfo.pscan_num);
+                cxt->pwCtx->queryInfo.pscan_num++;
+                break;
+            default:
+                break;
+        }
+    }
 
     return planstate_tree_walker(planstate, (bool (*)())ExecParallelInitializeDSM, d);
 }
@@ -211,10 +211,10 @@ static shm_mq_handle **ExecParallelSetupTupleQueues(ParallelContext *pcxt, bool 
      * otherwise, find the already allocated space.
      */
     if (!reinitialize) {
-        cxt->pwCtx->tupleQueue = (char *)palloc0(PARALLEL_TUPLE_QUEUE_SIZE * (Size)pcxt->nworkers);
+        cxt->pwCtx->queryInfo.tupleQueue = (char *)palloc0(PARALLEL_TUPLE_QUEUE_SIZE * (Size)pcxt->nworkers);
     }
-    Assert(cxt->pwCtx->tupleQueue != NULL);
-    char *tqueuespace = cxt->pwCtx->tupleQueue;
+    Assert(cxt->pwCtx->queryInfo.tupleQueue != NULL);
+    char *tqueuespace = cxt->pwCtx->queryInfo.tupleQueue;
 
     /* Create the queues, and become the receiver for each. */
     for (int i = 0; i < pcxt->nworkers; ++i) {
@@ -228,6 +228,27 @@ static shm_mq_handle **ExecParallelSetupTupleQueues(ParallelContext *pcxt, bool 
 }
 
 /*
+ * Set up tuple queue readers to read the results of a parallel subplan.
+ * All the workers are expected to return tuples matching tupDesc.
+ *
+ * This is separate from ExecInitParallelPlan() because we can launch the
+ * worker processes and let them start doing something before we do this.
+ */
+void ExecParallelCreateReaders(ParallelExecutorInfo *pei, TupleDesc tupDesc)
+{
+    Assert(pei->reader == NULL);
+    int nworkers = pei->pcxt->nworkers_launched;
+    if (nworkers > 0) {
+        pei->reader = (TupleQueueReader **)palloc((uint32)nworkers * sizeof(TupleQueueReader *));
+        for (int i = 0; i < nworkers; i++) {
+            shm_mq_set_handle(pei->tqueue[i], pei->pcxt->worker[i].bgwhandle);
+            pei->reader[i] = CreateTupleQueueReader(pei->tqueue[i], tupDesc);
+        }
+    }
+}
+
+
+/*
  * Re-initialize the parallel executor info such that it can be reused by
  * workers.
  */
@@ -235,6 +256,7 @@ void ExecParallelReinitialize(ParallelExecutorInfo *pei)
 {
     ReinitializeParallelDSM(pei->pcxt);
     pei->tqueue = ExecParallelSetupTupleQueues(pei->pcxt, true);
+    pei->reader = NULL;
     pei->finished = false;
 }
 
@@ -289,21 +311,23 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
      * asked for has been allocated or initialized yet, though, so do that.
      */
     MemoryContext oldcontext = MemoryContextSwitchTo(cxt->memCtx);
+    ParallelQueryInfo queryInfo;
+    int rc = memset_s(&queryInfo, sizeof(ParallelQueryInfo), 0, sizeof(ParallelQueryInfo));
+    securec_check(rc, "", "");
 
     /* Store serialized PlannedStmt. */
-    cxt->pwCtx->pstmt_space = ExecSerializePlan(planstate->plan, estate);
+    queryInfo.pstmt_space = ExecSerializePlan(planstate->plan, estate);
 
     /* Store serialized ParamListInfo. */
-    cxt->pwCtx->param_space = (char *)palloc0(param_len);
-    cxt->pwCtx->param_len = param_len;
-    SerializeParamList(estate->es_param_list_info, cxt->pwCtx->param_space, param_len);
+    queryInfo.param_space = (char *)palloc0(param_len);
+    queryInfo.param_len = param_len;
+    SerializeParamList(estate->es_param_list_info, queryInfo.param_space, param_len);
 
     /* Allocate space for each worker's BufferUsage; no need to initialize. */
-    cxt->pwCtx->bufUsage = (BufferUsage *)palloc0(sizeof(BufferUsage) * pcxt->nworkers);
-    pei->buffer_usage = cxt->pwCtx->bufUsage;
-
-    /* Set up tuple queues. */
-    pei->tqueue = ExecParallelSetupTupleQueues(pcxt, false);
+    queryInfo.bufUsage = (BufferUsage *)palloc0(sizeof(BufferUsage) * pcxt->nworkers);
+    pei->buffer_usage = queryInfo.bufUsage;
+    /* We don't need the TupleQueueReaders yet, though. */
+    pei->reader = NULL;
 
     /*
      * If instrumentation options were supplied, allocate space for the
@@ -311,19 +335,19 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
      * during ExecParallelInitializeDSM.
      */
     if (estate->es_instrument) {
-        cxt->pwCtx->instrumentation = (SharedExecutorInstrumentation *)palloc0(instrumentation_len);
-        cxt->pwCtx->instrumentation->instrument_options = estate->es_instrument;
-        cxt->pwCtx->instrumentation->instrument_offset = instrument_offset;
-        cxt->pwCtx->instrumentation->num_workers = nworkers;
-        cxt->pwCtx->instrumentation->num_plan_nodes = e.nnodes;
-        Instrumentation *instrument = GetInstrumentationArray(cxt->pwCtx->instrumentation);
+        queryInfo.instrumentation = (SharedExecutorInstrumentation *)palloc0(instrumentation_len);
+        queryInfo.instrumentation->instrument_options = estate->es_instrument;
+        queryInfo.instrumentation->instrument_offset = instrument_offset;
+        queryInfo.instrumentation->num_workers = nworkers;
+        queryInfo.instrumentation->num_plan_nodes = e.nnodes;
+        Instrumentation *instrument = GetInstrumentationArray(queryInfo.instrumentation);
         for (int i = 0; i < nworkers * e.nnodes; ++i) {
             InstrInit(&instrument[i], estate->es_instrument);
         }
-        pei->instrumentation = cxt->pwCtx->instrumentation;
+        pei->instrumentation = queryInfo.instrumentation;
     }
 
-    cxt->pwCtx->pscan = (ParallelHeapScanDesc *)palloc0(sizeof(ParallelHeapScanDesc) * e.nnodes);
+    queryInfo.pscan = (ParallelHeapScanDesc *)palloc0(sizeof(ParallelHeapScanDesc) * e.nnodes);
 
     /*
      * Give parallel-aware nodes a chance to initialize their shared data.
@@ -331,8 +355,13 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
      * if it exists.
      */
     d.pcxt = pcxt;
-    d.instrumentation = cxt->pwCtx->instrumentation;
+    d.instrumentation = queryInfo.instrumentation;
     d.nnodes = 0;
+
+    cxt->pwCtx->queryInfo = queryInfo;
+
+    /* Set up the tuple queues that the workers will write into. */
+    pei->tqueue = ExecParallelSetupTupleQueues(pcxt, false);
 
     /* Here we switch to old context, cause heap_beginscan_parallel need malloc memory */
     (void)MemoryContextSwitchTo(oldcontext);
@@ -397,12 +426,43 @@ void ExecParallelFinish(ParallelExecutorInfo *pei)
     if (pei->finished)
         return;
 
-    /* First, wait for the workers to finish. */
+    int nworkers = pei->pcxt->nworkers_launched;
+    int i;
+
+    /*
+     * Detach from tuple queues ASAP, so that any still-active workers will
+     * notice that no further results are wanted.
+     */
+    if (pei->tqueue != NULL) {
+        for (i = 0; i < nworkers; i++) {
+            shm_mq_detach(pei->tqueue[i]);
+        }
+        pfree(pei->tqueue);
+        pei->tqueue = NULL;
+    }
+
+    /*
+     * While we're waiting for the workers to finish, let's get rid of the
+     * tuple queue readers.  (Any other local cleanup could be done here too.)
+     */
+    if (pei->reader != NULL) {
+        for (i = 0; i < nworkers; i++) {
+            DestroyTupleQueueReader(pei->reader[i]);
+        }
+        pfree(pei->reader);
+        pei->reader = NULL;
+    }
+
+    /* Now wait for the workers to finish. */
     WaitForParallelWorkersToFinish(pei->pcxt);
 
-    /* Next, accumulate buffer usage. */
-    for (int i = 0; i < pei->pcxt->nworkers; ++i)
+    /*
+     * Next, accumulate buffer usage.  (This must wait for the workers to
+     * finish, or we might get incomplete data.)
+     */
+    for (i = 0; i < nworkers; ++i) {
         InstrAccumParallelQuery(&pei->buffer_usage[i]);
+    }
 
     /* Finally, accumulate instrumentation, if any. */
     if (pei->instrumentation) {
@@ -436,7 +496,7 @@ static DestReceiver *ExecParallelGetReceiver(void *seg)
     Assert(seg != NULL);
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)seg;
 
-    char *mqspace = cxt->pwCtx->tupleQueue;
+    char *mqspace = cxt->pwCtx->queryInfo.tupleQueue;
     mqspace += t_thrd.bgworker_cxt.ParallelWorkerNumber * PARALLEL_TUPLE_QUEUE_SIZE;
     shm_mq *mq = (shm_mq *)mqspace;
     shm_mq_set_sender(mq, t_thrd.proc);
@@ -451,10 +511,10 @@ static QueryDesc *ExecParallelGetQueryDesc(void *seg, DestReceiver *receiver, in
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)seg;
 
     /* Reconstruct leader-supplied PlannedStmt. */
-    PlannedStmt *pstmt = (PlannedStmt *)stringToNode(cxt->pwCtx->pstmt_space);
+    PlannedStmt *pstmt = (PlannedStmt *)stringToNode(cxt->pwCtx->queryInfo.pstmt_space);
 
     /* Reconstruct ParamListInfo. */
-    ParamListInfo paramLI = RestoreParamList(cxt->pwCtx->param_space, cxt->pwCtx->param_len);
+    ParamListInfo paramLI = RestoreParamList(cxt->pwCtx->queryInfo.param_space, cxt->pwCtx->queryInfo.param_len);
 
     /*
      * Create a QueryDesc for the query.
@@ -553,7 +613,7 @@ void ParallelQueryMain(void *seg)
     /* Set up DestReceiver, SharedExecutorInstrumentation, and QueryDesc. */
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)seg;
     DestReceiver *receiver = ExecParallelGetReceiver(seg);
-    SharedExecutorInstrumentation *instrumentation = cxt->pwCtx->instrumentation;
+    SharedExecutorInstrumentation *instrumentation = cxt->pwCtx->queryInfo.instrumentation;
     if (instrumentation != NULL)
         instrument_options = instrumentation->instrument_options;
     QueryDesc *queryDesc = ExecParallelGetQueryDesc(seg, receiver, instrument_options);
@@ -568,7 +628,7 @@ void ParallelQueryMain(void *seg)
     ExecutorFinish(queryDesc);
 
     /* Report buffer usage during parallel execution. */
-    BufferUsage *buffer_usage = cxt->pwCtx->bufUsage;
+    BufferUsage *buffer_usage = cxt->pwCtx->queryInfo.bufUsage;
     InstrEndParallelQuery(&buffer_usage[t_thrd.bgworker_cxt.ParallelWorkerNumber]);
 
     /* Report instrumentation data if any instrumentation options are set. */

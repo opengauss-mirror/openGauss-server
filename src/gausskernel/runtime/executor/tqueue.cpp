@@ -452,12 +452,9 @@ TupleQueueReader *CreateTupleQueueReader(shm_mq_handle *handle, TupleDesc tupled
  */
 void DestroyTupleQueueReader(TupleQueueReader *reader)
 {
-    if (reader->queue != NULL) {
-        shm_mq_detach(reader->queue);
-        reader->queue = NULL;
-    }
-    if (reader->remapinfo != NULL)
+    if (reader->remapinfo != NULL) {
         pfree(reader->remapinfo);
+    }
     pfree(reader);
 }
 
