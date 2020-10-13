@@ -222,9 +222,9 @@ public:
      * @brief Queries the validity of the row header.
      * @return Boolean value denoting whether the row is valid or not.
      */
-    inline bool IsRowValid() const
+    inline bool IsRowDeleted() const
     {
-        return m_rowHeader.IsRowValid();
+        return m_rowHeader.IsRowDeleted();
     }
 
     /**

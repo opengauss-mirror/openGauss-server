@@ -373,7 +373,9 @@ bool OccTransactionManager::WriteChanges(TxnManager* txMan)
                     access->m_origSentinel->SetNextPtr(access->m_auxRow->GetPrimarySentinel());
                 }
                 // upgrade should not change the reference count!
-                access->m_origSentinel->SetUpgradeCounter();
+                if (access->m_origSentinel->IsCommited()) {
+                    access->m_origSentinel->SetUpgradeCounter();
+                }
             }
         }
     }
@@ -402,6 +404,8 @@ bool OccTransactionManager::WriteChanges(TxnManager* txMan)
             access->m_origSentinel->UnSetDirty();
         }
     }
+
+    CleanRowsFromIndexes(txMan);
 
     if (cfg.m_enableCheckpoint) {
         GetCheckpointManager()->CommitTransaction(txMan, m_rowsSetSize);

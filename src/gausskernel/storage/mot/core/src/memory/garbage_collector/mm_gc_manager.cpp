@@ -40,7 +40,7 @@ GcLock g_gcGlobalEpochLock;
 
 GcManager* GcManager::allGcManagers = nullptr;
 
-inline GcManager::GcManager(int purpose, int getThreadId, int rcuMaxFreeCount)
+inline GcManager::GcManager(GC_TYPE purpose, int getThreadId, int rcuMaxFreeCount)
     : m_rcuFreeCount(rcuMaxFreeCount), m_tid(getThreadId), m_purpose(purpose)
 {}
 
@@ -80,7 +80,7 @@ bool GcManager::Initialize()
     return result;
 }
 
-GcManager* GcManager::Make(int purpose, int threadId, int rcuMaxFreeCount)
+GcManager* GcManager::Make(GC_TYPE purpose, int threadId, int rcuMaxFreeCount)
 {
     GcManager* gc = nullptr;
 
@@ -247,7 +247,11 @@ void GcManager::CleanIndexItems(uint32_t indexId, bool dropIndex)
     }
     m_managerLock.unlock();
     if (counter) {
-        MOT_LOG_INFO("threadId = %d cleaned from index id = %d items = %d\n", m_tid, indexId, counter);
+        MOT_LOG_INFO("Entity:%s threadId = %d cleaned from index id = %d items = %d\n",
+            enGcTypes[m_purpose],
+            m_tid,
+            indexId,
+            counter);
     }
 }
 

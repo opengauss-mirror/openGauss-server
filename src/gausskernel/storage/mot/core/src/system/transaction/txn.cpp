@@ -248,7 +248,6 @@ RC TxnManager::CommitInternal(uint64_t csn)
     if (!GetGlobalConfiguration().m_enableRedoLog ||
         GetGlobalConfiguration().m_redoLogHandlerType == RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
         m_occManager.ReleaseLocks(this);
-        m_occManager.CleanRowsFromIndexes(this);
     }
     return RC_OK;
 }
@@ -313,7 +312,6 @@ RC TxnManager::CommitPrepared(uint64_t transactionId)
     if (!GetGlobalConfiguration().m_enableRedoLog ||
         GetGlobalConfiguration().m_redoLogHandlerType == RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
         m_occManager.ReleaseLocks(this);
-        m_occManager.CleanRowsFromIndexes(this);
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddCommitPreparedTxn();
     return RC_OK;
@@ -340,7 +338,6 @@ RC TxnManager::EndTransaction()
         GetGlobalConfiguration().m_redoLogHandlerType != RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER &&
         IsFailedCommitPrepared() == false) {
         m_occManager.ReleaseLocks(this);
-        m_occManager.CleanRowsFromIndexes(this);
     }
     CleanDDLChanges();
     Cleanup();
@@ -638,7 +635,7 @@ Row* TxnManager::RemoveKeyFromIndex(Row* row, Sentinel* sentinel)
     Table* table = row->GetTable();
 
     Row* outputRow = nullptr;
-    if (row->GetStable() == nullptr) {
+    if (sentinel->GetStable() == nullptr) {
         outputRow = table->RemoveKeyFromIndex(row, sentinel, m_threadId, GetGcSession());
     } else {
         // Checkpoint works on primary-sentinel only!
