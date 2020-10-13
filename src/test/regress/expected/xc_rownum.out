@@ -1634,5 +1634,16 @@ explain select * from student where not(rownum > 3 or id = 1);
 (3 rows)
 
 
+-- ROWNUM with ORDER BY
+explain select * from test where rownum < 5 order by 1;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Sort  (cost=40.36..41.30 rows=378 width=42)
+   Sort Key: id
+   ->  Seq Scan on test  (cost=0.00..24.18 rows=378 width=42)
+         Filter: (ROWNUM < 5)
+(4 rows)
+
+
 drop table student;
 drop table test;
