@@ -26,7 +26,7 @@
 /* Functions that create or remove mappings. */
 extern void *dsm_create(void);
 #define dsm_attach(dsmHandle)
-extern void dsm_detach(void **seg);
+extern void dsm_detach(void **seg, bool newMemCtx);
 
 /* Resource management functions. */
 #define dsm_pin_mapping(dsmSegment)
@@ -41,8 +41,7 @@ extern void dsm_detach(void **seg);
 #define dsm_segment_handle(dsmSegment)
 
 /* Cleanup hooks. */
-#define on_dsm_detach(dsmSegment, callbackFunc, arg)
-#define cancel_on_dsm_detach(dsmSegment, callbackFunc, arg)
-#define reset_on_dsm_detach
+typedef void (*on_dsm_detach_callback) (void *seg, Datum arg);
+extern void on_dsm_detach(void *seg, on_dsm_detach_callback function, Datum arg);
 
 #endif /* DSM_H */

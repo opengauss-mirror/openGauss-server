@@ -132,8 +132,22 @@ void InitializeParallelDSM(ParallelContext *pcxt, const void *snap)
      */
     pcxt->seg = dsm_create();
 
-    knl_u_parallel_context *cxt = (knl_u_parallel_context *)pcxt->seg;
-    MemoryContext oldcontext = MemoryContextSwitchTo(cxt->memCtx);
+    MemoryContext oldcontext = NULL;
+    knl_u_parallel_context *cxt = NULL;
+    if (pcxt->seg != NULL) {
+        cxt = (knl_u_parallel_context *)pcxt->seg;
+        oldcontext = MemoryContextSwitchTo(cxt->memCtx);
+    } else {
+        /* DSM segment is full, use backend private memory, set worker to 0, fallback to serial query */
+        oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+        pcxt->nworkers = 0;
+        pcxt->seg = palloc(sizeof(knl_u_parallel_context));
+        cxt = (knl_u_parallel_context *)pcxt->seg;
+        cxt->memCtx = TopMemoryContext;
+        cxt->pwCtx = (ParallelInfoContext*)palloc0(sizeof(ParallelInfoContext));
+        cxt->used = true;
+        slist_init(&cxt->on_detach);
+    }
 
     /* Initialize fixed-size state in shared memory. */
     cxt->pwCtx->database_id = u_sess->proc_cxt.MyDatabaseId;
@@ -644,7 +658,7 @@ void DestroyParallelContext(ParallelContext *pcxt)
      * stored there.
      */
     if (pcxt->seg != NULL) {
-        dsm_detach(&(pcxt->seg));
+        dsm_detach(&(pcxt->seg), pcxt->nworkers > 0 ? true : false);
         pcxt->seg = NULL;
     }
 
@@ -1052,6 +1066,7 @@ void ParallelWorkerMain(Datum main_arg)
 
     /* Report success. */
     pq_putmessage('X', NULL, 0);
+    pq_stop_redirect_to_shm_mq();
 }
 
 /*
