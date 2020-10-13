@@ -444,5 +444,8 @@ explain select * from student where not(rownum < 3 + 2);
 explain select * from student where not(rownum < 3 and id = 1);
 explain select * from student where not(rownum > 3 or id = 1);
 
+-- ROWNUM with ORDER BY
+explain select * from test where rownum < 5 order by 1;
+
 drop table student;
 drop table test;

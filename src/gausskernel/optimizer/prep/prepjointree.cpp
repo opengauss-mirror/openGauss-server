@@ -2963,7 +2963,10 @@ void preprocess_rownum(PlannerInfo *root, Query *parse)
     if (quals == NULL) {
         return;
     }
-
+    /* If it includes {order by}, can not be rewrited */
+    if (parse->sortClause != NULL) {
+        return;
+    }
     if (parse->limitCount != NULL) {
         parse->limitCount = eval_const_expressions(root, parse->limitCount);
         if (!IsA(parse->limitCount, Const)) {
