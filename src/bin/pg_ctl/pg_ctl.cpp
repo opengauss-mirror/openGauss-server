@@ -3983,6 +3983,13 @@ static void do_actual_build(uint32 term)
 {
     GaussState state;
     errno_t tnRet = 0;
+    char cwd[MAXPGPATH];
+
+    if (getcwd(cwd, MAXPGPATH) == NULL) {
+        pg_fatal(_("could not identify current directory: %s"), gs_strerror(errno));
+        exit(1);
+    }
+    pg_log(PG_WARNING, _("current workdir is (%s).\n"), cwd);
 
     set_build_pid(getpid());
 
@@ -4020,6 +4027,10 @@ static void do_actual_build(uint32 term)
         securec_check_ss_c(tnRet, "\0", "\0");
         start_time = time(NULL);
         if (needstartafterbuild == true) {
+            if (0 != chdir(cwd)) {
+                pg_fatal(_("the current work directory: %s could not be changed"), gs_strerror(errno));
+                exit(1);
+            }
             do_start();
         }
         set_build_pid(0);
