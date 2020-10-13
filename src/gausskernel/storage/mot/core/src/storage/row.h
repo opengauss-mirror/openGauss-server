@@ -145,7 +145,7 @@ public:
         // We test to make sure pointer was not return into the pull;
         // If so we copy garbage and we fall in validation.
         if (data != nullptr) {
-            errno_t erc = memcpy_s(this->m_data, this->GetTupleSize(), data, size);
+            errno_t erc = memcpy_s(m_data, GetTupleSize(), data, size);
             securec_check(erc, "\0", "\0");
         }
     }
@@ -190,7 +190,7 @@ public:
      */
     inline void SetAbsentRow()
     {
-        this->m_rowHeader.SetAbsentBit();
+        m_rowHeader.SetAbsentBit();
     }
 
     /**
@@ -198,7 +198,7 @@ public:
      */
     inline void SetAbsentLockedRow()
     {
-        this->m_rowHeader.SetAbsentLockedBit();
+        m_rowHeader.SetAbsentLockedBit();
     }
 
     /**
@@ -206,7 +206,7 @@ public:
      */
     inline void UnsetAbsentRow()
     {
-        this->m_rowHeader.UnsetAbsentBit();
+        m_rowHeader.UnsetAbsentBit();
     }
 
     /**
@@ -215,7 +215,7 @@ public:
      */
     inline bool IsAbsentRow() const
     {
-        return this->m_rowHeader.IsAbsent();
+        return m_rowHeader.IsAbsent();
     }
 
     /**
@@ -233,7 +233,7 @@ public:
      */
     inline uint64_t GetCommitSequenceNumber() const
     {
-        return this->m_rowHeader.GetCSN();
+        return m_rowHeader.GetCSN();
     }
 
     /**
@@ -242,7 +242,7 @@ public:
      */
     inline void SetCommitSequenceNumber(uint64_t csn)
     {
-        this->m_rowHeader.SetCSN(csn);
+        m_rowHeader.SetCSN(csn);
     }
 
     /**
@@ -540,7 +540,7 @@ protected:
      */
     inline void SetValue(int colId, char* value)
     {
-        this->SetValue(colId, const_cast<const char*>(value));
+        SetValue(colId, const_cast<const char*>(value));
     }
 
     // disable override

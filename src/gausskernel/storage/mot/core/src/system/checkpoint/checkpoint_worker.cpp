@@ -246,6 +246,13 @@ void CheckpointWorkerPool::WorkerFunc()
         return;
     }
     SessionContext* sessionContext = GetSessionManager()->CreateSessionContext();
+    if (sessionContext == nullptr) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: Failed to initialize Session Context");
+        m_cpManager.OnError(ErrCodes::MEMORY, "Memory allocation failure");
+        MOT::MOTEngine::GetInstance()->OnCurrentThreadEnding();
+        MOT_LOG_DEBUG("thread exiting");
+        return;
+    }
     GcManager* gcSession = sessionContext->GetTxnManager()->GetGcSession();
     gcSession->SetGcType(GcManager::GC_CHECKPOINT);
     int threadId = MOTCurrThreadId;
@@ -258,6 +265,7 @@ void CheckpointWorkerPool::WorkerFunc()
     if (!deletedList) {
         MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: Failed to initialize buffer");
         m_cpManager.OnError(ErrCodes::MEMORY, "Memory allocation failure");
+        GetSessionManager()->DestroySessionContext(sessionContext);
         MOT::MOTEngine::GetInstance()->OnCurrentThreadEnding();
         MOT_LOG_DEBUG("thread exiting");
         return;
