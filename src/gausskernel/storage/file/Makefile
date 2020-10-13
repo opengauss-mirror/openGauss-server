@@ -9,6 +9,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = fd.o buffile.o copydir.o reinit.o lz4_file.o
+OBJS = fd.o buffile.o copydir.o reinit.o lz4_file.o sharedfileset.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

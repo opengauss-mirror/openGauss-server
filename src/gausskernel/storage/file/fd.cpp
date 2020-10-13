@@ -39,6 +39,14 @@
  * for a long time, like relation files. It is the caller's responsibility
  * to close them, there is no automatic mechanism in fd.c for that.
  *
+ * PathName(Create|Open|Delete)Temporary(File|Dir) are used to manage
+ * temporary files that have names so that they can be shared between
+ * backends.  Such files are automatically closed and count against the
+ * temporary file limit of the backend that creates them, but unlike anonymous
+ * files they are not automatically deleted.  See sharedfileset.c for a shared
+ * ownership mechanism that provides automatic cleanup for shared files when
+ * the last of a group of backends detaches.
+ *
  * AllocateFile, AllocateDir and OpenTransientFile are wrappers around
  * fopen(3), opendir(3), and open(2), respectively. They behave like the
  * corresponding native functions, except that the handle is registered with
@@ -145,10 +153,11 @@
 #define FileUnknownPos ((off_t)-1)
 
 /* these are the assigned bits in fdstate below: */
-#define FD_TEMPORARY (1 << 0)        /* T = delete when closed */
-#define FD_XACT_TEMPORARY (1 << 1)   /* T = delete at eoXact */
+#define FD_DELETE_AT_CLOSE (1 << 0)  /* T = delete when closed */
+#define FD_CLOSE_AT_EOXACT (1 << 1)  /* T = close at eoXact */
 #define FD_ERRTBL_LOG (1 << 2)       /* T = caching log file for error table */
 #define FD_ERRTBL_LOG_OWNER (1 << 3) /* T = owner of caching log file for error table */
+#define FD_TEMP_FILE_LIMIT (1 << 4)  /* T = respect temp_file_limit */
 
 #define RETRY_LIMIT 3 /* alloc socket retry limit */
 
@@ -219,7 +228,7 @@ static void FreeVfd(File file);
 static int FileAccess(File file);
 static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError);
 static void CleanupTempFiles(bool isProcExit);
-static void RemovePgTempFilesInDir(const char* tmpdirname);
+static void RemovePgTempFilesInDir(const char *tmpdirname, bool unlink_all);
 static void RemovePgTempRelationFiles(const char* tsdirname);
 static void RemovePgTempRelationFilesInDbspace(const char* dbspacedirname);
 static bool looks_like_temp_rel_name(const char* name);
@@ -227,6 +236,10 @@ static void DataFileIdCloseFile(Vfd* vfdP);
 static File PathNameOpenFile_internal(FileName fileName, int fileFlags, int fileMode, bool useFileCache,
     const RelFileNodeForkNum& fileNode, File file = FILE_INVALID);
 static void ReleaseLruFiles(void);
+static void walkdir(const char *path, void (*action)(const char *fname, bool isdir, int elevel), bool process_symlinks,
+    int elevel);
+static struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel);
+static void unlink_if_exists_fname(const char *fname, bool isdir, int elevel);
 void AtProcExit_Files(int code, Datum arg);
 
 void ReportAlarmInsuffDataInstFileDesc()
@@ -1063,6 +1076,35 @@ static int FileAccess(File file)
     return 0;
 }
 
+/*
+ * Called whenever a temporary file is deleted to report its size.
+ */
+static void ReportTemporaryFileUsage(const char *path, off_t size)
+{
+    pgstat_report_tempfile(size);
+
+    if (u_sess->attr.attr_common.log_temp_files >= 0) {
+        if ((size / 1024) >= u_sess->attr.attr_common.log_temp_files) {
+            ereport(LOG, (errmsg("temporary file: path \"%s\", size %lu", path, (unsigned long)size)));
+        }
+    }
+}
+
+/*
+ * Called to register a temporary file for automatic close.
+ * ResourceOwnerEnlargeFiles(CurrentResourceOwner) must have been called
+ * before the file was opened.
+ */
+static void RegisterTemporaryFile(File file)
+{
+    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_CLOSE_AT_EOXACT;
+
+    ResourceOwnerRememberFile(t_thrd.utils_cxt.CurrentResourceOwner, file);
+    u_sess->storage_cxt.VfdCache[file].resowner = t_thrd.utils_cxt.CurrentResourceOwner;
+
+    /* ensure cleanup happens at eoxact */
+    u_sess->storage_cxt.have_xact_temporary_files = true;
+}
 
 #ifdef NOT_USED
 /* Called when we get a shared invalidation message on some relation. */
@@ -1098,7 +1140,7 @@ File DataFileIdOpenFile(FileName fileName, const RelFileNodeForkNum& fileNode, i
  * otherwise, use ERROR log level.
  */
 #define LogLevelOfCloseFileFailed(_vfdP_)                                                                     \
-    ((t_thrd.xact_cxt.bInAbortTransaction && (((_vfdP_)->fdstate & (FD_TEMPORARY | FD_XACT_TEMPORARY)) != 0)) \
+    ((t_thrd.xact_cxt.bInAbortTransaction && (((_vfdP_)->fdstate & (FD_DELETE_AT_CLOSE | FD_CLOSE_AT_EOXACT)) != 0)) \
             ? WARNING                                                                                         \
             : data_sync_elevel(ERROR))
 
@@ -1283,6 +1325,64 @@ static File PathNameOpenFile_internal(
 }
 
 /*
+ * Create directory 'directory'.  If necessary, create 'basedir', which must
+ * be the directory above it.  This is designed for creating the top-level
+ * temporary directory on demand before creating a directory underneath it.
+ * Do nothing if the directory already exists.
+ *
+ * Directories created within the top-level temporary directory should begin
+ * with PG_TEMP_FILE_PREFIX, so that they can be identified as temporary and
+ * deleted at startup by RemovePgTempFiles().  Further subdirectories below
+ * that do not need any particular prefix.
+ */
+void PathNameCreateTemporaryDir(const char *basedir, const char *directory)
+{
+    if (mkdir(directory, S_IRWXU) < 0) {
+        if (errno == EEXIST) {
+            return;
+        }
+
+        /*
+         * Failed.  Try to create basedir first in case it's missing. Tolerate
+         * EEXIST to close a race against another process following the same
+         * algorithm.
+         */
+        if (mkdir(directory, S_IRWXU) < 0 && errno != EEXIST) {
+            ereport(ERROR,
+                (errcode_for_file_access(), errmsg("cannot create temporary directory \"%s\": %m", basedir)));
+        }
+
+        /* Try again. */
+        if (mkdir(directory, S_IRWXU) < 0 && errno != EEXIST) {
+            ereport(ERROR,
+                (errcode_for_file_access(), errmsg("cannot create temporary subdirectory \"%s\": %m", directory)));
+        }
+    }
+}
+
+/*
+ * Delete a directory and everything in it, if it exists.
+ */
+void PathNameDeleteTemporaryDir(const char *dirname)
+{
+    struct stat statbuf;
+
+    /* Silently ignore missing directory. */
+    if (stat(dirname, &statbuf) != 0 && errno == ENOENT) {
+        return;
+    }
+
+    /*
+     * Currently, walkdir doesn't offer a way for our passed in function to
+     * maintain state.  Perhaps it should, so that we could tell the caller
+     * whether this operation succeeded or failed.  Since this operation is
+     * used in a cleanup path, we wouldn't actually behave differently: we'll
+     * just log failures.
+     */
+    walkdir(dirname, unlink_if_exists_fname, false, LOG);
+}
+
+/*
  * Open a temporary file that will disappear when we close it.
  *
  * This routine takes care of generating an appropriate tempfile name.
@@ -1331,18 +1431,12 @@ File OpenTemporaryFile(bool interXact)
             u_sess->proc_cxt.MyDatabaseTableSpace ? u_sess->proc_cxt.MyDatabaseTableSpace : DEFAULTTABLESPACE_OID,
             true);
 
-    /* Mark it for deletion at close */
-    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_TEMPORARY;
+    /* Mark it for deletion at close and temporary file size limit */
+    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_DELETE_AT_CLOSE | FD_TEMP_FILE_LIMIT;
 
     /* Register it with the current resource owner */
     if (!interXact) {
-        u_sess->storage_cxt.VfdCache[file].fdstate |= FD_XACT_TEMPORARY;
-
-        ResourceOwnerRememberFile(t_thrd.utils_cxt.CurrentResourceOwner, file);
-        u_sess->storage_cxt.VfdCache[file].resowner = t_thrd.utils_cxt.CurrentResourceOwner;
-
-        /* ensure cleanup happens at eoxact */
-        u_sess->storage_cxt.have_xact_temporary_files = true;
+        RegisterTemporaryFile(file);
     }
 
     return file;
@@ -1411,6 +1505,35 @@ void UnlinkCacheFile(const char* pathname)
 }
 
 /*
+ * Return the path of the temp directory in a given tablespace.
+ */
+void TempTablespacePath(char *tempdirpath, Size pathSize, Oid tblspcOid)
+{
+    /*
+     * Identify the tempfile directory for this tablespace.
+     *
+     * If someone tries to specify pg_global, use pg_default instead.
+     */
+    int rc;
+    if (tblspcOid == InvalidOid || tblspcOid == DEFAULTTABLESPACE_OID || tblspcOid == GLOBALTABLESPACE_OID) {
+        /* The default tablespace is {datadir}/base */
+        rc = snprintf_s(tempdirpath, pathSize, pathSize - 1, "base/%s", PG_TEMP_FILES_DIR);
+        securec_check_ss(rc, "", "");
+    } else {
+        /* All other tablespaces are accessed via symlinks */
+#ifdef PGXC
+        /* Postgres-XC tablespaces include node name in path */
+        rc = snprintf_s(tempdirpath, pathSize, pathSize - 1, "pg_tblspc/%u/%s_%s/%s", tblspcOid,
+            TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName, PG_TEMP_FILES_DIR);
+#else
+        rc = snprintf_s(tempdirpath, pathSize, pathSize - 1, "pg_tblspc/%u/%s/%s", tblspcOid,
+            TABLESPACE_VERSION_DIRECTORY, PG_TEMP_FILES_DIR);
+#endif
+        securec_check_ss(rc, "", "");
+    }
+}
+
+/*
  * Open a temporary file in a specific tablespace.
  * Subroutine for OpenTemporaryFile, which see for details.
  */
@@ -1418,47 +1541,14 @@ static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
 {
     char tempdirpath[MAXPGPATH];
     char tempfilepath[MAXPGPATH];
-    File file;
-    int rc = EOK;
 
-    /*
-     * Identify the tempfile directory for this tablespace.
-     *
-     * If someone tries to specify pg_global, use pg_default instead.
-     */
-    if (tblspcOid == DEFAULTTABLESPACE_OID || tblspcOid == GLOBALTABLESPACE_OID) {
-        /* The default tablespace is {datadir}/base */
-        rc = snprintf_s(tempdirpath, sizeof(tempdirpath), sizeof(tempdirpath) - 1, "base/%s", PG_TEMP_FILES_DIR);
-        securec_check_ss(rc, "", "");
-    } else {
-        /* All other tablespaces are accessed via symlinks */
-#ifdef PGXC
-        /* Postgres-XC tablespaces include node name in path */
-        rc = snprintf_s(tempdirpath,
-            sizeof(tempdirpath),
-            sizeof(tempdirpath) - 1,
-            "pg_tblspc/%u/%s_%s/%s",
-            tblspcOid,
-            TABLESPACE_VERSION_DIRECTORY,
-            g_instance.attr.attr_common.PGXCNodeName,
-            PG_TEMP_FILES_DIR);
-#else
-        rc = snprintf_s(tempdirpath,
-            sizeof(tempdirpath),
-            sizeof(tempdirpath) - 1,
-            "pg_tblspc/%u/%s/%s",
-            tblspcOid,
-            TABLESPACE_VERSION_DIRECTORY,
-            PG_TEMP_FILES_DIR);
-#endif
-        securec_check_ss(rc, "", "");
-    }
+    TempTablespacePath(tempdirpath, MAXPGPATH, tblspcOid);
 
     /*
      * Generate a tempfile name that should be unique within the current
      * database instance.
      */
-    rc = snprintf_s(tempfilepath,
+    int rc = snprintf_s(tempfilepath,
         sizeof(tempfilepath),
         sizeof(tempfilepath) - 1,
         "%s/%s%lu.%ld",
@@ -1472,7 +1562,7 @@ static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
      * Open the file.  Note: we don't use O_EXCL, in case there is an orphaned
      * temp file that can be reused.
      */
-    file = PathNameOpenFile(tempfilepath, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, 0600);
+    File file = PathNameOpenFile(tempfilepath, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, 0600);
     if (file <= 0) {
         /*
          * We might need to create the tablespace's tempfile directory, if no
@@ -1510,11 +1600,117 @@ void FileCloseWithThief(File file)
         vfdP->fd = VFD_CLOSED;
     }
 
-    Assert(!(vfdP->fdstate & FD_TEMPORARY));
+    Assert(!(vfdP->fdstate & FD_DELETE_AT_CLOSE));
     if (vfdP->resowner) {
         ResourceOwnerForgetFile(vfdP->resowner, file);
     }
     FreeVfd(file);
+}
+
+/*
+ * Create a new file.  The directory containing it must already exist.  Files
+ * created this way are subject to temp_file_limit and are automatically
+ * closed at end of transaction, but are not automatically deleted on close
+ * because they are intended to be shared between cooperating backends.
+ *
+ * If the file is inside the top-level temporary directory, its name should
+ * begin with PG_TEMP_FILE_PREFIX so that it can be identified as temporary
+ * and deleted at startup by RemovePgTempFiles().  Alternatively, it can be
+ * inside a directory created with PathNameCreateTemporaryDir(), in which case
+ * the prefix isn't needed.
+ */
+File PathNameCreateTemporaryFile(char *path, bool error_on_failure)
+{
+    ResourceOwnerEnlargeFiles(t_thrd.utils_cxt.CurrentResourceOwner);
+
+    /*
+     * Open the file.  Note: we don't use O_EXCL, in case there is an orphaned
+     * temp file that can be reused.
+     */
+    File file = PathNameOpenFile(path, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, S_IRUSR | S_IWUSR);
+    if (file <= 0) {
+        if (error_on_failure) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not create temporary file \"%s\": %m", path)));
+        } else {
+            return file;
+        }
+    }
+
+    /* Mark it for temp_file_limit accounting. */
+    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_TEMP_FILE_LIMIT;
+
+    /* Register it for automatic close. */
+    RegisterTemporaryFile(file);
+
+    return file;
+}
+
+/*
+ * Open a file that was created with PathNameCreateTemporaryFile, possibly in
+ * another backend.  Files opened this way don't count against the
+ * temp_file_limit of the caller, are read-only and are automatically closed
+ * at the end of the transaction but are not deleted on close.
+ */
+File PathNameOpenTemporaryFile(char *path)
+{
+    ResourceOwnerEnlargeFiles(t_thrd.utils_cxt.CurrentResourceOwner);
+
+    /* We open the file read-only. */
+    File file = PathNameOpenFile(path, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
+    /* If no such file, then we don't raise an error. */
+    if (file <= 0 && errno != ENOENT) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open temporary file \"%s\": %m", path)));
+    }
+
+    if (file > 0) {
+        /* Register it for automatic close. */
+        RegisterTemporaryFile(file);
+    }
+
+    return file;
+}
+
+/*
+ * Delete a file by pathname.  Return true if the file existed, false if
+ * didn't.
+ */
+bool PathNameDeleteTemporaryFile(const char *path, bool error_on_failure)
+{
+    struct stat filestats;
+    int stat_errno;
+
+    /* Get the final size for pgstat reporting. */
+    if (stat(path, &filestats) != 0) {
+        stat_errno = errno;
+    } else {
+        stat_errno = 0;
+    }
+
+    /*
+     * Unlike FileClose's automatic file deletion code, we tolerate
+     * non-existence to support BufFileDeleteShared which doesn't know how
+     * many segments it has to delete until it runs out.
+     */
+    if (stat_errno == ENOENT) {
+        return false;
+    }
+
+    if (unlink(path) < 0) {
+        if (errno != ENOENT) {
+            ereport(error_on_failure ? ERROR : LOG,
+                (errcode_for_file_access(), errmsg("could not unlink temporary file \"%s\": %m", path)));
+        }
+        return false;
+    }
+
+    if (stat_errno == 0) {
+        ReportTemporaryFileUsage(path, filestats.st_size);
+    } else {
+        errno = stat_errno;
+        ereport(LOG, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", path)));
+    }
+
+    return true;
 }
 
 /*
@@ -1549,10 +1745,17 @@ void FileClose(File file)
         RESUME_INTERRUPTS();
     }
 
+    if (vfdP->fdstate & FD_TEMP_FILE_LIMIT) {
+        /* Subtract its size from current usage (do first in case of error) */
+        u_sess->storage_cxt.temporary_files_size -= vfdP->fileSize;
+        perm_space_decrease(GetUserId(), (uint64)vfdP->fileSize, SP_SPILL);
+        vfdP->fileSize = 0;
+    }
+
     /*
      * Delete the file if it was temporary, and make a log entry if wanted
      */
-    if (vfdP->fdstate & FD_TEMPORARY) {
+    if (vfdP->fdstate & FD_DELETE_AT_CLOSE) {
         struct stat filestats;
         int stat_errno;
 
@@ -1563,12 +1766,7 @@ void FileClose(File file)
          * is arranged to ensure that the worst-case consequence is failing to
          * emit log message(s), not failing to attempt the unlink.
          */
-        vfdP->fdstate &= ~FD_TEMPORARY;
-
-        /* Subtract its size from current usage (do first in case of error) */
-        u_sess->storage_cxt.temporary_files_size -= vfdP->fileSize;
-        perm_space_decrease(GetUserId(), (uint64)vfdP->fileSize, SP_SPILL);
-        vfdP->fileSize = 0;
+        vfdP->fdstate &= ~FD_DELETE_AT_CLOSE;
 
         /* first try the stat() */
         if (stat(vfdP->fileName, &filestats))
@@ -1582,15 +1780,7 @@ void FileClose(File file)
 
         /* and last report the stat results */
         if (stat_errno == 0) {
-            pgstat_report_tempfile((size_t)filestats.st_size);
-
-            if (u_sess->attr.attr_common.log_temp_files >= 0) {
-                if ((filestats.st_size / 1024) >= u_sess->attr.attr_common.log_temp_files)
-                    ereport(LOG,
-                        (errmsg("temporary file: path \"%s\", size %lu",
-                            vfdP->fileName,
-                            (unsigned long)filestats.st_size)));
-            }
+            ReportTemporaryFileUsage(vfdP->fileName, filestats.st_size);
         } else {
             errno = stat_errno;
             ereport(LOG, (errmsg("could not stat file \"%s\": %m", vfdP->fileName)));
@@ -1831,7 +2021,7 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
      * message if we do that.  All current callers would just throw error
      * immediately anyway, so this is safe at present.
      */
-    if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMPORARY) {
+    if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT) {
         off_t newPos = u_sess->storage_cxt.VfdCache[file].seekPos + amount;
 
         if (newPos > u_sess->storage_cxt.VfdCache[file].fileSize) {
@@ -1869,7 +2059,7 @@ retry:
         u_sess->storage_cxt.VfdCache[file].seekPos += returnCode;
 
         /* maintain fileSize and temporary_files_size if it's a temp file */
-        if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMPORARY) {
+        if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT) {
             off_t newPos = u_sess->storage_cxt.VfdCache[file].seekPos;
 
             if (newPos > u_sess->storage_cxt.VfdCache[file].fileSize) {
@@ -2272,7 +2462,7 @@ int FileTruncate(File file, off_t offset, uint32 wait_event_info)
 
     if (returnCode == 0 && u_sess->storage_cxt.VfdCache[file].fileSize > offset) {
         /* adjust our state for truncation of a temp file */
-        Assert(u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMPORARY);
+        Assert(u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT);
         uint64 descSize = (uint64)(u_sess->storage_cxt.VfdCache[file].fileSize - offset);
         perm_space_decrease(GetUserId(), descSize, SP_SPILL);
         u_sess->storage_cxt.temporary_files_size -= descSize;
@@ -2823,14 +3013,29 @@ TryAgain:
  */
 struct dirent* ReadDir(DIR* dir, const char* dirname)
 {
-    struct dirent* dent = NULL;
+    return ReadDirExtended(dir, dirname, ERROR);
+}
+
+/*
+ * Alternate version of ReadDir that allows caller to specify the elevel
+ * for any error report (whether it's reporting an initial failure of
+ * AllocateDir or a subsequent directory read failure).
+ *
+ * If elevel < ERROR, returns NULL after any error.  With the normal coding
+ * pattern, this will result in falling out of the loop immediately as
+ * though the directory contained no (more) entries.
+ */
+static struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel)
+{
+    struct dirent *dent = NULL;
 
     /* Give a generic message for AllocateDir failure, if caller didn't */
     if (dir == NULL) {
         char realDir[PATH_MAX] = {0};
-        char* ret = realpath(dirname, realDir);
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open directory \"%s\": %m",
-            ret != nullptr ? realDir : dirname)));
+        char *ret = realpath(dirname, realDir);
+        ereport(elevel, (errcode_for_file_access(),
+            errmsg("could not open directory \"%s\": %m", ret != nullptr ? realDir : dirname)));
+        return NULL;
     }
 
     errno = 0;
@@ -2849,9 +3054,10 @@ struct dirent* ReadDir(DIR* dir, const char* dirname)
 
     if (errno) {
         char realDir[PATH_MAX] = {0};
-        char* ret = realpath(dirname, realDir);
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not read directory \"%s\": %m",
-            ret != nullptr ? realDir : dirname)));
+        char *ret = realpath(dirname, realDir);
+        ereport(elevel, (errcode_for_file_access(),
+            errmsg("could not read directory \"%s\": %m", ret != nullptr ? realDir : dirname)));
+        return NULL;
     }
     return NULL;
 }
@@ -2970,6 +3176,24 @@ bool TempTablespacesAreSet(void)
 }
 
 /*
+ * GetTempTablespaces
+ *
+ * Populate an array with the OIDs of the tablespaces that should be used for
+ * temporary files.  Return the number that were copied into the output array.
+ */
+int GetTempTablespaces(Oid *tableSpaces, int numSpaces)
+{
+    int i;
+
+    Assert(TempTablespacesAreSet());
+    for (i = 0; i < u_sess->storage_cxt.numTempTableSpaces && i < numSpaces; ++i) {
+        tableSpaces[i] = u_sess->storage_cxt.tempTableSpaces[i];
+    }
+
+    return i;
+}
+
+/*
  * GetNextTempTableSpace
  *
  * Select the next temp tablespace to use.	A result of InvalidOid means
@@ -3059,7 +3283,8 @@ static void CleanupTempFiles(bool isProcExit)
         for (i = 1; i < u_sess->storage_cxt.SizeVfdCache; i++) {
             unsigned short fdstate = u_sess->storage_cxt.VfdCache[i].fdstate;
 
-            if ((fdstate & FD_TEMPORARY) && u_sess->storage_cxt.VfdCache[i].fileName != NULL) {
+            if (((fdstate & FD_DELETE_AT_CLOSE) || (fdstate & FD_CLOSE_AT_EOXACT)) &&
+                u_sess->storage_cxt.VfdCache[i].fileName != NULL) {
                 /*
                  * If we're in the process of exiting a backend process, close
                  * all temporary files. Otherwise, only close temporary files
@@ -3069,10 +3294,9 @@ static void CleanupTempFiles(bool isProcExit)
                  */
                 if (isProcExit)
                     FileClose((File)i);
-                else if (fdstate & FD_XACT_TEMPORARY) {
-                    ereport(WARNING,
-                        (errmsg("temporary file %s not closed at end-of-transaction",
-                            u_sess->storage_cxt.VfdCache[i].fileName)));
+                else if (fdstate & FD_CLOSE_AT_EOXACT) {
+                    ereport(WARNING, (errmsg("temporary file %s not closed at end-of-transaction",
+                        u_sess->storage_cxt.VfdCache[i].fileName)));
                     FileClose((File)i);
                 }
             } else if ((fdstate & FD_ERRTBL_LOG) && u_sess->storage_cxt.VfdCache[i].fileName != NULL) {
@@ -3120,7 +3344,7 @@ void RemovePgTempFiles(void)
      */
     rc = snprintf_s(temp_path, sizeof(temp_path), sizeof(temp_path) - 1, "base/%s", PG_TEMP_FILES_DIR);
     securec_check_ss(rc, "", "");
-    RemovePgTempFilesInDir(temp_path);
+    RemovePgTempFilesInDir(temp_path, false);
     RemovePgTempRelationFiles("base");
 
     /*
@@ -3163,7 +3387,7 @@ void RemovePgTempFiles(void)
             PG_TEMP_FILES_DIR);
         securec_check_ss(rc, "", "");
 #endif
-        RemovePgTempFilesInDir(temp_path);
+        RemovePgTempFilesInDir(temp_path, false);
 
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
@@ -3194,12 +3418,26 @@ void RemovePgTempFiles(void)
      * t_thrd.proc_cxt.DataDir as well.
      */
 #ifdef EXEC_BACKEND
-    RemovePgTempFilesInDir(PG_TEMP_FILES_DIR);
+    RemovePgTempFilesInDir(PG_TEMP_FILES_DIR, false);
 #endif
 }
 
-/* Process one pgsql_tmp directory for RemovePgTempFiles */
-static void RemovePgTempFilesInDir(const char* tmpdirname)
+/*
+ * Process one pgsql_tmp directory for RemovePgTempFiles.
+ *
+ * If missing_ok is true, it's all right for the named directory to not exist.
+ * Any other problem results in a LOG message.  (missing_ok should be true at
+ * the top level, since pgsql_tmp directories are not created until needed.)
+ *
+ * At the top level, this should be called with unlink_all = false, so that
+ * only files matching the temporary name prefix will be unlinked.  When
+ * recursing it will be called with unlink_all = true to unlink everything
+ * under a top-level temporary directory.
+ *
+ * (These two flags could be replaced by one, but it seems clearer to keep
+ * them separate.)
+ */
+static void RemovePgTempFilesInDir(const char *tmpdirname, bool unlink_all)
 {
     DIR* temp_dir = NULL;
     struct dirent* temp_de = NULL;
@@ -3221,10 +3459,27 @@ static void RemovePgTempFilesInDir(const char* tmpdirname)
         rc = snprintf_s(rm_path, sizeof(rm_path), sizeof(rm_path) - 1, "%s/%s", tmpdirname, temp_de->d_name);
         securec_check_ss(rc, "", "");
 
-        if (strncmp(temp_de->d_name, PG_TEMP_FILE_PREFIX, strlen(PG_TEMP_FILE_PREFIX)) == 0)
-            (void)unlink(rm_path); /* note we ignore any error */
-        else
+        if (unlink_all || strncmp(temp_de->d_name, PG_TEMP_FILE_PREFIX, strlen(PG_TEMP_FILE_PREFIX)) == 0) {
+            struct stat statbuf;
+
+            if (lstat(rm_path, &statbuf) < 0) {
+                ereport(LOG, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", rm_path)));
+                continue;
+            }
+
+            if (S_ISDIR(statbuf.st_mode)) {
+                /* recursively remove contents, then directory itself */
+                RemovePgTempFilesInDir(rm_path, true);
+
+                if (rmdir(rm_path) < 0) {
+                    ereport(LOG, (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", rm_path)));
+                }
+            } else {
+                (void)unlink(rm_path); /* note we ignore any error */
+            }
+        } else {
             ereport(LOG, (errmsg("unexpected file found in temporary-files directory: \"%s\"", rm_path)));
+        }
     }
 
     (void)FreeDir(temp_dir);
@@ -3347,6 +3602,72 @@ static bool looks_like_temp_rel_name(const char *name)
         return false;
     }
     return true;
+}
+
+/*
+ * walkdir: recursively walk a directory, applying the action to each
+ * regular file and directory (including the named directory itself).
+ *
+ * If process_symlinks is true, the action and recursion are also applied
+ * to regular files and directories that are pointed to by symlinks in the
+ * given directory; otherwise symlinks are ignored.  Symlinks are always
+ * ignored in subdirectories, ie we intentionally don't pass down the
+ * process_symlinks flag to recursive calls.
+ *
+ * Errors are reported at level elevel, which might be ERROR or less.
+ *
+ * See also walkdir in initdb.c, which is a frontend version of this logic.
+ */
+static void walkdir(const char *path, void (*action)(const char *fname, bool isdir, int elevel), bool process_symlinks,
+    int elevel)
+{
+    DIR *dir;
+    struct dirent *de;
+
+    dir = AllocateDir(path);
+
+    while ((de = ReadDirExtended(dir, path, elevel)) != NULL) {
+        char subpath[MAXPGPATH * 2];
+        struct stat fst;
+        int sret;
+
+        CHECK_FOR_INTERRUPTS();
+
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
+            continue;
+        }
+
+        int rc = sprintf_s(subpath, sizeof(subpath), "%s/%s", path, de->d_name);
+        securec_check_ss(rc, "", "");
+
+        if (process_symlinks) {
+            sret = stat(subpath, &fst);
+        } else {
+            sret = lstat(subpath, &fst);
+        }
+
+        if (sret < 0) {
+            ereport(elevel, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", subpath)));
+            continue;
+        }
+
+        if (S_ISREG(fst.st_mode)) {
+            (*action)(subpath, false, elevel);
+        } else if (S_ISDIR(fst.st_mode)) {
+            walkdir(subpath, action, false, elevel);
+        }
+    }
+
+    (void)FreeDir(dir); /* we ignore any error here */
+
+    /*
+     * It's important to fsync the destination directory itself as individual
+     * file fsyncs don't guarantee that the directory entry for the file is
+     * synced.  However, skip this if AllocateDir failed; the action function
+     * might not be robust against that.
+     */
+    if (dir)
+        (*action)(path, true, elevel);
 }
 
 void RemoveErrorCacheFiles()
@@ -3481,6 +3802,17 @@ FileExistStatus CheckFileExists(const char* path)
         } else {
             return FILE_EXIST;
         }
+    }
+}
+
+static void unlink_if_exists_fname(const char *fname, bool isdir, int elevel)
+{
+    if (isdir) {
+        if (rmdir(fname) != 0 && errno != ENOENT)
+            ereport(elevel, (errcode_for_file_access(), errmsg("could not rmdir directory \"%s\": %m", fname)));
+    } else {
+        /* Use PathNameDeleteTemporaryFile to report filesize */
+        (void)PathNameDeleteTemporaryFile(fname, false);
     }
 }
 
