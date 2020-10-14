@@ -25,6 +25,7 @@ if [ $arch = "amd64" ]; then
     else
     md5_file="md5_file_arm64"
 fi
+
   if hash md5sum 2>/dev/null; then
     echo "Checking if required packages are present and valid..."   
     if ! md5sum -c "$md5_file"; then
@@ -61,7 +62,7 @@ checkDockerVersion() {
 ##############
 
 # Parameters
-VERSION="1.0.1"
+VERSION="1.0.0"
 SKIPMD5=0
 DOCKEROPS=""
 MIN_DOCKER_VERSION="17.09"
