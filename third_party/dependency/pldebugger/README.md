@@ -44,7 +44,13 @@ Installation
 ### Download and Install
 1. Download software from the website:
 
-   https://opengauss.obs.cn-south-1.myhuaweicloud.com/dependency/pldebugger_package.tar.gz
+   for x86 system:
+
+   https://opengauss.obs.cn-south-1.myhuaweicloud.com/dependency/pldebugger_package_x86.tar.gz
+
+   for aarch64 system:
+
+   https://opengauss.obs.cn-south-1.myhuaweicloud.com/dependency/pldebugger_package_arm.tar.gz
 
 2. Decompress the file.
 
