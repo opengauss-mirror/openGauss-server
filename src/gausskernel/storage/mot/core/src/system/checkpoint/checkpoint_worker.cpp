@@ -143,7 +143,7 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
         stableRow = sentinel->GetStable();
         if (mainRow->IsRowDeleted()) {
             if (stableRow) {
-                // Truely deleted and was not removed by txn manager
+                // Truly deleted and was not removed by txn manager
                 isDeleted = true;
             } else {
                 MOT_LOG_DEBUG("Detected Deleted row without Stable Row!");

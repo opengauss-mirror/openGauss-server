@@ -641,14 +641,14 @@ static const Table_Entry txnStateMachine[TSM_SIZE][TSM_SIZE] = {
         {DEL, NS_ACTIONS::NOCHANGE},
         {DEL, NS_ACTIONS::NS_ERROR},
         {DEL, NS_ACTIONS::NS_ERROR},
-        {INS, NS_ACTIONS::NOCHANGE}},  // DEL states
+        {INS, NS_ACTIONS::NOCHANGE}},
     /* INSERT STATE */
     {{INS, NS_ACTIONS::NS_ERROR},
         {INS, NS_ACTIONS::NOCHANGE},
         {INS, NS_ACTIONS::NOCHANGE},
         {INS, NS_ACTIONS::NOCHANGE},
         {DEL, NS_ACTIONS::FILTER_DELETES},
-        {INS, NS_ACTIONS::NS_ERROR}},  // INS states
+        {INS, NS_ACTIONS::NS_ERROR}},
 };
 
 // Currently supporting RD/WR transitions

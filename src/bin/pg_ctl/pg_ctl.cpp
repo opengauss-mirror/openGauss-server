@@ -3839,7 +3839,7 @@ static void do_incremental_build(uint32 term)
     set_build_pid(getpid());
     char connstrSource[1024];
     char pgconfPath[1024] = {0};
-    char* motIniPath = NULL;
+    char* motConfPath = NULL;
     char* motChkptDir = NULL;
 
     /* 1. load repl_conninfo into conninfo_global.
@@ -3868,8 +3868,9 @@ static void do_incremental_build(uint32 term)
     /* deallocate the connections, we used it in step 4. */
     progname = "gs_rewind";
     status = gs_increment_build(pg_data, connstrSource, term);
-    /* try and fetch the mot checkpoint */
+
     if (status == BUILD_SUCCESS) {
+        /* try and fetch the mot checkpoint */
         if (streamConn == NULL) {
             streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
             if (streamConn == NULL) {
@@ -3877,22 +3878,28 @@ static void do_incremental_build(uint32 term)
                 exit(1);
             }
         }
-        pg_log(PG_PROGRESS, "fetch MOT checkpoint\n");
+
+        pg_log(PG_PROGRESS, "fetching MOT checkpoint\n");
+
         /* see if we have an mot conf file configured */
         tnRet = sprintf_s(pgconfPath, sizeof(pgconfPath), "%s/%s", pg_data, "postgresql.conf");
         securec_check_ss_c(tnRet, "\0", "\0");
-        motIniPath = GetOptionValueFromFile(pgconfPath, "mot_config_file");
-        if (motIniPath != NULL) {
+        motConfPath = GetOptionValueFromFile(pgconfPath, "mot_config_file");
+        if (motConfPath != NULL) {
             /* parse checkpoint_dir if exists */
-            motChkptDir = GetOptionValueFromFile(motIniPath, "checkpoint_dir");
+            motChkptDir = GetOptionValueFromFile(motConfPath, "checkpoint_dir");
         }
 
         FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : (const char*)pg_data, streamConn, progname, true);
-        if (motChkptDir)
+
+        if (motChkptDir) {
             free(motChkptDir);
-        if (motIniPath)
-            free(motIniPath);
+        }
+        if (motConfPath) {
+            free(motConfPath);
+        }
     }
+
     progname = "gs_ctl";
     if (streamConn != NULL) {
         PQfinish(streamConn);

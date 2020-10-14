@@ -1013,7 +1013,7 @@ static void BaseBackup(const char* dirname, uint32 term)
     int nRet = 0;
     struct stat st;
     char pgconfPath[1024] = {0};
-    char* motIniPath = NULL;
+    char* motConfPath = NULL;
     char* motChkptDir = NULL;
 
     pqsignal(SIGCHLD, BuildReaper); /* handle child termination */
@@ -1384,27 +1384,42 @@ static void BaseBackup(const char* dirname, uint32 term)
 
     TABLESPACE_LIST_RELEASE();
 
-    show_full_build_process("fetching MOT checkpoint");
-    /* see if we have an mot ini file configured */
-    nRet = sprintf_s(pgconfPath, sizeof(pgconfPath), "%s/%s", dirname, "postgresql.conf");
-    securec_check_ss_c(nRet, "\0", "\0");
-    motIniPath = GetOptionValueFromFile(pgconfPath, "mot_config_file");
-    if (motIniPath != NULL) {
-        /* parse checkpoint_dir if exists */
-        motChkptDir = GetOptionValueFromFile(motIniPath, "checkpoint_dir");
-    }
-
-    PQreset(streamConn);
-    FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : dirname, streamConn, progname, (bool)verbose);
-    if (motChkptDir)
-        free(motChkptDir);
-    if (motIniPath)
-        free(motIniPath);
-
     /*
      * End of copy data. Final result is already checked inside the loop.
      */
     PQclear(res);
+
+    res = PQgetResult(streamConn);
+    if (res != NULL) {
+        /*
+         * We expect the result to be NULL, otherwise we received some unexpected result.
+         * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
+         * otherwise we have problem! Report error and disconnect.
+         */
+        pg_log(PG_WARNING, _("unexpected result received after final result, status: %u\n"), PQresultStatus(res));
+        disconnect_and_exit(1);
+    }
+
+    show_full_build_process("fetching MOT checkpoint");
+
+    /* see if we have an mot conf file configured */
+    nRet = sprintf_s(pgconfPath, sizeof(pgconfPath), "%s/%s", dirname, "postgresql.conf");
+    securec_check_ss_c(nRet, "\0", "\0");
+    motConfPath = GetOptionValueFromFile(pgconfPath, "mot_config_file");
+    if (motConfPath != NULL) {
+        /* parse checkpoint_dir if exists */
+        motChkptDir = GetOptionValueFromFile(motConfPath, "checkpoint_dir");
+    }
+
+    FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : dirname, streamConn, progname, (bool)verbose);
+
+    if (motChkptDir) {
+        free(motChkptDir);
+    }
+    if (motConfPath) {
+        free(motConfPath);
+    }
+
     PQfinish(streamConn);
     streamConn = NULL;
 
@@ -1417,6 +1432,7 @@ static void BaseBackup(const char* dirname, uint32 term)
 
     show_full_build_process("rename build status file success");
 }
+
 /*
  * @@GaussDB@@
  * Brief            : the entry of full build
