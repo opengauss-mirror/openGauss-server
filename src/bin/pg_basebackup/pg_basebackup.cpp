@@ -1133,6 +1133,8 @@ static void BaseBackup(void)
         /* Error message already written in GetConnection() */
         exit(1);
 
+    ClearAndFreePasswd();
+
     /*
      * Run IDENTIFY_SYSTEM so we can get the timeline
      */
@@ -1430,18 +1432,28 @@ static void BaseBackup(void)
      * End of copy data. Final result is already checked inside the loop.
      */
     PQclear(res);
-    PQfinish(conn);
+
+    res = PQgetResult(conn);
+    if (res != NULL) {
+        /*
+         * We expect the result to be NULL, otherwise we received some unexpected result.
+         * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
+         * otherwise we have problem! Report error and disconnect.
+         */
+        fprintf(stderr,
+            _("%s: unexpected result received after final result, status: %u\n"),
+            progname,
+            PQresultStatus(res));
+        free(sysidentifier);
+        disconnect_and_exit(1);
+    }
 
     if (verbose) {
-        fprintf(stderr, "%s: fetch mot checkpoint\n", progname);
+        fprintf(stderr, "%s: fetching MOT checkpoint\n", progname);
     }
-    conn = GetConnection();
-    if (conn == NULL) {
-        /* Error message already written in GetConnection() */
-        exit(1);
-    }
-    ClearAndFreePasswd();
+
     FetchMotCheckpoint(basedir, conn, progname, (bool)verbose, format, compresslevel);
+
     PQfinish(conn);
     conn = NULL;
 

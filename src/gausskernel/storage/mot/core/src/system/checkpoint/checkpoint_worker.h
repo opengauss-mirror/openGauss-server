@@ -114,7 +114,7 @@ private:
      * @param sentinel The sentinel that holds to row.
      * @param fd The file descriptor to write to.
      * @param tid The thread id.
-     * @param isDeleted The row delete status
+     * @param isDeleted The row delete status.
      * @return Int equal to -1 on error, 0 if nothing was written and 1 if the row was written.
      */
     int Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, int tid, bool& isDeleted);
