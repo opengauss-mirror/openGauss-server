@@ -123,10 +123,12 @@ bool CheckpointWorkerPool::Write(Buffer* buffer, Row* row, int fd)
     return true;
 }
 
-int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, int tid)
+int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, int tid, bool& isDeleted)
 {
     Row* mainRow = sentinel->GetData();
+    Row* stableRow = nullptr;
     int wrote = 0;
+    isDeleted = false;
 
     if (mainRow != nullptr) {
         bool headerLocked = sentinel->TryLock(tid);
@@ -138,11 +140,25 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
             }
             sentinel->Lock(tid);
         }
+        stableRow = sentinel->GetStable();
+        if (mainRow->IsRowDeleted()) {
+            if (stableRow) {
+                // Truely deleted and was not removed by txn manager
+                isDeleted = true;
+            } else {
+                MOT_LOG_DEBUG("Detected Deleted row without Stable Row!");
+            }
+        }
+    } else {
+        return 0;
     }
 
-    Row* stableRow = sentinel->GetStable();
-    bool deleted = !sentinel->IsCommited(); /* this currently indicates if the row is deleted or not */
+    if (unlikely(stableRow == nullptr)) {
+        stableRow = sentinel->GetStable();
+    }
+
     bool statusBit = sentinel->GetStableStatus();
+    bool deleted = !sentinel->IsCommited(); /* this currently indicates if the row is deleted or not */
 
     do {
         if (statusBit == !m_na) { /* has stable version */
@@ -152,8 +168,10 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
                 if (!Write(buffer, stableRow, fd)) {
                     wrote = -1;
                 } else {
-                    CheckpointUtils::DestroyStableRow(stableRow);
-                    sentinel->SetStable(nullptr);
+                    if (isDeleted == false) {
+                        CheckpointUtils::DestroyStableRow(stableRow);
+                        sentinel->SetStable(nullptr);
+                    }
                     wrote = 1;
                 }
                 break;
@@ -202,6 +220,19 @@ Table* CheckpointWorkerPool::GetTask()
     return table;
 }
 
+void CheckpointWorkerPool::ExecuteMicroGcTransaction(
+    Sentinel** deletedList, GcManager* gcSession, Table* table, uint16_t& deletedCounter, uint16_t limit)
+{
+    if (deletedCounter == limit) {
+        gcSession->GcStartTxn();
+        for (uint16_t i = 0; i < limit; i++) {
+            Row* out = table->RemoveKeyFromIndex(deletedList[i]->GetData(), deletedList[i], 0, gcSession);
+        }
+        gcSession->GcCheckPointClean();
+        deletedCounter = 0;
+    }
+}
+
 void CheckpointWorkerPool::WorkerFunc()
 {
     MOT_DECLARE_NON_KERNEL_THREAD();
@@ -215,10 +246,29 @@ void CheckpointWorkerPool::WorkerFunc()
         return;
     }
     SessionContext* sessionContext = GetSessionManager()->CreateSessionContext();
-
+    if (sessionContext == nullptr) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: Failed to initialize Session Context");
+        m_cpManager.OnError(ErrCodes::MEMORY, "Memory allocation failure");
+        MOT::MOTEngine::GetInstance()->OnCurrentThreadEnding();
+        MOT_LOG_DEBUG("thread exiting");
+        return;
+    }
+    GcManager* gcSession = sessionContext->GetTxnManager()->GetGcSession();
+    gcSession->SetGcType(GcManager::GC_CHECKPOINT);
     int threadId = MOTCurrThreadId;
     if (GetGlobalConfiguration().m_enableNuma && !GetTaskAffinity().SetAffinity(threadId)) {
         MOT_LOG_WARN("Failed to set affinity for checkpoint worker, checkpoint performance may be affected");
+    }
+
+    Sentinel** deletedList = new (nothrow) Sentinel*[DELETE_LIST_SIZE];
+    uint16_t deletedListLocation = 0;
+    if (!deletedList) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: Failed to initialize buffer");
+        m_cpManager.OnError(ErrCodes::MEMORY, "Memory allocation failure");
+        GetSessionManager()->DestroySessionContext(sessionContext);
+        MOT::MOTEngine::GetInstance()->OnCurrentThreadEnding();
+        MOT_LOG_DEBUG("thread exiting");
+        return;
     }
 
     while (true) {
@@ -325,6 +375,7 @@ void CheckpointWorkerPool::WorkerFunc()
                 }
 
                 bool iterationSucceeded = true;
+                bool isDeleted = false;
                 while (it->IsValid()) {
                     MOT::Sentinel* Sentinel = it->GetPrimarySentinel();
                     MOT_ASSERT(Sentinel);
@@ -333,8 +384,11 @@ void CheckpointWorkerPool::WorkerFunc()
                         it->Next();
                         continue;
                     }
-
-                    int ckptStatus = Checkpoint(&buffer, Sentinel, fd, threadId);
+                    int ckptStatus = Checkpoint(&buffer, Sentinel, fd, threadId, isDeleted);
+                    if (isDeleted) {
+                        deletedList[deletedListLocation++] = Sentinel;
+                        ExecuteMicroGcTransaction(deletedList, gcSession, table, deletedListLocation, DELETE_LIST_SIZE);
+                    }
                     if (ckptStatus == 1) {
                         numOps++;
                         curSegLen += table->GetTupleSize() + sizeof(CheckpointUtils::EntryHeader);
@@ -429,6 +483,13 @@ void CheckpointWorkerPool::WorkerFunc()
                     MOT_LOG_ERROR("CheckpointWorkerPool::finishFile: failed to close file (id: %u)", tableId);
                 }
             }
+            if (deletedListLocation > 0) {
+                MOT_LOG_DEBUG("Checkpoint worker Clean Leftovers Table %c deletedListLocation = %u\n",
+                    table->GetTableName().c_str(),
+                    deletedListLocation);
+                ExecuteMicroGcTransaction(deletedList, gcSession, table, deletedListLocation, deletedListLocation);
+            }
+            table->ClearThreadMemoryCache();
 
             m_cpManager.TaskDone(table, seg, taskSucceeded);
 
@@ -439,7 +500,7 @@ void CheckpointWorkerPool::WorkerFunc()
             break;
         }
     }
-
+    delete[] deletedList;
     GetSessionManager()->DestroySessionContext(sessionContext);
     MOT::MOTEngine::GetInstance()->OnCurrentThreadEnding();
     MOT_LOG_DEBUG("thread exiting");

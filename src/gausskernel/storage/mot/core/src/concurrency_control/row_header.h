@@ -192,12 +192,12 @@ private:
     }
 
     /**
-     * @brief Queries whether the row is valid.
-     * @return True if the absent bit and the latet vsersion are not set for the row.
+     * @brief Queries whether the row is deleted.
+     * @return True if the absent bit and the latet vsersion are set for the row.
      */
-    bool IsRowValid() const
+    bool IsRowDeleted() const
     {
-        return (m_csnWord & (ABSENT_BIT | LATEST_VER_BIT)) == 0;
+        return (m_csnWord & (ABSENT_BIT | LATEST_VER_BIT)) == (ABSENT_BIT | LATEST_VER_BIT);
     }
 
     /** @brief Sets the absent bit in the row. */

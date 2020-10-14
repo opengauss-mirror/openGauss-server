@@ -417,6 +417,9 @@ Access* TxnAccess::RowLookup(void* const currentKey)
 RC TxnAccess::AccessLookup(const AccessType type, Sentinel* const originalSentinel, Row*& r_local_Row)
 {
 
+    if (m_rowCnt == 0) {
+        return RC::RC_LOCAL_ROW_NOT_FOUND;
+    }
     // type is the external operation.. for access the operation is always RD
     void* key = nullptr;
     Access* curr_acc = nullptr;
@@ -522,7 +525,11 @@ Row* TxnAccess::AddInsertToLocalAccess(Sentinel* org_sentinel, Row* org_row, RC&
     auto search = m_rowsSet->find(org_sentinel);
     if (likely(search == m_rowsSet->end())) {
         if (isUpgrade == true) {
-            curr_access = GetNewRowAccess(org_sentinel->GetData(), INS, rc);
+            if (org_sentinel->IsPrimaryIndex()) {
+                curr_access = GetNewRowAccess(org_sentinel->GetData(), INS, rc);
+            } else {
+                curr_access = GetNewRowAccess(org_row, INS, rc);
+            }
             // Check if draft is valid
             if (curr_access == nullptr) {
                 return nullptr;
@@ -578,8 +585,14 @@ Row* TxnAccess::AddInsertToLocalAccess(Sentinel* org_sentinel, Row* org_row, RC&
     return nullptr;
 }
 
-static const char* const enTxnStates[] = {
-    stringify(INV), stringify(RD), stringify(WR), stringify(DEL), stringify(INS), stringify(SCAN), stringify(TEST)};
+static const char* const enTxnStates[] = {stringify(INV),
+    stringify(RD),
+    stringify(RD_FOR_UPDATE),
+    stringify(WR),
+    stringify(DEL),
+    stringify(INS),
+    stringify(SCAN),
+    stringify(TEST)};
 
 enum NS_ACTIONS : uint32_t { NOCHANGE, INC_WRITES, FILTER_DELETES, GENERATE_ACCESS, NS_ERROR };
 
@@ -594,28 +607,44 @@ typedef union {
 } Table_Entry;
 
 static const Table_Entry txnStateMachine[TSM_SIZE][TSM_SIZE] = {
-
-    {{INV, NS_ACTIONS::NS_ERROR},
-        {RD, NS_ACTIONS::NOCHANGE},
-        {WR, NS_ACTIONS::INC_WRITES},
-        {DEL, NS_ACTIONS::GENERATE_ACCESS},
-        {INS, NS_ACTIONS::INC_WRITES}},  // INV states
+    /* INVALID STATE */
+    {{INV, NS_ACTIONS::NS_ERROR},               // INV
+        {RD, NS_ACTIONS::NOCHANGE},             // RD
+        {RD_FOR_UPDATE, NS_ACTIONS::NOCHANGE},  // RD_FOT_UPDATE
+        {WR, NS_ACTIONS::INC_WRITES},           // WR
+        {DEL, NS_ACTIONS::GENERATE_ACCESS},     // DEL
+        {INS, NS_ACTIONS::INC_WRITES}},         // INS
+    /* READ STATE */
     {{RD, NS_ACTIONS::NS_ERROR},
         {RD, NS_ACTIONS::NOCHANGE},
+        {RD_FOR_UPDATE, NS_ACTIONS::NOCHANGE},
         {WR, NS_ACTIONS::INC_WRITES},
         {DEL, NS_ACTIONS::GENERATE_ACCESS},
-        {RD, NS_ACTIONS::NS_ERROR}},  // RD states
+        {RD, NS_ACTIONS::NS_ERROR}},
+    /* READ_FOR_UPDATE STATE */
+    {{RD_FOR_UPDATE, NS_ACTIONS::NS_ERROR},
+        {RD_FOR_UPDATE, NS_ACTIONS::NOCHANGE},
+        {RD_FOR_UPDATE, NS_ACTIONS::NOCHANGE},
+        {WR, NS_ACTIONS::INC_WRITES},
+        {DEL, NS_ACTIONS::GENERATE_ACCESS},
+        {RD_FOR_UPDATE, NS_ACTIONS::NS_ERROR}},
+    /* WRITE STATE */
     {{WR, NS_ACTIONS::NS_ERROR},
         {WR, NS_ACTIONS::NOCHANGE},
         {WR, NS_ACTIONS::NOCHANGE},
+        {WR, NS_ACTIONS::NOCHANGE},
         {DEL, NS_ACTIONS::GENERATE_ACCESS},
-        {WR, NS_ACTIONS::NS_ERROR}},  // WR states
+        {WR, NS_ACTIONS::NS_ERROR}},
+    /* DELETE STATE */
     {{DEL, NS_ACTIONS::NS_ERROR},
+        {DEL, NS_ACTIONS::NOCHANGE},
         {DEL, NS_ACTIONS::NOCHANGE},
         {DEL, NS_ACTIONS::NS_ERROR},
         {DEL, NS_ACTIONS::NS_ERROR},
         {INS, NS_ACTIONS::NOCHANGE}},  // DEL states
+    /* INSERT STATE */
     {{INS, NS_ACTIONS::NS_ERROR},
+        {INS, NS_ACTIONS::NOCHANGE},
         {INS, NS_ACTIONS::NOCHANGE},
         {INS, NS_ACTIONS::NOCHANGE},
         {DEL, NS_ACTIONS::FILTER_DELETES},
@@ -743,7 +772,7 @@ bool TxnAccess::FilterOrderedSet(Access* element)
                 Access* ac = (*it).second;
                 res = true;
                 rc = m_txnManager->RollbackInsert(ac);
-                if (ac->m_params.IsUpgradeInsert() == false) {
+                if (ac->m_params.IsUpgradeInsert() == false or ac->m_params.IsDummyDeletedRow() == true) {
                     m_rowsSet->erase(it);
                     // need to perform index clean-up!
                     ReleaseAccess(ac);

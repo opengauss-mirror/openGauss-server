@@ -582,6 +582,16 @@ Row* Table::RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcMan
         if (likely(gc != nullptr)) {
             if (ix->GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
                 OutputRow = currSentinel->GetData();
+                if (currSentinel->GetStable()) {
+#ifdef MOT_DEBUG
+                    if (gc->GetGcType() != GcManager::GC_CHECKPOINT) {
+                        MOT_LOG_ERROR("ERROR!!!! Txn Delete with a stable ROW Type = %c\n", gc->GetGcTypeStr());
+                        MOT_ASSERT(false);
+                    }
+#endif
+                    gc->GcRecordObject(
+                        ix->GetIndexId(), currSentinel->GetStable(), nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
+                }
                 gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
                 gc->GcRecordObject(ix->GetIndexId(), OutputRow, nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
             } else {

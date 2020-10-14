@@ -211,6 +211,9 @@ enum AccessType : uint8_t {
     /** @var Denotes read row access code. */
     RD,
 
+    /** @var Denotes read for update row access code. */
+    RD_FOR_UPDATE,
+
     /** @var Denotes write row access code. */
     WR,
 
@@ -219,9 +222,6 @@ enum AccessType : uint8_t {
 
     /** @var Denotes insert row access code. */
     INS,
-
-    /** @var Denotes read for update row access code. */
-    RD_FOR_UPDATE,
 
     /** @var Internal code for testing. */
     SCAN,

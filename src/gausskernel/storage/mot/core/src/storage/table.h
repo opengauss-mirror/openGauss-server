@@ -290,6 +290,31 @@ public:
      */
     void Compact(TxnManager* txn);
 
+    /**
+     * @brief Count number of absent sentinels in a table
+     * @param none
+     */
+#ifdef MOT_DEBUG
+    void CountAbsents()
+    {
+        uint64_t absentCounter = 0;
+        MOT_LOG_INFO("Testing table %s \n", GetTableName().c_str());
+        for (uint16_t i = 0; i < m_numIndexes; i++) {
+            Index* index = GetIndex(i);
+            IndexIterator* it = index->Begin(0);
+            while (it->IsValid()) {
+                Sentinel* Sentinel = it->GetPrimarySentinel();
+                if (Sentinel->IsDirty()) {
+                    absentCounter++;
+                }
+                it->Next();
+            }
+            MOT_LOG_INFO("Found %lu Absents in index %s\n", absentCounter, index->GetName().c_str());
+            absentCounter = 0;
+        }
+    }
+#endif
+
     void ClearRowCache()
     {
         m_rowPool->ClearFreeCache();

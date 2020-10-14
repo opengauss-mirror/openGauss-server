@@ -134,6 +134,9 @@ struct LimboGroup {
     inline unsigned CleanIndexItemPerGroup(GcManager& ti, uint32_t indexId, bool dropIndex);
 };
 
+static const char* const enGcTypes[] = {
+    stringify(GC_MAIN), stringify(GC_INDEX), stringify(GC_LOG), stringify(GC_CHECKPOINT)};
+
 /**
  * @class GcManager
  * @brief Garbage-collector manager per-session
@@ -180,7 +183,7 @@ public:
      * @param rcuMaxFreeCount How many objects to reclaim
      * @return Pointer to instance of a GC manager
      */
-    static GcManager* Make(int purpose, int threadId, int rcuMaxFreeCount = MASSTREE_OBJECT_COUNT_PER_CLEANUP);
+    static GcManager* Make(GC_TYPE purpose, int threadId, int rcuMaxFreeCount = MASSTREE_OBJECT_COUNT_PER_CLEANUP);
 
     /**
      * @brief Add Current manager to the global list
@@ -208,6 +211,21 @@ public:
     int GetThreadId() const
     {
         return m_tid;
+    }
+
+    void SetGcType(GC_TYPE type)
+    {
+        m_purpose = type;
+    }
+
+    const char* GetGcTypeStr()
+    {
+        return enGcTypes[m_purpose];
+    }
+
+    GC_TYPE GetGcType()
+    {
+        return m_purpose;
     }
 
     void GcStartTxnMTtests()
@@ -307,7 +325,37 @@ public:
         m_managerLock.lock();
         ShrinkMem();
         m_managerLock.unlock();
-        MOT_LOG_DEBUG("THD_ID:%d closed session cleaned %d elements from limbo!\n", m_tid, inuseElements);
+        MOT_LOG_DEBUG("Entity:%s THD_ID:%d closed session cleaned %d elements from limbo!\n",
+            enGcTypes[m_purpose],
+            m_tid,
+            inuseElements);
+    }
+
+    /** @brief Clean all object at the end of the session */
+    inline void GcCheckPointClean()
+    {
+        if (m_isGcEnabled == false) {
+            return;
+        }
+
+        // End CP Txn
+        m_gcEpoch = 0;
+        m_isTxnStarted = false;
+
+        // Increase the global epoch to insure all elements are from a lower epoch
+        SetGlobalEpoch(GetGlobalEpoch() + 1);
+        m_managerLock.lock();
+        HardQuiesce(m_totalLimboInuseElements);
+        m_managerLock.unlock();
+
+#ifdef MOT_DEBUG
+        uint32_t inuseElements = m_totalLimboInuseElements;
+        uint32_t cleandObjects = inuseElements - m_totalLimboInuseElements;
+        if (cleandObjects) {
+            MOT_LOG_INFO(
+                "Entity:%s THD_ID:%d cleaned %d elements from limbo!\n", enGcTypes[m_purpose], m_tid, (cleandObjects));
+        }
+#endif
     }
 
     /**
@@ -455,7 +503,7 @@ private:
     uint16_t m_tid;
 
     /** @var GC manager type   */
-    uint8_t m_purpose;
+    GC_TYPE m_purpose;
 
     /** @brief Calculate the minimum epoch among all active GC Managers.
      *  @return The minimum epoch among all active GC Managers.
@@ -468,7 +516,7 @@ private:
     }
 
     /** @brief Constructor   */
-    inline GcManager(int purpose, int index, int rcuMaxFreeCount);
+    inline GcManager(GC_TYPE purpose, int index, int rcuMaxFreeCount);
 
     /** @brief Initialize GC Manager's structures.
      *  @return True for success

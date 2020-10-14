@@ -134,11 +134,7 @@ void RowHeader::WriteChangesToRow(const Access* access, uint64_t csn)
         case DEL:
             MOT_ASSERT(access->m_origSentinel->IsCommited() == true);
             if (access->m_params.IsPrimarySentinel()) {
-                if (row->GetPrimarySentinel()->GetStable() == nullptr) {
-                    m_csnWord = (csn | LOCK_BIT | ABSENT_BIT | LATEST_VER_BIT);
-                } else {
-                    m_csnWord = (csn | LOCK_BIT | ABSENT_BIT);  // if has stable, avoid destroying the row
-                }
+                m_csnWord = (csn | LOCK_BIT | ABSENT_BIT | LATEST_VER_BIT);
                 // and allow reuse of the original row
             }
             // Invalidate sentinel  - row is still locked!

@@ -89,6 +89,8 @@ public:
 
     enum ErrCodes { NO_ERROR = 0, FILE_IO = 1, MEMORY = 2, TABLE = 3, INDEX = 4, CALC = 5 };
 
+    static constexpr uint16_t DELETE_LIST_SIZE = 1000;
+
 private:
     /**
      * @brief The main worker function
@@ -112,9 +114,10 @@ private:
      * @param sentinel The sentinel that holds to row.
      * @param fd The file descriptor to write to.
      * @param tid The thread id.
+     * @param isDeleted The row delete status
      * @return Int equal to -1 on error, 0 if nothing was written and 1 if the row was written.
      */
-    int Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, int tid);
+    int Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, int tid, bool& isDeleted);
 
     /**
      * @brief Pops a task (table pointer) from the tasks queue.
@@ -147,6 +150,9 @@ private:
      * @return Boolean value denoting success or failure.
      */
     bool FinishFile(int& fd, uint32_t tableId, uint64_t numOps, uint64_t exId);
+
+    void ExecuteMicroGcTransaction(
+        Sentinel** deletedList, GcManager* gcSession, Table* table, uint16_t& deletedCounter, uint16_t limit);
 
     // Workers
     void* m_workers;
