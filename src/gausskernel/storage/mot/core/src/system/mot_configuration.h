@@ -85,6 +85,12 @@ public:
         --m_suppressLog;
     }
 
+    /** @brief Enables loading extra configuration parameters (by default disabled, used for testing). */
+    inline void EnableLoadExtraParams()
+    {
+        m_loadExtraParams = true;
+    }
+
     /**
      * @brief Validates configuration. Call this function after loading configuration to validate
      * the loaded values are valid, not out of bounds, and not self-contradicting.
@@ -701,6 +707,9 @@ private:
 
     /** @var Controls suppressing of log messages during configuration loading. */
     int m_suppressLog;
+
+    /** @var Controls loading of extra configuration parameters. */
+    bool m_loadExtraParams;
 
     /** @brief Loads configuration from main configuration. */
     void LoadConfig();
