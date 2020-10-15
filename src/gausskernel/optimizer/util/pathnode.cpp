@@ -3788,6 +3788,12 @@ HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     pathnode->jpath.path.param_info =
         get_joinrel_parampathinfo(root, joinrel, outer_path, inner_path, sjinfo, required_outer, &restrict_clauses);
 
+    pathnode->jpath.path.parallel_aware = false;
+    pathnode->jpath.path.parallel_safe =
+        joinrel->consider_parallel && outer_path->parallel_safe && inner_path->parallel_safe;
+    /* This is a foolish way to estimate parallel_degree, but for now... */
+    pathnode->jpath.path.parallel_degree = outer_path->parallel_degree;
+
     /*
      * A hashjoin never has pathkeys, since its output ordering is
      * unpredictable due to possible batching.      XXX If the inner relation is

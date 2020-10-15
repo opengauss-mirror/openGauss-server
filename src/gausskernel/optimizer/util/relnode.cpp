@@ -557,6 +557,7 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->reltargetlist = NIL;
     joinrel->pathlist = NIL;
     joinrel->ppilist = NIL;
+    joinrel->partial_pathlist = NIL;
     joinrel->cheapest_startup_path = NULL;
     joinrel->cheapest_total_path = NIL;
     joinrel->cheapest_unique_path = NULL;
