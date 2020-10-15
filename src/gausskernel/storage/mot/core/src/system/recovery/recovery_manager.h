@@ -60,6 +60,7 @@ public:
     };
 
     enum RecoveryOpState { COMMIT = 1, ABORT = 2, TPC_APPLY = 3, TPC_COMMIT = 4, TPC_ABORT = 5 };
+    enum CreateTableMethod { TRANSACTIONAL = 1, ADD_TO_ENGINE = 2, DONT_ADD_TO_ENGINE = 3 };
 
 private:
     /**
@@ -870,9 +871,9 @@ private:
      * @param data the table's data
      * @param status the returned status of the operation
      * @param table the returned table object.
-     * @param addToEngine should the table be added to the engine's metadata
+     * @param method controls whether the table is added to the engine or not.
      */
-    static void CreateTable(char* data, RC& status, Table*& table, bool addToEngine);
+    static void CreateTable(char* data, RC& status, Table*& table, CreateTableMethod method);
 
     /**
      * @brief performs the actual table deletion.

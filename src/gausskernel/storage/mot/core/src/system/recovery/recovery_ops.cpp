@@ -102,11 +102,11 @@ uint32_t RecoveryManager::RecoverLogOperationCreateTable(
     switch (state) {
         case COMMIT:
             MOT_LOG_DEBUG("RecoverLogOperationCreateTable: COMMIT");
-            CreateTable((char*)data, status, table, true);
+            CreateTable((char*)data, status, table, TRANSACTIONAL);
             break;
 
         case TPC_APPLY:
-            CreateTable((char*)data, status, table, false /* don't add to engine yet */);
+            CreateTable((char*)data, status, table, DONT_ADD_TO_ENGINE);
             if (status == RC_OK && table != nullptr) {
                 tableInfo = new (std::nothrow) TableInfo(table, transactionId);
                 if (tableInfo != nullptr) {
@@ -674,7 +674,7 @@ void RecoveryManager::UpdateRow(uint64_t tableId, uint64_t exId, char* keyData, 
     MOTCurrTxn->DestroyTxnKey(key);
 }
 
-void RecoveryManager::CreateTable(char* data, RC& status, Table*& table, bool addToEngine)
+void RecoveryManager::CreateTable(char* data, RC& status, Table*& table, CreateTableMethod method)
 {
     /* first verify that the table does not exists */
     string name;
@@ -699,25 +699,44 @@ void RecoveryManager::CreateTable(char* data, RC& status, Table*& table, bool ad
     do {
         if (!table->IsDeserialized()) {
             MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to de-serialize table");
+            status = RC_ERROR;
             break;
         }
 
-        if (addToEngine && ((status = MOTCurrTxn->CreateTable(table)) != RC_OK)) {
-            MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to add table to engine");
+        switch (method) {
+            case TRANSACTIONAL:
+                status = MOTCurrTxn->CreateTable(table);
+                break;
+
+            case ADD_TO_ENGINE:
+                status = GetTableManager()->AddTable(table) ? RC_OK : RC_ERROR;
+                break;
+
+            case DONT_ADD_TO_ENGINE:
+            default:
+                status = RC_OK;
+                break;
+        }
+
+        if (status != RC_OK) {
+            MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to add table %s (id: %u) to engine (method %u)",
+                table->GetLongTableName().c_str(),
+                table->GetTableId(),
+                method);
             break;
         }
 
-        MOT_LOG_DEBUG("RecoveryManager::CreateTable: table %s [internal id %u] created (%s to engine)",
+        MOT_LOG_DEBUG("RecoveryManager::CreateTable: table %s (id %u) created (method %u)",
             table->GetLongTableName().c_str(),
             table->GetTableId(),
-            addToEngine ? "added" : "not added");
-        status = RC_OK;
+            method);
         return;
 
     } while (0);
 
     MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to recover table");
     delete table;
+
     if (status == RC_OK) {
         status = RC_ERROR;
     }
