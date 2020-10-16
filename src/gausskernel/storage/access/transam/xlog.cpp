@@ -12398,7 +12398,6 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
             }
             pfree(labelfbuf.data);
 
-#ifdef ENABLE_MULTIPLE_NODES
             /* Write backup tablespace_map file. */
             if (tblspc_mapfbuf.len > 0) {
                 if (stat(TABLESPACE_MAP, &stat_buf) != 0) {
@@ -12422,7 +12421,6 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
                     ereport(
                         ERROR, (errcode_for_file_access(), errmsg("could not write file \"%s\": %m", TABLESPACE_MAP)));
             }
-#endif
             pfree(tblspc_mapfbuf.data);
         } else {
             *labelfile = labelfbuf.data;
@@ -12587,6 +12585,9 @@ XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive)
         if (strcmp(u_sess->attr.attr_common.application_name, "gs_roach") != 0) {
             if (unlink(fileName) != 0) {
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", fileName)));
+            }
+            if (unlink(TABLESPACE_MAP) != 0) {
+                ereport(DEBUG1, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", TABLESPACE_MAP)));
             }
         }
     }
