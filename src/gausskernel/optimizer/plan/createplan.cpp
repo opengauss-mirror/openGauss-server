@@ -1838,7 +1838,16 @@ static Gather* create_gather_plan(PlannerInfo* root, GatherPath* best_path)
     copy_path_costsize(&gather_plan->plan, &best_path->path);
 
 #ifdef STREAMPLAN
-    add_distribute_info(root, &gather_plan->plan, scan_relid, &(best_path->path), NULL);
+    switch (subplan->type) {
+        case T_HashJoin:
+        case T_MergeJoin:
+        case T_NestLoop:
+            inherit_plan_locator_info(&gather_plan->plan, subplan);
+            break;
+        default:
+            add_distribute_info(root, &gather_plan->plan, scan_relid, &(best_path->path), NULL);
+            break;
+    }
 #endif
 
     /* use parallel mode for parallel plans. */

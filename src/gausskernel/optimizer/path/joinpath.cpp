@@ -867,6 +867,55 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
 }
 
 /*
+ * try_partial_hashjoin_path
+ *	  Consider a partial hashjoin join path; if it appears useful, push it into
+ *	  the joinrel's partial_pathlist via add_partial_path().
+ */
+static void try_partial_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Path* outer_path, Path* inner_path,
+    List* hashclauses, JoinType jointype, JoinPathExtraData* extra)
+{
+    JoinCostWorkspace workspace;
+
+    /*
+     * If the inner path is parameterized, the parameterization must be fully
+     * satisfied by the proposed outer path.  Parameterized partial paths are
+     * not supported.  The caller should already have verified that no
+     * extra_lateral_rels are required here.
+     */
+    if (inner_path->param_info != NULL) {
+        Relids inner_paramrels = inner_path->param_info->ppi_req_outer;
+
+        if (!bms_is_empty(inner_paramrels)) {
+            return;
+        }
+    }
+
+    /*
+     * Before creating a path, get a quick lower bound on what it is likely
+     * to cost.  Bail out right away if it looks terrible.
+     */
+    initial_cost_hashjoin(
+        root, &workspace, jointype, hashclauses, outer_path, inner_path, extra->sjinfo, &extra->semifactors, 1);
+    if (!add_partial_path_precheck(joinrel, workspace.total_cost, NIL)) {
+        return;
+    }
+
+    /* Might be good enough to be worth trying, so let's try it. */
+    add_partial_path(joinrel,
+        (Path*)create_hashjoin_path(root,
+            joinrel,
+            jointype,
+            &workspace,
+            extra->sjinfo,
+            &extra->semifactors,
+            outer_path,
+            inner_path,
+            extra->restrictlist,
+            NULL,
+            hashclauses));
+}
+
+/*
  * clause_sides_match_join
  *	  Determine whether a join clause is of the right form to use in this join.
  *
@@ -1748,6 +1797,46 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                     }
                 }
                 j++;
+
+                /*
+                 * If the joinrel is parallel-safe, we may be able to consider a
+                 * partial hash join.  However, we can't handle JOIN_UNIQUE_OUTER,
+                 * because the outer path will be partial, and therefore we won't be
+                 * able to properly guarantee uniqueness.  Also, the resulting path
+                 * must not be parameterized.
+                 */
+                if (joinrel->consider_parallel && jointype != JOIN_UNIQUE_OUTER && outerrel->partial_pathlist != NIL) {
+                    Path* cheapest_partial_outer;
+                    Path* cheapest_safe_inner = NULL;
+
+                    cheapest_partial_outer = (Path*)linitial(outerrel->partial_pathlist);
+
+                    /*
+                     * Normally, given that the joinrel is parallel-safe, the cheapest
+                     * total inner path will also be parallel-safe, but if not, we'll
+                     * have to search cheapest_parameterized_paths for the cheapest
+                     * unparameterized inner path.
+                     */
+                    if (cheapest_total_inner->parallel_safe) {
+                        cheapest_safe_inner = cheapest_total_inner;
+                    } else {
+                        ListCell* lc;
+
+                        foreach (lc, innerrel->cheapest_parameterized_paths) {
+                            Path* innerpath = (Path*)lfirst(lc);
+
+                            if (innerpath->parallel_safe && bms_is_empty(PATH_REQ_OUTER(innerpath))) {
+                                cheapest_safe_inner = innerpath;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (cheapest_safe_inner != NULL) {
+                        try_partial_hashjoin_path(
+                            root, joinrel, cheapest_partial_outer, cheapest_safe_inner, hashclauses, jointype, extra);
+                    }
+                }
             }
             i++;
         }

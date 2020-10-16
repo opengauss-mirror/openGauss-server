@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * execParallel.c
- * 	  Support routines for parallel execution.
+ *    Support routines for parallel execution.
  *
  * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -16,7 +16,7 @@
  * the actual plan to be passed down to the worker.
  *
  * IDENTIFICATION
- * 	  src/backend/executor/execParallel.c
+ *    src/backend/executor/execParallel.c
  *
  * -------------------------------------------------------------------------
  */
@@ -158,11 +158,8 @@ static bool ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateConte
 }
 
 /*
- * Ordinary plan nodes won't do anything here, but parallel-aware plan nodes
- * may need to initialize shared state in the DSM before parallel workers
- * are available.  They can allocate the space they previous estimated using
- * shm_toc_allocate, and add the keys they previously estimated using
- * shm_toc_insert, in each case targeting pcxt->toc.
+ * Initialize the dynamic shared memory segment that will be used to control
+ * parallel execution.
  */
 static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitializeDSMContext *d)
 {
@@ -178,7 +175,15 @@ static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitiali
     d->nnodes++;
     knl_u_parallel_context *cxt = (knl_u_parallel_context *)d->pcxt->seg;
 
-    /* Call initializers for parallel-aware plan nodes. */
+    /*
+     * Call initializers for parallel-aware plan nodes.
+     *
+     * Ordinary plan nodes won't do anything here, but parallel-aware plan
+     * nodes may need to initialize shared state in the DSM before parallel
+     * workers are available.  They can allocate the space they previously
+     * estimated using shm_toc_allocate, and add the keys they previously
+     * estimated using shm_toc_insert, in each case targeting pcxt->toc.
+     */
     if (planstate->plan->parallel_aware) {
         switch (nodeTag(planstate)) {
             case T_SeqScanState:
