@@ -2476,10 +2476,18 @@ void MOTAdaptor::DatumToMOTKey(
 
             size -= VARHDRSZ;
             if (oper == KEY_OPER::READ_KEY_LIKE) {
-                if (src[size - 1] == '%')
+                if (src[size - 1] == '%') {
                     size -= 1;
-                else
-                    fill = 0x00;  // switch to equal
+                } else {
+                    // switch to equal
+                    if (type == BPCHAROID) {
+                        fill = 0x20;  // space ' ' == 0x20
+                    } else {
+                        fill = 0x00;
+                    }
+                }
+            } else if (type == BPCHAROID) {  // handle padding for blank-padded type
+                fill = 0x20;
             }
             col->PackKey(data, (uintptr_t)src, size, fill);
 

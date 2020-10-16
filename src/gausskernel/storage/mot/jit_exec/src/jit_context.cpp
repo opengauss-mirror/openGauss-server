@@ -48,24 +48,6 @@ static void CleanupJitContextInner(JitContext* jitContext);
 static void CleanupJitContextSubQueryDataArray(JitContext* jitContext);
 static void CleanupJitContextSubQueryData(JitContext::SubQueryData* subQueryData);
 
-// Helpers to allocate/free from top memory context
-inline void* palloc_top(size_t size_bytes)
-{
-    MemoryContext oldCtx = CurrentMemoryContext;
-    CurrentMemoryContext = u_sess->top_mem_cxt;
-    void* res = palloc(size_bytes);
-    CurrentMemoryContext = oldCtx;
-    return res;
-}
-
-inline void pfree_top(void* obj)
-{
-    MemoryContext oldCtx = CurrentMemoryContext;
-    CurrentMemoryContext = u_sess->top_mem_cxt;
-    pfree(obj);
-    CurrentMemoryContext = oldCtx;
-}
-
 extern bool InitGlobalJitContextPool()
 {
     return InitJitContextPool(&g_globalJitCtxPool, JIT_CONTEXT_GLOBAL, GetMotCodegenLimit());
@@ -78,16 +60,16 @@ extern void DestroyGlobalJitContextPool()
 
 extern JitContext* AllocJitContext(JitContextUsage usage)
 {
-    JitContext* result = NULL;
+    JitContext* result = nullptr;
     if (usage == JIT_CONTEXT_GLOBAL) {
         // allocate from global pool
         result = AllocPooledJitContext(&g_globalJitCtxPool);
     } else {
         // allocate from session local pool (create pool on demand and schedule cleanup during end of session)
-        if (u_sess->mot_cxt.jit_session_context_pool == NULL) {
+        if (u_sess->mot_cxt.jit_session_context_pool == nullptr) {
             u_sess->mot_cxt.jit_session_context_pool = AllocSessionJitContextPool();
-            if (u_sess->mot_cxt.jit_session_context_pool == NULL) {
-                return NULL;
+            if (u_sess->mot_cxt.jit_session_context_pool == nullptr) {
+                return nullptr;
             }
         }
         result = AllocPooledJitContext(u_sess->mot_cxt.jit_session_context_pool);
@@ -250,12 +232,12 @@ static List* GetSubQueryTargetList(const char* queryString, int subQueryIndex)
 
 extern bool ReFetchIndices(JitContext* jitContext)
 {
+    if (jitContext->m_commandType != JIT_COMMAND_INSERT) {
+        return true;
+    }
+
     // re-fetch main index
-    if ((jitContext->m_commandType != JIT_COMMAND_INSERT) && (jitContext->m_index == nullptr)) {
-        if (jitContext->m_indexId == 0) {
-            MOT_LOG_TRACE("Cannot re-fetch index: missing index identifier");
-            return false;
-        }
+    if (jitContext->m_index == nullptr) {
         jitContext->m_index = jitContext->m_table->GetIndexByExtId(jitContext->m_indexId);
         if (jitContext->m_index == nullptr) {
             MOT_LOG_TRACE("Failed to fetch index by extern id %" PRIu64, jitContext->m_indexId);
@@ -266,10 +248,6 @@ extern bool ReFetchIndices(JitContext* jitContext)
     // re-fetch inner index (JOIN commands only)
     if (IsJoinCommand(jitContext->m_commandType)) {
         if (jitContext->m_innerIndex == nullptr) {
-            if (jitContext->m_innerIndexId == 0) {
-                MOT_LOG_TRACE("Cannot re-fetch inner index: missing index identifier");
-                return false;
-            }
             jitContext->m_innerIndex = jitContext->m_innerTable->GetIndexByExtId(jitContext->m_innerIndexId);
             if (jitContext->m_innerIndex == nullptr) {
                 MOT_LOG_TRACE("Failed to fetch inner index by extern id %" PRIu64, jitContext->m_innerIndexId);
@@ -283,10 +261,6 @@ extern bool ReFetchIndices(JitContext* jitContext)
         for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
             JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
             if (subQueryData->m_index == nullptr) {
-                if (subQueryData->m_indexId == 0) {
-                    MOT_LOG_TRACE("Cannot re-fetch sub-query %u index: missing index identifier", i);
-                    return false;
-                }
                 subQueryData->m_index = subQueryData->m_table->GetIndexByExtId(subQueryData->m_indexId);
                 if (subQueryData->m_index == nullptr) {
                     MOT_LOG_TRACE(
@@ -303,10 +277,10 @@ extern bool ReFetchIndices(JitContext* jitContext)
 extern bool PrepareJitContext(JitContext* jitContext)
 {
     // allocate argument-is-null array
-    if (jitContext->m_argIsNull == NULL) {
+    if (jitContext->m_argIsNull == nullptr) {
         MOT_LOG_TRACE("Allocating null argument array with %u slots", (unsigned)jitContext->m_argCount);
-        jitContext->m_argIsNull = (int*)palloc_top(sizeof(int) * jitContext->m_argCount);
-        if (jitContext->m_argIsNull == NULL) {
+        jitContext->m_argIsNull = (int*)MOT::MemSessionAlloc(sizeof(int) * jitContext->m_argCount);
+        if (jitContext->m_argIsNull == nullptr) {
             MOT_LOG_TRACE("Failed to allocate null argument array in size of %d slots", jitContext->m_argCount);
             return false;
         }
@@ -323,7 +297,7 @@ extern bool PrepareJitContext(JitContext* jitContext)
     if ((jitContext->m_searchKey == nullptr) && (jitContext->m_commandType != JIT_COMMAND_INSERT)) {
         MOT_LOG_TRACE("Preparing search key from index %s", jitContext->m_index->GetName().c_str());
         jitContext->m_searchKey = PrepareJitSearchKey(jitContext, jitContext->m_index);
-        if (jitContext->m_searchKey == NULL) {
+        if (jitContext->m_searchKey == nullptr) {
             MOT_LOG_TRACE("Failed to allocate reusable search key for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
         } else {
@@ -335,34 +309,34 @@ extern bool PrepareJitContext(JitContext* jitContext)
     }
 
     // allocate bitmap-set object for incremental-redo when executing UPDATE command
-    if ((jitContext->m_bitmapSet == NULL) && ((jitContext->m_commandType == JIT_COMMAND_UPDATE) ||
-                                                 (jitContext->m_commandType == JIT_COMMAND_RANGE_UPDATE))) {
+    if ((jitContext->m_bitmapSet == nullptr) && ((jitContext->m_commandType == JIT_COMMAND_UPDATE) ||
+                                                    (jitContext->m_commandType == JIT_COMMAND_RANGE_UPDATE))) {
         int fieldCount = (int)jitContext->m_table->GetFieldCount();
         MOT_LOG_TRACE(
             "Initializing reusable bitmap set according to %d fields (including null-bits column 0) in table %s",
             fieldCount,
             jitContext->m_table->GetLongTableName().c_str());
-        void* buf = palloc_top(sizeof(MOT::BitmapSet));
-        if (buf == NULL) {
+        void* buf = MOT::MemSessionAlloc(sizeof(MOT::BitmapSet));
+        if (buf == nullptr) {
             MOT_LOG_TRACE("Failed to allocate reusable bitmap set for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
         }
 
-        uint8_t* bitmapData = (uint8_t*)palloc_top(MOT::BitmapSet::GetLength(fieldCount));
-        if (bitmapData == NULL) {
+        uint8_t* bitmapData = (uint8_t*)MOT::MemSessionAlloc(MOT::BitmapSet::GetLength(fieldCount));
+        if (bitmapData == nullptr) {
             MOT_LOG_TRACE("Failed to allocate reusable bitmap set for JIT context, aborting jitted code execution");
-            pfree_top(buf);
+            MOT::MemSessionFree(buf);
             return false;  // safe cleanup during destroy
         }
         jitContext->m_bitmapSet = new (buf) MOT::BitmapSet(bitmapData, fieldCount);
     }
 
     // allocate end-iterator key object when executing range UPDATE command or special SELECT commands
-    if ((jitContext->m_endIteratorKey == NULL) && IsRangeCommand(jitContext->m_commandType)) {
+    if ((jitContext->m_endIteratorKey == nullptr) && IsRangeCommand(jitContext->m_commandType)) {
         MOT_LOG_TRACE("Preparing end iterator key for range update/select command from index %s",
             jitContext->m_index->GetName().c_str());
         jitContext->m_endIteratorKey = PrepareJitSearchKey(jitContext, jitContext->m_index);
-        if (jitContext->m_endIteratorKey == NULL) {
+        if (jitContext->m_endIteratorKey == nullptr) {
             MOT_LOG_TRACE(
                 "Failed to allocate reusable end iterator key for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
@@ -375,11 +349,11 @@ extern bool PrepareJitContext(JitContext* jitContext)
     }
 
     // allocate inner loop search key for JOIN commands
-    if ((jitContext->m_innerSearchKey == NULL) && IsJoinCommand(jitContext->m_commandType)) {
+    if ((jitContext->m_innerSearchKey == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
         MOT_LOG_TRACE(
             "Preparing inner search key  for JOIN command from index %s", jitContext->m_innerIndex->GetName().c_str());
         jitContext->m_innerSearchKey = PrepareJitSearchKey(jitContext, jitContext->m_innerIndex);
-        if (jitContext->m_innerSearchKey == NULL) {
+        if (jitContext->m_innerSearchKey == nullptr) {
             MOT_LOG_TRACE(
                 "Failed to allocate reusable inner search key for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
@@ -392,11 +366,11 @@ extern bool PrepareJitContext(JitContext* jitContext)
     }
 
     // allocate inner loop end-iterator search key for JOIN commands
-    if ((jitContext->m_innerEndIteratorKey == NULL) && IsJoinCommand(jitContext->m_commandType)) {
+    if ((jitContext->m_innerEndIteratorKey == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
         MOT_LOG_TRACE("Preparing inner end iterator key for JOIN command from index %s",
             jitContext->m_innerIndex->GetName().c_str());
         jitContext->m_innerEndIteratorKey = PrepareJitSearchKey(jitContext, jitContext->m_innerIndex);
-        if (jitContext->m_innerEndIteratorKey == NULL) {
+        if (jitContext->m_innerEndIteratorKey == nullptr) {
             MOT_LOG_TRACE(
                 "Failed to allocate reusable inner end iterator key for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
@@ -409,10 +383,10 @@ extern bool PrepareJitContext(JitContext* jitContext)
     }
 
     // preparing outer row copy for JOIN commands
-    if ((jitContext->m_outerRowCopy == NULL) && IsJoinCommand(jitContext->m_commandType)) {
+    if ((jitContext->m_outerRowCopy == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
         MOT_LOG_TRACE("Preparing outer row copy for JOIN command");
         jitContext->m_outerRowCopy = jitContext->m_table->CreateNewRow();
-        if (jitContext->m_outerRowCopy == NULL) {
+        if (jitContext->m_outerRowCopy == nullptr) {
             MOT_LOG_TRACE("Failed to allocate reusable outer row copy for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
         }
@@ -511,35 +485,35 @@ extern void DestroyJitContext(JitContext* jitContext)
         CleanupJitContextInner(jitContext);
 
         // cleanup bitmap set
-        if (jitContext->m_bitmapSet != NULL) {
-            pfree_top(jitContext->m_bitmapSet->GetData());
+        if (jitContext->m_bitmapSet != nullptr) {
+            MOT::MemSessionFree(jitContext->m_bitmapSet->GetData());
             jitContext->m_bitmapSet->MOT::BitmapSet::~BitmapSet();
-            pfree_top(jitContext->m_bitmapSet);
-            jitContext->m_bitmapSet = NULL;
+            MOT::MemSessionFree(jitContext->m_bitmapSet);
+            jitContext->m_bitmapSet = nullptr;
         }
 
         // cleanup code generator (only in global-usage)
         if (jitContext->m_codeGen && (jitContext->m_usage == JIT_CONTEXT_GLOBAL)) {
             FreeGsCodeGen(jitContext->m_codeGen);
-            jitContext->m_codeGen = NULL;
+            jitContext->m_codeGen = nullptr;
         }
 
         // cleanup null argument array
-        if (jitContext->m_argIsNull != NULL) {
-            pfree_top(jitContext->m_argIsNull);
-            jitContext->m_argIsNull = NULL;
+        if (jitContext->m_argIsNull != nullptr) {
+            MOT::MemSessionFree(jitContext->m_argIsNull);
+            jitContext->m_argIsNull = nullptr;
         }
 
         // cleanup TVM function (only in global-usage)
         if (jitContext->m_tvmFunction && (jitContext->m_usage == JIT_CONTEXT_GLOBAL)) {
             delete jitContext->m_tvmFunction;
-            jitContext->m_tvmFunction = NULL;
+            jitContext->m_tvmFunction = nullptr;
         }
 
         // cleanup TVM execution context
-        if (jitContext->m_execContext != NULL) {
+        if (jitContext->m_execContext != nullptr) {
             tvm::freeExecContext(jitContext->m_execContext);
-            jitContext->m_execContext = NULL;
+            jitContext->m_execContext = nullptr;
         }
 
         FreeJitContext(jitContext);
@@ -593,12 +567,12 @@ static void CleanupJitContextPrimary(JitContext* jitContext)
         if (jitContext->m_index) {
             if (jitContext->m_searchKey) {
                 jitContext->m_index->DestroyKey(jitContext->m_searchKey);
-                jitContext->m_searchKey = NULL;
+                jitContext->m_searchKey = nullptr;
             }
 
             if (jitContext->m_endIteratorKey != nullptr) {
                 jitContext->m_index->DestroyKey(jitContext->m_endIteratorKey);
-                jitContext->m_endIteratorKey = NULL;
+                jitContext->m_endIteratorKey = nullptr;
             }
             jitContext->m_index = nullptr;
         }
@@ -606,7 +580,7 @@ static void CleanupJitContextPrimary(JitContext* jitContext)
         // cleanup JOIN outer row copy
         if (jitContext->m_outerRowCopy != nullptr) {
             jitContext->m_table->DestroyRow(jitContext->m_outerRowCopy);
-            jitContext->m_outerRowCopy = NULL;
+            jitContext->m_outerRowCopy = nullptr;
         }
     }
 }
@@ -616,12 +590,12 @@ static void CleanupJitContextInner(JitContext* jitContext)
         if (jitContext->m_innerIndex != nullptr) {
             if (jitContext->m_innerSearchKey != nullptr) {
                 jitContext->m_innerIndex->DestroyKey(jitContext->m_innerSearchKey);
-                jitContext->m_innerSearchKey = NULL;
+                jitContext->m_innerSearchKey = nullptr;
             }
 
             if (jitContext->m_innerEndIteratorKey != nullptr) {
                 jitContext->m_innerIndex->DestroyKey(jitContext->m_innerEndIteratorKey);
-                jitContext->m_innerEndIteratorKey = NULL;
+                jitContext->m_innerEndIteratorKey = nullptr;
             }
             jitContext->m_innerIndex = nullptr;
         }
@@ -646,6 +620,8 @@ static void CleanupJitContextSubQueryDataArray(JitContext* jitContext)
 
 static void CleanupJitContextSubQueryData(JitContext::SubQueryData* subQueryData)
 {
+    MemoryContext oldCtx = CurrentMemoryContext;
+    CurrentMemoryContext = u_sess->top_mem_cxt;
     if (subQueryData->m_slot != nullptr) {
         ExecDropSingleTupleTableSlot(subQueryData->m_slot);
         subQueryData->m_slot = nullptr;
@@ -665,13 +641,14 @@ static void CleanupJitContextSubQueryData(JitContext::SubQueryData* subQueryData
         }
         subQueryData->m_index = nullptr;
     }
+    CurrentMemoryContext = oldCtx;
 }
 
 static JitContextPool* AllocSessionJitContextPool()
 {
     size_t allocSize = sizeof(JitContextPool);
     JitContextPool* jitContextPool = (JitContextPool*)MOT::MemGlobalAllocAligned(allocSize, L1_CACHE_LINE);
-    if (jitContextPool == NULL) {
+    if (jitContextPool == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
             "Allocate JIT Context",
             "Failed to allocate %u bytes for JIT context pool",
@@ -682,7 +659,7 @@ static JitContextPool* AllocSessionJitContextPool()
 
         if (!InitJitContextPool(jitContextPool, JIT_CONTEXT_LOCAL, GetMotCodegenLimit())) {
             MOT::MemGlobalFree(jitContextPool);
-            jitContextPool = NULL;
+            jitContextPool = nullptr;
         }
     }
     return jitContextPool;
@@ -697,7 +674,7 @@ extern void FreeSessionJitContextPool(JitContextPool* jitContextPool)
 static MOT::Key* PrepareJitSearchKey(JitContext* jitContext, MOT::Index* index)
 {
     MOT::Key* key = index->CreateNewKey();
-    if (key == NULL) {
+    if (key == nullptr) {
         MOT_LOG_TRACE("Failed to prepare for executing jitted code: Failed to create reusable search key");
     } else {
         key->InitKey((uint16_t)index->GetKeyLength());

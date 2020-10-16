@@ -696,12 +696,14 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
     set_cheapest(baserel);
 
     if (!IS_PGXC_COORDINATOR && list_length(baserel->cheapest_parameterized_paths) > 0) {
-        bestPath = (Path*)linitial(baserel->cheapest_parameterized_paths);
-        if (IsA(bestPath, IndexPath) && bestPath->param_info) {
-            IndexPath* ip = (IndexPath*)bestPath;
-            bestClause = ip->indexclauses;
+        foreach (lc, baserel->cheapest_parameterized_paths) {
+            bestPath = (Path*)lfirst(lc);
+            if (IsA(bestPath, IndexPath) && bestPath->param_info) {
+                IndexPath* ip = (IndexPath*)bestPath;
+                bestClause = ip->indexclauses;
+                break;
+            }
         }
-
         usablePathkeys = nullptr;
     }
 

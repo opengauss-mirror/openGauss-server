@@ -55,14 +55,14 @@ static double numericToDouble(Datum numeric_value)
 /** @brief Allocates and initializes a distinct set of integers. */
 static void* prepareDistinctIntSet()
 {
-    void* buf = palloc(sizeof(DistinctIntSetType));
+    void* buf = MOT::MemSessionAlloc(sizeof(DistinctIntSetType));
     return new (buf) DistinctIntSetType();
 }
 
 /** @brief Allocates and initializes a distinct set of double-precision values. */
 static void* prepareDistinctDoubleSet()
 {
-    void* buf = palloc(sizeof(DistinctDoubleSetType));
+    void* buf = MOT::MemSessionAlloc(sizeof(DistinctDoubleSetType));
     return new (buf) DistinctDoubleSetType();
 }
 
@@ -93,7 +93,7 @@ static void destroyDistinctIntSet(void* distinct_set)
 {
     DistinctIntSetType* int_set = (DistinctIntSetType*)distinct_set;
     int_set->~DistinctIntSetType();
-    pfree(distinct_set);
+    MOT::MemSessionFree(distinct_set);
 }
 
 /** @brief Destroys and frees a distinct set of double-precision values. */
@@ -101,7 +101,7 @@ static void destroyDistinctDoubleSet(void* distinct_set)
 {
     DistinctDoubleSetType* double_set = (DistinctDoubleSetType*)distinct_set;
     double_set->~DistinctDoubleSetType();
-    pfree(distinct_set);
+    MOT::MemSessionFree(distinct_set);
 }
 
 /*---------------------------  DEBUG Print Helpers ---------------------------*/

@@ -229,7 +229,7 @@ bool RecoveryManager::RecoverTableMetadata(uint32_t tableId)
     CheckpointUtils::CloseFile(fd);
 
     Table* table = nullptr;
-    CreateTable(dataBuf, status, table, true);
+    CreateTable(dataBuf, status, table, ADD_TO_ENGINE);
     delete[] dataBuf;
 
     return (status == RC_OK);
@@ -482,7 +482,6 @@ bool RecoveryManager::RecoverFromCheckpoint()
         m_tableIds.size(),
         m_checkpointId);
 
-    BeginTransaction();
     for (auto it = m_tableIds.begin(); it != m_tableIds.end(); ++it) {
         if (IsRecoveryMemoryLimitReached(NUM_REDO_RECOVERY_THREADS)) {
             MOT_LOG_ERROR("Memory hard limit reached. Cannot recover datanode");
@@ -496,12 +495,6 @@ bool RecoveryManager::RecoverFromCheckpoint()
                 std::to_string(*it).c_str());
             return false;
         }
-    }
-    RC status = CommitTransaction(MOT_RECOVERED_TABLE_CSN);
-    if (status != RC_OK) {
-        MOT_LOG_ERROR("Failed to commit table recovery: %s (error code: %d)", RcToString(status), (int)status);
-        OnError(RecoveryManager::ErrCodes::CP_TABLE_COMMIT, "Failed to commit table recovery from checkpoint");
-        return false;
     }
 
     std::vector<std::thread> recoveryThreadPool;

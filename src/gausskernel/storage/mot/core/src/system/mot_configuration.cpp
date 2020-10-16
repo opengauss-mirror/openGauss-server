@@ -508,7 +508,8 @@ MOTConfiguration::MOTConfiguration()
       m_configMonitorPeriodSeconds(DEFAULT_CFG_MONITOR_PERIOD_SECONDS),
       m_runInternalConsistencyValidation(DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION),
       m_totalMemoryMb(DEFAULT_TOTAL_MEMORY_MB),
-      m_suppressLog(0)
+      m_suppressLog(0),
+      m_loadExtraParams(false)
 {}
 
 void MOTConfiguration::Initialize()
@@ -691,8 +692,14 @@ void MOTConfiguration::LoadConfig()
     const LayeredConfigTree* cfg = ConfigManager::GetInstance().GetLayeredConfigTree();
 
     // logger configuration
-    UPDATE_BOOL_CFG(m_enableRedoLog, "enable_redo_log", DEFAULT_ENABLE_REDO_LOG);
-    UPDATE_USER_CFG(m_loggerType, "logger_type", DEFAULT_LOGGER_TYPE);
+    if (m_loadExtraParams) {
+        UPDATE_BOOL_CFG(m_enableRedoLog, "enable_redo_log", DEFAULT_ENABLE_REDO_LOG);
+        UPDATE_USER_CFG(m_loggerType, "logger_type", DEFAULT_LOGGER_TYPE);
+    }
+
+    // Even though we allow loading this unexposed parameter (redo_log_handler_type), in reality it is always
+    // overridden by the external configuration loader GaussdbConfigLoader (so in effect whatever is defined in
+    // mot.conf is discarded). See GaussdbConfigLoader::ConfigureRedoLogHandler() for more details.
     UPDATE_USER_CFG(m_redoLogHandlerType, "redo_log_handler_type", DEFAULT_REDO_LOG_HANDLER_TYPE);
     UPDATE_INT_CFG(m_asyncRedoLogBufferArrayCount,
         "async_log_buffer_count",
@@ -715,7 +722,9 @@ void MOTConfiguration::LoadConfig()
         MAX_GROUP_COMMIT_TIMEOUT_USEC);
 
     // Checkpoint configuration
-    UPDATE_BOOL_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
+    if (m_loadExtraParams) {
+        UPDATE_BOOL_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
+    }
 
     if (!m_enableCheckpoint && m_enableRedoLog) {
         if (m_suppressLog == 0) {
@@ -745,9 +754,11 @@ void MOTConfiguration::LoadConfig()
         MAX_CHECKPOINT_RECOVERY_WORKERS);
 
     // Tx configuration - not configurable yet
-    UPDATE_BOOL_CFG(m_abortBufferEnable, "tx_abort_buffers_enable", true);
-    UPDATE_BOOL_CFG(m_preAbort, "tx_pre_abort", true);
-    m_validationLock = TxnValidation::TXN_VALIDATION_NO_WAIT;
+    if (m_loadExtraParams) {
+        UPDATE_BOOL_CFG(m_abortBufferEnable, "tx_abort_buffers_enable", true);
+        UPDATE_BOOL_CFG(m_preAbort, "tx_pre_abort", true);
+        m_validationLock = TxnValidation::TXN_VALIDATION_NO_WAIT;
+    }
 
     // statistics configuration
     UPDATE_BOOL_CFG(m_enableStats, "enable_stats", DEFAULT_ENABLE_STATS);
@@ -777,9 +788,11 @@ void MOTConfiguration::LoadConfig()
     // log configuration
     UPDATE_USER_CFG(m_logLevel, "log_level", DEFAULT_LOG_LEVEL);
     SetGlobalLogLevel(m_logLevel);
-    UPDATE_USER_CFG(m_numaErrorsLogLevel, "numa_errors_log_level", DEFAULT_NUMA_ERRORS_LOG_LEVEL);
-    UPDATE_USER_CFG(m_numaWarningsLogLevel, "numa_warnings_log_level", DEFAULT_NUMA_WARNINGS_LOG_LEVEL);
-    UPDATE_USER_CFG(m_cfgStartupLogLevel, "cfg_startup_log_level", DEFAULT_CFG_STARTUP_LOG_LEVEL);
+    if (m_loadExtraParams) {
+        UPDATE_USER_CFG(m_numaErrorsLogLevel, "numa_errors_log_level", DEFAULT_NUMA_ERRORS_LOG_LEVEL);
+        UPDATE_USER_CFG(m_numaWarningsLogLevel, "numa_warnings_log_level", DEFAULT_NUMA_WARNINGS_LOG_LEVEL);
+        UPDATE_USER_CFG(m_cfgStartupLogLevel, "cfg_startup_log_level", DEFAULT_CFG_STARTUP_LOG_LEVEL);
+    }
 
     // memory configuration
     UPDATE_BOOL_CFG(m_enableNuma, "enable_numa", DEFAULT_ENABLE_NUMA);
@@ -935,11 +948,13 @@ void MOTConfiguration::LoadConfig()
         DEFAULT_CHUNK_PREALLOC_WORKER_COUNT,
         MIN_CHUNK_PREALLOC_WORKER_COUNT,
         MAX_CHUNK_PREALLOC_WORKER_COUNT);
-    UPDATE_INT_CFG(m_highRedMarkPercent,
-        "high_red_mark_percent",
-        DEFAULT_HIGH_RED_MARK_PERCENT,
-        MIN_HIGH_RED_MARK_PERCENT,
-        MAX_HIGH_RED_MARK_PERCENT);
+    if (m_loadExtraParams) {
+        UPDATE_INT_CFG(m_highRedMarkPercent,
+            "high_red_mark_percent",
+            DEFAULT_HIGH_RED_MARK_PERCENT,
+            MIN_HIGH_RED_MARK_PERCENT,
+            MAX_HIGH_RED_MARK_PERCENT);
+    }
     UPDATE_ABS_MEM_CFG(m_sessionLargeBufferStoreSizeMB,
         "session_large_buffer_store_size",
         DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE,
@@ -987,20 +1002,24 @@ void MOTConfiguration::LoadConfig()
         m_codegenLimit, "mot_codegen_limit", DEFAULT_MOT_CODEGEN_LIMIT, MIN_MOT_CODEGEN_LIMIT, MAX_MOT_CODEGEN_LIMIT);
 
     // storage configuration
-    UPDATE_BOOL_CFG(
-        m_allowIndexOnNullableColumn, "allow_index_on_nullable_column", DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN);
-    UPDATE_USER_CFG(m_indexTreeFlavor, "index_tree_flavor", DEFAULT_INDEX_TREE_FLAVOR);
+    if (m_loadExtraParams) {
+        UPDATE_BOOL_CFG(
+            m_allowIndexOnNullableColumn, "allow_index_on_nullable_column", DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN);
+        UPDATE_USER_CFG(m_indexTreeFlavor, "index_tree_flavor", DEFAULT_INDEX_TREE_FLAVOR);
+    }
 
     // general configuration
-    UPDATE_TIME_CFG(m_configMonitorPeriodSeconds,
-        "config_update_period",
-        DEFAULT_CFG_MONITOR_PERIOD,
-        SCALE_SECONDS,
-        MIN_CFG_MONITOR_PERIOD_SECONDS,
-        MAX_CFG_MONITOR_PERIOD_SECONDS);
-    UPDATE_BOOL_CFG(m_runInternalConsistencyValidation,
-        "internal_consistency_validation",
-        DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION);
+    if (m_loadExtraParams) {
+        UPDATE_TIME_CFG(m_configMonitorPeriodSeconds,
+            "config_update_period",
+            DEFAULT_CFG_MONITOR_PERIOD,
+            SCALE_SECONDS,
+            MIN_CFG_MONITOR_PERIOD_SECONDS,
+            MAX_CFG_MONITOR_PERIOD_SECONDS);
+        UPDATE_BOOL_CFG(m_runInternalConsistencyValidation,
+            "internal_consistency_validation",
+            DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION);
+    }
 
     // load component log levels
     UpdateComponentLogLevel();
@@ -1134,8 +1153,8 @@ void MOTConfiguration::UpdateComponentLogLevel()
             // configure component log level first then override log level specific loggers in the component
             LogLevel componentLevel = componentCfg->GetUserConfigValue<LogLevel>("log_level", globalLogLevel);
             if (componentLevel != globalLogLevel) {
-                mot_string logLevelStr;
                 if (m_suppressLog == 0) {
+                    mot_string logLevelStr;
                     MOT_LOG_INFO("Updating the log level of component %s to: %s",
                         componentName.c_str(),
                         TypeFormatter<LogLevel>::ToString(componentLevel, logLevelStr));
@@ -1145,7 +1164,7 @@ void MOTConfiguration::UpdateComponentLogLevel()
 
             // all configuration values are logger configuration pairs (loggerName=log_level)
             mot_string_list loggerNames;
-            if (!componentCfg->GetConfigValueNames(loggerNames)) {
+            if (!componentCfg->GetConfigSectionNames(loggerNames)) {
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                     "Load Configuration",
                     "Failed to retrieve logger names for section %s",
@@ -1155,21 +1174,18 @@ void MOTConfiguration::UpdateComponentLogLevel()
             mot_string_list::const_iterator loggerItr = loggerNames.cbegin();
             while (loggerItr != loggerNames.cend()) {
                 const mot_string& loggerName = *loggerItr;
-                if (loggerName.compare("log_level") != 0) {  // skip special value for entire component log level
-                    MOT_LOG_DEBUG(
-                        "Loading component/logger %s/%s log level", componentName.c_str(), loggerName.c_str());
-                    LogLevel loggerLevel =
-                        componentCfg->GetUserConfigValue<LogLevel>(loggerName.c_str(), LogLevel::LL_INFO);
-                    if (loggerLevel != LogLevel::LL_INFO) {
+                MOT_LOG_DEBUG("Loading component/logger %s/%s log level", componentName.c_str(), loggerName.c_str());
+                const ConfigSection* loggerCfg = componentCfg->GetConfigSection(loggerName.c_str());
+                LogLevel loggerLevel = loggerCfg->GetUserConfigValue<LogLevel>("log_level", componentLevel);
+                if (loggerLevel != componentLevel) {
+                    if (m_suppressLog == 0) {
                         mot_string logLevelStr;
-                        if (m_suppressLog == 0) {
-                            MOT_LOG_INFO("Updating the log level of logger %s in component %s to: %s",
-                                loggerName.c_str(),
-                                componentName.c_str(),
-                                TypeFormatter<LogLevel>::ToString(loggerLevel, logLevelStr));
-                        }
-                        SetLoggerLogLevel(componentName.c_str(), loggerName.c_str(), loggerLevel);
+                        MOT_LOG_INFO("Updating the log level of logger %s in component %s to: %s",
+                            loggerName.c_str(),
+                            componentName.c_str(),
+                            TypeFormatter<LogLevel>::ToString(loggerLevel, logLevelStr));
                     }
+                    SetLoggerLogLevel(componentName.c_str(), loggerName.c_str(), loggerLevel);
                 }
                 ++loggerItr;
             }

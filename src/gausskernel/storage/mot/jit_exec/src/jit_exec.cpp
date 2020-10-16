@@ -467,16 +467,19 @@ extern void PurgeJitSourceCache(uint64_t relationId, bool purgeOnly)
 
 extern bool JitInitialize()
 {
+    if (!IsMotCodegenEnabled()) {
+        MOT_LOG_INFO("MOT JIT execution is disabled by user configuration");
+        return true;
+    }
+
     if (JitCanInitThreadCodeGen()) {
         if (IsMotPseudoCodegenForced()) {
             MOT_LOG_INFO("Forcing TVM on LLVM natively supported platform");
         } else {
             PrintNativeLlvmStartupInfo();
         }
-    } else if (IsMotCodegenEnabled()) {
-        MOT_LOG_INFO("Using TVM on LLVM natively unsupported platform");
     } else {
-        MOT_LOG_INFO("MOT JIT execution is disabled by user configuration");
+        MOT_LOG_INFO("Using TVM on LLVM natively unsupported platform");
     }
 
     enum InitState {
