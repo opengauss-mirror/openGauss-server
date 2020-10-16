@@ -282,7 +282,7 @@ def collectUnicode():
     output : Instantion
     """
     data = codename()
-    cmd = "source /etc/profile; locale | grep '^LANG='"
+    cmd = "locale | grep '^LANG='"
     status, output = subprocess.getstatusoutput(cmd)
     if status != 0:
         raise Exception((ErrorCode.GAUSS_505["GAUSS_50502"] % "Unicode") +
