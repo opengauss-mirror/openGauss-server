@@ -113,7 +113,11 @@ SELECT count(*) FROM fast_emp4000 WHERE home_base IS NULL;
 
 SELECT * FROM polygon_tbl WHERE f1 ~ '((1,1),(2,2),(2,1))'::polygon
     ORDER BY (poly_center(f1))[0];
-ERROR:  type "line" not yet implemented
+ id |         f1          
+----+---------------------
+  1 | ((2,0),(2,4),(0,0))
+(1 row)
+
 SELECT * FROM circle_tbl WHERE f1 && circle(point(1,-2), 1)
     ORDER BY area(f1);
       f1       
@@ -424,7 +428,11 @@ SELECT * FROM polygon_tbl WHERE f1 ~ '((1,1),(2,2),(2,1))'::polygon
 
 SELECT * FROM polygon_tbl WHERE f1 ~ '((1,1),(2,2),(2,1))'::polygon
     ORDER BY (poly_center(f1))[0];
-ERROR:  type "line" not yet implemented
+ id |         f1          
+----+---------------------
+  1 | ((2,0),(2,4),(0,0))
+(1 row)
+
 EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
 SELECT * FROM circle_tbl WHERE f1 && circle(point(1,-2), 1)
     ORDER BY area(f1);

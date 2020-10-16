@@ -2,7 +2,8 @@
 -- LSEG
 -- Line segments
 --
---DROP TABLE LSEG_TBL;
+DROP TABLE IF EXISTS LSEG_TBL;
+NOTICE:  table "lseg_tbl" does not exist, skipping
 CREATE TABLE LSEG_TBL (s lseg);
 INSERT INTO LSEG_TBL VALUES ('[(1,2),(3,4)]');
 INSERT INTO LSEG_TBL VALUES ('(0,0),(6,6)');
@@ -47,4 +48,10 @@ SELECT * FROM LSEG_TBL WHERE s <= lseg '[(1,2),(3,4)]' ORDER BY (s[0])[0], (s[0]
 (1 row)
 
 SELECT * FROM LSEG_TBL WHERE (s <-> lseg '[(1,2),(3,4)]') < 10 ORDER BY (s[0])[0], (s[0])[1];
-ERROR:  type "line" not yet implemented
+         s          
+--------------------
+ [(0,0),(6,6)]
+ [(1,2),(3,4)]
+ [(10,-10),(-3,-4)]
+(3 rows)
+
