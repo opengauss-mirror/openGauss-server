@@ -282,40 +282,40 @@ static void getSharedMemName(char* name, size_t len_name, const char* prefix, in
  * process address space.
  * This function will NOT create the shared memory if it does not exist.
  */
-static int attachTraceSharedMemLow(void** pTrcMem, const char* sMemName, uint64_t size)
+static trace_msg_code attachTraceSharedMemLow(void** pTrcMem, const char* sMemName, uint64_t size)
 {
     int fd;
     if (size == 0) {
-        return TRACE_COMMON_ERROR;
+	return TRACE_BUFFER_SIZE_ERR;
     }
 
     fd = shm_open(sMemName, O_RDWR, S_IRWXU);
     if (fd == -1) {
         // Failed to attach to shared memory
-        return TRACE_COMMON_ERROR;
+        return TRACE_OPEN_SHARE_MEMORY_ERR;
     }
 
     *pTrcMem = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (*pTrcMem == MAP_FAILED) {
         // failed to map memory
-        return TRACE_COMMON_ERROR;
+        return TRACE_MMAP_ERR;
     }
 
     return TRACE_OK;
 }
 
-static int detachTraceSharedMemLow(trace_infra* pTrcMem)
+static trace_msg_code detachTraceSharedMemLow(trace_infra* pTrcMem)
 {
     if (pTrcMem != NULL && munmap(pTrcMem, pTrcMem->total_size) == -1) {
-        return TRACE_COMMON_ERROR;
+        return TRACE_MUNMAP_ERR;
     }
     return TRACE_OK;
 }
 
-static int attachTraceBufferSharedMem(int key)
+static trace_msg_code attachTraceBufferSharedMem(int key)
 {
-    int rc;
+    trace_msg_code rc;
     void* ptr = NULL;
     char sBufMemName[TRC_SHARED_MEM_NAME_MAX] = {0};
     uint64_t bufferSize;
@@ -332,11 +332,11 @@ static int attachTraceBufferSharedMem(int key)
     return rc;
 }
 
-static int attachTraceCfgSharedMem(int key)
+static trace_msg_code attachTraceCfgSharedMem(int key)
 {
     char sCfgMemName[TRC_SHARED_MEM_NAME_MAX] = {0};
     trace_context* pTrcCxt = getTraceContext();
-    int rc;
+    trace_msg_code rc;
     void* ptr = NULL;
 
     getSharedMemName(sCfgMemName, sizeof(sCfgMemName), TRC_CFG_SHARED_MEM_NAME, key);
@@ -449,7 +449,7 @@ int gstrace_init(int key)
     return TRACE_OK;
 }
 
-static int createAndAttachTraceBuffer(int key, uint64_t bufferSize)
+static trace_msg_code createAndAttachTraceBuffer(int key, uint64_t bufferSize)
 {
     trace_context* pTrcCxt = getTraceContext();
     char sBufMemName[TRC_SHARED_MEM_NAME_MAX] = {0};
@@ -459,21 +459,21 @@ static int createAndAttachTraceBuffer(int key, uint64_t bufferSize)
     int fdTrc = shm_open(sBufMemName, O_RDWR | O_CREAT, S_IRWXU);
     if (fdTrc == -1) {
         // Failed to initialize trace shared memory buffer
-        return TRACE_COMMON_ERROR;
+        return TRACE_OPEN_SHARE_MEMORY_ERR;
     }
 
     ret = ftruncate(fdTrc, bufferSize + sizeof(trace_infra));
     if (ret == -1) {
         close(fdTrc);
         // Failed to set size of trace shared memory buffer
-        return TRACE_COMMON_ERROR;
+        return TRACE_TRUNCATE_ERR;
     }
 
     void* pTrcBufAddress = mmap(NULL, bufferSize + sizeof(trace_infra), PROT_READ | PROT_WRITE, MAP_SHARED, fdTrc, 0);
     close(fdTrc);
     if (pTrcBufAddress == MAP_FAILED) {
         // "failed to map memory for trace buffer
-        return TRACE_COMMON_ERROR;
+        return TRACE_MMAP_ERR;
     }
     // Anchor our shared memory address in our global variable
     pTrcCxt->pTrcInfra = (trace_infra*)pTrcBufAddress;
@@ -493,26 +493,25 @@ static int createAndAttachTraceBuffer(int key, uint64_t bufferSize)
  * shared memory buffers, one for the trace
  * config and one for the trace infra.
  */
-int gstrace_start(int key, const char* mask, uint64_t bufferSize, const char* trcFile)
+trace_msg_code gstrace_start(int key, const char* mask, uint64_t bufferSize, const char* trcFile)
 {
-    int ret;
+    trace_msg_code ret;
     bool bTrcToFile = (trcFile != NULL);
     trace_context* pTrcCxt = getTraceContext();
 
     if (!bTrcToFile && bufferSize <= 0) {
         /* Buffer size of Shared memory should be greater than 0. */
-        return TRACE_COMMON_ERROR;
+        return TRACE_BUFFER_SIZE_ERR;
     }
     bufferSize = bTrcToFile ? MIN_BUF_SIZE : roundToNearestPowerOfTwo(bufferSize);
 
-    if (attachTraceCfgSharedMem(key) != 0) {
+    if (attachTraceCfgSharedMem(key) != TRACE_OK) {
         /* Failed to attached to shared memory. */
-        return TRACE_COMMON_ERROR;
+        return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
     }
 
     if (pTrcCxt->pTrcCfg->bEnabled) {
-        printf("Trace has already been activated.\n");
-        return TRACE_OK;
+        return TRACE_ALREADY_START;
     }
 
     /* set the mask if it's passed in */
@@ -520,8 +519,8 @@ int gstrace_start(int key, const char* mask, uint64_t bufferSize, const char* tr
         trace_mask st_mask = {0};
 
         parseMask(mask, &st_mask);
-        ret = memcpy_s(&pTrcCxt->pTrcCfg->gs_trc_mask, sizeof(trace_mask), &st_mask, sizeof(trace_mask));
-        securec_check(ret, "\0", "\0");
+        errno_t rcs = memcpy_s(&pTrcCxt->pTrcCfg->gs_trc_mask, sizeof(trace_mask), &st_mask, sizeof(trace_mask));
+        securec_check(rcs, "\0", "\0");
         pTrcCxt->pTrcCfg->options |= GS_TRC_CFG_MASK_OPTION;
     }
 
@@ -531,8 +530,8 @@ int gstrace_start(int key, const char* mask, uint64_t bufferSize, const char* tr
         pTrcCxt->pTrcCfg->size = bufferSize;
         pTrcCxt->pTrcCfg->bTrcToFile = bTrcToFile;
         if (bTrcToFile) {
-            ret = snprintf_s(pTrcCxt->pTrcCfg->filePath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s", trcFile);
-            securec_check_ss_c(ret, "\0", "\0");
+            int rc = snprintf_s(pTrcCxt->pTrcCfg->filePath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s", trcFile);
+            securec_check_ss_c(rc, "\0", "\0");
             ret = TRACE_OK;
         }
         pTrcCxt->pTrcCfg->status = TRACE_STATUS_RECORDING;
@@ -545,19 +544,17 @@ int gstrace_start(int key, const char* mask, uint64_t bufferSize, const char* tr
     return ret;
 }
 
-int gstrace_stop(int key)
+trace_msg_code gstrace_stop(int key)
 {
     char sBufMemName[TRC_SHARED_MEM_NAME_MAX] = {0};
     trace_context* pTrcCxt = getTraceContext();
 
     if (attachTraceCfgSharedMem(key) != TRACE_OK) {
-        printf("Failed to attached to shared memory.\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
     }
 
     if (!pTrcCxt->pTrcCfg->bEnabled || pTrcCxt->pTrcCfg->status != TRACE_STATUS_RECORDING) {
-        printf("Trace had already been deactived.\n");
-        return TRACE_OK;
+        return TRACE_ALREADY_STOP;
     }
 
     pTrcCxt->pTrcCfg->status = TRACE_STATUS_PREPARE_STOP;
@@ -572,8 +569,7 @@ int gstrace_stop(int key)
 
     if (shm_unlink(sBufMemName) == -1) {
         perror("shm_unlink");
-        printf("Failed to delete shared memory.\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_UNLINK_SHARE_MEMORY_ERR;
     }
 
     pTrcCxt->pTrcCfg->size = 0;
@@ -877,7 +873,7 @@ void gstrace_tryblock_exit(bool inCatch, int* oldTryCounter)
     gtCurTryCounter = oldTryCounter;
 }
 
-static int dump_trace_context(int fd)
+static trace_msg_code dump_trace_context(int fd)
 {
     trace_context* pTrcCxt = getTraceContext();
     size_t bytesWritten;
@@ -885,34 +881,38 @@ static int dump_trace_context(int fd)
     // Write the trace config header first
     bytesWritten = write(fd, (void*)pTrcCxt->pTrcCfg, sizeof(trace_config));
     if (bytesWritten != sizeof(trace_config)) {
-        printf("Failed to write trace config header\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_WRITE_CFG_HEADER_ERR;
     }
 
     // Write the trace buffer header next
     bytesWritten = write(fd, (void*)pTrcCxt->pTrcInfra, sizeof(trace_infra));
     if (bytesWritten != sizeof(trace_infra)) {
-        printf("Failed to write trace header\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_WRITE_BUFFER_HEADER_ERR;
     } else {
         return TRACE_OK;
     }
 }
 
-static int dump_trace_buffer(int fd, const char* outPath)
+static trace_msg_code dump_trace_buffer(int fd, const char* outPath)
 {
     trace_context* pTrcCxt = getTraceContext();
-    size_t bytesWritten, bytesToWrite;
+    size_t bytesToWrite;
 
     /* get the address of the beginning of trace data */
-    void* pBuf = (char*)pTrcCxt->pTrcInfra + sizeof(trace_infra);
-
+    char* pBuf = (char*)pTrcCxt->pTrcInfra + sizeof(trace_infra);
     /* Write the remainder of the buffer */
     bytesToWrite = pTrcCxt->pTrcInfra->total_size - sizeof(trace_infra);
-    bytesWritten = write(fd, pBuf, bytesToWrite);
-    if (bytesWritten != bytesToWrite) {
-        printf("Failed to write trace buffer \n");
-        return TRACE_COMMON_ERROR;
+    while (bytesToWrite > 0) {
+        int64_t nbyte = write(fd, (void*)pBuf, bytesToWrite); 
+        if (nbyte < 0) {
+            break;
+        }
+        pBuf += nbyte;
+        bytesToWrite -= nbyte; 
+    }
+
+    if (bytesToWrite != 0) {
+        return TRACE_WRITE_BUFFER_ERR;
     } else {
         printf("Shared memory buffer has been dumped to file: %s.\n", outPath);
         return TRACE_OK;
@@ -929,31 +929,27 @@ static int dump_trace_buffer(int fd, const char* outPath)
 // this function will put the dump in
 // "tmp/trace_dump"
 // -------------------------------------------
-int gstrace_dump(int key, const char* outPath)
+trace_msg_code gstrace_dump(int key, const char* outPath)
 {
     trace_context* pTrcCxt = getTraceContext();
-    int ret;
+    trace_msg_code ret;
 
     if (attachTraceCfgSharedMem(key) != TRACE_OK) {
-        printf("Failed to attached to shared memory.\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
     }
 
     if (!pTrcCxt->pTrcCfg->bEnabled) {
-        printf("trace is disable.\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_DISABLE_ERR;
     }
 
     if (attachTraceBufferSharedMem(key) != TRACE_OK) {
-        printf("failed to attach to trace buffer shared mem\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_ATTACH_BUFFER_SHARE_MEMORY_ERR;
     }
 
     // open output file
     int fd = trace_open_filedesc(outPath, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU);
     if (fd == -1) {
-        printf("Failed to open file\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_OPEN_OUTPUT_FILE_ERR;
     }
 
     ret = dump_trace_context(fd);
@@ -981,15 +977,14 @@ static char* getStatusString(int status)
     }
 }
 
-int gstrace_config(int key)
+trace_msg_code gstrace_config(int key)
 {
     int rc;
     trace_context* pTrcCxt = getTraceContext();
 
     rc = attachTraceCfgSharedMem(key);
     if (rc != TRACE_OK) {
-        printf("Failed to attached to shared memory.\n");
-        return TRACE_COMMON_ERROR;
+        return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
     }
 
     if (pTrcCxt->pTrcCfg->bEnabled) {

@@ -159,20 +159,20 @@ public:
 
     // get header (the first slot)
     // so the first slot contains header or the record
-    void* parseHeader(void* pSlotHeader, size_t hdr_len);
-    void parseData(void* pData, size_t data_len);
-    void parseCfg(trace_config* pCfg);
-    void parseInfra(trace_infra* pInfra);
+    trace_msg_code parseHeader(void* pSlotHeader, size_t hdr_len);
+    trace_msg_code parseData(void* pData, size_t data_len);
+    trace_msg_code parseCfg(trace_config* pCfg);
+    trace_msg_code parseInfra(trace_infra* pInfra);
 
-    uint64_t readAndParseDump(uint64_t counter);
+    trace_msg_code readAndParseDump(uint64_t counter, uint64_t* totNumRecsFormatted);
     // Parse the whole dmp file.
-    void parse();
+    trace_msg_code parse();
 
     // Dynamically accept a visitor as the logic used for processing records
     // during parsing.
     void acceptVisitor(DumpFileVisitor* pVisitor);
-    int parseOneRecord(const char rec_tmp_buf[MAX_TRC_RC_SZ], size_t bufSize, bool hasdata);
-    int readAndParseOneRecord(void);
+    trace_msg_code parseOneRecord(const char rec_tmp_buf[MAX_TRC_RC_SZ], size_t bufSize, bool hasdata);
+    trace_msg_code readAndParseOneRecord(void);
     uint64_t findStartSlot(uint64_t maxSeq, uint64_t maxSlots, off_t* firstRecordOffset);
 
 private:
