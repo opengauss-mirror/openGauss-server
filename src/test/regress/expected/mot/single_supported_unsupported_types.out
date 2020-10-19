@@ -43,4 +43,3 @@ drop foreign table test0;
 drop foreign table test1;
 drop foreign table test2;
 drop foreign table test3;
-
