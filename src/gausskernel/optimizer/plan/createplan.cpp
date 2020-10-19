@@ -1072,8 +1072,8 @@ static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path)
          * subquery's rangetable so that the executor will apply permissions
          * checks to those rels at runtime.)
          */
-        if (rel->rtekind == RTE_SUBQUERY) {
-            Assert(is_dummy_plan(rel->subplan));
+        if (rel->rtekind == RTE_SUBQUERY &&
+            (rel->subplan != NULL && is_dummy_plan(rel->subplan) == true)) {
             return (Plan*)make_subqueryscan(tlist, NIL, rel->relid, rel->subplan);
         } else {
             /* Generate a Result plan with constant-FALSE gating qual */
