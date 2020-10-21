@@ -1805,7 +1805,8 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                  * able to properly guarantee uniqueness.  Also, the resulting path
                  * must not be parameterized.
                  */
-                if (joinrel->consider_parallel && jointype != JOIN_UNIQUE_OUTER && outerrel->partial_pathlist != NIL) {
+                if (joinrel->consider_parallel && jointype != JOIN_UNIQUE_OUTER && jointype != JOIN_FULL &&
+                    jointype != JOIN_RIGHT && outerrel->partial_pathlist != NIL) {
                     Path* cheapest_partial_outer;
                     Path* cheapest_safe_inner = NULL;
 
