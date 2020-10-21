@@ -10213,6 +10213,26 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
+			| ALTER POLICY IF_P EXISTS name ON qualified_name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_RLSPOLICY;
+					n->subname = $5;
+					n->relation = $7;
+					n->newname = $10;
+					n->missing_ok = true;
+					$$ = (Node *)n;
+				}
+			| ALTER ROW LEVEL SECURITY POLICY IF_P EXISTS name ON qualified_name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_RLSPOLICY;
+					n->subname = $8;
+					n->relation = $10;
+					n->newname = $13;
+					n->missing_ok = true;
+					$$ = (Node *)n;
+				}
 			| ALTER SCHEMA name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);

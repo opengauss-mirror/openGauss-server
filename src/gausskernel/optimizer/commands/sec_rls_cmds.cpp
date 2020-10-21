@@ -513,19 +513,26 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
     rlsPolicyTuple = systable_getnext(scanDesc);
     /* Policy does not exists */
     if (HeapTupleIsValid(rlsPolicyTuple) == false) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("row level security policy \"%s\" for relation \"%s\" does not exists",
+        if (renameStmt->missing_ok) {
+            ereport(NOTICE, 
+                (errmsg("row level security policy \"%s\" for relation \"%s\" does not exist, skipping",
                     renameStmt->subname,
                     renameStmt->relation->relname)));
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("row level security policy \"%s\" for relation \"%s\" does not exist",
+                        renameStmt->subname,
+                        renameStmt->relation->relname)));
+        }
+    } else {
+        /* Copy tuple here, because of update index later */
+        rlsPolicyTuple = heap_copytuple(rlsPolicyTuple);
+        /* Update RLS policy name */
+        (void)namestrcpy(&(((Form_pg_rlspolicy)GETSTRUCT(rlsPolicyTuple))->polname), renameStmt->newname);
+        simple_heap_update(pg_rlspolicy, &rlsPolicyTuple->t_self, rlsPolicyTuple);
+        CatalogUpdateIndexes(pg_rlspolicy, rlsPolicyTuple);
     }
-
-    /* Copy tuple here, because of update index later */
-    rlsPolicyTuple = heap_copytuple(rlsPolicyTuple);
-    /* Update RLS policy name */
-    (void)namestrcpy(&(((Form_pg_rlspolicy)GETSTRUCT(rlsPolicyTuple))->polname), renameStmt->newname);
-    simple_heap_update(pg_rlspolicy, &rlsPolicyTuple->t_self, rlsPolicyTuple);
-    CatalogUpdateIndexes(pg_rlspolicy, rlsPolicyTuple);
 
     /*
      * Invalidate relation's relcache entry so that other backends (and this
