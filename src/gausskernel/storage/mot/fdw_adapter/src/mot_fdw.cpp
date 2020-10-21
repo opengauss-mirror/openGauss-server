@@ -335,7 +335,7 @@ void MOTProcessRecoveredTransaction(uint64_t txid, bool isCommit)
 
     if (MOT::MOTEngine::GetInstance()->IsInProcessTx(txid)) {
         elog(LOG, "MOTProcessRecoveredTransaction: %lu - %s", txid, isCommit ? "commit" : "abort");
-        MOT::TxnManager* mgr = GetSafeTxn();
+        MOT::TxnManager* mgr = GetSafeTxn(__FUNCTION__);
         uint64_t inTxId = MOT::MOTEngine::GetInstance()->PerformInProcessTx(txid, isCommit);
         if (inTxId == InvalidTransactionId) {
             ereport(ERROR,
@@ -392,7 +392,15 @@ Datum mot_fdw_handler(PG_FUNCTION_ARGS)
         u_sess->mot_cxt.callbacks_set = true;
     }
 
-    MOTAdaptor::InitTxnManager();
+    PG_TRY();
+    {
+        MOTAdaptor::InitTxnManager(__FUNCTION__);
+    }
+    PG_CATCH();
+    {
+        elog(LOG, "Failed to init MOT transaction manager in FDW initializer");
+    }
+    PG_END_TRY();
     PG_RETURN_POINTER(fdwroutine);
 }
 
@@ -483,7 +491,7 @@ static void MOTGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid for
 {
     MOTFdwStateSt* planstate = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
     ForeignTable* ftable = GetForeignTable(foreigntableid);
-    MOT::TxnManager* currTxn = GetSafeTxn(/*GetCurrentTransactionId()*/);
+    MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
     Bitmapset* attrs = nullptr;
     ListCell* lc = nullptr;
     bool needWholeRow = false;
@@ -927,7 +935,7 @@ static void MOTBeginForeignScan(ForeignScanState* node, int eflags)
     festate = InitializeFdwState(fscan->fdw_private, &fscan->fdw_exprs, RelationGetRelid(node->ss.ss_currentRelation));
     MOTAdaptor::GetCmdOper(festate);
     festate->m_txnId = GetCurrentTransactionIdIfAny();
-    festate->m_currTxn = GetSafeTxn(/*festate->txnId*/);
+    festate->m_currTxn = GetSafeTxn(__FUNCTION__);
     festate->m_currTxn->IncStmtCount();
     festate->m_currTxn->m_queryState[(uint64_t)festate] = (uint64_t)festate;
     festate->m_table = festate->m_currTxn->GetTableByExternalId(RelationGetRelid(node->ss.ss_currentRelation));
@@ -958,7 +966,7 @@ static void MOTBeginForeignModify(
         festate = InitializeFdwState(fdwPrivate, nullptr, RelationGetRelid(resultRelInfo->ri_RelationDesc));
         festate->m_allocInScan = false;
         festate->m_txnId = GetCurrentTransactionIdIfAny();
-        festate->m_currTxn = GetSafeTxn(/*festate->txnId*/);
+        festate->m_currTxn = GetSafeTxn(__FUNCTION__);
         festate->m_currTxn->m_queryState[(uint64_t)festate] = (uint64_t)festate;
         festate->m_table = festate->m_currTxn->GetTableByExternalId(RelationGetRelid(resultRelInfo->ri_RelationDesc));
         resultRelInfo->ri_FdwState = festate;
@@ -1212,7 +1220,7 @@ static int MOTAcquireSampleRowsFunc(Relation relation, int elevel, HeapTuple* ro
     double samplerows = 0;                              /* # of rows fetched */
     double rowstoskip = -1;                             /* # of rows to skip before next sample */
     double rstate = anl_init_selection_state(targrows); /* random state */
-    MOT::TxnManager* currTxn = GetSafeTxn(/*GetCurrentTransactionId()*/);
+    MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
     MOT::Table* table = currTxn->GetTableByExternalId(RelationGetRelid(relation));
     if (table == nullptr) {
         abortParentTransactionParamsNoDetail(
@@ -1344,7 +1352,7 @@ List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultR
     TupleDesc desc = RelationGetDescr(rel);
     uint8_t attrsModify[BITMAP_GETLEN(desc->natts)];
     uint8_t* ptrAttrsModify = attrsModify;
-    MOT::TxnManager* currTxn = GetSafeTxn(/*GetCurrentTransactionId()*/);
+    MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
     MOT::Table* table = currTxn->GetTableByExternalId(RelationGetRelid(rel));
 
     if ((int)resultRelation < root->simple_rel_array_size && root->simple_rel_array[resultRelation] != nullptr) {
@@ -1425,7 +1433,7 @@ static TupleTableSlot* MOTExecForeignInsert(
     if (fdwState == nullptr) {
         fdwState = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
         fdwState->m_txnId = GetCurrentTransactionIdIfAny();
-        fdwState->m_currTxn = GetSafeTxn(/*fdwState->txnId*/);
+        fdwState->m_currTxn = GetSafeTxn(__FUNCTION__);
         fdwState->m_table = fdwState->m_currTxn->GetTableByExternalId(RelationGetRelid(resultRelInfo->ri_RelationDesc));
         if (fdwState->m_table == nullptr) {
             pfree(fdwState);
@@ -1585,7 +1593,27 @@ static void MOTEndForeignModify(EState* estate, ResultRelInfo* resultRelInfo)
 static void MOTXactCallback(XactEvent event, void* arg)
 {
     int rc = MOT::RC_OK;
-    MOT::TxnManager* mgr = GetSafeTxn(/*tid*/);
+    MOT::TxnManager* mgr = nullptr;
+
+    PG_TRY();
+    {
+        mgr = GetSafeTxn(__FUNCTION__);
+    }
+    PG_CATCH();
+    {
+        switch (event) {
+            case XACT_EVENT_ABORT:
+            case XACT_EVENT_ROLLBACK_PREPARED:
+            case XACT_EVENT_PREROLLBACK_CLEANUP:
+                elog(LOG, "Failed to get MOT transaction manager during abort.");
+                return;
+            default:
+                PG_RE_THROW();
+                return;
+        }
+    }
+    PG_END_TRY();
+
     ::TransactionId tid = GetCurrentTransactionIdIfAny();
     MOT::TxnState txnState = mgr->GetTxnState();
 
@@ -1898,7 +1926,17 @@ static void MOTVacuumForeignTable(VacuumStmt* stmt, Relation rel)
         return;
     }
     ::TransactionId tid = GetCurrentTransactionId();
-    MOTAdaptor::VacuumTable(rel, tid);
+
+    PG_TRY();
+    {
+        MOTAdaptor::VacuumTable(rel, tid);
+    }
+    PG_CATCH();
+    {
+        elog(LOG, "Vacuum of table %s failed", NameStr(rel->rd_rel->relname));
+        return;
+    }
+    PG_END_TRY();
 }
 
 static uint64_t MOTGetForeignRelationMemSize(Oid reloid, Oid ixoid)
