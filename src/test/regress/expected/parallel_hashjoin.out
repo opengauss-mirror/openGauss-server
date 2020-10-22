@@ -29,12 +29,10 @@ select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b 
   9 |  9
 (9 rows)
 
-
 set parallel_setup_cost = 1;
 set min_parallel_table_scan_size=0;
 set parallel_tuple_cost = 0.01;
 set enable_nestloop=off;
-
 explain (costs off) select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10;
                                    QUERY PLAN                                   
 --------------------------------------------------------------------------------
@@ -62,9 +60,33 @@ select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b 
   9 |  9
 (9 rows)
 
+-- Forbid parallel Hash Right Join or Hash Full Join.
+explain (costs off)select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id;
+                                QUERY PLAN
+--------------------------------------------------------------------------
+ Hash Right Join
+   Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
+   ->  Seq Scan on parallel_hashjoin_test_a
+   ->  Hash
+         ->  Seq Scan on parallel_hashjoin_test_b
+(5 rows)
+
+select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id;
+ id | id
+----+----
+  1 |  1
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
+(10 rows)
 
 reset parallel_setup_cost;
 reset min_parallel_table_scan_size;
 reset parallel_tuple_cost;
 reset enable_nestloop;
-
