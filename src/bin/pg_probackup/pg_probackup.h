@@ -698,6 +698,7 @@ extern bool		progress;
 extern char	   *replication_slot;
 #endif
 extern bool 	temp_slot;
+extern char	   *password;
 
 /* backup options */
 extern bool		smooth_checkpoint;
@@ -1115,6 +1116,8 @@ datapagemap_is_set(datapagemap_t *map, BlockNumber blkno);
 
 extern void
 datapagemap_print_debug(datapagemap_t *map);
+
+extern void replace_password(int argc, char** argv, const char* optionName);
 
 void *gs_palloc0(Size size);
 char *gs_pstrdup(const char *in);

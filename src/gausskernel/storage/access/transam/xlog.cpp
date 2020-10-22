@@ -7413,7 +7413,11 @@ static bool recoveryStopsHere(XLogReaderState* record, bool* includeThis)
         return false;
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
     if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_XID) {
+#else
+    if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_XID  && XLogRecGetRmid(record) == RM_XACT_ID) {
+#endif
         /*
          * There can be only one transaction end record with this exact
          * transactionid
@@ -7463,7 +7467,11 @@ static bool recoveryStopsHere(XLogReaderState* record, bool* includeThis)
 
         // Ignore recoveryTargetInclusive because this is not a transaction record
         *includeThis = false;
+#ifdef ENABLE_MULTIPLE_NODES
     } else if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME) {
+#else
+    } else if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME && XLogRecGetRmid(record) == RM_XACT_ID) {
+#endif
         /*
          * There can be many transactions that share the same commit time, so
          * we stop after the last one, if we are inclusive, or stop at the
@@ -11398,7 +11406,7 @@ void UpdateTimeline(CheckPoint* checkPoint)
  * @Description: Assign Checkpoint data from the old version to the new version
  * @in: record, xlog record
  */
-CheckPoint update_checkpoint(XLogReaderState* record)
+CheckPoint update_checkpoint(XLogReaderState * record)
 {
     CheckPointOld checkPointOld;
     CheckPoint checkPoint;
@@ -13549,7 +13557,7 @@ void RedoSpeedDiag(XLogRecPtr readPtr, XLogRecPtr endPtr)
  *
  * Exported to allow WALReceiver to read the pointer directly.
  */
-XLogRecPtr GetXLogReplayRecPtr(TimeLineID* targetTLI, XLogRecPtr* ReplayReadPtr)
+XLogRecPtr GetXLogReplayRecPtr(TimeLineID * targetTLI, XLogRecPtr * ReplayReadPtr)
 {
     /* use volatile pointer to prevent code rearrangement */
     XLogCtlData* xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
@@ -13631,7 +13639,7 @@ XLogRecPtr GetXLogReplayRecPtrInPending(void)
  * If 'targetTLI' is not NULL, it's set to the current recovery target
  * timeline.
  */
-XLogRecPtr GetStandbyFlushRecPtr(TimeLineID* targetTLI)
+XLogRecPtr GetStandbyFlushRecPtr(TimeLineID * targetTLI)
 {
     XLogRecPtr receivePtr;
     XLogRecPtr replayPtr;
