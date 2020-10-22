@@ -85,6 +85,11 @@ select rownum from distributors group by rownum;
 select rownum rn from distributors group by rn;
 select rownum + 1 from dual group by rownum;
 select rownum + 1 rn from dual group by rn;
+
+--test having
+select id from distributors group by rownum,id having rownum < 5;
+select rownum from distributors group by rownum having rownum < 5;
+select id from distributors group by id having rownum < 5;
 --test alias name after where
 select rownum rn, name from distributors where rn<3;
 select rownum rowno2, * from (select rownum rowno1, * from distributors order by id desc) where rowno2 < 2;
@@ -446,6 +451,12 @@ explain select * from student where not(rownum > 3 or id = 1);
 
 -- ROWNUM with ORDER BY
 explain select * from test where rownum < 5 order by 1;
+
+-- ROWNUM with GROUP BY
+explain select id from test where rownum < 5 group by id;
+
+-- ROWNUM with UNION and ORDER BY
+explain select id from student where rownum < 3 union select id from (select id from student order by 1)  where rownum < 5;
 
 drop table student;
 drop table test;

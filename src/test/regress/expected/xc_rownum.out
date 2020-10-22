@@ -242,6 +242,30 @@ select rownum + 1 rn from dual group by rn;
   2
 (1 row)
 
+
+--test having
+select id from distributors group by rownum,id having rownum < 5;
+ id 
+----
+  1
+  1
+  1
+  1
+(4 rows)
+
+select rownum from distributors group by rownum having rownum < 5;
+ rownum 
+--------
+      3
+      1
+      2
+      4
+(4 rows)
+
+select id from distributors group by id having rownum < 5;
+ERROR:  ROWNUM must appear in the GROUP BY clause or be used in an aggregate function
+LINE 1: select id from distributors group by id having rownum < 5;
+                                                       ^
 --test alias name after where
 select rownum rn, name from distributors where rn<3;
 ERROR:  Alias "rn" reference with ROWNUM included is invalid.
@@ -1643,6 +1667,33 @@ explain select * from test where rownum < 5 order by 1;
    ->  Seq Scan on test  (cost=0.00..24.18 rows=378 width=42)
          Filter: (ROWNUM < 5)
 (4 rows)
+
+
+-- ROWNUM with GROUP BY
+explain select id from test where rownum < 5 group by id;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ HashAggregate  (cost=25.12..25.79 rows=67 width=4)
+   Group By Key: id
+   ->  Seq Scan on test  (cost=0.00..24.18 rows=378 width=4)
+         Filter: (ROWNUM < 5)
+(4 rows)
+
+
+-- ROWNUM with UNION and ORDER BY
+explain select id from student where rownum < 3 union select id from (select id from student order by 1)  where rownum < 5;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ HashAggregate  (cost=79.04..79.10 rows=6 width=4)
+   Group By Key: public.student.id
+   ->  Append  (cost=0.00..79.02 rows=6 width=4)
+         ->  Limit  (cost=0.00..0.04 rows=2 width=4)
+               ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=4)
+         ->  Limit  (cost=78.87..78.92 rows=4 width=4)
+               ->  Sort  (cost=78.87..81.71 rows=1134 width=4)
+                     Sort Key: public.student.id
+                     ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=4)
+(9 rows)
 
 
 drop table student;

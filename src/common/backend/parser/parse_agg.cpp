@@ -740,6 +740,26 @@ static bool check_ungrouped_columns_walker(Node* node, check_ungrouped_columns_c
         }
     }
 
+    /* If There is ROWNUM, it must appear in the GROUP BY clause or be used in an aggregate function. */
+    if (IsA(node, Rownum)) {
+        Rownum *rownumVar = (Rownum *)node;
+        bool haveRownum = false;
+        if (!context->have_non_var_grouping || context->sublevels_up != 0) {
+            foreach (gl, context->groupClauses) {
+                Node *gnode = (Node *)((TargetEntry *)lfirst(gl))->expr;
+                if (IsA(gnode, Rownum)) {
+                    haveRownum = true;
+                    break;
+                }
+            }
+
+            if (haveRownum == false) {
+                ereport(ERROR, (errcode(ERRCODE_GROUPING_ERROR),
+                    errmsg("ROWNUM must appear in the GROUP BY clause or be used in an aggregate function"),
+                    parser_errposition(context->pstate, rownumVar->location)));
+            }
+        }
+    }
     /*
      * If we have an ungrouped Var of the original query level, we have a
      * failure.  Vars below the original query level are not a problem, and
