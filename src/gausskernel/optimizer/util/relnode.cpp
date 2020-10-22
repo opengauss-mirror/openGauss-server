@@ -536,7 +536,8 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
         if (restrictlist_ptr != NULL)
             *restrictlist_ptr = build_joinrel_restrictlist(root, joinrel, outer_rel, inner_rel);
         /* set interesting distribute keys */
-        build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
+        if (IS_STREAM_PLAN)
+            build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
 
         return joinrel;
     }
@@ -677,7 +678,8 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     }
 
     /* set interesting distribute keys */
-    build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
+    if (IS_STREAM_PLAN) 
+        build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
 
     /* Adjust joinrel globle_rows according hint. */
     adjust_rows_according_to_hint(root->parse->hintState, joinrel, outer_rel->relids);
