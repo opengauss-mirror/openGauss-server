@@ -70,6 +70,9 @@ extern bool IsWhereOperatorSupported(int whereOp);
 /** @brief Classifies a WHERE clause operator. */
 extern JitWhereOperatorClass ClassifyWhereOperator(int whereOp);
 
+/** @brief Queries whether a PG function is supported by MOT JIT. */
+extern bool IsFuncIdSupported(int funcId);
+
 /** @brief Queries whether the WHERE clause represents a full-prefix search. */
 extern bool IsFullPrefixSearch(const int* columnArray, int columnCount, int* firstZeroColumn);
 

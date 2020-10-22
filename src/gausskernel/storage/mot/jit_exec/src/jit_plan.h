@@ -50,6 +50,9 @@ enum JitIndexScanType {
     /** @var Invalid index scan. */
     JIT_INDEX_SCAN_TYPE_INVALID,
 
+    /** @var Full scan. */
+    JIT_INDEX_SCAN_FULL,
+
     /** @var Closed index scan (all columns are specified with equals operator. */
     JIT_INDEX_SCAN_CLOSED,
 
@@ -126,7 +129,9 @@ enum JitExprType {
     JIT_EXPR_TYPE_FUNC,
 
     /** @var Sub-link expression type (for a sub-query). */
-    JIT_EXPR_TYPE_SUBLINK
+    JIT_EXPR_TYPE_SUBLINK,
+
+    JIT_EXPR_TYPE_BOOL
 };
 
 /** @enum Index scan types. */
@@ -241,7 +246,7 @@ struct JitOpExpr {
     int _op_func_id;
 
     /** @var The operator arguments (3 at most). */
-    JitExpr* _args[3];
+    JitExpr* _args[MOT_JIT_MAX_FUNC_EXPR_ARGS];
 
     /** @var The number of arguments used in the operator. */
     int _arg_count;
@@ -264,7 +269,7 @@ struct JitFuncExpr {
     int _func_id;
 
     /** @var The function arguments (3 at most). */
-    JitExpr* _args[3];
+    JitExpr* _args[MOT_JIT_MAX_FUNC_EXPR_ARGS];
 
     /** @var The number of arguments used in the function. */
     int _arg_count;
@@ -285,6 +290,29 @@ struct JitSubLinkExpr {
 
     /** @var The position of the sub-query plan in the sub-query plan array of the containing compound plan. */
     int _sub_query_index;
+};
+
+struct JitBoolExpr {
+    /** @var The expression type (always @ref JIT_EXPR_TYPE_SUBLINK). */
+    JitExprType _expr_type;
+
+    /** @var The original expression in the parsed query (required for extracting the sub-query). */
+    Expr* _source_expr;
+
+    /** @var The expression result type (always BOOLOID). */
+    int _result_type;
+
+    /** @var The position of the expression in the arg-is-null array. */
+    int _arg_pos;
+
+    /** @var The correlating Boolean operator type. */
+    BoolExprType _bool_expr_type;
+
+    /** @var The Boolean operator arguments (2 at most). */
+    JitExpr* _args[MOT_JIT_MAX_BOOL_EXPR_ARGS];
+
+    /** @var The number of arguments used in the Boolean operator. */
+    int _arg_count;
 };
 
 /** @struct An expression tied to a table column. */

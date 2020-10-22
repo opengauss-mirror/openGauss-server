@@ -750,6 +750,11 @@ MOT::IndexIterator* searchIterator(MOT::Index* index, MOT::Key* key, int forward
     return itr;
 }
 
+MOT::IndexIterator* beginIterator(MOT::Index* index)
+{
+    return index->Begin(MOTCurrThreadId);
+}
+
 MOT::IndexIterator* createEndIterator(MOT::Index* index, MOT::Key* key, int forward_scan, int include_bound)
 {
     MOT::IndexIterator* itr = NULL;
