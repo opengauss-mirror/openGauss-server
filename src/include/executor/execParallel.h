@@ -31,7 +31,8 @@ typedef struct ParallelExecutorInfo {
     struct TupleQueueReader **reader; /* tuple reader/writer support */
 } ParallelExecutorInfo;
 
-extern ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers);
+extern ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
+    int nworkers, int64 tuples_needed);
 extern void ExecParallelCreateReaders(ParallelExecutorInfo *pei, TupleDesc tupDesc);
 extern void ExecParallelFinish(ParallelExecutorInfo *pei);
 extern void ExecParallelCleanup(ParallelExecutorInfo *pei);

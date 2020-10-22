@@ -269,7 +269,7 @@ void ExecParallelReinitialize(ParallelExecutorInfo *pei)
  * Sets up the required infrastructure for backend workers to perform
  * execution and return results to the main backend.
  */
-ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers)
+ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers, int64 tuples_needed)
 {
     ExecParallelEstimateContext e;
     ExecParallelInitializeDSMContext d;
@@ -319,6 +319,9 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
     ParallelQueryInfo queryInfo;
     int rc = memset_s(&queryInfo, sizeof(ParallelQueryInfo), 0, sizeof(ParallelQueryInfo));
     securec_check(rc, "", "");
+
+    queryInfo.tuples_needed = tuples_needed;
+    queryInfo.eflags = estate->es_top_eflags;
 
     /* Store serialized PlannedStmt. */
     queryInfo.pstmt_space = ExecSerializePlan(planstate->plan, estate);
@@ -627,9 +630,14 @@ void ParallelQueryMain(void *seg)
     InstrStartParallelQuery();
 
     /* Start up the executor, have it run the plan, and then shut it down. */
-    (void)ExecutorStart(queryDesc, 0);
+    (void)ExecutorStart(queryDesc, cxt->pwCtx->queryInfo.eflags);
     ExecParallelInitializeWorker(queryDesc->planstate, seg);
-    ExecutorRun(queryDesc, ForwardScanDirection, 0L);
+
+    /* Pass down any tuple bound */
+    int64 tuples_needed = cxt->pwCtx->queryInfo.tuples_needed;
+    ExecSetTupleBound(tuples_needed, queryDesc->planstate);
+
+    ExecutorRun(queryDesc, ForwardScanDirection, tuples_needed < 0 ? 0 : tuples_needed);
     ExecutorFinish(queryDesc);
 
     /* Report buffer usage during parallel execution. */

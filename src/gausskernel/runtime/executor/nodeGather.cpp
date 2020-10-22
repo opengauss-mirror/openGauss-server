@@ -66,6 +66,7 @@ GatherState *ExecInitGather(Gather *node, EState *estate, int eflags)
     gatherstate->ps.state = estate;
     gatherstate->need_to_scan_locally = !node->single_copy &&
         u_sess->attr.attr_sql.parallel_leader_participation;
+    gatherstate->tuples_needed = -1;
 
     /*
      * Miscellaneous initialization
@@ -81,9 +82,10 @@ GatherState *ExecInitGather(Gather *node, EState *estate, int eflags)
     gatherstate->ps.qual = (List *)ExecInitExpr((Expr *)node->plan.qual, (PlanState *)gatherstate);
 
     /*
-     * tuple table initialization
+     * tuple table initialization, doesn't need tuple_mcxt
      */
-    gatherstate->funnel_slot = ExecInitExtraTupleSlot(estate);
+    gatherstate->funnel_slot = MakeTupleTableSlot(false);
+    estate->es_tupleTable = lappend(estate->es_tupleTable, gatherstate->funnel_slot);
     ExecInitResultTupleSlot(estate, &gatherstate->ps);
 
     /*
@@ -98,7 +100,12 @@ GatherState *ExecInitGather(Gather *node, EState *estate, int eflags)
      * Initialize result tuple type and projection info.
      */
     ExecAssignResultTypeFromTL(&gatherstate->ps);
-    ExecAssignProjectionInfo(&gatherstate->ps, NULL);
+    if (tlist_matches_tupdesc(&gatherstate->ps, gatherstate->ps.plan->targetlist,
+        OUTER_VAR, ExecGetResultType(outerPlanState(gatherstate)))) {
+        gatherstate->ps.ps_ProjInfo = NULL;
+    } else {
+        ExecAssignProjectionInfo(&gatherstate->ps, NULL);
+    }
 
     /*
      * Initialize funnel slot to same tuple descriptor as outer plan.
@@ -143,9 +150,9 @@ TupleTableSlot *ExecGather(GatherState *node)
          */
         if (gather->num_workers > 0 && IsInParallelMode()) {
             /* Initialize the workers required to execute Gather node. */
-            if (!node->pei)
-                node->pei = ExecInitParallelPlan(node->ps.lefttree, estate, gather->num_workers);
-
+            if (!node->pei) {
+                node->pei = ExecInitParallelPlan(node->ps.lefttree, estate, gather->num_workers, node->tuples_needed);
+            }
             /*
              * Register backend workers. We might not get as many as we
              * requested, or indeed any at all.
@@ -200,7 +207,6 @@ TupleTableSlot *ExecGather(GatherState *node)
      * returned by a TupleQueueReader; to make sure we don't leave a dangling
      * pointer around, clear the working slot first.
      */
-    (void)ExecClearTuple(node->funnel_slot);
     ExprContext *econtext = node->ps.ps_ExprContext;
     ResetExprContext(econtext);
 
@@ -211,8 +217,14 @@ TupleTableSlot *ExecGather(GatherState *node)
          * plan ourselves.
          */
         slot = gather_getnext(node);
-        if (TupIsNull(slot))
+        if (TupIsNull(slot)) {
             return NULL;
+        }
+
+        /* If no projection is required, we're done. */
+        if (node->ps.ps_ProjInfo == NULL) {
+            return slot;
+        }
 
         /*
          * form the result tuple using ExecProject(), and return it --- unless
