@@ -897,7 +897,8 @@ void MOTAdaptor::Destroy()
     m_initialized = false;
 }
 
-MOT::TxnManager* MOTAdaptor::InitTxnManager(MOT::ConnectionId connection_id /* = INVALID_CONNECTION_ID */)
+MOT::TxnManager* MOTAdaptor::InitTxnManager(
+    const char* callerSrc, MOT::ConnectionId connection_id /* = INVALID_CONNECTION_ID */)
 {
     if (!u_sess->mot_cxt.txn_manager) {
         bool attachCleanFunc =
@@ -913,8 +914,9 @@ MOT::TxnManager* MOTAdaptor::InitTxnManager(MOT::ConnectionId connection_id /* =
         MOT::SessionContext* session_ctx =
             MOT::GetSessionManager()->CreateSessionContext(IS_PGXC_COORDINATOR, 0, nullptr, connection_id);
         if (session_ctx == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Session Initialization", "Failed to create session context");
-            ereport(FATAL, (errmsg("Session startup: failed to create session context.")));
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INTERNAL, "Session Initialization", "Failed to create session context in %s", callerSrc);
+            ereport(ERROR, (errmsg("Session startup: failed to create session context.")));
             return nullptr;
         }
         MOT_ASSERT(u_sess->mot_cxt.session_context == session_ctx);
@@ -1057,7 +1059,7 @@ void MOTAdaptor::DestroyTxn(int status, Datum ptr)
 MOT::RC MOTAdaptor::Commit(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->Commit(tid);
     } else {
@@ -1068,7 +1070,7 @@ MOT::RC MOTAdaptor::Commit(::TransactionId tid)
 MOT::RC MOTAdaptor::EndTransaction(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->EndTransaction();
     } else {
@@ -1080,7 +1082,7 @@ MOT::RC MOTAdaptor::EndTransaction(::TransactionId tid)
 MOT::RC MOTAdaptor::Rollback(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->Rollback(tid);
     } else {
@@ -1091,7 +1093,7 @@ MOT::RC MOTAdaptor::Rollback(::TransactionId tid)
 MOT::RC MOTAdaptor::Prepare(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->Prepare(tid);
     } else {
@@ -1102,7 +1104,7 @@ MOT::RC MOTAdaptor::Prepare(::TransactionId tid)
 MOT::RC MOTAdaptor::CommitPrepared(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->CommitPrepared(tid);
     } else {
@@ -1113,7 +1115,7 @@ MOT::RC MOTAdaptor::CommitPrepared(::TransactionId tid)
 MOT::RC MOTAdaptor::RollbackPrepared(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->RollbackPrepared(tid);
     } else {
@@ -1124,7 +1126,7 @@ MOT::RC MOTAdaptor::RollbackPrepared(::TransactionId tid)
 MOT::RC MOTAdaptor::FailedCommitPrepared(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     return txn->FailedCommitPrepared(tid);
 }
 
@@ -1541,7 +1543,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
 {
     MOT::RC res;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
     MOT::Table* table = txn->GetTableByExternalId(index->relation->foreignOid);
 
@@ -1699,7 +1701,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
     bool hasBlob = false;
     MOT::Index* primaryIdx = nullptr;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn(tid);
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__, tid);
     MOT::Table* currentTable = nullptr;
     MOT::RC res = MOT::RC_ERROR;
     std::string tname("");
@@ -1922,7 +1924,7 @@ MOT::RC MOTAdaptor::DropIndex(DropForeignStmt* stmt, ::TransactionId tid)
 {
     MOT::RC res = MOT::RC_OK;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "dropping index %s, ixoid: %u, taboid: %u", stmt->name, stmt->indexoid, stmt->reloid);
@@ -1956,7 +1958,7 @@ MOT::RC MOTAdaptor::DropTable(DropForeignStmt* stmt, ::TransactionId tid)
 {
     MOT::RC res = MOT::RC_OK;
     MOT::Table* tab = nullptr;
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "dropping table %s, oid: %u", stmt->name, stmt->reloid);
@@ -1982,7 +1984,7 @@ MOT::RC MOTAdaptor::TruncateTable(Relation rel, ::TransactionId tid)
 
     EnsureSafeThreadAccessInline();
 
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "truncating table %s, oid: %u", NameStr(rel->rd_rel->relname), rel->rd_id);
@@ -2007,7 +2009,7 @@ MOT::RC MOTAdaptor::VacuumTable(Relation rel, ::TransactionId tid)
     MOT::RC res = MOT::RC_OK;
     MOT::Table* tab = nullptr;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "vacuuming table %s, oid: %u", NameStr(rel->rd_rel->relname), rel->rd_id);
@@ -2028,7 +2030,7 @@ uint64_t MOTAdaptor::GetTableIndexSize(uint64_t tabId, uint64_t ixId)
 {
     uint64_t res = 0;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     MOT::Table* tab = nullptr;
     MOT::Index* ix = nullptr;
 
@@ -2909,7 +2911,7 @@ void MatchIndex::Serialize(List** list) const
 
 void MatchIndex::Deserialize(ListCell* cell, uint64_t exTableID)
 {
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
 
     m_ixPosition = (int32_t)((Const*)lfirst(cell))->constvalue;
     MOT::Table* table = txn->GetTableByExternalId(exTableID);

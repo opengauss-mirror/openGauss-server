@@ -77,7 +77,7 @@ extern JitPlan* IsJittable(Query* query, const char* queryString)
 
     // since we use session local allocations and a session context might have not been created yet, we make sure such
     // one exists now
-    GetSafeTxn();
+    GetSafeTxn(__FUNCTION__);
 
     // check limit not breached
     if (u_sess->mot_cxt.jit_context_count >= GetMotCodegenLimit()) {

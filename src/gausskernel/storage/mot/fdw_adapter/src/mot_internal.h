@@ -316,7 +316,8 @@ public:
                 break;
         }
     }
-    static MOT::TxnManager* InitTxnManager(MOT::ConnectionId connection_id = INVALID_CONNECTION_ID);
+    static MOT::TxnManager* InitTxnManager(
+        const char* callerSrc, MOT::ConnectionId connection_id = INVALID_CONNECTION_ID);
     static void DestroyTxn(int status, Datum ptr);
     static void DeleteTablePtr(MOT::Table* t);
 
@@ -406,10 +407,10 @@ public:
     static bool m_callbacks_initialized;
 };
 
-inline MOT::TxnManager* GetSafeTxn(::TransactionId txn_id = 0)
+inline MOT::TxnManager* GetSafeTxn(const char* callerSrc, ::TransactionId txn_id = 0)
 {
     if (!u_sess->mot_cxt.txn_manager) {
-        MOTAdaptor::InitTxnManager();
+        MOTAdaptor::InitTxnManager(callerSrc);
         if (u_sess->mot_cxt.txn_manager != nullptr) {
             if (txn_id != 0) {
                 u_sess->mot_cxt.txn_manager->SetTransactionId(txn_id);
