@@ -75,6 +75,19 @@ void GlobalStatistics::Subtract(const GlobalStatistics& rhs)
     }
 }
 
+bool GlobalStatistics::HasValidSamples() const
+{
+    bool result = false;
+    uint32_t statCount = m_statVars.size();
+    for (uint32_t i = 0; i < statCount; ++i) {
+        if (m_statVars[i]->GetSampleCount() > 0) {
+            result = true;
+            break;
+        }
+    }
+    return result;
+}
+
 mot_string GlobalStatistics::MakeName(const char* baseName, NamingScheme namingScheme)
 {
     mot_string result;

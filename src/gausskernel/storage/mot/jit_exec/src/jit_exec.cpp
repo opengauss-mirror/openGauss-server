@@ -63,7 +63,9 @@
 namespace JitExec {
 DECLARE_LOGGER(LiteExecutor, JitExec);
 
-static pthread_spinlock_t jitConfigLock;
+#ifdef MOT_JIT_TEST
+static uint64_t totalExecCount = 0;
+#endif
 
 extern JitPlan* IsJittable(Query* query, const char* queryString)
 {
@@ -71,7 +73,7 @@ extern JitPlan* IsJittable(Query* query, const char* queryString)
     bool limitBreached = false;
 
     // when running under thread-pool, it is possible to be executed from a thread that hasn't yet executed any MOT code
-    // and thus lacking a thread id and numa node id. Nevertheless, we can be sure that a proper session context is set
+    // and thus lacking a thread id and NUMA node id. Nevertheless, we can be sure that a proper session context is set
     // up.
     EnsureSafeThreadAccess();
 
@@ -135,7 +137,7 @@ extern JitPlan* IsJittable(Query* query, const char* queryString)
     return jitPlan;
 }
 
-static void ProcessJitResult(MOT::RC result, JitContext* jitContext)
+static void ProcessJitResult(MOT::RC result, JitContext* jitContext, int newScan)
 {
     // NOTE: errors might be reported in a better way, so this part can be reviewed sometime
     // we ignore "local row not found" in SELECT and DELETE scenarios
@@ -144,11 +146,21 @@ static void ProcessJitResult(MOT::RC result, JitContext* jitContext)
             case JIT_COMMAND_DELETE:
             case JIT_COMMAND_SELECT:
             case JIT_COMMAND_RANGE_SELECT:
+            case JIT_COMMAND_FULL_SELECT:
             case JIT_COMMAND_POINT_JOIN:
             case JIT_COMMAND_RANGE_JOIN:
             case JIT_COMMAND_COMPOUND_SELECT:
+            case JIT_COMMAND_UPDATE:
+            case JIT_COMMAND_RANGE_UPDATE:
                 // this is considered as successful execution
-                JitStatisticsProvider::GetInstance().AddExecQuery();
+                JitStatisticsProvider::GetInstance().AddInvokeQuery();
+                if (newScan) {
+#ifdef MOT_JIT_TEST
+                    MOT_ATOMIC_INC(totalExecCount);
+                    MOT_LOG_INFO("JIT total queries executed: %" PRIu64, MOT_ATOMIC_LOAD(totalExecCount));
+#endif
+                    JitStatisticsProvider::GetInstance().AddExecQuery();
+                }
                 return;
             default:
                 break;
@@ -171,7 +183,8 @@ static void ProcessJitResult(MOT::RC result, JitContext* jitContext)
 
     if (result != MOT::RC_OK) {
         if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
-            MOT_LOG_ERROR_STACK("Failed to execute jitted function");
+            MOT_LOG_ERROR_STACK(
+                "Failed to execute jitted function with error code: %d (%s)", (int)result, MOT::RcToString(result));
         }
         if (result == MOT::RC_ABORT) {
             JitStatisticsProvider::GetInstance().AddAbortExecQuery();
@@ -389,7 +402,7 @@ extern int JitExecQuery(
     // in trace log-level we raise the log level to DEBUG on first few executions only
     bool firstExec = false;
     if ((++jitContext->m_execCount <= 2) && MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
-        MOT_LOG_TRACE("Executing JIT context %p (exec: %" PRIu64 ", query: %" PRIu64 " iteration: %" PRIu64 "): %s",
+        MOT_LOG_TRACE("Executing JIT context %p (exec: %" PRIu64 ", query: %" PRIu64 ", iteration: %" PRIu64 "): %s",
             jitContext,
             jitContext->m_execCount,
             jitContext->m_queryCount,
@@ -451,9 +464,16 @@ extern int JitExecQuery(
     u_sess->mot_cxt.jit_context = NULL;
 
     if (result == 0) {
-        JitStatisticsProvider::GetInstance().AddExecQuery();
+        JitStatisticsProvider::GetInstance().AddInvokeQuery();
+        if (newScan) {
+#ifdef MOT_JIT_TEST
+            MOT_ATOMIC_INC(totalExecCount);
+            MOT_LOG_INFO("JIT total queries executed: %" PRIu64, MOT_ATOMIC_LOAD(totalExecCount));
+#endif
+            JitStatisticsProvider::GetInstance().AddExecQuery();
+        }
     } else {
-        ProcessJitResult((MOT::RC)result, jitContext);
+        ProcessJitResult((MOT::RC)result, jitContext, newScan);
     }
 
     return result;

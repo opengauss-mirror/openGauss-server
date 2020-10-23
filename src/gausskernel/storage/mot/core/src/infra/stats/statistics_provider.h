@@ -78,8 +78,9 @@ public:
      * @param name The unique name that identifies the provider.
      * @param generator The statistics generator.
      * @param enable Specifies whether the statistics provider is enabled.
+     * @param[opt] extended Specifies whether extended statistics are printed by this provider.
      */
-    StatisticsProvider(const char* name, StatisticsGenerator* generator, bool enable);
+    StatisticsProvider(const char* name, StatisticsGenerator* generator, bool enable, bool extended = false);
 
     /** @brief Destructor. */
     virtual ~StatisticsProvider();
@@ -121,6 +122,9 @@ public:
      * @brief Summarizes statistics for printing.
      */
     void Summarize();
+
+    /** @brief Queries whether there are valid statistics for the given options. */
+    bool HasStatisticsFor(uint32_t statOpts);
 
     /**
      * @brief Prints statistics managed by this provider to log file using the
@@ -213,6 +217,9 @@ private:
 
     /** @var The number of thread statistics objects. */
     uint32_t m_threadStatCount;
+
+    /** @brief Specified whether this provider prints extended statistics. */
+    bool m_hasExtendedStats;
 
     /** @var Serialize access to class members. */
     pthread_spinlock_t m_statLock;

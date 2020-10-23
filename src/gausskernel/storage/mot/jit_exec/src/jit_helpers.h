@@ -308,6 +308,13 @@ void adjustKey(MOT::Key* key, MOT::Index* index, unsigned char pattern);
 MOT::IndexIterator* searchIterator(MOT::Index* index, MOT::Key* key, int forward_scan, int include_bound);
 
 /**
+ * @brief Gets the begin iterator for a full-scan.
+ * @param index The index in which to search the iterator.
+ * @return The resulting iterator, or NULL if failed.
+ */
+MOT::IndexIterator* beginIterator(MOT::Index* index);
+
+/**
  * @brief Creates an end-iterator for a range scan.
  * @param index The index in which to search the iterator.
  * @param key The search key.

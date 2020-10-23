@@ -97,6 +97,19 @@ void ThreadStatistics::Normalize()
     }
 }
 
+bool ThreadStatistics::HasValidSamples() const
+{
+    bool result = false;
+    uint32_t statCount = m_statVars.size();
+    for (uint32_t i = 0; i < statCount; ++i) {
+        if (m_statVars[i]->GetSampleCount() > 0) {
+            result = true;
+            break;
+        }
+    }
+    return result;
+}
+
 mot_string ThreadStatistics::MakeName(const char* baseName, uint64_t threadId)
 {
     mot_string result;

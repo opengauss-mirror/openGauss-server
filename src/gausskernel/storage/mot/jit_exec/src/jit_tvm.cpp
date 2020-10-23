@@ -144,6 +144,62 @@ void ParamExpression::dump()
     fprintf(stderr, "getDatumParam(%%params, param_id=%d, arg_pos=%d)", _param_id, _arg_pos);
 }
 
+Datum AndExpression::eval(ExecContext* exec_context)
+{
+    Datum result = PointerGetDatum(NULL);
+    Datum lhs = _lhs->eval(exec_context);
+    if (exec_context->_expr_rc == MOT_NO_ERROR) {
+        Datum rhs = _rhs->eval(exec_context);
+        if (exec_context->_expr_rc == MOT_NO_ERROR) {
+            result = BoolGetDatum(DatumGetBool(lhs) && DatumGetBool(rhs));
+        }
+    }
+    return result;
+}
+
+void AndExpression::dump()
+{
+    _lhs->dump();
+    fprintf(stderr, " AND ");
+    _rhs->dump();
+}
+
+Datum OrExpression::eval(ExecContext* exec_context)
+{
+    Datum result = PointerGetDatum(NULL);
+    Datum lhs = _lhs->eval(exec_context);
+    if (exec_context->_expr_rc == MOT_NO_ERROR) {
+        Datum rhs = _rhs->eval(exec_context);
+        if (exec_context->_expr_rc == MOT_NO_ERROR) {
+            result = BoolGetDatum(DatumGetBool(lhs) || DatumGetBool(rhs));
+        }
+    }
+    return result;
+}
+
+void OrExpression::dump()
+{
+    _lhs->dump();
+    fprintf(stderr, " OR ");
+    _rhs->dump();
+}
+
+Datum NotExpression::eval(ExecContext* exec_context)
+{
+    Datum result = PointerGetDatum(NULL);
+    Datum arg = _arg->eval(exec_context);
+    if (exec_context->_expr_rc == MOT_NO_ERROR) {
+        result = BoolGetDatum(!DatumGetBool(arg));
+    }
+    return result;
+}
+
+void NotExpression::dump()
+{
+    fprintf(stderr, "NOT ");
+    _arg->dump();
+}
+
 uint64_t RegisterRefInstruction::Exec(ExecContext* exec_context)
 {
     return getRegisterValue(exec_context, GetRegisterRef());

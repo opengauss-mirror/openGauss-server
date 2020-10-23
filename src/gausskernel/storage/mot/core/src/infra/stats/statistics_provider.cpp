@@ -34,11 +34,13 @@
 namespace MOT {
 DECLARE_LOGGER(StatisticsProvider, Statistics)
 
-StatisticsProvider::StatisticsProvider(const char* name, StatisticsGenerator* generator, bool enable)
+StatisticsProvider::StatisticsProvider(
+    const char* name, StatisticsGenerator* generator, bool enable, bool extended /* = false */)
     : m_enable(enable),
       m_generator(generator),
       m_threadStats(nullptr),
       m_threadStatCount(0),
+      m_hasExtendedStats(extended),
       m_globalStats(nullptr),
       m_aggregateStats(nullptr),
       m_prevAggregateStats(nullptr),
@@ -252,6 +254,42 @@ void StatisticsProvider::Summarize()
     m_diffGlobalStats->Subtract(*m_prevGlobalStats);
     m_diffGlobalStats->Summarize(false);
     m_prevGlobalStats->Assign(*m_globalStats);
+}
+
+bool StatisticsProvider::HasStatisticsFor(uint32_t statOpts)
+{
+    bool result = m_hasExtendedStats;
+    if (!result && (statOpts & STAT_OPT_SCOPE_THREAD)) {
+        if (statOpts & STAT_OPT_LEVEL_SUMMARY) {
+            result = m_diffStats->HasValidSamples();
+        }
+        if (!result && (statOpts & STAT_OPT_LEVEL_DETAIL)) {
+            result = m_diffAverageStats->HasValidSamples();
+        }
+    }
+
+    if (!result && (statOpts & STAT_OPT_SCOPE_GLOBAL)) {
+        if (statOpts & STAT_OPT_LEVEL_DETAIL) {
+            pthread_spin_lock(&m_statLock);
+            for (uint32_t i = 0; i < m_threadStatCount; ++i) {
+                if (m_threadStats[i] != nullptr) {
+                    result = m_threadStats[i]->HasValidSamples();
+                    if (result) {
+                        break;
+                    }
+                }
+            }
+            pthread_spin_unlock(&m_statLock);
+            if (!result) {
+                result = m_averageStats->HasValidSamples();
+            }
+        }
+        if (!result && (statOpts & STAT_OPT_LEVEL_SUMMARY)) {
+            result = m_aggregateStats->HasValidSamples();
+        }
+    }
+
+    return result;
 }
 
 void StatisticsProvider::PrintStatistics(LogLevel logLevel, uint32_t statOpts /* = STAT_OPT_DEFAULT */)

@@ -256,7 +256,6 @@ struct StatisticsProviderPrinter {
     inline void operator()(StatisticsProvider* const& provider)
     {
         if (provider->IsEnabled()) {
-            provider->Summarize();
             provider->PrintStatistics(m_logLevel, m_statOpts);
         }
     }
@@ -331,20 +330,25 @@ void StatisticsManager::PrintStatistics(LogLevel logLevel, uint32_t statOpts /* 
 {
     pthread_mutex_lock(&m_providersLock);
 
-    // make sure there is at least one enabled provider
+    // make sure there is at least one enabled provider with some statistics
     if (!m_providers.empty()) {
         bool hasEnabled = false;
-        mot_list<StatisticsProvider*>::const_iterator itr = m_providers.cbegin();
-        while (itr != m_providers.cend()) {
-            if ((*itr)->IsEnabled()) {
+        bool hasStats = false;
+        mot_list<StatisticsProvider*>::iterator itr = m_providers.begin();
+        while (itr != m_providers.end()) {
+            StatisticsProvider* provider = *itr;
+            if (provider->IsEnabled()) {
                 hasEnabled = true;
-                break;
-            } else {
-                ++itr;
+                provider->Summarize();
+                if (provider->HasStatisticsFor(statOpts)) {
+                    hasStats = true;
+                }
+                // continue summarizing statistics for other statistics providers
             }
+            ++itr;
         }
 
-        if (hasEnabled) {
+        if (hasEnabled && hasStats) {
             if (statOpts & STAT_OPT_PERIOD_DIFF) {
                 MOT_LOG_INFO("--> Periodic Report (last %lu seconds) <--", m_statsPrintPeriodSeconds);
             } else if (statOpts & STAT_OPT_LEVEL_SUMMARY) {

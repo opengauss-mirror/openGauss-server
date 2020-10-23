@@ -109,6 +109,9 @@ public:
      */
     void Subtract(const GlobalStatistics& rhs);
 
+    /** @brief Queries whether there are valid samples in this statistics container. */
+    bool HasValidSamples() const;
+
     /**
      * @brief Utility method for generating global statistic variable names.
      * @param base_name The name of the statistic variable.
