@@ -2043,6 +2043,8 @@ typedef struct ParallelQueryInfo {
     char *pstmt_space;
     char *param_space;
     Size param_len;
+    int64 tuples_needed; /* tuple bound, see ExecSetTupleBound */
+    int eflags;
     int pscan_num;
     ParallelHeapScanDescData **pscan;
 } ParallelQueryInfo;

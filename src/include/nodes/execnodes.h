@@ -2302,6 +2302,7 @@ typedef struct GatherState {
     struct TupleQueueReader **reader;
     TupleTableSlot *funnel_slot;
     bool need_to_scan_locally;
+    int64 tuples_needed;
 } GatherState;
 
 /* ----------------
