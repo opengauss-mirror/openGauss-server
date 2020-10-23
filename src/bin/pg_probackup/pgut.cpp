@@ -24,8 +24,6 @@
 #include "logger.h"
 #include "file.h"
 
-
-static char	   *password = NULL;
 bool			prompt_password = true;
 bool			force_password = false;
 

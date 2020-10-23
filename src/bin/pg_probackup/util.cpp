@@ -589,3 +589,40 @@ check_postmaster(const char *pgdata)
 	fclose(fp);
 	return pid;
 }
+
+/*
+ * Replace the actual password with *'s.
+ */
+void replace_password(int argc, char** argv, const char* optionName)
+{
+    int count = 0;
+    char* pchPass = NULL;
+    char* pchTemp = NULL;
+
+    // Check if password option is specified in command line
+    for (count = 0; count < argc; count++) {
+        // Password can be specified by optionName
+        if (strncmp(optionName, argv[count], strlen(optionName)) == 0) {
+            pchTemp = strchr(argv[count], '=');
+            if (pchTemp != NULL) {
+                pchPass = pchTemp + 1;
+            } else if ((NULL != strstr(argv[count], optionName)) && (strlen(argv[count]) > strlen(optionName))) {
+                pchPass = argv[count] + strlen(optionName);
+            } else {
+                pchPass = argv[(int)(count + 1)];
+            }
+
+            // Replace first char of password with * and rest clear it
+            if (strlen(pchPass) > 0) {
+                *pchPass = '*';
+                pchPass = pchPass + 1;
+                while ('\0' != *pchPass) {
+                    *pchPass = '\0';
+                    pchPass++;
+                }
+            }
+
+            break;
+        }
+    }
+}

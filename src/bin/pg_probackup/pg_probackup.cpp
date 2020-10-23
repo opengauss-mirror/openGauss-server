@@ -74,6 +74,7 @@ bool		no_sync = false;
 char	   *replication_slot = NULL;
 #endif
 bool		temp_slot = false;
+char	   *password = NULL;
 
 /* backup options */
 bool         backup_logs = false;
@@ -190,7 +191,7 @@ static ConfigOption cmd_options[] =
 	{ 'b', 147, "force",			&force,				SOURCE_CMD_STRICT },
 	{ 'b', 148, "compress",			&compress_shortcut,	SOURCE_CMD_STRICT },
 	{ 'B', 'w', "no-password",		&prompt_password,	SOURCE_CMD_STRICT },
-	{ 'b', 'W', "password",			&force_password,	SOURCE_CMD_STRICT },
+	{ 's', 'W', "password",			&password,			SOURCE_CMD_STRICT },
 	{ 's', 149, "instance",			&instance_name,		SOURCE_CMD_STRICT },
 	{ 's', 150, "wal-file-path",	&wal_file_path,		SOURCE_CMD_STRICT },
 	{ 's', 151, "wal-file-name",	&wal_file_name,		SOURCE_CMD_STRICT },
@@ -381,6 +382,10 @@ main(int argc, char *argv[])
 	optind += 1;
 	/* Parse command line only arguments */
 	config_get_opt(argc, argv, cmd_options, instance_options);
+	if (password) {
+		replace_password(argc, argv, "-W");
+		replace_password(argc, argv, "--password");
+	}
 
 	pgut_init();
 
