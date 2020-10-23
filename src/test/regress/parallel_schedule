@@ -526,9 +526,6 @@ test: vec_sonic_hashjoin_number_prepare
 test: vec_sonic_hashjoin_number_nospill
 #test: hw_pwd_complexity
 
-# test serial function
-test: test_serial
-
 test: timeout
 test: dml
 #test: iud
