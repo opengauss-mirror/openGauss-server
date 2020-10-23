@@ -4,18 +4,20 @@ insert into parallel_hashjoin_test_a select n from generate_series(1,1000) n;
 insert into parallel_hashjoin_test_b select n from generate_series(1,10) n;
 analyse parallel_hashjoin_test_a;
 analyse parallel_hashjoin_test_b;
-explain (costs off) select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Hash Left Join
-   Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
-   ->  Seq Scan on parallel_hashjoin_test_a
-         Filter: (id < 10)
-   ->  Hash
-         ->  Seq Scan on parallel_hashjoin_test_b
-(6 rows)
+explain (costs off) select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10 order by parallel_hashjoin_test_a.id;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Sort Key: parallel_hashjoin_test_a.id
+   ->  Hash Left Join
+         Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
+         ->  Seq Scan on parallel_hashjoin_test_a
+               Filter: (id < 10)
+         ->  Hash
+               ->  Seq Scan on parallel_hashjoin_test_b
+(8 rows)
 
-select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10;
+select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10 order by parallel_hashjoin_test_a.id;
  id | id 
 ----+----
   1 |  1
@@ -33,20 +35,22 @@ set parallel_setup_cost = 1;
 set min_parallel_table_scan_size=0;
 set parallel_tuple_cost = 0.01;
 set enable_nestloop=off;
-explain (costs off) select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Gather
-   Number of Workers: 2
-   ->  Hash Left Join
-         Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
-         ->  Parallel Seq Scan on parallel_hashjoin_test_a
-               Filter: (id < 10)
-         ->  Hash
-               ->  Seq Scan on parallel_hashjoin_test_b
-(8 rows)
+explain (costs off) select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10 order by parallel_hashjoin_test_a.id;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Sort
+   Sort Key: parallel_hashjoin_test_a.id
+   ->  Gather
+         Number of Workers: 2
+         ->  Hash Left Join
+               Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
+               ->  Parallel Seq Scan on parallel_hashjoin_test_a
+                     Filter: (id < 10)
+               ->  Hash
+                     ->  Seq Scan on parallel_hashjoin_test_b
+(10 rows)
 
-select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10;
+select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10 order by parallel_hashjoin_test_a.id;
  id | id 
 ----+----
   1 |  1
@@ -61,18 +65,20 @@ select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b 
 (9 rows)
 
 -- Forbid parallel Hash Right Join or Hash Full Join.
-explain (costs off)select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id;
-                                QUERY PLAN
---------------------------------------------------------------------------
- Hash Right Join
-   Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
-   ->  Seq Scan on parallel_hashjoin_test_a
-   ->  Hash
-         ->  Seq Scan on parallel_hashjoin_test_b
-(5 rows)
+explain (costs off)select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id order by parallel_hashjoin_test_a.id;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Sort Key: parallel_hashjoin_test_a.id
+   ->  Hash Right Join
+         Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
+         ->  Seq Scan on parallel_hashjoin_test_a
+         ->  Hash
+               ->  Seq Scan on parallel_hashjoin_test_b
+(7 rows)
 
-select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id;
- id | id
+select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id order by parallel_hashjoin_test_a.id;
+ id | id 
 ----+----
   1 |  1
   2 |  2
