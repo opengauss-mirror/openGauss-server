@@ -137,12 +137,25 @@ RC TxnManager::DeleteLastRow()
     rc = m_accessMgr->UpdateRowState(AccessType::DEL, access);
     if (rc != RC_OK)
         return rc;
+    access->m_stmtCount = GetStmtCount();
     return rc;
 }
 
 RC TxnManager::UpdateLastRowState(AccessType state)
 {
     return m_accessMgr->UpdateRowState(state, m_accessMgr->GetLastAccess());
+}
+
+bool TxnManager::IsUpdatedInCurrStmt()
+{
+    Access* access = m_accessMgr->GetLastAccess();
+    if (access == nullptr) {
+        return false;
+    }
+    if (m_internalStmtCount == m_accessMgr->GetLastAccess()->m_stmtCount) {
+        return true;
+    }
+    return false;
 }
 
 RC TxnManager::StartTransaction(uint64_t transactionId, int isolationLevel)
@@ -781,8 +794,10 @@ RC TxnManager::OverwriteRow(Row* updatedRow, BitmapSet& modifiedColumns)
         return RC_ERROR;
 
     Access* access = m_accessMgr->GetLastAccess();
-    if (access->m_type == AccessType::WR)
+    if (access->m_type == AccessType::WR) {
         access->m_modifiedColumns |= modifiedColumns;
+        access->m_stmtCount = GetStmtCount();
+    }
     return RC_OK;
 }
 

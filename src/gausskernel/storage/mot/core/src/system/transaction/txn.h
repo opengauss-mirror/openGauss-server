@@ -471,6 +471,8 @@ public:
         m_occManager.SetValidationNoWait(b);
     }
 
+    bool IsUpdatedInCurrStmt();
+
 private:
     static constexpr uint32_t SESSION_ID_BITS = 32;
 
