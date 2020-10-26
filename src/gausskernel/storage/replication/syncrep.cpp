@@ -145,7 +145,7 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN, int mode)
             return XLByteDifference(XactCommitLSN, writePtr) < max_xlog_diff_amount;
         case SYNC_REP_WAIT_FLUSH:
             return XLByteDifference(XactCommitLSN, flushPtr) < max_xlog_diff_amount;
-        case SYNC_REP_WAIT_REPALY:
+        case SYNC_REP_WAIT_APPLY:
             return XLByteDifference(XactCommitLSN, replayPtr) < max_xlog_diff_amount;
         default:
             return true;
@@ -577,9 +577,9 @@ void SyncRepReleaseWaiters(void)
         numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_FLUSH);
     }
 
-    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_REPALY], replayPtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_REPALY] = t_thrd.walsender_cxt.MyWalSnd->apply;
-        numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_REPALY);
+    if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_APPLY], replayPtr)) {
+        walsndctl->lsn[SYNC_REP_WAIT_APPLY] = t_thrd.walsender_cxt.MyWalSnd->apply;
+        numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_APPLY);
     }
 
     LWLockRelease(SyncRepLock);
@@ -1466,8 +1466,8 @@ void assign_synchronous_commit(int newval, void* extra)
         case SYNCHRONOUS_COMMIT_REMOTE_FLUSH:
             SyncRepWaitMode = SYNC_REP_WAIT_FLUSH;
             break;
-        case SYNCHRONOUS_COMMIT_REMOTE_REPLAY:
-            SyncRepWaitMode = SYNC_REP_WAIT_REPALY;
+        case SYNCHRONOUS_COMMIT_REMOTE_APPLY:
+            SyncRepWaitMode = SYNC_REP_WAIT_APPLY;
             break;
         default:
             SyncRepWaitMode = SYNC_REP_NO_WAIT;

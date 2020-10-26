@@ -899,7 +899,7 @@ static const struct config_enum_entry autovacuum_mode_options[] = {{"analyze", A
 static const struct config_enum_entry synchronous_commit_options[] = {{"local", SYNCHRONOUS_COMMIT_LOCAL_FLUSH, false},
     {"remote_receive", SYNCHRONOUS_COMMIT_REMOTE_RECEIVE, false},
     {"remote_write", SYNCHRONOUS_COMMIT_REMOTE_WRITE, false},
-    {"remote_apply", SYNCHRONOUS_COMMIT_REMOTE_REPLAY, false},
+    {"remote_apply", SYNCHRONOUS_COMMIT_REMOTE_APPLY, false},
     {"on", SYNCHRONOUS_COMMIT_ON, false},
     {"off", SYNCHRONOUS_COMMIT_OFF, false},
     {"true", SYNCHRONOUS_COMMIT_ON, true},
@@ -908,7 +908,7 @@ static const struct config_enum_entry synchronous_commit_options[] = {{"local", 
     {"no", SYNCHRONOUS_COMMIT_OFF, true},
     {"1", SYNCHRONOUS_COMMIT_ON, true},
     {"0", SYNCHRONOUS_COMMIT_OFF, true},
-    {"2", SYNCHRONOUS_COMMIT_REMOTE_REPLAY, false},
+    {"2", SYNCHRONOUS_COMMIT_REMOTE_APPLY, true},
     {NULL, 0, false}};
 
 static const struct config_enum_entry force_parallel_mode_options[] = {
