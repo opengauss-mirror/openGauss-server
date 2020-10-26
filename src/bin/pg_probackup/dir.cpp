@@ -962,6 +962,12 @@ opt_path_map(ConfigOption *opt, const char *arg, TablespaceList *list,
 	else
 		list->head = cell;
 	list->tail = cell;
+
+	if (strncmp(type, "tablespace", strlen(type)) == 0) {
+		specify_tbsdir = true;
+	} else if (strncmp(type, "external directory", strlen(type)) == 0) {
+		specify_extdir = true;
+	}
 }
 
 /* Parse tablespace mapping */
