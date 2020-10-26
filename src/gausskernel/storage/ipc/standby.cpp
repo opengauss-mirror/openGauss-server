@@ -784,18 +784,7 @@ static XLogRecPtr LogCurrentRunningXacts(RunningTransactions CurrRunningXacts)
 {
     xl_running_xacts xlrec;
     XLogRecPtr recptr;
-    TransactionId recentXmin = InvalidTransactionId;
-
-#ifndef ENABLE_MULTIPLE_NODES
-    GetTransactionSnapshot();
-    recentXmin = u_sess->utils_cxt.RecentXmin;
-    if (IsUnderPostmaster) {
-        ProcArrayClearTransaction(t_thrd.proc);
-    }
-    Assert(TransactionIdIsValid(recentXmin));
-#else
-    recentXmin = t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin;
-#endif
+    TransactionId recentXmin = t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin;
 
     XLogBeginInsert();
     XLogRegisterData((char*)(&recentXmin), sizeof(TransactionId));
