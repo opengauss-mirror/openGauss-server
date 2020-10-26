@@ -7,8 +7,25 @@
 
 #include "plpy_procedure.h"
 
-/* the interpreter's globals dict */
-extern PyObject* PLy_interp_globals;
+class PyLock {
+public:
+    PyLock(int* lockLevel) : m_lockLevel(lockLevel)
+    {
+        (*m_lockLevel)++;
+    }
+
+    ~PyLock()
+    {
+        (*m_lockLevel)--;
+    }
+    void reset()
+    {
+        (*m_lockLevel) = 0;
+    }
+
+private:
+    int* m_lockLevel;
+};
 
 /*
  * A stack of PL/Python execution contexts. Each time user-defined Python code

@@ -27,7 +27,10 @@ void* PLy_malloc0(size_t bytes)
 {
     void* ptr = PLy_malloc(bytes);
 
-    MemSet(ptr, 0, bytes);
+    if (bytes > 0) {
+        errno_t rc = memset_s(ptr, bytes, 0, bytes);
+        securec_check(rc, "\0", "\0");
+    }
     return ptr;
 }
 
@@ -38,8 +41,8 @@ char* PLy_strdup(const char* str)
     errno_t rc = EOK;
 
     len = strlen(str) + 1;
-    result = PLy_malloc(len);
-    rc = memcpy_s(result, len, str, len - 1);
+    result = (char*)PLy_malloc(len);
+    rc = memcpy_s(result, len, str, len);
     securec_check(rc, "\0", "\0");
 
     return result;
@@ -58,10 +61,10 @@ void PLy_free(void* ptr)
  */
 PyObject* PLyUnicode_Bytes(PyObject* unicode)
 {
-    PyObject *bytes = NULL;
-    PyObject *rv = NULL;
-    char *utf8string = NULL;
-    char *encoded = NULL;
+    PyObject* bytes = NULL;
+    PyObject* rv = NULL;
+    char* utf8string = NULL;
+    char* encoded = NULL;
 
     /* First encode the Python unicode object with UTF-8. */
     bytes = PyUnicode_AsUTF8String(unicode);

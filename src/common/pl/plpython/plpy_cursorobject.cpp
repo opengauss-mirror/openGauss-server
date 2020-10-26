@@ -1,7 +1,7 @@
 /*
  * the PLyCursor class
  *
- * src/pl/plpython/plpy_cursorobject.c
+ * src/common/pl/plpython/plpy_cursorobject.cpp
  */
 
 #include "postgres.h"
@@ -91,7 +91,7 @@ PyObject* PLy_cursor(PyObject* self, PyObject* args)
         return PLy_cursor_plan(plan, planargs);
     }
 
-    PLy_exception_set(PLy_exc_error, "plpy.cursor expected a query or a plan");
+    PLy_exception_set(plpy_t_context.PLy_exc_error, "plpy.cursor expected a query or a plan");
     return NULL;
 }
 
@@ -209,7 +209,7 @@ static PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args)
         volatile int j;
 
         if (nargs > 0) {
-            nulls = palloc(nargs * sizeof(char));
+            nulls = (char*)palloc(nargs * sizeof(char));
         } else {
             nulls = NULL;
         }
@@ -255,7 +255,7 @@ static PyObject* PLy_cursor_plan(PyObject* ob, PyObject* args)
 
         /* cleanup plan->values array */
         for (k = 0; k < nargs; k++) {
-            if (plan->args[k].out.d.typbyval == NULL && (plan->values[k] != PointerGetDatum(NULL))) {
+            if (!plan->args[k].out.d.typbyval && (plan->values[k] != PointerGetDatum(NULL))) {
                 pfree(DatumGetPointer(plan->values[k]));
                 plan->values[k] = PointerGetDatum(NULL);
             }
@@ -406,12 +406,10 @@ static PyObject* PLy_cursor_fetch(PyObject* self, PyObject* args)
         ret->nrows = PyInt_FromLong(SPI_processed);
 
         if (SPI_processed != 0) {
-            int i;
-
             Py_DECREF(ret->rows);
             ret->rows = PyList_New(SPI_processed);
 
-            for (i = 0; i < SPI_processed; i++) {
+            for (uint32 i = 0; i < SPI_processed; i++) {
                 PyObject* row = PLyDict_FromTuple(&cursor->result, SPI_tuptable->vals[i], SPI_tuptable->tupdesc);
 
                 PyList_SetItem(ret->rows, i, row);

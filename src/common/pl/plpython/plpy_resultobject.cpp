@@ -20,9 +20,13 @@ static PyObject* PLy_result_nrows(PyObject* self, PyObject* args);
 static PyObject* PLy_result_status(PyObject* self, PyObject* args);
 static Py_ssize_t PLy_result_length(PyObject* arg);
 static PyObject* PLy_result_item(PyObject* arg, Py_ssize_t idx);
+#if PY_MAJOR_VERSION < 3
 static PyObject* PLy_result_slice(PyObject* arg, Py_ssize_t lidx, Py_ssize_t hidx);
 static int PLy_result_ass_item(PyObject* arg, Py_ssize_t idx, PyObject* item);
-static int PLy_result_ass_slice(PyObject* rg, Py_ssize_t lidx, Py_ssize_t hidx, PyObject* slice);
+static int PLy_result_ass_slice(PyObject* arg, Py_ssize_t lidx, Py_ssize_t hidx, PyObject* slice);
+#else
+static PyObject* PLy_result_str(PyObject* arg);
+#endif
 static PyObject* PLy_result_subscript(PyObject* arg, PyObject* item);
 static int PLy_result_ass_subscript(PyObject* self, PyObject* item, PyObject* value);
 
@@ -33,9 +37,15 @@ static PySequenceMethods PLy_result_as_sequence = {
     NULL,                 /* sq_concat */
     NULL,                 /* sq_repeat */
     PLy_result_item,      /* sq_item */
+#if PY_MAJOR_VERSION < 3
     PLy_result_slice,     /* sq_slice */
     PLy_result_ass_item,  /* sq_ass_item */
-    PLy_result_ass_slice, /* sq_ass_slice */
+    PLy_result_ass_slice  /* sq_ass_slice */
+#else
+    NULL,                 /* sq_slice */
+    NULL,                 /* sq_ass_item */
+    NULL                  /* sq_ass_slice */
+#endif
 };
 
 static PyMappingMethods PLy_result_as_mapping = {
@@ -70,7 +80,11 @@ static PyTypeObject PLy_ResultType = {
     &PLy_result_as_mapping,                   /* tp_as_mapping */
     0,                                        /* tp_hash */
     0,                                        /* tp_call */
+#if PY_MAJOR_VERSION < 3
     0,                                        /* tp_str */
+#else
+    &PLy_result_str,                          /* tp_str */
+#endif
     0,                                        /* tp_getattro */
     0,                                        /* tp_setattro */
     0,                                        /* tp_as_buffer */
@@ -129,7 +143,7 @@ static PyObject* PLy_result_colnames(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(plpy_t_context.PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 
@@ -147,7 +161,7 @@ static PyObject* PLy_result_coltypes(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(plpy_t_context.PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 
@@ -165,7 +179,7 @@ static PyObject* PLy_result_coltypmods(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(plpy_t_context.PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 
@@ -210,6 +224,7 @@ static PyObject* PLy_result_item(PyObject* arg, Py_ssize_t idx)
     return rv;
 }
 
+#if PY_MAJOR_VERSION < 3
 static int PLy_result_ass_item(PyObject* arg, Py_ssize_t idx, PyObject* item)
 {
     int rv;
@@ -235,6 +250,23 @@ static int PLy_result_ass_slice(PyObject* arg, Py_ssize_t lidx, Py_ssize_t hidx,
     rv = PyList_SetSlice(ob->rows, lidx, hidx, slice);
     return rv;
 }
+#else
+static PyObject* PLy_result_str(PyObject* arg)
+{
+    PLyResultObject* ob = (PLyResultObject*)arg;
+
+#if PY_MAJOR_VERSION >= 3
+    return PyUnicode_FromFormat(
+        "<%s status=%S nrows=%S rows=%S>", Py_TYPE(ob)->tp_name, ob->status, ob->nrows, ob->rows);
+#else
+    return PyString_FromFormat("<%s status=%ld nrows=%ld rows=%s>",
+        ob->ob_type->tp_name,
+        PyInt_AsLong(ob->status),
+        PyInt_AsLong(ob->nrows),
+        PyString_AsString(PyObject_Str(ob->rows)));
+#endif
+}
+#endif
 
 static PyObject* PLy_result_subscript(PyObject* arg, PyObject* item)
 {

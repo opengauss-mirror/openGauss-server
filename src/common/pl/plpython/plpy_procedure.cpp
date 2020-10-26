@@ -1,7 +1,7 @@
 /*
  * Python procedure manipulation for plpython
  *
- * src/pl/plpython/plpy_procedure.c
+ * src/common/pl/plpython/plpy_procedure.cpp
  */
 
 #include "postgres.h"
@@ -22,7 +22,6 @@
 #include "plpy_elog.h"
 #include "plpy_main.h"
 
-static HTAB* PLy_procedure_cache = NULL;
 
 static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is_trigger);
 static bool PLy_procedure_argument_valid(PLyTypeInfo* arg);
@@ -32,12 +31,16 @@ static char* PLy_procedure_munge_source(const char* name, const char* src);
 void init_procedure_caches(void)
 {
     HASHCTL hash_ctl;
+    errno_t rc = EOK;
 
-    MemSet_S(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+    rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+    securec_check(rc, "\0", "\0");
+
     hash_ctl.keysize = sizeof(PLyProcedureKey);
     hash_ctl.entrysize = sizeof(PLyProcedureEntry);
     hash_ctl.hash = tag_hash;
-    PLy_procedure_cache = hash_create("PL/Python procedures", 32, &hash_ctl, HASH_ELEM | HASH_FUNCTION);
+    plpy_t_context.PLy_procedure_cache =
+        hash_create("PL/Python procedures", 32, &hash_ctl, HASH_ELEM | HASH_FUNCTION);
 }
 
 /*
@@ -87,7 +90,7 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
     if (use_cache) {
         key.fn_oid = fn_oid;
         key.fn_rel = fn_rel;
-        entry = hash_search(PLy_procedure_cache, &key, HASH_ENTER, &found);
+        entry = (PLyProcedureEntry*)hash_search(plpy_t_context.PLy_procedure_cache, &key, HASH_ENTER, &found);
         proc = entry->proc;
     }
 
@@ -111,7 +114,7 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
     {
         /* Do not leave an uninitialised entry in the cache */
         if (use_cache)
-            hash_search(PLy_procedure_cache, &key, HASH_REMOVE, NULL);
+            hash_search(plpy_t_context.PLy_procedure_cache, &key, HASH_REMOVE, NULL);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -141,10 +144,16 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
         "__plpython_procedure_%s_%u",
         NameStr(procStruct->proname),
         fn_oid);
-    if (rv >= sizeof(procName) || rv < 0)
+    if (rv >= (int)sizeof(procName) || rv < 0)
         elog(ERROR, "procedure name would overrun buffer");
 
-    proc = PLy_malloc(sizeof(PLyProcedure));
+    /* Replace any not-legal-in-Python-names characters with '_' */
+    for (char* ptr = procName; *ptr; ptr++) {
+        if (!((*ptr >= 'A' && *ptr <= 'Z') || (*ptr >= 'a' && *ptr <= 'z') || (*ptr >= '0' && *ptr <= '9')))
+            *ptr = '_';
+    }
+
+    proc = (PLyProcedure*)PLy_malloc(sizeof(PLyProcedure));
     proc->proname = PLy_strdup(NameStr(procStruct->proname));
     proc->pyname = PLy_strdup(procName);
     proc->fn_xmin = HeapTupleGetRawXmin(procTup);
@@ -213,8 +222,8 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
          */
         if (procStruct->pronargs) {
             Oid* types = NULL;
-            char **names = NULL;
-            char *modes = NULL;
+            char** names = NULL;
+            char* modes = NULL;
             int i, pos, total;
 
             /* extract argument type info from the pg_proc tuple */
@@ -306,7 +315,7 @@ void PLy_procedure_compile(PLyProcedure* proc, const char* src)
     PyObject* crv = NULL;
     char* msrc = NULL;
 
-    proc->globals = PyDict_Copy(PLy_interp_globals);
+    proc->globals = PyDict_Copy(plpy_t_context.PLy_interp_globals);
 
     /*
      * SD is private preserved data between calls. GD is global data shared by
@@ -333,8 +342,8 @@ void PLy_procedure_compile(PLyProcedure* proc, const char* src)
         /*
          * compile a call to the function
          */
-        clen = snprintf(call, sizeof(call), "%s()", proc->pyname);
-        if (clen < 0 || clen >= sizeof(call))
+        clen = snprintf_s(call, sizeof(call), sizeof(call) - 1, "%s()", proc->pyname);
+        if (clen < 0 || clen >= (int)sizeof(call))
             elog(ERROR, "string would overflow buffer");
         proc->code = Py_CompileString(call, "<string>", Py_eval_input);
         if (proc->code != NULL)
@@ -442,19 +451,20 @@ static bool PLy_procedure_valid(PLyProcedure* proc, HeapTuple procTup)
 
 static char* PLy_procedure_munge_source(const char* name, const char* src)
 {
-    char *mrc = NULL;
-    char *mp = NULL;
+    char* mrc = NULL;
+    char* mp = NULL;
     const char* sp = NULL;
-    size_t mlen, plen;
+    size_t mlen;
+    int plen;
 
     /*
      * room for function source and the def statement
      */
     mlen = (strlen(src) * 2) + strlen(name) + 16;
 
-    mrc = palloc(mlen);
-    plen = snprintf(mrc, mlen, "def %s():\n\t", name);
-    Assert(plen >= 0 && plen < mlen);
+    mrc = (char*)palloc(mlen);
+    plen = snprintf_s(mrc, mlen, mlen - 1, "def %s():\n\t", name);
+    Assert(plen >= 0 && (size_t)plen < mlen);
 
     sp = src;
     mp = mrc + plen;

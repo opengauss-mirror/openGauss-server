@@ -119,6 +119,25 @@ typedef int Py_ssize_t;
 #undef TEXTDOMAIN
 #define TEXTDOMAIN PG_TEXTDOMAIN("plpython")
 
+typedef struct plpy_t_context_struct {
+    bool inited;
+    MemoryContext plpython_func_cxt;
+    HTAB* PLy_spi_exceptions;
+    HTAB* PLy_procedure_cache;
+
+    /* a list of nested explicit subtransactions */
+    List* explicit_subtransactions;
+
+    PyObject* PLy_exc_error;
+    PyObject* PLy_exc_fatal;
+    PyObject* PLy_exc_spi_error;
+    PyObject* PLy_interp_globals;
+
+    int Ply_LockLevel;
+} plpy_t_context_struct;
+
+extern THR_LOCAL plpy_t_context_struct plpy_t_context;
+
 #include <compile.h>
 #include <eval.h>
 

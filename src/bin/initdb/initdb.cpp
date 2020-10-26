@@ -265,6 +265,15 @@ static void load_dist_fdw(void);
 static void load_hdfs_fdw(void);
 #endif
 
+#ifdef ENABLE_PYTHON2
+static void load_plpython2u_extension(void);
+static void load_plpythonu_extension(void);
+#endif
+
+#ifdef ENABLE_PYTHON3
+static void load_plpython3u_extension(void);
+#endif
+
 static void load_mot_fdw(void); /* load MOT fdw */
 #ifdef ENABLE_MULTIPLE_NODES
 static void load_hstore_extension(void);
@@ -2536,6 +2545,71 @@ static void load_log_extension(void)
 }
 #endif
 
+#ifdef ENABLE_PYTHON2
+static void load_plpython2u_extension()
+{
+    PG_CMD_DECL;
+    int nRet = 0;
+
+    fputs(_("loading plpython2u extension ... "), stdout);
+    (void)fflush(stdout);
+
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+    securec_check_ss_c(nRet, "\0", "\0");
+    PG_CMD_OPEN;
+
+    PG_CMD_PUTS("CREATE EXTENSION plpython2u;\n");
+
+    PG_CMD_CLOSE;
+
+    check_ok();
+}
+#endif
+
+#ifdef ENABLE_PYTHON3
+static void load_plpython3u_extension()
+{
+    PG_CMD_DECL;
+    int nRet = 0;
+
+    fputs(_("loading plpython3u extension ... "), stdout);
+    (void)fflush(stdout);
+
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+    securec_check_ss_c(nRet, "\0", "\0");
+    PG_CMD_OPEN;
+
+    PG_CMD_PUTS("CREATE EXTENSION plpython3u;\n");
+
+    PG_CMD_CLOSE;
+
+    check_ok();
+}
+#endif
+
+#ifdef ENABLE_PYTHON2
+static void load_plpythonu_extension()
+{
+    PG_CMD_DECL;
+    int nRet = 0;
+
+    fputs(_("loading plpythonu extension ... "), stdout);
+    (void)fflush(stdout);
+
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+    securec_check_ss_c(nRet, "\0", "\0");
+    PG_CMD_OPEN;
+
+    PG_CMD_PUTS("CREATE EXTENSION plpythonu;\n");
+
+    PG_CMD_CLOSE;
+
+    check_ok();
+}
+#endif
 
 static void load_supported_extension(void)
 {
@@ -2561,6 +2635,16 @@ static void load_supported_extension(void)
 
     /* loading hstore extension */
     load_hstore_extension();
+#endif
+
+    /* loading plpy extension */
+#ifdef ENABLE_PYTHON2
+    load_plpython2u_extension();
+    load_plpythonu_extension();
+#endif
+
+#ifdef ENABLE_PYTHON3
+    load_plpython3u_extension();
 #endif
 
     /* loading foreign-data wrapper for mot in-memory data access*/

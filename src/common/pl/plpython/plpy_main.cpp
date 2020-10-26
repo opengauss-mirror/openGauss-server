@@ -11,6 +11,7 @@
 #include "catalog/pg_type.h"
 #include "commands/trigger.h"
 #include "executor/spi.h"
+#include "executor/executor.h"
 #include "miscadmin.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
@@ -36,16 +37,16 @@
 #define plpython_inline_handler plpython3_inline_handler
 #endif
 
-extern void _PG_init(void);
-extern Datum plpython_validator(PG_FUNCTION_ARGS);
-extern Datum plpython_call_handler(PG_FUNCTION_ARGS);
-extern Datum plpython_inline_handler(PG_FUNCTION_ARGS);
+extern "C" void _PG_init(void);
+extern "C" Datum plpython_validator(PG_FUNCTION_ARGS);
+extern "C" Datum plpython_call_handler(PG_FUNCTION_ARGS);
+extern "C" Datum plpython_inline_handler(PG_FUNCTION_ARGS);
 
 #if PY_MAJOR_VERSION < 3
 /* Define aliases plpython2_call_handler etc */
-extern Datum plpython2_validator(PG_FUNCTION_ARGS);
-extern Datum plpython2_call_handler(PG_FUNCTION_ARGS);
-extern Datum plpython2_inline_handler(PG_FUNCTION_ARGS);
+extern "C" Datum plpython2_validator(PG_FUNCTION_ARGS);
+extern "C" Datum plpython2_call_handler(PG_FUNCTION_ARGS);
+extern "C" Datum plpython2_inline_handler(PG_FUNCTION_ARGS);
 #endif
 
 PG_MODULE_MAGIC;
@@ -70,19 +71,18 @@ static void PLy_pop_execution_context(void);
 
 static const int plpython_python_version = PY_MAJOR_VERSION;
 
-/* initialize global variables */
-PyObject* PLy_interp_globals = NULL;
-
 /* this doesn't need to be global; use PLy_current_execution_context() */
-static PLyExecutionContext* PLy_execution_contexts = NULL;
+static THR_LOCAL PLyExecutionContext* PLy_execution_contexts = NULL;
+THR_LOCAL plpy_t_context_struct plpy_t_context = {0};
 
-void _PG_init(void)
+pthread_mutex_t Ply_LocaleMutex = PTHREAD_MUTEX_INITIALIZER;
+
+void PG_init(void)
 {
     /* Be sure we do initialization only once (should be redundant now) */
-    static THR_LOCAL bool inited = false;
     const int** version_ptr;
 
-    if (inited) {
+    if (plpy_t_context.inited) {
         return;
     }
 
@@ -107,10 +107,25 @@ void _PG_init(void)
 #if PY_MAJOR_VERSION >= 3
     PyImport_AppendInittab("plpy", PyInit_plpy);
 #endif
+
+#if PY_MAJOR_VERSION < 3
+    if (!PyEval_ThreadsInitialized()) {
+        PyEval_InitThreads();
+    }
+#endif
+
     Py_Initialize();
 #if PY_MAJOR_VERSION >= 3
     PyImport_ImportModule("plpy");
 #endif
+
+#if PY_MAJOR_VERSION >= 3
+    if (!PyEval_ThreadsInitialized()) {
+        PyEval_InitThreads();
+        PyEval_SaveThread();
+    }
+#endif
+
     PLy_init_interp();
     PLy_init_plpy();
     if (PyErr_Occurred()) {
@@ -119,11 +134,16 @@ void _PG_init(void)
 
     init_procedure_caches();
 
-    explicit_subtransactions = NIL;
+    plpy_t_context.explicit_subtransactions = NIL;
 
     PLy_execution_contexts = NULL;
 
-    inited = true;
+    plpy_t_context.inited = true;
+}
+
+void _PG_init(void)
+{
+    PG_init();
 }
 
 /*
@@ -140,14 +160,14 @@ void PLy_init_interp(void)
         PLy_elog(ERROR, "could not import \"__main__\" module");
     }
     Py_INCREF(mainmod);
-    PLy_interp_globals = PyModule_GetDict(mainmod);
+    plpy_t_context.PLy_interp_globals = PyModule_GetDict(mainmod);
     PLy_interp_safe_globals = PyDict_New();
     if (PLy_interp_safe_globals == NULL) {
         PLy_elog(ERROR, "could not create globals");
     }
-    PyDict_SetItemString(PLy_interp_globals, "GD", PLy_interp_safe_globals);
+    PyDict_SetItemString(plpy_t_context.PLy_interp_globals, "GD", PLy_interp_safe_globals);
     Py_DECREF(mainmod);
-    if (PLy_interp_globals == NULL || PyErr_Occurred()) {
+    if (plpy_t_context.PLy_interp_globals == NULL || PyErr_Occurred()) {
         PLy_elog(ERROR, "could not initialize globals");
     }
 }
@@ -159,23 +179,49 @@ Datum plpython_validator(PG_FUNCTION_ARGS)
     Form_pg_proc procStruct;
     bool is_trigger = false;
 
+    if (!CheckFunctionValidatorAccess(fcinfo->flinfo->fn_oid, funcoid))
+        PG_RETURN_VOID();
+
     if (!u_sess->attr.attr_sql.check_function_bodies) {
         PG_RETURN_VOID();
     }
 
-    /* Get the new function's pg_proc entry */
-    tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcoid));
-    if (!HeapTupleIsValid(tuple)) {
-        elog(ERROR, "cache lookup failed for function %u", funcoid);
+    AutoMutexLock plpythonLock(&Ply_LocaleMutex);
+    if (plpy_t_context.Ply_LockLevel == 0) {
+        plpythonLock.lock();
     }
-    procStruct = (Form_pg_proc)GETSTRUCT(tuple);
 
-    is_trigger = PLy_procedure_is_trigger(procStruct);
+    PyLock pyLock(&(plpy_t_context.Ply_LockLevel));
 
-    ReleaseSysCache(tuple);
+    PG_TRY();
+    {
+        PG_init();
 
-    /* We can't validate triggers against any particular table ... */
-    PLy_procedure_get(funcoid, InvalidOid, is_trigger);
+        /* Get the new function's pg_proc entry */
+        tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcoid));
+        if (!HeapTupleIsValid(tuple)) {
+            elog(ERROR, "cache lookup failed for function %u", funcoid);
+        }
+        procStruct = (Form_pg_proc)GETSTRUCT(tuple);
+
+        is_trigger = PLy_procedure_is_trigger(procStruct);
+
+        if (is_trigger) {
+            elog(ERROR, "PL/Python does not support trigger");
+        }
+
+        ReleaseSysCache(tuple);
+
+        /* We can't validate triggers against any particular table ... */
+        PLy_procedure_get(funcoid, InvalidOid, is_trigger);
+    }
+    PG_CATCH();
+    {
+        pyLock.reset();
+        plpythonLock.unLock();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     PG_RETURN_VOID();
 }
@@ -189,29 +235,48 @@ Datum plpython2_validator(PG_FUNCTION_ARGS)
 
 Datum plpython_call_handler(PG_FUNCTION_ARGS)
 {
+    AutoMutexLock plpythonLock(&Ply_LocaleMutex);
+
+    if (plpy_t_context.Ply_LockLevel == 0) {
+        plpythonLock.lock();
+    }
+
     Datum retval;
     PLyExecutionContext* exec_ctx = NULL;
     ErrorContextCallback plerrcontext;
 
-    /* Note: SPI_finish() happens in plpy_exec.c, which is dubious design */
-    if (SPI_connect() != SPI_OK_CONNECT) {
-        elog(ERROR, "SPI_connect failed");
+    PyLock pyLock(&(plpy_t_context.Ply_LockLevel));
+
+    PG_TRY();
+    {
+        PG_init();
+
+        /* Note: SPI_finish() happens in plpy_exec.cpp, which is dubious design */
+        if (SPI_connect() != SPI_OK_CONNECT) {
+            elog(ERROR, "SPI_connect failed");
+        }
+
+        /*
+         * Push execution context onto stack.  It is important that this get
+         * popped again, so avoid putting anything that could throw error between
+         * here and the PG_TRY.
+         */
+        exec_ctx = PLy_push_execution_context();
+
+        /*
+         * Setup error traceback support for ereport()
+         */
+        plerrcontext.callback = plpython_error_callback;
+        plerrcontext.previous = t_thrd.log_cxt.error_context_stack;
+        t_thrd.log_cxt.error_context_stack = &plerrcontext;
     }
-
-    /*
-     * Push execution context onto stack.  It is important that this get
-     * popped again, so avoid putting anything that could throw error between
-     * here and the PG_TRY.  (plpython_error_callback expects the stack entry
-     * to be there, so we have to make the context first.)
-     */
-    exec_ctx = PLy_push_execution_context();
-
-    /*
-     * Setup error traceback support for ereport()
-     */
-    plerrcontext.callback = plpython_error_callback;
-    plerrcontext.previous = t_thrd.log_cxt.error_context_stack;
-    t_thrd.log_cxt.error_context_stack = &plerrcontext;
+    PG_CATCH();
+    {
+        pyLock.reset();
+        plpythonLock.unLock();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     PG_TRY();
     {
@@ -219,6 +284,7 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
         PLyProcedure* proc = NULL;
 
         if (CALLED_AS_TRIGGER(fcinfo)) {
+            elog(ERROR, "PL/Python does not support trigger");
             Relation tgrel = ((TriggerData*)fcinfo->context)->tg_relation;
             HeapTuple trv;
 
@@ -236,14 +302,26 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     {
         PLy_pop_execution_context();
         PyErr_Clear();
+        pyLock.reset();
+        plpythonLock.unLock();
         PG_RE_THROW();
     }
     PG_END_TRY();
 
-    /* Pop the error context stack */
-    t_thrd.log_cxt.error_context_stack = plerrcontext.previous;
-    /* ... and then the execution context */
-    PLy_pop_execution_context();
+    PG_TRY();
+    {
+        /* Pop the error context stack */
+        t_thrd.log_cxt.error_context_stack = plerrcontext.previous;
+        /* ... and then the execution context */
+        PLy_pop_execution_context();
+    }
+    PG_CATCH();
+    {
+        pyLock.reset();
+        plpythonLock.unLock();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     return retval;
 }
@@ -257,43 +335,67 @@ Datum plpython2_call_handler(PG_FUNCTION_ARGS)
 
 Datum plpython_inline_handler(PG_FUNCTION_ARGS)
 {
+    AutoMutexLock plpythonLock(&Ply_LocaleMutex);
+    if (plpy_t_context.Ply_LockLevel == 0) {
+        plpythonLock.lock();
+    }
+    PyLock pyLock(&(plpy_t_context.Ply_LockLevel));
+
     InlineCodeBlock* codeblock = (InlineCodeBlock*)DatumGetPointer(PG_GETARG_DATUM(0));
     FunctionCallInfoData fake_fcinfo;
     FmgrInfo flinfo;
     PLyProcedure proc;
     PLyExecutionContext* exec_ctx = NULL;
     ErrorContextCallback plerrcontext;
+    errno_t rc = EOK;
 
-    /* Note: SPI_finish() happens in plpy_exec.c, which is dubious design */
-    if (SPI_connect() != SPI_OK_CONNECT) {
-        elog(ERROR, "SPI_connect failed");
+    PG_TRY();
+    {
+        PG_init();
+
+        /* Note: SPI_finish() happens in plpy_exec.c, which is dubious design */
+        if (SPI_connect() != SPI_OK_CONNECT) {
+            elog(ERROR, "SPI_connect failed");
+        }
+
+        rc = memset_s(&fake_fcinfo, sizeof(fake_fcinfo), 0, sizeof(fake_fcinfo));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(&flinfo, sizeof(flinfo), 0, sizeof(flinfo));
+        securec_check(rc, "\0", "\0");
+
+        fake_fcinfo.flinfo = &flinfo;
+        flinfo.fn_oid = InvalidOid;
+        flinfo.fn_mcxt = CurrentMemoryContext;
+
+        rc = memset_s(&proc, sizeof(PLyProcedure), 0, sizeof(PLyProcedure));
+        securec_check(rc, "\0", "\0");
+
+        proc.pyname = PLy_strdup("__plpython_inline_block");
+        proc.result.out.d.typoid = VOIDOID;
+
+        /*
+         * Push execution context onto stack.  It is important that this get
+         * popped again, so avoid putting anything that could throw error between
+         * here and the PG_TRY.  (plpython_inline_error_callback doesn't currently
+         * need the stack entry, but for consistency with plpython_call_handler we
+         * do it in this order.)
+         */
+        exec_ctx = PLy_push_execution_context();
+
+        /*
+         * Setup error traceback support for ereport()
+         */
+        plerrcontext.callback = plpython_inline_error_callback;
+        plerrcontext.previous = t_thrd.log_cxt.error_context_stack;
+        t_thrd.log_cxt.error_context_stack = &plerrcontext;
     }
-
-    MemSet(&fake_fcinfo, 0, sizeof(fake_fcinfo));
-    MemSet(&flinfo, 0, sizeof(flinfo));
-    fake_fcinfo.flinfo = &flinfo;
-    flinfo.fn_oid = InvalidOid;
-    flinfo.fn_mcxt = CurrentMemoryContext;
-
-    MemSet(&proc, 0, sizeof(PLyProcedure));
-    proc.pyname = PLy_strdup("__plpython_inline_block");
-    proc.result.out.d.typoid = VOIDOID;
-
-    /*
-     * Push execution context onto stack.  It is important that this get
-     * popped again, so avoid putting anything that could throw error between
-     * here and the PG_TRY.  (plpython_inline_error_callback doesn't currently
-     * need the stack entry, but for consistency with plpython_call_handler we
-     * do it in this order.)
-     */
-    exec_ctx = PLy_push_execution_context();
-
-    /*
-     * Setup error traceback support for ereport()
-     */
-    plerrcontext.callback = plpython_inline_error_callback;
-    plerrcontext.previous = t_thrd.log_cxt.error_context_stack;
-    t_thrd.log_cxt.error_context_stack = &plerrcontext;
+    PG_CATCH();
+    {
+        plpythonLock.unLock();
+        pyLock.reset();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     PG_TRY();
     {
@@ -306,17 +408,30 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
         PLy_pop_execution_context();
         PLy_procedure_delete(&proc);
         PyErr_Clear();
+        plpythonLock.unLock();
+        pyLock.reset();
         PG_RE_THROW();
     }
     PG_END_TRY();
 
-    /* Pop the error context stack */
-    t_thrd.log_cxt.error_context_stack = plerrcontext.previous;
-    /* ... and then the execution context */
-    PLy_pop_execution_context();
+    PG_TRY();
+    {
 
-    /* Now clean up the transient procedure we made */
-    PLy_procedure_delete(&proc);
+        /* Pop the error context stack */
+        t_thrd.log_cxt.error_context_stack = plerrcontext.previous;
+        /* ... and then the execution context */
+        PLy_pop_execution_context();
+
+        /* Now clean up the transient procedure we made */
+        PLy_procedure_delete(&proc);
+    }
+    PG_CATCH();
+    {
+        plpythonLock.unLock();
+        pyLock.reset();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     PG_RETURN_VOID();
 }
@@ -358,7 +473,7 @@ PLyExecutionContext* PLy_current_execution_context(void)
 
 static PLyExecutionContext* PLy_push_execution_context(void)
 {
-    PLyExecutionContext* context = PLy_malloc(sizeof(PLyExecutionContext));
+    PLyExecutionContext* context = (PLyExecutionContext*)PLy_malloc(sizeof(PLyExecutionContext));
 
     context->curr_proc = NULL;
     context->scratch_ctx = AllocSetContextCreate(u_sess->top_transaction_mem_cxt,

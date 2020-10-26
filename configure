@@ -28697,6 +28697,19 @@ fi
 if test "$with_python" = yes; then
   ac_save_CPPFLAGS=$CPPFLAGS
   CPPFLAGS="$python_includespec $CPPFLAGS"
+
+if test $python_majorversion = 2; then
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_PYTHON2 1
+_ACEOF
+fi
+
+if test $python_majorversion = 3; then
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_PYTHON3 1
+_ACEOF
+fi
+
   if test "${ac_cv_header_Python_h+set}" = set; then
   { $as_echo "$as_me:$LINENO: checking for Python.h" >&5
 $as_echo_n "checking for Python.h... " >&6; }
