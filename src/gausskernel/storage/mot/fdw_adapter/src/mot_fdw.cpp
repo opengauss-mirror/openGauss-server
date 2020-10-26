@@ -1508,6 +1508,10 @@ static TupleTableSlot* MOTExecForeignUpdate(
         return nullptr;
     }
 
+    // This case handle multiple updates of the same row in one query
+    if (fdwState->m_currTxn->IsUpdatedInCurrStmt()) {
+        return nullptr;
+    }
     if ((rc = MOTAdaptor::UpdateRow(fdwState, planSlot, currRow)) == MOT::RC_OK) {
         if (resultRelInfo->ri_projectReturning) {
             return planSlot;
@@ -1552,6 +1556,10 @@ static TupleTableSlot* MOTExecForeignDelete(
     }
 
     if (currRow == nullptr) {
+        // This case handle multiple updates of the same row in one query
+        if (fdwState->m_currTxn->IsUpdatedInCurrStmt()) {
+            return nullptr;
+        }
         elog(ERROR, "MOTExecForeignDelete failed to fetch row");
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc), fdwState->m_currTxn);
@@ -2233,6 +2241,20 @@ inline bool IsNotEqualOper(OpExpr* op)
     }
 }
 
+inline void RevertKeyOperation(KEY_OPER& oper)
+{
+    if (oper == KEY_OPER::READ_KEY_BEFORE) {
+        oper = KEY_OPER::READ_KEY_AFTER;
+    } else if (oper == KEY_OPER::READ_KEY_OR_PREV) {
+        oper = KEY_OPER::READ_KEY_OR_NEXT;
+    } else if (oper == KEY_OPER::READ_KEY_AFTER) {
+        oper = KEY_OPER::READ_KEY_BEFORE;
+    } else if (oper == KEY_OPER::READ_KEY_OR_NEXT) {
+        oper = KEY_OPER::READ_KEY_OR_PREV;
+    }
+    return;
+}
+
 inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
 {
     switch (op->opno) {
@@ -2411,11 +2433,13 @@ bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, E
                         } else {
                             v = (Var*)r;
                             e = l;
+                            RevertKeyOperation(oper);
                         }
                     }
                 } else if (IsA(r, Var)) {
                     v = (Var*)r;
                     e = l;
+                    RevertKeyOperation(oper);
                 } else {
                     isOperatorMOTReady = false;
                     break;
