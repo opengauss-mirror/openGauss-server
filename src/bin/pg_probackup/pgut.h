@@ -23,7 +23,6 @@ extern void	pgut_help(bool details);
  * pgut framework variables and functions
  */
 extern bool			prompt_password;
-extern bool			force_password;
 
 extern bool			interrupted;
 extern bool			in_cleanup;

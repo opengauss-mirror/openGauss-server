@@ -137,7 +137,7 @@ void help_pg_probackup(void)
 	printf(_("                 [--compress-algorithm=compress-algorithm]\n"));
 	printf(_("                 [--compress-level=compress-level]\n"));
 	printf(_("                 [--compress]\n"));
-	printf(_("                 [-d dbname] [-h host] [-p port] [-U username] [-w] [-W]\n"));
+	printf(_("                 [-d dbname] [-h host] [-p port] [-U username] [-w] [-W password]\n"));
 	printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
 	printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
 	printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
@@ -410,7 +410,7 @@ static void help_backup(void)
 	printf(_("                 [--compress-algorithm=compress-algorithm]\n"));
 	printf(_("                 [--compress-level=compress-level]\n"));
 	printf(_("                 [--compress]\n"));
-	printf(_("                 [-d dbname] [-h host] [-p port] [-U username] [-w] [-W]\n"));
+	printf(_("                 [-d dbname] [-h host] [-p port] [-U username] [-w] [-W password]\n"));
 	printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
 	printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
 	printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
@@ -484,7 +484,7 @@ static void help_backup(void)
 	printf(_("  -h, --pghost=hostname            database server host or socket directory(default: 'local socket')\n"));
 	printf(_("  -p, --pgport=port                database server port (default: 5432)\n"));
 	printf(_("  -w, --no-password                never prompt for password\n"));
-	printf(_("  -W, --password                   force password prompt\n"));
+	printf(_("  -W, --password=password          the password of specified database user\n"));
 
 	printf(_("\n  Remote options:\n"));
 	printf(_("      --remote-proto=protocol      remote protocol to use\n"));

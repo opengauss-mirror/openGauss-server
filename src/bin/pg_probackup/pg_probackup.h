@@ -719,6 +719,8 @@ extern bool		compress_shortcut;
 
 /* other options */
 extern char *instance_name;
+extern bool specify_extdir;
+extern bool specify_tbsdir;
 
 /* show options */
 extern ShowFormat show_format;
