@@ -187,8 +187,6 @@ class DN_OLAP(Kernel):
             tmpDNDict["enable_data_replicate"] = "off"
             tmpDNDict["replication_type"] = "1"
             tmpDNDict["max_wal_senders"] = "8"
-            tmpDNDict["application_name"] = "'dn_%s'" % \
-                                            self.instInfo.instanceId
             if len(azNames) == 1 and len(peerInsts) > 0:
                 if syncNum == -1 and len(peerInsts) > 1:
                     num = len(peerInsts) - 1
