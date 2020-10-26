@@ -569,8 +569,7 @@ function make_package_srv()
     cp -rf ${BINARYLIBS_PATH}/install_tools/ipaddress.py ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
     cp -rf ${BINARYLIBS_PATH}/install_tools/six.py ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
     cp -rf ${BINARYLIBS_PATH}/install_tools/_cffi_backend.py ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
-    cp -rf ${BINARYLIBS_PATH}/install_tools/_cffi_backend.so_UCS2 ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
-    cp -rf ${BINARYLIBS_PATH}/install_tools/_cffi_backend.so_UCS4 ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
+    cp -rf ${BINARYLIBS_PATH}/install_tools/_cffi_backend.so* ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
     cp -rf ${BINARYLIBS_PATH}/install_tools/psutil/ ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
     cp -rf ${BINARYLIBS_PATH}/install_tools/netifaces/ ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
     cp -rf ${BINARYLIBS_PATH}/install_tools/paramiko/ ${BUILD_DIR}/temp/script/gspylib/inspection/lib/
@@ -590,8 +589,7 @@ function make_package_srv()
     mv ./install_tools/ipaddress.py             ./lib
     mv ./install_tools/six.py                   ./lib
     mv ./install_tools/_cffi_backend.py         ./lib
-    mv ./install_tools/_cffi_backend.so_UCS2    ./lib
-    mv ./install_tools/_cffi_backend.so_UCS4    ./lib
+    mv ./install_tools/_cffi_backend.so*        ./lib
     mv ./install_tools/paramiko                 ./lib
     mv ./install_tools/psutil                   ./lib
     mv ./install_tools/netifaces                ./lib
