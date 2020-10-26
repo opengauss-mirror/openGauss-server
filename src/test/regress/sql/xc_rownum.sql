@@ -1,6 +1,9 @@
 --------------------------------------------------------------------
 -------------------test rownum pseudocolumn ------------------------
 --------------------------------------------------------------------
+-- ROWNUM can not be used as alias
+select oid rownum from pg_class;
+select oid as rownum from pg_class;
 
 ------------------------------------
 --test the basic function of rownum
