@@ -460,6 +460,7 @@ explain select id from test where rownum < 5 group by id;
 
 -- ROWNUM with UNION and ORDER BY
 explain select id from student where rownum < 3 union select id from (select id from student order by 1)  where rownum < 5;
+select * from test where id < 2 union select * from (select * from test order by id desc) where rownum < 5;
 
 drop table student;
 drop table test;

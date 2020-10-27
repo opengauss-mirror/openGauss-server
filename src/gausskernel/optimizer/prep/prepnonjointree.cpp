@@ -1941,7 +1941,11 @@ static void reduce_orderby_recurse(Query* query, Node* jtnode, bool reduce)
         /* Reduce orderby clause in subquery for join or from clause of more than one rte */
         reduce_orderby_final(rte, reduce);
     } else if (IsA(jtnode, FromExpr)) {
-        /* If there is ROWNUM, can not reduce orderby clause in subquery */
+        /* If there is ROWNUM, can not reduce orderby clause in subquery from fromlist.
+         * For example, If there is a SQL {select * from table_name where rownum < n union
+         * select * from (select * from table_name order by column_name desc) where rownum < n;},
+         * can not reduce orderby clause here.
+         */
         if (contain_rownum_walker(jtnode, NULL)) {
             return;
         }

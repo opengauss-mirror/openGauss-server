@@ -1640,5 +1640,15 @@ explain select id from student where rownum < 3 union select id from (select id 
                      ->  Seq Scan on student  (cost=0.00..21.34 rows=1134 width=4)
 (9 rows)
 
+select * from test where id < 2 union select * from (select * from test order by id desc) where rownum < 5;
+ id | testchar 
+----+----------
+  8 | test8
+  7 | test7
+  9 | test9
+  1 | test1
+ 10 | test10
+(5 rows)
+
 drop table student;
 drop table test;
